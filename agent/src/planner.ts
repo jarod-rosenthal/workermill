@@ -7,7 +7,7 @@
  * back for server-side processing.
  *
  * Guardrails (matching server-side planning pipeline):
- *   1. File cap: max 5 targetFiles per story (prevents scope explosion)
+ *   1. File cap: max targetFiles per story, synced from server (prevents scope explosion)
  *   2. Critic validation: LLM scores the plan, rejects below 85/100
  *   3. Max 3 Planner-Critic iterations before failure
  *
@@ -28,6 +28,7 @@ import {
   serializePlan,
   runCriticValidation,
   formatCriticFeedback,
+  getCriticConfig,
   AUTO_APPROVAL_THRESHOLD,
   type ExecutionPlan,
 } from "./plan-validator.js";
@@ -661,6 +662,13 @@ export async function planTask(
   }> = [];
   let totalFileCapTruncations = 0;
 
+  // Pre-fetch critic config so applyFileCap and thresholds use server values from the start
+  const criticConfig = await getCriticConfig();
+  if (!criticConfig) {
+    console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Could not fetch critic config — critic validation will be skipped`);
+    await postLog(task.id, `${PREFIX} ⚠️ Could not fetch critic config from API — critic validation will be skipped`);
+  }
+
   try {
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     const iterLabel = MAX_ITERATIONS > 1 ? ` (attempt ${iteration}/${MAX_ITERATIONS})` : "";
@@ -745,7 +753,7 @@ export async function planTask(
     const { truncatedCount, details } = applyFileCap(plan);
     if (truncatedCount > 0) {
       totalFileCapTruncations += truncatedCount;
-      const msg = `${PREFIX} File cap applied: ${truncatedCount} stories truncated to max 5 targetFiles`;
+      const msg = `${PREFIX} File cap applied: ${truncatedCount} stories truncated to max ${criticConfig?.maxTargetFiles ?? 15} targetFiles`;
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
       await postLog(task.id, msg);
       for (const detail of details) {

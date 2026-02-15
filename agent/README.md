@@ -22,9 +22,10 @@ The setup wizard launches automatically after install. It will:
 1. Check all prerequisites (auto-installs Claude CLI if missing)
 2. Prompt for your API key (from Settings > Integrations on the dashboard)
 3. Validate connectivity to the WorkerMill API
-4. Prompt for your SCM token (GitHub/GitLab/Bitbucket)
-5. Pull the worker Docker image
-6. Save configuration to `~/.workermill/config.json`
+4. Authenticate to private ECR and pull the worker Docker image
+5. Save configuration to `~/.workermill/config.json`
+
+SCM tokens (GitHub/GitLab/Bitbucket) are managed via **Settings > Integrations** on the dashboard — no local token setup needed.
 
 ## Usage
 
@@ -60,7 +61,7 @@ Config is stored at `~/.workermill/config.json` (created by `workermill-agent se
 | `apiKey` | — | Organization API key |
 | `agentId` | `agent-<hostname>` | Unique agent identifier |
 | `maxWorkers` | `2` | Max concurrent worker containers |
-| `workerImage` | `public.ecr.aws/a7k5r0v0/workermill-worker:latest` | Docker image for workers |
+| `workerImage` | Private ECR image | Docker image for workers (requires AWS credentials) |
 
 ## Troubleshooting
 
@@ -70,4 +71,4 @@ Config is stored at `~/.workermill/config.json` (created by `workermill-agent se
 | Auth failure | Check API key in Settings > Integrations |
 | Docker not found | Install Docker Desktop and ensure it's running |
 | Claude CLI not found | See install instructions above |
-| Image pull fails | Check internet and try `docker pull public.ecr.aws/a7k5r0v0/workermill-worker:latest` |
+| Image pull fails | Ensure AWS CLI is configured (`aws configure`) with ECR read access |

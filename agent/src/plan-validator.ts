@@ -3,7 +3,7 @@
  *
  * Validates execution plans locally before posting to the cloud API.
  * Implements the same guardrails as the server-side planning pipeline:
- *   1. File cap: max 5 targetFiles per story (prevents scope explosion)
+ *   1. File cap: max targetFiles per story, synced from server (prevents scope explosion)
  *   2. Critic validation: LLM scores the plan, rejects below threshold
  *
  * This ensures remote agent plans get the same quality gates as cloud plans,
@@ -30,8 +30,9 @@ let cachedCriticConfig: CriticConfig | null = null;
 /**
  * Fetch critic prompt and thresholds from the server.
  * Cached per agent session to avoid repeated API calls.
+ * Returns null if the API is unreachable — caller decides how to proceed.
  */
-async function getCriticConfig(): Promise<CriticConfig> {
+export async function getCriticConfig(): Promise<CriticConfig | null> {
   if (cachedCriticConfig) return cachedCriticConfig;
 
   try {
@@ -41,15 +42,13 @@ async function getCriticConfig(): Promise<CriticConfig> {
       approvalThreshold: data.approvalThreshold ?? 85,
       maxTargetFiles: data.maxTargetFiles ?? 15,
     };
+    // Sync module-level thresholds so applyFileCap and formatCriticFeedback use server values
+    AUTO_APPROVAL_THRESHOLD = cachedCriticConfig.approvalThreshold;
+    MAX_TARGET_FILES = cachedCriticConfig.maxTargetFiles;
     return cachedCriticConfig;
-  } catch (err) {
-    // Fallback: use minimal defaults if API unavailable (should not happen in normal operation)
-    console.warn("Failed to fetch critic config from API, using fallback defaults");
-    return {
-      promptTemplate: "Review this execution plan and score it 0-100.\n\n## PRD\n{{PRD}}\n\n## PLAN\n{{PLAN}}\n\nRespond with JSON: {\"approved\": boolean, \"score\": number, \"risks\": [], \"suggestions\": []}",
-      approvalThreshold: 85,
-      maxTargetFiles: 15,
-    };
+  } catch {
+    console.warn("Failed to fetch critic config from API");
+    return null;
   }
 }
 
@@ -310,19 +309,17 @@ export function serializePlan(plan: ExecutionPlan): string {
 
 /**
  * Build the critic prompt with PRD and plan substituted.
- * Fetches the prompt template from the server on first call (cached per session).
+ * Requires getCriticConfig() to have been called first (caller responsibility).
+ * Returns null if critic config was never fetched.
  */
-export async function buildCriticPrompt(
+export function buildCriticPrompt(
   prd: string,
   plan: ExecutionPlan,
-): Promise<string> {
-  const config = await getCriticConfig();
-  // Sync thresholds from server
-  AUTO_APPROVAL_THRESHOLD = config.approvalThreshold;
-  MAX_TARGET_FILES = config.maxTargetFiles;
+): string | null {
+  if (!cachedCriticConfig) return null;
 
   const planJson = JSON.stringify(plan, null, 2);
-  return config.promptTemplate.replace("{{PRD}}", prd).replace("{{PLAN}}", planJson);
+  return cachedCriticConfig.promptTemplate.replace("{{PRD}}", prd).replace("{{PLAN}}", planJson);
 }
 
 /**
@@ -542,7 +539,13 @@ export async function runCriticValidation(
   providerApiKey?: string,
   taskId?: string,
 ): Promise<CriticResult | null> {
-  const criticPrompt = await buildCriticPrompt(prd, plan);
+  const criticPrompt = buildCriticPrompt(prd, plan);
+  if (!criticPrompt) {
+    console.warn(
+      `${ts()} ${taskLabel} ${chalk.yellow("⚠")} Critic config not available — skipping validation`,
+    );
+    return null;
+  }
   const effectiveProvider = provider || "anthropic";
 
   console.log(

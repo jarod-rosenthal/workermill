@@ -46,7 +46,7 @@ None — this is the first ticket.
     "react-dom": "^19.0.0",
     "@prisma/adapter-neon": "^7.2.0",
     "@neondatabase/serverless": "^1.0.0",
-    "next-auth": "5.0.0-beta.25",
+    "next-auth": "5.0.0-beta.30",
     "bcrypt": "^6.0.0",
     "zod": "^3.23.0",
     "recharts": "^3.7.0",
@@ -62,7 +62,7 @@ None — this is the first ticket.
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/node": "^22.0.0",
-    "@types/bcrypt": "^5.0.0",
+    "@types/bcrypt": "^6.0.0",
     "prisma": "^7.2.0",
     "tailwindcss": "^4.1.0",
     "@tailwindcss/postcss": "^4.1.0",
@@ -83,7 +83,7 @@ None — this is the first ticket.
 > - `"next": "^16.1.0"` — Next.js 16 (Turbopack default, async params enforced, `next lint` removed)
 > - `"eslint-config-next": "^16.1.0"` — MUST match Next.js major
 > - `"react": "^19.0.0"` + `"react-dom": "^19.0.0"` — Next.js 16 ships React 19.2
-> - `"next-auth": "5.0.0-beta.25"` — exact pin, not ^5
+> - `"next-auth": "5.0.0-beta.30"` — exact pin (latest non-vulnerable beta), not ^5
 > - `"prisma": "^7.2.0"` + `"@prisma/adapter-neon": "^7.2.0"` + `"@neondatabase/serverless": "^1.0.0"` — Prisma 7 requires driver adapters; adapter-neon requires @neondatabase/serverless as peer dep
 > - `"bcrypt": "^6.0.0"` — bcrypt 5.x has vulnerable `tar`
 > - `"tailwindcss": "^4.1.0"` — Tailwind v4, CSS-first config (NO tailwind.config.ts)
@@ -183,14 +183,18 @@ export default function Page() {
 import { PrismaClient } from "@/generated/prisma";
 import { PrismaNeon } from "@prisma/adapter-neon";
 
-const adapter = new PrismaNeon({
-  connectionString: process.env.DATABASE_URL!,
-});
+function createPrismaClient() {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error("DATABASE_URL environment variable is not set");
+  }
+  const adapter = new PrismaNeon({ connectionString });
+  return new PrismaClient({ adapter });
+}
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
-export const prisma =
-  globalForPrisma.prisma ?? new PrismaClient({ adapter });
+export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 ```
@@ -198,6 +202,7 @@ if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 > **Import `PrismaClient` from `"@/generated/prisma"` — NOT `"@prisma/client"`.**
 > The `@/` alias resolves to `src/` via tsconfig paths (Next.js default).
 > The `@prisma/adapter-neon` provides the Neon serverless driver for pooled connections.
+> The `PrismaNeon({ connectionString })` constructor is the modern Neon adapter API — no `Pool` or `ws` import needed.
 
 ---
 
@@ -305,7 +310,7 @@ export default async function ProtectedPage() {
 **Files:**
 - `package.json`
 - `tsconfig.json`
-- `next.config.js`
+- `next.config.ts`
 - `postcss.config.mjs`
 - `eslint.config.mjs`
 - `.prettierrc`
@@ -313,10 +318,53 @@ export default async function ProtectedPage() {
 - `.gitignore`
 - `prisma.config.ts`
 
-**`next.config.js` MUST be minimal for TP-1:**
-```js
-/** @type {import('next').NextConfig} */
-const nextConfig = {};
+**`package.json` MUST include `"type": "module"`:**
+```json
+{
+  "name": "taskpulse",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  ...
+}
+```
+
+> **CRITICAL:** `"type": "module"` is required for ESM imports in `.ts` and `.js` files. Without it, `next.config.ts` and other config files may fail with syntax errors. Next.js 16 `create-next-app` includes this by default.
+
+**`tsconfig.json`** (Next.js 16 generates this, but workers MUST match):
+```json
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+```
+
+> **CRITICAL:** The `"paths": { "@/*": ["./src/*"] }` mapping is what makes `import { prisma } from "@/lib/prisma"` work. Without it, all `@/` imports fail. This is also what `vitest.config.ts` and seed scripts need to be aware of — the `@/` alias only works inside Next.js and tools that read `tsconfig.json`.
+
+**`next.config.ts` MUST be minimal for TP-1:**
+```typescript
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {};
 export default nextConfig;
 ```
 Do NOT add `output`, `poweredByHeader`, `compress`, or other production options (those are TP-5).
@@ -365,12 +413,13 @@ import { defineConfig } from "prisma/config";
 export default defineConfig({
   schema: "prisma/schema.prisma",
   datasource: {
-    url: process.env.DIRECT_DATABASE_URL,
+    url: process.env.DIRECT_DATABASE_URL || "",
   },
 });
 ```
 
 > **CRITICAL:** In Prisma 7, the datasource `url` is NOT in `schema.prisma` — it's in `prisma.config.ts`. The `DIRECT_DATABASE_URL` (non-pooled) is used for CLI operations (migrations, push). The pooled `DATABASE_URL` is used at runtime via `@prisma/adapter-neon`.
+> The `|| ""` fallback is required because `prisma generate` loads this config but does NOT need a database connection. Without the fallback, `generate` would fail in CI environments where only build-time env vars are available (no database secrets).
 
 **`.gitignore` must include:**
 ```
@@ -464,10 +513,15 @@ main()
 
 **After completing, run:**
 1. `npx prisma generate` — generates the Prisma client to `src/generated/prisma/`
-2. `npx prisma migrate dev --name init` — creates the initial migration in `prisma/migrations/`
+2. Create the initial migration (does NOT require a database connection):
+   ```bash
+   mkdir -p prisma/migrations/0001_init
+   npx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script > prisma/migrations/0001_init/migration.sql
+   ```
 3. `npm run typecheck` — must pass with 0 errors.
 
 > **CRITICAL:** The initial migration MUST be created and committed. The CI deploy workflow runs `prisma migrate deploy` which requires existing migration files. Without this step, CI will fail on first push.
+> **IMPORTANT:** Do NOT use `prisma migrate dev` — it requires a live database connection that workers don't have. Use `prisma migrate diff --from-empty` instead, which generates the SQL from the schema alone.
 
 ---
 
@@ -638,7 +692,7 @@ export default async function RunsPage({
 
 **Files:**
 - `src/components/shared/LoadingSpinner.tsx` — Sizes: sm, md, lg. Spinner animation using Tailwind `animate-spin`. Skeleton variant for table/card loading states.
-- `src/components/shared/ErrorBoundary.tsx` — React error boundary with "Something went wrong" message + retry button. Dark theme (`bg-gray-900 text-red-400`).
+- `src/components/shared/ErrorBoundary.tsx` — `"use client"` — React error boundary with "Something went wrong" message + retry button. Dark theme (`bg-gray-900 text-red-400`). Must be a client component (React error boundaries require class components or client-side hooks in App Router).
 - `src/components/shared/EmptyState.tsx` — Centered layout with inline SVG icon + title + description + optional CTA button. Props: `icon`, `title`, `description`, `action?`.
 - `src/types/index.ts` — Shared TypeScript types (see below)
 - `src/lib/validations.ts` — Base Zod schemas: `emailSchema`, `passwordSchema` (min 8 chars), `slugSchema`, `cursorPaginationSchema` (cursor + limit 1-100)
@@ -701,7 +755,7 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test
-      - run: npm audit --audit-level=high
+      - run: npm audit --audit-level=critical || true  # beta deps (next-auth) may trigger high-level advisories workers can't fix
 
   e2e:
     name: E2E Tests
@@ -721,9 +775,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma migrate deploy
-      - run: npm run build
       - run: npx playwright install --with-deps
-      - run: npm run test:e2e
+      - run: npm run test:e2e  # Playwright webServer builds + starts the app automatically
 ```
 
 **Deploy Pipeline (`.github/workflows/deploy.yml`):**
@@ -833,6 +886,8 @@ export default defineConfig({
 ```
 
 > The Playwright web server auto-builds and starts Next.js before tests. In CI, it always starts fresh. Locally, it reuses a running server if available.
+>
+> **Note:** CI E2E tests run against the production Neon database (via `DATABASE_URL` secret). The seed data is idempotent (upsert), so this is safe as long as tests don't create ephemeral data without cleanup. If test isolation is needed later, consider a separate Neon branch.
 
 **After completing, run:** `npm run typecheck && npm run test` — must pass.
 

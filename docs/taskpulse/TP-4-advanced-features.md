@@ -16,7 +16,7 @@ Schedule management UI, API key management UI, global search, keyboard shortcuts
 
 **This ticket creates:** Schedule components, API key components, schedule API routes, API key API routes, keyboard shortcuts hook, global search component, unit tests.
 
-**This ticket modifies:** `src/app/[project]/settings/page.tsx` (add API key management section), `src/app/[project]/schedules/page.tsx` (replace stub with full schedule UI). **Group all modifications to the same file in the same story as related new files.**
+**This ticket modifies:** `src/app/[project]/settings/page.tsx` (add API key management section), `src/app/[project]/schedules/page.tsx` (replace stub with full schedule UI), `src/app/[project]/layout.tsx` (add GlobalSearch, KeyboardShortcutsHelp, and keyboard shortcuts integration). **Group all modifications to the same file in the same story as related new files.**
 
 **TP-5 creates:** vercel.json, production config. Do NOT create vercel.json.
 
@@ -101,6 +101,8 @@ TP-3 complete — all UI pages functional, dashboard charts rendering, E2E tests
 - `src/components/schedules/CronDisplay.tsx` — NEW
 - `src/app/[project]/schedules/page.tsx` — MODIFY (replace stub)
 
+**ScheduleForm and CronDisplay are both client components — add `"use client"` to each.**
+
 **CronDisplay (`src/components/schedules/CronDisplay.tsx`):**
 - Takes a cron expression string
 - Renders human-readable description (e.g., "Every day at 2:00 AM UTC") using `cronstrue` (`import cronstrue from "cronstrue"` → `cronstrue.toString(cronExpression)`)
@@ -166,12 +168,15 @@ curl -X POST https://taskpulse.workermill.com/api/trigger \
 
 ---
 
-### Work Group 5: Keyboard Shortcuts + Global Search (3 files)
+### Work Group 5: Keyboard Shortcuts + Global Search (4 files)
 
 **Files:**
 - `src/hooks/useKeyboardShortcuts.ts` — NEW
-- `src/components/shared/GlobalSearch.tsx` — NEW
-- `src/components/shared/KeyboardShortcutsHelp.tsx` — NEW
+- `src/components/shared/GlobalSearch.tsx` — NEW (`"use client"` — keyboard events, Headless UI Dialog, localStorage, debounced search)
+- `src/components/shared/KeyboardShortcutsHelp.tsx` — NEW (`"use client"` — modal with keyboard event listener)
+- `src/app/[project]/layout.tsx` — MODIFY (add GlobalSearch, KeyboardShortcutsHelp, and useKeyboardShortcuts integration)
+
+> **Integration:** The project layout must render `<GlobalSearch />` and `<KeyboardShortcutsHelp />` alongside the existing Sidebar/Header. Since these components use hooks and browser APIs, wrap them in a client component boundary within the layout. The `useKeyboardShortcuts` hook should be called from this same client wrapper to register global shortcuts.
 
 **useKeyboardShortcuts hook:**
 - Global keyboard event handler

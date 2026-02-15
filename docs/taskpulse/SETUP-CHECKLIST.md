@@ -18,7 +18,7 @@ Decisions to confirm or change before any infrastructure work.
 ### Tech Stack
 
 - [ ] **Next.js 16 + React 19.2 + Prisma 7 + Neon + Vercel** — latest stable stack
-- [ ] **NextAuth v5 beta.25** — same exact pin as TeamBoard
+- [ ] **NextAuth v5 beta.30** — exact pin (latest non-vulnerable beta)
 - [ ] **Tailwind CSS v4** — CSS-first config (`@import "tailwindcss"` + `@theme`), no `tailwind.config.ts`
 - [ ] **Prisma 7** — `prisma-client` generator, `@prisma/adapter-neon`, `prisma.config.ts`, no `@prisma/client` dep
 - [ ] **ESLint flat config** — `eslint.config.mjs`, no `.eslintrc.json`, `eslint .` instead of `next lint`

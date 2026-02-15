@@ -14,7 +14,7 @@ Production configuration and deployment validation for TaskPulse. This is the fi
 
 ## Scope Boundary
 
-- **Creates:** `vercel.json` (new), modifies `next.config.js` (production optimizations)
+- **Creates:** `vercel.json` (new), modifies `next.config.ts` (production optimizations)
 - **Verifies locally:** typecheck, lint, tests, E2E tests, seed data correctness
 - **Human validates after deploy:** live URL smoke tests, Vercel deployment status
 
@@ -40,7 +40,11 @@ TP-4 complete — all features implemented, all tests passing.
 
 ## Work Groups
 
-### Work Group 1: Production Config (2 files)
+### Work Group 1: Production Config & Verification (2 files)
+
+**Files:**
+- `vercel.json` — NEW
+- `next.config.ts` — MODIFY (add production optimizations)
 
 **`vercel.json`** (new):
 ```json
@@ -65,43 +69,35 @@ TP-4 complete — all features implemented, all tests passing.
 }
 ```
 
-**`next.config.js`** (modify — preserve existing ESM `export default` syntax):
+**`next.config.ts`** (modify — preserve existing ESM `export default` syntax):
 - Add `poweredByHeader: false`
 - Add `compress: true`
 - Do NOT add any `webpack` configuration (Next.js 16 uses Turbopack by default)
 
-### Work Group 2: Seed Data Verification
+**Verification steps (run after file changes):**
 
-Verify `prisma/seed.ts` creates:
-- Demo user (`demo@workermill.com` / `demo1234`)
-- "Acme Backend Services" project
-- 5 task definitions with step templates
-- 50 runs with steps and logs
-- 2 schedules
-- 2 API keys
+1. Verify `prisma/migrations/` directory exists with the initial migration from TP-1. If missing, create it:
+   ```bash
+   mkdir -p prisma/migrations/0001_init
+   npx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script > prisma/migrations/0001_init/migration.sql
+   ```
+   > **Do NOT use `prisma migrate dev`** — it requires a live database connection that workers don't have. Use `prisma migrate diff --from-empty` instead.
+2. Verify seed data completeness — `prisma/seed.ts` must create: demo user, "Acme Backend Services" project, 5 task definitions, 50 runs with steps/logs, 2 schedules, 2 API keys
+3. Verify "Built by WorkerMill" is present in the landing page source (`src/app/page.tsx`)
 
-### Work Group 3: Database Migration Check
-
-- Verify `prisma/migrations/` directory exists
-- If not, create initial migration: `npx prisma migrate dev --name init`
-- Verify `npx prisma migrate deploy` succeeds
-
-### Work Group 4: Local Verification
-
+**After completing, run:**
 1. `npm run typecheck` — 0 errors
 2. `npm run lint` — 0 errors
 3. `npm run test` — all pass
 4. `npm run test:e2e` — all pass
 5. `npm run db:seed` — completes without errors
-6. Verify "Built by WorkerMill" in landing page footer
-7. Git commit and push to main
 
 ---
 
 ## Acceptance Criteria
 
 - [ ] `vercel.json` created with security headers and function config
-- [ ] `next.config.js` updated with `poweredByHeader: false`
+- [ ] `next.config.ts` updated with `poweredByHeader: false`
 - [ ] Prisma migrations exist and `migrate deploy` succeeds
 - [ ] Seed script creates full demo data
 - [ ] `npm run typecheck` and `npm run lint` pass
@@ -136,4 +132,4 @@ After Vercel auto-deploys the push to main:
 
 ## Estimated Plan Size
 
-3-4 stories.
+1-2 stories.

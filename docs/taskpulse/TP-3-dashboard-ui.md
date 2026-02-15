@@ -115,6 +115,7 @@ Every component uses dark colors. Reference the design system in README.md:
 - `src/app/[project]/runs/page.tsx` — MODIFY (replace stub)
 
 **RunStatusBadge (`src/components/runs/RunStatusBadge.tsx`):**
+Client component (`"use client"` — used inside client component parents like RunsTable).
 - Small pill badge with icon + text
 - Colors per status (see README.md design system):
   - QUEUED: `text-gray-400 bg-gray-400/10` — clock icon
@@ -141,6 +142,7 @@ Every component uses dark colors. Reference the design system in README.md:
 - Empty state: EmptyState component
 
 **TriggerRunDialog (`src/components/runs/TriggerRunDialog.tsx`):**
+Client component (`"use client"` — uses Headless UI Dialog and form state).
 - Headless UI Dialog with dark overlay
 - Task selector dropdown
 - JSON input editor (textarea with monospace font)
@@ -159,9 +161,11 @@ Every component uses dark colors. Reference the design system in README.md:
 
 ### Work Group 3: Run Detail — Timeline + Logs (3 files)
 
+> **Dependency:** This group imports `RunStatusBadge` from Work Group 2. WG2 must be completed first.
+
 **Files:**
 - `src/components/runs/RunTimeline.tsx` — NEW
-- `src/components/runs/RunLogs.tsx` — NEW
+- `src/components/runs/RunLogs.tsx` — NEW (`"use client"` — uses useSSE hook, interactive filtering, auto-scroll)
 - `src/app/[project]/runs/[id]/page.tsx` — MODIFY (replace stub)
 
 **RunTimeline (`src/components/runs/RunTimeline.tsx`):**
@@ -206,6 +210,8 @@ This is the **hero component** — the trace/waterfall view of run execution.
 ---
 
 ### Work Group 4: Tasks Pages (4 files)
+
+> **Dependency:** This group imports `RunsTable` and `RunStatusBadge` from Work Group 2. WG2 must be completed first.
 
 **Files:**
 - `src/components/tasks/TaskCard.tsx` — NEW

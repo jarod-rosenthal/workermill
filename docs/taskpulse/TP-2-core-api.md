@@ -79,12 +79,13 @@ Workers MUST NOT invent custom error shapes. Every error response is `{ error: s
 
 ## Work Groups
 
-### Work Group 1: Auth Middleware & RBAC Helpers (3 files)
+### Work Group 1: Auth Middleware & RBAC Helpers (4 files)
 
 **Files:**
 - `src/lib/middleware.ts` — RBAC middleware functions
-- `src/app/api/auth/signup/route.ts` — MODIFY (already exists from TP-1, enhance if needed)
+- `src/app/api/auth/signup/route.ts` — MODIFY (add Zod validation using `emailSchema`/`passwordSchema` from validations.ts, and consistent error response format `{ error: string }`)
 - `src/lib/validations.ts` — MODIFY (add route-specific Zod schemas)
+- `src/types/index.ts` — MODIFY (add API response types for routes: project list item, run list item, task with run counts, member with user info, schedule with task name, dashboard stats shape)
 
 **`src/lib/middleware.ts`:**
 ```typescript
@@ -145,15 +146,16 @@ Workers MUST NOT invent custom error shapes. Every error response is `{ error: s
 
 ---
 
-### Work Group 3: Task Definition & Run Routes (6 files)
+### Work Group 3: Task Definition, Run Routes & Simulator (7 files)
 
 **Files:**
-- `src/app/api/projects/[slug]/tasks/route.ts` — GET list, POST register
+- `src/app/api/projects/[slug]/tasks/route.ts` — GET list, POST register (MEMBER+)
 - `src/app/api/projects/[slug]/tasks/[id]/route.ts` — GET detail, PUT update (MEMBER+), DELETE (ADMIN+)
-- `src/app/api/projects/[slug]/runs/route.ts` — GET list (filterable), POST trigger
+- `src/app/api/projects/[slug]/runs/route.ts` — GET list (filterable), POST trigger (MEMBER+)
 - `src/app/api/projects/[slug]/runs/[id]/route.ts` — GET detail (include steps + recent logs)
 - `src/app/api/projects/[slug]/runs/[id]/cancel/route.ts` — POST cancel (MEMBER+)
 - `src/app/api/projects/[slug]/runs/[id]/retry/route.ts` — POST retry (MEMBER+)
+- `src/lib/run-simulator.ts` — Run simulation logic
 
 **GET /api/projects/[slug]/tasks:**
 - Returns task definitions with run counts and last run status
@@ -183,17 +185,6 @@ Workers MUST NOT invent custom error shapes. Every error response is `{ error: s
 
 **POST cancel:** Sets status to CANCELLED (only if QUEUED or EXECUTING)
 **POST retry:** Creates a new Run from the same task/input with `attempt: previousAttempt + 1`
-
-**After completing, run:** `npm run typecheck` — must pass with 0 errors.
-
----
-
-### Work Group 4: Run Simulator & SSE Stream (3 files)
-
-**Files:**
-- `src/lib/run-simulator.ts` — Run simulation logic
-- `src/app/api/projects/[slug]/runs/[id]/stream/route.ts` — SSE stream
-- `src/app/api/projects/[slug]/stats/route.ts` — Dashboard aggregations
 
 **`src/lib/run-simulator.ts`:**
 
@@ -226,9 +217,29 @@ export function simulateRun(
   //    - DEBUG: Step-specific progress messages (2-3 per step)
   //    - INFO: "Completed {step name} in {duration}ms" (or ERROR on failure)
   // 5. Total run duration = sum of step durations
-  // 6. Return all records (caller persists to database)
+  // 6. Return all records (caller persists to database using Prisma nested creates)
 }
 ```
+
+> **Implementation note:** `simulateRun()` returns data objects — the caller persists them using Prisma nested `create`:
+> ```typescript
+> const result = simulateRun(projectId, taskDef, input, "manual");
+> const run = await prisma.run.create({
+>   data: { ...result.run, steps: { create: result.steps }, logs: { create: result.logs } },
+>   include: { steps: true, logs: true },
+> });
+> ```
+> Prisma generates the `id` (CUID) and `createdAt` fields on insert. The `simulateRun()` return objects should omit these auto-generated fields (use `Omit<Run, 'id' | 'createdAt'>` etc., or plain objects matching the create input shape).
+
+**After completing, run:** `npm run typecheck` — must pass with 0 errors.
+
+---
+
+### Work Group 4: SSE Stream & Dashboard Stats (2 files)
+
+**Files:**
+- `src/app/api/projects/[slug]/runs/[id]/stream/route.ts` — SSE stream
+- `src/app/api/projects/[slug]/stats/route.ts` — Dashboard aggregations
 
 **`/api/projects/[slug]/runs/[id]/stream` — SSE:**
 - Returns `text/event-stream` response
@@ -238,7 +249,7 @@ export function simulateRun(
 
 **SSE replay logic (since runs are simulated synchronously — all data exists upfront):**
 - On subscription, check if the run was created recently (within last 30 seconds):
-  - **Recent run:** Emit logs progressively with delays matching their timestamp offsets from `run.startedAt`. This creates the illusion of real-time execution. Each log is delayed by `(log.timestamp - run.startedAt) - (Date.now() - subscriptionStartTime)`.
+  - **Recent run:** Emit logs progressively with delays matching their timestamp offsets from `run.startedAt`. This creates the illusion of real-time execution. Each log is delayed by `Math.max(0, (log.timestamp - run.startedAt) - (Date.now() - subscriptionStartTime))`. The `Math.max(0, ...)` clamp handles late subscribers where the calculated delay would be negative.
   - **Historical run:** Emit all logs immediately in timestamp order, then close.
 - After all logs emitted, send a final `status` event with the terminal state and close the stream.
 
@@ -258,7 +269,7 @@ Returns JSON with:
 
 ### Work Group 5: Seed Data Expansion (2 files)
 
-> **Dependency:** This group imports `simulateRun()` from `run-simulator.ts` (Work Group 4). WG4 must be completed first.
+> **Dependency:** This group imports `simulateRun()` from `run-simulator.ts` (Work Group 3). WG3 must be completed first.
 
 **Files:**
 - `prisma/seed.ts` — REPLACE (expand from demo user to full demo data)
@@ -337,7 +348,7 @@ Returns JSON with:
 
 ## Definition of Done
 
-- [ ] All 13 TP-2 API route files created and functional
+- [ ] All 14 TP-2 files created and functional (13 API route files + run-simulator.ts)
 - [ ] RBAC enforcement on every protected endpoint
 - [ ] Run simulation produces realistic traces and logs
 - [ ] SSE stream works for run log streaming

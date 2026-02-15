@@ -54,7 +54,7 @@ TaskPulse is a developer-facing dashboard for orchestrating and monitoring backg
 | DB Adapter | @prisma/adapter-neon | `^7.2.0` | Neon serverless driver for Prisma 7 |
 | Neon Driver | @neondatabase/serverless | `^1.0.0` | Required peer dep of @prisma/adapter-neon |
 | Database | PostgreSQL (Neon) | — | Free tier, connection pooling, reliable |
-| Auth | NextAuth.js v5 | `5.0.0-beta.25` | Session-based auth — same pin as TeamBoard |
+| Auth | NextAuth.js v5 | `5.0.0-beta.30` | Session-based auth — latest non-vulnerable beta |
 | Styling | TailwindCSS v4 | `^4.1.0` | CSS-first config, dark theme with utility classes |
 | PostCSS | @tailwindcss/postcss | `^4.1.0` | Tailwind v4 PostCSS plugin (replaces `tailwindcss` plugin) |
 | UI Components | @headlessui/react | `^2.2.0` | Accessible dialogs, dropdowns, transitions |
@@ -64,6 +64,7 @@ TaskPulse is a developer-facing dashboard for orchestrating and monitoring backg
 | Cron Parsing | cron-parser | `^4.9.0` | Parse cron expressions, compute next runs |
 | Cron Description | cronstrue | `^3.9.0` | Human-readable cron descriptions |
 | Class Merging | tailwind-merge | `^3.4.0` | Resolve conflicting Tailwind classes in cn() |
+| Class Utils | clsx | `^2.1.0` | Conditional class composition (used with tailwind-merge in cn()) |
 | Validation | Zod | `^3.23.0` | Request validation schemas |
 | Password Hashing | bcrypt | `^6.0.0` | Signup password hashing |
 | ESLint Compat | @eslint/eslintrc | `^3.3.0` | FlatCompat for eslint-config-next in flat config |
@@ -309,7 +310,7 @@ taskpulse/
 │   │   │   ├── schedules/page.tsx                  # Schedule management
 │   │   │   ├── dashboard/page.tsx                  # Analytics + charts
 │   │   │   └── settings/page.tsx                   # Members, API keys, project config
-│   │   └── api/
+│   │   ├── api/
 │   │       ├── health/route.ts
 │   │       ├── seed/route.ts
 │   │       ├── auth/
@@ -340,7 +341,7 @@ taskpulse/
 │   │       │       │   └── [id]/route.ts           # DELETE revoke
 │   │       │       └── stats/route.ts              # GET dashboard aggregations
 │   │       └── trigger/route.ts                    # POST — external trigger (API key auth)
-│   │   ├── globals.css                               # Tailwind v4 CSS-first config
+│   │   └── globals.css                               # Tailwind v4 CSS-first config
 │   ├── components/
 │   │   ├── layout/
 │   │   │   ├── Sidebar.tsx
@@ -404,7 +405,7 @@ taskpulse/
 ├── eslint.config.mjs                              # ESLint flat config (Next.js 16)
 ├── postcss.config.mjs                             # Tailwind v4 PostCSS plugin
 ├── .prettierrc
-├── next.config.js
+├── next.config.ts
 ├── tsconfig.json
 ├── package.json
 ├── playwright.config.ts
@@ -482,7 +483,7 @@ Since TaskPulse is a showcase (not a production task runner), runs are **simulat
 
 **For the UI animation:** The Run detail page renders the trace timeline based on step timestamps. Steps are revealed progressively using CSS transitions keyed to the time offset from `Run.startedAt`, creating the illusion of real-time execution even though all data was calculated upfront.
 
-**SSE stream behavior:** Since runs are simulated synchronously (all data created upfront), the SSE stream endpoint progressively emits logs based on their timestamps rather than dumping everything at once. It compares each log's `timestamp` to the run's `startedAt` and the subscription start time, emitting logs with appropriate delays to replay the execution timeline. For already-completed historical runs, all logs are emitted immediately. For freshly triggered runs (where `startedAt` is within the last 30 seconds), logs are emitted with delays matching their timestamp offsets.
+**SSE stream behavior:** Since runs are simulated synchronously (all data created upfront), the SSE stream endpoint progressively emits logs based on their timestamps rather than dumping everything at once. It compares each log's `timestamp` to the run's `startedAt` and the subscription start time, emitting logs with appropriate delays to replay the execution timeline. For already-completed historical runs, all logs are emitted immediately. For freshly triggered runs (where `startedAt` is within the last 30 seconds), logs are emitted with delays matching their timestamp offsets. Clamp delays with `Math.max(0, delay)` to handle late subscribers.
 
 **`src/lib/run-simulator.ts`** contains the simulation logic:
 - `simulateRun(projectId, taskDef, input, triggeredBy)` → creates Run + RunSteps + RunLogs with calculated timestamps. Always produces a terminal state (COMPLETED or FAILED). Uses **relative imports** for Prisma types (not `@/`) because it's shared between Next.js app code and `prisma/seed.ts`.
@@ -552,7 +553,7 @@ Each run has appropriate RunSteps and RunLogs matching the task's step templates
 | [TP-2](./TP-2-core-api.md) | Core API & Task Engine | RBAC, project/task/run CRUD, simulation, SSE | 6-8 |
 | [TP-3](./TP-3-dashboard-ui.md) | Dashboard UI | Runs list, trace timeline, log viewer, charts, E2E | 7-9 |
 | [TP-4](./TP-4-advanced-features.md) | Scheduling, API Keys & Polish | Schedules, API keys, trigger endpoint, tests | 5-7 |
-| [TP-5](./TP-5-production-deploy.md) | Production Deploy & Validation | vercel.json, security headers, verification | 3-4 |
+| [TP-5](./TP-5-production-deploy.md) | Production Deploy & Validation | vercel.json, security headers, verification | 1-2 |
 
 **Sequential dependencies:** TP-1 → TP-2 → TP-3 → TP-4 → TP-5
 

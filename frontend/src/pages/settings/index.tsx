@@ -719,24 +719,23 @@ export default function Settings() {
     if (!tokens?.accessToken) return;
     setUsageLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/api/billing/subscription`, {
+      const response = await fetch(`${API_BASE}/api/billing/status`, {
         headers: { Authorization: `Bearer ${tokens.accessToken}` },
       });
       if (response.ok) {
         const data = await response.json();
         // Map subscription data to UsageData interface
         setUsageData({
-          hours: {
-            used: data.usage.hoursUsed,
-            included: data.usage.hoursIncluded,
-            remaining: data.usage.hoursRemaining,
-            percent: data.usage.percentUsed,
-            isUnlimited: data.usage.isUnlimited,
+          tasks: {
+            used: data.usage?.tasks ?? 0,
+            quota: data.usage?.quota ?? 0,
+            percent: data.usage?.percent ?? 0,
+            isUnlimited: data.usage?.isUnlimited ?? false,
           },
-          plan: data.plan.id,
+          plan: data.plan?.id ?? data.plan ?? "free",
           billingPeriod: {
-            start: data.billing.periodStart,
-            daysUntilReset: data.billing.daysRemaining,
+            start: data.billing?.periodStart ?? null,
+            daysUntilReset: data.billing?.daysRemaining ?? 0,
           },
         });
       }

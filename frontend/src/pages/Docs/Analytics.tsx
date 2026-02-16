@@ -342,9 +342,9 @@ export default function Analytics() {
             Track your plan usage and billing information:
           </p>
           <ul className="space-y-2 text-sm text-muted-foreground">
-            <li><strong className="text-foreground">Hours Used</strong> - Worker compute time consumed</li>
-            <li><strong className="text-foreground">Hours Remaining</strong> - Available in current billing period</li>
-            <li><strong className="text-foreground">Days Until Reset</strong> - When your quota refreshes</li>
+            <li><strong className="text-foreground">Plan Limits</strong> - Concurrent workers, expert personas, and log retention for your plan</li>
+            <li><strong className="text-foreground">Current Usage</strong> - Active workers and tasks in progress</li>
+            <li><strong className="text-foreground">Days Until Reset</strong> - When your billing period refreshes</li>
             <li><strong className="text-foreground">Daily Usage Chart</strong> - Tasks and costs per day</li>
           </ul>
         </div>

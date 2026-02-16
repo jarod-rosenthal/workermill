@@ -6,10 +6,9 @@ import { AnalyticsSkeleton } from "../components/ui/skeleton";
 
 interface UsageStats {
   plan: string;
-  hours: {
+  tasks: {
     used: number;
-    included: number;
-    remaining: number;
+    quota: number;
     percent: number;
     isUnlimited: boolean;
   };
@@ -504,25 +503,24 @@ export default function Analytics() {
   async function fetchAnalytics() {
     setLoading(true);
     try {
-      // Fetch billing subscription for compute hours usage
-      const usageRes = await fetch("/api/billing/subscription", {
+      // Fetch billing status for task usage
+      const usageRes = await fetch("/api/billing/status", {
         headers: { Authorization: `Bearer ${tokens?.accessToken}` },
       });
       if (usageRes.ok) {
         const data = await usageRes.json();
-        // Map subscription data to UsageStats interface
+        // Map billing status data to UsageStats interface
         setUsage({
-          plan: data.plan.id,
-          hours: {
-            used: data.usage.hoursUsed,
-            included: data.usage.hoursIncluded,
-            remaining: data.usage.hoursRemaining,
-            percent: data.usage.percentUsed,
-            isUnlimited: data.usage.isUnlimited,
+          plan: data.plan ?? "free",
+          tasks: {
+            used: data.usage?.tasks ?? 0,
+            quota: data.usage?.quota ?? 0,
+            percent: data.usage?.percent ?? 0,
+            isUnlimited: data.usage?.isUnlimited ?? false,
           },
           billingPeriod: {
-            start: data.billing.periodStart,
-            daysUntilReset: data.billing.daysRemaining,
+            start: data.billing?.billingCycleStart ?? null,
+            daysUntilReset: 0,
           },
         });
       }
@@ -676,20 +674,20 @@ export default function Analytics() {
           </div>
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Hours Used
+              Tasks Used
             </p>
             <p className="text-2xl font-bold">
-              {usage.hours.isUnlimited
-                ? `${usage.hours.used.toFixed(1)}h`
-                : `${usage.hours.used.toFixed(1)}h / ${usage.hours.included}h`}
+              {usage.tasks.isUnlimited
+                ? `${usage.tasks.used}`
+                : `${usage.tasks.used} / ${usage.tasks.quota}`}
             </p>
           </div>
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Hours Remaining
+              Usage
             </p>
             <p className="text-2xl font-bold">
-              {usage.hours.isUnlimited ? "∞" : `${usage.hours.remaining.toFixed(1)}h`}
+              {usage.tasks.isUnlimited ? "Unlimited" : `${usage.tasks.percent}%`}
             </p>
           </div>
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">

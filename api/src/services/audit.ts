@@ -506,7 +506,7 @@ export async function queryAuditLogs(
 
 /**
  * Get audit log retention period (days) for an organization
- * Based on plan: Free = 30 days, Starter = 90 days, Pro/Enterprise = 365 days
+ * Based on plan: Free = 14 days, Pro = 90 days, Enterprise = 365 days
  */
 export function getAuditRetentionDays(plan: string): number {
   switch (plan) {

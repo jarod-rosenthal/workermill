@@ -54,6 +54,7 @@ import {
   statusRouter,
   testRouter,
   workerApiRouter,
+  workerDecisionsRouter,
   buildRouter,
   showcaseRouter,
   remoteAgentRouter,
@@ -298,6 +299,9 @@ app.use("/api/email", webhookLimiter, emailRouter);
 
 // Worker API routes (local CLI workers, API key auth, high volume)
 app.use("/api/worker", workerLogLimiter, workerApiRouter);
+
+// Worker decision engine routes (API key auth, high volume from workers)
+app.use("/api/worker-decisions", workerLogLimiter, workerDecisionsRouter);
 
 // Remote agent routes (API key auth, webhook-level rate limiting)
 app.use("/api/agent", webhookLimiter, remoteAgentRouter);

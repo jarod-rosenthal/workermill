@@ -17,6 +17,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **If you think something could be "better" (CloudWatch, WebSockets, etc.), ASK FIRST.**
 
+***REMOVED******REMOVED******REMOVED*** DO NOT Touch the Local Database
+
+**On 2026-02-16, Claude dropped the local PostgreSQL database (`DROP DATABASE workermill`) without permission while debugging a "loading logs" issue. The data only existed locally and was permanently destroyed. This must NEVER happen again.**
+
+- **NEVER** run `DROP DATABASE`, `DROP SCHEMA`, or `TRUNCATE` on any database without explicit user approval
+- **NEVER** run destructive SQL commands as a "debugging step" — read-only queries only
+- **NEVER** assume a database is empty or broken just because a query returns no results — verify from multiple angles first
+- **NEVER** recreate, reset, or wipe a database to "fix" a migration issue — ask the user first
+- If the database appears empty or broken, **STOP and ask the user** before taking any action
+- The local Docker PostgreSQL (`workermill-local-db` on port 5433) may contain data that does NOT exist anywhere else — treat it as production-critical
+
 ***REMOVED******REMOVED******REMOVED*** DO NOT Relax Security
 
 **NEVER, under ANY circumstances, relax, bypass, or weaken security checks:**

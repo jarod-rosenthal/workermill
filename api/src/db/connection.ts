@@ -228,6 +228,7 @@ import { ChangeSelfReviewDefaultToFalse1706688000046 } from "./migrations/170668
 import { ConsolidatePlansToThreeTiers1706688000047 } from "./migrations/1706688000047-ConsolidatePlansToThreeTiers.js";
 import { AddLogDeletionSafeguard1706688000048 } from "./migrations/1706688000048-AddLogDeletionSafeguard.js";
 import { AddGithubRepoToKbCards1706688000049 } from "./migrations/1706688000049-AddGithubRepoToKbCards.js";
+import { AddBoardIssueKeys1706688000050 } from "./migrations/1706688000050-AddBoardIssueKeys.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -473,6 +474,7 @@ export const AppDataSource = new DataSource({
     ConsolidatePlansToThreeTiers1706688000047,
     AddLogDeletionSafeguard1706688000048,
     AddGithubRepoToKbCards1706688000049,
+    AddBoardIssueKeys1706688000050,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

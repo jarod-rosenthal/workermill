@@ -53,6 +53,9 @@ export class KbCard {
   @Column({ name: "cover_color", type: "varchar", length: 20, nullable: true })
   coverColor: string | null;
 
+  @Column({ name: "card_number", type: "int", nullable: true })
+  cardNumber: number | null;
+
   @Column({ name: "worker_task_id", type: "uuid", nullable: true })
   workerTaskId: string | null;
 

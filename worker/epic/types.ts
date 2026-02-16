@@ -6,23 +6,11 @@
  */
 
 /**
- * Expert persona types that can participate in Epic collaboration.
+ * Expert persona identifier — dynamically loaded from API.
+ * System defaults: frontend_developer, backend_developer, security_engineer, etc.
+ * Custom personas: any slug created in PersonaStudio.
  */
-export type ExpertPersona =
-  | "frontend_developer"
-  | "backend_developer"
-  | "security_engineer"
-  | "qa_engineer"
-  | "devops_engineer"
-  | "tech_writer"
-  | "api_developer"
-  | "data_engineer"
-  | "database_administrator"
-  | "ml_engineer"
-  | "mobile_developer_android"
-  | "mobile_developer_ios"
-  | "tech_lead"
-  | "manager";
+export type ExpertPersona = string;
 
 /**
  * Configuration for an expert subagent.

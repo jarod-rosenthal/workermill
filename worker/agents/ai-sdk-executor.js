@@ -84,43 +84,55 @@ const MARKERS = {
   ERROR: '::error::',
 };
 
-// Default models per provider
-const PROVIDER_DEFAULT_MODELS = {
-  anthropic: 'claude-haiku-4-5',
-  openai: 'gpt-4o',
-  google: 'gemini-2.0-flash',
-  gemini: 'gemini-2.0-flash',
-  ollama: 'qwen2.5-coder:32b',
-};
+// Read icons from environment (injected by coordinator via getWorkerConfig)
+let PROVIDER_ICONS = {};
+let PERSONA_CONFIGS = {};
+try {
+  if (process.env.PROVIDER_ICONS_JSON) {
+    PROVIDER_ICONS = JSON.parse(process.env.PROVIDER_ICONS_JSON);
+  }
+} catch { /* use empty fallback */ }
+try {
+  if (process.env.PERSONA_ICONS_JSON) {
+    // Convert { persona: emoji } to { persona: { emoji } } format
+    const raw = JSON.parse(process.env.PERSONA_ICONS_JSON);
+    PERSONA_CONFIGS = {};
+    for (const [k, v] of Object.entries(raw)) {
+      PERSONA_CONFIGS[k] = { emoji: v };
+    }
+  }
+} catch { /* use empty fallback */ }
 
-// Provider icons (consistent with Settings.tsx)
-const PROVIDER_ICONS = {
-  anthropic: '🤖',
-  openai: '🔷',
-  google: '🔵',
-  gemini: '🔵',
-  ollama: '🏠',
-};
-
-// Persona configs for visibility (emoji lookup)
-const PERSONA_CONFIGS = {
-  frontend_developer: { emoji: '🎨' },
-  backend_developer: { emoji: '⚙️' },
-  devops_engineer: { emoji: '🔧' },
-  security_engineer: { emoji: '🔒' },
-  qa_engineer: { emoji: '🧪' },
-  tech_writer: { emoji: '📝' },
-  project_manager: { emoji: '📋' },
-  api_developer: { emoji: '🔌' },
-  database_administrator: { emoji: '🗄️' },
-  ml_engineer: { emoji: '🧠' },
-  mobile_developer_ios: { emoji: '📱' },
-  mobile_developer_android: { emoji: '🤖' },
-  data_engineer: { emoji: '📊' },
-  manager: { emoji: '👔' },
-  tech_lead: { emoji: '👨‍💼' },
-  planning_agent: { emoji: '🗺️' },
-};
+// Fallback provider icons if env not set
+if (Object.keys(PROVIDER_ICONS).length === 0) {
+  PROVIDER_ICONS = {
+    anthropic: '🤖',
+    openai: '🔷',
+    google: '🔵',
+    gemini: '🔵',
+    ollama: '🏠',
+  };
+}
+if (Object.keys(PERSONA_CONFIGS).length === 0) {
+  PERSONA_CONFIGS = {
+    frontend_developer: { emoji: '🎨' },
+    backend_developer: { emoji: '⚙️' },
+    devops_engineer: { emoji: '🔧' },
+    security_engineer: { emoji: '🔒' },
+    qa_engineer: { emoji: '🧪' },
+    tech_writer: { emoji: '📝' },
+    project_manager: { emoji: '📋' },
+    api_developer: { emoji: '🔌' },
+    database_administrator: { emoji: '🗄️' },
+    ml_engineer: { emoji: '🧠' },
+    mobile_developer_ios: { emoji: '📱' },
+    mobile_developer_android: { emoji: '🤖' },
+    data_engineer: { emoji: '📊' },
+    manager: { emoji: '👔' },
+    tech_lead: { emoji: '👨‍💼' },
+    planning_agent: { emoji: '🗺️' },
+  };
+}
 
 /**
  * Get formatted log prefix for agent output
@@ -600,8 +612,8 @@ function isReviewPersona(persona) {
 async function runAgent(config) {
   const { provider, model: modelName, persona, prompt } = config;
 
-  // Determine actual model to use
-  const actualModel = modelName || PROVIDER_DEFAULT_MODELS[provider] || PROVIDER_DEFAULT_MODELS.anthropic;
+  // Determine actual model to use (model is always passed by the coordinator via --model arg)
+  const actualModel = modelName || 'claude-haiku-4-5';
 
   // Set global log prefix for this agent run
   LOG_PREFIX = getLogPrefix(persona, provider);
@@ -1250,9 +1262,6 @@ module.exports = {
   createTools,
   loadPersonaDirectives,
   getLogPrefix,
-  PROVIDER_DEFAULT_MODELS,
-  PROVIDER_ICONS,
-  PERSONA_CONFIGS,
   MARKERS,
 };
 

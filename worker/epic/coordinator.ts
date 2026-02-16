@@ -582,6 +582,10 @@ export class EpicCoordinator {
       // Initialize resume: check for existing completions from previous run
       await this.initializeWithResume();
 
+      // Load worker config from Decision API (icons, defaults)
+      const workerConfig = await this.decisionClient.getWorkerConfig();
+      this.executor.setIcons(workerConfig.personaIcons, workerConfig.providerIcons);
+
       // Detect and checkout existing branch for retry scenarios
       if (this.config.jiraIssueKey) {
         const priorWork = await this.gitOps.detectAndCheckoutExistingBranch(this.config.jiraIssueKey);

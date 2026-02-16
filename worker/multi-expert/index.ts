@@ -32,6 +32,7 @@ import {
   DEFAULT_THRESHOLDS,
 } from "../epic/dist/quality-gate.js";
 import { createAIClient, type AIClient, type AIClientConfig } from "../epic/dist/ai-client-types.js";
+import { DecisionClient, createDecisionClient, type WorkerConfigResponse } from "../epic/dist/decision-client.js";
 
 /**
  * Provider routing configuration.
@@ -80,33 +81,8 @@ interface Story {
   jiraIssueKey?: string;
 }
 
-// Persona emojis for visibility (matches Epic format)
-const PERSONA_EMOJIS: Record<string, string> = {
-  frontend_developer: "🎨",
-  backend_developer: "⚙️",
-  devops_engineer: "🔧",
-  security_engineer: "🔒",
-  qa_engineer: "🧪",
-  tech_writer: "📝",
-  project_manager: "📋",
-  api_developer: "🔌",
-  database_administrator: "🗄️",
-  ml_engineer: "🧠",
-  data_engineer: "📊",
-  mobile_developer_ios: "📱",
-  mobile_developer_android: "🤖",
-  tech_lead: "👨‍💼",
-  planning_agent: "🗺️",
-};
-
-// Provider icons for log visibility (consistent with Settings.tsx and ai-sdk-executor.js)
-const PROVIDER_ICONS: Record<string, string> = {
-  anthropic: "🤖",
-  openai: "🔷",
-  google: "🔵",
-  gemini: "🔵",
-  ollama: "🏠",
-};
+// Persona and provider icons are loaded from the Decision API at runtime
+// via getWorkerConfig() in the coordinator's start() method.
 
 /**
  * Get basic expert configuration for a persona (for unified AIClient usage).
@@ -180,75 +156,17 @@ function loadConfig(): MultiExpertConfig {
   };
 }
 
-// Default models per provider
-const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
-  anthropic: "claude-haiku-4-5",
-  openai: "gpt-4o",
-  google: "gemini-2.0-flash",
-  gemini: "gemini-2.0-flash",
-  ollama: "qwen2.5-coder:32b",
-};
+// Default models per provider removed — provider routing is now handled
+// by the Decision API via routeProvider().
 
-/**
- * Infer provider from model name.
- */
-function inferProviderFromModel(model: string): string {
-  const modelLower = model.toLowerCase();
-  if (modelLower.includes("claude") || modelLower.includes("anthropic")) {
-    return "anthropic";
-  }
-  if (modelLower.includes("gpt") || modelLower.includes("o1") || modelLower.includes("o3")) {
-    return "openai";
-  }
-  if (modelLower.includes("gemini")) {
-    return "google";
-  }
-  if (modelLower.includes("qwen") || modelLower.includes("deepseek") || modelLower.includes("llama") || modelLower.includes("codestral")) {
-    return "ollama";
-  }
-  // Default to anthropic if can't infer
-  return "anthropic";
-}
+// inferProviderFromModel() removed — provider routing is now handled
+// by the Decision API via routeProvider().
 
-/**
- * Get provider and model for a persona from routing or defaults.
- * Fallback priority: providerRouting > managerModel > workerModel > Anthropic default
- */
-function getProviderForPersona(
-  persona: string,
-  config: MultiExpertConfig
-): { provider: string; model: string } {
-  // 1. Check explicit per-persona routing
-  const routing = config.providerRouting?.[persona];
-  if (routing) {
-    return { provider: routing.provider, model: routing.model };
-  }
-  // 2. Inherit from manager model (gemini-2.5-pro, etc.)
-  if (config.managerModel) {
-    const provider = inferProviderFromModel(config.managerModel);
-    return { provider, model: config.managerModel };
-  }
-  // 3. Use task's workerModel
-  if (config.model) {
-    const provider = inferProviderFromModel(config.model);
-    return { provider, model: config.model };
-  }
-  // 4. Fall back to Anthropic default
-  return {
-    provider: "anthropic",
-    model: PROVIDER_DEFAULT_MODELS.anthropic,
-  };
-}
+// getProviderForPersona() removed — provider routing is now handled
+// by the Decision API via this.decisionClient.routeProvider().
 
-/**
- * Get log prefix for visibility (matches Epic format).
- * Format: [🧪 qa_engineer 🔵] for persona + provider visibility
- */
-function getLogPrefix(persona: string, provider?: string): string {
-  const emoji = PERSONA_EMOJIS[persona] || "🤖";
-  const providerIcon = provider ? (PROVIDER_ICONS[provider] || "🤖") : "";
-  return provider ? `[${emoji} ${persona} ${providerIcon}]` : `[${emoji} ${persona}]`;
-}
+// getLogPrefix() moved to class method on MultiExpertCoordinator
+// to access instance-level icon maps loaded from Decision API.
 
 /**
  * Build the correct Authorization header for Bitbucket API calls.
@@ -363,6 +281,11 @@ class MultiExpertCoordinator {
   } | null> = new Map();
   // Unified AIClient for feature-flagged execution (multi-provider)
   private aiClientCache: Map<string, AIClient> = new Map();
+  // Decision client for API-driven routing and config
+  private decisionClient: DecisionClient;
+  // Persona/provider icons loaded from Decision API
+  private personaIcons: Record<string, string> = {};
+  private providerIcons: Record<string, string> = {};
 
   constructor(config: MultiExpertConfig) {
     this.config = config;
@@ -384,6 +307,34 @@ class MultiExpertCoordinator {
 
     // Initialize Jira client for ticket updates
     this.jira = new JiraClient(config.jiraIssueKey);
+
+    // Initialize decision client for API-driven routing and config
+    this.decisionClient = createDecisionClient({
+      apiBaseUrl: config.apiBaseUrl,
+      orgApiKey: config.orgApiKey,
+      logger: (msg) => console.log(msg),
+    });
+  }
+
+  /**
+   * Get log prefix for visibility (matches Epic format).
+   * Format: [emoji persona providerIcon] for persona + provider visibility
+   */
+  private getLogPrefix(persona: string, provider?: string): string {
+    const emoji = this.personaIcons[persona] || "🤖";
+    const providerIcon = provider ? (this.providerIcons[provider] || "🤖") : "";
+    return provider ? `[${emoji} ${persona} ${providerIcon}]` : `[${emoji} ${persona}]`;
+  }
+
+  /**
+   * Get list of available providers based on configured API keys.
+   */
+  private getAvailableProviders(): string[] {
+    const providers: string[] = ["anthropic"]; // always available
+    if (this.config.openaiApiKey) providers.push("openai");
+    if (this.config.googleApiKey) providers.push("google");
+    if (this.config.ollamaHost) providers.push("ollama");
+    return providers;
   }
 
   /**
@@ -529,7 +480,7 @@ class MultiExpertCoordinator {
    * Adds prefix for coordinator messages. For executor output, use postRawLog().
    */
   private async postLog(message: string, persona?: string, provider?: string): Promise<void> {
-    const prefix = persona ? getLogPrefix(persona, provider) : "[Multi-Provider]";
+    const prefix = persona ? this.getLogPrefix(persona, provider) : "[Multi-Provider]";
     console.log(`${prefix} ${message}`);
 
     try {
@@ -2007,12 +1958,12 @@ The repository is cloned at: **${this.repoPath}**
     }
 
     const lines: string[] = [];
-    const emoji = PERSONA_EMOJIS[currentStory.persona] || "🤖";
+    const emoji = this.personaIcons[currentStory.persona] || "🤖";
 
     for (const s of allStories) {
       const isCurrentStory = s.storyIndex === currentStory.storyIndex;
       const isCompleted = this.completedStoryIndices.has(s.storyIndex);
-      const personaEmoji = PERSONA_EMOJIS[s.persona] || "🤖";
+      const personaEmoji = this.personaIcons[s.persona] || "🤖";
 
       let status: string;
       if (isCompleted) {
@@ -2102,7 +2053,7 @@ The repository is cloned at: **${this.repoPath}**
     const lines: string[] = [];
 
     for (const msg of messages) {
-      const emoji = PERSONA_EMOJIS[msg.persona] || "🤖";
+      const emoji = this.personaIcons[msg.persona] || "🤖";
 
       if (msg.messageType === "question") {
         lines.push(`- [${emoji} ${msg.persona}] Q: ${msg.content}`);
@@ -2126,7 +2077,7 @@ The repository is cloned at: **${this.repoPath}**
     const lines: string[] = [];
 
     for (const c of consultations) {
-      const emoji = PERSONA_EMOJIS[c.persona] || "🤖";
+      const emoji = this.personaIcons[c.persona] || "🤖";
       const blocking = c.metadata?.blocking ? " [BLOCKING]" : "";
       lines.push(`- [${emoji} ${c.persona}]${blocking} asks you: ${c.content}`);
     }
@@ -2141,11 +2092,16 @@ The repository is cloned at: **${this.repoPath}**
    * @param userFeedback - Optional feedback from user via Talk to Worker
    */
   private async executeStory(story: Story, allStories?: Story[], userFeedback?: string): Promise<{ success: boolean; error?: string }> {
-    // Get provider routing for this persona
-    const routing = getProviderForPersona(story.persona, this.config);
+    // Get provider routing for this persona from Decision API
+    const routing = await this.decisionClient.routeProvider({
+      persona: story.persona,
+      modelName: this.config.model || this.config.managerModel,
+      providerRouting: this.config.providerRouting ? JSON.stringify(this.config.providerRouting) : undefined,
+      availableProviders: this.getAvailableProviders(),
+    });
     const provider = routing.provider;
     const model = routing.model;
-    const prefix = getLogPrefix(story.persona, provider);
+    const prefix = this.getLogPrefix(story.persona, provider);
     const startTime = Date.now();
 
     // Set current story index for token tracking (streaming mode emits cumulative tokens per-story)
@@ -2195,6 +2151,14 @@ The repository is cloned at: **${this.repoPath}**
       // Pass reviewer token for PR approvals (avoids self-approval restriction)
       if (this.config.githubReviewerToken) {
         env.GITHUB_REVIEWER_TOKEN = this.config.githubReviewerToken;
+      }
+
+      // Pass icon maps to executor via environment (loaded from Decision API)
+      if (Object.keys(this.personaIcons).length > 0) {
+        env.PERSONA_ICONS_JSON = JSON.stringify(this.personaIcons);
+      }
+      if (Object.keys(this.providerIcons).length > 0) {
+        env.PROVIDER_ICONS_JSON = JSON.stringify(this.providerIcons);
       }
 
       // Set provider-specific API key
@@ -2487,6 +2451,11 @@ The repository is cloned at: **${this.repoPath}**
     // Clone the repository
     await this.cloneRepo();
     await this.postLog("Repository cloned successfully");
+
+    // Load worker config from Decision API (icons, defaults)
+    const workerConfig = await this.decisionClient.getWorkerConfig();
+    this.personaIcons = workerConfig.personaIcons;
+    this.providerIcons = workerConfig.providerIcons;
 
     // Detect and checkout existing branch for retry scenarios
     const hasExistingBranch = await this.detectAndCheckoutExistingBranch();
@@ -2852,8 +2821,13 @@ The repository is cloned at: **${this.repoPath}**
 
     await this.postLog(`Starting inline Tech Lead review phase (attempt ${this.revisionCount + 1}/${this.maxRevisions})`);
 
-    // Get provider for tech_lead from routing (or use default which is Anthropic)
-    const { provider, model } = getProviderForPersona("tech_lead", this.config);
+    // Get provider for tech_lead from Decision API
+    const { provider, model } = await this.decisionClient.routeProvider({
+      persona: "tech_lead",
+      modelName: this.config.model || this.config.managerModel,
+      providerRouting: this.config.providerRouting ? JSON.stringify(this.config.providerRouting) : undefined,
+      availableProviders: this.getAvailableProviders(),
+    });
     await this.postLog(`Tech Lead review using ${provider}/${model}`);
 
     const result = await this.runAiSdkReview(provider, model);

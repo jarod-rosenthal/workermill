@@ -26,12 +26,31 @@ const TEMPLATES: { value: CreateBoardData["template"]; label: string; descriptio
   },
 ];
 
+function autoDerivePrefix(boardName: string): string {
+  const words = boardName
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .split(/[\s\-_]+/)
+    .filter(Boolean);
+  if (words.length >= 2) {
+    return words
+      .slice(0, 5)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase();
+  }
+  const word = words[0] || "";
+  if (word.length <= 3) return word.toUpperCase();
+  return word.substring(0, 3).toUpperCase();
+}
+
 export default function CreateBoardDialog({
   open,
   onClose,
   onCreate,
 }: CreateBoardDialogProps) {
   const [name, setName] = useState("");
+  const [prefix, setPrefix] = useState("");
+  const [prefixManuallyEdited, setPrefixManuallyEdited] = useState(false);
   const [description, setDescription] = useState("");
   const [template, setTemplate] = useState<CreateBoardData["template"]>("project");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -53,16 +72,17 @@ export default function CreateBoardDialog({
       await onCreate({
         name: name.trim(),
         description: description.trim() || undefined,
+        prefix: prefix || undefined,
         template,
       });
       setName("");
+      setPrefix("");
+      setPrefixManuallyEdited(false);
       setDescription("");
       setTemplate("project");
       onClose();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to create board",
-      );
+      setError(err instanceof Error ? err.message : "Failed to create board");
     } finally {
       setIsSubmitting(false);
     }
@@ -90,13 +110,16 @@ export default function CreateBoardDialog({
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-1">
-                Board Name
-              </label>
+              <label className="block text-sm font-medium mb-1">Board Name</label>
               <input
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (!prefixManuallyEdited) {
+                    setPrefix(autoDerivePrefix(e.target.value));
+                  }
+                }}
                 placeholder="e.g., Sprint 42"
                 className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
                 autoFocus
@@ -105,9 +128,32 @@ export default function CreateBoardDialog({
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1">
-                Description (optional)
-              </label>
+              <label className="block text-sm font-medium mb-1">Key Prefix</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={prefix}
+                  onChange={(e) => {
+                    setPrefix(
+                      e.target.value
+                        .toUpperCase()
+                        .replace(/[^A-Z0-9]/g, "")
+                        .slice(0, 10),
+                    );
+                    setPrefixManuallyEdited(true);
+                  }}
+                  placeholder="e.g., CM"
+                  maxLength={10}
+                  className="w-24 px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 uppercase"
+                />
+                <span className="text-sm text-muted-foreground">
+                  Cards: {prefix || "XX"}-1, {prefix || "XX"}-2, ...
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Description (optional)</label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -118,9 +164,7 @@ export default function CreateBoardDialog({
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">
-                Template
-              </label>
+              <label className="block text-sm font-medium mb-2">Template</label>
               <div className="space-y-2">
                 {TEMPLATES.map((t) => (
                   <label
@@ -141,9 +185,7 @@ export default function CreateBoardDialog({
                     />
                     <div>
                       <div className="text-sm font-medium">{t.label}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {t.description}
-                      </div>
+                      <div className="text-xs text-muted-foreground">{t.description}</div>
                     </div>
                   </label>
                 ))}

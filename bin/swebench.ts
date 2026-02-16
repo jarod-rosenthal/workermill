@@ -566,13 +566,17 @@ async function runCards(
   );
 
   let nextIdx = 0;
-  let running = 0;
 
   async function startNext(): Promise<void> {
-    while (nextIdx < cards.length && running < concurrency) {
+    // Count currently running tasks dynamically (no stale closure counter)
+    const currentlyRunning = cards.filter(
+      (c) => c.workerTaskId && !TERMINAL_STATUSES.has(c.status || "") && c.status !== undefined,
+    ).length;
+
+    let slotsAvailable = concurrency - currentlyRunning;
+    while (nextIdx < cards.length && slotsAvailable > 0) {
       const card = cards[nextIdx];
       nextIdx++;
-      running++;
 
       try {
         const result = await apiJson<{
@@ -583,6 +587,7 @@ async function runCards(
 
         card.workerTaskId = result.workerTask.id;
         card.status = result.workerTask.status;
+        slotsAvailable--;
         console.log(
           `  Started ${card.instanceId} -> task ${card.workerTaskId}`,
         );
@@ -591,7 +596,6 @@ async function runCards(
           `  Failed to start ${card.instanceId}: ${err instanceof Error ? err.message : String(err)}`,
         );
         card.status = "failed";
-        running--;
       }
     }
   }
@@ -615,11 +619,13 @@ async function pollForCompletion(
 ): Promise<void> {
   const POLL_INTERVAL_MS = 10000;
   const startTime = Date.now();
-  let running = cards.filter(
-    (c) => c.workerTaskId && !TERMINAL_STATUSES.has(c.status || ""),
+
+  // Keep polling while any card is either running or not yet started
+  let remaining = cards.filter(
+    (c) => !TERMINAL_STATUSES.has(c.status || ""),
   ).length;
 
-  while (running > 0) {
+  while (remaining > 0) {
     await sleep(POLL_INTERVAL_MS);
 
     try {
@@ -640,10 +646,10 @@ async function pollForCompletion(
       }
 
       // Update card statuses
-      running = 0;
       let completed = 0;
       let failed = 0;
       let inProgress = 0;
+      let pending = 0;
 
       for (const card of cards) {
         const info = statusMap.get(card.cardId);
@@ -653,7 +659,6 @@ async function pollForCompletion(
         }
 
         if (card.workerTaskId && !TERMINAL_STATUSES.has(card.status || "")) {
-          running++;
           inProgress++;
         } else if (card.status === "completed" || card.status === "deployed") {
           completed++;
@@ -663,6 +668,8 @@ async function pollForCompletion(
           card.status === "review_rejected"
         ) {
           failed++;
+        } else {
+          pending++;
         }
       }
 
@@ -670,15 +677,15 @@ async function pollForCompletion(
       const total = cards.length;
       const done = completed + failed;
       console.log(
-        `  [${done}/${total}] ${completed} completed, ${failed} failed, ${inProgress} running (${elapsed})`,
+        `  [${done}/${total}] ${completed} completed, ${failed} failed, ${inProgress} running, ${pending} pending (${elapsed})`,
       );
 
       // Start more tasks if slots opened up
       await startNext();
 
-      // Recount running after potentially starting new ones
-      running = cards.filter(
-        (c) => c.workerTaskId && !TERMINAL_STATUSES.has(c.status || ""),
+      // Recount: keep looping while any card is not in a terminal state
+      remaining = cards.filter(
+        (c) => !TERMINAL_STATUSES.has(c.status || ""),
       ).length;
     } catch (err) {
       console.warn(
@@ -712,24 +719,14 @@ async function extractDiffsAndWritePredictions(
       (card.status === "completed" || card.status === "deployed")
     ) {
       try {
-        // Fetch control center dashboard which includes githubPrUrl for all tasks
-        const dashboardData = await apiJson<{
-          tasks: Array<{
-            id: string;
-            githubPrUrl: string | null;
-            githubRepo: string | null;
-          }>;
-        }>(`${apiUrl}/api/control-center`).catch(() => null);
+        // Fetch individual task to get githubPrUrl
+        const task = await apiJson<{
+          id: string;
+          githubPrUrl: string | null;
+          githubRepo: string | null;
+        }>(`${apiUrl}/api/tasks/${card.workerTaskId}`).catch(() => null);
 
-        let prUrl: string | null = null;
-        if (dashboardData?.tasks) {
-          const task = dashboardData.tasks.find(
-            (t) => t.id === card.workerTaskId,
-          );
-          if (task?.githubPrUrl) {
-            prUrl = task.githubPrUrl;
-          }
-        }
+        const prUrl = task?.githubPrUrl || null;
 
         if (prUrl) {
           // Extract diff from GitHub PR

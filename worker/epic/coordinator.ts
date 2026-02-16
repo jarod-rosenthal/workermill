@@ -16,7 +16,7 @@ import type {
   ResilienceConfig,
   EpicValidationResult,
 } from "./types.js";
-import { getAvailableExperts, matchPersonaToExpert } from "./experts.js";
+import { getAvailableExperts, matchPersonaToExpert, loadExpertRegistry } from "./experts.js";
 import type { DecisionClient } from "./decision-client.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { StoryExecutor } from "./executor.js";
@@ -576,6 +576,18 @@ export class EpicCoordinator {
     this.missionActive = true;
 
     try {
+      // Load dynamic expert registry from API
+      await loadExpertRegistry(this.config.apiBaseUrl, this.config.orgApiKey);
+
+      // Re-initialize expert states with (potentially updated) registry
+      this.expertStates.clear();
+      for (const expert of getAvailableExperts()) {
+        this.expertStates.set(expert, {
+          persona: expert,
+          status: "idle",
+        });
+      }
+
       // Clone the repository
       await this.gitOps.cloneIfNeeded();
 

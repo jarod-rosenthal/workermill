@@ -200,12 +200,13 @@ async function runCardAsWorkerTask(
   return workerTask;
 }
 
-// Default columns for new boards
+// Default columns for new boards (matches worker task lifecycle)
 const DEFAULT_BOARD_COLUMNS = [
   { name: "To Do", position: 0, color: "#6b7280" },
   { name: "In Progress", position: 1, color: "#f59e0b" },
   { name: "Review", position: 2, color: "#8b5cf6" },
-  { name: "Done", position: 3, color: "#10b981" },
+  { name: "Approved", position: 3, color: "#3b82f6" },
+  { name: "Done", position: 4, color: "#10b981" },
 ];
 
 const TEMPLATE_COLUMNS: Record<string, Array<{ name: string; position: number; color: string; wipLimit?: number }>> = {
@@ -213,7 +214,8 @@ const TEMPLATE_COLUMNS: Record<string, Array<{ name: string; position: number; c
     { name: "To Do", position: 0, color: "#6b7280" },
     { name: "In Progress", position: 1, color: "#f59e0b", wipLimit: 3 },
     { name: "Review", position: 2, color: "#8b5cf6", wipLimit: 2 },
-    { name: "Done", position: 3, color: "#10b981" },
+    { name: "Approved", position: 3, color: "#3b82f6", wipLimit: 2 },
+    { name: "Done", position: 4, color: "#10b981" },
   ],
   bugs: [
     { name: "New", position: 0, color: "#ef4444" },

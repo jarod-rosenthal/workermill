@@ -409,7 +409,7 @@ export default function CardDetail({
 
           <div className="grid grid-cols-[1fr,200px] gap-6">
             {/* Main content */}
-            <div className="space-y-6">
+            <div className="space-y-6 min-w-0">
               {/* Description */}
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground mb-2">
@@ -647,9 +647,9 @@ export default function CardDetail({
                             <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
-                        <p className="text-sm whitespace-pre-wrap pl-8">
-                          {comment.content}
-                        </p>
+                        <div className="pl-8 overflow-hidden prose prose-invert prose-sm max-w-none prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground prose-code:text-violet-400 prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-pre:overflow-x-auto prose-a:text-violet-400 prose-li:text-muted-foreground prose-blockquote:text-muted-foreground prose-blockquote:border-border">
+                          <ReactMarkdown>{comment.content}</ReactMarkdown>
+                        </div>
                       </div>
                     ))}
                   </div>

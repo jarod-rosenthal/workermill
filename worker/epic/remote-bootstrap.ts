@@ -15,7 +15,7 @@
  */
 
 import { execSync, spawnSync } from "child_process";
-import { existsSync, mkdirSync, writeFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, rmSync, readdirSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import axios from "axios";
@@ -297,7 +297,6 @@ function preInstallDeps(repoDir: string): void {
   }
 
   // Monorepo subprojects (one level deep)
-  const { readdirSync, statSync } = require("fs");
   try {
     for (const entry of readdirSync(repoDir)) {
       if (entry === "node_modules" || entry.startsWith(".")) continue;

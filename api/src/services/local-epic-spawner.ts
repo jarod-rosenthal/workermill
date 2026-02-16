@@ -15,6 +15,7 @@ import axios from "axios";
 import { WorkerTask } from "../models/WorkerTask.js";
 import { worktreeManager } from "./worktree-manager.js";
 import { logger } from "../utils/logger.js";
+import { ensureValidOAuthToken } from "./llm-backend.js";
 
 /** Check if a task has the self-review label (works across Jira, GitHub, GitLab, Linear) */
 function hasSelfReviewLabel(task: WorkerTask): boolean {
@@ -298,6 +299,25 @@ class LocalEpicSpawner {
       targetRepo: task.githubRepo,
       tokenSource: scmTokenFromCreds ? "secrets-manager" : "env",
     });
+
+    // Pre-spawn OAuth refresh: ensure the credentials file has a fresh access token.
+    // Access tokens last ~8 hours. Tasks run < 1 hour. By refreshing here (and ONLY here),
+    // the container's access token never expires mid-run, so Claude CLI never needs to use
+    // the refresh token. This eliminates the race condition where multiple consumers
+    // (orchestrator, planner, containers) compete over a single-use refresh token.
+    try {
+      const tokenValid = await ensureValidOAuthToken();
+      if (!tokenValid) {
+        logger.warn("OAuth token refresh failed pre-spawn — container may fail auth", {
+          taskId: task.id,
+        });
+      }
+    } catch (err) {
+      logger.warn("OAuth token check failed pre-spawn", {
+        taskId: task.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     // Build Docker run arguments
     // Note: --network host only works on Linux. On Docker Desktop (Windows/macOS),

@@ -126,11 +126,14 @@ export async function ensureValidOAuthToken(): Promise<boolean> {
     }
 
     const currentTime = Date.now();
-    const thirtyMinutes = 30 * 60 * 1000;
+    const twoHours = 2 * 60 * 60 * 1000;
 
-    // Token still valid for more than 30 minutes — proactive refresh to prevent
-    // expiry during long-running Docker containers that receive the token at spawn time
-    if (currentTime < oauth.expiresAt - thirtyMinutes) {
+    // Token still valid for more than 2 hours — no refresh needed.
+    // Using a 2-hour margin (instead of 30 min) so that containers spawned after
+    // this refresh have at least 6+ hours of access token life. Since tasks run < 1 hour,
+    // the access token never expires mid-run and Claude CLI never needs to use the
+    // refresh token — eliminating the single-use refresh token race condition.
+    if (currentTime < oauth.expiresAt - twoHours) {
       const hoursLeft = Math.floor((oauth.expiresAt - currentTime) / 3600000);
       logger.info("OAuth token valid", {
         hoursLeft,

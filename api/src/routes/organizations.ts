@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { body, param, validationResult } from "express-validator";
 import { randomBytes } from "crypto";
 import { AppDataSource } from "../db/connection.js";
-import { Organization, User, OrgInvite, UserOrganization, type InviteRole } from "../models/index.js";
+import { Organization, User, OrgInvite, UserOrganization, type InviteRole, PLAN_USER_LIMITS, type OrganizationPlan } from "../models/index.js";
 import { authenticateUser, authenticateCognitoOnly, requireAdmin } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import { randomUUID } from "crypto";
@@ -357,6 +357,22 @@ router.post(
       const org = req.organization!;
       const currentUser = req.user!;
       const { email, role } = req.body as { email: string; role: InviteRole };
+
+      // Enforce seat limits based on plan
+      const seatLimit =
+        PLAN_USER_LIMITS[org.plan as OrganizationPlan] ?? PLAN_USER_LIMITS.free;
+      if (seatLimit !== -1) {
+        const userOrgCount = AppDataSource.getRepository(UserOrganization);
+        const currentSeats = await userOrgCount.count({
+          where: { orgId: org.id },
+        });
+        if (currentSeats >= seatLimit) {
+          res.status(403).json({
+            error: `Your ${org.plan} plan allows ${seatLimit} seat(s). Upgrade to add more members.`,
+          });
+          return;
+        }
+      }
 
       const inviteRepo = AppDataSource.getRepository(OrgInvite);
       const userRepo = AppDataSource.getRepository(User);

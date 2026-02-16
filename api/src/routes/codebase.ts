@@ -16,6 +16,18 @@ const router = Router();
 // All routes require authentication
 router.use(authenticateRequest);
 
+// Block codebase RAG for free plan
+router.use((req: Request, res: Response, next) => {
+  const plan = req.organization?.plan;
+  if (!plan || plan === "free") {
+    res.status(403).json({
+      error: "Codebase RAG requires Pro plan or higher.",
+    });
+    return;
+  }
+  next();
+});
+
 /**
  * POST /api/codebase/index
  * Trigger indexing for a repository

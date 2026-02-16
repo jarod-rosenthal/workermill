@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { AppDataSource } from "../../db/connection.js";
-import { Organization } from "../../models/index.js";
+import { Organization, PLAN_MAX_WORKERS, PLAN_MAX_EXPERTS, PLAN_FEATURES, type OrganizationPlan } from "../../models/index.js";
 import { RemoteAgent } from "../../models/RemoteAgent.js";
 import { requireAdmin } from "../../middleware/auth.js";
 import { body, validateRequest } from "../../middleware/validation.js";
@@ -321,6 +321,11 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         res.status(400).json({ error: "maxConcurrentWorkers must be between 1 and 14" });
         return;
       }
+      const planLimit = PLAN_MAX_WORKERS[org.plan as OrganizationPlan] ?? 1;
+      if (planLimit !== -1 && max > planLimit) {
+        res.status(403).json({ error: `Your ${org.plan} plan allows up to ${planLimit} concurrent worker(s). Upgrade to Pro for more.` });
+        return;
+      }
       org.maxConcurrentWorkers = max;
     }
 
@@ -330,10 +335,16 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         res.status(400).json({ error: "maxParallelExperts must be between 1 and 14" });
         return;
       }
+      const planLimit = PLAN_MAX_EXPERTS[org.plan as OrganizationPlan] ?? 3;
+      if (planLimit !== -1 && max > planLimit) {
+        res.status(403).json({ error: `Your ${org.plan} plan allows up to ${planLimit} expert persona(s) per task. Upgrade to Pro for unlimited.` });
+        return;
+      }
       org.maxParallelExperts = max;
     }
 
-    // Validate and update Warm Container Pool Settings
+    // Validate and update Warm Container Pool Settings (Pro+ only)
+    const planFeatures = PLAN_FEATURES[org.plan as OrganizationPlan] ?? PLAN_FEATURES.free;
     if (warmPoolSize !== undefined) {
       const size = parseInt(warmPoolSize, 10);
       if (isNaN(size) || size < 0 || size > 5) {
@@ -450,12 +461,19 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         res.status(400).json({ error: "Invalid primaryProvider. Must be one of: anthropic, openai, google, ollama, openrouter, groq, deepseek, mistral, xai, bedrock, azure" });
         return;
       }
+      if (!planFeatures.multiProvider && primaryProvider !== "anthropic") {
+        res.status(403).json({ error: "Free plan only supports Anthropic Claude. Upgrade to Pro for all AI providers." });
+        return;
+      }
       org.primaryProvider = primaryProvider;
     }
 
-    // Validate and update Provider Routing
-    // Format: { "persona_name": { "provider": "ollama", "model": "qwen2.5-coder:32b" } }
+    // Validate and update Provider Routing (Pro+ only — requires multiProvider)
     if (providerRouting !== undefined) {
+      if (!planFeatures.multiProvider && providerRouting && Object.keys(providerRouting).length > 0) {
+        res.status(403).json({ error: "Provider routing requires Pro plan or higher." });
+        return;
+      }
       if (typeof providerRouting !== "object" || providerRouting === null) {
         res.status(400).json({ error: "providerRouting must be an object" });
         return;
@@ -828,6 +846,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     }
 
     if (remoteAgentOnly !== undefined) {
+      if (!planFeatures.cloudExecution && Boolean(remoteAgentOnly)) {
+        res.status(403).json({ error: "Remote agent mode requires Pro plan or higher." });
+        return;
+      }
       org.remoteAgentOnly = Boolean(remoteAgentOnly);
     }
 
@@ -999,6 +1021,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     }
 
     if (selfReviewEnabled !== undefined) {
+      if (!planFeatures.memoryPersistence && selfReviewEnabled === true) {
+        res.status(403).json({ error: "Self-review requires Pro plan or higher." });
+        return;
+      }
       org.selfReviewEnabled = selfReviewEnabled === true;
     }
 
@@ -1024,8 +1050,12 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.repositories = [...new Set(repositories as string[])];
     }
 
-    // Validate and update Codebase RAG settings
+    // Validate and update Codebase RAG settings (Pro+ only)
     if (codebaseIndexingEnabled !== undefined) {
+      if (org.plan === "free" && codebaseIndexingEnabled === true) {
+        res.status(403).json({ error: "Codebase RAG requires Pro plan or higher." });
+        return;
+      }
       org.codebaseIndexingEnabled = codebaseIndexingEnabled === true;
     }
     if (codebaseMaxFilesPerRepo !== undefined) {

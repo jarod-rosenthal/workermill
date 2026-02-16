@@ -1,9 +1,11 @@
 import {
   Bell,
   CheckCircle,
+  Crown,
   Github,
   Kanban,
   Loader2,
+  Lock,
   Router,
   XCircle,
 } from "lucide-react";
@@ -12,6 +14,7 @@ import type { Settings, IntegrationStatus, AIProviderState } from "./types";
 interface IntegrationsSectionProps {
   settings: Settings;
   settingsSaving?: boolean;
+  orgPlan?: string;
   handleSetDefaultIssueTracker?: (provider: "jira" | "linear" | "github-issues" | "internal") => Promise<void>;
   jiraStatus: IntegrationStatus;
   githubStatus: IntegrationStatus;
@@ -60,9 +63,30 @@ interface IntegrationsSectionProps {
   fetchMcpApiKeys: () => void;
 }
 
+function ProBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 rounded-full border border-amber-500/30">
+      <Crown className="w-3 h-3" />
+      Pro
+    </span>
+  );
+}
+
+function LockedOverlay() {
+  return (
+    <div className="absolute inset-0 bg-card/60 backdrop-blur-[1px] rounded-xl flex items-center justify-center z-10">
+      <div className="flex flex-col items-center gap-1.5">
+        <Lock className="w-5 h-5 text-muted-foreground/60" />
+        <span className="text-xs text-muted-foreground/80 font-medium">Upgrade to Pro</span>
+      </div>
+    </div>
+  );
+}
+
 export function IntegrationsSection({
   settings,
   settingsSaving,
+  orgPlan,
   handleSetDefaultIssueTracker,
   jiraStatus,
   githubStatus,
@@ -110,6 +134,8 @@ export function IntegrationsSection({
   setWorkermillSlideOpen,
   fetchMcpApiKeys,
 }: IntegrationsSectionProps) {
+  const isFreePlan = !orgPlan || orgPlan === "free";
+
   return (
     <div className="space-y-6">
       <div>
@@ -193,7 +219,8 @@ export function IntegrationsSection({
         </div>
 
         {/* GitLab Card */}
-        <div className={`border rounded-xl p-6 bg-card transition-colors ${settings.scmProvider === "gitlab" ? "border-primary ring-1 ring-primary/30" : "border-border/50 hover:border-orange-500/50"}`}>
+        <div className={`relative border rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : ""} ${settings.scmProvider === "gitlab" ? "border-primary ring-1 ring-primary/30" : "border-border/50 hover:border-orange-500/50"}`}>
+          {isFreePlan && <LockedOverlay />}
           <div className="flex items-center gap-3 mb-4">
             <div className="w-12 h-12 rounded-lg bg-orange-500/10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" className="w-7 h-7 text-orange-500" fill="currentColor">
@@ -230,7 +257,8 @@ export function IntegrationsSection({
         </div>
 
         {/* BitBucket Card */}
-        <div className={`border rounded-xl p-6 bg-card transition-colors ${settings.scmProvider === "bitbucket" ? "border-primary ring-1 ring-primary/30" : "border-border/50 hover:border-blue-600/50"}`}>
+        <div className={`relative border rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : ""} ${settings.scmProvider === "bitbucket" ? "border-primary ring-1 ring-primary/30" : "border-border/50 hover:border-blue-600/50"}`}>
+          {isFreePlan && <LockedOverlay />}
           <div className="flex items-center gap-3 mb-4">
             <div className="w-12 h-12 rounded-lg bg-blue-600/10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" className="w-7 h-7 text-blue-600" fill="currentColor">
@@ -267,7 +295,8 @@ export function IntegrationsSection({
         </div>
 
         {/* Slack Card */}
-        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-purple-500/50 transition-colors">
+        <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-purple-500/50"}`}>
+          {isFreePlan && <LockedOverlay />}
           <div className="flex items-center gap-3 mb-4">
             <div className="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" className="w-7 h-7 text-purple-500" fill="currentColor">
@@ -375,7 +404,8 @@ export function IntegrationsSection({
         </div>
 
         {/* Microsoft Teams Card */}
-        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-violet-500/50 transition-colors">
+        <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-violet-500/50"}`}>
+          {isFreePlan && <LockedOverlay />}
           <div className="flex items-center gap-3 mb-4">
             <div className="w-12 h-12 rounded-lg bg-violet-500/10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" className="w-7 h-7 text-violet-500" fill="currentColor">
@@ -439,12 +469,16 @@ export function IntegrationsSection({
 
       {/* Cloud Providers Section */}
       <div className="mt-8">
-        <h3 className="text-lg font-semibold text-foreground mb-1">Cloud Providers</h3>
+        <div className="flex items-center gap-2 mb-1">
+          <h3 className="text-lg font-semibold text-foreground">Cloud Providers</h3>
+          {isFreePlan && <ProBadge />}
+        </div>
         <p className="text-sm text-muted-foreground mb-4">Configure cloud credentials for worker deployment</p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* AWS Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-orange-500/50 transition-colors">
+          <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-orange-500/50"}`}>
+            {isFreePlan && <LockedOverlay />}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-orange-500/10 flex items-center justify-center">
                 {/* AWS Cloud icon */}
@@ -478,7 +512,8 @@ export function IntegrationsSection({
           </div>
 
           {/* GCP Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-blue-500/50 transition-colors">
+          <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-blue-500/50"}`}>
+            {isFreePlan && <LockedOverlay />}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center">
                 <svg viewBox="0 0 24 24" className="w-7 h-7 text-blue-500" fill="currentColor">
@@ -510,7 +545,8 @@ export function IntegrationsSection({
           </div>
 
           {/* Azure Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-cyan-500/50 transition-colors">
+          <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-cyan-500/50"}`}>
+            {isFreePlan && <LockedOverlay />}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-cyan-500/10 flex items-center justify-center">
                 <svg viewBox="0 0 24 24" className="w-7 h-7 text-cyan-500" fill="currentColor">
@@ -545,7 +581,10 @@ export function IntegrationsSection({
 
       {/* AI Providers Section */}
       <div className="mt-8">
-        <h3 className="text-lg font-semibold text-foreground mb-1">AI Providers</h3>
+        <div className="flex items-center gap-2 mb-1">
+          <h3 className="text-lg font-semibold text-foreground">AI Providers</h3>
+          {isFreePlan && <span className="text-xs text-muted-foreground">(Anthropic included on Free)</span>}
+        </div>
         <p className="text-sm text-muted-foreground mb-4">Configure API keys for AI model providers</p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -580,7 +619,8 @@ export function IntegrationsSection({
           </div>
 
           {/* OpenAI Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-emerald-500/50 transition-colors">
+          <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-emerald-500/50"}`}>
+            {isFreePlan && <LockedOverlay />}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center">
                 <span className="text-2xl">🔷</span>
@@ -610,7 +650,8 @@ export function IntegrationsSection({
           </div>
 
           {/* Google Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-blue-500/50 transition-colors">
+          <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-blue-500/50"}`}>
+            {isFreePlan && <LockedOverlay />}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center">
                 <span className="text-2xl">🔵</span>
@@ -640,7 +681,8 @@ export function IntegrationsSection({
           </div>
 
           {/* OpenRouter Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-cyan-500/50 transition-colors">
+          <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-cyan-500/50"}`}>
+            {isFreePlan && <LockedOverlay />}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-cyan-500/10 flex items-center justify-center">
                 <span className="text-2xl">🔀</span>
@@ -670,7 +712,8 @@ export function IntegrationsSection({
           </div>
 
           {/* Groq Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-yellow-500/50 transition-colors">
+          <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-yellow-500/50"}`}>
+            {isFreePlan && <LockedOverlay />}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-yellow-500/10 flex items-center justify-center">
                 <span className="text-2xl">⚡</span>
@@ -700,7 +743,8 @@ export function IntegrationsSection({
           </div>
 
           {/* DeepSeek Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-teal-500/50 transition-colors">
+          <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-teal-500/50"}`}>
+            {isFreePlan && <LockedOverlay />}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-teal-500/10 flex items-center justify-center">
                 <span className="text-2xl">🔍</span>
@@ -730,7 +774,8 @@ export function IntegrationsSection({
           </div>
 
           {/* Mistral Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-indigo-500/50 transition-colors">
+          <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-indigo-500/50"}`}>
+            {isFreePlan && <LockedOverlay />}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-indigo-500/10 flex items-center justify-center">
                 <span className="text-2xl">🌀</span>
@@ -760,7 +805,8 @@ export function IntegrationsSection({
           </div>
 
           {/* xAI Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-gray-500/50 transition-colors">
+          <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-gray-500/50"}`}>
+            {isFreePlan && <LockedOverlay />}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-gray-500/10 flex items-center justify-center">
                 <span className="text-2xl font-bold">𝕏</span>
@@ -790,7 +836,8 @@ export function IntegrationsSection({
           </div>
 
           {/* AWS Bedrock Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-orange-400/50 transition-colors">
+          <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-orange-400/50"}`}>
+            {isFreePlan && <LockedOverlay />}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-orange-400/10 flex items-center justify-center">
                 <span className="text-2xl">☁️</span>
@@ -825,7 +872,8 @@ export function IntegrationsSection({
           </div>
 
           {/* Azure AI Foundry Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-sky-500/50 transition-colors">
+          <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-sky-500/50"}`}>
+            {isFreePlan && <LockedOverlay />}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-sky-500/10 flex items-center justify-center">
                 <span className="text-2xl">🔶</span>
@@ -855,7 +903,8 @@ export function IntegrationsSection({
           </div>
 
           {/* Ollama Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-purple-500/50 transition-colors">
+          <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : "hover:border-purple-500/50"}`}>
+            {isFreePlan && <LockedOverlay />}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center">
                 <span className="text-2xl">🏠</span>

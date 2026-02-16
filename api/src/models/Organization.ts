@@ -589,7 +589,7 @@ export class Organization {
   @Column({ name: "graceful_shutdown_enabled", type: "boolean", default: true })
   gracefulShutdownEnabled: boolean;
 
-  @Column({ name: "self_review_enabled", type: "boolean", default: true })
+  @Column({ name: "self_review_enabled", type: "boolean", default: false })
   selfReviewEnabled: boolean;
 
   // Repository list for multi-repo workflows (array of "owner/repo" strings)

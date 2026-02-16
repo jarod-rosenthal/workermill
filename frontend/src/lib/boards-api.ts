@@ -5,6 +5,7 @@ import apiClient from "./api-client";
 export interface Board {
   id: string;
   name: string;
+  prefix: string;
   description: string | null;
   isStarred: boolean;
   columnCount: number;
@@ -96,6 +97,7 @@ export interface BoardDetail {
 export interface CreateBoardData {
   name: string;
   description?: string;
+  prefix?: string;
   template?: "empty" | "project" | "bug_tracker";
 }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link } from "react-router-dom";
 import {
   ArrowLeft,
   RefreshCw,
@@ -120,6 +120,7 @@ function SortableColumn({
 
 export default function BoardView() {
   const { boardId } = useParams<{ boardId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     currentBoard,
     labels,
@@ -191,6 +192,22 @@ export default function BoardView() {
     }, 10_000);
     return () => clearInterval(interval);
   }, [hasActiveWorkerCards, boardId, fetchBoardDetail]);
+
+  // Auto-open card detail when ?card= query param is present
+  useEffect(() => {
+    const cardId = searchParams.get("card");
+    if (!cardId || !currentBoard?.columns) return;
+
+    for (const col of currentBoard.columns) {
+      const card = col.cards.find((c) => c.id === cardId);
+      if (card) {
+        setSelectedCard(card);
+        // Clear the query param so it doesn't re-trigger
+        setSearchParams({}, { replace: true });
+        break;
+      }
+    }
+  }, [searchParams, currentBoard?.columns, setSearchParams]);
 
   const handleRefresh = useCallback(() => {
     if (boardId) fetchBoardDetail(boardId);

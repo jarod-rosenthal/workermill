@@ -2500,7 +2500,11 @@ export default function Dashboard() {
                           </div>
                           <span className="text-muted-foreground">•</span>
                           {(() => {
-                            const url = buildTicketUrl(task.jiraIssueKey, issueTrackerConfig ?? undefined);
+                            const url = buildTicketUrl(
+                              task.jiraIssueKey,
+                              issueTrackerConfig ?? undefined,
+                              task.cardBoardId && task.cardId ? { boardId: task.cardBoardId, cardId: task.cardId } : null,
+                            );
                             const isExt = url?.startsWith("http");
                             return url ? (
                               <a
@@ -3449,7 +3453,11 @@ export default function Dashboard() {
                         {/* Task - Clickable issue key */}
                         <td className="p-3">
                           {(() => {
-                            const url = buildTicketUrl(task.jiraIssueKey, issueTrackerConfig ?? undefined);
+                            const url = buildTicketUrl(
+                              task.jiraIssueKey,
+                              issueTrackerConfig ?? undefined,
+                              task.cardBoardId && task.cardId ? { boardId: task.cardBoardId, cardId: task.cardId } : null,
+                            );
                             const isExt = url?.startsWith("http");
                             return url ? (
                               <a
@@ -4036,7 +4044,11 @@ export default function Dashboard() {
             <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
               <div className="flex items-center gap-3">
                 {(() => {
-                  const url = buildTicketUrl(selectedTask.jiraIssueKey, issueTrackerConfig ?? undefined);
+                  const url = buildTicketUrl(
+                    selectedTask.jiraIssueKey,
+                    issueTrackerConfig ?? undefined,
+                    selectedTask.cardBoardId && selectedTask.cardId ? { boardId: selectedTask.cardBoardId, cardId: selectedTask.cardId } : null,
+                  );
                   const isExt = url?.startsWith("http");
                   return url ? (
                     <a

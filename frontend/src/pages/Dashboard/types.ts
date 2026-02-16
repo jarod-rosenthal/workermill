@@ -200,6 +200,9 @@ export interface ActiveTask {
   costCeilingPercent?: number;
   // Remote agent
   claimedByAgent?: string | null;
+  // Board context for internal issue links
+  cardBoardId?: string | null;
+  cardId?: string | null;
 }
 
 export interface CompletedTask {
@@ -246,6 +249,9 @@ export interface CompletedTask {
   } | null;
   // Remote agent
   claimedByAgent?: string | null;
+  // Board context for internal issue links
+  cardBoardId?: string | null;
+  cardId?: string | null;
 }
 
 export interface ManagerStatus {

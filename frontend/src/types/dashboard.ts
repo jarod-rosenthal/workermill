@@ -76,6 +76,8 @@ export interface TaskCardData {
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
+  cardBoardId?: string | null;
+  cardId?: string | null;
 }
 
 // Activity Feed Types

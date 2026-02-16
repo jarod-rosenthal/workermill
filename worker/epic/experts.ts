@@ -5,6 +5,7 @@
  * Each expert has a specific persona, specialties, and system prompt.
  */
 
+import axios from "axios";
 import type { ExpertConfig, ExpertPersona } from "./types.js";
 
 /**
@@ -71,7 +72,7 @@ Include file paths, commands, and exact details. Only emit when you genuinely di
  * Expert configurations for Epic collaboration.
  * Each expert has tools and prompts tuned for their specialty.
  */
-export const EXPERT_CONFIGS: Record<ExpertPersona, ExpertConfig> = {
+export const DEFAULT_EXPERT_CONFIGS: Record<ExpertPersona, ExpertConfig> = {
   frontend_developer: {
     persona: "frontend_developer",
     description: "Frontend development specialist - React, TypeScript, CSS",
@@ -673,24 +674,102 @@ Work Style:
 };
 
 /**
+ * Runtime expert registry — populated from API at startup, falls back to defaults.
+ */
+let expertRegistry: Map<string, ExpertConfig> | null = null;
+
+/**
+ * Load expert configs from the API. Called once at coordinator startup.
+ * Falls back to DEFAULT_EXPERT_CONFIGS on failure.
+ */
+export async function loadExpertRegistry(
+  apiBaseUrl: string,
+  apiKey: string,
+): Promise<void> {
+  try {
+    const response = await axios.get(
+      `${apiBaseUrl}/api/personas/worker/experts`,
+      {
+        headers: { "x-api-key": apiKey },
+        timeout: 10000,
+      },
+    );
+
+    const entries = response.data.experts as Array<{
+      slug: string;
+      name: string;
+      emoji: string | null;
+      color: string | null;
+      description: string | null;
+      systemPrompt: string;
+      specialties: string[];
+      tools: string[];
+      reviewOnly: boolean;
+    }>;
+
+    expertRegistry = new Map();
+    for (const entry of entries) {
+      expertRegistry.set(entry.slug, {
+        persona: entry.slug,
+        description: entry.description || entry.name,
+        systemPrompt: entry.systemPrompt,
+        specialties: entry.specialties,
+        tools: entry.tools,
+        model: "", // Set at runtime from EpicConfig
+      });
+    }
+
+    // Track which are review-only
+    const reviewOnlySlugs = entries
+      .filter((e) => e.reviewOnly)
+      .map((e) => e.slug);
+    REVIEW_ONLY_PERSONAS.clear();
+    for (const slug of reviewOnlySlugs) {
+      REVIEW_ONLY_PERSONAS.add(slug);
+    }
+
+    console.log(
+      `[Epic] Expert registry loaded: ${expertRegistry.size} personas (${reviewOnlySlugs.length} review-only)`,
+    );
+  } catch (err) {
+    console.log(
+      `[Epic] Failed to load expert registry, using defaults: ${(err as Error).message}`,
+    );
+    expertRegistry = null; // Will fall back to defaults
+  }
+}
+
+function getRegistry(): Record<string, ExpertConfig> | Map<string, ExpertConfig> {
+  return expertRegistry || DEFAULT_EXPERT_CONFIGS;
+}
+
+/**
  * Get the expert config for a given persona.
  */
-export function getExpertConfig(persona: ExpertPersona): ExpertConfig {
-  return EXPERT_CONFIGS[persona];
+export function getExpertConfig(persona: string): ExpertConfig {
+  const registry = getRegistry();
+  if (registry instanceof Map) {
+    return registry.get(persona) || DEFAULT_EXPERT_CONFIGS[persona];
+  }
+  return registry[persona];
 }
 
 /**
  * Personas reserved for review/management — never assigned to stories.
  */
-const REVIEW_ONLY_PERSONAS: Set<ExpertPersona> = new Set(["tech_lead", "manager"]);
+const REVIEW_ONLY_PERSONAS: Set<string> = new Set(["tech_lead", "manager"]);
 
 /**
  * Get all available expert personas (excludes review-only personas like tech_lead/manager).
  */
-export function getAvailableExperts(): ExpertPersona[] {
-  return (Object.keys(EXPERT_CONFIGS) as ExpertPersona[]).filter(
-    (p) => !REVIEW_ONLY_PERSONAS.has(p),
-  );
+export function getAvailableExperts(): string[] {
+  const registry = getRegistry();
+  if (registry instanceof Map) {
+    return Array.from(registry.keys()).filter(
+      (p) => !REVIEW_ONLY_PERSONAS.has(p),
+    );
+  }
+  return Object.keys(registry).filter((p) => !REVIEW_ONLY_PERSONAS.has(p));
 }
 
 /**
@@ -698,18 +777,23 @@ export function getAvailableExperts(): ExpertPersona[] {
  */
 export function findExpertForQuestion(
   questionContent: string,
-  excludePersona?: string
-): ExpertPersona | null {
+  excludePersona?: string,
+): string | null {
   const content = questionContent.toLowerCase();
+  const registry = getRegistry();
+  const entries =
+    registry instanceof Map
+      ? Array.from(registry.entries())
+      : Object.entries(registry);
 
-  for (const [persona, config] of Object.entries(EXPERT_CONFIGS)) {
+  for (const [persona, config] of entries) {
     if (persona === excludePersona) continue;
 
-    const matchesSpecialty = config.specialties.some(
-      (specialty) => content.includes(specialty)
+    const matchesSpecialty = config.specialties.some((specialty) =>
+      content.includes(specialty),
     );
     if (matchesSpecialty) {
-      return persona as ExpertPersona;
+      return persona;
     }
   }
 
@@ -719,10 +803,13 @@ export function findExpertForQuestion(
 /**
  * Match a story persona to an expert.
  */
-export function matchPersonaToExpert(persona: string): ExpertPersona | null {
-  const normalized = persona.toLowerCase().replace(/[^a-z]/g, "_");
-  if (normalized in EXPERT_CONFIGS) {
-    return normalized as ExpertPersona;
+export function matchPersonaToExpert(persona: string): string | null {
+  const normalized = persona.toLowerCase().replace(/[^a-z_]/g, "_");
+  const registry = getRegistry();
+  if (registry instanceof Map) {
+    if (registry.has(normalized)) return normalized;
+  } else {
+    if (normalized in registry) return normalized;
   }
   return null;
 }

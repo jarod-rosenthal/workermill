@@ -128,6 +128,16 @@ export class AddBoardIssueKeys1706688000050 implements MigrationInterface {
       ) AS sub
       WHERE b."id" = sub."board_id"
     `);
+
+    // 8. Backfill jira_issue_key on existing worker_tasks linked to board cards
+    await queryRunner.query(`
+      UPDATE "worker_tasks" wt
+      SET "jira_issue_key" = b."prefix" || '-' || c."card_number"
+      FROM "kb_cards" c
+      JOIN "kb_boards" b ON b."id" = c."board_id"
+      WHERE c."worker_task_id" = wt."id"
+      AND c."card_number" IS NOT NULL
+    `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

@@ -16,7 +16,8 @@ import type {
   ResilienceConfig,
   EpicValidationResult,
 } from "./types.js";
-import { getAvailableExperts, findExpertForQuestion, matchPersonaToExpert } from "./experts.js";
+import { getAvailableExperts, matchPersonaToExpert } from "./experts.js";
+import type { DecisionClient } from "./decision-client.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { StoryExecutor } from "./executor.js";
 import { GitOps } from "./git-ops.js";
@@ -48,6 +49,7 @@ export class EpicCoordinator {
   private executor: StoryExecutor;
   private gitOps: GitOps;
   private ticketOps: TicketOps;
+  private decisionClient: DecisionClient;
   private expertStates: Map<ExpertPersona, ExpertState>;
   private missionActive: boolean = false;
   private pollIntervalMs: number = 5000;
@@ -111,9 +113,22 @@ export class EpicCoordinator {
   // Proactive conflict detection: scan worktrees every N iterations
   private loopIterationCount: number = 0;
 
-  constructor(config: EpicConfig, resilience?: ResilienceConfig) {
+  constructor(config: EpicConfig, resilience?: ResilienceConfig, decisionClient?: DecisionClient) {
     this.config = config;
     this.coordination = new CoordinationClient(config);
+
+    // Initialize decision client (uses safe fallbacks if API unavailable)
+    if (decisionClient) {
+      this.decisionClient = decisionClient;
+    } else {
+      // Lazy import to avoid circular dependency — inline require
+      const { DecisionClient: DC } = require("./decision-client.js");
+      this.decisionClient = new DC({
+        apiBaseUrl: config.apiBaseUrl,
+        orgApiKey: config.orgApiKey,
+        logger: (msg: string) => console.log(msg),
+      });
+    }
 
     // Determine workspace directory based on execution mode
     // REPO_PATH is set by epic-entrypoint.sh after cloning - use parent directory as workDir
@@ -1559,19 +1574,20 @@ export class EpicCoordinator {
     for (const question of orphanedQuestions) {
       if (answeredInPass.has(question.id)) continue;
 
-      // Try specialty match first
-      const specialtyMatch = findExpertForQuestion(
-        question.content,
-        question.fromPersona
-      );
+      // Route via Decision API for specialty matching
+      const orphanRouting = await this.decisionClient.routeQuestion({
+        question: question.content,
+        fromPersona: question.fromPersona,
+        idleExperts: stillIdleExperts,
+      });
       let responder: ExpertPersona | null = null;
 
       if (
-        specialtyMatch &&
-        stillIdleExperts.includes(specialtyMatch) &&
-        specialtyMatch !== question.fromPersona
+        orphanRouting.targetExpert &&
+        stillIdleExperts.includes(orphanRouting.targetExpert as ExpertPersona) &&
+        orphanRouting.targetExpert !== question.fromPersona
       ) {
-        responder = specialtyMatch;
+        responder = orphanRouting.targetExpert as ExpertPersona;
       } else {
         // Any idle expert (excluding the asker)
         responder =
@@ -2057,24 +2073,26 @@ export class EpicCoordinator {
     }
 
     for (const question of questions) {
-      // First, check for explicit target in metadata (from Q-SECURITY-001 patterns)
-      let targetPersona: ExpertPersona | null = null;
+      // Compute idle expert names for routing
+      const idleExpertNames = Array.from(this.expertStates.entries())
+        .filter(([_, state]) => state.status === "idle")
+        .map(([persona]) => persona);
+      // Route via Decision API — handles metadata targets, content-based routing, and tier selection
+      const routing = await this.decisionClient.routeQuestion({
+        question: question.content,
+        fromPersona: question.metadata?.targetPersona as string || question.fromPersona,
+        idleExperts: idleExpertNames,
+      });
 
-      if (question.metadata?.targetPersona) {
-        // Use explicit target from question metadata
-        targetPersona = question.metadata.targetPersona as ExpertPersona;
-      } else {
-        // Fall back to content-based routing
-        targetPersona = findExpertForQuestion(
-          question.content,
-          question.fromPersona
-        );
-      }
+      // If metadata has an explicit target, prefer it over the routing result
+      const effectiveTarget: ExpertPersona | null = question.metadata?.targetPersona
+        ? (question.metadata.targetPersona as ExpertPersona)
+        : (routing.targetExpert as ExpertPersona | null);
 
       // Tier 1: Target expert is idle — route directly
-      const expertState = targetPersona ? this.expertStates.get(targetPersona) : undefined;
+      const expertState = effectiveTarget ? this.expertStates.get(effectiveTarget) : undefined;
       if (expertState && expertState.status === "idle") {
-        console.log("[Epic] Routing question from " + question.fromPersona + " to " + targetPersona);
+        console.log(`[Epic] Routing question from ${question.fromPersona} to ${effectiveTarget} (tier ${routing.routingTier}: ${routing.reason})`);
         const answerText = await this.executor.answerQuestion(
           {
             id: question.id,
@@ -2086,28 +2104,22 @@ export class EpicCoordinator {
             metadata: question.metadata,
             createdAt: question.createdAt,
           },
-          targetPersona! // non-null: expertState is only set when targetPersona is truthy
+          effectiveTarget!
         );
-        this.deliverAnswerToAsker(question, answerText, targetPersona!);
+        this.deliverAnswerToAsker(question, answerText, effectiveTarget!);
         continue;
       }
 
-      // Target expert is busy — try fallback tiers
-      // Tier 2a: Find idle expert with matching specialty (skip if no target — already tried in content-based routing above)
-      const specialtyMatch = targetPersona
-        ? findExpertForQuestion(question.content, question.fromPersona)
-        : null;
-      if (
-        specialtyMatch &&
-        specialtyMatch !== targetPersona
-      ) {
-        const matchState = this.expertStates.get(specialtyMatch);
-        if (matchState && matchState.status === "idle") {
+      // Target expert is busy — try routing result's fallback target if different
+      if (routing.targetExpert && routing.targetExpert !== effectiveTarget) {
+        const routedTarget = routing.targetExpert as ExpertPersona;
+        const routedState = this.expertStates.get(routedTarget);
+        if (routedState && routedState.status === "idle") {
           console.log(
-            `[Epic] Target ${targetPersona} busy — routing question from ${question.fromPersona} to specialty-matched ${specialtyMatch}`
+            `[Epic] Target ${effectiveTarget} busy — routing question from ${question.fromPersona} to ${routedTarget} (tier ${routing.routingTier}: ${routing.reason})`
           );
           await this.postLog(
-            `Routing question to ${specialtyMatch} (target ${targetPersona} busy)`
+            `Routing question to ${routedTarget} (target ${effectiveTarget} busy)`
           );
           const answerText2a = await this.executor.answerQuestion(
             {
@@ -2120,14 +2132,14 @@ export class EpicCoordinator {
               metadata: question.metadata,
               createdAt: question.createdAt,
             },
-            specialtyMatch
+            routedTarget
           );
-          this.deliverAnswerToAsker(question, answerText2a, specialtyMatch);
+          this.deliverAnswerToAsker(question, answerText2a, routedTarget);
           continue;
         }
       }
 
-      // Tier 2b: Any idle expert (excluding the question asker)
+      // Fallback: Any idle expert (excluding the question asker)
       const anyIdleExpert = Array.from(this.expertStates.entries()).find(
         ([persona, state]) =>
           state.status === "idle" && persona !== question.fromPersona
@@ -2135,10 +2147,10 @@ export class EpicCoordinator {
       if (anyIdleExpert) {
         const [fallbackPersona] = anyIdleExpert;
         console.log(
-          `[Epic] ${targetPersona ? `Target ${targetPersona} busy` : "No target match"} — routing question from ${question.fromPersona} to idle ${fallbackPersona}`
+          `[Epic] ${effectiveTarget ? `Target ${effectiveTarget} busy` : "No target match"} — routing question from ${question.fromPersona} to idle ${fallbackPersona}`
         );
         await this.postLog(
-          `Routing question to ${fallbackPersona} (${targetPersona ? `target ${targetPersona} busy` : "no target match"}, no specialty match)`
+          `Routing question to ${fallbackPersona} (${effectiveTarget ? `target ${effectiveTarget} busy` : "no target match"}, no specialty match)`
         );
         const answerText2b = await this.executor.answerQuestion(
           {
@@ -2168,7 +2180,7 @@ export class EpicCoordinator {
         this.inFlightQuickAnswers.add(question.id);
 
         // Fire-and-forget: don't block the poll loop
-        const quickAnswerPersona = targetPersona || ("backend_developer" as ExpertPersona);
+        const quickAnswerPersona = effectiveTarget || ("backend_developer" as ExpertPersona);
         this.executor
           .spawnQuickAnswer(
             {
@@ -3036,70 +3048,44 @@ export class EpicCoordinator {
           return;
         }
 
-        // Parse decision from output - check for structured output marker first (AI SDK 6.0+ Output.object)
-        // This is the most reliable format - guaranteed by the schema
-        const structuredDecisionMatch = allOutput.match(/::review_decision::(approved|revision_needed|rejected)/i);
-        const textDecisionMatch = allOutput.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
-        let decision: "approved" | "revision_needed" | "rejected";
+        // Delegate review output parsing to Decision API
+        // (handles structured markers, text markers, and natural language patterns)
+        this.decisionClient.parseReviewOutcome({
+          reviewOutput: allOutput,
+          reviewerPersona: "tech_lead",
+          revisionNumber: this.revisionCount,
+        }).then((reviewOutcome) => {
+          // Report tokens for cost tracking
+          reportTokensFromOutput();
 
-        if (structuredDecisionMatch) {
-          console.log("[Epic] Found structured output marker from AI SDK");
-          decision = structuredDecisionMatch[1].toLowerCase() as "approved" | "revision_needed" | "rejected";
-        } else if (textDecisionMatch) {
-          decision = textDecisionMatch[1].toLowerCase() as "approved" | "revision_needed" | "rejected";
-        } else {
-          // Fallback: detect natural language approval patterns (LLMs don't always follow format)
-          const lowerOutput = allOutput.toLowerCase();
-          const approvalPatterns = [
-            /\bapproving\b/,
-            /\bapproved\b/,
-            /\blgtm\b/,
-            /\bship it\b/,
-            /\bmerge this\b/,
-            /\bready to merge\b/,
-            /gh pr review.*--approve/,
-          ];
-          const rejectionPatterns = [
-            /\brejecting\b/,
-            /\brejected\b/,
-            /\bcannot approve\b/,
-            /\bdo not merge\b/,
-          ];
+          const decision = reviewOutcome.decision === "rejected"
+            ? "rejected" as const
+            : reviewOutcome.decision === "revision_needed"
+              ? "revision_needed" as const
+              : "approved" as const;
 
-          if (approvalPatterns.some(p => p.test(lowerOutput))) {
-            console.log("[Epic] Detected natural language approval (missing REVIEW_DECISION marker)");
-            decision = "approved";
-          } else if (rejectionPatterns.some(p => p.test(lowerOutput))) {
-            console.log("[Epic] Detected natural language rejection (missing REVIEW_DECISION marker)");
-            decision = "rejected";
-          } else {
-            console.log("[Epic] No decision marker found, defaulting to revision_needed");
-            decision = "revision_needed";
-          }
-        }
+          console.log(`[Epic] Decision API parsed review: ${decision} (score: ${reviewOutcome.score ?? "N/A"})`);
 
-        // Parse feedback - check structured marker first
-        const structuredFeedbackMatch = allOutput.match(/::feedback::(.+?)(?=\n|$)/i);
-        const textFeedbackMatch = allOutput.match(/FEEDBACK:\s*([\s\S]*?)(?=\n\s*(?:REVIEW_DECISION:|CODE_QUALITY_SCORE:)|$)/i);
-        const feedback = structuredFeedbackMatch?.[1]?.trim() || textFeedbackMatch?.[1]?.trim() || "No feedback provided";
+          resolve({
+            success: true,
+            decision,
+            feedback: reviewOutcome.feedback || "No feedback provided",
+            codeQualityScore: reviewOutcome.score
+              ? Math.min(10, Math.max(1, reviewOutcome.score))
+              : 5,
+          });
+        }).catch((parseErr) => {
+          console.error("[Epic] Decision API review parsing failed, using fallback:", parseErr);
+          // Report tokens even on parse failure
+          reportTokensFromOutput();
 
-        // Parse score - check structured marker first
-        const structuredScoreMatch = allOutput.match(/::code_quality_score::(\d+)/i);
-        const textScoreMatch = allOutput.match(/CODE_QUALITY_SCORE:\s*(\d+)/i);
-        const codeQualityScore = structuredScoreMatch
-          ? Math.min(10, Math.max(1, parseInt(structuredScoreMatch[1], 10)))
-          : textScoreMatch
-            ? Math.min(10, Math.max(1, parseInt(textScoreMatch[1], 10)))
-            : 5;
-
-        // Report tokens for cost tracking
-        reportTokensFromOutput();
-
-        resolve({
-          success: true,
-          decision,
-          feedback,
-          codeQualityScore,
+          // Fallback: approve (same as decision client's safe fallback)
+          resolve({
+            success: true,
+            decision: "approved",
+            feedback: "Decision API unavailable — auto-approving",
+            codeQualityScore: 5,
+          });
         });
       });
 

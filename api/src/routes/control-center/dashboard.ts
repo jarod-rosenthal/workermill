@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { authenticateRequest, authenticateUser } from "../../middleware/auth.js";
 import { AppDataSource } from "../../db/connection.js";
-import { WorkerTask, Organization } from "../../models/index.js";
+import { WorkerTask, Organization, KbCard } from "../../models/index.js";
 import { logger } from "../../utils/logger.js";
 import {
   formatTaskData,
@@ -208,6 +208,25 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
     runningTasks.length = 0;
     runningTasks.push(...sortedRunningTasks);
 
+    // Batch-fetch card context for internal board cards (for direct links)
+    const allTaskIds = [...runningTasks, ...queuedTasks, ...allTasks].map((t) => t.id);
+    const cardContextMap = new Map<string, { boardId: string; cardId: string }>();
+    if (allTaskIds.length > 0) {
+      const cardRows = await AppDataSource.getRepository(KbCard)
+        .createQueryBuilder("card")
+        .select(["card.workerTaskId", "card.boardId", "card.id"])
+        .where("card.workerTaskId IN (:...taskIds)", { taskIds: allTaskIds })
+        .getMany();
+      for (const row of cardRows) {
+        if (row.workerTaskId) {
+          cardContextMap.set(row.workerTaskId, {
+            boardId: row.boardId,
+            cardId: row.id,
+          });
+        }
+      }
+    }
+
     // Format active tasks - uses shared formatTaskData
     // Fetch Ralph progress, checkpoint data, and Epic progress for active tasks in parallel
     const activeTasksWithRalph = await Promise.all(
@@ -217,7 +236,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
           fetchCheckpointForTask(task.id),
           fetchEpicProgressForTask(task),
         ]);
-        return formatTaskData(task, ralphData, checkpointData, epicProgressData || undefined, org.maxReviewRevisions);
+        return formatTaskData(task, ralphData, checkpointData, epicProgressData || undefined, org.maxReviewRevisions, cardContextMap.get(task.id) ?? null);
       })
     );
     const activeTasksData = activeTasksWithRalph;
@@ -226,7 +245,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
     const queuedTasksData = await Promise.all(
       queuedTasks.slice(0, 20).map(async (task) => {
         const epicProgressData = await fetchEpicProgressForTask(task);
-        return formatTaskData(task, undefined, undefined, epicProgressData || undefined, org.maxReviewRevisions);
+        return formatTaskData(task, undefined, undefined, epicProgressData || undefined, org.maxReviewRevisions, cardContextMap.get(task.id) ?? null);
       })
     );
 
@@ -270,6 +289,9 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         // Quality metrics
         qualityScore: task.qualityScore ?? null,
         qualityGrade: task.getQualityGrade() ?? null,
+        // Internal board card context (for direct link to card)
+        cardBoardId: cardContextMap.get(task.id)?.boardId ?? null,
+        cardId: cardContextMap.get(task.id)?.cardId ?? null,
       }));
 
     // System settings from org

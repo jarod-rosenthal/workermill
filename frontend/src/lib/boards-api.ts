@@ -87,6 +87,7 @@ export interface Activity {
 export interface BoardDetail {
   id: string;
   name: string;
+  prefix: string;
   description: string | null;
   isStarred: boolean;
   columns: Column[];

@@ -7,6 +7,7 @@
 
 import axios from "axios";
 import { runAgent } from "./agent-sdk.js";
+import { createDecisionClient, type DecisionClient } from "../epic/dist/decision-client.js";
 import type {
   ManagerConfig,
   ManagerResult,
@@ -122,6 +123,7 @@ export class PRReviewer {
   private repoPath: string;
   private logsApi: ReturnType<typeof axios.create>;
   private allOutput: string = "";
+  private decisionClient: DecisionClient;
 
   constructor(config: ManagerConfig, repoPath: string) {
     this.config = config;
@@ -135,6 +137,13 @@ export class PRReviewer {
         "x-api-key": config.orgApiKey,
       },
       timeout: 5000,
+    });
+
+    // Decision client for server-side review parsing
+    this.decisionClient = createDecisionClient({
+      apiBaseUrl: config.apiBaseUrl,
+      orgApiKey: config.orgApiKey,
+      logger: (msg) => console.log(msg),
     });
   }
 
@@ -193,10 +202,14 @@ export class PRReviewer {
         };
       }
 
-      // Parse decision from output
-      const decision = this.parseDecision();
-      const feedback = this.parseFeedback();
-      const codeQualityScore = this.parseCodeQualityScore();
+      // Parse decision from output via Decision API
+      const reviewResult = await this.decisionClient.parseReviewOutcome({
+        reviewOutput: this.allOutput,
+        reviewerPersona: "tech_lead",
+      });
+      const decision = reviewResult.decision as ReviewDecision;
+      const feedback = reviewResult.feedback || "No feedback provided";
+      const codeQualityScore = reviewResult.score || 7;
 
       await this.postLog(`Decision: ${decision}`, "system");
       await this.postLog(`Code Quality Score: ${codeQualityScore}`, "system");
@@ -390,65 +403,6 @@ Begin your review now. Start by fetching the PR diff.`;
     }
   }
 
-  /**
-   * Parse the review decision from agent output.
-   */
-  private parseDecision(): ReviewDecision {
-    // Look for REVIEW_DECISION: marker
-    const decisionMatch = this.allOutput.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
-    if (decisionMatch) {
-      return decisionMatch[1].toLowerCase() as ReviewDecision;
-    }
-
-    // Fallback: look for legacy markers
-    const legacyMatch = this.allOutput.match(/::review_decision::(approved|revision_needed|rejected)/i);
-    if (legacyMatch) {
-      return legacyMatch[1].toLowerCase() as ReviewDecision;
-    }
-
-    // Default to approved if agent completed successfully without explicit decision
-    console.log("[Manager] No explicit decision found, defaulting to approved");
-    return "approved";
-  }
-
-  /**
-   * Parse feedback from agent output.
-   */
-  private parseFeedback(): string {
-    // Look for FEEDBACK: marker - capture everything until REVIEW_DECISION: or CODE_QUALITY_SCORE: or end
-    // Use [\s\S]*? to properly match multi-line content including newlines
-    const feedbackMatch = this.allOutput.match(/FEEDBACK:\s*([\s\S]*?)(?=\n\s*(?:REVIEW_DECISION:|CODE_QUALITY_SCORE:)|$)/i);
-    if (feedbackMatch && feedbackMatch[1].trim()) {
-      return feedbackMatch[1].trim();
-    }
-
-    // Fallback: look for legacy markers
-    const legacyMatch = this.allOutput.match(/::feedback::([^\n]+)/i);
-    if (legacyMatch) {
-      return legacyMatch[1].trim();
-    }
-
-    return "No feedback provided";
-  }
-
-  /**
-   * Parse code quality score from agent output.
-   */
-  private parseCodeQualityScore(): number {
-    // Look for CODE_QUALITY_SCORE: marker
-    const scoreMatch = this.allOutput.match(/CODE_QUALITY_SCORE:\s*(\d+)/i);
-    if (scoreMatch) {
-      return Math.min(10, Math.max(1, parseInt(scoreMatch[1], 10)));
-    }
-
-    // Fallback: look for legacy markers
-    const legacyMatch = this.allOutput.match(/::code_quality_score::(\d+)/i);
-    if (legacyMatch) {
-      return Math.min(10, Math.max(1, parseInt(legacyMatch[1], 10)));
-    }
-
-    return 7; // Default to 7 if not specified
-  }
 
   /**
    * Report completion to the WorkerMill API.

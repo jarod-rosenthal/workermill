@@ -32,7 +32,7 @@ export default function PersonaStudio() {
           Overview
         </h2>
         <p>
-          WorkerMill includes 14 specialized AI personas, each with expertise in a specific development
+          WorkerMill includes 14+ specialized AI personas, and you can create your own, each with expertise in a specific development
           domain. The Persona Studio lets you:
         </p>
         <ul>

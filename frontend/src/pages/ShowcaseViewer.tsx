@@ -70,7 +70,7 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     storyCount: 105,
     cost: "$142.00",
     duration: "~18 hrs",
-    repoUrl: "https://github.com/jarod-rosenthal/oncallshift",
+    repoUrl: "https://github.com/workermill-examples/oncallshift",
     liveUrl: "https://oncallshift.com",
     category: "incident-management",
     personasUsed: [

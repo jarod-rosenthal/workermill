@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
 import BuiltByBadge from "../components/BuiltByBadge";
 import {
   ArrowLeft,
@@ -15,7 +17,13 @@ import {
   FileText,
   Workflow,
   Users,
+  ChevronDown,
+  GitPullRequest,
+  AlertTriangle,
+  MessageSquare,
+  FileCode,
 } from "lucide-react";
+import { teamBoardEpics } from "../data/teamboard-showcase-data";
 
 interface QualityScores {
   lint: string;
@@ -170,94 +178,31 @@ const showcaseData: Record<string, ShowcaseDetail> = {
   teamboard: {
     id: "teamboard",
     name: "TeamBoard",
-    tagline: "Multi-tenant SaaS project management with Kanban boards.",
+    tagline:
+      "Multi-tenant SaaS project management — built across 5 sequential epics by AI workers.",
     description:
-      "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time updates, workspace dashboards, and activity feeds. Deployed to Vercel.",
-    stack: "Next.js + Prisma + TailwindCSS",
-    storyCount: 10,
-    cost: "$14.20",
-    duration: "48 min",
+      "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time SSE updates, PWA offline support, workspace dashboards, activity feeds, and E2E tests. 5 epics executed sequentially, each building on the last. Deployed to Vercel at teamboard.workermill.com.",
+    stack: "Next.js 15 + Prisma + TailwindCSS + Neon PostgreSQL",
+    storyCount: 44,
+    cost: "Claude Max",
+    duration: "~354 min",
     repoUrl: "https://github.com/workermill-examples/teamboard",
+    liveUrl: "https://teamboard.workermill.com",
     category: "saas",
-    personasUsed: ["backend_developer", "frontend_developer", "qa_engineer"],
+    personasUsed: [
+      "backend_developer",
+      "frontend_developer",
+      "qa_engineer",
+      "devops_engineer",
+      "database_administrator",
+    ],
     qualityScores: {
       lint: "0 errors",
-      types: "0 errors",
-      tests: ">60% coverage",
+      types: "0 errors (3342 → 0)",
+      tests: "279 unit + 56 E2E",
       security: "0 critical",
     },
-    stories: [
-      {
-        title: "Project setup and Prisma schema",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "4 min",
-      },
-      {
-        title: "Authentication with NextAuth.js",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "5 min",
-      },
-      {
-        title: "Workspace CRUD and multi-tenancy",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "6 min",
-      },
-      {
-        title: "Board and column management",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "4 min",
-      },
-      {
-        title: "Card CRUD and drag-and-drop",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$2.00",
-        duration: "7 min",
-      },
-      {
-        title: "Dashboard with charts",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$1.80",
-        duration: "6 min",
-      },
-      {
-        title: "Activity feed and SSE",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "5 min",
-      },
-      {
-        title: "Member management and RBAC",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "4 min",
-      },
-      {
-        title: "Seed data and demo workspace",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$0.80",
-        duration: "3 min",
-      },
-      {
-        title: "Test suite and Vercel deployment",
-        persona: "qa_engineer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "4 min",
-      },
-    ],
+    stories: [],
     icon: <Globe className="w-5 h-5" />,
   },
   shipapi: {
@@ -790,6 +735,7 @@ const personaLabels: Record<string, { label: string; color: string }> = {
   security_engineer: { label: "Security", color: "text-red-400" },
   qa_engineer: { label: "QA", color: "text-green-400" },
   tech_writer: { label: "Docs", color: "text-cyan-400" },
+  database_administrator: { label: "DBA", color: "text-yellow-400" },
 };
 
 function PersonaBadge({ persona }: { persona: string }) {
@@ -798,13 +744,12 @@ function PersonaBadge({ persona }: { persona: string }) {
     color: "text-muted-foreground",
   };
   return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${info.color} bg-current/10`}
-      style={{ backgroundColor: "currentColor", opacity: 0.12 }}
-    >
-      <span style={{ opacity: 1 }} className={info.color}>
-        {info.label}
-      </span>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${info.color} relative`}>
+      <span
+        className="absolute inset-0 rounded"
+        style={{ backgroundColor: "currentColor", opacity: 0.12 }}
+      />
+      <span className="relative">{info.label}</span>
     </span>
   );
 }
@@ -812,6 +757,11 @@ function PersonaBadge({ persona }: { persona: string }) {
 export default function ShowcaseViewer() {
   const { projectId } = useParams<{ projectId: string }>();
   const project = projectId ? showcaseData[projectId] : undefined;
+  const isTeamBoard = projectId === "teamboard";
+  const [expandedEpic, setExpandedEpic] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<Record<string, "spec" | "log">>(
+    {},
+  );
 
   if (!project) {
     return (
@@ -903,13 +853,27 @@ export default function ShowcaseViewer() {
             </div>
           </div>
           <div className="card-elevated border border-border/50 rounded-xl p-5">
-            <div className="flex items-center gap-2 text-2xl font-bold text-green-500">
-              <DollarSign className="w-5 h-5" />
-              {project.cost.replace("$", "")}
-            </div>
-            <div className="text-sm text-muted-foreground mt-1">
-              total cost (BYOK)
-            </div>
+            {project.cost.startsWith("$") ? (
+              <>
+                <div className="flex items-center gap-2 text-2xl font-bold text-green-500">
+                  <DollarSign className="w-5 h-5" />
+                  {project.cost.replace("$", "")}
+                </div>
+                <div className="text-sm text-muted-foreground mt-1">
+                  total cost (BYOK)
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 text-2xl font-bold text-primary">
+                  <Zap className="w-5 h-5" />
+                  {project.cost}
+                </div>
+                <div className="text-sm text-muted-foreground mt-1">
+                  subscription model
+                </div>
+              </>
+            )}
           </div>
           <div className="card-elevated border border-border/50 rounded-xl p-5">
             <div className="flex items-center gap-2 text-2xl font-bold text-foreground">
@@ -931,8 +895,219 @@ export default function ShowcaseViewer() {
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-8">
-          {/* Story timeline — 2/3 width */}
+        <div className={isTeamBoard ? "" : "grid lg:grid-cols-3 gap-8"}>
+          {/* Epic board view for TeamBoard, story timeline for others */}
+          {isTeamBoard ? (
+            <div className="mb-8">
+              <div className="flex items-center gap-3 mb-6">
+                <h2 className="text-xl font-semibold text-foreground">
+                  Build Log
+                </h2>
+                <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">
+                  {teamBoardEpics.length} epics &middot; 100 comments
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {teamBoardEpics.map((epic) => {
+                  const isExpanded = expandedEpic === epic.id;
+                  const tab = activeTab[epic.id] || "log";
+                  return (
+                    <div
+                      key={epic.id}
+                      className="card-elevated border border-border/50 rounded-xl overflow-hidden"
+                    >
+                      {/* Epic header — always visible */}
+                      <button
+                        onClick={() =>
+                          setExpandedEpic(isExpanded ? null : epic.id)
+                        }
+                        className="w-full text-left p-4 hover:bg-muted/30 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <ChevronDown
+                            className={`w-4 h-4 text-muted-foreground transition-transform flex-shrink-0 ${
+                              isExpanded ? "rotate-0" : "-rotate-90"
+                            }`}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-foreground">
+                                {epic.title}
+                              </span>
+                              {epic.status === "completed" ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-500/10 text-green-500">
+                                  <CheckCircle className="w-3 h-3" />
+                                  Approved
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-500">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  Escalated
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+                              <span className="flex items-center gap-1">
+                                <Layers className="w-3 h-3" />
+                                {epic.storyCount} stories
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {epic.duration}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <MessageSquare className="w-3 h-3" />
+                                {epic.commentCount} notes
+                              </span>
+                              {epic.techLeadScore && (
+                                <span className="flex items-center gap-1 text-green-500">
+                                  <CheckCircle className="w-3 h-3" />
+                                  {epic.techLeadScore}
+                                </span>
+                              )}
+                              <a
+                                href={epic.prUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1 text-primary hover:underline"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <GitPullRequest className="w-3 h-3" />
+                                PR ***REMOVED***{epic.prNumber}
+                              </a>
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-2">
+                              <span className="text-[10px] text-muted-foreground uppercase tracking-wider mr-1">
+                                Built by
+                              </span>
+                              {epic.personas.map((p) => (
+                                <PersonaBadge key={p} persona={p} />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* Expanded content */}
+                      {isExpanded && (
+                        <div className="border-t border-border/30">
+                          {/* Tab bar */}
+                          <div className="flex border-b border-border/30 bg-muted/20">
+                            <button
+                              onClick={() =>
+                                setActiveTab((prev) => ({
+                                  ...prev,
+                                  [epic.id]: "log",
+                                }))
+                              }
+                              className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                                tab === "log"
+                                  ? "border-primary text-primary"
+                                  : "border-transparent text-muted-foreground hover:text-foreground"
+                              }`}
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                              Build Log ({epic.commentCount})
+                            </button>
+                            <button
+                              onClick={() =>
+                                setActiveTab((prev) => ({
+                                  ...prev,
+                                  [epic.id]: "spec",
+                                }))
+                              }
+                              className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                                tab === "spec"
+                                  ? "border-primary text-primary"
+                                  : "border-transparent text-muted-foreground hover:text-foreground"
+                              }`}
+                            >
+                              <FileCode className="w-3.5 h-3.5" />
+                              Ticket Specification
+                            </button>
+                          </div>
+
+                          {/* Content */}
+                          <div className="p-4 max-h-[600px] overflow-y-auto">
+                            <div className="prose prose-sm prose-invert max-w-none prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground prose-code:text-primary prose-code:bg-muted/50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-muted/30 prose-pre:border prose-pre:border-border/30 prose-a:text-primary prose-li:text-muted-foreground prose-table:text-muted-foreground prose-th:text-foreground prose-td:text-muted-foreground prose-hr:border-border/30 prose-blockquote:text-muted-foreground prose-blockquote:border-border/50">
+                              <ReactMarkdown>
+                                {tab === "log"
+                                  ? epic.buildLog
+                                  : epic.description}
+                              </ReactMarkdown>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Quality and sidebar below the board on TeamBoard */}
+              <div className="grid md:grid-cols-3 gap-6 mt-8">
+                {/* Quality scores */}
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground mb-4">
+                    Quality Gates
+                  </h2>
+                  <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
+                    {Object.entries(project.qualityScores).map(
+                      ([gate, result], i) => (
+                        <div
+                          key={gate}
+                          className={`flex items-center justify-between px-4 py-3 ${
+                            i <
+                            Object.keys(project.qualityScores).length - 1
+                              ? "border-b border-border/30"
+                              : ""
+                          }`}
+                        >
+                          <span className="text-sm text-foreground capitalize">
+                            {gate}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                            <span className="text-xs text-green-500 font-medium">
+                              {result}
+                            </span>
+                          </div>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </div>
+
+                {/* Personas used */}
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground mb-4">
+                    AI Experts
+                  </h2>
+                  <div className="card-elevated border border-border/50 rounded-xl p-4">
+                    <div className="flex flex-wrap gap-2">
+                      {project.personasUsed.map((persona) => (
+                        <PersonaBadge key={persona} persona={persona} />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* About */}
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground mb-4">
+                    About
+                  </h2>
+                  <div className="card-elevated border border-border/50 rounded-xl p-4">
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      {project.description}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
           <div className="lg:col-span-2">
             <h2 className="text-xl font-semibold text-foreground mb-6">
               Story Timeline
@@ -1030,6 +1205,8 @@ export default function ShowcaseViewer() {
               </div>
             </div>
           </div>
+            </>
+          )}
         </div>
       </main>
     </div>

@@ -227,6 +227,12 @@ export interface PlanningInput {
   maxStories?: number;
   /** Optional refinement feedback appended to prompt (from critic review). */
   refinementFeedback?: string;
+  availablePersonas?: Array<{
+    slug: string;
+    name: string;
+    description: string | null;
+    specialties: string[];
+  }>;
 }
 
 /**
@@ -779,7 +785,15 @@ Then analyze this task and create an execution plan with stories. For each story
 
 You MUST use one of these exact persona values for each story. Any other value will cause the story to fail:
 
-- \`frontend_developer\` — React, CSS, UI components, browser APIs
+${
+  input.availablePersonas
+    ? input.availablePersonas
+        .map(
+          (p) =>
+            `- \`${p.slug}\` — ${p.description || p.name}${p.specialties.length > 0 ? ` (${p.specialties.join(", ")})` : ""}`,
+        )
+        .join("\n")
+    : `- \`frontend_developer\` — React, CSS, UI components, browser APIs
 - \`backend_developer\` — Server-side logic, APIs, databases, business logic
 - \`api_developer\` — API design, REST/GraphQL endpoints, integrations
 - \`devops_engineer\` — CI/CD, Docker, infrastructure, deployment, migrations
@@ -789,7 +803,8 @@ You MUST use one of these exact persona values for each story. Any other value w
 - \`data_engineer\` — Data pipelines, ETL, data processing
 - \`ml_engineer\` — Machine learning, model training, AI features
 - \`mobile_developer_ios\` — iOS/Swift development
-- \`mobile_developer_android\` — Android/Kotlin development
+- \`mobile_developer_android\` — Android/Kotlin development`
+}
 
 Do NOT invent personas (e.g., "fullstack_developer" does not exist). For full-stack work, split into \`backend_developer\` and \`frontend_developer\` stories.
 

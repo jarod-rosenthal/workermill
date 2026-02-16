@@ -1010,6 +1010,18 @@ router.get(
     const calibrationMultiplier = org.storyCalibrationMultiplier ?? 0.4;
     const maxStories = Math.max(3, Math.round(20 * calibrationMultiplier));
 
+    // Fetch available personas for dynamic planner prompt
+    const { getExpertRegistry } = await import("../services/persona.js");
+    const experts = await getExpertRegistry(org.id);
+    const availablePersonas = experts
+      .filter((e: any) => !e.reviewOnly)
+      .map((e: any) => ({
+        slug: e.slug,
+        name: e.name,
+        description: e.description,
+        specialties: e.specialties,
+      }));
+
     const planningInput: PlanningInput = {
       taskId: task.id,
       title: task.summary || task.jiraIssueKey || "Unnamed Task",
@@ -1020,6 +1032,7 @@ router.get(
       taskNotes: task.taskNotes || undefined,
       maxParallelExperts: org.maxParallelExperts ?? 4,
       maxStories,
+      availablePersonas,
     };
 
     const prompt = buildPlanningPrompt(planningInput);

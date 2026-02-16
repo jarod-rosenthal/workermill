@@ -9,7 +9,7 @@
 
 import { logger } from "../utils/logger.js";
 import { cleanupStaleCoordination } from "./coordination.js";
-import { ensureValidOAuthToken } from "./llm-backend.js";
+// ensureValidOAuthToken removed — refresh moved to local-epic-spawner.ts pre-spawn
 import { findV2PipelineTasks, runSequentialPipeline } from "./pipeline-executor.js";
 import { maintainAllWarmPools } from "./warm-pool.js";
 import { cleanupLoop, failHungTasks, failOrphanedTasks } from "./task-cleanup.js";
@@ -243,16 +243,11 @@ async function pollLoop(): Promise<void> {
         });
       }
 
-      // Proactively refresh OAuth token in local mode to prevent expiration during idle periods.
-      // Run every ~1 hour (720 polls * 5 seconds = 3600 seconds).
-      // Ensures containers spawned later get a fresh token via the bind-mounted credentials file.
-      if (process.env.EXECUTION_MODE === "local" && state.tasksProcessed % 720 === 0 && state.tasksProcessed > 0) {
-        ensureValidOAuthToken().catch((error) => {
-          logger.warn("Periodic OAuth token refresh failed", {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-      }
+      // NOTE: OAuth token refresh was REMOVED from the orchestrator poll loop.
+      // Refreshing here races with running containers — OAuth refresh tokens are single-use,
+      // so consuming one here invalidates the copy cached by any running Claude CLI process.
+      // Token refresh now happens at spawn time in local-epic-spawner.ts (pre-spawn refresh),
+      // ensuring each container starts with a fresh 8-hour access token that never expires mid-run.
 
       // Maintain warm container pools
       // Run every ~30 seconds (6 polls * 5 seconds = 30 seconds)

@@ -45,6 +45,7 @@ For solo developers exploring AI-powered development. Full product experience wi
 | Users | 1 |
 | Concurrent worker containers | 1 |
 | Expert personas per task | 3 |
+| AI providers | **Anthropic Claude only** |
 | Execution modes | Local + BYOK |
 | Cloud execution (ECS) | No |
 | Warm container pool | No |
@@ -69,6 +70,7 @@ Up to 5 seats included. For developers and small teams who want speed and collab
 | Users | Up to 5 |
 | Concurrent worker containers | 5 |
 | Expert personas per task | **Unlimited** |
+| AI providers | **All (OpenAI, Google, Ollama + Anthropic)** |
 | Execution modes | Local + BYOK + **Cloud** |
 | Cloud execution (ECS) | Yes |
 | Warm container pool | Yes |

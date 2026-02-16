@@ -164,6 +164,7 @@ router.get(
         maxExperts: 3,
         logRetention: 14,
         features: [
+          "Anthropic Claude models",
           "1 concurrent worker",
           "3 expert personas per task",
           "Local + BYOK execution only",
@@ -181,6 +182,7 @@ router.get(
         maxExperts: -1,
         logRetention: 90,
         features: [
+          "All AI providers (OpenAI, Google, Ollama)",
           "5 concurrent workers",
           "Unlimited expert personas",
           "Cloud execution + Warm Pool",

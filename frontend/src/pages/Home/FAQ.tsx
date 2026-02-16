@@ -10,7 +10,7 @@ const faqItems: FAQItem[] = [
   {
     question: "How does pricing work?",
     answer:
-      "WorkerMill offers three plans: Free, Pro, and Enterprise. The Free plan lets you run tasks locally with your own AI keys at no cost. Pro ($29/month, launching at $14.50) adds cloud execution, warm pool, advanced analytics, and priority support. Enterprise offers unlimited everything with SSO, compliance, and dedicated support. All plans include BYOK (Bring Your Own Keys) - use your own AI provider API keys and only pay WorkerMill for orchestration.",
+      "WorkerMill offers three plans: Free, Pro, and Enterprise. The Free plan runs Anthropic Claude models locally on your hardware at no cost — unlimited tasks, all personas, all integrations. Pro ($29/month, launching at $14.50) unlocks all AI providers (OpenAI, Google, Ollama), 5x parallel workers, cloud execution, and team features. Enterprise offers unlimited everything with SSO, compliance, and dedicated support.",
   },
   {
     question: "What is Epic Mode and why is it the default?",
@@ -35,7 +35,7 @@ const faqItems: FAQItem[] = [
   {
     question: "What AI models power the workers?",
     answer:
-      "WorkerMill supports all major AI providers including Anthropic Claude (Opus, Sonnet, Haiku), OpenAI (GPT-4o, o1), Google Gemini, and self-hosted Ollama. Choose the model that fits your needs - from high-capability frontier models for complex tasks to faster, cost-effective options for routine work. Use Jira labels like 'haiku', 'sonnet', or 'opus' to select specific models.",
+      "The Free plan uses Anthropic Claude models (Opus, Sonnet, Haiku) — the best coding models available. Pro and Enterprise unlock all major providers: OpenAI (GPT-4o, o1), Google Gemini, and self-hosted Ollama. Choose the model that fits your needs — from high-capability frontier models for complex tasks to faster, cost-effective options for routine work. Use Jira labels like 'haiku', 'sonnet', or 'opus' to select specific models.",
   },
   {
     question: "What is the AI Support Agent?",

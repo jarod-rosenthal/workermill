@@ -88,13 +88,15 @@ export interface RouteProviderRequest {
   persona?: string;
   taskComplexity?: "low" | "medium" | "high";
   modelName?: string;
+  providerRouting?: string;
+  availableProviders?: string[];
 }
 
 /** Response from POST /route-provider */
 export interface RouteProviderResponse {
   provider: string;
   model: string;
-  inferenceSource: "config" | "routing" | "fallback";
+  inferenceSource: "explicit" | "routing" | "model_name" | "default" | "fallback";
 }
 
 /** Response from GET /worker-config */

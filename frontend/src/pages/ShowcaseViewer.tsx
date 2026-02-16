@@ -842,7 +842,20 @@ export default function ShowcaseViewer() {
         </div>
 
         {/* Stats row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
+        <div
+          className={`grid grid-cols-2 gap-4 mb-12 ${isTeamBoard ? "md:grid-cols-5" : "md:grid-cols-4"}`}
+        >
+          {isTeamBoard && (
+            <div className="card-elevated border border-border/50 rounded-xl p-5">
+              <div className="flex items-center gap-2 text-2xl font-bold text-foreground">
+                <FileCode className="w-5 h-5 text-muted-foreground" />
+                29K
+              </div>
+              <div className="text-sm text-muted-foreground mt-1">
+                lines of code
+              </div>
+            </div>
+          )}
           <div className="card-elevated border border-border/50 rounded-xl p-5">
             <div className="flex items-center gap-2 text-2xl font-bold text-foreground">
               <Layers className="w-5 h-5 text-muted-foreground" />

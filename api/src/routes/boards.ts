@@ -32,6 +32,67 @@ const router = Router();
 router.use(authenticateUser);
 
 // =============================================================================
+// Helper: Derive board prefix from name
+// =============================================================================
+
+/**
+ * Derive a short prefix from a board name for issue keys.
+ * "CalMill" → "CM", "TaskPulse Dashboard" → "TPD", "Bugs" → "BUG"
+ */
+function derivePrefix(name: string): string {
+  const words = name
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .split(/[\s\-_]+/)
+    .filter(Boolean);
+
+  if (words.length >= 2) {
+    return words
+      .slice(0, 5)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase();
+  }
+
+  const word = words[0] || "BD";
+  if (word.length <= 3) return word.toUpperCase();
+  return word.substring(0, 3).toUpperCase();
+}
+
+/**
+ * Generate a unique prefix for a board within an org.
+ * Appends incrementing digits on collision.
+ */
+async function generateUniquePrefix(
+  boardRepo: import("typeorm").Repository<KbBoard>,
+  orgId: string,
+  name: string,
+  preferredPrefix?: string,
+): Promise<string> {
+  let prefix =
+    preferredPrefix
+      ?.toUpperCase()
+      .replace(/[^A-Z0-9]/g, "")
+      .slice(0, 10) || derivePrefix(name);
+
+  const existing = await boardRepo
+    .createQueryBuilder("b")
+    .where("b.orgId = :orgId", { orgId })
+    .select("b.prefix")
+    .getMany();
+  const usedPrefixes = new Set(existing.map((b) => b.prefix));
+
+  if (!usedPrefixes.has(prefix)) return prefix;
+
+  let attempt = 2;
+  const base = prefix;
+  while (usedPrefixes.has(prefix)) {
+    prefix = `${base}${attempt}`;
+    attempt++;
+  }
+  return prefix;
+}
+
+// =============================================================================
 // Helper: Log activity
 // =============================================================================
 
@@ -160,7 +221,10 @@ async function runCardAsWorkerTask(
   // Create WorkerTask
   const workerTask = workerTaskRepo.create({
     orgId: org.id,
-    jiraIssueKey: `${card.board?.name?.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "BOARD"}-${card.id.slice(0, 8)}`,
+    jiraIssueKey:
+      card.board?.prefix && card.cardNumber
+        ? `${card.board.prefix}-${card.cardNumber}`
+        : `${card.board?.name?.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "BOARD"}-${card.id.slice(0, 8)}`,
     jiraIssueId: null,
     summary: card.title,
     description,
@@ -272,6 +336,7 @@ router.get("/", async (req: Request, res: Response) => {
         id: board.id,
         name: board.name,
         description: board.description,
+        prefix: board.prefix,
         position: board.position,
         template: board.template,
         columnCount: board.columns?.length || 0,
@@ -295,13 +360,14 @@ router.post(
   "/",
   body("name").isString().notEmpty().isLength({ max: 200 }).withMessage("name is required (max 200 chars)"),
   body("description").optional().isString().isLength({ max: 2000 }),
+  body("prefix").optional().isString().isLength({ max: 10 }),
   body("template").optional().isString().isIn(["project", "sprint", "bugs"]),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
       const org = req.organization!;
       const user = req.user!;
-      const { name, description, template } = req.body;
+      const { name, description, template, prefix: requestedPrefix } = req.body;
 
       const result = await AppDataSource.transaction(async (em) => {
         const boardRepo = em.getRepository(KbBoard);
@@ -314,12 +380,15 @@ router.post(
           .select("MAX(b.position)", "max")
           .getRawOne();
 
+        const prefix = await generateUniquePrefix(boardRepo, org.id, name, requestedPrefix);
+
         const board = boardRepo.create({
           orgId: org.id,
           name,
           description: description || null,
           position: (maxPos?.max ?? -1) + 1,
           template: template || null,
+          prefix,
           createdById: user.id,
         });
         await boardRepo.save(board);
@@ -351,6 +420,7 @@ router.post(
           id: result.board.id,
           name: result.board.name,
           description: result.board.description,
+          prefix: result.board.prefix,
           position: result.board.position,
           template: result.board.template,
           createdAt: result.board.createdAt,
@@ -1048,6 +1118,12 @@ router.post(
 
       const cardRepo = AppDataSource.getRepository(KbCard);
 
+      // Atomically claim the next card number
+      const [{ next_num }] = await AppDataSource.query(
+        `UPDATE "kb_boards" SET "next_card_number" = "next_card_number" + 1 WHERE "id" = $1 RETURNING "next_card_number" - 1 AS next_num`,
+        [boardId],
+      );
+
       const maxPos = await cardRepo
         .createQueryBuilder("c")
         .where("c.columnId = :columnId", { columnId })
@@ -1064,12 +1140,13 @@ router.post(
         dueDate: dueDate ? new Date(dueDate) : null,
         coverColor: coverColor || null,
         githubRepo: githubRepo || null,
+        cardNumber: next_num,
       });
       await cardRepo.save(card);
 
       await logActivity(boardId, req.user!.id, "created", "card", card.id, { title });
 
-      res.status(201).json({ card });
+      res.status(201).json({ card: { ...card, issueKey: `${board.prefix}-${next_num}` } });
     } catch (error) {
       logger.error("Error creating card", { error });
       res.status(500).json({ error: "Failed to create card" });

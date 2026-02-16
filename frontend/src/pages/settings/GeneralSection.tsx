@@ -162,7 +162,7 @@ export function GeneralSection({
           </div>
           <div>
             <h3 className="font-semibold text-foreground">Usage</h3>
-            <p className="text-sm text-muted-foreground">Track your compute hours this billing period</p>
+            <p className="text-sm text-muted-foreground">Track your task usage this billing period</p>
           </div>
         </div>
         {usageLoading ? (
@@ -174,26 +174,26 @@ export function GeneralSection({
           <div className="space-y-4">
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-foreground">Compute hours this month</span>
+                <span className="text-sm font-medium text-foreground">Tasks this month</span>
                 <span className="text-sm text-muted-foreground">
-                  {usageData.hours.isUnlimited ? (
-                    <>{usageData.hours.used.toFixed(1)}h / Unlimited</>
+                  {usageData.tasks.isUnlimited ? (
+                    <>{usageData.tasks.used} / Unlimited</>
                   ) : (
-                    <>{usageData.hours.used.toFixed(1)}h / {usageData.hours.included}h</>
+                    <>{usageData.tasks.used} / {usageData.tasks.quota}</>
                   )}
                 </span>
               </div>
-              {!usageData.hours.isUnlimited && (
+              {!usageData.tasks.isUnlimited && (
                 <div className="w-full h-3 bg-muted rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all ${
-                      usageData.hours.percent >= 90
+                      usageData.tasks.percent >= 90
                         ? "bg-red-500"
-                        : usageData.hours.percent >= 75
+                        : usageData.tasks.percent >= 75
                           ? "bg-yellow-500"
                           : "bg-green-500"
                     }`}
-                    style={{ width: `${Math.min(usageData.hours.percent, 100)}%` }}
+                    style={{ width: `${Math.min(usageData.tasks.percent, 100)}%` }}
                   />
                 </div>
               )}
@@ -204,10 +204,10 @@ export function GeneralSection({
                 )}
               </div>
             </div>
-            {!usageData.hours.isUnlimited && usageData.hours.percent >= 90 && (
+            {!usageData.tasks.isUnlimited && usageData.tasks.percent >= 90 && (
               <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 text-sm">
                 <AlertTriangle className="w-4 h-4" />
-                <span>You&apos;ve used {usageData.hours.percent.toFixed(0)}% of your included compute hours.</span>
+                <span>You&apos;ve used {usageData.tasks.percent.toFixed(0)}% of your monthly task quota.</span>
               </div>
             )}
           </div>

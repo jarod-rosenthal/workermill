@@ -1,6 +1,6 @@
 # WorkerMill Pricing and Positioning Research
 
-*Last updated: January 2026*
+*Last updated: February 2026*
 
 ## Executive Summary
 
@@ -33,7 +33,7 @@ WorkerMill is **B2B developer infrastructure**, not a consumer product. The targ
 
 | Segment | Description | Characteristics |
 |---------|-------------|-----------------|
-| **Small Team** | 2-10 devs, has processes | GitHub + Jira/Linear, ships regularly |
+| **Solo Dev / Small Team** | 1-10 devs, has processes | GitHub + Jira/Linear, ships regularly |
 | **Agency** | Builds for clients | High volume, needs throughput |
 | **Startup** | Technical founders, moving fast | Has codebase, wants to multiply output |
 | **Enterprise** | Large org, compliance needs | SSO, audit logs, SLAs |
@@ -61,32 +61,37 @@ A customer must have:
 
 ### Philosophy
 
-- **B2B pricing**: Monthly minimums that cover infrastructure costs
-- **Usage-based component**: Pay for what you use beyond included tasks
-- **BYOK (Bring Your Own Keys)**: Customers provide their own AI API keys
+- **Simple 3-tier model**: Free, Pro, Enterprise — no per-task billing, no overage rates
+- **BYOK (Bring Your Own Keys)**: Free tier runs on user hardware with their own AI API keys
+- **Unlimited tasks on all tiers**: No artificial task limits — pay for capacity, not usage
 - **Professional pricing signals professional tool**
 
 ### Pricing Tiers
 
-| Tier | Monthly | Included Tasks | Overage (Std/Epic/Multi) |
-|------|---------|----------------|--------------------------|
-| **Starter** | $29/mo | 50 | $0.15 / $0.25 / $0.35 |
-| **Team** | $99/mo | 250 | $0.10 / $0.20 / $0.30 |
-| **Business** | $299/mo | 1000 | $0.08 / $0.15 / $0.25 |
-| **Enterprise** | Custom | Custom | Volume discounts |
+| | **Free** | **Pro** | **Enterprise** |
+|---|---------|---------|----------------|
+| **Price** | $0/mo | $29/mo (launch: $14.50) | Custom |
+| **Users** | 1 | 5 | Unlimited |
+| **Concurrent Workers** | 1 | 5 | Unlimited |
+| **Expert Personas/Task** | 3 | Unlimited | Unlimited |
+| **Log Retention** | 14 days | 90 days | Unlimited |
+| **Tasks** | Unlimited | Unlimited | Unlimited |
+| **Execution** | Local + BYOK | Cloud + warm pool | Dedicated infrastructure |
+| **Support** | Community | Priority | Dedicated CSM |
+| **SSO/SAML** | - | - | Yes |
+| **Compliance (SOC 2, HIPAA)** | - | - | Yes |
 
-### Task Types
+### What Each Tier Unlocks
 
-| Type | Description | Relative Cost |
-|------|-------------|---------------|
-| **Standard** | 1 expert, single task | 1x |
-| **Epic** | 10+ experts in parallel (Anthropic) | 2x |
-| **Multi-Provider** | 10+ experts, any AI provider mix | 3x |
+| Tier | Key Value |
+|------|-----------|
+| **Free** | Get started with zero cost. Run workers locally with your own AI keys. Perfect for solo devs evaluating the platform. |
+| **Pro** | Cloud execution with warm worker pools for faster start times. Team collaboration with 5 seats. Extended log retention for debugging and audits. |
+| **Enterprise** | Full compliance suite (SSO/SAML, SOC 2, HIPAA BAA). Dedicated infrastructure with custom SLAs. Unlimited everything. |
 
 ### Payment Options
 
 - Credit card (Stripe)
-- Bitcoin/Crypto (via Stripe + Crypto.com integration)
 - Invoice (Enterprise only)
 
 ---
@@ -101,15 +106,19 @@ A customer must have:
 | Cursor | Individual devs | Seat-based | $20/mo |
 | Devin | Dev teams | Seat-based | $500/mo |
 | Factory | Enterprise | Custom | Unknown |
-| **WorkerMill** | Dev teams | Usage-based | $29-299/mo |
+| **WorkerMill** | Dev teams | Capacity-based | Free - $29/mo |
 
 ### Differentiation
 
 | vs Copilot/Cursor | vs Devin |
 |-------------------|----------|
-| Autonomous tasks, not autocomplete | Usage-based, not $500/mo flat |
-| Works while you sleep | Multi-provider flexibility |
-| Ticket-driven, not editor-based | Orchestrates multiple experts |
+| Autonomous tasks, not autocomplete | Free tier available, Pro at $29/mo vs $500/mo |
+| Works while you sleep | Multi-provider flexibility (BYOK) |
+| Ticket-driven, not editor-based | Orchestrates multiple expert personas |
+
+### Pricing Advantage
+
+WorkerMill's BYOK model means customers pay AI providers directly for tokens. The platform fee covers orchestration, monitoring, and workflow automation — not AI compute. This makes WorkerMill dramatically cheaper than platforms that bundle AI costs into their pricing.
 
 ---
 
@@ -124,14 +133,17 @@ A customer must have:
 
 ### Value Propositions
 
-**For Small Teams:**
-> Stop context-switching. Write the ticket, get the PR. Review and merge.
+**For Solo Devs (Free):**
+> Start automating your backlog today. Zero cost, zero commitment. Bring your own API keys and run locally.
 
-**For Agencies:**
-> Multiply your throughput. Handle more clients without hiring.
+**For Small Teams (Pro):**
+> Stop context-switching. Write the ticket, get the PR. Cloud workers with warm pools ship faster.
 
-**For Startups:**
-> Move faster than your competition. Ship features around the clock.
+**For Agencies (Pro):**
+> Multiply your throughput. Handle more clients without hiring. 5 concurrent workers running 24/7.
+
+**For Enterprise:**
+> Full compliance, unlimited scale, dedicated support. SSO/SAML, SOC 2 ready, custom SLAs.
 
 ### How It Works (Simple)
 
@@ -168,6 +180,10 @@ WorkerMill creates PRs. Deployment happens through your existing pipeline or one
 
 > You bring your own API keys. WorkerMill supports Anthropic (Claude), OpenAI, Google (Gemini), and self-hosted Ollama. You choose the model for each task.
 
+### "Why is there a free tier?"
+
+> We believe the best way to evaluate an AI coding tool is to use it on your real codebase. The free tier gives you unlimited tasks with 1 worker — enough to see real results before upgrading.
+
 ---
 
 ## Infrastructure Economics
@@ -181,25 +197,27 @@ WorkerMill creates PRs. Deployment happens through your existing pipeline or one
 | NAT Gateway / VPC Endpoints | Fixed | ~$14-35 |
 | CloudWatch/S3/misc | Fixed | ~$15 |
 | **Fixed floor** | | **~$77-116** |
-| Worker containers | Variable | ~$0.025/task |
+| Worker containers (Pro/Enterprise) | Variable | ~$0.025/task |
 
-### Break-Even Analysis
+### Free Tier Economics
 
-At $99/mo Team tier with 250 included tasks:
-- Fixed costs: ~$100/mo
-- Variable costs: 250 × $0.025 = $6.25
-- Revenue: $99
-- Margin: ~-$7 at exactly 250 tasks (break-even at slight overage)
+The Free tier has **zero marginal cost** to WorkerMill:
+- Workers run on the user's local machine (Docker containers)
+- AI tokens paid directly by user (BYOK)
+- Only platform API calls hit WorkerMill infrastructure
+- Negligible per-user cost at the API layer
 
-At higher volume or with multiple customers sharing fixed costs, margins improve significantly.
+### Pro Tier Margin
 
-### Margin by Task Type
+At $29/mo (launch $14.50/mo) with cloud execution:
+- Average 5 concurrent workers, usage varies
+- Compute cost per task: ~$0.025
+- At 200 tasks/month: $5 compute cost
+- **Margin: ~83% at $29/mo, ~66% at launch price**
 
-| Type | Your Cost | Price (Team tier) | Margin |
-|------|-----------|-------------------|--------|
-| Standard | $0.025 | $0.10 | 75% |
-| Epic | $0.075 | $0.20 | 63% |
-| Multi-Provider | $0.10 | $0.30 | 67% |
+### Enterprise Margin
+
+Custom pricing covers dedicated infrastructure costs with target 70%+ margins.
 
 ---
 
@@ -211,7 +229,7 @@ At higher volume or with multiple customers sharing fixed costs, margins improve
 
 **Subhead:** WorkerMill orchestrates AI coding agents that work on your backlog while you focus on what matters.
 
-**CTA:** Start free trial / See how it works
+**CTA:** Get started free / See how it works
 
 ### How It Works Section
 
@@ -232,11 +250,12 @@ At higher volume or with multiple customers sharing fixed costs, margins improve
 ### Pricing Section
 
 ```
-STARTER          TEAM             BUSINESS
-$29/mo           $99/mo           $299/mo
-50 tasks         250 tasks        1000 tasks
-1 user           5 users          20 users
-Email support    Priority support Dedicated support
+FREE             PRO              ENTERPRISE
+$0/mo            $29/mo           Custom
+Unlimited tasks  Unlimited tasks  Unlimited tasks
+1 user           5 users          Unlimited users
+1 worker         5 workers        Unlimited workers
+Local + BYOK     Cloud + warm     Dedicated infra
 ```
 
 ### Social Proof / Use Cases
@@ -249,18 +268,18 @@ Email support    Priority support Dedicated support
 
 ## Next Steps
 
-1. [ ] Update website hero and messaging
-2. [ ] Build pricing page with tier comparison
+1. [x] Update website hero and messaging
+2. [x] Build pricing page with tier comparison
 3. [ ] Create onboarding flow that qualifies users
-4. [ ] Set up Stripe billing with monthly subscriptions
-5. [ ] Add usage tracking and overage billing
+4. [x] Set up Stripe billing with monthly subscriptions
+5. [ ] Add usage tracking dashboard
 6. [ ] Create demo video showing ticket → PR flow
 
 ---
 
 ## Open Questions
 
-1. **Free trial duration?** 14 days? 7 days? X tasks?
-2. **Overage billing frequency?** Monthly? Real-time balance?
-3. **Annual discount?** 2 months free standard?
-4. **Self-hosted option?** For enterprise customers?
+1. **Launch pricing duration?** How long does the $14.50 introductory rate last?
+2. **Annual discount?** 2 months free standard?
+3. **Self-hosted option?** For enterprise customers who need on-prem?
+4. **Pro trial?** Should Pro have a 14-day free trial?

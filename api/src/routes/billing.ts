@@ -74,8 +74,8 @@ router.use(authenticateUser);
  * @swagger
  * /api/billing/subscription:
  *   get:
- *     summary: Get subscription and hours usage details
- *     description: Returns current plan details, hours usage, billing period info, and team member count
+ *     summary: Get subscription details
+ *     description: Returns current plan details, billing period info, and team member count
  *     tags: [Billing]
  *     security:
  *       - BearerAuth: []

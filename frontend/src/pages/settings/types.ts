@@ -165,10 +165,9 @@ export interface PendingInvite {
 }
 
 export interface UsageData {
-  hours: {
+  tasks: {
     used: number;
-    included: number;
-    remaining: number;
+    quota: number;
     percent: number;
     isUnlimited: boolean;
   };

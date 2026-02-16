@@ -1,4 +1,4 @@
-import { Check, Sparkles, Building2, Users, Gift, Crown, Zap } from "lucide-react";
+import { Check, Sparkles, Gift, Crown, Zap } from "lucide-react";
 
 interface PricingTier {
   name: string;
@@ -20,15 +20,19 @@ const tiers: PricingTier[] = [
     price: "$0",
     period: "",
     description: "For solo developers exploring AI-powered development",
-    highlight_line: "Local execution with Claude Max",
+    highlight_line: "Full product, your hardware",
     icon: <Zap className="w-5 h-5" />,
     features: [
-      "20 tasks per month",
-      "1 user",
-      "Local execution only",
-      "Up to 2 parallel workers",
-      "Tech lead review on every PR",
-      "7-day log retention",
+      "Unlimited tasks",
+      "1 concurrent worker",
+      "3 expert personas per task",
+      "All 14+ AI personas",
+      "All integrations (Jira, GitHub, GitLab, Bitbucket, Linear)",
+      "Local + BYOK execution",
+      "Codebase RAG",
+      "MCP servers",
+      "Basic analytics",
+      "14-day log retention",
       "Community support",
     ],
     cta: "Get Started Free",
@@ -36,64 +40,49 @@ const tiers: PricingTier[] = [
   },
   {
     name: "Pro",
-    price: "$49",
-    period: "/seat/mo",
-    description: "For developers who want speed and flexibility",
-    highlight_line: "Unlimited tasks, parallel execution",
+    price: "$14.50",
+    period: "/mo",
+    description: "For developers and small teams who want speed",
+    highlight_line: "Up to 5 seats included",
     icon: <Sparkles className="w-5 h-5" />,
     highlighted: true,
-    badge: "Most Popular",
+    badge: "Launch Price",
     features: [
-      "Unlimited tasks",
-      "Local + Cloud + BYOK execution",
-      "Unlimited parallel workers",
-      "All 14+ personas",
-      "Memory & skills persistence",
+      "Everything in Free, plus:",
+      "5 concurrent workers",
+      "Unlimited expert personas",
+      "Up to 5 users",
+      "Cloud execution (ECS)",
+      "Warm container pool",
       "Advanced analytics",
-      "30-day log retention",
-      "Priority support",
-    ],
-    cta: "Coming Soon",
-    disabled: true,
-  },
-  {
-    name: "Team",
-    price: "$149",
-    period: "/month",
-    description: "For teams shipping faster together",
-    highlight_line: "Up to 10 seats included",
-    icon: <Users className="w-5 h-5" />,
-    features: [
-      "Everything in Pro, plus:",
-      "Up to 25 users",
+      "Memory & skills persistence",
       "Role-based access",
-      "Shared memory & skills",
-      "90-day audit logs",
-      "SSO / SAML",
-      "API access (MCP servers)",
-      "Dedicated support",
+      "90-day log retention",
+      "Priority support (< 4hr)",
     ],
-    cta: "Coming Soon",
-    disabled: true,
+    cta: "Start Free Trial",
+    disabled: false,
   },
   {
     name: "Enterprise",
     price: "Custom",
     period: "",
-    description: "For large organizations with advanced needs",
+    description: "For organizations with compliance and scale needs",
     highlight_line: "Custom configuration",
     icon: <Crown className="w-5 h-5" />,
     features: [
-      "Everything in Team, plus:",
-      "Unlimited users",
+      "Everything in Pro, plus:",
+      "Unlimited users & workers",
       "Self-hosted option",
+      "SSO / SAML",
       "Dedicated Worker Pool",
       "IP Allowlisting",
       "Data Residency Controls",
       "AWS Bedrock / Azure AI Foundry",
+      "Compliance Center & SOC 2",
       "99.9% SLA",
+      "Unlimited log retention",
       "Dedicated CSM",
-      "SOC 2 Report available",
     ],
     cta: "Contact Sales",
     disabled: false,
@@ -109,16 +98,16 @@ export function Pricing() {
             Start Free, Scale When Ready
           </h2>
           <p className="text-muted-foreground text-lg max-w-2xl mx-auto mb-4">
-            Run locally with your Claude Max subscription at no cost.
-            Upgrade for parallel execution, team features, and cloud compute.
+            Full product on Free. Upgrade for parallel workers, cloud execution,
+            and team features.
           </p>
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-full">
             <Zap className="w-4 h-4 text-green-500" />
-            <span className="text-sm font-medium text-green-500">Free tier includes tech lead review on every PR</span>
+            <span className="text-sm font-medium text-green-500">Free tier includes all integrations and codebase RAG</span>
           </div>
         </div>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           {tiers.map((tier, index) => (
             <div
               key={index}
@@ -154,6 +143,11 @@ export function Pricing() {
                 </div>
 
                 <div className="flex items-baseline gap-1 mb-1">
+                  {tier.name === "Pro" && (
+                    <span className="text-2xl font-bold text-muted-foreground line-through mr-1">
+                      $29
+                    </span>
+                  )}
                   <span
                     className={`text-4xl font-bold ${
                       tier.highlighted ? "text-primary" : "text-foreground"
@@ -221,15 +215,15 @@ export function Pricing() {
           </h3>
           <div className="grid md:grid-cols-3 gap-6 text-center">
             <div>
-              <p className="font-medium text-foreground mb-1">Free = Local Execution</p>
+              <p className="font-medium text-foreground mb-1">Free = Full Product</p>
               <p className="text-sm text-muted-foreground">
-                You bring Claude Max or Pro. Workers run on your machine. WorkerMill handles orchestration.
+                All features, your hardware, our orchestration. Unlimited tasks, all personas, all integrations.
               </p>
             </div>
             <div>
-              <p className="font-medium text-foreground mb-1">Paid = Speed + Scale</p>
+              <p className="font-medium text-foreground mb-1">Pro = Speed + Team</p>
               <p className="text-sm text-muted-foreground">
-                Parallel experts, cloud execution, team features, and persistent memory that learns your codebase.
+                5x parallel workers, cloud execution, 5 seats, memory persistence. Launch price: $14.50/mo.
               </p>
             </div>
             <div>
@@ -261,7 +255,7 @@ export function Pricing() {
             <div className="text-center p-3 bg-card rounded-lg border border-border">
               <p className="font-semibold text-foreground">They get</p>
               <p className="text-primary font-bold text-lg">1 month free</p>
-              <p className="text-xs text-muted-foreground">on any paid plan</p>
+              <p className="text-xs text-muted-foreground">on Pro plan</p>
             </div>
           </div>
           <p className="text-center text-xs text-muted-foreground mt-4">

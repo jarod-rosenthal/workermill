@@ -160,22 +160,15 @@ export default function Terms() {
                   WorkerMill offers the following subscription plans:
                 </p>
                 <ul className="list-disc list-inside text-muted-foreground space-y-2 mb-4">
-                  <li><strong>Starter:</strong> $29/month - 5 compute hours included, $8/hr overage</li>
-                  <li><strong>Team:</strong> $79/month - 20 compute hours included, $6/hr overage</li>
-                  <li><strong>Business:</strong> $199/month - 60 compute hours included, $4/hr overage</li>
-                  <li><strong>Enterprise:</strong> Custom pricing - Contact sales for details</li>
+                  <li><strong>Free:</strong> $0/month - 1 concurrent worker, local + BYOK execution only</li>
+                  <li><strong>Pro:</strong> $29/month - 5 concurrent workers, cloud execution, warm pool, advanced analytics</li>
+                  <li><strong>Enterprise:</strong> Custom pricing - Unlimited everything, SSO/SAML, compliance, dedicated support</li>
                 </ul>
-
-                <h3 className="text-lg font-semibold text-foreground mb-2">Billing Granularity</h3>
-                <p className="text-muted-foreground leading-relaxed mb-4">
-                  Compute time is billed <strong>per-second</strong> of actual container runtime. Times are displayed
-                  in minutes or hours for readability, but you pay only for the exact time used with no rounding.
-                </p>
 
                 <h3 className="text-lg font-semibold text-foreground mb-2">Payment Processing</h3>
                 <p className="text-muted-foreground leading-relaxed mb-4">
                   Payments are processed through Stripe, a PCI-compliant payment processor. By providing payment
-                  information, you authorize us to charge your payment method for subscription fees and any applicable overage charges.
+                  information, you authorize us to charge your payment method for subscription fees.
                 </p>
 
                 <h3 className="text-lg font-semibold text-foreground mb-2">Subscription Terms</h3>
@@ -185,7 +178,6 @@ export default function Terms() {
                 <ul className="list-disc list-inside text-muted-foreground space-y-2 mb-4">
                   <li>You will receive a prorated refund for unused time in the current billing period</li>
                   <li>Your access continues until the end of the paid period</li>
-                  <li>Unused included hours do not roll over between billing periods</li>
                 </ul>
 
                 <h3 className="text-lg font-semibold text-foreground mb-2">Price Changes</h3>

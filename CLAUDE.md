@@ -540,7 +540,7 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 | `tasks.ts` | Worker log ingestion |
 | `orchestrator.ts` | Poll loop, system control (start/stop/status) |
 | `settings.ts` | Organization settings CRUD |
-| `billing.ts` | Stripe billing integration |
+| `billing.ts` | Stripe billing (Free/Pro/Enterprise plans) |
 | `coordination.ts` | Multi-worker file locking |
 
 ***REMOVED******REMOVED******REMOVED*** Task Flow
@@ -558,6 +558,21 @@ Directives in `worker/directives/` define role-specific behavior:
 See `worker/AGENTS.md` for comprehensive worker instructions.
 
 > **IMPORTANT:** `worker/AGENTS.md` contains instructions for AI workers that execute tasks on **target repositories** (e.g., oncallshift). These workers run inside ECS containers and use execution scripts in `/app/execution-compiled/`. This is **NOT** relevant when Claude Code is working on the WorkerMill codebase itself - those instructions are for the spawned worker containers, not for development work on this repository.
+
+***REMOVED******REMOVED******REMOVED*** Worker Decision Service (IP Protection)
+
+Worker decision logic (error classification, quality gates, review parsing, question routing, provider routing) is served by the API at `/api/worker-decisions/`. Workers call these endpoints via `DecisionClient` (`worker/epic/decision-client.ts`) with 5-retry, circuit breaker, and safe fallbacks.
+
+| Endpoint | Purpose | Fallback |
+|----------|---------|----------|
+| `POST /classify-error` | Error category + fix strategy | Escalate to human |
+| `POST /evaluate-quality` | Quality threshold check | Pass (skip gate) |
+| `POST /review-outcome` | Parse reviewer output | Auto-approve |
+| `POST /route-question` | Route Q to best expert | First idle expert |
+| `POST /route-provider` | Map persona to AI provider | Anthropic default |
+| `GET /worker-config` | AGENTS.md, icons, defaults | Minimal stub |
+
+All IP lives in `api/src/services/worker-decision-engine.ts`. Worker source files (`error-classifier.ts`, `quality-gate.ts`, `blocker-manager.ts`) are still present for backward compatibility but will be removed once all call sites are migrated.
 
 ***REMOVED******REMOVED******REMOVED*** Unified AIClient Interface
 

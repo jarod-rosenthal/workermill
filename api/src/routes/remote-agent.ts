@@ -27,6 +27,7 @@ import { RemoteAgent } from "../models/RemoteAgent.js";
 import { In, Not } from "typeorm";
 import { logger } from "../utils/logger.js";
 import { buildPlanningPrompt, computeMaxTargetFiles, type PlanningInput } from "../services/planning-agent-local.js";
+import { getExpertRegistry } from "../services/persona.js";
 import { publishStoriesReady } from "../services/pipeline-executor.js";
 import {
   convertToV2Format,
@@ -1011,7 +1012,6 @@ router.get(
     const maxStories = Math.max(3, Math.round(20 * calibrationMultiplier));
 
     // Fetch available personas for dynamic planner prompt
-    const { getExpertRegistry } = await import("../services/persona.js");
     const experts = await getExpertRegistry(org.id);
     const availablePersonas = experts
       .filter((e: any) => !e.reviewOnly)

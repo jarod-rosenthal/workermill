@@ -9,6 +9,7 @@
 
 import "dotenv/config";
 import { EpicCoordinator } from "./coordinator.js";
+import { DecisionClient } from "./decision-client.js";
 import type { EpicConfig, ResilienceConfig } from "./types.js";
 
 /**
@@ -121,7 +122,13 @@ async function main(): Promise<void> {
     console.log("  - Incremental rebase: " + (resilience.incrementalRebaseEnabled ?? true));
     console.log("  - Merge agent: " + (resilience.mergeAgentEnabled ?? false));
 
-    const coordinator = new EpicCoordinator(config, resilience);
+    const decisionClient = new DecisionClient({
+      apiBaseUrl: config.apiBaseUrl,
+      orgApiKey: config.orgApiKey,
+      logger: (msg, type) => console.log(msg),
+    });
+
+    const coordinator = new EpicCoordinator(config, resilience, decisionClient);
 
     // Handle graceful shutdown
     let shutdownInProgress = false;

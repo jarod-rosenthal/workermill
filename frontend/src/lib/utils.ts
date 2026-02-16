@@ -23,8 +23,18 @@ export interface IssueTrackerConfig {
  * @param config - Issue tracker configuration from org settings
  * @returns The full URL to view the issue, or null if unable to build URL
  */
-export function buildTicketUrl(issueKey: string | null | undefined, config?: IssueTrackerConfig): string | null {
+export function buildTicketUrl(
+  issueKey: string | null | undefined,
+  config?: IssueTrackerConfig,
+  boardContext?: { boardId: string; cardId: string } | null,
+): string | null {
   if (!issueKey) return null;
+
+  // Internal board cards: direct link if we have board context
+  if (boardContext?.boardId) {
+    return `/boards/${boardContext.boardId}?card=${boardContext.cardId}`;
+  }
+
   if (!config) return null;
 
   const { provider, jiraBaseUrl, linearWorkspace, githubRepo } = config;

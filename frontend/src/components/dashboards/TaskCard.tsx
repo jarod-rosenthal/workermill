@@ -89,7 +89,11 @@ export function TaskCard({
 }: TaskCardProps) {
   const [expanded, setExpanded] = useState(showDetails);
   const issueTrackerConfig = useIssueTrackerConfig();
-  const ticketUrl = buildTicketUrl(task.jiraKey, issueTrackerConfig ?? undefined);
+  const ticketUrl = buildTicketUrl(
+    task.jiraKey,
+    issueTrackerConfig ?? undefined,
+    task.cardBoardId && task.cardId ? { boardId: task.cardBoardId, cardId: task.cardId } : null,
+  );
   const isExternalLink = ticketUrl?.startsWith("http");
 
   const formatDuration = (minutes?: number) => {

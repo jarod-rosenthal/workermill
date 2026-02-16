@@ -5,8 +5,10 @@ import {
   ChevronRight,
   Code,
   Cpu,
+  Crown,
   Database,
   Loader2,
+  Lock,
   Plus,
   Router,
   Sliders,
@@ -29,6 +31,27 @@ interface AIWorkersSectionProps {
   getExecutionSummary: () => string;
   getRoutingSummary: () => string;
   formatCooldownDisplay: (seconds: number) => string;
+  orgPlan?: string;
+}
+
+function ProBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 rounded-full border border-amber-500/30">
+      <Crown className="w-3 h-3" />
+      Pro
+    </span>
+  );
+}
+
+function LockedOverlay() {
+  return (
+    <div className="absolute inset-0 bg-card/60 backdrop-blur-[1px] rounded-xl flex items-center justify-center z-10">
+      <div className="flex flex-col items-center gap-1.5">
+        <Lock className="w-5 h-5 text-muted-foreground/60" />
+        <span className="text-xs text-muted-foreground/80 font-medium">Upgrade to Pro</span>
+      </div>
+    </div>
+  );
 }
 
 export function AIWorkersSection({
@@ -42,7 +65,9 @@ export function AIWorkersSection({
   getExecutionSummary,
   getRoutingSummary,
   formatCooldownDisplay,
+  orgPlan,
 }: AIWorkersSectionProps) {
+  const isFreePlan = !orgPlan || orgPlan === "free";
   return (
     <div className="space-y-6">
       <div>
@@ -86,22 +111,29 @@ export function AIWorkersSection({
             <div className="space-y-6">
               {/* Provider Selection */}
               <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-3">Primary Provider</label>
+                <label className="block text-sm font-medium text-muted-foreground mb-3">
+                  Primary Provider
+                  {isFreePlan && <span className="ml-2 text-xs text-amber-400">(Anthropic only on Free)</span>}
+                </label>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {PROVIDER_OPTIONS.map((provider) => (
                     <button
                       key={provider.value}
                       onClick={() => {
+                        if (isFreePlan && provider.value !== "anthropic") return;
                         updateSetting("primaryProvider", provider.value);
                         const newProviderModels = MODEL_OPTIONS[provider.value];
                         if (newProviderModels && !newProviderModels.find((m) => m.value === settings.defaultWorkerModel)) {
                           updateSetting("defaultWorkerModel", newProviderModels[0].value);
                         }
                       }}
+                      disabled={isFreePlan && provider.value !== "anthropic"}
                       className={`p-3 rounded-lg border-2 transition-all ${
                         settings.primaryProvider === provider.value
                           ? "border-primary bg-primary/10"
-                          : "border-border bg-background/50 hover:border-primary/50"
+                          : isFreePlan && provider.value !== "anthropic"
+                            ? "border-border bg-background/50 opacity-40 cursor-not-allowed"
+                            : "border-border bg-background/50 hover:border-primary/50"
                       }`}
                     >
                       <div className="text-2xl mb-1">{provider.icon}</div>
@@ -470,13 +502,15 @@ export function AIWorkersSection({
           </CollapsibleSection>
 
           {/* Warm Container Pool */}
-          <CollapsibleSection
-            title="Warm Container Pool"
-            icon={<Zap className="w-4 h-4" />}
-            iconBgColor="bg-amber-500/20"
-            iconColor="text-amber-500"
-            summary={settings.warmPoolSize > 0 ? `${settings.warmPoolSize} container${settings.warmPoolSize > 1 ? 's' : ''}, ${settings.warmPoolHoursStart}:00-${settings.warmPoolHoursEnd}:00` : "Disabled"}
-          >
+          <div className="relative">
+            {isFreePlan && <LockedOverlay />}
+            <CollapsibleSection
+              title={<>Warm Container Pool {isFreePlan && <ProBadge />}</>}
+              icon={<Zap className="w-4 h-4" />}
+              iconBgColor="bg-amber-500/20"
+              iconColor="text-amber-500"
+              summary={settings.warmPoolSize > 0 ? `${settings.warmPoolSize} container${settings.warmPoolSize > 1 ? 's' : ''}, ${settings.warmPoolHoursStart}:00-${settings.warmPoolHoursEnd}:00` : "Disabled"}
+            >
             <div className="space-y-6">
               <div className="p-4 rounded-lg bg-amber-500/5 border border-amber-500/20">
                 <h4 className="text-sm font-medium text-amber-400 mb-2">Eliminate Cold-Start Latency</h4>
@@ -578,17 +612,20 @@ export function AIWorkersSection({
               )}
             </div>
           </CollapsibleSection>
+          </div>
 
           {/* Provider Routing */}
-          <CollapsibleSection
-            title="Provider Routing"
-            icon={<Router className="w-4 h-4" />}
-            iconBgColor="bg-orange-500/20"
-            iconColor="text-orange-500"
-            summary={getRoutingSummary()}
-            badge="Advanced"
-            badgeColor="bg-orange-500/20 text-orange-500"
-          >
+          <div className="relative">
+            {isFreePlan && <LockedOverlay />}
+            <CollapsibleSection
+              title={<>Provider Routing {isFreePlan && <ProBadge />}</>}
+              icon={<Router className="w-4 h-4" />}
+              iconBgColor="bg-orange-500/20"
+              iconColor="text-orange-500"
+              summary={getRoutingSummary()}
+              badge="Advanced"
+              badgeColor="bg-orange-500/20 text-orange-500"
+            >
             <div className="space-y-6">
               {/* Mode Explanation */}
               <div className={`p-4 rounded-lg border ${
@@ -702,6 +739,7 @@ export function AIWorkersSection({
               )}
             </div>
           </CollapsibleSection>
+          </div>
 
           {/* Memory & Learning Section */}
           <CollapsibleSection
@@ -748,16 +786,18 @@ export function AIWorkersSection({
                     <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
                       <Code className="w-4 h-4 text-violet-500" />
                       Codebase Indexing
+                      {isFreePlan && <ProBadge />}
                     </h4>
                     <p className="text-xs text-muted-foreground mt-1">
                       Enable semantic search across your repository code for context-aware AI assistance
                     </p>
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
+                  <label className={`relative inline-flex items-center ${isFreePlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
                     <input
                       type="checkbox"
                       checked={settings.codebaseIndexingEnabled}
-                      onChange={(e) => updateSetting("codebaseIndexingEnabled", e.target.checked)}
+                      onChange={(e) => { if (!isFreePlan) updateSetting("codebaseIndexingEnabled", e.target.checked); }}
+                      disabled={isFreePlan}
                       className="sr-only peer"
                     />
                     <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-violet-500/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500"></div>

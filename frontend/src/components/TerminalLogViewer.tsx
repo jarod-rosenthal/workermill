@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { RefreshCw, ChevronUp, ChevronDown, AlertCircle } from "lucide-react";
-import axios from "axios";
+import apiClient from "../lib/api-client";
 
 interface LogEntry {
   id: string;
@@ -36,11 +36,8 @@ export function TerminalLogViewer({ taskId, height = "400px" }: TerminalLogViewe
       try {
         setLoading(true);
         setError(null);
-        const token = localStorage.getItem("accessToken");
         // Fetch all logs for completed task viewing (no limit)
-        const response = await axios.get(`/api/control-center/logs/${taskId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await apiClient.get(`/control-center/logs/${taskId}`);
 
         const fetchedLogs = response.data.logs || [];
         setLogs(fetchedLogs);

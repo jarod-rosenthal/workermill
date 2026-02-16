@@ -1,4 +1,5 @@
 import {
+  Crown,
   Loader2,
   Mail,
   Send,
@@ -14,6 +15,7 @@ interface TeamSectionProps {
   teamMembersLoading: boolean;
   currentUser: { id: string } | null;
   isCurrentUserAdmin: boolean;
+  orgPlan?: string;
   editingMemberId: string | null;
   setEditingMemberId: (id: string | null) => void;
   handleUpdateMemberRole: (memberId: string, role: "admin" | "member" | "viewer") => void;
@@ -36,6 +38,7 @@ export function TeamSection({
   teamMembersLoading,
   currentUser,
   isCurrentUserAdmin,
+  orgPlan,
   editingMemberId,
   setEditingMemberId,
   handleUpdateMemberRole,
@@ -52,6 +55,8 @@ export function TeamSection({
   revokingInviteId,
   setShowInviteModal,
 }: TeamSectionProps) {
+  const isFreePlan = !orgPlan || orgPlan === "free";
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -59,13 +64,20 @@ export function TeamSection({
           <h2 className="text-xl font-semibold text-foreground mb-1">Team</h2>
           <p className="text-sm text-muted-foreground">Manage your organization&apos;s members</p>
         </div>
-        <button
-          onClick={() => setShowInviteModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white text-sm font-semibold rounded-lg hover:bg-indigo-600 transition-all"
-        >
-          <UserPlus className="w-4 h-4" />
-          Invite Member
-        </button>
+        {isFreePlan ? (
+          <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 text-amber-400 text-sm font-medium rounded-lg border border-amber-500/30">
+            <Crown className="w-4 h-4" />
+            Upgrade to Pro for up to 5 seats
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowInviteModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white text-sm font-semibold rounded-lg hover:bg-indigo-600 transition-all"
+          >
+            <UserPlus className="w-4 h-4" />
+            Invite Member
+          </button>
+        )}
       </div>
 
       {/* Current Members */}

@@ -36,8 +36,10 @@ Scaffold a complete Next.js 16 project from scratch — Prisma 7 ORM with a 13-m
     "next": "^16.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "next-auth": "5.0.0-beta.25",
+    "next-auth": "5.0.0-beta.30",
     "@auth/prisma-adapter": "latest",
+    "@prisma/adapter-neon": "^7.4.0",
+    "@neondatabase/serverless": "^0.10.0",
     "zod": "^4.3.0",
     "date-fns": "^4.1.0",
     "@date-fns/tz": "latest",
@@ -45,7 +47,7 @@ Scaffold a complete Next.js 16 project from scratch — Prisma 7 ORM with a 13-m
   },
   "devDependencies": {
     "typescript": "^5.7.0",
-    "prisma": "^7.2.0",
+    "prisma": "^7.4.0",
     "tailwindcss": "^4.1.0",
     "@tailwindcss/postcss": "^4.1.0",
     "vitest": "^4.0.0",
@@ -66,10 +68,15 @@ import path from "node:path";
 import { defineConfig } from "prisma/config";
 
 export default defineConfig({
-  earlyAccess: true,
   schema: path.join(__dirname, "prisma", "schema.prisma"),
+  datasource: {
+    // Direct (non-pooled) URL for CLI migrations; falls back for generate-only
+    url: process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL || "postgresql://localhost:5432/calmill",
+  },
 });
 ```
+
+> **Prisma 7.4 Breaking Change:** `earlyAccess` is NOT a valid config property. The `url` and `directUrl` fields have been **removed from schema.prisma** — connection URLs now go in `prisma.config.ts` via the `datasource` block above.
 
 **Schema generator block** — Prisma 7 still uses generator in schema.prisma but the client output path should be explicit:
 ```prisma
@@ -81,18 +88,28 @@ generator client {
 
 **Import the generated client from the output path:**
 ```typescript
-import { PrismaClient } from "@/generated/prisma";
+import { PrismaClient } from "@/generated/prisma/client";
 ```
 
 **NOT** from `@prisma/client` (Prisma 7 moves generated code outside node_modules).
+
+**Prisma 7 + Neon requires an adapter** — PrismaClient no longer reads `DATABASE_URL` from env directly. Use the `PrismaNeon` adapter:
+```typescript
+import { PrismaClient } from "@/generated/prisma/client";
+import { PrismaNeon } from "@prisma/adapter-neon";
+
+function createPrismaClient() {
+  const connectionString = process.env.DATABASE_URL!;
+  const adapter = new PrismaNeon({ connectionString });
+  return new PrismaClient({ adapter });
+}
+```
 
 ### Prisma Schema (13 models, 3 enums)
 
 ```prisma
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
-  directUrl = env("DIRECT_DATABASE_URL")
 }
 
 generator client {
@@ -605,7 +622,7 @@ Create foundational configuration:
 - Scripts: `dev`, `build`, `start`, `lint`, `typecheck`, `test`, `test:e2e`, `postinstall` (prisma generate)
 - `tsconfig.json` with ES2022/ESNext, strict mode, path alias `@/*` → `./src/*`
 - `next.config.ts` with minimal config (empty object)
-- `prisma.config.ts` with Prisma 7 configuration pointing to `prisma/schema.prisma`
+- `prisma.config.ts` with Prisma 7 configuration: `schema` path + `datasource.url` (reads `DIRECT_DATABASE_URL` with fallbacks — NO `earlyAccess`, NO `url`/`directUrl` in schema)
 
 **Target files:** `package.json`, `tsconfig.json`, `next.config.ts`, `prisma.config.ts`
 
@@ -652,7 +669,7 @@ Database foundation:
 
 Core application libraries:
 - `src/lib/auth.ts` — NextAuth v5 config with Credentials + Google providers, PrismaAdapter, JWT strategy, custom callbacks exposing `id`, `username`, `timezone` on session
-- `src/lib/prisma.ts` — PrismaClient singleton imported from `@/generated/prisma` (Prisma 7 pattern). Use global cache in development to prevent connection exhaustion.
+- `src/lib/prisma.ts` — PrismaClient singleton imported from `@/generated/prisma/client` (Prisma 7 pattern). Must use `PrismaNeon` adapter from `@prisma/adapter-neon` with `DATABASE_URL` (pooled connection string). Use global cache in development to prevent connection exhaustion.
 - `src/lib/utils.ts` — `cn()` (clsx + twMerge), `formatDate()`, `generateSlug()`, `generateUsername()` (from email), `debounce()`
 - `src/lib/validations.ts` — Zod 4 schemas: `loginSchema`, `signupSchema`, `eventTypeSchema`, `bookingSchema`, `scheduleSchema`
 - `src/types/index.ts` — TypeScript types with Prisma relations, API response types `ApiResponse<T>`, `PaginatedResponse<T>`
@@ -750,6 +767,47 @@ Infrastructure and docs:
 - **`README.md`** — Project overview, local setup instructions, environment variable documentation, architecture diagram
 
 **Target files:** `.github/workflows/ci.yml`, `.github/workflows/deploy.yml`, `CLAUDE.md`, `README.md`
+
+---
+
+## Pre-Provisioned Infrastructure
+
+The following infrastructure is already set up. Workers do NOT need to create these — just use them.
+
+| Resource | Value |
+|----------|-------|
+| **GitHub Repo** | `workermill-examples/calmill` (private) |
+| **Vercel Project ID** | `prj_X16gHljg2G3W6CDAKKWQZuDEVvhu` |
+| **Vercel Team ID** | `team_2ASKtHtTGR8ex1m1CxSgB6kw` |
+| **DNS** | `calmill.workermill.com` → CNAME `cname.vercel-dns.com` (Route53) |
+| **Database** | Neon PostgreSQL (connection strings in env vars) |
+| **Auto-deploy** | **DISABLED** — deployments are manual only via deploy hook |
+| **Deploy Hook** | `https://api.vercel.com/v1/integrations/deploy/prj_X16gHljg2G3W6CDAKKWQZuDEVvhu/OvGTaerjqm` |
+
+### Vercel Environment Variables (already set)
+
+- `DATABASE_URL` — Neon pooled connection string
+- `DIRECT_DATABASE_URL` — Neon direct connection string
+- `AUTH_SECRET` — NextAuth secret (generated)
+- `NEXTAUTH_URL` — `https://calmill.workermill.com`
+- `NEXT_PUBLIC_APP_URL` — `https://calmill.workermill.com`
+
+### GitHub Actions Secrets (already set)
+
+- `DATABASE_URL`, `DIRECT_DATABASE_URL`, `AUTH_SECRET`
+- `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`
+
+### Deployment (Story 10)
+
+The deploy workflow should use the Vercel CLI with the pre-set secrets:
+
+```yaml
+- run: npx vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+- run: npx vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+- run: npx vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+```
+
+**Do NOT enable auto-deploy.** The `deploy.yml` workflow is the only deployment path.
 
 ---
 

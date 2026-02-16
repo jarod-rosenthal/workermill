@@ -17,6 +17,8 @@ import { AppDataSource } from "../db/connection.js";
 import {
   WorkerTask,
   Organization,
+  PLAN_FEATURES,
+  type OrganizationPlan,
 } from "../models/index.js";
 import { getECSTaskRunner } from "./ecs-task-runner.js";
 import {
@@ -287,6 +289,22 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
     const settingsOrgId = task.getCredentialsOrgId();
     const orgRepo = AppDataSource.getRepository(Organization);
     const org = await orgRepo.findOne({ where: { id: settingsOrgId } });
+
+    // Enforce plan limits: free plan cannot use cloud execution (ECS)
+    if (org) {
+      const planFeatures =
+        PLAN_FEATURES[org.plan as OrganizationPlan] ?? PLAN_FEATURES.free;
+      if (!planFeatures.cloudExecution) {
+        logger.warn("Cloud execution blocked for free plan org", {
+          taskId: task.id,
+          orgId: org.id,
+          plan: org.plan,
+        });
+        throw new Error(
+          "Cloud execution requires Pro plan or higher. Use local execution mode instead.",
+        );
+      }
+    }
 
     // For AI SDK multi-expert mode, resolve the underlying provider from org's providerRouting
     let aiSdkUnderlyingProvider: string | undefined;

@@ -1,16 +1,20 @@
+import { Crown, Lock } from "lucide-react";
 import type { Settings, ValidationErrors } from "./types";
 
 interface QualitySectionProps {
   settings: Settings;
   updateSetting: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
   validationErrors: ValidationErrors;
+  orgPlan?: string;
 }
 
 export function QualitySection({
   settings,
   updateSetting,
   validationErrors,
+  orgPlan,
 }: QualitySectionProps) {
+  const isFreePlan = !orgPlan || orgPlan === "free";
   return (
     <div className="space-y-6">
       <div>
@@ -271,14 +275,23 @@ export function QualitySection({
             {/* Self-Review */}
             <div className="flex items-center justify-between pt-4 border-t border-border">
               <div>
-                <span className="text-sm text-foreground">Self-Review</span>
+                <span className="text-sm text-foreground">
+                  Self-Review
+                  {isFreePlan && (
+                    <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 rounded-full border border-amber-500/30">
+                      <Crown className="w-3 h-3" />
+                      Pro
+                    </span>
+                  )}
+                </span>
                 <p className="text-xs text-muted-foreground">Run an extra Claude CLI pass to review each story before merging (adds latency and cost)</p>
               </div>
-              <label className="relative inline-flex items-center cursor-pointer">
+              <label className={`relative inline-flex items-center ${isFreePlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
                 <input
                   type="checkbox"
                   checked={settings.selfReviewEnabled}
-                  onChange={(e) => updateSetting("selfReviewEnabled", e.target.checked)}
+                  onChange={(e) => { if (!isFreePlan) updateSetting("selfReviewEnabled", e.target.checked); }}
+                  disabled={isFreePlan}
                   className="sr-only peer"
                 />
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>

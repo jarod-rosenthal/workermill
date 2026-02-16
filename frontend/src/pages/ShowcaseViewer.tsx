@@ -22,8 +22,10 @@ import {
   AlertTriangle,
   MessageSquare,
   FileCode,
+  Rocket,
 } from "lucide-react";
 import { teamBoardEpics } from "../data/teamboard-showcase-data";
+import { taskPulseEpics } from "../data/taskpulse-showcase-data";
 
 interface QualityScores {
   lint: string;
@@ -65,7 +67,7 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     tagline:
       "Production incident management platform — built entirely by WorkerMill.",
     description:
-      "Complete rebuild of a production incident management platform: on-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens.",
+      "Production incident management platform: on-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens.",
     stack: "Express + TypeScript + React + React Native + Terraform",
     storyCount: 105,
     cost: "$142.00",
@@ -204,6 +206,38 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     },
     stories: [],
     icon: <Globe className="w-5 h-5" />,
+  },
+  taskpulse: {
+    id: "taskpulse",
+    name: "TaskPulse",
+    tagline:
+      "Background task monitoring dashboard — built across 5 sequential epics by AI workers.",
+    description:
+      "Full-stack task monitoring platform with cron scheduling, API key management, real-time run tracking, keyboard shortcuts, and global search. 5 epics executed sequentially, each building on the last. Deployed to Vercel at taskpulse.workermill.com.",
+    stack: "Next.js 16 + Prisma 7 + TailwindCSS v4 + Neon PostgreSQL",
+    storyCount: 36,
+    cost: "Claude Max",
+    duration: "~310 min",
+    repoUrl: "https://github.com/workermill-examples/taskpulse",
+    liveUrl: "https://taskpulse.workermill.com",
+    category: "monitoring",
+    personasUsed: [
+      "backend_developer",
+      "frontend_developer",
+      "qa_engineer",
+      "devops_engineer",
+      "database_administrator",
+      "security_engineer",
+      "api_developer",
+    ],
+    qualityScores: {
+      lint: "0 errors",
+      types: "0 errors",
+      tests: "101 unit tests",
+      security: "0 critical",
+    },
+    stories: [],
+    icon: <BarChart3 className="w-5 h-5" />,
   },
   shipapi: {
     id: "shipapi",
@@ -758,6 +792,9 @@ export default function ShowcaseViewer() {
   const { projectId } = useParams<{ projectId: string }>();
   const project = projectId ? showcaseData[projectId] : undefined;
   const isTeamBoard = projectId === "teamboard";
+  const isTaskPulse = projectId === "taskpulse";
+  const isEpicBoard = isTeamBoard || isTaskPulse;
+  const epicBoardData = isTeamBoard ? teamBoardEpics : taskPulseEpics;
   const [expandedEpic, setExpandedEpic] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Record<string, "spec" | "log">>(
     {},
@@ -843,13 +880,13 @@ export default function ShowcaseViewer() {
 
         {/* Stats row */}
         <div
-          className={`grid grid-cols-2 gap-4 mb-12 ${isTeamBoard ? "md:grid-cols-5" : "md:grid-cols-4"}`}
+          className={`grid grid-cols-2 gap-4 mb-12 ${isEpicBoard ? "md:grid-cols-5" : "md:grid-cols-4"}`}
         >
-          {isTeamBoard && (
+          {isEpicBoard && (
             <div className="card-elevated border border-border/50 rounded-xl p-5">
               <div className="flex items-center gap-2 text-2xl font-bold text-foreground">
                 <FileCode className="w-5 h-5 text-muted-foreground" />
-                29K
+                {isTaskPulse ? "18K" : "29K"}
               </div>
               <div className="text-sm text-muted-foreground mt-1">
                 lines of code
@@ -908,21 +945,23 @@ export default function ShowcaseViewer() {
           </div>
         </div>
 
-        <div className={isTeamBoard ? "" : "grid lg:grid-cols-3 gap-8"}>
-          {/* Epic board view for TeamBoard, story timeline for others */}
-          {isTeamBoard ? (
+        <div className={isEpicBoard ? "" : "grid lg:grid-cols-3 gap-8"}>
+          {/* Epic board view for TeamBoard/TaskPulse, story timeline for others */}
+          {isEpicBoard ? (
             <div className="mb-8">
               <div className="flex items-center gap-3 mb-6">
                 <h2 className="text-xl font-semibold text-foreground">
                   Build Log
                 </h2>
                 <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">
-                  {teamBoardEpics.length} epics &middot; 100 comments
+                  {epicBoardData.length} epics &middot;{" "}
+                  {epicBoardData.reduce((sum, e) => sum + e.commentCount, 0)}{" "}
+                  comments
                 </span>
               </div>
 
               <div className="space-y-3">
-                {teamBoardEpics.map((epic) => {
+                {epicBoardData.map((epic) => {
                   const isExpanded = expandedEpic === epic.id;
                   const tab = activeTab[epic.id] || "log";
                   return (
@@ -948,10 +987,15 @@ export default function ShowcaseViewer() {
                               <span className="text-sm font-semibold text-foreground">
                                 {epic.title}
                               </span>
-                              {epic.status === "completed" ? (
+                              {epic.status === "deployed" ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-500/10 text-blue-500">
+                                  <Rocket className="w-3 h-3" />
+                                  Deployed
+                                </span>
+                              ) : epic.status === "completed" ? (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-500/10 text-green-500">
                                   <CheckCircle className="w-3 h-3" />
-                                  Approved
+                                  PR Approved
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-500">

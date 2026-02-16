@@ -21,7 +21,6 @@ export interface AgentConfig {
   githubToken: string;
   bitbucketToken: string;
   gitlabToken: string;
-  workerImage: string;
 }
 
 export interface FileConfig {
@@ -36,7 +35,6 @@ export interface FileConfig {
     bitbucket: string;
     gitlab: string;
   };
-  workerImage: string;
   setupCompletedAt: string;
 }
 
@@ -91,9 +89,6 @@ export function loadConfigFromFile(): AgentConfig {
     process.exit(1);
   }
 
-  // Worker image — may be overridden by server config at startup
-  let workerImage = fc.workerImage || "workermill-worker:local";
-
   return {
     apiUrl: fc.apiUrl,
     apiKey: fc.apiKey,
@@ -104,7 +99,6 @@ export function loadConfigFromFile(): AgentConfig {
     githubToken: fc.tokens?.github || "",
     bitbucketToken: fc.tokens?.bitbucket || "",
     gitlabToken: fc.tokens?.gitlab || "",
-    workerImage,
   };
 }
 
@@ -154,7 +148,6 @@ export function loadConfig(): AgentConfig {
     githubToken: process.env.GITHUB_TOKEN || "",
     bitbucketToken: process.env.BITBUCKET_TOKEN || "",
     gitlabToken: process.env.GITLAB_TOKEN || "",
-    workerImage: process.env.WORKER_IMAGE || "workermill-worker:local",
   };
 }
 
@@ -204,19 +197,18 @@ export interface PrerequisiteResult {
 /**
  * Check all prerequisites and return results (non-exiting version for setup wizard).
  */
-export function checkPrerequisites(workerImage?: string): PrerequisiteResult[] {
+export function checkPrerequisites(): PrerequisiteResult[] {
   const results: PrerequisiteResult[] = [];
-  const image = workerImage || "workermill-worker:local";
+  const isWin = process.platform === "win32";
+  const which = isWin ? "where" : "which";
 
-  // Docker
+  // Git
   try {
-    const version = execSync("docker version --format {{.Server.Version}}", {
-      encoding: "utf-8",
-      timeout: 10000,
-    }).trim();
-    results.push({ name: "Docker", ok: true, detail: version });
+    execSync(`${which} git`, { stdio: "ignore", timeout: 10000 });
+    const version = execSync("git --version", { encoding: "utf-8", timeout: 10000 }).trim();
+    results.push({ name: "Git", ok: true, detail: version });
   } catch {
-    results.push({ name: "Docker", ok: false, detail: "Not running or not installed" });
+    results.push({ name: "Git", ok: false, detail: "Not installed" });
   }
 
   // Claude CLI (search known install locations, not just PATH)
@@ -250,14 +242,6 @@ export function checkPrerequisites(workerImage?: string): PrerequisiteResult[] {
     results.push({ name: "Node.js", ok: false, detail: `${nodeVersion} (need >= 20)` });
   }
 
-  // Worker image
-  try {
-    execSync(`docker image inspect ${image}`, { stdio: "ignore", timeout: 10000 });
-    results.push({ name: "Worker image", ok: true, detail: image });
-  } catch {
-    results.push({ name: "Worker image", ok: false, detail: `'${image}' not found` });
-  }
-
   return results;
 }
 
@@ -265,25 +249,13 @@ export function checkPrerequisites(workerImage?: string): PrerequisiteResult[] {
  * Validate prerequisites (exits on failure — backward compat).
  */
 export function validatePrerequisites(): void {
-  // Check Docker
+  // Check Git
+  const isWin = process.platform === "win32";
+  const which = isWin ? "where" : "which";
   try {
-    execSync("docker version", { stdio: "ignore" });
+    execSync(`${which} git`, { stdio: "ignore", timeout: 10000 });
   } catch {
-    console.error("Docker is not available. Please install Docker and ensure it's running.");
-    process.exit(1);
-  }
-
-  // Check worker image (use env-configured image or default)
-  const image = process.env.WORKER_IMAGE || "workermill-worker:local";
-  try {
-    execSync(`docker image inspect ${image}`, { stdio: "ignore" });
-  } catch {
-    console.error(`Worker image '${image}' not found.`);
-    if (image === "workermill-worker:local") {
-      console.error("Build it with: ./bin/local-workermill build-worker");
-    } else {
-      console.error(`Pull it with: docker pull ${image}`);
-    }
+    console.error("Git is not installed. Install Git and ensure it's in PATH.");
     process.exit(1);
   }
 
@@ -311,19 +283,8 @@ export function getSystemInfo(): {
   hostname: string;
   platform: string;
   nodeVersion: string;
-  dockerVersion: string;
   claudeVersion: string;
 } {
-  let dockerVersion = "unknown";
-  try {
-    dockerVersion = execSync("docker version --format {{.Server.Version}}", {
-      encoding: "utf-8",
-      timeout: 10000,
-    }).trim();
-  } catch {
-    /* ignore */
-  }
-
   let claudeVersion = "unknown";
   const claudeBin = findClaudePath();
   if (claudeBin) {
@@ -341,7 +302,6 @@ export function getSystemInfo(): {
     hostname: hostname(),
     platform: process.platform,
     nodeVersion: process.version,
-    dockerVersion,
     claudeVersion,
   };
 }

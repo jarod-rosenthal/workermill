@@ -39,15 +39,9 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
       config.maxWorkers = cloudMaxWorkers;
     }
 
-    // Override worker image URL from server (keeps ECR details server-side)
-    if (configResponse.data.workerImageUrl) {
-      config.workerImage = configResponse.data.workerImageUrl;
-    }
-
     console.log(`  ${chalk.green("●")} Connected to ${chalk.cyan(config.apiUrl)}`);
     console.log(`  ${chalk.dim("Agent:")}     ${config.agentId}`);
     console.log(`  ${chalk.dim("Workers:")}   ${chalk.yellow(String(config.maxWorkers))} parallel`);
-    console.log(`  ${chalk.dim("Image:")}     ${config.workerImage}`);
     console.log(`  ${chalk.dim("SCM:")}       ${configResponse.data.scmProvider}`);
     console.log(`  ${chalk.dim("Model:")}     ${chalk.yellow(configResponse.data.defaultWorkerModel)}`);
     console.log();

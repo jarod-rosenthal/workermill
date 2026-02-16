@@ -31,13 +31,7 @@ import { CredentialRotator } from "./credential-rotator.js";
 import { spawn, execSync } from "child_process";
 import { writeFileSync, unlinkSync, existsSync, readFileSync } from "fs";
 import { runQualityVerification, postQualityMetrics, type QualityMetrics } from "./quality-runner.js";
-import {
-  evaluateQualityGate,
-  formatQualityGateResult,
-  type QualityGateResult,
-  type QualityThresholds,
-  DEFAULT_THRESHOLDS,
-} from "./quality-gate.js";
+import type { EvaluateQualityResponse } from "./decision-client.js";
 
 
 /**
@@ -170,7 +164,7 @@ export class EpicCoordinator {
       gracefulShutdownEnabled: true,
     };
     // Resilience config is used by coordinator for file-overlap gating etc.
-    this.executor = new StoryExecutor(config, this.coordination, this.gitOps, this.resilience);
+    this.executor = new StoryExecutor(config, this.coordination, this.gitOps, this.decisionClient, this.resilience);
     this.executor.onWorktreeCreated = (storyIndex, worktreePath, branchName) => {
       this.activeWorktrees.set(storyIndex, worktreePath);
       this.storyBranchNames.set(storyIndex, branchName);
@@ -182,7 +176,8 @@ export class EpicCoordinator {
     this.blockerManager = new BlockerManager(
       this.coordination,
       config.parentTaskId,
-      this.resilience
+      this.resilience,
+      this.decisionClient
     );
 
     // Initialize credential rotator for Claude Max rate limit handling
@@ -1273,6 +1268,7 @@ export class EpicCoordinator {
         }
         // Clear the blocker and retry the story
         this.failedStoryIndices.delete(blocker.storyIndex);
+        this.completedStoryIndices.delete(blocker.storyIndex);
         // If guidance was provided, it will be passed to the story on re-execution
         if (response.guidance) {
           this.userFeedback = response.guidance;
@@ -1281,6 +1277,18 @@ export class EpicCoordinator {
         // Unblock dependent stories
         for (const depIndex of blocker.dependentStories) {
           this.blockedStoryIndices.delete(depIndex);
+        }
+        // Re-queue the story for revision execution (bypass claim system)
+        // Without this, the story is in limbo — not failed, not completed, not queued
+        {
+          const allStories = await this.coordination.getReadyStories();
+          const storyToRetry = allStories.find((s) => s.storyIndex === blocker.storyIndex);
+          if (storyToRetry) {
+            this.revisionStoriesQueued.push(storyToRetry);
+            console.log(`[Epic] Re-queued story ${blocker.storyIndex} for revision execution`);
+          } else {
+            console.warn(`[Epic] Could not find story ${blocker.storyIndex} in ready stories — it may not re-execute`);
+          }
         }
         // Resume running status
         await this.updateTaskStatus("running", `Retrying story ${blocker.storyIndex}`);
@@ -2023,7 +2031,7 @@ export class EpicCoordinator {
     }
 
     // Check if we should auto-retry
-    if (this.blockerManager.shouldAutoRetry(story.storyIndex, errorMessage)) {
+    if (await this.blockerManager.shouldAutoRetry(story.storyIndex, errorMessage)) {
       const retryCount = this.blockerManager.getRetryCount(story.storyIndex);
       const maxRetries = this.resilience.blockerMaxAutoRetries;
       console.log(`[Epic] Story ${story.storyIndex} failed - auto-retry ${retryCount + 1}/${maxRetries}`);
@@ -2429,7 +2437,7 @@ export class EpicCoordinator {
       // Run quality verification and epic validation in parallel (both are independent)
       this.postDashboardLog("Running quality checks and epic validation...");
       let capturedQualityMetrics: QualityMetrics | undefined;
-      let qualityGateResult: QualityGateResult | undefined;
+      let qualityGateResult: EvaluateQualityResponse | undefined;
 
       const [qualityResult, epicValidationResult] = await Promise.allSettled([
         // Quality verification (typecheck, lint, tests — can be slow)
@@ -2456,35 +2464,39 @@ export class EpicCoordinator {
         this.validateEpicCompletion(storyCompletions, this.totalStories),
       ]);
 
-      // Process quality result
+      // Process quality result via Decision API
       if (qualityResult.status === "fulfilled") {
         capturedQualityMetrics = qualityResult.value;
 
-        const thresholds: QualityThresholds =
-          this.config.qualityThresholds || DEFAULT_THRESHOLDS;
-        const bypassReason = this.config.qualityGateBypass
-          ? "bypass-quality-gate label set"
-          : undefined;
-        qualityGateResult = evaluateQualityGate(
-          capturedQualityMetrics,
-          thresholds,
-          this.config.qualityGateBypass || false,
-          bypassReason,
-        );
+        // Quality gate bypass check
+        if (this.config.qualityGateBypass) {
+          qualityGateResult = { pass: true, reasons: ["bypass-quality-gate label set"], blockers: [] };
+          console.log("[Epic] Quality gate bypassed");
+        } else {
+          // Build diff summary for quality evaluation
+          const diffSummary = `score=${capturedQualityMetrics.qualityScore}/100, typeErrors=${capturedQualityMetrics.typeErrors}, lintErrors=${capturedQualityMetrics.lintErrors}, testFailures=${capturedQualityMetrics.testFailures}`;
+          qualityGateResult = await this.decisionClient.evaluateQuality({
+            diff: diffSummary,
+            storyDescription: this.config.jiraRequirements || undefined,
+          });
+        }
 
-        console.log(formatQualityGateResult(qualityGateResult));
+        const statusIcon = qualityGateResult.pass ? "PASSED ✅" : "FAILED ❌";
+        const reasons = qualityGateResult.reasons.length > 0 ? `\n  ${qualityGateResult.reasons.join("\n  ")}` : "";
+        console.log(`[Epic] Quality Gate: ${statusIcon}${reasons}`);
 
-        if (!qualityGateResult.passed && !qualityGateResult.bypassed) {
+        if (!qualityGateResult.pass) {
           console.log("[Epic] Quality gate failed - blocking PR creation");
           this.postDashboardLog("Quality gate failed — PR blocked");
+          const failureReasons = [...qualityGateResult.reasons, ...qualityGateResult.blockers];
           await this.ticketOps.postComment(
-            `❌ Quality gate failed - PR not created.\n\n**Issues:**\n${qualityGateResult.failureReasons.map((r) => `- ${r}`).join("\n")}\n\n*Fix the issues and re-run, or add the \`bypass-quality-gate\` label to skip.*`,
+            `❌ Quality gate failed - PR not created.\n\n**Issues:**\n${failureReasons.map((r) => `- ${r}`).join("\n")}\n\n*Fix the issues and re-run, or add the \`bypass-quality-gate\` label to skip.*`,
           );
 
           await this.updateTaskStatus(
             "quality_gate_failed",
-            `Quality gate failed: ${qualityGateResult.failureReasons.join(", ")}`,
-            `Quality gate blocked PR creation: ${qualityGateResult.summary}`,
+            `Quality gate failed: ${failureReasons.join(", ")}`,
+            `Quality gate blocked PR creation: ${failureReasons[0] || "quality check failed"}`,
           );
 
           this.missionActive = false;

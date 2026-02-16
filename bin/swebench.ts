@@ -13,19 +13,18 @@
  *   --concurrency N    Max concurrent workers (default: 4)
  *   --api-url URL      WorkerMill API base URL (default: http://localhost:3001)
  *   --output FILE      Output JSONL file path (default: swebench_predictions.jsonl)
- *   --repos-dir DIR    Where to clone repos (default: ~/.swebench/repos)
+ *   --timeout M        Max minutes to wait for completion (default: 120)
+ *   --model-name NAME  model_name_or_path in predictions (default: workermill-v0.9)
  *   --dry-run          Create board/cards but don't run them
  *   --help             Show this help message
  *
  * Auth:
  *   Set WORKERMILL_TOKEN env var with a JWT Bearer token from the frontend.
  *   (DevTools -> Application -> Local Storage -> auth_token)
+ *   Set GITHUB_TOKEN env var for diff extraction (avoids 60 req/hr rate limit).
  */
 
-import { execSync } from "child_process";
 import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,7 +81,8 @@ function parseArgs(): {
   concurrency: number;
   apiUrl: string;
   output: string;
-  reposDir: string;
+  timeoutMinutes: number;
+  modelName: string;
   dryRun: boolean;
   help: boolean;
 } {
@@ -92,7 +92,8 @@ function parseArgs(): {
     concurrency: 4,
     apiUrl: "http://localhost:3001",
     output: "swebench_predictions.jsonl",
-    reposDir: path.join(os.homedir(), ".swebench", "repos"),
+    timeoutMinutes: 120,
+    modelName: "workermill-v0.9",
     dryRun: false,
     help: false,
   };
@@ -113,14 +114,21 @@ function parseArgs(): {
           process.exit(1);
         }
         break;
+      case "--timeout":
+        opts.timeoutMinutes = parseInt(args[++i], 10);
+        if (isNaN(opts.timeoutMinutes) || opts.timeoutMinutes < 1) {
+          console.error("Error: --timeout must be a positive integer (minutes)");
+          process.exit(1);
+        }
+        break;
+      case "--model-name":
+        opts.modelName = args[++i];
+        break;
       case "--api-url":
         opts.apiUrl = args[++i];
         break;
       case "--output":
         opts.output = args[++i];
-        break;
-      case "--repos-dir":
-        opts.reposDir = args[++i];
         break;
       case "--dry-run":
         opts.dryRun = true;
@@ -150,13 +158,15 @@ Options:
   --concurrency N    Max concurrent workers (default: 4)
   --api-url URL      WorkerMill API base URL (default: http://localhost:3001)
   --output FILE      Output JSONL file path (default: swebench_predictions.jsonl)
-  --repos-dir DIR    Where to clone repos (default: ~/.swebench/repos)
+  --timeout M        Max minutes to wait for completion (default: 120)
+  --model-name NAME  model_name_or_path in predictions (default: workermill-v0.9)
   --dry-run          Create board/cards but don't run them
   --help, -h         Show this help message
 
 Environment:
   WORKERMILL_TOKEN   JWT Bearer token (required). Get from browser DevTools:
                      Application -> Local Storage -> auth_token
+  GITHUB_TOKEN       GitHub token for diff extraction (optional, avoids rate limit)
 
 Examples:
   ***REMOVED*** Dry run with 5 instances
@@ -183,6 +193,7 @@ const TERMINAL_STATUSES = new Set([
 ]);
 
 let authToken: string;
+let githubToken: string;
 
 async function apiFetch(
   url: string,
@@ -315,7 +326,7 @@ function sampleInstances(
     // Proportional count, ensuring at least 1 per repo if possible
     let repoCount: number;
     if (isLast) {
-      repoCount = remaining;
+      repoCount = Math.min(remaining, repoInstances.length);
     } else {
       repoCount = Math.max(
         1,
@@ -350,72 +361,13 @@ function sampleInstances(
 }
 
 // ---------------------------------------------------------------------------
-// Step 3: Pre-clone repos and create worktrees
+// Step 3: Pre-clone repos (skipped — workers clone independently)
 // ---------------------------------------------------------------------------
-
-function precloneRepos(
-  instances: SWEBenchInstance[],
-  reposDir: string,
-): void {
-  console.log("Pre-cloning repositories...");
-  fs.mkdirSync(reposDir, { recursive: true });
-
-  // Unique repos
-  const repos = new Set(instances.map((i) => i.repo));
-
-  for (const repo of repos) {
-    const repoDir = path.join(reposDir, repo.replace("/", "__"));
-
-    if (fs.existsSync(path.join(repoDir, "HEAD"))) {
-      console.log(`  ${repo}: already cloned`);
-    } else {
-      console.log(`  ${repo}: cloning...`);
-      try {
-        execSync(
-          `git clone --bare https://github.com/${repo}.git "${repoDir}"`,
-          { stdio: "pipe", timeout: 300000 },
-        );
-        console.log(`  ${repo}: cloned`);
-      } catch (err) {
-        console.error(
-          `  ${repo}: clone failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        throw new Error(`Failed to clone ${repo}`);
-      }
-    }
-  }
-
-  // Create worktrees for each instance
-  console.log("\nCreating worktrees for each instance...");
-  for (const inst of instances) {
-    const repoDir = path.join(reposDir, inst.repo.replace("/", "__"));
-    const worktreeDir = path.join(reposDir, inst.instance_id);
-
-    if (fs.existsSync(worktreeDir)) {
-      console.log(`  ${inst.instance_id}: worktree exists`);
-      continue;
-    }
-
-    try {
-      // Fetch the specific commit if needed
-      execSync(`git -C "${repoDir}" fetch origin ${inst.base_commit} 2>/dev/null || true`, {
-        stdio: "pipe",
-        timeout: 60000,
-      });
-
-      execSync(
-        `git -C "${repoDir}" worktree add "${worktreeDir}" ${inst.base_commit}`,
-        { stdio: "pipe", timeout: 60000 },
-      );
-      console.log(`  ${inst.instance_id}: worktree created at ${inst.base_commit.slice(0, 8)}`);
-    } catch (err) {
-      console.warn(
-        `  ${inst.instance_id}: worktree creation failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      // Non-fatal: worker will clone on its own
-    }
-  }
-}
+// NOTE: Workers clone repos independently based on task.githubRepo.
+// The base_commit from SWE-bench is not yet passed to workers — this is a
+// known gap. Workers will work from HEAD, which may differ from the instance's
+// base_commit. A future improvement would add a baseCommit field to
+// KbCard/WorkerTask to ensure workers start from the correct commit.
 
 // ---------------------------------------------------------------------------
 // Step 4: Create KbBoard
@@ -560,6 +512,7 @@ async function runCards(
   boardId: string,
   cards: CardInfo[],
   concurrency: number,
+  timeoutMinutes: number,
 ): Promise<void> {
   console.log(
     `\nRunning ${cards.length} cards with concurrency ${concurrency}...`,
@@ -604,7 +557,7 @@ async function runCards(
   await startNext();
 
   // Poll until all done
-  await pollForCompletion(apiUrl, boardId, cards, startNext);
+  await pollForCompletion(apiUrl, boardId, cards, startNext, timeoutMinutes);
 }
 
 // ---------------------------------------------------------------------------
@@ -616,8 +569,10 @@ async function pollForCompletion(
   boardId: string,
   cards: CardInfo[],
   startNext: () => Promise<void>,
+  timeoutMinutes: number,
 ): Promise<void> {
   const POLL_INTERVAL_MS = 10000;
+  const TIMEOUT_MS = timeoutMinutes * 60 * 1000;
   const startTime = Date.now();
 
   // Keep polling while any card is either running or not yet started
@@ -626,6 +581,16 @@ async function pollForCompletion(
   ).length;
 
   while (remaining > 0) {
+    // Check timeout
+    if (Date.now() - startTime > TIMEOUT_MS) {
+      console.warn(`\n  Timeout reached (${timeoutMinutes} minutes). Treating ${remaining} remaining tasks as failed.`);
+      for (const card of cards) {
+        if (!TERMINAL_STATUSES.has(card.status || "")) {
+          card.status = "failed";
+        }
+      }
+      break;
+    }
     await sleep(POLL_INTERVAL_MS);
 
     try {
@@ -703,6 +668,7 @@ async function extractDiffsAndWritePredictions(
   apiUrl: string,
   cards: CardInfo[],
   outputFile: string,
+  modelName: string,
 ): Promise<{ completed: number; failed: number; noChanges: number }> {
   console.log(`\nExtracting diffs and writing predictions to ${outputFile}...`);
 
@@ -711,87 +677,91 @@ async function extractDiffsAndWritePredictions(
   let failed = 0;
   let noChanges = 0;
 
-  for (const card of cards) {
-    let modelPatch = "";
+  try {
+    for (const card of cards) {
+      let modelPatch = "";
 
-    if (
-      card.workerTaskId &&
-      (card.status === "completed" || card.status === "deployed")
-    ) {
-      try {
-        // Fetch individual task to get githubPrUrl
-        const task = await apiJson<{
-          id: string;
-          githubPrUrl: string | null;
-          githubRepo: string | null;
-        }>(`${apiUrl}/api/tasks/${card.workerTaskId}`).catch(() => null);
+      if (
+        card.workerTaskId &&
+        (card.status === "completed" || card.status === "deployed")
+      ) {
+        try {
+          // Fetch individual task to get githubPrUrl
+          const task = await apiJson<{
+            id: string;
+            githubPrUrl: string | null;
+            githubRepo: string | null;
+          }>(`${apiUrl}/api/tasks/${card.workerTaskId}`).catch(() => null);
 
-        const prUrl = task?.githubPrUrl || null;
+          const prUrl = task?.githubPrUrl || null;
 
-        if (prUrl) {
-          // Extract diff from GitHub PR
-          // PR URL format: https://github.com/owner/repo/pull/123
-          const prMatch = prUrl.match(
-            /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/,
-          );
-          if (prMatch) {
-            const [, repoPath, prNumber] = prMatch;
-            try {
-              const diffResp = await fetch(
-                `https://api.github.com/repos/${repoPath}/pulls/${prNumber}`,
-                {
-                  headers: {
-                    Accept: "application/vnd.github.v3.diff",
-                  },
-                },
-              );
-              if (diffResp.ok) {
-                modelPatch = await diffResp.text();
-                completed++;
-              } else {
+          if (prUrl) {
+            // Extract diff from GitHub PR
+            // PR URL format: https://github.com/owner/repo/pull/123
+            const prMatch = prUrl.match(
+              /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/,
+            );
+            if (prMatch) {
+              const [, repoPath, prNumber] = prMatch;
+              try {
+                const diffHeaders: Record<string, string> = {
+                  Accept: "application/vnd.github.v3.diff",
+                };
+                if (githubToken) {
+                  diffHeaders["Authorization"] = `token ${githubToken}`;
+                }
+                const diffResp = await fetch(
+                  `https://api.github.com/repos/${repoPath}/pulls/${prNumber}`,
+                  { headers: diffHeaders },
+                );
+                if (diffResp.ok) {
+                  modelPatch = await diffResp.text();
+                  completed++;
+                } else {
+                  console.warn(
+                    `  ${card.instanceId}: Could not fetch PR diff (${diffResp.status})`,
+                  );
+                  noChanges++;
+                }
+              } catch {
                 console.warn(
-                  `  ${card.instanceId}: Could not fetch PR diff (${diffResp.status})`,
+                  `  ${card.instanceId}: Error fetching PR diff`,
                 );
                 noChanges++;
               }
-            } catch {
+            } else {
               console.warn(
-                `  ${card.instanceId}: Error fetching PR diff`,
+                `  ${card.instanceId}: Could not parse PR URL: ${prUrl}`,
               );
               noChanges++;
             }
           } else {
             console.warn(
-              `  ${card.instanceId}: Could not parse PR URL: ${prUrl}`,
+              `  ${card.instanceId}: No PR URL found (task completed without changes?)`,
             );
             noChanges++;
           }
-        } else {
+        } catch (err) {
           console.warn(
-            `  ${card.instanceId}: No PR URL found (task completed without changes?)`,
+            `  ${card.instanceId}: Error getting task info: ${err instanceof Error ? err.message : String(err)}`,
           );
           noChanges++;
         }
-      } catch (err) {
-        console.warn(
-          `  ${card.instanceId}: Error getting task info: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        noChanges++;
+      } else {
+        failed++;
       }
-    } else {
-      failed++;
+
+      // Write JSONL line
+      const prediction = {
+        instance_id: card.instanceId,
+        model_name_or_path: modelName,
+        model_patch: modelPatch,
+      };
+      fs.writeSync(fd, JSON.stringify(prediction) + "\n");
     }
-
-    // Write JSONL line
-    const prediction = {
-      instance_id: card.instanceId,
-      model_name_or_path: "workermill",
-      model_patch: modelPatch,
-    };
-    fs.writeSync(fd, JSON.stringify(prediction) + "\n");
+  } finally {
+    fs.closeSync(fd);
   }
-
-  fs.closeSync(fd);
 
   return { completed, failed, noChanges };
 }
@@ -832,6 +802,7 @@ async function main(): Promise<void> {
 
   // Validate auth token
   authToken = process.env.WORKERMILL_TOKEN || "";
+  githubToken = process.env.GITHUB_TOKEN || "";
   if (!authToken) {
     console.error(
       "Error: WORKERMILL_TOKEN env var is required.\n" +
@@ -848,8 +819,10 @@ async function main(): Promise<void> {
   console.log(`  Concurrency: ${opts.concurrency}`);
   console.log(`  API URL:     ${opts.apiUrl}`);
   console.log(`  Output:      ${opts.output}`);
-  console.log(`  Repos dir:   ${opts.reposDir}`);
+  console.log(`  Timeout:     ${opts.timeoutMinutes} minutes`);
+  console.log(`  Model name:  ${opts.modelName}`);
   console.log(`  Dry run:     ${opts.dryRun}`);
+  console.log(`  GitHub auth: ${githubToken ? "yes" : "no (may hit rate limit)"}`);
   console.log();
 
   const startTime = Date.now();
@@ -860,8 +833,7 @@ async function main(): Promise<void> {
   // Step 2: Sample
   const sampled = sampleInstances(allInstances, opts.count);
 
-  // Step 3: Pre-clone repos
-  precloneRepos(sampled, opts.reposDir);
+  // Step 3: Pre-clone repos (skipped — workers clone independently)
 
   // Step 4: Create board
   const { boardId, firstColumnId } = await createBoard(
@@ -893,7 +865,7 @@ async function main(): Promise<void> {
         fd,
         JSON.stringify({
           instance_id: card.instanceId,
-          model_name_or_path: "workermill",
+          model_name_or_path: modelName,
           model_patch: "",
         }) + "\n",
       );
@@ -904,13 +876,14 @@ async function main(): Promise<void> {
   }
 
   // Step 7: Run cards
-  await runCards(opts.apiUrl, boardId, cards, opts.concurrency);
+  await runCards(opts.apiUrl, boardId, cards, opts.concurrency, opts.timeoutMinutes);
 
   // Step 8-9: Extract diffs and write predictions
   const results = await extractDiffsAndWritePredictions(
     opts.apiUrl,
     cards,
     opts.output,
+    opts.modelName,
   );
 
   // Step 10: Print summary

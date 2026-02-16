@@ -56,6 +56,9 @@ export class KbCard {
   @Column({ name: "worker_task_id", type: "uuid", nullable: true })
   workerTaskId: string | null;
 
+  @Column({ name: "github_repo", type: "varchar", length: 255, nullable: true })
+  githubRepo: string | null;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

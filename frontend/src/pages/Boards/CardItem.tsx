@@ -53,6 +53,8 @@ function getCardWorkerStatusStyle(status: string | null): string {
     case "pr_created":
     case "review_requested":
       return "bg-purple-500/15 text-purple-400";
+    case "pr_approved":
+      return "bg-blue-500/15 text-blue-400";
     case "completed":
     case "deployed":
       return "bg-green-500/15 text-green-400";
@@ -75,6 +77,8 @@ function getCardWorkerDotStyle(status: string | null): string {
     case "pr_created":
     case "review_requested":
       return "bg-purple-400";
+    case "pr_approved":
+      return "bg-blue-400";
     case "completed":
     case "deployed":
       return "bg-green-400";
@@ -98,6 +102,8 @@ function getCardWorkerStatusLabel(status: string | null): string {
     case "pr_created":
     case "review_requested":
       return "PR";
+    case "pr_approved":
+      return "Approved";
     case "completed":
     case "deployed":
       return "Done";

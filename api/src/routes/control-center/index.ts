@@ -4,6 +4,7 @@ import streamRouter from "./stream.js";
 import logsRouter from "./logs.js";
 import actionsRouter from "./actions.js";
 import searchRouter from "./search.js";
+import codeEventsRouter from "./code-events.js";
 
 const router = Router();
 
@@ -13,5 +14,6 @@ router.use(streamRouter);
 router.use(logsRouter);
 router.use(actionsRouter);
 router.use(searchRouter);
+router.use(codeEventsRouter);
 
 export default router;

@@ -568,7 +568,7 @@ router.post(
   "/:projectId/columns",
   param("projectId").isUUID().withMessage("Invalid project ID"),
   body("name").isString().notEmpty().isLength({ max: 100 }).withMessage("name is required (max 100 chars)"),
-  body("columnType").isIn(["backlog", "ready", "in_progress", "review", "done"]).withMessage("Invalid column type"),
+  body("columnType").isIn(["backlog", "in_progress", "review", "pr_approved", "deployed"]).withMessage("Invalid column type"),
   body("color").optional().isString().isLength({ max: 20 }),
   body("wipLimit").optional().isInt({ min: 1 }),
   body("position").optional().isInt({ min: 0 }),
@@ -718,9 +718,9 @@ router.post(
           acceptanceCriteria.length > 0
         );
 
-        // Determine status and column type
+        // Determine status and column type — all new tasks land in Backlog
         const taskStatus = hasRequiredFields ? "ready" : "draft";
-        const targetColumnType = hasRequiredFields ? "ready" : "backlog";
+        const targetColumnType = "backlog";
 
         // Find the appropriate column
         let targetColumn = await columnRepo.findOne({
@@ -987,7 +987,7 @@ router.put(
         );
 
         const newStatus = hasRequiredFields ? "ready" : "draft";
-        const targetColumnType = hasRequiredFields ? "ready" : "backlog";
+        const targetColumnType = "backlog"; // Both draft and ready stay in Backlog
 
         // Only update column if status changed
         if (task.status !== newStatus) {
@@ -2003,7 +2003,8 @@ router.get(
         queued: 0,
         executing: 0,
         review: 0,
-        completed: 0,
+        pr_approved: 0,
+        deployed: 0,
         failed: 0,
       };
 

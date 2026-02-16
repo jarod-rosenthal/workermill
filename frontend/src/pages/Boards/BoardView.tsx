@@ -6,6 +6,7 @@ import {
   Settings,
   Plus,
   Columns3,
+  X,
 } from "lucide-react";
 import {
   DndContext,
@@ -170,6 +171,7 @@ export default function BoardView() {
       "planning",
       "pr_created",
       "review_requested",
+      "pr_approved",
       "dispatching",
     ];
     return currentBoard.columns.some((col) =>
@@ -460,6 +462,49 @@ export default function BoardView() {
             )}
           </div>
           <div className="flex items-center gap-2">
+            <div className="relative">
+              {showAddColumn ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    value={newColumnName}
+                    onChange={(e) => setNewColumnName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleAddColumn();
+                      if (e.key === "Escape") {
+                        setShowAddColumn(false);
+                        setNewColumnName("");
+                      }
+                    }}
+                    placeholder="Column name..."
+                    className="w-36 px-2 py-1.5 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleAddColumn}
+                    className="px-2 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90"
+                  >
+                    Add
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowAddColumn(false);
+                      setNewColumnName("");
+                    }}
+                    className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowAddColumn(true)}
+                  className="p-2 rounded-lg hover:bg-muted transition-colors"
+                  title="Add Column"
+                >
+                  <Plus className="w-4 h-4 text-muted-foreground" />
+                </button>
+              )}
+            </div>
             <button
               onClick={handleRefresh}
               className="p-2 rounded-lg hover:bg-muted transition-colors"
@@ -508,52 +553,8 @@ export default function BoardView() {
                 />
               ))}
 
-              {/* Add column */}
-              <div className="flex-shrink-0 w-[300px]">
-                {showAddColumn ? (
-                  <div className="rounded-xl bg-muted/30 border border-border/50 p-3">
-                    <input
-                      value={newColumnName}
-                      onChange={(e) => setNewColumnName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleAddColumn();
-                        if (e.key === "Escape") {
-                          setShowAddColumn(false);
-                          setNewColumnName("");
-                        }
-                      }}
-                      placeholder="Column name..."
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      autoFocus
-                    />
-                    <div className="flex gap-2 mt-2">
-                      <button
-                        onClick={handleAddColumn}
-                        className="px-3 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90"
-                      >
-                        Add
-                      </button>
-                      <button
-                        onClick={() => {
-                          setShowAddColumn(false);
-                          setNewColumnName("");
-                        }}
-                        className="px-3 py-1.5 text-sm rounded-lg hover:bg-muted"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setShowAddColumn(true)}
-                    className="w-full flex items-center gap-2 px-4 py-3 rounded-xl border border-dashed border-border/50 text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/30 transition-all text-sm"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Add Column
-                  </button>
-                )}
-              </div>
+              {/* Spacer for horizontal scroll */}
+              <div className="flex-shrink-0 w-4" />
             </div>
           </SortableContext>
 

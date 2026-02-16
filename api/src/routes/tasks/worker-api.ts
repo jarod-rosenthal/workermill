@@ -6,7 +6,7 @@ import { getECSTaskRunner } from "../../services/ecs-task-runner.js";
 import { getCostTracker } from "../../services/cost-tracker.js";
 import { logger } from "../../utils/logger.js";
 import { body, param, query, validateRequest } from "../../middleware/validation.js";
-import { checkAndUnblockDependentTasks, syncInternalTaskStatus } from "../../services/task-monitor.js";
+import { checkAndUnblockDependentTasks, syncInternalTaskStatus, syncKbCardColumn } from "../../services/task-monitor.js";
 import { notifyTaskCompleted, notifyTaskFailed } from "../../services/notifications.js";
 import { postTicketComment } from "../../utils/ticket-comments.js";
 
@@ -232,6 +232,18 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
       }
     }
 
+    // Sync KbCard column when worker completes (moves card across board swim lanes)
+    if (["review_requested", "pr_created", "pr_approved", "completed", "deployed"].includes(newStatus)) {
+      try {
+        await syncKbCardColumn(taskId, newStatus);
+      } catch (syncError) {
+        logger.warn("Failed to sync KbCard column from worker-complete", {
+          taskId,
+          error: syncError instanceof Error ? syncError.message : String(syncError),
+        });
+      }
+    }
+
     // Record cost to org cumulative (only if not already done by /usage endpoint)
     if (!task.usageReportedAt) {
       try {
@@ -372,6 +384,18 @@ router.post("/:id/worker-progress", authenticateApiKey, async (req: Request, res
         logger.warn("Failed to sync internal task status from worker-progress", {
           taskId,
           internalTaskId: task.internalTaskId,
+          error: syncError instanceof Error ? syncError.message : String(syncError),
+        });
+      }
+    }
+
+    // Sync KbCard column for progress statuses (moves card across board swim lanes)
+    if (["review_requested", "pr_created"].includes(status)) {
+      try {
+        await syncKbCardColumn(taskId, status);
+      } catch (syncError) {
+        logger.warn("Failed to sync KbCard column from worker-progress", {
+          taskId,
           error: syncError instanceof Error ? syncError.message : String(syncError),
         });
       }

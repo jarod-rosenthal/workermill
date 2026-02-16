@@ -6,7 +6,7 @@ import {
   getSignatureFromHeaders,
   getDeliveryIdFromHeaders,
 } from "../../services/webhook.js";
-import { checkAndUnblockDependentTasks } from "../../services/task-monitor.js";
+import { checkAndUnblockDependentTasks, syncKbCardColumn } from "../../services/task-monitor.js";
 import { logger } from "../../utils/logger.js";
 import {
   body,
@@ -243,6 +243,11 @@ router.post(
         return;
       }
 
+      // Sync KbCard column to "Approved"
+      syncKbCardColumn(task.id, "pr_approved").catch((err) => {
+        logger.warn("Failed to sync KbCard column from GitHub webhook", { taskId: task.id, error: err instanceof Error ? err.message : String(err) });
+      });
+
       logger.info("PR approved, awaiting manager review", {
         taskId: task.id,
         prNumber,
@@ -440,6 +445,11 @@ router.post(
           res.json({ status: "ignored", reason: "Task status already changed" });
           return;
         }
+
+        // Sync KbCard column to "Approved"
+        syncKbCardColumn(task.id, "pr_approved").catch((err) => {
+          logger.warn("Failed to sync KbCard column from GitHub webhook", { taskId: task.id, error: err instanceof Error ? err.message : String(err) });
+        });
 
         res.json({
           status: "processed",

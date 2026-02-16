@@ -1860,43 +1860,47 @@ export async function syncKbCardColumn(
   });
   if (!linkedCard) return;
 
-  // Map worker status to target column name
-  let targetColumnName: string | null;
+  // Map worker status to target column name (with fallbacks for boards that use different names)
+  let targetColumnNames: string[] | null;
   switch (newStatus) {
     case "claimed":
     case "executing":
     case "planning":
     case "environment_setup":
-      targetColumnName = "In Progress";
+      targetColumnNames = ["In Progress"];
       break;
     case "review_requested":
     case "pr_created":
-      targetColumnName = "Review";
+      targetColumnNames = ["Review"];
       break;
     case "pr_approved":
-      targetColumnName = "PR Approved";
+      targetColumnNames = ["Approved", "PR Approved", "Done"];
       break;
     case "completed":
     case "deployed":
-      targetColumnName = "Deployed";
+      targetColumnNames = ["Done", "Deployed"];
       break;
     case "failed":
     case "escalated":
     case "cancelled":
-      targetColumnName = null; // Stay in current column
+      targetColumnNames = null; // Stay in current column
       break;
     default:
       return; // Unknown status, don't move
   }
 
-  if (!targetColumnName) return; // No column movement needed
+  if (!targetColumnNames) return; // No column movement needed
 
-  // Find the target column on the same board (case-insensitive)
-  const targetColumn = await columnRepo
-    .createQueryBuilder("col")
-    .where("col.board_id = :boardId", { boardId: linkedCard.boardId })
-    .andWhere("LOWER(col.name) = LOWER(:name)", { name: targetColumnName })
-    .getOne();
+  // Find the target column on the same board (try each name in priority order, case-insensitive)
+  let targetColumn: KbColumn | null = null;
+  for (const name of targetColumnNames) {
+    targetColumn = await columnRepo
+      .createQueryBuilder("col")
+      .where("col.board_id = :boardId", { boardId: linkedCard.boardId })
+      .andWhere("LOWER(col.name) = LOWER(:name)", { name })
+      .getOne();
+    if (targetColumn) break;
+  }
 
   if (!targetColumn || targetColumn.id === linkedCard.columnId) return;
 
@@ -1915,7 +1919,7 @@ export async function syncKbCardColumn(
 
   logger.debug("Moved KbCard to column", {
     cardId: linkedCard.id,
-    targetColumn: targetColumnName,
+    targetColumn: targetColumn.name,
     workerStatus: newStatus,
   });
 }

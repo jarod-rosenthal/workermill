@@ -791,6 +791,26 @@ router.delete(
 // ============================================================================
 
 /**
+ * GET /api/personas/worker/experts
+ * Get all enabled personas as expert configs for worker startup.
+ * Uses API key authentication (for workers).
+ */
+router.get(
+  "/worker/experts",
+  authenticateApiKey,
+  async (req: Request, res: Response) => {
+    try {
+      const orgId = req.organization!.id;
+      const experts = await personaService.getExpertRegistry(orgId);
+      res.json({ experts });
+    } catch (error) {
+      logger.error("Error getting expert registry", { error });
+      res.status(500).json({ error: "Failed to get expert registry" });
+    }
+  }
+);
+
+/**
  * GET /api/personas/worker/:slug/bundle
  * Get the complete persona bundle for a worker
  * Uses API key authentication (for workers)

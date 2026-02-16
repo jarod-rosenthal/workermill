@@ -645,6 +645,77 @@ export async function getPersonaBundle(
   return bundle;
 }
 
+/**
+ * Get all enabled personas as expert registry entries for workers.
+ * Returns system personas + org-specific, with org overrides hiding system originals.
+ */
+export async function getExpertRegistry(
+  orgId: string
+): Promise<
+  Array<{
+    slug: string;
+    name: string;
+    emoji: string | null;
+    color: string | null;
+    description: string | null;
+    systemPrompt: string;
+    specialties: string[];
+    tools: string[];
+    reviewOnly: boolean;
+  }>
+> {
+  const personas = await listPersonas(orgId);
+  const enabledPersonas = personas.filter((p) => p.enabled);
+
+  const directiveRepo = AppDataSource.getRepository(PersonaDirective);
+
+  const STANDARD_TOOLS = [
+    "Read",
+    "Write",
+    "Edit",
+    "Glob",
+    "Grep",
+    "Bash",
+    "post_context",
+    "ask_siblings",
+    "check_sibling_questions",
+    "answer_sibling",
+  ];
+
+  const REVIEW_ONLY_SLUGS = new Set(["tech_lead", "manager"]);
+
+  const entries = await Promise.all(
+    enabledPersonas.map(async (persona) => {
+      // Fetch active readme directive for system prompt
+      const readmeDirective = await directiveRepo.findOne({
+        where: {
+          personaId: persona.id,
+          type: "readme" as any,
+          isActive: true,
+        },
+      });
+
+      const systemPrompt =
+        readmeDirective?.content ||
+        `You are a ${persona.name}. ${persona.description || ""}`;
+
+      return {
+        slug: persona.slug,
+        name: persona.name,
+        emoji: persona.emoji,
+        color: persona.color,
+        description: persona.description,
+        systemPrompt,
+        specialties: persona.skills || [],
+        tools: STANDARD_TOOLS,
+        reviewOnly: REVIEW_ONLY_SLUGS.has(persona.slug),
+      };
+    })
+  );
+
+  return entries;
+}
+
 // ============================================================================
 // Common Directives (Special Persona)
 // ============================================================================

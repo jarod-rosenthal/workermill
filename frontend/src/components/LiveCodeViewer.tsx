@@ -21,6 +21,7 @@ interface LiveCodeViewerProps {
   files: Record<string, CodeFile>;
   selectedFile: string | null;
   onSelectFile: (filePath: string) => void;
+  personaEmojis?: Record<string, string>;
 }
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
@@ -75,27 +76,11 @@ function getDirPath(filePath: string): string {
   return parts.join("/") || ".";
 }
 
-const PERSONA_EMOJIS: Record<string, string> = {
-  frontend_developer: "\u{1F3A8}",
-  backend_developer: "\u2699\uFE0F",
-  devops_engineer: "\u{1F527}",
-  security_engineer: "\u{1F512}",
-  qa_engineer: "\u{1F9EA}",
-  tech_writer: "\u{1F4DD}",
-  project_manager: "\u{1F4CB}",
-  api_developer: "\u{1F50C}",
-  database_administrator: "\u{1F5C4}\uFE0F",
-  ml_engineer: "\u{1F9E0}",
-  data_engineer: "\u{1F4CA}",
-  mobile_developer_ios: "\u{1F4F1}",
-  mobile_developer_android: "\u{1F916}",
-  tech_lead: "\u{1F468}\u200D\u{1F4BC}",
-};
-
 export function LiveCodeViewer({
   files,
   selectedFile,
   onSelectFile,
+  personaEmojis,
 }: LiveCodeViewerProps) {
   const codeContainerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
@@ -145,7 +130,7 @@ export function LiveCodeViewer({
           const dirPath = getDirPath(file.filePath);
           const isSelected = file.filePath === selectedFile;
           const expertEmoji = file.expert
-            ? PERSONA_EMOJIS[file.expert] || ""
+            ? personaEmojis?.[file.expert] || ""
             : "";
 
           return (
@@ -200,7 +185,7 @@ export function LiveCodeViewer({
               </span>
               {currentFile.expert && (
                 <span className="text-[10px] text-muted-foreground">
-                  {PERSONA_EMOJIS[currentFile.expert] || ""}{" "}
+                  {personaEmojis?.[currentFile.expert] || ""}{" "}
                   {currentFile.expert}
                 </span>
               )}
@@ -239,7 +224,7 @@ export function LiveCodeViewer({
                     <div key={idx} className="font-mono text-xs">
                       {patch.expert && (
                         <div className="text-muted-foreground text-[10px] mb-1">
-                          {PERSONA_EMOJIS[patch.expert] || ""}{" "}
+                          {personaEmojis?.[patch.expert] || ""}{" "}
                           {patch.expert} &middot;{" "}
                           {new Date(patch.timestamp).toLocaleTimeString()}
                         </div>

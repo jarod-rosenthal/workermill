@@ -1,22 +1,7 @@
 import { useMemo } from "react";
 import { X } from "lucide-react";
 
-// Persona config for display
-const PERSONA_CONFIGS: Record<string, { emoji: string; shortLabel: string }> = {
-  frontend_developer: { emoji: "🎨", shortLabel: "Frontend" },
-  backend_developer: { emoji: "⚙️", shortLabel: "Backend" },
-  devops_engineer: { emoji: "🔧", shortLabel: "DevOps" },
-  security_engineer: { emoji: "🔒", shortLabel: "Security" },
-  qa_engineer: { emoji: "🧪", shortLabel: "QA" },
-  tech_writer: { emoji: "📝", shortLabel: "Docs" },
-  project_manager: { emoji: "📋", shortLabel: "PM" },
-  api_developer: { emoji: "🔌", shortLabel: "API" },
-  database_administrator: { emoji: "🗄️", shortLabel: "DBA" },
-  ml_engineer: { emoji: "🤖", shortLabel: "ML" },
-  mobile_developer_ios: { emoji: "📱", shortLabel: "iOS" },
-  mobile_developer_android: { emoji: "🤖", shortLabel: "Android" },
-  manager: { emoji: "👔", shortLabel: "Manager" },
-};
+export type PersonaMap = Record<string, { emoji: string; shortLabel: string }>;
 
 export type StoryStatus =
   | "planned"
@@ -47,6 +32,7 @@ interface DependencyGraphProps {
   stories: PlanStory[];
   onClose: () => void;
   epicTitle?: string;
+  personaMap?: PersonaMap;
 }
 
 // Check if status is "active" (running/executing)
@@ -151,13 +137,13 @@ interface GraphNode {
 }
 
 // Calculate graph layout levels
-function calculateLayout(stories: PlanStory[]): GraphNode[] {
+function calculateLayout(stories: PlanStory[], personaMap?: PersonaMap): GraphNode[] {
   const nodes: GraphNode[] = stories.map((story) => ({
     id: `story-${story.index}`,
     index: story.index,
     title: story.title.length > 22 ? story.title.substring(0, 22) + "..." : story.title,
-    persona: PERSONA_CONFIGS[story.persona]?.shortLabel || story.persona,
-    personaEmoji: PERSONA_CONFIGS[story.persona]?.emoji || "?",
+    persona: personaMap?.[story.persona]?.shortLabel || story.persona,
+    personaEmoji: personaMap?.[story.persona]?.emoji || "?",
     status: story.status,
     dependencies: story.dependencies || [],
     level: 0,
@@ -216,8 +202,9 @@ export function DependencyGraph({
   stories,
   onClose,
   epicTitle,
+  personaMap,
 }: DependencyGraphProps) {
-  const nodes = useMemo(() => calculateLayout(stories), [stories]);
+  const nodes = useMemo(() => calculateLayout(stories, personaMap), [stories, personaMap]);
 
   // Find max level for sizing (including START node at level 0)
   const maxLevel = Math.max(...nodes.map((n) => n.level), 0);
@@ -581,8 +568,8 @@ export function DependencyGraph({
 }
 
 // Inline dependency graph component (for embedding in task cards)
-export function InlineDependencyGraph({ stories }: { stories: PlanStory[] }) {
-  const nodes = useMemo(() => calculateLayout(stories), [stories]);
+export function InlineDependencyGraph({ stories, personaMap }: { stories: PlanStory[]; personaMap?: PersonaMap }) {
+  const nodes = useMemo(() => calculateLayout(stories, personaMap), [stories, personaMap]);
 
   // Simplified layout for inline display
   const maxLevel = Math.max(...nodes.map((n) => n.level), 0);
@@ -829,8 +816,8 @@ function getParentStatusInfo(status: ParentTaskStatus | undefined): { label: str
 }
 
 // Embedded dependency graph for side panel (larger than inline, no modal)
-export function EmbeddedDependencyGraph({ stories, parentTaskStatus }: { stories: PlanStory[]; parentTaskStatus?: ParentTaskStatus }) {
-  const nodes = useMemo(() => calculateLayout(stories), [stories]);
+export function EmbeddedDependencyGraph({ stories, parentTaskStatus, personaMap }: { stories: PlanStory[]; parentTaskStatus?: ParentTaskStatus; personaMap?: PersonaMap }) {
+  const nodes = useMemo(() => calculateLayout(stories, personaMap), [stories, personaMap]);
 
   const maxLevel = Math.max(...nodes.map((n) => n.level), 0);
   const levelGroups = useMemo(() => {

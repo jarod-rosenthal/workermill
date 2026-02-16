@@ -87,6 +87,7 @@ import {
 } from "../../components/icons";
 import { LiveCodeViewer, type CodeFile } from "../../components/LiveCodeViewer";
 import { useIssueTrackerConfig } from "../../hooks/useIssueTrackerConfig";
+import { usePersonas } from "../../hooks/usePersonas";
 import { buildTicketUrl } from "../../lib/utils";
 import type { ControlCenterData, CompletedTask, ActiveTask, WorkflowMode } from "./types";
 import { TERMINAL_STATUSES, API_BASE, PERSONA_CONFIG } from "./types";
@@ -100,6 +101,18 @@ export default function Dashboard() {
 
   // Coordination store for blocker alerts
   const coordinationMessages = useCoordinationStore((s) => s.messages);
+
+  // Persona metadata from API with fallback
+  const personas = usePersonas();
+  const personaEmojis = Object.fromEntries(
+    Object.entries(personas).map(([slug, meta]) => [slug, meta.emoji || ""]),
+  );
+  const personaMap = Object.fromEntries(
+    Object.entries(personas).map(([slug, meta]) => [
+      slug,
+      { emoji: meta.emoji || "", shortLabel: meta.shortLabel || slug },
+    ]),
+  );
 
   // Always start fresh - no cached data to avoid showing stale data on refresh
   // Fresh data loads in <1 second, so showing loading state is better than stale data
@@ -2829,7 +2842,7 @@ export default function Dashboard() {
                                 <span className="text-sm font-medium text-foreground">Execution Flow</span>
                               </div>
                               <div className="flex justify-center">
-                                <EmbeddedDependencyGraph stories={task.planJson.stories} parentTaskStatus={task.status} />
+                                <EmbeddedDependencyGraph stories={task.planJson.stories} parentTaskStatus={task.status} personaMap={personaMap} />
                               </div>
                             </div>
                           )}
@@ -3209,6 +3222,7 @@ export default function Dashboard() {
                                   userSelectedFileRef.current[task.id] = true;
                                   setSelectedCodeFile((prev) => ({ ...prev, [task.id]: filePath }));
                                 }}
+                                personaEmojis={personaEmojis}
                               />
                             )}
                           </div>

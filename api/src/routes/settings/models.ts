@@ -19,6 +19,10 @@ import {
 } from "../../providers/index.js";
 import { isValidProviderId, type ProviderId } from "../../providers/types.js";
 import {
+  PLAN_FEATURES,
+  type OrganizationPlan,
+} from "../../models/index.js";
+import {
   getAvailableModels,
   modelCache,
   secretsClient,
@@ -139,6 +143,19 @@ router.post("/providers/:providerId/test", async (req: Request, res: Response) =
       return;
     }
 
+    // Block non-Anthropic providers on free plan
+    if (providerId !== "anthropic") {
+      const features =
+        PLAN_FEATURES[org.plan as OrganizationPlan] ?? PLAN_FEATURES.free;
+      if (!features.multiProvider) {
+        res.status(403).json({
+          error:
+            "Free plan only supports Anthropic Claude. Upgrade to Pro for all AI providers.",
+        });
+        return;
+      }
+    }
+
     if (!hasProvider(providerId)) {
       res.status(404).json({ error: `Provider not found: ${providerId}` });
       return;
@@ -237,6 +254,19 @@ router.put(
       if (!isValidProviderId(providerId)) {
         res.status(400).json({ error: `Invalid provider ID: ${providerId}` });
         return;
+      }
+
+      // Block non-Anthropic providers on free plan
+      if (providerId !== "anthropic") {
+        const features =
+          PLAN_FEATURES[org.plan as OrganizationPlan] ?? PLAN_FEATURES.free;
+        if (!features.multiProvider) {
+          res.status(403).json({
+            error:
+              "Free plan only supports Anthropic Claude. Upgrade to Pro for all AI providers.",
+          });
+          return;
+        }
       }
 
       if (!hasProvider(providerId)) {

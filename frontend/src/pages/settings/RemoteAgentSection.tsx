@@ -1,6 +1,8 @@
 import {
   CheckCircle,
+  Crown,
   Loader2,
+  Lock,
   Server,
   Copy,
   Zap,
@@ -21,12 +23,34 @@ interface RemoteAgent {
 interface RemoteAgentSectionProps {
   remoteAgents: RemoteAgent[];
   remoteAgentsLoading: boolean;
+  orgPlan?: string;
 }
 
 export function RemoteAgentSection({
   remoteAgents,
   remoteAgentsLoading,
+  orgPlan,
 }: RemoteAgentSectionProps) {
+  const isFreePlan = !orgPlan || orgPlan === "free";
+
+  if (isFreePlan) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground mb-1">Remote Agent</h2>
+          <p className="text-sm text-muted-foreground">Run AI workers on your own machine with your Claude Max subscription</p>
+        </div>
+        <div className="border border-amber-500/30 rounded-xl p-8 bg-amber-500/5 text-center">
+          <Crown className="w-10 h-10 text-amber-400 mx-auto mb-3" />
+          <h3 className="text-lg font-semibold text-foreground mb-2">Upgrade to Pro</h3>
+          <p className="text-sm text-muted-foreground max-w-md mx-auto">
+            Remote Agent requires Pro plan or higher. Free plan supports local execution only.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>

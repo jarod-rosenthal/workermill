@@ -4,7 +4,7 @@ import {
   DeleteSecretCommand,
 } from "@aws-sdk/client-secrets-manager";
 import { AppDataSource } from "../../db/connection.js";
-import { Organization } from "../../models/index.js";
+import { Organization, PLAN_FEATURES, type OrganizationPlan } from "../../models/index.js";
 import { requireAdmin } from "../../middleware/auth.js";
 import { body, validateRequest } from "../../middleware/validation.js";
 import { logger } from "../../utils/logger.js";
@@ -17,6 +17,26 @@ import {
   extractAccountIdFromArn,
 } from "../../services/external-id.js";
 import { getOrgSecret, saveOrgSecret, secretsClient } from "./helpers.js";
+
+/** Middleware: reject if org's plan doesn't include multiProvider (free = Anthropic only) */
+function requireMultiProvider(req: Request, res: Response, next: () => void) {
+  const features = PLAN_FEATURES[req.organization!.plan as OrganizationPlan] ?? PLAN_FEATURES.free;
+  if (!features.multiProvider) {
+    res.status(403).json({ error: "This integration requires Pro plan or higher." });
+    return;
+  }
+  next();
+}
+
+/** Middleware: reject if org's plan doesn't include cloudExecution */
+function requireCloudExecution(req: Request, res: Response, next: () => void) {
+  const features = PLAN_FEATURES[req.organization!.plan as OrganizationPlan] ?? PLAN_FEATURES.free;
+  if (!features.cloudExecution) {
+    res.status(403).json({ error: "Cloud provider integrations require Pro plan or higher." });
+    return;
+  }
+  next();
+}
 
 const router = Router();
 
@@ -677,6 +697,7 @@ router.post("/bitbucket/test", async (req: Request, res: Response) => {
 router.put(
   "/gitlab",
   requireAdmin,
+  requireMultiProvider,
   body("token").optional().isString().withMessage("token must be a string"),
   body("webhookSecret").optional().isString().withMessage("webhookSecret must be a string"),
   validateRequest,
@@ -732,6 +753,7 @@ router.put(
 router.put(
   "/bitbucket",
   requireAdmin,
+  requireMultiProvider,
   body("username").optional().isString().withMessage("username must be a string"),
   body("appPassword").optional().isString().withMessage("appPassword must be a string"),
   body("defaultRepo").optional().isString().withMessage("defaultRepo must be a string"),
@@ -1154,6 +1176,7 @@ router.post("/linear/issues", async (req: Request, res: Response) => {
 router.put(
   "/teams",
   requireAdmin,
+  requireMultiProvider,
   body("webhookUrl").isURL().withMessage("webhookUrl must be a valid URL"),
   validateRequest,
   async (req: Request, res: Response) => {
@@ -1249,6 +1272,7 @@ router.post("/teams/test", async (req: Request, res: Response) => {
 router.put(
   "/slack",
   requireAdmin,
+  requireMultiProvider,
   body("webhookUrl").isURL().withMessage("webhookUrl must be a valid URL"),
   validateRequest,
   async (req: Request, res: Response) => {
@@ -1360,6 +1384,7 @@ router.post("/slack/test", async (req: Request, res: Response) => {
 router.put(
   "/aws",
   requireAdmin,
+  requireCloudExecution,
   body("accessKeyId").isString().notEmpty().withMessage("accessKeyId is required"),
   body("secretAccessKey").isString().notEmpty().withMessage("secretAccessKey is required"),
   body("region").optional().isString().withMessage("region must be a string"),
@@ -1526,6 +1551,7 @@ router.get("/aws/role", async (req: Request, res: Response) => {
 router.put(
   "/aws/role",
   requireAdmin,
+  requireCloudExecution,
   body("roleArn").isString().notEmpty().withMessage("roleArn is required"),
   body("region").optional().isString().withMessage("region must be a string"),
   validateRequest,
@@ -1656,6 +1682,7 @@ router.post("/aws/role/test", async (req: Request, res: Response) => {
 router.put(
   "/gcp",
   requireAdmin,
+  requireCloudExecution,
   body("projectId").isString().notEmpty().withMessage("projectId is required"),
   body("serviceAccountJson").isString().notEmpty().withMessage("serviceAccountJson is required"),
   validateRequest,
@@ -1703,6 +1730,7 @@ router.put(
 router.put(
   "/azure",
   requireAdmin,
+  requireCloudExecution,
   body("clientId").isString().notEmpty().withMessage("clientId is required"),
   body("clientSecret").isString().notEmpty().withMessage("clientSecret is required"),
   body("tenantId").isString().notEmpty().withMessage("tenantId is required"),

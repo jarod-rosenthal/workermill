@@ -35,7 +35,7 @@ const featuredProject: ShowcaseProject = {
   tagline:
     "Production incident management platform — built entirely by WorkerMill.",
   description:
-    "Complete rebuild of a production incident management platform: on-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens.",
+    "Production incident management platform: on-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens.",
   stack: "Express + TypeScript + React + React Native + Terraform",
   storyCount: 105,
   cost: "Claude Max",
@@ -61,6 +61,21 @@ const showcaseProjects: ShowcaseProject[] = [
     liveUrl: "https://teamboard.workermill.com",
     category: "saas",
     icon: <Globe className="w-4 h-4" />,
+  },
+  {
+    id: "taskpulse",
+    name: "TaskPulse",
+    tagline: "Background task monitoring dashboard with scheduling.",
+    description:
+      "Full-stack task monitoring platform with cron scheduling, API key management, real-time run tracking, keyboard shortcuts, and global search. Deployed to Vercel.",
+    stack: "Next.js 16 + Prisma 7 + TailwindCSS v4 + Neon PostgreSQL",
+    storyCount: 36,
+    cost: "Claude Max",
+    duration: "~310 min",
+    repoUrl: "https://github.com/workermill-examples/taskpulse",
+    liveUrl: "https://taskpulse.workermill.com",
+    category: "monitoring",
+    icon: <BarChart3 className="w-4 h-4" />,
   },
   {
     id: "shipapi",

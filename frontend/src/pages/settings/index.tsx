@@ -2004,6 +2004,7 @@ export default function Settings() {
             teamMembersLoading={teamMembersLoading}
             currentUser={currentUser}
             isCurrentUserAdmin={isCurrentUserAdmin}
+            orgPlan={organization?.plan}
             editingMemberId={editingMemberId}
             setEditingMemberId={setEditingMemberId}
             handleUpdateMemberRole={handleUpdateMemberRole}
@@ -2034,6 +2035,7 @@ export default function Settings() {
             getExecutionSummary={getExecutionSummary}
             getRoutingSummary={getRoutingSummary}
             formatCooldownDisplay={formatCooldownDisplay}
+            orgPlan={organization?.plan}
           />
         );
       case "quality":
@@ -2042,6 +2044,7 @@ export default function Settings() {
             settings={settings}
             updateSetting={updateSetting}
             validationErrors={validationErrors}
+            orgPlan={organization?.plan}
           />
         );
       case "integrations":
@@ -2049,6 +2052,7 @@ export default function Settings() {
           <IntegrationsSection
             settings={settings}
             settingsSaving={settingsSaving}
+            orgPlan={organization?.plan}
             handleSetDefaultIssueTracker={handleSetDefaultIssueTracker}
             jiraStatus={jiraStatus}
             githubStatus={githubStatus}
@@ -2102,6 +2106,7 @@ export default function Settings() {
           <RemoteAgentSection
             remoteAgents={remoteAgents}
             remoteAgentsLoading={remoteAgentsLoading}
+            orgPlan={organization?.plan}
           />
         );
       case "billing":

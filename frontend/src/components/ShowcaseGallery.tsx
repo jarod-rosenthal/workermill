@@ -40,7 +40,7 @@ const featuredProject: ShowcaseProject = {
   storyCount: 105,
   cost: "Claude Max",
   duration: "~18 hrs",
-  repoUrl: "https://github.com/jarod-rosenthal/oncallshift",
+  repoUrl: "https://github.com/workermill-examples/oncallshift",
   liveUrl: "https://oncallshift.com",
   category: "incident-management",
   icon: <Zap className="w-5 h-5" />,

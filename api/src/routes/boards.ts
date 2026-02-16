@@ -67,7 +67,7 @@ async function runCardAsWorkerTask(
 
   const card = await cardRepo.findOne({
     where: { id: cardId },
-    relations: ["cardLabels", "cardLabels.label"],
+    relations: ["cardLabels", "cardLabels.label", "board"],
   });
   if (!card) throw new Error("Card not found");
 
@@ -160,7 +160,7 @@ async function runCardAsWorkerTask(
   // Create WorkerTask
   const workerTask = workerTaskRepo.create({
     orgId: org.id,
-    jiraIssueKey: `BOARD-${card.id.slice(0, 8)}`,
+    jiraIssueKey: `${card.board?.name?.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "BOARD"}-${card.id.slice(0, 8)}`,
     jiraIssueId: null,
     summary: card.title,
     description,

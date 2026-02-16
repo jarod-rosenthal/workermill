@@ -28,33 +28,8 @@ import axios from "axios";
 import * as fs from "fs/promises";
 import { execSync, spawn } from "child_process";
 
-// Persona configs for log visibility (consistent with frontend)
-const PERSONA_CONFIGS: Record<string, { emoji: string }> = {
-  frontend_developer: { emoji: "🎨" },
-  backend_developer: { emoji: "⚙️" },
-  devops_engineer: { emoji: "🔧" },
-  security_engineer: { emoji: "🔒" },
-  qa_engineer: { emoji: "🧪" },
-  tech_writer: { emoji: "📝" },
-  project_manager: { emoji: "📋" },
-  api_developer: { emoji: "🔌" },
-  database_administrator: { emoji: "🗄️" },
-  ml_engineer: { emoji: "🧠" },
-  data_engineer: { emoji: "📊" },
-  mobile_developer_ios: { emoji: "📱" },
-  mobile_developer_android: { emoji: "🤖" },
-  tech_lead: { emoji: "👨‍💼" },
-  planning_agent: { emoji: "🗺️" },
-};
-
-// Provider icons for log visibility (consistent with Settings.tsx and ai-sdk-executor.js)
-const PROVIDER_ICONS: Record<string, string> = {
-  anthropic: "🤖",
-  openai: "🔷",
-  google: "🔵",
-  gemini: "🔵",
-  ollama: "🏠",
-};
+// Persona and provider icons are loaded from the Decision API at runtime
+// via setIcons() called by the coordinator after getWorkerConfig().
 
 /**
  * Load directive content from filesystem for a given persona (fallback).
@@ -102,6 +77,9 @@ export class StoryExecutor {
   private resilience: ResilienceConfig;
   // Track auto-retry attempts per story (for blocker handling)
   private retryCountByStory: Map<number, number> = new Map();
+  // Persona/provider icons loaded from Decision API
+  private personaIcons: Record<string, string> = {};
+  private providerIcons: Record<string, string> = {};
   // Callback to notify coordinator when a worktree is created (for graceful shutdown tracking)
   onWorktreeCreated?: (storyIndex: number, worktreePath: string, branchName: string) => void;
 
@@ -152,6 +130,15 @@ export class StoryExecutor {
   }
 
   /**
+   * Set persona and provider icons loaded from the Decision API.
+   * Called by the coordinator after getWorkerConfig().
+   */
+  setIcons(personaIcons: Record<string, string>, providerIcons: Record<string, string>): void {
+    this.personaIcons = personaIcons;
+    this.providerIcons = providerIcons;
+  }
+
+  /**
    * Execute an agent using either the unified AIClient or legacy runAgent.
    * Routes based on the useUnifiedClient feature flag.
    */
@@ -198,9 +185,9 @@ export class StoryExecutor {
    * Format: [🧪 qa_engineer 🤖] for persona + provider visibility
    */
   private getLogPrefix(expert: ExpertPersona, provider: string = "anthropic"): string {
-    const personaConfig = PERSONA_CONFIGS[expert] || { emoji: "🤖" };
-    const providerIcon = PROVIDER_ICONS[provider] || "🤖";
-    return `[${personaConfig.emoji} ${expert} ${providerIcon}]`;
+    const emoji = this.personaIcons[expert] || "🤖";
+    const providerIcon = this.providerIcons[provider] || "🤖";
+    return `[${emoji} ${expert} ${providerIcon}]`;
   }
 
   /**
@@ -1099,7 +1086,7 @@ ${parts.join("\n\n")}
     const pendingQuestions = await this.coordination.getQuestionsForPersona(expert);
     const pendingQuestionsText = pendingQuestions
       .map((q) => {
-        const emoji = PERSONA_CONFIGS[q.fromPersona]?.emoji || "🤖";
+        const emoji = this.personaIcons[q.fromPersona] || "🤖";
         return `- ⚠️ [${emoji} ${q.fromPersona}] is waiting for your answer: "${q.content}"`;
       })
       .join("\n");
@@ -1108,7 +1095,7 @@ ${parts.join("\n\n")}
     const recentQandA = await this.coordination.getRecentQandA(15);
     const qandAText = recentQandA
       .map((msg) => {
-        const emoji = PERSONA_CONFIGS[msg.persona]?.emoji || "🤖";
+        const emoji = this.personaIcons[msg.persona] || "🤖";
         if (msg.messageType === "question") {
           return `- [${emoji} ${msg.persona}] Q: ${msg.content}`;
         } else {

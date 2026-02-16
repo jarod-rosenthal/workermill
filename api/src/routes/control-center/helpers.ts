@@ -331,6 +331,7 @@ export function formatTaskData(
     storiesFailed: number;
   },
   orgMaxReviewRevisions?: number,
+  cardContext?: { boardId: string; cardId: string } | null,
 ) {
   // Get workflow mode and generate steps accordingly
   const workflowMode = task.getWorkflowMode();
@@ -412,6 +413,9 @@ export function formatTaskData(
     lastHeartbeatAt: task.lastHeartbeatAt?.toISOString() ?? null,
     // Error details for failed tasks
     errorMessage: task.errorMessage || null,
+    // Internal board card context (for direct link to card)
+    cardBoardId: cardContext?.boardId ?? null,
+    cardId: cardContext?.cardId ?? null,
   };
 }
 

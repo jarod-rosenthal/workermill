@@ -377,7 +377,7 @@ router.get("/posture", async (req: Request, res: Response) => {
         id: "data_retention",
         name: "Data Retention",
         status: "active" as const,
-        description: `Audit logs retained for ${org.plan === "enterprise" ? 365 : org.plan === "team" ? 90 : 30} days`,
+        description: `Audit logs retained for ${org.plan === "enterprise" ? 365 : org.plan === "pro" ? 90 : 14} days`,
       },
     ];
 

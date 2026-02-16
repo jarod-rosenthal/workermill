@@ -9,7 +9,6 @@ import { AppDataSource } from "../db/connection.js";
 import {
   Organization,
   type OrganizationPlan,
-  PLAN_QUOTAS,
 } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
@@ -33,12 +32,9 @@ export function isStripeConfigured(): boolean {
 // Price IDs for each plan (configured in Stripe Dashboard)
 // These should be set in environment variables
 const PRICE_IDS: Record<OrganizationPlan, string | null> = {
-  free: null, // Legacy - no Stripe price
-  starter: config.stripe?.prices?.starter || "", // $29/mo - 5 hrs included
-  team: config.stripe?.prices?.team || "", // $79/mo - 20 hrs included
-  business: config.stripe?.prices?.business || "", // $199/mo - 60 hrs included
-  pro: config.stripe?.prices?.pro || "", // Legacy - maps to team
-  enterprise: config.stripe?.prices?.enterprise || null, // Custom pricing
+  free: null,
+  pro: config.stripe?.prices?.pro || "",
+  enterprise: config.stripe?.prices?.enterprise || null,
 };
 
 /**
@@ -200,8 +196,17 @@ export async function handleSubscriptionCreated(
     return;
   }
 
+  // Map legacy plan names to new tiers
+  const legacyPlanMap: Record<string, OrganizationPlan> = {
+    starter: "pro",
+    team: "pro",
+    business: "pro",
+  };
+  const newPlan: OrganizationPlan = plan
+    ? (legacyPlanMap[plan] || plan) as OrganizationPlan
+    : "pro";
+
   // Update organization with subscription details — atomic update
-  const newPlan = plan || "starter";
   await orgRepo
     .createQueryBuilder()
     .update(Organization)
@@ -209,20 +214,17 @@ export async function handleSubscriptionCreated(
       stripeSubscriptionId: subscription.id,
       stripeSubscriptionStatus: subscription.status,
       plan: newPlan,
-      taskQuota: PLAN_QUOTAS[newPlan],
       billingCycleStart: new Date(subscription.current_period_start * 1000),
       taskUsageThisMonth: 0,
     } as Record<string, unknown>)
     .where("id = :id", { id: org.id })
     .execute();
   org.plan = newPlan;
-  org.taskQuota = PLAN_QUOTAS[newPlan];
 
   logger.info("Subscription created for organization", {
     orgId: org.id,
     subscriptionId: subscription.id,
     plan: org.plan,
-    taskQuota: org.taskQuota,
   });
 }
 
@@ -360,7 +362,6 @@ export async function handleSubscriptionDeleted(
       stripeSubscriptionId: null,
       stripeSubscriptionStatus: null,
       plan: "free",
-      taskQuota: PLAN_QUOTAS.free,
     } as Record<string, unknown>)
     .where("id = :id", { id: org.id })
     .execute();
@@ -506,16 +507,17 @@ export async function handleCheckoutSessionCompleted(
   org.stripeCustomerId = session.customer as string;
   org.stripeSubscriptionId = session.subscription as string;
 
-  // Set plan from metadata or default to starter
-  if (plan && ["starter", "pro", "enterprise"].includes(plan)) {
-    org.plan = plan;
+  // Map legacy plan names to new tiers and set plan
+  const legacyPlanMap: Record<string, OrganizationPlan> = {
+    starter: "pro",
+    team: "pro",
+    business: "pro",
+  };
+  if (plan) {
+    org.plan = (legacyPlanMap[plan] || plan) as OrganizationPlan;
   } else {
-    // Fallback: try to determine plan from session
-    org.plan = "starter";
+    org.plan = "pro";
   }
-
-  // Set task quota based on plan
-  org.taskQuota = PLAN_QUOTAS[org.plan];
 
   // Reset usage for new subscription
   org.taskUsageThisMonth = 0;
@@ -532,7 +534,6 @@ export async function handleCheckoutSessionCompleted(
       stripeCustomerId: org.stripeCustomerId,
       stripeSubscriptionId: org.stripeSubscriptionId,
       plan: org.plan,
-      taskQuota: org.taskQuota,
       taskUsageThisMonth: 0,
       billingCycleStart: new Date(),
       stripeSubscriptionStatus: "active",
@@ -546,12 +547,16 @@ export async function handleCheckoutSessionCompleted(
     customerId: org.stripeCustomerId,
     subscriptionId: org.stripeSubscriptionId,
     plan: org.plan,
-    taskQuota: org.taskQuota,
   });
 }
 
 /**
- * Check if organization can create a new task (quota check)
+ * Check if organization can create a new task
+ *
+ * All plans allow unlimited tasks. This checks:
+ * 1. Billing is not paused
+ * 2. For paid plans (pro/enterprise), subscription must be active
+ * Free plans are always allowed.
  */
 export async function canCreateTask(org: Organization): Promise<{
   allowed: boolean;
@@ -566,35 +571,28 @@ export async function canCreateTask(org: Organization): Promise<{
     };
   }
 
+  // Check if billing is paused
+  if (org.billingPaused) {
+    return {
+      allowed: false,
+      reason: org.billingPausedReason || "Billing is paused. Please contact support.",
+      usage: { used: org.taskUsageThisMonth, quota: -1 },
+    };
+  }
+
   // Check subscription status for paid plans
   if (org.plan !== "free" && org.stripeSubscriptionStatus !== "active") {
     return {
       allowed: false,
       reason: "Subscription is not active. Please update your payment method.",
-      usage: { used: org.taskUsageThisMonth, quota: org.taskQuota },
-    };
-  }
-
-  // Unlimited plans (-1 quota)
-  if (org.taskQuota === -1) {
-    return {
-      allowed: true,
       usage: { used: org.taskUsageThisMonth, quota: -1 },
     };
   }
 
-  // Check quota
-  if (org.taskUsageThisMonth >= org.taskQuota) {
-    return {
-      allowed: false,
-      reason: `Monthly usage limit reached. Upgrade your plan for additional compute hours.`,
-      usage: { used: org.taskUsageThisMonth, quota: org.taskQuota },
-    };
-  }
-
+  // All plans allow unlimited tasks
   return {
     allowed: true,
-    usage: { used: org.taskUsageThisMonth, quota: org.taskQuota },
+    usage: { used: org.taskUsageThisMonth, quota: -1 },
   };
 }
 

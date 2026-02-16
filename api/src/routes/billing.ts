@@ -28,11 +28,12 @@ import {
 import * as creditBilling from "../services/credit-billing.js";
 import {
   type OrganizationPlan,
-  PLAN_QUOTAS,
   PLAN_USER_LIMITS,
-  PLAN_HOURS,
   PLAN_PRICES,
-  PLAN_OVERAGE_RATES,
+  PLAN_MAX_WORKERS,
+  PLAN_MAX_EXPERTS,
+  PLAN_LOG_RETENTION,
+  PLAN_FEATURES,
 } from "../models/Organization.js";
 import { body, query, validateRequest } from "../middleware/validation.js";
 
@@ -91,10 +92,12 @@ router.get(
     const plan = org.plan as OrganizationPlan;
 
     // Get plan details
-    const includedHours = PLAN_HOURS[plan] ?? 3;
-    const price = PLAN_PRICES[plan] ?? 49;
-    const userLimit = PLAN_USER_LIMITS[plan] ?? 3;
-    const overageRate = PLAN_OVERAGE_RATES[plan] ?? 12;
+    const price = PLAN_PRICES[plan] ?? 0;
+    const userLimit = PLAN_USER_LIMITS[plan] ?? 1;
+    const maxWorkers = PLAN_MAX_WORKERS[plan] ?? 1;
+    const maxExperts = PLAN_MAX_EXPERTS[plan] ?? 3;
+    const logRetention = PLAN_LOG_RETENTION[plan] ?? 14;
+    const features = PLAN_FEATURES[plan] ?? PLAN_FEATURES.free;
 
     // Calculate billing period (defaults to current month if no billingCycleStart)
     let periodStart: Date;
@@ -118,33 +121,6 @@ router.get(
     const msRemaining = periodEnd.getTime() - now.getTime();
     const daysRemaining = Math.max(0, Math.ceil(msRemaining / (1000 * 60 * 60 * 24)));
 
-    // Query sum of ecsTaskSeconds for completed tasks in current billing period
-    const taskRepo = AppDataSource.getRepository(WorkerTask);
-    const result = await taskRepo
-      .createQueryBuilder("task")
-      .select("COALESCE(SUM(task.ecsTaskSeconds), 0)", "totalSeconds")
-      .where("task.orgId = :orgId", { orgId: org.id })
-      .andWhere("task.createdAt >= :periodStart", { periodStart })
-      .andWhere("task.createdAt < :periodEnd", { periodEnd })
-      .andWhere("task.status IN (:...statuses)", {
-        statuses: ["completed", "deployed", "pr_created", "review_requested", "pr_approved", "review_approved"],
-      })
-      .getRawOne();
-
-    const totalSeconds = parseInt(result?.totalSeconds || "0", 10);
-    const hoursUsed = totalSeconds / 3600;
-
-    // Calculate usage metrics
-    const isUnlimited = includedHours === -1;
-    const hoursIncluded = isUnlimited ? -1 : includedHours;
-    const hoursRemaining = isUnlimited ? -1 : Math.max(0, includedHours - hoursUsed);
-    const overageHours = isUnlimited ? 0 : Math.max(0, hoursUsed - includedHours);
-    const overageCost = overageHours * overageRate;
-    const percentUsed = isUnlimited ? 0 : includedHours > 0 ? Math.min(100, (hoursUsed / includedHours) * 100) : 0;
-
-    // Calculate estimated invoice
-    const nextInvoiceEstimate = price + overageCost;
-
     // Get team member count
     const userRepo = AppDataSource.getRepository(User);
     const memberCount = await userRepo.count({
@@ -156,24 +132,16 @@ router.get(
         id: plan,
         name: plan.charAt(0).toUpperCase() + plan.slice(1),
         price,
-        includedHours: hoursIncluded,
         userLimit,
-        overageRate,
-      },
-      usage: {
-        hoursUsed: Math.round(hoursUsed * 100) / 100,
-        hoursIncluded,
-        hoursRemaining: isUnlimited ? -1 : Math.round(hoursRemaining * 100) / 100,
-        overageHours: Math.round(overageHours * 100) / 100,
-        overageCost: Math.round(overageCost * 100) / 100,
-        percentUsed: Math.round(percentUsed * 10) / 10,
-        isUnlimited,
+        maxWorkers,
+        maxExperts,
+        logRetention,
+        features,
       },
       billing: {
         periodStart: periodStart.toISOString(),
         periodEnd: periodEnd.toISOString(),
         daysRemaining,
-        nextInvoiceEstimate: Math.round(nextInvoiceEstimate * 100) / 100,
       },
       team: {
         memberCount,
@@ -188,72 +156,61 @@ router.get(
   asyncHandler(async (_req: Request, res: Response) => {
     const plans = [
       {
-        id: "starter",
-        name: "Starter",
-        price: 29,
-        includedHours: 5,
-        userLimit: 5,
+        id: "free",
+        name: "Free",
+        price: 0,
+        userLimit: 1,
+        maxWorkers: 1,
+        maxExperts: 3,
+        logRetention: 14,
         features: [
-          "5 compute hours/month included",
-          "Up to 5 users",
-          "All integrations",
-          "All execution modes",
-          "Email support",
+          "1 concurrent worker",
+          "3 expert personas per task",
+          "Local + BYOK execution only",
           "14-day log retention",
+          "Community support",
         ],
-        overageRate: 8, // $8/hr
       },
       {
-        id: "team",
-        name: "Team",
-        price: 79,
-        includedHours: 20,
-        userLimit: 20,
+        id: "pro",
+        name: "Pro",
+        price: 29,
+        launchPrice: 14.50,
+        userLimit: 5,
+        maxWorkers: 5,
+        maxExperts: -1,
+        logRetention: 90,
         features: [
-          "20 compute hours/month included",
-          "Up to 20 users",
-          "Warm Container Pool",
-          "30-day audit logs",
-          "Priority support (< 4hr)",
+          "5 concurrent workers",
+          "Unlimited expert personas",
+          "Cloud execution + Warm Pool",
+          "90-day log retention",
           "Advanced analytics",
+          "Memory persistence",
+          "Role-based access",
+          "Configurable Tech Lead",
+          "Priority support",
         ],
-        overageRate: 6, // $6/hr
         highlighted: true,
-      },
-      {
-        id: "business",
-        name: "Business",
-        price: 199,
-        includedHours: 60,
-        userLimit: -1, // Unlimited
-        features: [
-          "60 compute hours/month included",
-          "Unlimited users",
-          "Self-hosted SCM support",
-          "SSO / SAML",
-          "90-day audit logs",
-          "Compliance Center",
-          "Dedicated support",
-        ],
-        overageRate: 4, // $4/hr
+        badge: "Launch Price",
       },
       {
         id: "enterprise",
         name: "Enterprise",
-        price: null, // Custom pricing
-        includedHours: -1, // Unlimited
-        userLimit: -1, // Unlimited
+        price: null,
+        userLimit: -1,
+        maxWorkers: -1,
+        maxExperts: -1,
+        logRetention: -1,
         features: [
-          "Custom compute allocation",
-          "Unlimited users",
+          "Unlimited everything",
+          "SSO / SAML",
+          "Compliance Center",
           "Dedicated Worker Pool",
-          "Priority Task Queue",
-          "1 year+ audit retention",
           "Data Residency Controls",
           "99.9% SLA",
           "Dedicated CSM",
         ],
-        overageRate: null, // Custom
       },
     ];
 
@@ -336,8 +293,8 @@ router.post(
   requireAdmin,
   body("plan")
     .isString()
-    .isIn(["starter", "pro", "enterprise"])
-    .withMessage("plan must be one of: starter, pro, enterprise"),
+    .isIn(["pro"])
+    .withMessage("plan must be: pro (enterprise is contact-sales, free needs no checkout)"),
   validateRequest,
   asyncHandler(async (req: Request, res: Response) => {
     if (!config.stripe?.secretKey) {

@@ -145,8 +145,8 @@ async function runCardAsWorkerTask(
   const basePersona = (org.defaultWorkerPersona || "backend_developer") as WorkerPersona;
   const workerPersona = needsPlanning ? "project_manager" : basePersona;
 
-  // Repo
-  const githubRepo = org.getDefaultRepo();
+  // Repo (card-level override takes precedence over org default)
+  const githubRepo = card.githubRepo || org.getDefaultRepo();
   if (!githubRepo) {
     throw new Error("No repository configured for organization");
   }
@@ -583,6 +583,7 @@ router.get(
               assigneeName: null,
               workerTaskId: card.workerTaskId,
               workerStatus: card.workerTask?.status || null,
+              githubRepo: card.githubRepo,
               labels: card.cardLabels?.map((cl) => ({
                 id: cl.label?.id,
                 name: cl.label?.name,
@@ -1022,12 +1023,13 @@ router.post(
   body("priority").optional().isIn(["urgent", "high", "medium", "low"]),
   body("dueDate").optional().isISO8601(),
   body("coverColor").optional().isString().isLength({ max: 20 }),
+  body("githubRepo").optional().isString().isLength({ max: 255 }),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
       const org = req.organization!;
       const boardId = req.params.boardId as string;
-      const { columnId, title, description, priority, dueDate, coverColor } = req.body;
+      const { columnId, title, description, priority, dueDate, coverColor, githubRepo } = req.body;
 
       const boardRepo = AppDataSource.getRepository(KbBoard);
       const board = await boardRepo.findOne({ where: { id: boardId, orgId: org.id } });
@@ -1060,6 +1062,7 @@ router.post(
         priority: priority || null,
         dueDate: dueDate ? new Date(dueDate) : null,
         coverColor: coverColor || null,
+        githubRepo: githubRepo || null,
       });
       await cardRepo.save(card);
 
@@ -1176,13 +1179,14 @@ router.put(
   body("dueDate").optional(),
   body("assigneeId").optional(),
   body("coverColor").optional(),
+  body("githubRepo").optional().isString().isLength({ max: 255 }),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
       const org = req.organization!;
       const boardId = req.params.boardId as string;
       const cardId = req.params.cardId as string;
-      const { title, description, priority, dueDate, assigneeId, coverColor } = req.body;
+      const { title, description, priority, dueDate, assigneeId, coverColor, githubRepo } = req.body;
 
       const boardRepo = AppDataSource.getRepository(KbBoard);
       const board = await boardRepo.findOne({ where: { id: boardId, orgId: org.id } });
@@ -1204,6 +1208,7 @@ router.put(
       if (dueDate !== undefined) card.dueDate = dueDate ? new Date(dueDate) : null;
       if (assigneeId !== undefined) card.assigneeId = assigneeId || null;
       if (coverColor !== undefined) card.coverColor = coverColor || null;
+      if (githubRepo !== undefined) card.githubRepo = githubRepo || null;
       await cardRepo.save(card);
 
       await logActivity(boardId, req.user!.id, "updated", "card", cardId);

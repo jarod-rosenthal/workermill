@@ -111,13 +111,13 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
     //   review_requested → pr_approved, deployed, failed, escalated
     //   pr_approved → deployed, failed
     //   pr_created → review_requested, pr_approved, deployed, failed
-    //   escalated → failed, completed
+    //   escalated → running (blocker resolved), failed, completed
     if (task.isWaiting()) {
       const forwardTransitions: Record<string, string[]> = {
         pr_created: ["review_requested", "pr_approved", "deployed", "failed", "escalated"],
         review_requested: ["pr_approved", "deployed", "failed", "escalated"],
         pr_approved: ["deployed", "failed"],
-        escalated: ["failed", "completed", "deployed"],
+        escalated: ["running", "failed", "completed", "deployed"],
       };
       const allowed = forwardTransitions[task.status] || [];
       if (!result || !allowed.includes(result)) {
@@ -145,6 +145,10 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
     // Map result to status
     let newStatus: typeof task.status;
     switch (result) {
+      case "running":
+        // Worker resuming after blocker resolution — map to active execution state
+        newStatus = "executing";
+        break;
       case "deployed":
         newStatus = "deployed";
         break;
@@ -173,7 +177,13 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
 
     // Update task
     task.status = newStatus;
-    task.completedAt = new Date();
+    if (result === "running") {
+      // Resuming from escalated — worker is still active, clear premature completedAt
+      task.completedAt = null as unknown as Date;
+      task.errorMessage = "";
+    } else {
+      task.completedAt = new Date();
+    }
 
     if (prUrl) {
       task.githubPrUrl = prUrl;

@@ -333,40 +333,11 @@ lsof -ti :5173 -ti :5174 2>/dev/null | xargs -r kill -9
 
 ***REMOVED******REMOVED******REMOVED*** Remote Agent Mode
 
-Run workers locally while using the **cloud** WorkerMill dashboard (workermill.com). A lightweight agent process polls the cloud API for tasks, runs planning via Claude CLI, and spawns Docker worker containers that report logs/status directly to the cloud.
-
-```bash
-***REMOVED*** 1. Install the agent CLI globally
-npm install -g @workermill/agent
-
-***REMOVED*** 2. Run interactive setup (configures API key, SCM tokens, etc.)
-workermill-agent setup
-
-***REMOVED*** 3. Start the remote agent
-workermill-agent start
-```
-
-| Aspect | Local Mode | Remote Agent Mode |
-|--------|------------|-------------------|
-| Dashboard | localhost:5173 | workermill.com |
-| Database | Local Docker PostgreSQL | Cloud RDS |
-| API | Local (tsx watch) | Cloud ECS |
-| Workers | Docker (local API) | Docker (cloud API) |
-| Planning | Local Claude CLI | Local Claude CLI |
-| Cost | Claude Max subscription | Claude Max subscription |
-
-**Key difference:** `API_BASE_URL` in worker containers points to `https://workermill.com` instead of `localhost`, so all logs, coordination, and status updates go to the cloud dashboard.
+Run workers locally while using the **cloud** dashboard (workermill.com). `npm install -g @workermill/agent && workermill-agent setup && workermill-agent start`. Key difference: `API_BASE_URL` points to `https://workermill.com` instead of `localhost`.
 
 ***REMOVED******REMOVED******REMOVED*** Local Architecture
 
-**What runs where in local mode:**
-
-| Component | How It Runs | Auto-Reload? |
-|-----------|-------------|--------------|
-| PostgreSQL | Docker container | N/A |
-| API | Direct process (`tsx watch`) | ✅ Yes |
-| Frontend | Direct process (Vite) | ✅ Yes |
-| Worker | Docker container | ❌ No — see "Rebuild Worker Image" in Critical Rules |
+API (`tsx watch`) and Frontend (Vite) auto-reload. PostgreSQL and Worker run as Docker containers — **Worker does NOT auto-reload** (see "Rebuild Worker Image" in Critical Rules).
 
 ---
 
@@ -503,27 +474,11 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 
 ***REMOVED******REMOVED******REMOVED*** Worker Deployment Workflow
 
-**Standard flow (no `deploy` label):**
-1. Worker creates PR with code changes
-2. Worker outputs `::result::review_requested`
-3. Human reviews and approves PR
-4. Webhook triggers WorkerMill
-5. Worker re-runs to merge PR and deploy
+**Standard:** Worker creates PR → outputs `::result::review_requested` → human approves → webhook re-triggers → worker merges & deploys.
 
-**Auto-deploy flow (with `deploy` label):**
-1. Worker creates PR → immediately merges → deploys
-2. Worker outputs `::result::deployed`
+**Auto-deploy (with `deploy` label):** Worker creates PR → immediately merges → deploys → outputs `::result::deployed`.
 
-***REMOVED******REMOVED******REMOVED*** Webhooks
-
-| Platform | Endpoint |
-|----------|----------|
-| Jira | `https://workermill.com/api/webhooks/jira` |
-| Linear | `https://workermill.com/api/webhooks/linear` |
-| GitHub Issues | `https://workermill.com/api/webhooks/github-issues` |
-| GitHub PR | `https://workermill.com/api/webhooks/github` |
-| GitLab MR | `https://workermill.com/api/webhooks/gitlab` |
-| BitBucket PR | `https://workermill.com/api/webhooks/bitbucket` |
+**Webhooks:** All at `https://workermill.com/api/webhooks/{jira,linear,github-issues,github,gitlab,bitbucket}`. Route files in `api/src/routes/webhooks/`.
 
 ---
 
@@ -585,65 +540,15 @@ Worker decision logic (error classification, quality gates, review parsing, ques
 
 All IP lives in `api/src/services/worker-decision-engine.ts`. Worker source files (`error-classifier.ts`, `quality-gate.ts`, `blocker-manager.ts`) are still present for backward compatibility but will be removed once all call sites are migrated.
 
-***REMOVED******REMOVED******REMOVED*** Unified AIClient Interface
-
-The `worker/ai-clients/` module provides a unified interface for AI execution across different SDKs:
-
-```
-AIClient Interface
-       │
-       ├── AnthropicAgentClient (Claude CLI - used by Epic)
-       │   └── Spawns claude process, streams JSON output
-       │
-       └── AISdkClient (Vercel AI SDK - OpenAI, Google, Ollama)
-           └── Uses generateText/streamText with provider routing
-```
-
-| File | Purpose |
-|------|---------|
-| `worker/ai-clients/types.ts` | `AIClient` interface, `AIClientOptions`, `AIClientResult` |
-| `worker/ai-clients/anthropic-agent.ts` | Claude CLI wrapper |
-| `worker/ai-clients/ai-sdk-client.ts` | Vercel AI SDK wrapper |
-| `worker/ai-clients/index.ts` | `createAIClient()` factory function |
-
 ***REMOVED******REMOVED******REMOVED*** Frontend Architecture
 
-| Concept | Implementation |
-|---------|----------------|
-| State management | Zustand stores in `frontend/src/stores/` |
-| API calls | Axios with base URL from env, auth interceptors |
-| Routing | React Router v7 in `frontend/src/App.tsx` |
-| Styling | TailwindCSS with custom config |
-| Forms | React Hook Form + Zod validation |
-| Auth | Cognito-backed, token stored in localStorage |
+React 19 + Vite + TailwindCSS + Zustand. Routing via React Router v7 (`App.tsx`). Auth via Cognito (token in localStorage). Forms via React Hook Form + Zod.
 
-**SSE Log Streaming:**
-- API: `GET /api/control-center/tasks/:taskId/stream` returns SSE events
-- Frontend: `EventSource` in task detail page subscribes to log stream
-- Logs polled from PostgreSQL every 500ms and pushed via SSE
+***REMOVED******REMOVED******REMOVED*** Multi-Provider Support
 
-***REMOVED******REMOVED******REMOVED*** Multi-Provider AI Support
+**AI Providers:** `anthropic` (default), `openai`, `google`, `ollama` — all production. Models discoverable in org settings.
 
-| Provider | Models | Status |
-|----------|--------|--------|
-| `anthropic` (default) | claude-haiku-4-5, claude-sonnet-4, claude-opus-4 | Production |
-| `openai` | gpt-4o, gpt-5.1-codex, o1, o1-mini | Production |
-| `google` | gemini-2.0-flash, gemini-3-pro-preview | Production |
-| `ollama` | qwen2.5-coder:32b, deepseek-r1:70b, etc. | Production |
-
-***REMOVED******REMOVED******REMOVED*** Multi-SCM Provider Support
-
-| Provider | Status | Auth Method | Default Repo Field |
-|----------|--------|-------------|-------------------|
-| `github` (default) | Production | Bearer token | `defaultGithubRepo` |
-| `gitlab` | Production | PRIVATE-TOKEN | `defaultGitlabRepo` |
-| `bitbucket` | Production | Repository Access Token | `defaultBitbucketRepo` |
-
-**oncallshift uses Bitbucket:** Repositories at `bitbucket.org/oncallshift/`. Workers targeting OCS tickets use Bitbucket provider.
-
-**No cross-provider fallback:** Each SCM provider requires its own credentials. Workers will fail if the configured `scmProvider` doesn't have credentials set up in Settings > Integrations.
-
-Bitbucket auth details are in the Critical Rules section above ("DO NOT Use Outdated Bitbucket Auth").
+**SCM Providers:** `github` (Bearer token), `gitlab` (PRIVATE-TOKEN), `bitbucket` (Repository Access Token). Each needs credentials in Settings > Integrations. **oncallshift uses Bitbucket.** See Critical Rules for Bitbucket auth details.
 
 ---
 
@@ -793,27 +698,16 @@ The agent heartbeat endpoint must ALWAYS update `remote_agents.last_heartbeat_at
 ***REMOVED******REMOVED******REMOVED*** Terraform Commands
 
 ```bash
-***REMOVED*** Production
 cd infrastructure/terraform/environments/prod
-terraform init -backend-config="bucket=workermill-terraform-state-AWS_ACCOUNT_ID"
-terraform plan
-terraform apply
-
-***REMOVED*** Development
-cd infrastructure/terraform/environments/dev
 terraform init -backend-config="bucket=workermill-terraform-state-AWS_ACCOUNT_ID"
 terraform plan && terraform apply
 ```
 
-**Note:** No `-var` flags needed - all variables have defaults in `variables.tf`.
+No `-var` flags needed — defaults in `variables.tf`. **Dev environment is NOT running** (see Critical Rules).
 
 ***REMOVED******REMOVED******REMOVED*** SES Email Configuration
 
-**Cross-region:** Outbound email uses **us-east-2** SES (has production sending access). Inbound uses us-east-1. Do not change this. All email templates in `api/src/services/email.ts`.
-
-***REMOVED******REMOVED******REMOVED*** Bastion Host
-
-SSH bastion for local development database access. Runs as a t4g.nano Spot instance on-demand (~$0.001/hr). Lambda (`workermill-dev-bastion-control`) manages start/stop and auto-whitelists your IP. SSH key at `~/.ssh/workermill-bastion`. See Local Development section for commands.
+**Cross-region:** Outbound email uses **us-east-2** SES (production sending access). Inbound uses us-east-1. Do not change this. Templates in `api/src/services/email.ts`.
 
 ---
 
@@ -892,34 +786,6 @@ Enforces strict plan adherence: extracts requirements, implements one at a time,
 
 ***REMOVED******REMOVED*** MCP Tools Available
 
-Claude Code has access to MCP servers for external integrations. Use `ToolSearch` to load these before calling.
+MCP servers: `workermill` (task management, orchestrator, codebase RAG), `github`, `jira`, `ollama`, `oncallshift`. Tools are auto-discoverable.
 
-| Server | Tools | Purpose |
-|--------|-------|---------|
-| `workermill` | Task management, orchestrator control, **codebase RAG** | Manage WorkerMill tasks and search indexed code |
-| `github` | `create_issue`, `create_pull_request`, `search_code`, etc. | GitHub operations |
-| `jira` | `jira_get`, `jira_post`, `jira_put` | Jira API operations |
-| `ollama` | `ollama_chat`, `ollama_generate`, `ollama_list` | Local LLM inference |
-| `oncallshift` | Incident management, schedules, escalation policies | OncallShift platform operations |
-
-***REMOVED******REMOVED******REMOVED*** Codebase RAG Tools (WorkerMill MCP)
-
-Search indexed repositories using vector embeddings — same RAG system the AI workers use.
-
-| Tool | Purpose |
-|------|---------|
-| `workermill_codebase_search` | Semantic code search (natural language query → relevant snippets). Use `multiQuery: true` for broader recall |
-| `workermill_codebase_symbol` | Find code by exact symbol name (function, class, interface) |
-| `workermill_codebase_file` | Get all indexed chunks for a specific file |
-| `workermill_codebase_index` | Trigger indexing for a repository (async) |
-| `workermill_codebase_status` | Check indexing status (pending/indexing/ready/failed) |
-| `workermill_codebase_stats` | Org-wide indexing statistics |
-| `workermill_codebase_repositories` | List all indexed repositories |
-
-**Prerequisites:** Ollama running with `nomic-embed-text`, `codebaseIndexingEnabled: true` in org settings, repositories indexed.
-
-**Usage pattern:**
-```
-1. ToolSearch query: "github create issue"
-2. Call the returned tool (e.g., mcp__github__create_issue)
-```
+**Codebase RAG** (WorkerMill MCP): `workermill_codebase_search` (semantic search, use `multiQuery: true` for broader recall), `workermill_codebase_symbol`, `workermill_codebase_file`, `workermill_codebase_index`, `workermill_codebase_status`. Requires Ollama + `nomic-embed-text` + `codebaseIndexingEnabled: true` in org settings.

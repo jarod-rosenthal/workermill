@@ -97,15 +97,40 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
       return;
     }
 
-    // Skip if task already completed or in a waiting state (e.g. review_requested, pr_approved).
-    // Terminal states: completed, deployed, failed, cancelled
-    // Waiting states: review_requested, pr_approved, escalated, pr_created
-    // These are all states where the worker already reported its actual result — a late
-    // fallback from the spawner (which only knows exit code) must not overwrite them.
-    if (task.isTerminal() || task.isWaiting()) {
+    // Skip if task already completed (terminal states).
+    if (task.isTerminal()) {
       logger.info("Task already transitioned, ignoring worker-complete", { taskId, currentStatus: task.status });
       res.json({ status: "ignored", reason: `Task already in ${task.status}` });
       return;
+    }
+
+    // For tasks in a waiting state (review_requested, pr_approved, escalated, pr_created),
+    // allow transitions to a more advanced state (e.g. review_requested → pr_approved)
+    // but block lateral/redundant calls (e.g. spawner fallback sending "completed" for exit 0).
+    // Valid forward transitions from waiting states:
+    //   review_requested → pr_approved, deployed, failed, escalated
+    //   pr_approved → deployed, failed
+    //   pr_created → review_requested, pr_approved, deployed, failed
+    //   escalated → failed, completed
+    if (task.isWaiting()) {
+      const forwardTransitions: Record<string, string[]> = {
+        pr_created: ["review_requested", "pr_approved", "deployed", "failed", "escalated"],
+        review_requested: ["pr_approved", "deployed", "failed", "escalated"],
+        pr_approved: ["deployed", "failed"],
+        escalated: ["failed", "completed", "deployed"],
+      };
+      const allowed = forwardTransitions[task.status] || [];
+      if (!result || !allowed.includes(result)) {
+        logger.info("Task in waiting state, ignoring non-forward worker-complete", {
+          taskId,
+          currentStatus: task.status,
+          incomingResult: result,
+          allowedTransitions: allowed,
+        });
+        res.json({ status: "ignored", reason: `Task already in ${task.status}, result '${result}' not a valid forward transition` });
+        return;
+      }
+      logger.info("Forward transition from waiting state", { taskId, from: task.status, to: result });
     }
 
     logger.info("Worker completion reported", {

@@ -43,7 +43,7 @@ const features: FeatureRow[] = [
     devin: "no",
     copilot: "no",
     cursor: "no",
-    workermill_note: "14 expert personas",
+    workermill_note: "Unlimited custom personas",
   },
   {
     feature: "Multi-provider LLMs",

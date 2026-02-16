@@ -791,6 +791,7 @@ router.get(
             coverColor: card.coverColor,
             workerTaskId: card.workerTaskId,
             workerStatus: card.workerTask?.status || null,
+            githubRepo: card.githubRepo,
             labels: card.cardLabels?.map((cl) => ({
               id: cl.label?.id,
               name: cl.label?.name,
@@ -1132,6 +1133,7 @@ router.get(
           coverColor: card.coverColor,
           workerTaskId: card.workerTaskId,
           workerStatus: card.workerTask?.status || null,
+          githubRepo: card.githubRepo,
           assignee: card.assignee
             ? { id: card.assignee.id, fullName: card.assignee.fullName, email: card.assignee.email }
             : null,

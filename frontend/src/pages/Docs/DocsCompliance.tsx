@@ -110,7 +110,7 @@ const complianceFrameworks = [
 
 // Data retention policies
 const retentionPolicies = [
-  { data: "Task Logs", retention: "30 days", configurable: true },
+  { data: "Task Logs", retention: "14-90 days (plan-dependent)", configurable: true },
   { data: "Completed Tasks", retention: "90 days", configurable: true },
   { data: "Audit Logs", retention: "1 year", configurable: false },
   { data: "User Sessions", retention: "24 hours", configurable: false },
@@ -287,7 +287,7 @@ export default function DocsCompliance() {
         </div>
         <p className="text-sm text-muted-foreground">
           Configure retention policies in <span className="text-foreground font-medium">Settings → Compliance → Retention</span>.
-          Extended retention available on Enterprise plans.
+          Log retention: 14 days (Free), 90 days (Pro), unlimited (Enterprise).
         </p>
       </section>
 

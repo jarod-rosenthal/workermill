@@ -12,9 +12,7 @@ import { TransactionHistory } from "../components/billing/TransactionHistory";
 import {
   ArrowLeft,
   Zap,
-  Clock,
   Users,
-  TrendingUp,
   Gift,
   Copy,
   CheckCircle,
@@ -24,6 +22,9 @@ import {
   DollarSign,
   AlertTriangle,
   Calendar,
+  Cpu,
+  Brain,
+  Archive,
 } from "lucide-react";
 
 interface SubscriptionData {
@@ -31,24 +32,16 @@ interface SubscriptionData {
     id: string;
     name: string;
     price: number;
-    includedHours: number;
     userLimit: number;
-    overageRate: number;
-  };
-  usage: {
-    hoursUsed: number;
-    hoursIncluded: number;
-    hoursRemaining: number;
-    overageHours: number;
-    overageCost: number;
-    percentUsed: number;
-    isUnlimited: boolean;
+    maxWorkers: number;
+    maxExperts: number;
+    logRetention: number;
+    features: Record<string, boolean>;
   };
   billing: {
     periodStart: string;
     periodEnd: string;
     daysRemaining: number;
-    nextInvoiceEstimate: number;
   };
   team: {
     memberCount: number;
@@ -90,11 +83,14 @@ interface Plan {
   id: string;
   name: string;
   price: number | null;
-  includedHours: number;
+  launchPrice?: number;
   userLimit: number;
+  maxWorkers: number;
+  maxExperts: number;
+  logRetention: number;
   features: string[];
-  overageRate: number | null;
   highlighted?: boolean;
+  badge?: string;
 }
 
 interface ReferralStats {
@@ -338,19 +334,9 @@ export default function Billing() {
     }
   };
 
-  // Get next plan for upgrade prompt
-  const _nextPlan = plans.find((p) => {
-    const planOrder = ["starter", "team", "business", "enterprise"];
-    const currentIndex = planOrder.indexOf(subscription?.plan.id || "starter");
-    return p.id === planOrder[currentIndex + 1];
-  });
-
-  // Get progress bar color based on usage
-  const getProgressColor = (percent: number) => {
-    if (percent >= 90) return "bg-red-500";
-    if (percent >= 75) return "bg-amber-500";
-    return "bg-green-500";
-  };
+  // Get next plan for upgrade prompt (free → pro; enterprise is contact-sales)
+  const _nextPlan =
+    subscription?.plan.id === "free" ? plans.find((p) => p.id === "pro") : null;
 
   // Format date for display
   const formatDate = (dateString: string) => {
@@ -498,27 +484,34 @@ export default function Billing() {
           </div>
 
           <div className="p-6">
-            <div className="grid grid-cols-3 gap-6 mb-6">
+            <div className="grid grid-cols-4 gap-6 mb-6">
               <div className="text-center p-4 rounded-lg bg-muted/30">
-                <Clock className="w-6 h-6 text-primary mx-auto mb-2" />
+                <Cpu className="w-6 h-6 text-primary mx-auto mb-2" />
                 <p className="text-2xl font-bold text-foreground">
-                  {subscription.plan.includedHours === -1 ? "Unlimited" : `${subscription.plan.includedHours}h`}
+                  {subscription.plan.maxWorkers === -1 ? "Unlimited" : subscription.plan.maxWorkers}
                 </p>
-                <p className="text-sm text-muted-foreground">Included Hours</p>
+                <p className="text-sm text-muted-foreground">Workers</p>
               </div>
               <div className="text-center p-4 rounded-lg bg-muted/30">
-                <Users className="w-6 h-6 text-cyan-400 mx-auto mb-2" />
+                <Brain className="w-6 h-6 text-cyan-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-foreground">
+                  {subscription.plan.maxExperts === -1 ? "Unlimited" : subscription.plan.maxExperts}
+                </p>
+                <p className="text-sm text-muted-foreground">Experts / Task</p>
+              </div>
+              <div className="text-center p-4 rounded-lg bg-muted/30">
+                <Users className="w-6 h-6 text-amber-400 mx-auto mb-2" />
                 <p className="text-2xl font-bold text-foreground">
                   {subscription.plan.userLimit === -1 ? "Unlimited" : subscription.plan.userLimit}
                 </p>
-                <p className="text-sm text-muted-foreground">Team Max</p>
+                <p className="text-sm text-muted-foreground">Users</p>
               </div>
               <div className="text-center p-4 rounded-lg bg-muted/30">
-                <TrendingUp className="w-6 h-6 text-amber-400 mx-auto mb-2" />
+                <Archive className="w-6 h-6 text-green-400 mx-auto mb-2" />
                 <p className="text-2xl font-bold text-foreground">
-                  ${subscription.plan.overageRate}/hr
+                  {subscription.plan.logRetention === -1 ? "Unlimited" : `${subscription.plan.logRetention}d`}
                 </p>
-                <p className="text-sm text-muted-foreground">Overage Rate</p>
+                <p className="text-sm text-muted-foreground">Log Retention</p>
               </div>
             </div>
 
@@ -538,72 +531,41 @@ export default function Billing() {
           </div>
         </div>
 
-        {/* Hours Usage & Billing Period - Two Column */}
+        {/* Plan Features & Billing Period - Two Column */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Hours Usage Card */}
+          {/* Plan Features Card */}
           <div className="bg-card rounded-xl border border-border p-6">
             <div className="flex items-center gap-2 mb-4">
-              <Clock className="w-5 h-5 text-primary" />
-              <h3 className="font-semibold text-foreground">Compute Hours</h3>
+              <Sparkles className="w-5 h-5 text-primary" />
+              <h3 className="font-semibold text-foreground">Plan Features</h3>
             </div>
 
-            {subscription.usage.isUnlimited ? (
-              <div className="text-center py-4">
-                <p className="text-3xl font-bold text-foreground">
-                  {subscription.usage.hoursUsed.toFixed(1)}h
-                </p>
-                <p className="text-sm text-muted-foreground">used this period</p>
-                <p className="text-xs text-green-400 mt-2">Unlimited compute hours</p>
-              </div>
-            ) : (
-              <>
-                {/* Progress Bar */}
-                <div className="mb-4">
-                  <div className="flex justify-between text-sm mb-2">
-                    <span className="text-muted-foreground">
-                      {subscription.usage.hoursUsed.toFixed(1)}h / {subscription.usage.hoursIncluded}h used
-                    </span>
-                    <span className={`font-medium ${
-                      subscription.usage.percentUsed >= 90 ? "text-red-400" :
-                      subscription.usage.percentUsed >= 75 ? "text-amber-400" : "text-green-400"
-                    }`}>
-                      {subscription.usage.percentUsed.toFixed(0)}%
-                    </span>
-                  </div>
-                  <div className="h-3 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${getProgressColor(subscription.usage.percentUsed)}`}
-                      style={{ width: `${Math.min(100, subscription.usage.percentUsed)}%` }}
+            <div className="space-y-3">
+              {subscription.plan.features &&
+                Object.entries(subscription.plan.features).map(([key, enabled]) => (
+                  <div key={key} className="flex items-center gap-2 text-sm">
+                    <CheckCircle
+                      className={`w-4 h-4 ${enabled ? "text-green-400" : "text-muted-foreground/40"}`}
                     />
+                    <span
+                      className={
+                        enabled ? "text-foreground" : "text-muted-foreground line-through"
+                      }
+                    >
+                      {key
+                        .replace(/([A-Z])/g, " $1")
+                        .replace(/^./, (s) => s.toUpperCase())
+                        .trim()}
+                    </span>
                   </div>
-                </div>
-
-                {/* Overage Info */}
-                <div className="space-y-2">
-                  {subscription.usage.overageHours > 0 ? (
-                    <>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-amber-400">Overage hours</span>
-                        <span className="font-medium text-amber-400">
-                          {subscription.usage.overageHours.toFixed(1)}h
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-amber-400">Overage charges</span>
-                        <span className="font-medium text-amber-400">
-                          ${subscription.usage.overageCost.toFixed(2)}
-                        </span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex items-center gap-2 text-sm text-green-400">
-                      <CheckCircle className="w-4 h-4" />
-                      <span>No overage charges</span>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
+                ))}
+              {(!subscription.plan.features ||
+                Object.keys(subscription.plan.features).length === 0) && (
+                <p className="text-sm text-muted-foreground">
+                  No feature flags for this plan.
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Billing Period Card */}
@@ -616,28 +578,28 @@ export default function Billing() {
             <div className="space-y-4">
               <div>
                 <p className="text-2xl font-bold text-foreground">
-                  {formatDate(subscription.billing.periodStart)} - {formatDate(subscription.billing.periodEnd)}
+                  {formatDate(subscription.billing.periodStart)} -{" "}
+                  {formatDate(subscription.billing.periodEnd)}
                 </p>
               </div>
 
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Days remaining</span>
-                <span className="font-medium text-foreground">{subscription.billing.daysRemaining} days</span>
+                <span className="font-medium text-foreground">
+                  {subscription.billing.daysRemaining} days
+                </span>
               </div>
 
-              <div className="pt-4 border-t border-border">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Est. Invoice</span>
-                  <span className="text-2xl font-bold text-foreground">
-                    ${subscription.billing.nextInvoiceEstimate.toFixed(2)}
-                  </span>
+              {subscription.plan.price > 0 && (
+                <div className="pt-4 border-t border-border">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Monthly Cost</span>
+                    <span className="text-2xl font-bold text-foreground">
+                      ${subscription.plan.price}
+                    </span>
+                  </div>
                 </div>
-                {subscription.usage.overageCost > 0 && (
-                  <p className="text-xs text-muted-foreground mt-1 text-right">
-                    ${subscription.plan.price} base + ${subscription.usage.overageCost.toFixed(2)} overage
-                  </p>
-                )}
-              </div>
+              )}
             </div>
           </div>
         </div>
@@ -770,7 +732,7 @@ export default function Billing() {
                         <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
                           <span className="text-xs font-bold text-primary">2</span>
                         </div>
-                        <p className="text-muted-foreground">They get 1 month free on any paid plan</p>
+                        <p className="text-muted-foreground">They get 1 month free on Pro plan</p>
                       </div>
                       <div className="flex items-start gap-3">
                         <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">

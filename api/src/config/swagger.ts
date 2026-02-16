@@ -279,7 +279,7 @@ const swaggerDefinition = {
           },
           taskQuota: {
             type: "integer",
-            description: "Legacy field. Plans are now billed by compute hours. See includedHours.",
+            description: "Legacy field. Plans use task-based quotas.",
           },
           userLimit: {
             type: "integer",

@@ -9,7 +9,7 @@ const newProjectSteps = [
     details: [
       "Plain English project description",
       "Pick a starter template or start blank",
-      "Free plan preview before you build",
+      "Free preview before you build",
     ],
   },
   {
@@ -30,7 +30,7 @@ const newProjectSteps = [
     description: "Free local mode or paid cloud execution",
     details: [
       "Free: Your machine + Claude Max ($0)",
-      "Pro: Unlimited parallel workers",
+      "Pro: 5 concurrent workers + cloud",
       "BYOK or cloud — zero AI markup",
     ],
   },

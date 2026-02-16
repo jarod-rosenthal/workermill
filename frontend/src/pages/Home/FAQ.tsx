@@ -10,7 +10,7 @@ const faqItems: FAQItem[] = [
   {
     question: "How does pricing work?",
     answer:
-      "WorkerMill uses simple hours-based pricing. Each plan includes monthly compute hours - the actual container runtime for your tasks. A quick bug fix might use 10-15 minutes, while a larger feature could use 30-60 minutes. If you exceed your included hours, overage rates apply per hour. All plans include BYOK (Bring Your Own Keys) - use your own AI provider API keys and only pay WorkerMill for orchestration.",
+      "WorkerMill offers three plans: Free, Pro, and Enterprise. The Free plan lets you run tasks locally with your own AI keys at no cost. Pro ($29/month, launching at $14.50) adds cloud execution, warm pool, advanced analytics, and priority support. Enterprise offers unlimited everything with SSO, compliance, and dedicated support. All plans include BYOK (Bring Your Own Keys) - use your own AI provider API keys and only pay WorkerMill for orchestration.",
   },
   {
     question: "What is Epic Mode and why is it the default?",
@@ -23,9 +23,9 @@ const faqItems: FAQItem[] = [
       "BYOK means you provide your own API keys for AI providers like Anthropic, OpenAI, Google, or self-hosted Ollama. You pay those providers directly at their rates, and WorkerMill only charges for orchestration (compute hours). This gives you full control over AI costs and lets you use self-hosted models at zero AI cost. Planning and review features work with all supported providers.",
   },
   {
-    question: "What counts as a compute hour?",
+    question: "What does a task look like?",
     answer:
-      "Compute hours measure actual container runtime, billed to the second (displayed in minutes for readability). When you submit a Jira or Linear ticket, WorkerMill spins up a container that clones your repo, analyzes the task, writes code, runs tests, and creates a PR. The clock runs from container start to completion. A typical bug fix uses 10-20 minutes, a medium feature 20-45 minutes. You pay only for exact time used - no rounding.",
+      "When you submit a Jira, Linear, or GitHub issue, WorkerMill spins up an isolated container that clones your repo, analyzes the task, writes code, runs tests, and creates a PR. A typical bug fix takes 10-20 minutes, a medium feature 20-45 minutes. You can watch progress in real-time via the dashboard's live terminal stream.",
   },
   {
     question: "How does WorkerMill access my code?",

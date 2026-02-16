@@ -312,15 +312,21 @@ export function BillingSection({
                   <Sparkles className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-foreground">Need More Capacity?</h3>
-                  <p className="text-sm text-muted-foreground">View all plans and upgrade options</p>
+                  <h3 className="font-semibold text-foreground">
+                    {(!organization?.plan || organization.plan === "free") ? "Upgrade to Pro" : "Need More Capacity?"}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {(!organization?.plan || organization.plan === "free")
+                      ? "Upgrade to Pro for 5x parallel workers, cloud execution, and team features"
+                      : "View all plans and upgrade options"}
+                  </p>
                 </div>
               </div>
               <button
                 onClick={handleOpenBillingPortal}
                 className="px-4 py-2 border border-primary text-primary rounded-lg hover:bg-primary/10 inline-flex items-center gap-2 font-medium text-sm"
               >
-                Upgrade Plan
+                {(!organization?.plan || organization.plan === "free") ? "Upgrade to Pro" : "Manage Plan"}
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>

@@ -224,8 +224,7 @@ export default function ManagementDashboard() {
   const getPlanBadge = (plan: string) => {
     const planColors: Record<string, string> = {
       free: "bg-gray-500/10 text-gray-500",
-      starter: "bg-blue-500/10 text-blue-500",
-      professional: "bg-purple-500/10 text-purple-500",
+      pro: "bg-purple-500/10 text-purple-500",
       enterprise: "bg-amber-500/10 text-amber-500",
     };
 

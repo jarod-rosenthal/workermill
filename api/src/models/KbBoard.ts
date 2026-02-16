@@ -36,6 +36,12 @@ export class KbBoard {
   @Column({ type: "varchar", length: 50, nullable: true })
   template: string | null;
 
+  @Column({ type: "varchar", length: 10 })
+  prefix: string;
+
+  @Column({ name: "next_card_number", type: "int", default: 1 })
+  nextCardNumber: number;
+
   @Column({ name: "created_by", type: "uuid", nullable: true })
   createdById: string | null;
 

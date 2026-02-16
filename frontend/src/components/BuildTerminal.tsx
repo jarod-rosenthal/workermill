@@ -201,49 +201,6 @@ function StoryCard({ story }: { story: PlannedStory }) {
   );
 }
 
-// ─── Persona colors for log prefix ─────────────────────────────────────────
-
-const LOG_PERSONA_COLORS: Record<string, string> = {
-  planning_agent: "text-teal-400",
-  backend_developer: "text-blue-400",
-  frontend_developer: "text-purple-400",
-  database_administrator: "text-yellow-400",
-  devops_engineer: "text-orange-400",
-  qa_engineer: "text-green-400",
-  security_engineer: "text-red-400",
-  tech_lead: "text-amber-400",
-  api_developer: "text-indigo-400",
-  coordinator: "text-slate-500",
-};
-
-function LogLine({ line }: { line: string }) {
-  if (!line) return null;
-
-  // Match lines like "[🗺️ planning_agent 🤖] message" or "[coordinator] message"
-  const match = line.match(/^(\[[^\]]+\])\s+(.*)/);
-  if (!match) {
-    return <div className="text-slate-300 leading-relaxed">{line}</div>;
-  }
-
-  const prefix = match[1];
-  const message = match[2];
-
-  let color = "text-slate-500";
-  for (const [persona, cls] of Object.entries(LOG_PERSONA_COLORS)) {
-    if (prefix.includes(persona)) {
-      color = cls;
-      break;
-    }
-  }
-
-  return (
-    <div className="leading-relaxed">
-      <span className={`${color} select-none mr-1.5`}>{prefix}</span>
-      <span className="text-slate-300">{message}</span>
-    </div>
-  );
-}
-
 // ─── Live Terminal ──────────────────────────────────────────────────────────
 
 function LiveTerminal({
@@ -265,7 +222,10 @@ function LiveTerminal({
   return (
     <div ref={containerRef} className="p-4 font-mono text-xs flex-1 overflow-y-auto">
       {logs.map((line, i) => (
-        <LogLine key={i} line={line} />
+        <div key={i} className="text-slate-300 leading-relaxed">
+          <span className="text-slate-600 select-none mr-2">$</span>
+          {line}
+        </div>
       ))}
       {!isComplete && (
         <div className="flex items-center gap-1 text-teal-400 mt-1">
@@ -336,7 +296,7 @@ export default function BuildTerminal({
       setReplayComplete(false);
       setActiveTab("terminal");
 
-      const logs = (plan.logs || []).filter(Boolean);
+      const logs = plan.logs || [];
       let i = 0;
 
       const playNext = () => {

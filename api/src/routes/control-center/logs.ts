@@ -15,6 +15,7 @@ import {
 } from "../../services/log-parser.js";
 import { body, param, query, validateRequest } from "../../middleware/validation.js";
 import { planningProgressEmitter, type PlanningProgressEvent } from "../../services/planning-progress-events.js";
+import { codeEventEmitter, type CodeEvent } from "../../services/code-events.js";
 import {
   cloudwatchLogs,
   parseLogForError,
@@ -437,10 +438,34 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
     },
   );
 
+  // Subscribe to real-time code events (in-memory, not persisted) for Live Code Viewer
+  const unsubscribeCode = codeEventEmitter.subscribeToCodeEvents(
+    taskId,
+    (event: CodeEvent) => {
+      if (!isConnected) return;
+      try {
+        res.write("event: code_event\n");
+        res.write(`data: ${JSON.stringify({
+          type: "code_event",
+          toolName: event.toolName,
+          filePath: event.filePath,
+          content: event.content,
+          oldStr: event.oldStr,
+          newStr: event.newStr,
+          expert: event.expert,
+          timestamp: event.timestamp,
+        })}\n\n`);
+      } catch (error) {
+        logger.error("Error sending code event SSE", { error, taskId });
+      }
+    },
+  );
+
   req.on("close", () => {
     clearInterval(logInterval);
     clearInterval(pingInterval);
     unsubscribePlanning();
+    unsubscribeCode();
   });
 });
 

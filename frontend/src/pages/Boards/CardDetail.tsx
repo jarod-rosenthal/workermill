@@ -91,6 +91,8 @@ function getWorkerStatusStyle(status: string | null): string {
     case "pr_created":
     case "review_requested":
       return "bg-purple-500/15 text-purple-400";
+    case "pr_approved":
+      return "bg-blue-500/15 text-blue-400";
     case "completed":
     case "deployed":
       return "bg-green-500/15 text-green-400";
@@ -115,6 +117,8 @@ function formatWorkerStatus(status: string | null): string {
       return "PR Created";
     case "review_requested":
       return "Review Requested";
+    case "pr_approved":
+      return "PR Approved";
     case "completed":
       return "Completed";
     case "deployed":

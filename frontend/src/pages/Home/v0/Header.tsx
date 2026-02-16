@@ -1,7 +1,7 @@
 import { Link, useLocation } from "react-router-dom"
 import { Button } from "../../../components/ui/button"
 
-const navItems = [
+const navItems: Array<{ label: string; href: string; isRoute?: boolean }> = [
   { label: "Showcase", href: "***REMOVED***showcase" },
   { label: "How It Works", href: "***REMOVED***how-it-works" },
   { label: "Pricing", href: "***REMOVED***pricing" },

@@ -12,7 +12,7 @@ import { Project } from "./Project.js";
 import type { InternalTask } from "./InternalTask.js";
 import { Organization } from "./Organization.js";
 
-export type BoardColumnType = "backlog" | "ready" | "in_progress" | "review" | "done";
+export type BoardColumnType = "backlog" | "in_progress" | "review" | "pr_approved" | "deployed";
 
 // Default column configurations
 export const DEFAULT_COLUMNS: Array<{
@@ -22,11 +22,11 @@ export const DEFAULT_COLUMNS: Array<{
   color: string;
   isDefault: boolean;
 }> = [
-  { name: "Backlog", columnType: "backlog", position: 0, color: "***REMOVED***6b7280", isDefault: false },
-  { name: "Ready", columnType: "ready", position: 1, color: "***REMOVED***3b82f6", isDefault: true },
-  { name: "In Progress", columnType: "in_progress", position: 2, color: "***REMOVED***f59e0b", isDefault: false },
-  { name: "Review", columnType: "review", position: 3, color: "***REMOVED***8b5cf6", isDefault: false },
-  { name: "Done", columnType: "done", position: 4, color: "***REMOVED***10b981", isDefault: false },
+  { name: "Backlog", columnType: "backlog", position: 0, color: "***REMOVED***6b7280", isDefault: true },
+  { name: "In Progress", columnType: "in_progress", position: 1, color: "***REMOVED***f59e0b", isDefault: false },
+  { name: "Review", columnType: "review", position: 2, color: "***REMOVED***8b5cf6", isDefault: false },
+  { name: "PR Approved", columnType: "pr_approved", position: 3, color: "***REMOVED***3b82f6", isDefault: false },
+  { name: "Deployed", columnType: "deployed", position: 4, color: "***REMOVED***10b981", isDefault: false },
 ];
 
 @Entity("board_columns")
@@ -76,12 +76,11 @@ export class BoardColumn {
 
   // Helper to check if this column allows worker assignment
   canAssignToWorker(): boolean {
-    // Only Ready column allows assigning to worker
-    return this.columnType === "ready";
+    return this.columnType === "backlog";
   }
 
   // Helper to check if this is a terminal column
   isTerminal(): boolean {
-    return this.columnType === "done";
+    return this.columnType === "deployed";
   }
 }

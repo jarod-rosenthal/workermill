@@ -230,6 +230,35 @@ export class StoryExecutor {
   }
 
   /**
+   * Post a code event (Write/Edit) to the Live Code Viewer.
+   * Fire-and-forget — does not block on failures.
+   */
+  private postCodeEvent(
+    toolName: "Write" | "Edit",
+    filePath: string,
+    expert: string,
+    data: { content?: string; oldStr?: string; newStr?: string },
+  ): void {
+    // Truncate content at 100KB
+    const truncate = (s?: string) =>
+      s && s.length > 100_000 ? s.substring(0, 100_000) : s;
+
+    this.logsApi
+      .post("/api/control-center/code-events", {
+        taskId: this.config.parentTaskId,
+        toolName,
+        filePath,
+        content: truncate(data.content),
+        oldStr: truncate(data.oldStr),
+        newStr: truncate(data.newStr),
+        expert,
+      })
+      .catch(() => {
+        // Fire and forget — don't block on code event failures
+      });
+  }
+
+  /**
    * Load directive content for a persona.
    * Tries API first (supports org customizations), falls back to file system.
    * Also records directive usage for effectiveness tracking.
@@ -1328,6 +1357,18 @@ Begin your implementation now.`;
       }
       // Post tool usage to dashboard + console (postLog handles both)
       this.postLog(toolMsg, expert, "tool");
+
+      // Post code events for Write/Edit tools (Live Code Viewer)
+      if (msg.toolName === "Write" && msg.toolInput) {
+        this.postCodeEvent("Write", msg.toolInput.file_path, expert, {
+          content: msg.toolInput.content,
+        });
+      } else if (msg.toolName === "Edit" && msg.toolInput) {
+        this.postCodeEvent("Edit", msg.toolInput.file_path, expert, {
+          oldStr: msg.toolInput.old_string,
+          newStr: msg.toolInput.new_string,
+        });
+      }
     } else if (msg.type === "text" && msg.content) {
       // Post full content to dashboard + console (postLog handles both)
       this.postLog(msg.content, expert, "output");

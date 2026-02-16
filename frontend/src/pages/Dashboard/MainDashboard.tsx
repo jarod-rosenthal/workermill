@@ -53,6 +53,7 @@ import {
   FileSearch,
   Monitor,
   LayoutGrid,
+  FileCode,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../../components/RalphProgress";
 import type { PlanningProgressData } from "../../components/PlanningProgress";
@@ -84,6 +85,7 @@ import {
   StepsIcon,
   TechLeadReviewIcon,
 } from "../../components/icons";
+import { LiveCodeViewer, type CodeFile } from "../../components/LiveCodeViewer";
 import { useIssueTrackerConfig } from "../../hooks/useIssueTrackerConfig";
 import { buildTicketUrl } from "../../lib/utils";
 import type { ControlCenterData, CompletedTask, ActiveTask, WorkflowMode } from "./types";
@@ -170,6 +172,12 @@ export default function Dashboard() {
   const [shownTerminals, setShownTerminals] = useState<Set<string>>(new Set());
   // Auto-scroll toggle for terminal output
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+
+  // Live Code Viewer state
+  const [codeFiles, setCodeFiles] = useState<Record<string, Record<string, CodeFile>>>({});
+  const [selectedCodeFile, setSelectedCodeFile] = useState<Record<string, string | null>>({});
+  const [terminalTab, setTerminalTab] = useState<Record<string, "terminal" | "code">>({});
+  const userSelectedFileRef = useRef<Record<string, boolean>>({});
 
   // Task detail modal
   const [selectedTask, setSelectedTask] = useState<CompletedTask | null>(null);
@@ -1006,6 +1014,73 @@ export default function Dashboard() {
       }
     });
 
+    // Handle code events for Live Code Viewer (ephemeral, in-memory only)
+    eventSource.addEventListener("code_event", (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        const filePath = data.filePath as string;
+        const toolName = data.toolName as "Write" | "Edit";
+
+        setCodeFiles((prev) => {
+          const taskFiles = { ...(prev[taskId] || {}) };
+          const existing = taskFiles[filePath];
+          const now = Date.now();
+
+          if (toolName === "Write") {
+            taskFiles[filePath] = {
+              filePath,
+              content: data.content,
+              patches: existing?.patches || [],
+              lastTouched: now,
+              lastToolName: "Write",
+              expert: data.expert,
+            };
+          } else {
+            // Edit — append patch
+            const patches = [...(existing?.patches || [])];
+            patches.push({
+              oldStr: data.oldStr || "",
+              newStr: data.newStr || "",
+              expert: data.expert,
+              timestamp: data.timestamp,
+            });
+            // Bound patches to 20 per file
+            const bounded = patches.length > 20 ? patches.slice(-20) : patches;
+            taskFiles[filePath] = {
+              filePath,
+              content: existing?.content,
+              patches: bounded,
+              lastTouched: now,
+              lastToolName: "Edit",
+              expert: data.expert || existing?.expert,
+            };
+          }
+
+          // Bound to 50 files per task
+          const fileEntries = Object.entries(taskFiles);
+          if (fileEntries.length > 50) {
+            const sorted = fileEntries.sort(
+              ([, a], [, b]) => b.lastTouched - a.lastTouched,
+            );
+            const trimmed = Object.fromEntries(sorted.slice(0, 50));
+            return { ...prev, [taskId]: trimmed };
+          }
+
+          return { ...prev, [taskId]: taskFiles };
+        });
+
+        // Auto-select file if user hasn't manually selected one for this task
+        if (!userSelectedFileRef.current[taskId]) {
+          setSelectedCodeFile((prev) => ({
+            ...prev,
+            [taskId]: filePath,
+          }));
+        }
+      } catch (err) {
+        console.error("Error parsing code event SSE data:", err);
+      }
+    });
+
     eventSource.onopen = () => {
       stopPolling(taskId); // Stop fallback polling once SSE opens
       setStreamingTerminals((prev) => new Set([...prev, taskId]));
@@ -1115,6 +1190,18 @@ export default function Dashboard() {
     });
     setParsedErrors((prev) => {
       const cleaned: Record<string, ParsedError[]> = {};
+      for (const taskId of Object.keys(prev)) {
+        if (activeTaskIdSet.has(taskId)) {
+          cleaned[taskId] = prev[taskId];
+        }
+      }
+      if (Object.keys(cleaned).length !== Object.keys(prev).length) {
+        return cleaned;
+      }
+      return prev;
+    });
+    setCodeFiles((prev) => {
+      const cleaned: Record<string, Record<string, CodeFile>> = {};
       for (const taskId of Object.keys(prev)) {
         if (activeTaskIdSet.has(taskId)) {
           cleaned[taskId] = prev[taskId];
@@ -1688,7 +1775,7 @@ export default function Dashboard() {
         // Flatten tasks from columns, filter to ready/backlog tasks without workerTaskId
         const availableTasks: Array<{ taskKey: string; title: string; persona: string | null; columnType: string }> = [];
         for (const column of data.columns) {
-          if (column.columnType === "ready" || column.columnType === "backlog") {
+          if (column.columnType === "backlog") {
             for (const task of column.tasks) {
               if (!task.workerTaskId) {
                 availableTasks.push({
@@ -2987,7 +3074,7 @@ export default function Dashboard() {
                         <div className="mt-2 flex gap-2">
                           {/* Terminal - takes remaining space after error panel */}
                           <div className="terminal-bg border rounded-lg overflow-hidden flex-1 min-w-0">
-                            {/* Terminal header */}
+                            {/* Terminal header with tabs */}
                             <div className="flex items-center justify-between px-3 py-1.5 terminal-header border-b">
                               <div className="flex items-center gap-2">
                                 <div className="flex gap-1.5">
@@ -2995,37 +3082,68 @@ export default function Dashboard() {
                                   <div className="w-3 h-3 rounded-full bg-yellow-500" />
                                   <div className="w-3 h-3 rounded-full bg-green-500" />
                                 </div>
-                                <span className="text-xs text-gray-400 font-mono">
-                                  worker-{workerId}
-                                </span>
+                                {/* Terminal / Live Code tabs */}
+                                <div className="flex items-center gap-0.5 ml-1">
+                                  <button
+                                    onClick={() => setTerminalTab((prev) => ({ ...prev, [task.id]: "terminal" }))}
+                                    className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-t transition-colors ${
+                                      (terminalTab[task.id] || "terminal") === "terminal"
+                                        ? "bg-background border-b-2 border-primary text-foreground"
+                                        : "text-muted-foreground hover:text-foreground"
+                                    }`}
+                                  >
+                                    <Terminal className="w-3 h-3" />
+                                    Terminal
+                                  </button>
+                                  <button
+                                    onClick={() => setTerminalTab((prev) => ({ ...prev, [task.id]: "code" }))}
+                                    className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-t transition-colors ${
+                                      terminalTab[task.id] === "code"
+                                        ? "bg-background border-b-2 border-primary text-foreground"
+                                        : "text-muted-foreground hover:text-foreground"
+                                    }`}
+                                  >
+                                    <FileCode className="w-3 h-3" />
+                                    Live Code
+                                    {codeFiles[task.id] && Object.keys(codeFiles[task.id]).length > 0 && (
+                                      <span className="px-1 py-0.5 text-[10px] rounded-full bg-primary/20 text-primary">
+                                        {Object.keys(codeFiles[task.id]).length}
+                                      </span>
+                                    )}
+                                  </button>
+                                </div>
                                 <span className={`text-xs font-mono ${workerOffline[task.id] ? "text-orange-400" : "text-green-400"}`}>
                                   {workerOffline[task.id] ? "[worker offline]" : "[streaming]"}
                                 </span>
                               </div>
                               <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => setAutoScrollEnabled(!autoScrollEnabled)}
-                                  className={`text-xs px-2 py-0.5 rounded ${autoScrollEnabled ? "bg-green-600 text-white" : "bg-gray-600 text-gray-300"}`}
-                                  title={autoScrollEnabled ? "Auto-scroll ON - click to disable" : "Auto-scroll OFF - click to enable"}
-                                >
-                                  {autoScrollEnabled ? "Auto-scroll ON" : "Auto-scroll OFF"}
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    const terminalEl = terminalRefs.current[task.id];
-                                    if (terminalEl) terminalEl.scrollTop = terminalEl.scrollHeight;
-                                  }}
-                                  className="text-gray-400 hover:text-white p-1"
-                                  title="Scroll to bottom"
-                                >
-                                  <RefreshCw className="w-3 h-3" />
-                                </button>
+                                {(terminalTab[task.id] || "terminal") === "terminal" && (
+                                  <>
+                                    <button
+                                      onClick={() => setAutoScrollEnabled(!autoScrollEnabled)}
+                                      className={`text-xs px-2 py-0.5 rounded ${autoScrollEnabled ? "bg-green-600 text-white" : "bg-gray-600 text-gray-300"}`}
+                                      title={autoScrollEnabled ? "Auto-scroll ON - click to disable" : "Auto-scroll OFF - click to enable"}
+                                    >
+                                      {autoScrollEnabled ? "Auto-scroll ON" : "Auto-scroll OFF"}
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        const terminalEl = terminalRefs.current[task.id];
+                                        if (terminalEl) terminalEl.scrollTop = terminalEl.scrollHeight;
+                                      }}
+                                      className="text-gray-400 hover:text-white p-1"
+                                      title="Scroll to bottom"
+                                    >
+                                      <RefreshCw className="w-3 h-3" />
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </div>
-                            {/* Terminal content */}
+                            {/* Terminal content — always mounted, hidden via CSS to keep SSE alive */}
                             <div
                               ref={(el) => { terminalRefs.current[task.id] = el; }}
-                              className="p-3 h-96 overflow-y-auto font-mono text-xs terminal-text leading-relaxed terminal-bg"
+                              className={`p-3 h-96 overflow-y-auto font-mono text-xs terminal-text leading-relaxed terminal-bg ${(terminalTab[task.id] || "terminal") !== "terminal" ? "hidden" : ""}`}
                             >
                               {streamingLogs[task.id] && streamingLogs[task.id].length > 0 ? (
                                 streamingLogs[task.id]
@@ -3075,6 +3193,17 @@ export default function Dashboard() {
                                 </div>
                               )}
                             </div>
+                            {/* Live Code Viewer — shown when code tab is active */}
+                            {terminalTab[task.id] === "code" && (
+                              <LiveCodeViewer
+                                files={codeFiles[task.id] || {}}
+                                selectedFile={selectedCodeFile[task.id] || null}
+                                onSelectFile={(filePath) => {
+                                  userSelectedFileRef.current[task.id] = true;
+                                  setSelectedCodeFile((prev) => ({ ...prev, [task.id]: filePath }));
+                                }}
+                              />
+                            )}
                           </div>
 
                           {/* Side Panel - Tabbed: Errors & Communications */}

@@ -28,13 +28,14 @@ export interface DefinitionOfDoneItem {
 
 // Internal task status - drives column assignment automatically
 export type InternalTaskStatus =
-  | "draft"      // Task created, missing required fields (no persona, incomplete AC)
-  | "ready"      // Task has all required fields, ready to execute
-  | "queued"     // WorkerTask created, waiting to be claimed
-  | "executing"  // Worker is actively working on task
-  | "review"     // PR created, awaiting review
-  | "completed"  // Task completed (PR merged or deployed)
-  | "failed";    // Task execution failed
+  | "draft"        // Task created, missing required fields (no persona, incomplete AC)
+  | "ready"        // Task has all required fields, ready to execute
+  | "queued"       // WorkerTask created, waiting to be claimed
+  | "executing"    // Worker is actively working on task
+  | "review"       // PR created, awaiting review
+  | "pr_approved"  // PR approved by tech lead, ready for merge/deploy
+  | "deployed"     // Task deployed (PR merged and deployed)
+  | "failed";      // Task execution failed
 
 @Entity("internal_tasks")
 export class InternalTask {
@@ -250,7 +251,7 @@ export class InternalTask {
    * Check if task is in a terminal state
    */
   isTerminal(): boolean {
-    return this.status === "completed" || this.status === "failed";
+    return this.status === "deployed" || this.status === "failed";
   }
 
   /**

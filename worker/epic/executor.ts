@@ -1360,13 +1360,15 @@ Begin your implementation now.`;
 
       // Post code events for Write/Edit tools (Live Code Viewer)
       if (msg.toolName === "Write" && msg.toolInput) {
-        this.postCodeEvent("Write", msg.toolInput.file_path, expert, {
-          content: msg.toolInput.content,
+        const input = msg.toolInput as Record<string, string>;
+        this.postCodeEvent("Write", input.file_path, expert, {
+          content: input.content,
         });
       } else if (msg.toolName === "Edit" && msg.toolInput) {
-        this.postCodeEvent("Edit", msg.toolInput.file_path, expert, {
-          oldStr: msg.toolInput.old_string,
-          newStr: msg.toolInput.new_string,
+        const input = msg.toolInput as Record<string, string>;
+        this.postCodeEvent("Edit", input.file_path, expert, {
+          oldStr: input.old_string,
+          newStr: input.new_string,
         });
       }
     } else if (msg.type === "text" && msg.content) {

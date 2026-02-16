@@ -556,15 +556,44 @@ router.delete(
     }
 
     // Only allow deleting terminal tasks, queued tasks, or waiting tasks (like escalated)
-    if (!task.isTerminal() && !task.isWaiting() && task.status !== "queued") {
+    if (!task.isTerminal() && !task.isWaiting() && task.status !== "queued" && task.status !== "planning" && task.status !== "pending_plan_approval") {
       res.status(400).json({
         error: "Cannot delete active task",
-        reason: "Only completed, failed, cancelled, queued, or escalated tasks can be deleted"
+        reason: "Only completed, failed, cancelled, queued, planning, or escalated tasks can be deleted"
       });
       return;
     }
 
-    await taskRepo.remove(task);
+    // Cascade-delete all related records in a transaction.
+    // The worker_task_logs table has a safeguard trigger that blocks mass deletes,
+    // so we bypass it via the app.allow_log_delete session variable (requires transaction for SET LOCAL).
+    await AppDataSource.transaction(async (manager) => {
+      await manager.query(`SET LOCAL app.allow_log_delete = 'authorized'`);
+      // Delete owned records
+      await manager.query(`DELETE FROM worker_task_logs WHERE task_id = $1`, [id]);
+      await manager.query(`DELETE FROM worker_check_ins WHERE task_id = $1`, [id]);
+      await manager.query(`DELETE FROM worker_file_locks WHERE task_id = $1`, [id]);
+      await manager.query(`DELETE FROM worker_contexts WHERE parent_task_id = $1 OR task_id = $1`, [id]);
+      await manager.query(`DELETE FROM worker_commands WHERE task_id = $1`, [id]);
+      await manager.query(`DELETE FROM worker_task_errors WHERE task_id = $1`, [id]);
+      await manager.query(`DELETE FROM worker_task_token_usage WHERE task_id = $1`, [id]);
+      await manager.query(`DELETE FROM worker_resource_reservations WHERE task_id = $1`, [id]);
+      await manager.query(`DELETE FROM task_relationships WHERE source_task_id = $1 OR target_task_id = $1`, [id]);
+      await manager.query(`DELETE FROM pr_feedback WHERE task_id = $1`, [id]);
+      await manager.query(`DELETE FROM episodic_memories WHERE task_id = $1`, [id]);
+      await manager.query(`DELETE FROM procedural_memories WHERE source_task_id = $1`, [id]);
+      await manager.query(`DELETE FROM credit_transactions WHERE task_id = $1`, [id]);
+      await manager.query(`DELETE FROM warm_containers WHERE assigned_task_id = $1`, [id]);
+      // Nullify FK references in tables that shouldn't be deleted
+      await manager.query(`UPDATE kb_cards SET worker_task_id = NULL WHERE worker_task_id = $1`, [id]);
+      await manager.query(`UPDATE projects SET worker_task_id = NULL WHERE worker_task_id = $1`, [id]);
+      await manager.query(`UPDATE support_tickets SET ai_response_task_id = NULL WHERE ai_response_task_id = $1`, [id]);
+      await manager.query(`UPDATE internal_tasks SET worker_task_id = NULL WHERE worker_task_id = $1`, [id]);
+      // Orphan child tasks rather than cascade-delete them
+      await manager.query(`UPDATE worker_tasks SET parent_task_id = NULL WHERE parent_task_id = $1`, [id]);
+      // Delete the task itself
+      await manager.query(`DELETE FROM worker_tasks WHERE id = $1`, [id]);
+    });
 
     logger.info("Task deleted", { taskId: id, orgId, status: task.status });
     res.json({ success: true, message: "Task deleted successfully" });

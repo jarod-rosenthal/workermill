@@ -15,7 +15,6 @@ import { AGENT_VERSION } from "../version.js";
 import {
   loadConfigFromFile,
   checkPrerequisites,
-  getSystemInfo,
   getPidFile,
   getLogFile,
   getConfigFile,
@@ -32,16 +31,14 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
 
   const config = loadConfigFromFile();
 
-  // Validate prerequisites
-  const prereqs = checkPrerequisites(config.workerImage);
+  // Validate prerequisites (Git, Claude CLI, Claude auth, Node.js)
+  const prereqs = checkPrerequisites();
   const failing = prereqs.filter((p) => !p.ok);
 
-  // Auto-pull worker image if it's the only missing prereq
-  const imageMissing = failing.find((p) => p.name === "Worker image");
   // Claude CLI and auth are soft prerequisites — only needed for Anthropic provider.
   // Non-Anthropic orgs can plan+execute without Claude CLI.
   const softPrereqs = new Set(["Claude CLI", "Claude auth"]);
-  const hardFailing = failing.filter((p) => p.name !== "Worker image" && !softPrereqs.has(p.name));
+  const hardFailing = failing.filter((p) => !softPrereqs.has(p.name));
   const softFailing = failing.filter((p) => softPrereqs.has(p.name));
 
   if (hardFailing.length > 0) {
@@ -56,20 +53,6 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     for (const p of softFailing) {
       console.log(chalk.yellow(`  ⚠ ${p.name}: ${p.detail} (required for Anthropic provider)`));
     }
-  }
-
-  if (imageMissing) {
-    console.log(chalk.yellow(`  Worker image not found locally. Pulling ${config.workerImage}...`));
-    const { spawnSync } = await import("child_process");
-    const pull = spawnSync("docker", ["pull", config.workerImage], {
-      stdio: "inherit",
-      timeout: 600_000,
-    });
-    if (pull.status !== 0) {
-      console.log(chalk.red(`  Failed to pull worker image.`));
-      process.exit(1);
-    }
-    console.log(chalk.green(`  ✓ Worker image pulled`));
   }
 
   if (options.detach) {
@@ -128,11 +111,8 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     console.log(chalk.yellow(`  ⚠ RAM: ${totalRamGB} GB (below recommended 16 GB — workers may be slow)`));
   }
 
-  // Register with system info
-  const sysInfo = getSystemInfo();
   console.log(chalk.dim(`  Agent:     ${config.agentId}`));
   console.log(chalk.dim(`  Version:   ${AGENT_VERSION}`));
-  console.log(chalk.dim(`  Image:     ${config.workerImage}`));
   console.log();
 
   try {

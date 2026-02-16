@@ -6,7 +6,6 @@
 
 import chalk from "chalk";
 import { existsSync, readFileSync } from "fs";
-import { execSync } from "child_process";
 import axios from "axios";
 import { getPidFile, getConfigFile, loadConfigFromFile } from "../config.js";
 
@@ -47,31 +46,6 @@ export async function statusCommand(): Promise<void> {
   console.log(`  Agent ID:    ${config.agentId}`);
   console.log(`  API URL:     ${config.apiUrl}`);
   console.log(`  Max workers: ${config.maxWorkers}`);
-  console.log(`  Image:       ${config.workerImage}`);
-
-  // Active containers
-  console.log();
-  console.log(chalk.bold("  Active Containers"));
-
-  try {
-    const output = execSync(
-      'docker ps --filter "name=workermill-" --format "{{.Names}}\t{{.Status}}\t{{.RunningFor}}"',
-      { encoding: "utf-8", timeout: 10000 },
-    ).trim();
-
-    if (output) {
-      const lines = output.split("\n");
-      console.log(chalk.dim(`  Found ${lines.length} container(s):`));
-      for (const line of lines) {
-        const [name, status, running] = line.split("\t");
-        console.log(`    ${chalk.cyan(name)}  ${status}  ${chalk.dim(running || "")}`);
-      }
-    } else {
-      console.log(chalk.dim("  No active containers"));
-    }
-  } catch {
-    console.log(chalk.dim("  Could not query Docker"));
-  }
 
   // API connectivity
   console.log();

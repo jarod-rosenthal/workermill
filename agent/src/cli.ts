@@ -28,7 +28,7 @@ program
 
 program
   .command("setup")
-  .description("Interactive setup wizard - configure API key, validate prerequisites, pull worker image")
+  .description("Interactive setup wizard - configure API key and validate prerequisites")
   .action(setupCommand);
 
 program
@@ -44,7 +44,7 @@ program
 
 program
   .command("status")
-  .description("Show agent status, active containers, and API connectivity")
+  .description("Show agent status and API connectivity")
   .action(statusCommand);
 
 program
@@ -55,7 +55,7 @@ program
 
 program
   .command("pull")
-  .description("Pull the latest worker Docker image")
+  .description("(Deprecated) Docker is no longer used — workers run as native processes")
   .action(pullCommand);
 
 program

@@ -1,12 +1,12 @@
 /**
  * esbuild bundler for @workermill/agent
  *
- * Produces minified, mangled single-file bundles for CLI and library entry points.
- * This replaces the raw tsc output in dist/ with obfuscated code that's harder
- * to reverse-engineer, protecting proprietary planning logic and system architecture.
+ * Produces minified, mangled single-file bundles for CLI and library entry points,
+ * plus worker entry points (epic worker and manager worker).
  *
  * tsc runs first (via package.json "build" script) to generate dist/*.js,
- * then this script re-bundles those into minified output.
+ * then this script re-bundles those into minified output and additionally
+ * bundles worker code from ../worker/ into dist/worker.js and dist/manager-worker.js.
  */
 
 import { build } from "esbuild";
@@ -52,7 +52,7 @@ const shared = {
 const cliContent = readFileSync("dist/cli.js", "utf-8");
 writeFileSync("dist/cli.js", cliContent.replace(/^***REMOVED***!.*\n/, ""), "utf-8");
 
-// Bundle CLI entry point (bin)
+// Step 1: Bundle CLI entry point (bin)
 await build({
   ...shared,
   entryPoints: ["dist/cli.js"],
@@ -60,7 +60,7 @@ await build({
   banner: { js: "***REMOVED***!/usr/bin/env node" },
 });
 
-// Bundle library entry point
+// Step 2: Bundle library entry point
 await build({
   ...shared,
   entryPoints: ["dist/index.js"],
@@ -76,7 +76,27 @@ renameSync("dist/index.bundle.js", "dist/index.js");
 // Ensure CLI is executable (npm preserves file permissions from publish)
 chmodSync("dist/cli.js", 0o755);
 
-// Remove all other .js files (they're now bundled into cli.js and index.js)
+// Step 3: Bundle epic worker entry point (from worker/ source)
+await build({
+  ...shared,
+  entryPoints: ["../worker/epic/remote-bootstrap.ts"],
+  outfile: "dist/worker.js",
+  banner: { js: "// WorkerMill Worker - minified" },
+});
+console.log("✓ dist/worker.js bundled from worker/epic/remote-bootstrap.ts");
+
+// Step 4: Bundle manager worker entry point
+await build({
+  ...shared,
+  entryPoints: ["../worker/manager/index.ts"],
+  outfile: "dist/manager-worker.js",
+  banner: { js: "// WorkerMill Manager - minified" },
+});
+console.log("✓ dist/manager-worker.js bundled from worker/manager/index.ts");
+
+// Remove all other .js files from dist/ (they're now bundled)
+const keepFiles = new Set(["cli.js", "index.js", "worker.js", "manager-worker.js"]);
+
 function cleanUnbundled(dir) {
   try {
     for (const entry of readdirSync(dir)) {
@@ -91,8 +111,7 @@ function cleanUnbundled(dir) {
         } catch { /* ignore */ }
       } else if (
         entry.endsWith(".js") &&
-        full !== join("dist", "cli.js") &&
-        full !== join("dist", "index.js")
+        !keepFiles.has(entry)
       ) {
         rmSync(full);
       }

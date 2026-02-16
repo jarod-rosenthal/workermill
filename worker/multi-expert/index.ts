@@ -24,13 +24,7 @@ import {
   postQualityMetrics,
   type QualityMetrics,
 } from "../epic/dist/quality-runner.js";
-import {
-  evaluateQualityGate,
-  formatQualityGateResult,
-  type QualityGateResult,
-  type QualityThresholds,
-  DEFAULT_THRESHOLDS,
-} from "../epic/dist/quality-gate.js";
+import type { EvaluateQualityResponse } from "../epic/dist/decision-client.js";
 import { createAIClient, type AIClient, type AIClientConfig } from "../epic/dist/ai-client-types.js";
 import { DecisionClient, createDecisionClient, type WorkerConfigResponse } from "../epic/dist/decision-client.js";
 
@@ -269,7 +263,7 @@ class MultiExpertCoordinator {
   private userFeedback: string | null = null;
   // Quality metrics (captured before PR creation, same as Epic mode)
   private qualityMetrics: QualityMetrics | undefined;
-  private qualityGateResult: QualityGateResult | undefined;
+  private qualityGateResult: EvaluateQualityResponse | undefined;
   // Prior work context from existing branch (for retry scenarios)
   private priorWorkContext: PriorWorkContext | undefined;
   // Directive cache for effectiveness tracking
@@ -1105,12 +1099,8 @@ class MultiExpertCoordinator {
 
         // Add quality gate status if available
         if (this.qualityGateResult) {
-          const gateStatus = this.qualityGateResult.passed ? '✅ Passed' :
-                             this.qualityGateResult.bypassed ? '⚠️ Bypassed' : '❌ Failed';
+          const gateStatus = this.qualityGateResult.pass ? '✅ Passed' : '❌ Failed';
           prBody += `\n**Quality Gate:** ${gateStatus}`;
-          if (this.qualityGateResult.bypassed && this.qualityGateResult.bypassReason) {
-            prBody += ` (${this.qualityGateResult.bypassReason})`;
-          }
         }
       }
 
@@ -2650,25 +2640,25 @@ The repository is cloned at: **${this.repoPath}**
         );
         await this.postLog(`Quality metrics posted: score=${this.qualityMetrics.qualityScore}/100`);
 
-        // Evaluate quality gate
-        const thresholds: QualityThresholds = DEFAULT_THRESHOLDS;
-        this.qualityGateResult = evaluateQualityGate(
-          this.qualityMetrics,
-          thresholds,
-          false, // No bypass support in multi-provider yet
-          undefined
-        );
+        // Evaluate quality gate via Decision API
+        const diffSummary = `score=${this.qualityMetrics.qualityScore}/100, typeErrors=${this.qualityMetrics.typeErrors}, lintErrors=${this.qualityMetrics.lintErrors}, testFailures=${this.qualityMetrics.testFailures}`;
+        this.qualityGateResult = await this.decisionClient.evaluateQuality({
+          diff: diffSummary,
+          storyDescription: this.jiraRequirements || undefined,
+        });
 
         // Log quality gate result
-        console.log(formatQualityGateResult(this.qualityGateResult));
+        const statusIcon = this.qualityGateResult.pass ? "PASSED ✅" : "FAILED ❌";
+        console.log(`[Multi-Provider] Quality Gate: ${statusIcon}`);
         await this.postLog(
-          `Quality gate: ${this.qualityGateResult.passed ? "PASSED" : "FAILED"} - ${this.qualityGateResult.summary}`
+          `Quality gate: ${statusIcon}${this.qualityGateResult.reasons.length > 0 ? ` - ${this.qualityGateResult.reasons[0]}` : ""}`
         );
 
         // If quality gate failed, warn but don't block (can add blocking later)
-        if (!this.qualityGateResult.passed) {
+        if (!this.qualityGateResult.pass) {
+          const failureReasons = [...this.qualityGateResult.reasons, ...this.qualityGateResult.blockers];
           await this.postLog(
-            `Quality gate issues: ${this.qualityGateResult.failureReasons.join(", ")}`
+            `Quality gate issues: ${failureReasons.join(", ")}`
           );
         }
       } catch (qualityError) {

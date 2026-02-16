@@ -286,11 +286,13 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
   const lastEventIdHeader = req.headers["last-event-id"];
   const headerCursor = typeof lastEventIdHeader === "string" ? lastEventIdHeader : null;
 
-  // Default to "now minus 5 minutes" to avoid sending huge history on fresh connect
+  // Default to "now minus 30 seconds" to avoid replaying huge history on fresh connect.
+  // The frontend fetches the most recent 100 logs via REST before connecting SSE,
+  // so SSE only needs to catch up from a very recent point.
   let cursor = (headerCursor ? parseCursor(headerCursor) : null)
     || (since ? parseCursor(since) : null)
     || {
-      lastCreatedAt: new Date(Date.now() - 5 * 60 * 1000),
+      lastCreatedAt: new Date(Date.now() - 30 * 1000),
       lastId: "00000000-0000-0000-0000-000000000000",
     };
 

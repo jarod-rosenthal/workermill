@@ -26,7 +26,7 @@ const tiers: PricingTier[] = [
       "Unlimited tasks",
       "1 concurrent worker",
       "3 expert personas per task",
-      "All 14+ AI personas",
+      "Unlimited specialized AI experts",
       "All integrations (Jira, GitHub, GitLab, Bitbucket, Linear)",
       "Anthropic Claude models",
       "Local + BYOK execution",

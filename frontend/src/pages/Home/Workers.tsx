@@ -103,7 +103,7 @@ export default function Workers() {
         {/* Section header */}
         <div className="text-center mb-16">
           <h2 className="text-3xl lg:text-4xl font-bold mb-4">
-            <span className="text-foreground">14+ specialized </span>
+            <span className="text-foreground">Unlimited specialized </span>
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
               AI experts
             </span>

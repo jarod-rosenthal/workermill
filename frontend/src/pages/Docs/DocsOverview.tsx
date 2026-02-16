@@ -35,7 +35,7 @@ const features = [
 ];
 
 const stats = [
-  { label: "AI Experts", value: "14", icon: Cpu },
+  { label: "AI Experts", value: "14+", icon: Cpu },
   { label: "AI Providers", value: "4+", icon: Zap },
   { label: "Issue Trackers", value: "3+", icon: CheckCircle },
 ];
@@ -65,7 +65,7 @@ export default function DocsOverview() {
             specialized AI workers to execute tickets autonomously using <strong className="text-foreground">Team Planning</strong> by default.
           </p>
           <p className="text-muted-foreground leading-relaxed">
-            Each task is handled by a <strong className="text-foreground">team of 14 specialized AI experts</strong> running in isolated environments
+            Each task is handled by a <strong className="text-foreground">team of specialized AI experts</strong> running in isolated environments
             with access to your codebase, able to read documentation, understand context, write code, run tests,
             and create pull requests. WorkerMill works with <strong className="text-foreground">all major AI providers</strong> including
             Anthropic Claude, OpenAI GPT, Google Gemini, and self-hosted models via Ollama.

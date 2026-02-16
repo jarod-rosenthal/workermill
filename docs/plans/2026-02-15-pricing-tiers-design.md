@@ -50,7 +50,7 @@ For solo developers exploring AI-powered development. Full product experience wi
 | Cloud execution (ECS) | No |
 | Warm container pool | No |
 | All integrations (Jira, GitHub, GitLab, Bitbucket, Linear) | Yes |
-| All 14+ personas | Yes |
+| Unlimited specialized AI experts | Yes |
 | Codebase RAG | Yes |
 | MCP servers | Yes |
 | Tech lead review | Every PR |
@@ -75,7 +75,7 @@ Up to 5 seats included. For developers and small teams who want speed and collab
 | Cloud execution (ECS) | Yes |
 | Warm container pool | Yes |
 | All integrations | Yes |
-| All 14+ personas | Yes |
+| Unlimited specialized AI experts | Yes |
 | Codebase RAG | Yes |
 | MCP servers | Yes |
 | Tech lead review | Configurable (on/off) |
@@ -269,7 +269,7 @@ export const PLAN_FEATURES: Record<OrganizationPlan, {
 - Log streaming (PostgreSQL + SSE)
 - Worker entrypoint and execution
 - LLM model selection (stays as org setting, not plan-gated)
-- All 14+ personas available on all plans
+- Unlimited specialized AI experts available on all plans
 - All SCM integrations available on all plans
 - Codebase RAG available on all plans
 - MCP servers available on all plans

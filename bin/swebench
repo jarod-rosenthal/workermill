@@ -1,0 +1,12 @@
+***REMOVED***!/bin/bash
+***REMOVED*** SWE-bench Lite Benchmark Runner for WorkerMill
+***REMOVED*** Wrapper that invokes the TypeScript script via tsx.
+***REMOVED***
+***REMOVED*** Usage: bin/swebench [options]
+***REMOVED*** Run bin/swebench --help for full usage info.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+***REMOVED*** tsx is installed in api/node_modules
+exec "$PROJECT_ROOT/api/node_modules/.bin/tsx" "$SCRIPT_DIR/swebench.ts" "$@"

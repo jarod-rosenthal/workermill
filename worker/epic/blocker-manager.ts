@@ -10,6 +10,7 @@ import type {
   BlockerInfo,
   BlockerResponse,
   ContextMessage,
+  ErrorCategory,
   ExpertPersona,
   ReadyStory,
   ResilienceConfig,
@@ -146,7 +147,7 @@ export class BlockerManager {
     );
 
     console.log(
-      `[BlockerManager] Escalated blocker for story ${storyIndex}: ${classification.category} error`
+      `[BlockerManager] Escalated blocker for story ${storyIndex}: ${result.category} error`
     );
     console.log(
       `[BlockerManager] Summary: ${summary.substring(0, 200)}...`
@@ -161,7 +162,7 @@ export class BlockerManager {
       storyIndex,
       storyTitle,
       persona,
-      errorCategory: result.category,
+      errorCategory: (result.category as ErrorCategory) || "unknown",
       summary,
       errorMessage,
       affectedFiles: result.affectedFiles,

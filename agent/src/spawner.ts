@@ -293,8 +293,9 @@ export async function spawnWorker(
     // Execution mode
     EXECUTION_MODE_SETTING: (task.jiraFields?.executionMode as string) || "autonomous",
 
-    // AI provider configuration — Claude CLI reads credentials natively
-    ANTHROPIC_API_KEY: credentials?.anthropicApiKey || process.env.ANTHROPIC_API_KEY || "",
+    // AI provider configuration — Claude CLI reads ~/.claude/.credentials.json natively (OAuth).
+    // Only pass an explicit API key if the org configured one; otherwise let workers use OAuth.
+    ANTHROPIC_API_KEY: credentials?.anthropicApiKey || "",
     WORKER_PROVIDER: task.workerProvider || "anthropic",
     OPENAI_API_KEY: credentials?.openaiApiKey || "",
     GOOGLE_API_KEY: credentials?.googleApiKey || "",
@@ -564,7 +565,7 @@ export async function spawnManagerWorker(
     MANAGER_PROVIDER: credentials?.managerProvider || "anthropic",
     MANAGER_MODEL: credentials?.managerModelId || "",
 
-    ANTHROPIC_API_KEY: credentials?.anthropicApiKey || process.env.ANTHROPIC_API_KEY || "",
+    ANTHROPIC_API_KEY: credentials?.anthropicApiKey || "",
     OPENAI_API_KEY: credentials?.openaiApiKey || "",
     GOOGLE_API_KEY: credentials?.googleApiKey || "",
 

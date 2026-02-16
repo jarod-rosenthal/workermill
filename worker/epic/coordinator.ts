@@ -2474,7 +2474,7 @@ export class EpicCoordinator {
           console.log("[Epic] Quality gate bypassed");
         } else {
           // Build diff summary for quality evaluation
-          const diffSummary = `score=${capturedQualityMetrics.qualityScore}/100, typeErrors=${capturedQualityMetrics.typeErrors}, lintErrors=${capturedQualityMetrics.lintErrors}, testFailures=${capturedQualityMetrics.testFailures}`;
+          const diffSummary = `score=${capturedQualityMetrics.qualityScore}/100, typeErrors=${capturedQualityMetrics.typeErrors}, lintErrors=${capturedQualityMetrics.lintErrors}, testsFailed=${capturedQualityMetrics.testsFailed}`;
           qualityGateResult = await this.decisionClient.evaluateQuality({
             diff: diffSummary,
             storyDescription: this.config.jiraRequirements || undefined,

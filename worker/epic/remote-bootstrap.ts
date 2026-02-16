@@ -326,7 +326,7 @@ function loadConfig(repoDir: string, mainBranch: string): EpicConfig {
     parentTaskId: process.env.PARENT_TASK_ID!,
     apiBaseUrl: process.env.API_BASE_URL!,
     orgApiKey: process.env.ORG_API_KEY!,
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY!,
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
     githubToken: process.env.SCM_TOKEN || process.env.GITHUB_TOKEN!,
     githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN || undefined,
     targetRepo: process.env.TARGET_REPO!,

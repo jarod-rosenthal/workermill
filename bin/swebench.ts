@@ -409,11 +409,13 @@ async function createBoard(
 }
 
 // ---------------------------------------------------------------------------
-// Step 5: Create "sdk" label and attach to cards
+// Step 5: Create "sdk" and "standard" labels and attach to cards
 // ---------------------------------------------------------------------------
 
-async function ensureSdkLabel(
+async function ensureLabel(
   apiUrl: string,
+  name: string,
+  color: string,
 ): Promise<string> {
   // Check existing org labels
   const labelsData = await apiJson<{
@@ -421,10 +423,10 @@ async function ensureSdkLabel(
   }>(`${apiUrl}/api/boards/labels`);
 
   const existing = labelsData.labels.find(
-    (l) => l.name.toLowerCase() === "sdk",
+    (l) => l.name.toLowerCase() === name.toLowerCase(),
   );
   if (existing) {
-    console.log(`  SDK label already exists: ${existing.id}`);
+    console.log(`  "${name}" label already exists: ${existing.id}`);
     return existing.id;
   }
 
@@ -433,11 +435,11 @@ async function ensureSdkLabel(
     `${apiUrl}/api/boards/labels`,
     {
       method: "POST",
-      body: JSON.stringify({ name: "sdk", color: "#6b7280" }),
+      body: JSON.stringify({ name, color }),
     },
   );
 
-  console.log(`  SDK label created: ${created.label.id}`);
+  console.log(`  "${name}" label created: ${created.label.id}`);
   return created.label.id;
 }
 
@@ -449,7 +451,7 @@ async function createCards(
   apiUrl: string,
   boardId: string,
   columnId: string,
-  sdkLabelId: string,
+  labelIds: string[],
   instances: SWEBenchInstance[],
 ): Promise<CardInfo[]> {
   console.log(`\nCreating ${instances.length} cards...`);
@@ -479,14 +481,16 @@ async function createCards(
 
     const cardId = cardData.card.id;
 
-    // Attach SDK label
-    await apiFetch(
-      `${apiUrl}/api/boards/${boardId}/cards/${cardId}/labels`,
-      {
-        method: "POST",
-        body: JSON.stringify({ labelId: sdkLabelId }),
-      },
-    );
+    // Attach labels (sdk + standard)
+    for (const labelId of labelIds) {
+      await apiFetch(
+        `${apiUrl}/api/boards/${boardId}/cards/${cardId}/labels`,
+        {
+          method: "POST",
+          body: JSON.stringify({ labelId }),
+        },
+      );
+    }
 
     cards.push({
       cardId,
@@ -841,15 +845,16 @@ async function main(): Promise<void> {
     sampled.length,
   );
 
-  // Step 5: Ensure SDK label exists
-  const sdkLabelId = await ensureSdkLabel(opts.apiUrl);
+  // Step 5: Ensure SDK + standard labels exist (standard skips planning)
+  const sdkLabelId = await ensureLabel(opts.apiUrl, "sdk", "#6b7280");
+  const standardLabelId = await ensureLabel(opts.apiUrl, "standard", "#3b82f6");
 
   // Step 6: Create cards
   const cards = await createCards(
     opts.apiUrl,
     boardId,
     firstColumnId,
-    sdkLabelId,
+    [sdkLabelId, standardLabelId],
     sampled,
   );
 

@@ -14,8 +14,9 @@ function derivePrefix(name: string): string {
     .filter((w) => w.length > 0);
 
   if (words.length >= 2) {
-    // Multi-word: first letter of each word
+    // Multi-word: first letter of each word (max 5)
     return words
+      .slice(0, 5)
       .map((w) => w[0])
       .join("")
       .toUpperCase();

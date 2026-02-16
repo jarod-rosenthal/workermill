@@ -22,7 +22,7 @@ import { GitOps } from "./git-ops.js";
 import { TicketOps } from "./ticket-ops.js";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
-import { classifyError, extractAffectedFiles, generateFixPrompt } from "./error-classifier.js";
+import type { DecisionClient } from "./decision-client.js";
 import { createRetryableApi } from "./api-retry.js";
 import axios from "axios";
 import * as fs from "fs/promises";
@@ -73,6 +73,8 @@ export class StoryExecutor {
   private directiveCache: Map<string, { readme: string | null; common: Record<string, string> } | null> = new Map();
   // Unified AIClient for feature-flagged execution
   private aiClient: AIClient | null = null;
+  // Decision client for API-side error classification
+  private decisionClient: DecisionClient;
   // Resilience configuration (from org settings)
   private resilience: ResilienceConfig;
   // Track auto-retry attempts per story (for blocker handling)
@@ -87,11 +89,13 @@ export class StoryExecutor {
     config: EpicConfig,
     coordination: CoordinationClient,
     gitOps: GitOps,
+    decisionClient: DecisionClient,
     resilience?: ResilienceConfig
   ) {
     this.config = config;
     this.coordination = coordination;
     this.gitOps = gitOps;
+    this.decisionClient = decisionClient;
     this.ticketOps = new TicketOps(config.jiraIssueKey, config.ticketSystem);
     // Default resilience settings if not provided
     this.resilience = resilience || {
@@ -938,20 +942,19 @@ ${parts.join("\n\n")}
       console.error("[Executor] Story " + story.storyIndex + " failed:", errorMessage);
       await this.postLog(`${story.title} — FAILED: ${errorMessage}`, expert, "error");
 
-      // Classify the error to determine if it's auto-fixable
-      const classification = classifyError(errorMessage);
-      const affectedFiles = extractAffectedFiles(errorMessage);
+      // Classify the error via Decision API to determine if it's auto-fixable
+      const result = await this.decisionClient.classifyError({ errorOutput: errorMessage });
       const retryCount = this.retryCountByStory.get(story.storyIndex) ?? 0;
 
-      console.log(`[Executor] Error classification: category=${classification.category}, fixable=${classification.isFixable}`);
+      console.log(`[Executor] Error classification: category=${result.category}, fixable=${result.fixable}`);
       console.log(`[Executor] Auto-retry: enabled=${this.resilience.blockerAutoRetryEnabled}, attempts=${retryCount}/${this.resilience.blockerMaxAutoRetries}`);
 
       // Check if we should auto-retry
       // Transient errors (network/502/503/504) are retryable even though they aren't "fixable" by code changes
-      const isTransientError = classification.category === "network";
+      const isTransientError = result.category === "network";
       const shouldAutoRetry =
         this.resilience.blockerAutoRetryEnabled &&
-        (classification.isFixable || isTransientError) &&
+        (result.fixable || isTransientError) &&
         retryCount < this.resilience.blockerMaxAutoRetries;
 
       if (shouldAutoRetry) {
@@ -962,7 +965,7 @@ ${parts.join("\n\n")}
           // Transient errors: wait briefly then re-run the story without a fix prompt
           const backoffMs = Math.min(2000 * Math.pow(2, retryCount), 15000);
           await this.postLog(
-            `Transient ${classification.category} error — retrying in ${Math.round(backoffMs / 1000)}s (attempt ${retryCount + 1}/${this.resilience.blockerMaxAutoRetries})`,
+            `Transient ${result.category} error — retrying in ${Math.round(backoffMs / 1000)}s (attempt ${retryCount + 1}/${this.resilience.blockerMaxAutoRetries})`,
             expert,
             "system"
           );
@@ -971,22 +974,24 @@ ${parts.join("\n\n")}
         }
 
         await this.postLog(
-          `Auto-fix attempt ${retryCount + 1}/${this.resilience.blockerMaxAutoRetries} for ${classification.category} error`,
+          `Auto-fix attempt ${retryCount + 1}/${this.resilience.blockerMaxAutoRetries} for ${result.category} error`,
           expert,
           "system"
         );
 
-        // Generate fix prompt and re-execute
-        const fixPrompt = generateFixPrompt(classification, errorMessage, affectedFiles);
-        const fixFeedback = `## AUTO-FIX REQUIRED\n\nThe previous attempt failed with a ${classification.category} error. Please fix it.\n\n${fixPrompt}`;
+        // Build fix feedback from Decision API response
+        const fixParts = [`Error: ${errorMessage}`];
+        if (result.fixStrategy) fixParts.push(`Fix strategy: ${result.fixStrategy}`);
+        if (result.affectedFiles.length > 0) fixParts.push(`Affected files: ${result.affectedFiles.join(", ")}`);
+        const fixFeedback = `## AUTO-FIX REQUIRED\n\nThe previous attempt failed with a ${result.category} error. Please fix it.\n\n${fixParts.join("\n\n")}`;
 
         // Re-execute the story with fix feedback
         return this.executeStory(story, expert, totalStories, fixFeedback);
       }
 
       // Not fixable or retries exhausted - post blocker and escalate
-      const escalationReason = !classification.isFixable
-        ? `Non-fixable ${classification.category} error`
+      const escalationReason = !result.fixable
+        ? `Non-fixable ${result.category} error`
         : `Auto-fix failed after ${retryCount} attempts`;
 
       await this.postLog(`Escalating blocker: ${escalationReason}`, expert, "system");
@@ -1001,9 +1006,9 @@ ${parts.join("\n\n")}
         story.storyIndex,  // storyIndex for sessionId threading
         {
           storyTitle: story.title,
-          errorCategory: classification.category,
-          isFixable: classification.isFixable,
-          affectedFiles,
+          errorCategory: result.category,
+          isFixable: result.fixable,
+          affectedFiles: result.affectedFiles,
           autoRetryAttempts: retryCount,
           maxAutoRetries: this.resilience.blockerMaxAutoRetries,
           escalationReason,

@@ -7,7 +7,15 @@
 
 import { spawn } from "child_process";
 import { QualityMetrics } from "./quality-runner.js";
-import { QualityGateResult } from "./quality-gate.js";
+/** Quality gate result type (formerly from quality-gate.ts, now inline) */
+interface QualityGateResult {
+  passed: boolean;
+  bypassed?: boolean;
+  bypassReason?: string;
+  checks: Array<{ name: string; passed: boolean; message: string; actual?: number; threshold?: number }>;
+  summary: string;
+  failureReasons: string[];
+}
 
 /**
  * Types of issues that can be auto-fixed.
@@ -569,10 +577,10 @@ export async function postAutoFixStats(
  * Convenience wrapper that handles the full flow.
  */
 export async function runAutoFixWithTracking(
-  gateResult: import("./quality-gate.js").QualityGateResult,
+  gateResult: QualityGateResult,
   metrics: QualityMetrics,
   config: Partial<AutoFixConfig>,
-  runQualityChecks: () => Promise<{ metrics: QualityMetrics; gateResult: import("./quality-gate.js").QualityGateResult }>,
+  runQualityChecks: () => Promise<{ metrics: QualityMetrics; gateResult: QualityGateResult }>,
   apiConfig?: { baseUrl: string; apiKey: string }
 ): Promise<AutoFixResult> {
   // Run the auto-fix

@@ -14,7 +14,7 @@ import type {
   ReadyStory,
   ResilienceConfig,
 } from "./types.js";
-import { classifyError, extractAffectedFiles, generateBlockerSummary } from "./error-classifier.js";
+import type { DecisionClient } from "./decision-client.js";
 
 /**
  * Manages blockers for Epic execution.
@@ -24,17 +24,20 @@ export class BlockerManager {
   private coordination: CoordinationClient;
   private parentTaskId: string;
   private config: ResilienceConfig;
+  private decisionClient: DecisionClient;
   private retryCountByStory: Map<number, number> = new Map();
   private consumedResolutionIds: Set<string> = new Set();
 
   constructor(
     coordination: CoordinationClient,
     parentTaskId: string,
-    config: ResilienceConfig
+    config: ResilienceConfig,
+    decisionClient: DecisionClient
   ) {
     this.coordination = coordination;
     this.parentTaskId = parentTaskId;
     this.config = config;
+    this.decisionClient = decisionClient;
   }
 
   /**
@@ -110,18 +113,12 @@ export class BlockerManager {
     errorMessage: string,
     allStories: ReadyStory[]
   ): Promise<BlockerInfo> {
-    const classification = classifyError(errorMessage);
-    const affectedFiles = extractAffectedFiles(errorMessage);
+    const result = await this.decisionClient.classifyError({ errorOutput: errorMessage });
     const dependentStories = this.getDependentStories(storyIndex, allStories);
     const autoRetryAttempts = this.retryCountByStory.get(storyIndex) ?? 0;
 
-    // Generate human-readable summary
-    const summary = generateBlockerSummary(
-      errorMessage,
-      classification,
-      affectedFiles,
-      storyTitle
-    );
+    // Use summary from Decision API response
+    const summary = result.summary || `${storyTitle} failed: ${result.category} error`;
 
     // Post escalation to coordination feed
     // The content is the summary (shown prominently), full error is in metadata
@@ -134,16 +131,16 @@ export class BlockerManager {
         storyIndex,
         storyTitle,
         persona,
-        errorCategory: classification.category,
+        errorCategory: result.category,
         summary,
         fullErrorMessage: errorMessage,  // Full error preserved in metadata
-        affectedFiles,
+        affectedFiles: result.affectedFiles,
         autoRetryAttempts,
         maxAutoRetries: this.config.blockerMaxAutoRetries,
         dependentStories,
         isEscalated: true,
-        isFixable: classification.isFixable,
-        fixStrategy: classification.fixStrategy,
+        isFixable: result.fixable,
+        fixStrategy: result.fixStrategy,
       },
       `${persona}-story-${storyIndex}`
     );
@@ -164,10 +161,10 @@ export class BlockerManager {
       storyIndex,
       storyTitle,
       persona,
-      errorCategory: classification.category,
+      errorCategory: result.category,
       summary,
       errorMessage,
-      affectedFiles,
+      affectedFiles: result.affectedFiles,
       autoRetryAttempts,
       maxAutoRetries: this.config.blockerMaxAutoRetries,
       dependentStories,
@@ -352,7 +349,7 @@ export class BlockerManager {
    * Check if an error should trigger auto-retry or immediate escalation.
    * Returns true if should auto-retry, false if should escalate.
    */
-  shouldAutoRetry(storyIndex: number, errorMessage: string): boolean {
+  async shouldAutoRetry(storyIndex: number, errorMessage: string): Promise<boolean> {
     if (!this.config.blockerAutoRetryEnabled) {
       return false;
     }
@@ -361,7 +358,7 @@ export class BlockerManager {
       return false;
     }
 
-    const classification = classifyError(errorMessage);
-    return classification.isFixable;
+    const result = await this.decisionClient.classifyError({ errorOutput: errorMessage });
+    return result.fixable;
   }
 }

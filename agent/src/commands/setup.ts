@@ -2,11 +2,10 @@
  * Setup Wizard — Interactive configuration for the WorkerMill Remote Agent.
  *
  * Prerequisites checked/installed:
- *   - Docker Desktop (must be installed manually)
+ *   - Git (must be installed)
  *   - Git for Windows (must be installed manually — required by Claude Code on Windows)
  *   - Claude CLI → winget on Windows, curl | bash on Linux/macOS/WSL
  *   - Claude auth → launches `claude` which prompts for sign-in on first run
- *   - Worker image → pulled from private ECR (requires AWS credentials)
  */
 
 import chalk from "chalk";
@@ -14,7 +13,7 @@ import ora from "ora";
 import inquirer from "inquirer";
 import { execSync, spawnSync } from "child_process";
 import { existsSync } from "fs";
-import { hostname, homedir, totalmem, freemem, cpus } from "os";
+import { hostname, homedir, totalmem, cpus } from "os";
 import { join } from "path";
 import axios from "axios";
 import {
@@ -150,46 +149,19 @@ export async function setupCommand(): Promise<void> {
   }
   console.log();
 
-  // ── Step 1: Docker ────────────────────────────────────────────────────────
-  const dockerSpinner = ora("Checking Docker...").start();
+  // ── Step 1: Git ──────────────────────────────────────────────────────────
+  const gitSpinner = ora("Checking Git...").start();
 
-  if (commandExists("docker")) {
-    const version = getVersion("docker");
-
-    // Verify Docker daemon is actually running (not just the CLI installed)
-    try {
-      const osType = execSync("docker info --format {{.OSType}}", {
-        encoding: "utf-8",
-        timeout: 15000,
-      }).trim();
-
-      // On Windows, verify Linux containers mode
-      if (isWindows && osType === "windows") {
-        dockerSpinner.fail("Docker is running in Windows containers mode");
-        console.log();
-        console.log(chalk.yellow("  WorkerMill workers require Linux containers."));
-        console.log(chalk.yellow("  Right-click the Docker Desktop icon in the system tray →"));
-        console.log(chalk.yellow("  'Switch to Linux containers...'"));
-        console.log();
-        console.log("  Then re-run: workermill-agent");
-        process.exit(1);
-      }
-    } catch {
-      dockerSpinner.fail("Docker is installed but the daemon is not running");
-      console.log();
-      console.log(chalk.yellow("  Start Docker Desktop, wait for it to fully initialize,"));
-      console.log(chalk.yellow("  then re-run: workermill-agent"));
-      process.exit(1);
-    }
-
-    dockerSpinner.succeed(`Docker ${chalk.dim(version ? `(${version})` : "")}`);
+  if (commandExists("git")) {
+    const version = getVersion("git");
+    gitSpinner.succeed(`Git ${chalk.dim(version ? `(${version})` : "")}`);
   } else {
-    dockerSpinner.fail("Docker is not installed");
+    gitSpinner.fail("Git is not installed");
     console.log();
-    console.log(chalk.yellow("  Docker Desktop is required but must be installed manually:"));
-    console.log(`  ${chalk.cyan("https://docs.docker.com/get-docker/")}`);
+    console.log(chalk.yellow("  Git is required. Install it from:"));
+    console.log(`  ${chalk.cyan("https://git-scm.com/downloads")}`);
     console.log();
-    console.log("  Install Docker, start it, then re-run: workermill-agent");
+    console.log("  Then re-run: workermill-agent");
     process.exit(1);
   }
 
@@ -322,16 +294,12 @@ export async function setupCommand(): Promise<void> {
   // Validate API key
   const validateSpinner = ora("Validating API key...").start();
   let scmProvider = "github";
-  let workerImageUrl = "";
-  let ecrRegistry = "";
   try {
     const resp = await axios.get(`${apiUrl.replace(/\/$/, "")}/api/agent/config`, {
       headers: { "x-api-key": apiKey },
       timeout: 15000,
     });
     scmProvider = resp.data.scmProvider || "github";
-    workerImageUrl = resp.data.workerImageUrl || "";
-    ecrRegistry = resp.data.ecrRegistry || "";
     validateSpinner.succeed(`Connected! SCM provider: ${scmProvider}`);
   } catch (error: unknown) {
     const err = error as { response?: { status?: number } };
@@ -360,122 +328,7 @@ export async function setupCommand(): Promise<void> {
     },
   ]);
 
-  // ── Step 7: AWS CLI + ECR auth + pull worker image ───────────────────────
-  console.log();
-  const workerImage = workerImageUrl || "workermill-worker:local";
-  const isEcrImage = ecrRegistry.length > 0;
-
-  // Check AWS CLI
-  const awsSpinner = ora("Checking AWS CLI...").start();
-  if (commandExists("aws")) {
-    try {
-      execSync("aws sts get-caller-identity", {
-        stdio: "pipe",
-        timeout: 15000,
-      });
-      awsSpinner.succeed("AWS CLI configured");
-    } catch {
-      awsSpinner.warn("AWS CLI found but credentials not configured");
-      console.log();
-      console.log(
-        chalk.yellow(
-          "  Configure AWS credentials for private ECR image access:",
-        ),
-      );
-      console.log(chalk.cyan("    aws configure"));
-      console.log(
-        chalk.dim(
-          "  Contact your WorkerMill admin for AWS access key / secret key.",
-        ),
-      );
-      console.log(
-        chalk.dim(
-          "  Setup will continue — you can configure AWS later before starting.",
-        ),
-      );
-    }
-  } else {
-    awsSpinner.warn("AWS CLI not found");
-    console.log();
-    console.log(
-      chalk.yellow(
-        "  AWS CLI is required for pulling worker images from private ECR.",
-      ),
-    );
-    console.log(
-      chalk.cyan(
-        "  Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
-      ),
-    );
-    console.log(
-      chalk.dim(
-        "  Setup will continue — install AWS CLI before starting the agent.",
-      ),
-    );
-  }
-
-  // Authenticate with ECR (only if the worker image is from ECR)
-  let ecrAuthed = false;
-  if (isEcrImage) {
-    console.log();
-    console.log(chalk.dim(`  Authenticating with private ECR...`));
-    // Extract region from ECR registry hostname
-    const regionMatch = ecrRegistry.match(/\.ecr\.([a-z0-9-]+)\.amazonaws\.com/);
-    const ecrRegion = regionMatch ? regionMatch[1] : "us-east-1";
-    try {
-      execSync(
-        `aws ecr get-login-password --region ${ecrRegion} | docker login --username AWS --password-stdin ${ecrRegistry}`,
-        { stdio: "pipe", timeout: 30_000 },
-      );
-      console.log(chalk.green("  ✓ ECR authenticated"));
-      ecrAuthed = true;
-    } catch {
-      console.log(
-        chalk.yellow("  ⚠ ECR authentication failed (AWS credentials may not be configured yet)"),
-      );
-      console.log(
-        chalk.dim("  Worker image pull will be skipped — authenticate later with:"),
-      );
-      console.log(
-        chalk.dim(
-          `    aws ecr get-login-password --region ${ecrRegion} | docker login --username AWS --password-stdin ${ecrRegistry}`,
-        ),
-      );
-    }
-  }
-
-  // Pull worker image (skip if ECR and auth failed, or if local image)
-  if (ecrAuthed || !isEcrImage) {
-    console.log();
-    console.log(chalk.dim(`  Pulling worker image: ${workerImage}`));
-    console.log(
-      chalk.dim("  This may take a few minutes on first run (~1.1 GB)..."),
-    );
-    console.log();
-
-    const pullResult = spawnSync("docker", ["pull", workerImage], {
-      stdio: "inherit",
-      timeout: 600_000,
-    });
-
-    if (pullResult.status === 0) {
-      console.log();
-      console.log(chalk.green("  ✓ Worker image pulled"));
-    } else {
-      console.log();
-      console.log(chalk.red("  ✗ Failed to pull worker image."));
-      if (pullResult.error) {
-        console.log(chalk.yellow(`  Error: ${pullResult.error.message}`));
-      }
-      console.log(
-        chalk.dim(
-          "  Setup will continue — you can pull the image later before starting.",
-        ),
-      );
-    }
-  }
-
-  // ── Step 8: Save config ───────────────────────────────────────────────────
+  // ── Step 7: Save config ────────────────────────────────────────────────────
   const fileConfig: FileConfig = {
     apiUrl: apiUrl.replace(/\/$/, ""),
     apiKey,
@@ -484,7 +337,6 @@ export async function setupCommand(): Promise<void> {
     pollIntervalMs: 5000,
     heartbeatIntervalMs: 30000,
     tokens: { github: "", bitbucket: "", gitlab: "" }, // SCM tokens come from org Settings
-    workerImage,
     setupCompletedAt: new Date().toISOString(),
   };
 

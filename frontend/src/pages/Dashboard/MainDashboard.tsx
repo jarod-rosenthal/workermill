@@ -1018,7 +1018,14 @@ export default function Dashboard() {
     eventSource.addEventListener("code_event", (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
-        const filePath = data.filePath as string;
+        // Normalize: strip /workspace/worktrees/<expert>/ or /workspace/<repo>/ prefix
+        const rawPath = data.filePath as string;
+        const filePath =
+          rawPath.replace(
+            /^\/workspace\/worktrees\/[^/]+\//, "",
+          ).replace(
+            /^\/workspace\/[^/]+\//, "",
+          ) || rawPath;
         const toolName = data.toolName as "Write" | "Edit";
 
         setCodeFiles((prev) => {

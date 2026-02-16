@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { authenticateSSE } from "../../middleware/auth.js";
 import { AppDataSource } from "../../db/connection.js";
-import { WorkerTask, Organization } from "../../models/index.js";
+import { WorkerTask, Organization, KbCard } from "../../models/index.js";
 import { logger } from "../../utils/logger.js";
 import { costEvents, type CostUpdateEvent } from "../../services/cost-events.js";
 import {
@@ -157,6 +157,25 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       // Sort with PRD grouping, then limit to 10
       const filteredRunningTasks = sortTasksWithPrdGrouping(filteredTasks).slice(0, 10);
 
+      // Batch-fetch card context for internal board cards (for direct links)
+      const streamTaskIds = filteredRunningTasks.map((t) => t.id);
+      const cardContextMap = new Map<string, { boardId: string; cardId: string }>();
+      if (streamTaskIds.length > 0) {
+        const cardRows = await AppDataSource.getRepository(KbCard)
+          .createQueryBuilder("card")
+          .select(["card.workerTaskId", "card.boardId", "card.id"])
+          .where("card.workerTaskId IN (:...taskIds)", { taskIds: streamTaskIds })
+          .getMany();
+        for (const row of cardRows) {
+          if (row.workerTaskId) {
+            cardContextMap.set(row.workerTaskId, {
+              boardId: row.boardId,
+              cardId: row.id,
+            });
+          }
+        }
+      }
+
       // Fetch Ralph progress, checkpoint data, and Epic progress for running tasks in parallel
       const runningTasks = await Promise.all(
         filteredRunningTasks.map(async (task) => {
@@ -165,7 +184,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
             fetchCheckpointForTask(task.id),
             fetchEpicProgressForTask(task),
           ]);
-          return formatTaskData(task, ralphData, checkpointData, epicProgressData || undefined, freshOrg.maxReviewRevisions);
+          return formatTaskData(task, ralphData, checkpointData, epicProgressData || undefined, freshOrg.maxReviewRevisions, cardContextMap.get(task.id) ?? null);
         })
       );
 

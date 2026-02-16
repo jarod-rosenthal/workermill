@@ -14,7 +14,7 @@ import { authenticateUser } from "../middleware/auth.js";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { AppDataSource } from "../db/connection.js";
-import { User, Organization, OrgInvite, UserOrganization, PLAN_QUOTAS } from "../models/index.js";
+import { User, Organization, OrgInvite, UserOrganization } from "../models/index.js";
 import { applyReferralCode, validateReferralCode } from "../services/referral.js";
 import { notifyNewSignup } from "../services/admin-notifications.js";
 import { sendWelcomeEmail } from "../services/email/index.js";
@@ -464,7 +464,7 @@ router.post(
           name: organizationName,
           slug,
           plan: "free",
-          taskQuota: PLAN_QUOTAS.free,
+          taskQuota: 0, // Unlimited tasks (feature-gated, not quota-based)
           apiKey: randomBytes(32).toString("hex"), // Generate API key for org
         });
         await orgRepo.save(org);
@@ -888,7 +888,7 @@ router.post(
           name: organizationName,
           slug,
           plan: "free",
-          taskQuota: PLAN_QUOTAS.free,
+          taskQuota: 0, // Unlimited tasks (feature-gated, not quota-based)
           apiKey: randomBytes(32).toString("hex"),
         });
         await orgRepo.save(org);
@@ -1455,7 +1455,7 @@ router.post(
           slug,
           azureTenantId: tenantId,
           plan: "free",
-          taskQuota: PLAN_QUOTAS.free,
+          taskQuota: 0, // Unlimited tasks (feature-gated, not quota-based)
           apiKey: randomBytes(32).toString("hex"),
         });
         await orgRepo.save(org);

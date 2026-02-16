@@ -186,7 +186,7 @@ const swaggerDefinition = {
         properties: {
           plan: {
             type: "string",
-            enum: ["free", "starter", "pro", "enterprise"],
+            enum: ["free", "pro", "enterprise"],
             description: "Current subscription plan",
           },
           usage: {
@@ -265,7 +265,7 @@ const swaggerDefinition = {
         properties: {
           id: {
             type: "string",
-            enum: ["free", "starter", "pro", "enterprise"],
+            enum: ["free", "pro", "enterprise"],
             description: "Plan identifier",
           },
           name: {

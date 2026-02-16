@@ -140,12 +140,8 @@ export const config = {
     secretKey: process.env.STRIPE_SECRET_KEY || "",
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
     prices: {
-      free: "", // Legacy - no Stripe price
-      starter: process.env.STRIPE_PRICE_STARTER || "price_starter", // $29/mo - 5 hrs included
-      team: process.env.STRIPE_PRICE_TEAM || "price_team", // $79/mo - 20 hrs included
-      business: process.env.STRIPE_PRICE_BUSINESS || "price_business", // $199/mo - 60 hrs included
-      pro: process.env.STRIPE_PRICE_PRO || "price_pro", // Legacy - maps to team
-      enterprise: process.env.STRIPE_PRICE_ENTERPRISE || "price_enterprise", // Custom
+      pro: process.env.STRIPE_PRICE_PRO || "price_pro",
+      enterprise: process.env.STRIPE_PRICE_ENTERPRISE || "price_enterprise",
     },
   },
 

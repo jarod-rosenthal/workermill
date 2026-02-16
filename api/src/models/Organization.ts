@@ -69,6 +69,7 @@ export const PLAN_FEATURES: Record<OrganizationPlan, {
   complianceCenter: boolean;
   dedicatedWorkerPool: boolean;
   dataResidency: boolean;
+  multiProvider: boolean;
 }> = {
   free: {
     cloudExecution: false,
@@ -81,6 +82,7 @@ export const PLAN_FEATURES: Record<OrganizationPlan, {
     complianceCenter: false,
     dedicatedWorkerPool: false,
     dataResidency: false,
+    multiProvider: false,
   },
   pro: {
     cloudExecution: true,
@@ -93,6 +95,7 @@ export const PLAN_FEATURES: Record<OrganizationPlan, {
     complianceCenter: false,
     dedicatedWorkerPool: false,
     dataResidency: false,
+    multiProvider: true,
   },
   enterprise: {
     cloudExecution: true,
@@ -105,6 +108,7 @@ export const PLAN_FEATURES: Record<OrganizationPlan, {
     complianceCenter: true,
     dedicatedWorkerPool: true,
     dataResidency: true,
+    multiProvider: true,
   },
 };
 

@@ -28,6 +28,7 @@ const tiers: PricingTier[] = [
       "3 expert personas per task",
       "All 14+ AI personas",
       "All integrations (Jira, GitHub, GitLab, Bitbucket, Linear)",
+      "Anthropic Claude models",
       "Local + BYOK execution",
       "Codebase RAG",
       "MCP servers",
@@ -49,6 +50,7 @@ const tiers: PricingTier[] = [
     badge: "Launch Price",
     features: [
       "Everything in Free, plus:",
+      "All AI providers (OpenAI, Google, Ollama)",
       "5 concurrent workers",
       "Unlimited expert personas",
       "Up to 5 users",
@@ -215,15 +217,15 @@ export function Pricing() {
           </h3>
           <div className="grid md:grid-cols-3 gap-6 text-center">
             <div>
-              <p className="font-medium text-foreground mb-1">Free = Full Product</p>
+              <p className="font-medium text-foreground mb-1">Free = Anthropic Claude</p>
               <p className="text-sm text-muted-foreground">
-                All features, your hardware, our orchestration. Unlimited tasks, all personas, all integrations.
+                Full product with Claude models on your hardware. Unlimited tasks, all personas, all integrations.
               </p>
             </div>
             <div>
-              <p className="font-medium text-foreground mb-1">Pro = Speed + Team</p>
+              <p className="font-medium text-foreground mb-1">Pro = All Providers + Scale</p>
               <p className="text-sm text-muted-foreground">
-                5x parallel workers, cloud execution, 5 seats, memory persistence. Launch price: $14.50/mo.
+                OpenAI, Google, Ollama + 5x parallel workers, cloud execution, 5 seats. Launch price: $14.50/mo.
               </p>
             </div>
             <div>

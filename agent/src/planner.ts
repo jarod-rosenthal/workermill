@@ -870,6 +870,8 @@ export async function planTask(
         try {
           let refinedOutput: string;
           if (isAnthropicPlanning) {
+            // No repo access for refinement — planner already explored on first pass.
+            // Passing cwd would cause redundant repo scanning.
             refinedOutput = await runClaudeCli(
               claudePath,
               cliModel,
@@ -877,7 +879,6 @@ export async function planTask(
               cleanEnv,
               task.id,
               startTime,
-              repoPath || undefined,
             );
           } else {
             if (!providerApiKey) {
@@ -888,8 +889,7 @@ export async function planTask(
               model: cliModel,
               apiKey: providerApiKey,
               prompt: refinementPrompt,
-              workingDir: repoPath || undefined,
-              enableTools: !!repoPath,
+              enableTools: false,
               maxSteps: 10,
             });
           }

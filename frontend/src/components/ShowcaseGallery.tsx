@@ -2,7 +2,6 @@ import { Link } from "react-router-dom";
 import {
   ExternalLink,
   Clock,
-  DollarSign,
   Layers,
   ArrowRight,
   Zap,
@@ -39,7 +38,7 @@ const featuredProject: ShowcaseProject = {
     "Complete rebuild of a production incident management platform: on-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens.",
   stack: "Express + TypeScript + React + React Native + Terraform",
   storyCount: 105,
-  cost: "$142.00",
+  cost: "Claude Max",
   duration: "~18 hrs",
   repoUrl: "https://github.com/jarod-rosenthal/oncallshift",
   liveUrl: "https://oncallshift.com",
@@ -54,11 +53,12 @@ const showcaseProjects: ShowcaseProject[] = [
     tagline: "Multi-tenant SaaS project management with Kanban boards.",
     description:
       "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time updates, workspace dashboards, and activity feeds. Deployed to Vercel.",
-    stack: "Next.js + Prisma + TailwindCSS",
-    storyCount: 10,
-    cost: "$14.20",
-    duration: "48 min",
+    stack: "Next.js 15 + Prisma + TailwindCSS + Neon PostgreSQL",
+    storyCount: 44,
+    cost: "Claude Max",
+    duration: "~354 min",
     repoUrl: "https://github.com/workermill-examples/teamboard",
+    liveUrl: "https://teamboard.workermill.com",
     category: "saas",
     icon: <Globe className="w-4 h-4" />,
   },
@@ -70,7 +70,7 @@ const showcaseProjects: ShowcaseProject[] = [
       "Inventory management API with JWT auth, rate limiting, full-text search, audit logging, and auto-generated OpenAPI docs. Full AWS deployment.",
     stack: "FastAPI + SQLAlchemy + Terraform",
     storyCount: 8,
-    cost: "$9.80",
+    cost: "Claude Max",
     duration: "35 min",
     repoUrl: "https://github.com/workermill-examples/shipapi",
     category: "api",
@@ -84,7 +84,7 @@ const showcaseProjects: ShowcaseProject[] = [
       "Event ingestion API with real-time WebSocket dashboard: charts, heatmap, and searchable event table. Demo data generator keeps charts active.",
     stack: "Express + React + Socket.io + GCP",
     storyCount: 12,
-    cost: "$18.40",
+    cost: "Claude Max",
     duration: "62 min",
     repoUrl: "https://github.com/workermill-examples/pulseview",
     category: "analytics",
@@ -98,7 +98,7 @@ const showcaseProjects: ShowcaseProject[] = [
       "Documentation platform with Stripe-like design, Meilisearch-powered search, Django admin CMS, and 15+ pages of generated API docs.",
     stack: "Django + HTMX + Meilisearch",
     storyCount: 10,
-    cost: "$12.60",
+    cost: "Claude Max",
     duration: "42 min",
     repoUrl: "https://github.com/workermill-examples/docforge",
     category: "documentation",
@@ -112,7 +112,7 @@ const showcaseProjects: ShowcaseProject[] = [
       "Go CLI scanning codebases for leaked secrets using regex and entropy analysis. Web dashboard tracks results. Cross-platform binaries via goreleaser.",
     stack: "Go + Cobra + Next.js",
     storyCount: 12,
-    cost: "$22.30",
+    cost: "Claude Max",
     duration: "75 min",
     repoUrl: "https://github.com/workermill-examples/envguard",
     category: "security",
@@ -126,7 +126,7 @@ const showcaseProjects: ShowcaseProject[] = [
       "Three-service order processing (Order, Payment, Notification) via AWS SQS. Real-time monitoring dashboard shows animated message flow.",
     stack: "Express + SQS + React + Terraform",
     storyCount: 14,
-    cost: "$28.50",
+    cost: "Claude Max",
     duration: "95 min",
     repoUrl: "https://github.com/workermill-examples/orderflow",
     category: "microservices",
@@ -151,7 +151,7 @@ export default function ShowcaseGallery() {
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
             Real projects built from a description. Each includes the repo,
-            build log, cost breakdown, and quality metrics.
+            build log, and quality metrics.
           </p>
         </div>
 
@@ -221,12 +221,12 @@ export default function ShowcaseGallery() {
                       </div>
                     </div>
                     <div className="card-elevated border border-border/50 rounded-xl p-4 text-center lg:text-left">
-                      <div className="flex items-center justify-center lg:justify-start gap-2 text-2xl font-bold text-green-500">
-                        <DollarSign className="w-5 h-5" />
-                        {featuredProject.cost.replace("$", "")}
+                      <div className="flex items-center justify-center lg:justify-start gap-2 text-lg font-bold text-amber-400">
+                        <Zap className="w-5 h-5" />
+                        Claude Max
                       </div>
                       <div className="text-xs text-muted-foreground mt-1">
-                        total cost (BYOK)
+                        subscription model
                       </div>
                     </div>
                     <div className="card-elevated border border-border/50 rounded-xl p-4 text-center lg:text-left">
@@ -254,13 +254,16 @@ export default function ShowcaseGallery() {
             >
               {/* Card header */}
               <div className="px-6 pt-6 pb-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary">
-                    {project.icon}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary">
+                      {project.icon}
+                    </div>
+                    <h3 className="text-lg font-semibold text-foreground">
+                      {project.name}
+                    </h3>
                   </div>
-                  <h3 className="text-lg font-semibold text-foreground">
-                    {project.name}
-                  </h3>
+                  {project.liveUrl && <BuiltByBadge />}
                 </div>
                 <p className="text-sm text-muted-foreground leading-relaxed mb-4">
                   {project.description}
@@ -283,12 +286,12 @@ export default function ShowcaseGallery() {
                     </div>
                   </div>
                   <div className="text-center">
-                    <div className="flex items-center justify-center gap-1 text-sm font-semibold text-green-500">
-                      <DollarSign className="w-3.5 h-3.5" />
-                      {project.cost.replace("$", "")}
+                    <div className="flex items-center justify-center gap-1 text-sm font-semibold text-amber-400">
+                      <Zap className="w-3.5 h-3.5" />
+                      Max
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">
-                      cost
+                      Claude Max
                     </div>
                   </div>
                   <div className="text-center">
@@ -305,6 +308,17 @@ export default function ShowcaseGallery() {
 
               {/* Actions */}
               <div className="px-6 py-4 border-t border-border/30 flex gap-3">
+                {project.liveUrl && (
+                  <a
+                    href={project.liveUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                  >
+                    <Globe className="w-3 h-3" />
+                    Live Demo
+                  </a>
+                )}
                 <a
                   href={project.repoUrl}
                   target="_blank"
@@ -328,9 +342,9 @@ export default function ShowcaseGallery() {
         {/* Bottom note */}
         <div className="text-center mt-12">
           <p className="text-sm text-muted-foreground">
-            Costs shown are BYOK mode (your API key). Local mode with Claude Max
-            costs{" "}
-            <span className="text-green-500 font-semibold">$0</span>.
+            All projects built using{" "}
+            <span className="text-amber-400 font-semibold">Claude Max</span>{" "}
+            subscription. No per-token API costs.
           </p>
         </div>
       </div>

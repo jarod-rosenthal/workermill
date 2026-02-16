@@ -608,38 +608,40 @@
 /* ============================================
    LIGHT MODE TYPOGRAPHY ENHANCEMENTS
    Navy text on cool slate for premium readability
+   Scoped to [data-page="app"] to avoid overriding
+   the always-dark landing page's Tailwind classes.
    ============================================ */
 
 /* Headings - deep navy with presence */
-[data-theme="light"] h1, [data-theme="light"] h2, [data-theme="light"] h3, [data-theme="light"] h4, [data-theme="light"] h5, [data-theme="light"] h6 {
+[data-theme="light"] [data-page="app"] h1, [data-theme="light"] [data-page="app"] h2, [data-theme="light"] [data-page="app"] h3, [data-theme="light"] [data-page="app"] h4, [data-theme="light"] [data-page="app"] h5, [data-theme="light"] [data-page="app"] h6 {
   color: ***REMOVED***1a2332;
   letter-spacing: -0.025em;
 }
 
-[data-theme="light"] h1 {
+[data-theme="light"] [data-page="app"] h1 {
   font-weight: 700;
   color: ***REMOVED***0f1521;
 }
 
-[data-theme="light"] h2 {
+[data-theme="light"] [data-page="app"] h2 {
   font-weight: 600;
   color: ***REMOVED***1a2332;
 }
 
-[data-theme="light"] h3, [data-theme="light"] h4 {
+[data-theme="light"] [data-page="app"] h3, [data-theme="light"] [data-page="app"] h4 {
   font-weight: 600;
 }
 
 /* Body text - readable slate gray */
-[data-theme="light"] p {
+[data-theme="light"] [data-page="app"] p {
   color: ***REMOVED***374151;
   line-height: 1.7;
 }
 
 /* Labels and captions */
-[data-theme="light"] label,
-[data-theme="light"] figcaption,
-[data-theme="light"] .caption {
+[data-theme="light"] [data-page="app"] label,
+[data-theme="light"] [data-page="app"] figcaption,
+[data-theme="light"] [data-page="app"] .caption {
   color: ***REMOVED***64748b;
 }
 

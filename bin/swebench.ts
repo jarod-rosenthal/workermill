@@ -238,7 +238,7 @@ async function downloadDataset(
 
   // Fetch in batches of 100 (HuggingFace API limit), up to enough for sampling
   const batchSize = 100;
-  const totalToFetch = Math.min(300, Math.max(count * 3, 300)); // Fetch 300 to allow stratified sampling
+  const totalToFetch = 300; // SWE-bench Lite has exactly 300 instances
   const allInstances: SWEBenchInstance[] = [];
 
   for (let offset = 0; offset < totalToFetch; offset += batchSize) {
@@ -865,7 +865,7 @@ async function main(): Promise<void> {
         fd,
         JSON.stringify({
           instance_id: card.instanceId,
-          model_name_or_path: modelName,
+          model_name_or_path: opts.modelName,
           model_patch: "",
         }) + "\n",
       );

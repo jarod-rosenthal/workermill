@@ -1615,7 +1615,7 @@ export async function monitorExecutingTasks(): Promise<void> {
       }
 
       // INTERNAL TASK SYNC: Update InternalTask status and board column when WorkerTask completes
-      if (task.internalTaskId && ["completed", "deployed", "failed", "review_requested", "pr_created", "escalated"].includes(newStatus)) {
+      if (task.internalTaskId && ["completed", "deployed", "failed", "review_requested", "pr_created", "pr_approved", "escalated"].includes(newStatus)) {
         try {
           await syncInternalTaskStatus(task, newStatus);
         } catch (syncError) {
@@ -1628,7 +1628,7 @@ export async function monitorExecutingTasks(): Promise<void> {
       }
 
       // KB CARD: Move linked KbCard to appropriate column and post status comment
-      if (["completed", "deployed", "failed", "review_requested", "pr_created", "escalated"].includes(newStatus)) {
+      if (["completed", "deployed", "failed", "review_requested", "pr_created", "pr_approved", "escalated"].includes(newStatus)) {
         // Move card to matching column (Done, Review, To Do)
         try {
           await syncKbCardColumn(task.id, newStatus);
@@ -1861,7 +1861,7 @@ export async function syncKbCardColumn(
   if (!linkedCard) return;
 
   // Map worker status to target column name
-  let targetColumnName: string;
+  let targetColumnName: string | null;
   switch (newStatus) {
     case "claimed":
     case "executing":
@@ -1871,21 +1871,25 @@ export async function syncKbCardColumn(
       break;
     case "review_requested":
     case "pr_created":
-    case "pr_approved":
       targetColumnName = "Review";
+      break;
+    case "pr_approved":
+      targetColumnName = "PR Approved";
       break;
     case "completed":
     case "deployed":
-      targetColumnName = "Done";
+      targetColumnName = "Deployed";
       break;
     case "failed":
     case "escalated":
     case "cancelled":
-      targetColumnName = "To Do";
+      targetColumnName = null; // Stay in current column
       break;
     default:
       return; // Unknown status, don't move
   }
+
+  if (!targetColumnName) return; // No column movement needed
 
   // Find the target column on the same board (case-insensitive)
   const targetColumn = await columnRepo
@@ -1920,7 +1924,7 @@ export async function syncKbCardColumn(
  * Sync WorkerTask status back to the originating InternalTask.
  * Updates the InternalTask status and moves the card to the appropriate board column.
  */
-async function syncInternalTaskStatus(
+export async function syncInternalTaskStatus(
   workerTask: WorkerTask,
   newStatus: string,
 ): Promise<void> {
@@ -1942,26 +1946,31 @@ async function syncInternalTaskStatus(
 
   // Map WorkerTask status to InternalTask status and target column type
   let internalStatus: typeof internalTask.status;
-  let targetColumnType: BoardColumnType;
+  let targetColumnType: BoardColumnType | null;
 
   switch (newStatus) {
-    case "completed":
-    case "deployed":
-      internalStatus = "completed";
-      targetColumnType = "done";
-      break;
-    case "failed":
-      internalStatus = "failed";
-      targetColumnType = "backlog"; // Failed tasks go back to backlog for re-triage
-      break;
     case "review_requested":
     case "pr_created":
       internalStatus = "review";
       targetColumnType = "review";
       break;
+    case "pr_approved":
+      internalStatus = "pr_approved";
+      targetColumnType = "pr_approved";
+      break;
+    case "completed":
+    case "deployed":
+      internalStatus = "deployed";
+      targetColumnType = "deployed";
+      break;
     case "escalated":
+      // Stay in current column — needs human attention
+      internalStatus = internalTask.status; // no status change
+      targetColumnType = null;
+      break;
+    case "failed":
       internalStatus = "failed";
-      targetColumnType = "backlog";
+      targetColumnType = null; // Stay in current column
       break;
     default:
       return; // Unknown status, don't sync
@@ -1970,21 +1979,24 @@ async function syncInternalTaskStatus(
   // Update InternalTask status
   internalTask.status = internalStatus;
 
-  // Move card to appropriate board column
-  const targetColumn = await columnRepo.findOne({
-    where: { projectId: internalTask.projectId, columnType: targetColumnType },
-  });
+  // Move card to appropriate board column (null = stay in current column)
+  let targetColumn = null;
+  if (targetColumnType) {
+    targetColumn = await columnRepo.findOne({
+      where: { projectId: internalTask.projectId, columnType: targetColumnType },
+    });
 
-  if (targetColumn) {
-    const maxPosResult = await internalTaskRepo
-      .createQueryBuilder("task")
-      .where("task.columnId = :columnId", { columnId: targetColumn.id })
-      .select("MAX(task.columnPosition)", "maxPos")
-      .getRawOne();
-    const newPosition = (maxPosResult?.maxPos ?? -1) + 1;
+    if (targetColumn) {
+      const maxPosResult = await internalTaskRepo
+        .createQueryBuilder("task")
+        .where("task.columnId = :columnId", { columnId: targetColumn.id })
+        .select("MAX(task.columnPosition)", "maxPos")
+        .getRawOne();
+      const newPosition = (maxPosResult?.maxPos ?? -1) + 1;
 
-    internalTask.columnId = targetColumn.id;
-    internalTask.columnPosition = newPosition;
+      internalTask.columnId = targetColumn.id;
+      internalTask.columnPosition = newPosition;
+    }
   }
 
   // Atomic update to prevent clobbering concurrent board changes

@@ -9,7 +9,7 @@ import {
 import { User } from "./User.js";
 import { WorkerTask } from "./WorkerTask.js";
 
-export type OrganizationPlan = "free" | "starter" | "team" | "business" | "pro" | "enterprise";
+export type OrganizationPlan = "free" | "pro" | "enterprise";
 
 /**
  * Feature flags for gradual rollout of new features.
@@ -22,54 +22,90 @@ export interface OrganizationFeatureFlags {
   shadowModeEnabled?: boolean;
 }
 
-// Plan quotas (included compute hours per month)
-export const PLAN_HOURS: Record<OrganizationPlan, number> = {
-  free: 1,         // Legacy - new signups go to starter
-  starter: 5,      // $29/mo - 5 compute hours included
-  team: 20,        // $79/mo - 20 compute hours included
-  business: 60,    // $199/mo - 60 compute hours included
-  pro: 20,         // Legacy - maps to team
-  enterprise: -1,  // Unlimited
-};
-
-// Legacy: Plan quotas (approximate tasks per month, assuming 20 min avg)
-export const PLAN_QUOTAS: Record<OrganizationPlan, number> = {
-  free: 3,         // ~1 hour / 20 min
-  starter: 15,     // ~5 hours / 20 min
-  team: 60,        // ~20 hours / 20 min
-  business: 180,   // ~60 hours / 20 min
-  pro: 60,         // Legacy - maps to team
-  enterprise: -1,  // Unlimited
-};
-
 // Plan user limits
 export const PLAN_USER_LIMITS: Record<OrganizationPlan, number> = {
-  free: 1,         // Legacy
-  starter: 5,      // $29/mo - up to 5 users
-  team: 20,        // $79/mo - up to 20 users
-  business: -1,    // $199/mo - unlimited users
-  pro: 20,         // Legacy - maps to team
+  free: 1,
+  pro: 5,
   enterprise: -1,  // Unlimited
 };
 
-// Plan monthly prices (in dollars)
+// Plan prices (monthly, in dollars)
 export const PLAN_PRICES: Record<OrganizationPlan, number> = {
   free: 0,
-  starter: 29,
-  team: 79,
-  business: 199,
-  pro: 79,         // Legacy - maps to team
-  enterprise: 0,   // Custom pricing
+  pro: 29,
+  enterprise: 0,  // Custom pricing
 };
 
-// Overage rates per hour (in dollars)
-export const PLAN_OVERAGE_RATES: Record<OrganizationPlan, number> = {
-  free: 8,         // Same as starter
-  starter: 8,      // $8/hr overage
-  team: 6,         // $6/hr overage
-  business: 4,     // $4/hr overage
-  pro: 6,          // Legacy - maps to team
-  enterprise: 4,   // Custom - same as business default
+// Max concurrent worker containers
+export const PLAN_MAX_WORKERS: Record<OrganizationPlan, number> = {
+  free: 1,
+  pro: 5,
+  enterprise: -1,  // Unlimited
+};
+
+// Max parallel expert personas per task
+export const PLAN_MAX_EXPERTS: Record<OrganizationPlan, number> = {
+  free: 3,
+  pro: -1,   // Unlimited
+  enterprise: -1,
+};
+
+// Log retention in days (-1 = unlimited)
+export const PLAN_LOG_RETENTION: Record<OrganizationPlan, number> = {
+  free: 14,
+  pro: 90,
+  enterprise: -1,
+};
+
+// Feature flags per plan
+export const PLAN_FEATURES: Record<OrganizationPlan, {
+  cloudExecution: boolean;
+  warmPool: boolean;
+  advancedAnalytics: boolean;
+  memoryPersistence: boolean;
+  roleBasedAccess: boolean;
+  ssoSaml: boolean;
+  configurableTechLead: boolean;
+  complianceCenter: boolean;
+  dedicatedWorkerPool: boolean;
+  dataResidency: boolean;
+}> = {
+  free: {
+    cloudExecution: false,
+    warmPool: false,
+    advancedAnalytics: false,
+    memoryPersistence: false,
+    roleBasedAccess: false,
+    ssoSaml: false,
+    configurableTechLead: false,
+    complianceCenter: false,
+    dedicatedWorkerPool: false,
+    dataResidency: false,
+  },
+  pro: {
+    cloudExecution: true,
+    warmPool: true,
+    advancedAnalytics: true,
+    memoryPersistence: true,
+    roleBasedAccess: true,
+    ssoSaml: false,
+    configurableTechLead: true,
+    complianceCenter: false,
+    dedicatedWorkerPool: false,
+    dataResidency: false,
+  },
+  enterprise: {
+    cloudExecution: true,
+    warmPool: true,
+    advancedAnalytics: true,
+    memoryPersistence: true,
+    roleBasedAccess: true,
+    ssoSaml: true,
+    configurableTechLead: true,
+    complianceCenter: true,
+    dedicatedWorkerPool: true,
+    dataResidency: true,
+  },
 };
 
 @Entity("organizations")

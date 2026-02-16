@@ -513,12 +513,10 @@ export function getAuditRetentionDays(plan: string): number {
     case "enterprise":
       return 365;
     case "pro":
-      return 365;
-    case "starter":
       return 90;
     case "free":
     default:
-      return 30;
+      return 14;
   }
 }
 

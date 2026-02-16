@@ -225,6 +225,7 @@ import { AddTicketSystemBackfill1706688000043 } from "./migrations/1706688000043
 import { AddMaxPerStoryRevisions1706688000044 } from "./migrations/1706688000044-AddMaxPerStoryRevisions.js";
 import { UpdateBoardColumns1706688000045 } from "./migrations/1706688000045-UpdateBoardColumns.js";
 import { ChangeSelfReviewDefaultToFalse1706688000046 } from "./migrations/1706688000046-ChangeSelfReviewDefaultToFalse.js";
+import { ConsolidatePlansToThreeTiers1706688000047 } from "./migrations/1706688000047-ConsolidatePlansToThreeTiers.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -467,6 +468,7 @@ export const AppDataSource = new DataSource({
     AddMaxPerStoryRevisions1706688000044,
     UpdateBoardColumns1706688000045,
     ChangeSelfReviewDefaultToFalse1706688000046,
+    ConsolidatePlansToThreeTiers1706688000047,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

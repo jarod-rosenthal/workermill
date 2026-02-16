@@ -1,4 +1,4 @@
-export { Organization, type OrganizationPlan, PLAN_HOURS, PLAN_QUOTAS, PLAN_USER_LIMITS, PLAN_PRICES, PLAN_OVERAGE_RATES } from "./Organization.js";
+export { Organization, type OrganizationPlan, PLAN_USER_LIMITS, PLAN_PRICES, PLAN_MAX_WORKERS, PLAN_MAX_EXPERTS, PLAN_LOG_RETENTION, PLAN_FEATURES } from "./Organization.js";
 export { User, type UserRole, type UserPreferences, type EmailPreferences } from "./User.js";
 export { UserOrganization, type OrgMemberRole } from "./UserOrganization.js";
 export { UserApiKey } from "./UserApiKey.js";

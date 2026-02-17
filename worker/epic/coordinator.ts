@@ -33,6 +33,16 @@ import { writeFileSync, unlinkSync, existsSync, readFileSync } from "fs";
 import { runQualityVerification, postQualityMetrics, type QualityMetrics } from "./quality-runner.js";
 import type { EvaluateQualityResponse } from "./decision-client.js";
 
+/**
+ * Personas excluded from question routing (Tier 2/3 fallback).
+ * They can still answer questions explicitly targeted at them (Tier 1).
+ */
+const QUESTION_INELIGIBLE_PERSONAS = new Set([
+  "support_agent",
+  "project_manager",
+  "tech_writer",
+  "ml_engineer",
+]);
 
 /**
  * Epic coordinator managing multi-agent collaboration.
@@ -1588,9 +1598,10 @@ export class EpicCoordinator {
 
     if (orphanedQuestions.length === 0) return;
 
-    // Re-check which experts are still idle after pass 1
+    // Re-check which experts are still idle after pass 1 (exclude non-coding personas)
     const stillIdleExperts = Array.from(this.expertStates.entries())
       .filter(([_, state]) => state.status === "idle")
+      .filter(([persona]) => !QUESTION_INELIGIBLE_PERSONAS.has(persona))
       .map(([persona]) => persona);
 
     if (stillIdleExperts.length === 0) return;
@@ -2097,9 +2108,10 @@ export class EpicCoordinator {
     }
 
     for (const question of questions) {
-      // Compute idle expert names for routing
+      // Compute idle expert names for routing (exclude non-coding personas)
       const idleExpertNames = Array.from(this.expertStates.entries())
         .filter(([_, state]) => state.status === "idle")
+        .filter(([persona]) => !QUESTION_INELIGIBLE_PERSONAS.has(persona))
         .map(([persona]) => persona);
       // Route via Decision API — handles metadata targets, content-based routing, and tier selection
       const routing = await this.decisionClient.routeQuestion({
@@ -2163,10 +2175,12 @@ export class EpicCoordinator {
         }
       }
 
-      // Fallback: Any idle expert (excluding the question asker)
+      // Fallback: Any idle coding expert (excluding the question asker and non-coding personas)
       const anyIdleExpert = Array.from(this.expertStates.entries()).find(
         ([persona, state]) =>
-          state.status === "idle" && persona !== question.fromPersona
+          state.status === "idle" &&
+          persona !== question.fromPersona &&
+          !QUESTION_INELIGIBLE_PERSONAS.has(persona)
       );
       if (anyIdleExpert) {
         const [fallbackPersona] = anyIdleExpert;

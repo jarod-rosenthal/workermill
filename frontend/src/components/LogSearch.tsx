@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import DOMPurify from "dompurify";
 import axios from "axios";
 import { useDebounce } from "../hooks/useDebounce";
 import { Search, X, Loader2 } from "lucide-react";
@@ -476,7 +477,13 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                   <div
                     className="text-sm font-mono text-muted-foreground bg-muted/50 p-2 rounded mb-2 border border-border [&_mark]:bg-yellow-500/30 [&_mark]:text-foreground [&_mark]:rounded [&_mark]:px-0.5"
                     dangerouslySetInnerHTML={{
-                      __html: result.headline || result.snippet,
+                      __html: DOMPurify.sanitize(
+                        result.headline || result.snippet || "",
+                        {
+                          ALLOWED_TAGS: ["mark"],
+                          ALLOWED_ATTR: [],
+                        }
+                      ),
                     }}
                   />
 

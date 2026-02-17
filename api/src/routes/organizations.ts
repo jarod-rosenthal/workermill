@@ -6,6 +6,7 @@ import { Organization, User, OrgInvite, UserOrganization, type InviteRole, PLAN_
 import { authenticateUser, authenticateCognitoOnly, requireAdmin } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import { randomUUID } from "crypto";
+import bcrypt from "bcrypt";
 import { sendInviteEmail, sendOrgAddedEmail, sendWelcomeEmail } from "../services/email/index.js";
 
 const router = Router();
@@ -311,12 +312,15 @@ router.post(
       const org = req.organization!;
       const orgRepo = AppDataSource.getRepository(Organization);
 
-      org.apiKey = `org_${randomUUID().replace(/-/g, "")}`;
+      const rawKey = `org_${randomUUID().replace(/-/g, "")}`;
+      org.apiKeyHash = await bcrypt.hash(rawKey, 10);
+      org.apiKeyPrefix = rawKey.substring(0, 12);
+      org.apiKey = rawKey; // Keep raw key for spawner use (ECS/local workers)
       await orgRepo.save(org);
 
       logger.info("Organization API key rotated", { orgId: org.id });
       res.json({
-        apiKey: org.apiKey,
+        apiKey: rawKey,
         message: "API key rotated successfully. Update your integrations.",
       });
     } catch (error) {

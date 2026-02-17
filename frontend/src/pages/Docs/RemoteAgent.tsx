@@ -34,7 +34,7 @@ const architectureFlow = [
     bgColor: "bg-green-500/10",
     borderColor: "border-green-500/30",
     description:
-      "Polls the cloud API for tasks, runs Team Planning via Claude CLI, spawns Docker worker containers",
+      "Polls the cloud API for tasks, runs planning via Claude CLI, spawns Docker worker containers",
     location: "Your Machine",
   },
   {
@@ -317,7 +317,7 @@ export default function RemoteAgent() {
               },
               {
                 step: "3",
-                label: "Team Planning",
+                label: "Planning",
                 desc: "Claude CLI decomposes",
               },
               {
@@ -387,18 +387,17 @@ export default function RemoteAgent() {
         </div>
       </section>
 
-      {/* Team Planning */}
+      {/* Planning */}
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
           <Terminal className="w-5 h-5 text-primary" />
-          Team Planning
+          Planning
         </h2>
         <div className="bg-card border border-border rounded-xl p-6 space-y-4">
           <p className="text-muted-foreground">
             The remote agent includes{" "}
-            <strong className="text-foreground">Team Planning</strong> — before
-            the main planner runs, three specialized analyst agents analyze your
-            repository in parallel:
+            <strong className="text-foreground">planning with repo context</strong> — the planner clones your
+            repository and analyzes it directly to create a thorough execution plan:
           </p>
           <div className="grid md:grid-cols-3 gap-4">
             <div className="bg-background rounded-lg p-4 border border-border">

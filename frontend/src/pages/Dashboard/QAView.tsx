@@ -68,10 +68,10 @@ const mockQAData: QADashboardData = {
     {
       id: '1',
       type: 'task_completed',
-      title: 'Test suite passed for OCS-145',
+      title: 'Test suite passed for PROJ-218',
       description: '47 tests passed, 0 failed',
       timestamp: new Date(Date.now() - 30 * 60000).toISOString(),
-      jiraKey: 'OCS-145',
+      jiraKey: 'PROJ-218',
       severity: 'success',
     },
     {

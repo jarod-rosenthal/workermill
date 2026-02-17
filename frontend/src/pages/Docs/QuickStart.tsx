@@ -17,7 +17,7 @@ import { useState } from "react";
 const labels = [
   {
     name: "workermill",
-    description: "Required - Triggers Team Planning (parallel stories)",
+    description: "Required - Triggers planning and parallel story execution",
     required: true,
   },
   {

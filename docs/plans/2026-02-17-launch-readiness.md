@@ -46,32 +46,32 @@
 - Docs pages use "OCS-123" as examples (`MCP.tsx:94`, `Integrations.tsx:270`, `AdvancedFeatures.tsx:257`)
 - Settings show an "OnCallShift" integration panel visible to all users (`settings/index.tsx:274-281`)
 - Support admin email hardcoded to `admin@localhost` (`SupportTicketDetail.tsx:74`)
-**Fix:** Replace all OCS references with generic examples (PROJ-123, ACME-456). Remove or gate OnCallShift integration panel. Move support admin emails to org settings.
-**Status:** TODO
+**Fix:** Replaced all OCS-* task keys with generic PROJ-*/ACME-*/APP-* across 9 dashboard role views and 7 docs pages. Removed OnCallShift integration card and SlideOver from settings. Changed support admin email to `support@workermill.com`.
+**Status:** FIXED
 
 ### 7. Dead footer links on landing page
 **File:** `frontend/src/components/Footer.tsx:26-36`
 **Problem:** Links to `/changelog`, `/about`, `/careers`, `/contact` go to pages that don't exist. They silently redirect to home.
-**Fix:** Remove dead links or create placeholder pages.
-**Status:** TODO
+**Fix:** Removed dead links. Replaced with working links: Status (status.workermill.com), Support (mailto:support@workermill.com), Sales (mailto:sales@workermill.com).
+**Status:** FIXED
 
 ### 8. No empty state guidance for new users
 **File:** `Dashboard/MainDashboard.tsx:3750`
 **Problem:** New user with no tasks sees "No tasks yet" in a table cell. No getting-started guide, no CTA, no link to docs.
-**Fix:** Add a proper empty state component with icon, description, and CTA button (like BoardsList has).
-**Status:** TODO
+**Fix:** Added rich empty state with Rocket icon, description, and CTA links to Boards and Quick Start Guide.
+**Status:** FIXED
 
 ### 9. SetupWizard is unreachable
 **File:** `frontend/src/pages/SetupWizard.tsx`
 **Problem:** The 4-step setup wizard exists but the onboarding route skips it. Users can complete signup without configuring any integration, then immediately fail when running tasks.
-**Fix:** Either integrate the wizard into the onboarding flow or add a "setup incomplete" banner on the dashboard that links to settings.
-**Status:** TODO
+**Actual state:** Already addressed — `SetupBanner` component (`frontend/src/components/SetupBanner.tsx`) checks issue tracker, SCM, and AI provider configuration. Renders on the dashboard with progress bar and checklist linking to settings. Pre-flight validation (item 3) also catches missing config at task creation time.
+**Status:** ALREADY IMPLEMENTED (no change needed)
 
 ### 10. Outdated docs reference "Team Planning"
 **File:** `Docs/QuickStart.tsx:20`
 **Problem:** Still says "Triggers Team Planning (parallel stories)" but team planning was removed in v0.8.0.
-**Fix:** Update to "Triggers planning and execution workflow."
-**Status:** TODO
+**Fix:** Renamed "Team Planning" to "Epic Planning" / "Planning" across QuickStart.tsx, TaskLifecycle.tsx, DocsOverview.tsx, AdvancedFeatures.tsx, and RemoteAgent.tsx.
+**Status:** FIXED
 
 ---
 

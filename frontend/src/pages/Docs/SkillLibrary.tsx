@@ -360,7 +360,7 @@ export default function SkillLibrary() {
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <GitBranch className="w-4 h-4" />
               <span>Repository:</span>
-              <code className="bg-muted/50 px-2 py-0.5 rounded text-xs">oncallshift-api</code>
+              <code className="bg-muted/50 px-2 py-0.5 rounded text-xs">acme-api</code>
             </div>
           </div>
         </div>

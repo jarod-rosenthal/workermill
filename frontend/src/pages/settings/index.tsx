@@ -269,16 +269,6 @@ export default function Settings() {
   const [teamsTesting, setTeamsTesting] = useState(false);
   const [teamsSaving, setTeamsSaving] = useState(false);
 
-  // OnCallShift integration state
-   
-  const [oncallshiftApiKey, setOncallshiftApiKey] = useState("");
-  const [oncallshiftStatus, setOncallshiftStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [oncallshiftVisible, setOncallshiftVisible] = useState(false);
-   
-  const [oncallshiftTesting, setOncallshiftTesting] = useState(false);
-   
-  const [oncallshiftSaving, setOncallshiftSaving] = useState(false);
 
   // Cloud provider states - Access Keys (legacy)
   const [awsAccessKey, setAwsAccessKey] = useState("");
@@ -318,7 +308,6 @@ export default function Settings() {
   const [linearSlideOpen, setLinearSlideOpen] = useState(false);
   const [teamsSlideOpen, setTeamsSlideOpen] = useState(false);
    
-  const [oncallshiftSlideOpen, setOncallshiftSlideOpen] = useState(false);
   const [ollamaSlideOpen, setOllamaSlideOpen] = useState(false);
   const [awsSlideOpen, setAwsSlideOpen] = useState(false);
   const [gcpSlideOpen, setGcpSlideOpen] = useState(false);
@@ -584,7 +573,6 @@ export default function Settings() {
       setLinearStatus({ connected: data.linear?.configured || false, lastChecked: new Date().toISOString(), webhookSecretConfigured: data.linear?.webhookSecretConfigured || false });
       setSlackStatus({ connected: data.slack?.configured || false, lastChecked: new Date().toISOString() });
       setTeamsStatus({ connected: data.teams?.configured || false, lastChecked: new Date().toISOString() });
-      setOncallshiftStatus({ connected: data.oncallshift?.configured || false, lastChecked: new Date().toISOString() });
       // AWS is configured if either access keys OR IAM role is set up
       setAwsStatus({ connected: data.aws?.configured || data.aws?.roleConfigured || false, lastChecked: new Date().toISOString() });
       // Load role config if available
@@ -2063,7 +2051,6 @@ export default function Settings() {
             slackStatus={slackStatus}
             linearStatus={linearStatus}
             teamsStatus={teamsStatus}
-            oncallshiftStatus={oncallshiftStatus}
             awsStatus={awsStatus}
             gcpStatus={gcpStatus}
             azureStatus={azureStatus}
@@ -2084,7 +2071,6 @@ export default function Settings() {
             setSlackSlideOpen={setSlackSlideOpen}
             setLinearSlideOpen={setLinearSlideOpen}
             setTeamsSlideOpen={setTeamsSlideOpen}
-            setOncallshiftSlideOpen={setOncallshiftSlideOpen}
             setAwsSlideOpen={setAwsSlideOpen}
             handleAwsSlideOpen={handleAwsSlideOpen}
             setGcpSlideOpen={setGcpSlideOpen}
@@ -4476,95 +4462,7 @@ export default function Settings() {
           </div>
         </SlideOver>
 
-        {/* OnCallShift SlideOver */}
-        <SlideOver
-          isOpen={oncallshiftSlideOpen}
-          onClose={() => setOncallshiftSlideOpen(false)}
-          title="Configure OnCallShift"
-          icon={<Bell className="w-6 h-6 text-rose-500" />}
-          iconBgColor="bg-rose-500/20"
-        >
-          <div className="space-y-6">
-            <div className="p-4 rounded-lg bg-rose-500/5 border border-rose-500/20">
-              <p className="text-sm text-muted-foreground">
-                Connect OnCallShift to create incidents automatically when critical tasks fail or need escalation.
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">API Key</label>
-              <input
-                type="password"
-                value={oncallshiftApiKey}
-                onChange={(e) => setOncallshiftApiKey(e.target.value)}
-                placeholder="ocs_..."
-                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
-              />
-              <p className="mt-1 text-xs text-muted-foreground">
-                Create at OnCallShift → Settings → API Keys
-              </p>
-            </div>
-            <div className="flex gap-3 pt-4">
-              <button
-                onClick={async () => {
-                  setOncallshiftTesting(true);
-                  setMessage(null);
-                  try {
-                    const response = await fetch(`${API_BASE}/api/settings/integrations/oncallshift/test`, {
-                      method: "POST",
-                      headers: { Authorization: `Bearer ${tokens?.accessToken}` },
-                    });
-                    const data = await response.json();
-                    if (!response.ok) throw new Error(data.error || "OnCallShift connection test failed");
-                    setOncallshiftStatus({ connected: true, lastChecked: new Date().toISOString() });
-                    setMessage({ type: "success", text: `OnCallShift connection successful (${data.serviceCount} services found)` });
-                  } catch (err) {
-                    setMessage({ type: "error", text: err instanceof Error ? err.message : "OnCallShift connection test failed" });
-                    setOncallshiftStatus({ connected: false, lastChecked: new Date().toISOString() });
-                  } finally {
-                    setOncallshiftTesting(false);
-                  }
-                }}
-                disabled={oncallshiftTesting || !oncallshiftStatus.connected}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                {oncallshiftTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Test
-              </button>
-              <button
-                onClick={async () => {
-                  setOncallshiftSaving(true);
-                  setMessage(null);
-                  try {
-                    const response = await fetch(`${API_BASE}/api/settings/integrations/oncallshift`, {
-                      method: "PUT",
-                      headers: {
-                        Authorization: `Bearer ${tokens?.accessToken}`,
-                        "Content-Type": "application/json",
-                      },
-                      body: JSON.stringify({ apiKey: oncallshiftApiKey }),
-                    });
-                    const data = await response.json();
-                    if (!response.ok) throw new Error(data.error || "Failed to save OnCallShift credentials");
-                    setOncallshiftStatus({ connected: true, lastChecked: new Date().toISOString() });
-                    setMessage({ type: "success", text: "OnCallShift credentials saved successfully" });
-                    setOncallshiftApiKey("");
-                    setOncallshiftSlideOpen(false);
-                    fetchIntegrations();
-                  } catch (err) {
-                    setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save OnCallShift credentials" });
-                  } finally {
-                    setOncallshiftSaving(false);
-                  }
-                }}
-                disabled={oncallshiftSaving || !oncallshiftApiKey}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-rose-500 text-white rounded-lg hover:bg-rose-600 transition-colors disabled:opacity-50"
-              >
-                {oncallshiftSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                Save
-              </button>
-            </div>
-          </div>
-        </SlideOver>
+
       </ErrorBoundaryWithRetry>
     </div>
   );

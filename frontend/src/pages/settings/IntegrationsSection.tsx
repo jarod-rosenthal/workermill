@@ -1,5 +1,4 @@
 import {
-  Bell,
   CheckCircle,
   Crown,
   Github,
@@ -23,7 +22,6 @@ interface IntegrationsSectionProps {
   slackStatus: IntegrationStatus;
   linearStatus: IntegrationStatus;
   teamsStatus: IntegrationStatus;
-  oncallshiftStatus: IntegrationStatus;
   awsStatus: IntegrationStatus;
   gcpStatus: IntegrationStatus;
   azureStatus: IntegrationStatus;
@@ -44,7 +42,6 @@ interface IntegrationsSectionProps {
   setSlackSlideOpen: (open: boolean) => void;
   setLinearSlideOpen: (open: boolean) => void;
   setTeamsSlideOpen: (open: boolean) => void;
-  setOncallshiftSlideOpen: (open: boolean) => void;
   setAwsSlideOpen: (open: boolean) => void;
   handleAwsSlideOpen: () => void;
   setGcpSlideOpen: (open: boolean) => void;
@@ -95,7 +92,6 @@ export function IntegrationsSection({
   slackStatus,
   linearStatus,
   teamsStatus,
-  oncallshiftStatus,
   awsStatus,
   gcpStatus,
   azureStatus,
@@ -116,7 +112,6 @@ export function IntegrationsSection({
   setSlackSlideOpen,
   setLinearSlideOpen,
   setTeamsSlideOpen,
-  setOncallshiftSlideOpen,
   setAwsSlideOpen,
   handleAwsSlideOpen,
   setGcpSlideOpen,
@@ -436,35 +431,6 @@ export function IntegrationsSection({
           </div>
         </div>
 
-        {/* OnCallShift Card */}
-        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-red-500/50 transition-colors">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-12 h-12 rounded-lg bg-red-500/10 flex items-center justify-center">
-              <Bell className="w-7 h-7 text-red-500" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-foreground">OnCallShift</h3>
-              <p className="text-xs text-muted-foreground">Incident Management</p>
-            </div>
-          </div>
-          <div className="flex items-center justify-between">
-            {oncallshiftStatus.connected ? (
-              <span className="flex items-center gap-1 text-green-500 text-sm">
-                <CheckCircle className="w-4 h-4" /> Connected
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 text-muted-foreground text-sm">
-                <XCircle className="w-4 h-4" /> Not connected
-              </span>
-            )}
-            <button
-              onClick={() => setOncallshiftSlideOpen(true)}
-              className="text-sm text-primary hover:underline"
-            >
-              Configure
-            </button>
-          </div>
-        </div>
       </div>
 
       {/* Cloud Providers Section */}

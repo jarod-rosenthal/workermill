@@ -24,7 +24,7 @@ const mockEngineerData: EngineerDashboardData = {
     inProgress: [
       {
         id: '1',
-        jiraKey: 'OCS-145',
+        jiraKey: 'PROJ-145',
         summary: 'Add user authentication middleware',
         status: 'executing',
         persona: 'backend_developer',
@@ -49,7 +49,7 @@ const mockEngineerData: EngineerDashboardData = {
     needsReview: [
       {
         id: '2',
-        jiraKey: 'OCS-142',
+        jiraKey: 'PROJ-142',
         summary: 'Fix null pointer in user service',
         status: 'review_requested',
         persona: 'backend_developer',
@@ -77,7 +77,7 @@ const mockEngineerData: EngineerDashboardData = {
     readyToDeploy: [
       {
         id: '3',
-        jiraKey: 'OCS-139',
+        jiraKey: 'PROJ-139',
         summary: 'Update API documentation',
         status: 'approved',
         persona: 'tech_writer',
@@ -133,17 +133,17 @@ const mockEngineerData: EngineerDashboardData = {
     {
       id: '1',
       type: 'task_started',
-      title: 'Task OCS-145 started executing',
+      title: 'Task PROJ-145 started executing',
       timestamp: new Date(Date.now() - 12 * 60000).toISOString(),
-      jiraKey: 'OCS-145',
+      jiraKey: 'PROJ-145',
       severity: 'info',
     },
     {
       id: '2',
       type: 'pr_created',
-      title: 'PR #45 created for OCS-142',
+      title: 'PR #45 created for PROJ-142',
       timestamp: new Date(Date.now() - 32 * 60000).toISOString(),
-      jiraKey: 'OCS-142',
+      jiraKey: 'PROJ-142',
       prUrl: 'https://github.com/example/repo/pull/45',
       severity: 'success',
     },

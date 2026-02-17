@@ -237,15 +237,6 @@ export function checkPrerequisites(): PrerequisiteResult[] {
     results.push({ name: "Claude auth", ok: false, detail: "Run 'claude' and complete sign-in" });
   }
 
-  // Node.js version
-  const nodeVersion = process.version;
-  const major = parseInt(nodeVersion.slice(1).split(".")[0], 10);
-  if (major >= 20) {
-    results.push({ name: "Node.js", ok: true, detail: nodeVersion });
-  } else {
-    results.push({ name: "Node.js", ok: false, detail: `${nodeVersion} (need >= 20)` });
-  }
-
   return results;
 }
 

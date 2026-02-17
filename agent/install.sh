@@ -1,0 +1,67 @@
+***REMOVED***!/bin/sh
+***REMOVED*** WorkerMill Agent Installer
+***REMOVED*** Usage: curl -fsSL https://workermill.com/install.sh | bash
+set -e
+
+REPO="workermill/workermill"
+INSTALL_DIR="$HOME/.workermill/bin"
+
+***REMOVED*** Detect platform
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+
+case "$OS" in
+  linux)  PLATFORM="linux" ;;
+  darwin) PLATFORM="darwin" ;;
+  *)      echo "Unsupported OS: $OS"; exit 1 ;;
+esac
+
+case "$ARCH" in
+  x86_64|amd64)  ARCH="x64" ;;
+  arm64|aarch64) ARCH="arm64" ;;
+  *)             echo "Unsupported architecture: $ARCH"; exit 1 ;;
+esac
+
+BINARY_NAME="workermill-agent-${PLATFORM}-${ARCH}"
+
+echo "Installing WorkerMill Agent (${PLATFORM}-${ARCH})..."
+
+***REMOVED*** Get latest release URL
+RELEASE_URL=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+  | grep "browser_download_url.*${BINARY_NAME}\"" \
+  | head -1 \
+  | cut -d '"' -f 4)
+
+if [ -z "$RELEASE_URL" ]; then
+  echo "Error: Could not find binary for ${BINARY_NAME}"
+  echo "Check https://github.com/${REPO}/releases for available binaries."
+  exit 1
+fi
+
+***REMOVED*** Download
+mkdir -p "$INSTALL_DIR"
+curl -fsSL "$RELEASE_URL" -o "$INSTALL_DIR/workermill-agent"
+chmod +x "$INSTALL_DIR/workermill-agent"
+
+***REMOVED*** Add to PATH
+SHELL_NAME=$(basename "$SHELL")
+PROFILE=""
+case "$SHELL_NAME" in
+  zsh)  PROFILE="$HOME/.zshrc" ;;
+  bash) PROFILE="$HOME/.bashrc" ;;
+  fish) PROFILE="$HOME/.config/fish/config.fish" ;;
+esac
+
+if [ -n "$PROFILE" ] && ! grep -q ".workermill/bin" "$PROFILE" 2>/dev/null; then
+  if [ "$SHELL_NAME" = "fish" ]; then
+    echo "set -gx PATH \$HOME/.workermill/bin \$PATH" >> "$PROFILE"
+  else
+    echo 'export PATH="$HOME/.workermill/bin:$PATH"' >> "$PROFILE"
+  fi
+  echo "Added ~/.workermill/bin to PATH in $PROFILE"
+fi
+
+echo ""
+echo "WorkerMill Agent installed to $INSTALL_DIR/workermill-agent"
+echo ""
+echo "Run 'workermill-agent' to get started (you may need to restart your shell)."

@@ -88,7 +88,7 @@ export interface ParseReviewOutcomeResponse {
 }
 
 export interface RouteQuestionRequest {
-  questionText: string;
+  question: string;
   targetPersona?: string;
   idleExperts: string[];
   allExperts: string[];
@@ -901,7 +901,7 @@ export function routeQuestion(
   }
 
   // Tier 2: keyword matching
-  const questionLower = req.questionText.toLowerCase();
+  const questionLower = req.question.toLowerCase();
   for (const mapping of KEYWORD_SPECIALTY) {
     if (mapping.keywords.test(questionLower)) {
       if (idleSet.has(mapping.persona)) {

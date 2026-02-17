@@ -261,9 +261,6 @@ export async function setupCommand(): Promise<void> {
     }
   }
 
-  // ── Step 5: Node.js ──────────────────────────────────────────────────────
-  console.log(chalk.green("  ✓") + ` Node.js ${chalk.dim(`(${process.version})`)}`);
-
   console.log();
 
   // ── Step 6: Configuration prompts ─────────────────────────────────────────

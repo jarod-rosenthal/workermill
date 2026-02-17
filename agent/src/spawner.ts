@@ -59,20 +59,6 @@ interface ActiveProcess {
 const activeProcesses = new Map<string, ActiveProcess>();
 
 /**
- * Resolve the path to dist/worker.js bundled with the agent package.
- */
-function resolveWorkerPath(): string {
-  return path.join(path.dirname(new URL(import.meta.url).pathname), "worker.js");
-}
-
-/**
- * Resolve the path to dist/manager-worker.js bundled with the agent package.
- */
-function resolveManagerWorkerPath(): string {
-  return path.join(path.dirname(new URL(import.meta.url).pathname), "manager-worker.js");
-}
-
-/**
  * Check if Claude OAuth credentials exist on this machine.
  * When OAuth is available, we skip passing ANTHROPIC_API_KEY to workers
  * so Claude CLI uses OAuth instead of a potentially low-balance API key.
@@ -206,8 +192,6 @@ export async function spawnWorker(
       : config.gitlabToken;
 
   const envVars: Record<string, string> = {
-    // Node.js process — use reasonable heap limit
-    NODE_OPTIONS: "--max-old-space-size=4096",
     EPIC_MODE: "true",
     EXECUTION_MODE: "remote",
     TASK_ID: task.id,
@@ -335,20 +319,13 @@ export async function spawnWorker(
     if (v !== "") childEnv[k] = v;
   }
 
-  // Resolve worker entry point
-  const workerPath = resolveWorkerPath();
-  if (!fs.existsSync(workerPath)) {
-    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Worker bundle not found at ${workerPath}`);
-    return;
-  }
-
   const reviewEnabled = task.skipManagerReview === false;
   console.log(`${ts()} ${taskLabel} ${chalk.dim("Starting worker process")}`);
   console.log(`${ts()} ${taskLabel} ${chalk.dim(`  review=${reviewEnabled} model=${task.workerModel} repo=${task.githubRepo}`)}`);
 
-  // Spawn Node.js process
-  const proc = spawn("node", [workerPath], {
-    env: childEnv,
+  // Spawn worker process (re-invokes self with __WORKERMILL_MODE)
+  const proc = spawn(process.execPath, [], {
+    env: { ...childEnv, __WORKERMILL_MODE: "worker" },
     cwd: workDir,
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,
@@ -552,7 +529,6 @@ export async function spawnManagerWorker(
       : config.gitlabToken;
 
   const envVars: Record<string, string> = {
-    NODE_OPTIONS: "--max-old-space-size=3072",
     TASK_ID: task.id,
     MANAGER_ACTION: task.managerAction,
     JIRA_ISSUE_KEY: task.jiraIssueKey || "",
@@ -596,16 +572,10 @@ export async function spawnManagerWorker(
     if (v !== "") childEnv[k] = v;
   }
 
-  const managerPath = resolveManagerWorkerPath();
-  if (!fs.existsSync(managerPath)) {
-    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Manager worker bundle not found at ${managerPath}`);
-    return;
-  }
-
   console.log(`${ts()} ${taskLabel} ${chalk.magenta("◆ MANAGER")} Starting ${task.managerAction}`);
 
-  const proc = spawn("node", [managerPath], {
-    env: childEnv,
+  const proc = spawn(process.execPath, [], {
+    env: { ...childEnv, __WORKERMILL_MODE: "manager" },
     cwd: workDir,
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,

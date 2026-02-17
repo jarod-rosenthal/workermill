@@ -73,7 +73,7 @@ const swaggerDefinition = {
           },
           jiraIssueKey: {
             type: "string",
-            description: "Jira issue key (e.g., OCS-123)",
+            description: "Jira issue key (e.g., PROJ-123)",
           },
           jiraIssueId: {
             type: "string",

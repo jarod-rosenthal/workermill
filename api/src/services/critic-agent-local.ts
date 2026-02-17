@@ -387,21 +387,71 @@ ${(story.acceptanceCriteria || []).map(c => `  - ${c}`).join("\n") || "  - (see 
 }
 
 /**
- * Parse critic result from Claude output.
+ * Extract a balanced JSON object from a string starting at the given position.
+ * Properly handles nested braces, strings with escaped characters, and code
+ * blocks embedded in JSON string values (which contain triple backticks).
  */
-function parseCriticResult(output: string): CriticResult {
-  // Try to extract JSON from the response
-  const jsonMatch = output.match(/```json\s*([\s\S]*?)\s*```/);
-  if (jsonMatch) {
-    const parsed = JSON.parse(jsonMatch[1]);
-    return normalizeCriticResult(parsed);
+function extractBalancedJson(text: string, start: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (ch === "\\") {
+      if (inString) escape = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        return text.substring(start, i + 1);
+      }
+    }
   }
 
-  // Try to find raw JSON
-  const rawJsonMatch = output.match(/\{[\s\S]*"score"[\s\S]*\}/);
-  if (rawJsonMatch) {
-    const parsed = JSON.parse(rawJsonMatch[0]);
-    return normalizeCriticResult(parsed);
+  return null; // Unbalanced
+}
+
+/**
+ * Parse critic result from Claude output.
+ * Uses bracket-matching instead of lazy regex to handle backticks in reasoning text.
+ */
+function parseCriticResult(output: string): CriticResult {
+  // Strategy 1: Find ```json fence and extract balanced JSON
+  const jsonFenceStart = output.indexOf("```json");
+  if (jsonFenceStart !== -1) {
+    const braceStart = output.indexOf("{", jsonFenceStart + 7);
+    if (braceStart !== -1) {
+      const extracted = extractBalancedJson(output, braceStart);
+      if (extracted) {
+        return normalizeCriticResult(JSON.parse(extracted));
+      }
+    }
+  }
+
+  // Strategy 2: Find raw JSON from first {
+  const braceStart = output.indexOf("{");
+  if (braceStart !== -1) {
+    const extracted = extractBalancedJson(output, braceStart);
+    if (extracted) {
+      return normalizeCriticResult(JSON.parse(extracted));
+    }
   }
 
   throw new Error("Could not find JSON critic result in output");

@@ -525,6 +525,29 @@ function validatePlan(parsed: Record<string, unknown>): {
 
 // ─── JSON extraction ────────────────────────────────────────────────────────
 
+/**
+ * Extract a balanced JSON object from a string starting at the given position.
+ */
+function extractBalancedJson(text: string, start: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { if (inString) escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return text.substring(start, i + 1);
+    }
+  }
+  return null;
+}
+
 function extractJsonFromText(text: string): Record<string, unknown> | null {
   try {
     return JSON.parse(text.trim());
@@ -532,22 +555,24 @@ function extractJsonFromText(text: string): Record<string, unknown> | null {
     // Continue
   }
 
-  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (fenceMatch) {
-    try {
-      return JSON.parse(fenceMatch[1].trim());
-    } catch {
-      // Continue
+  // Find ```json fence and extract balanced JSON
+  const jsonFenceStart = text.indexOf("```json");
+  if (jsonFenceStart !== -1) {
+    const braceStart = text.indexOf("{", jsonFenceStart + 7);
+    if (braceStart !== -1) {
+      const extracted = extractBalancedJson(text, braceStart);
+      if (extracted) {
+        try { return JSON.parse(extracted); } catch { /* Continue */ }
+      }
     }
   }
 
+  // Find raw JSON from first {
   const braceStart = text.indexOf("{");
-  const braceEnd = text.lastIndexOf("}");
-  if (braceStart !== -1 && braceEnd > braceStart) {
-    try {
-      return JSON.parse(text.slice(braceStart, braceEnd + 1));
-    } catch {
-      // Continue
+  if (braceStart !== -1) {
+    const extracted = extractBalancedJson(text, braceStart);
+    if (extracted) {
+      try { return JSON.parse(extracted); } catch { /* Continue */ }
     }
   }
 

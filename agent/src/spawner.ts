@@ -73,6 +73,16 @@ function resolveManagerWorkerPath(): string {
 }
 
 /**
+ * Check if Claude OAuth credentials exist on this machine.
+ * When OAuth is available, we skip passing ANTHROPIC_API_KEY to workers
+ * so Claude CLI uses OAuth instead of a potentially low-balance API key.
+ */
+function hasOAuthCredentials(): boolean {
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  return fs.existsSync(path.join(home, ".claude", ".credentials.json"));
+}
+
+/**
  * Get SCM token based on provider.
  * Prefers org credentials from API, falls back to local config.
  */
@@ -221,7 +231,7 @@ export async function spawnWorker(
     SCM_BASE_URL: credentials?.scmBaseUrl || "",
     GITHUB_TOKEN: githubToken,
     GH_TOKEN: githubToken,
-    GITHUB_REVIEWER_TOKEN: credentials?.githubReviewerToken || "",
+    GITHUB_REVIEWER_TOKEN: credentials?.githubReviewerToken || config.githubReviewerToken || "",
     BITBUCKET_TOKEN: bitbucketToken,
     BITBUCKET_USERNAME: credentials?.bitbucketUsername || "x-token-auth",
     GITLAB_TOKEN: gitlabToken,
@@ -294,8 +304,9 @@ export async function spawnWorker(
     EXECUTION_MODE_SETTING: (task.jiraFields?.executionMode as string) || "autonomous",
 
     // AI provider configuration — Claude CLI reads ~/.claude/.credentials.json natively (OAuth).
-    // Only pass an explicit API key if the org configured one; otherwise let workers use OAuth.
-    ANTHROPIC_API_KEY: credentials?.anthropicApiKey || "",
+    // If OAuth credentials exist, DON'T pass ANTHROPIC_API_KEY — it would override OAuth
+    // with a potentially low-balance API key from org settings.
+    ANTHROPIC_API_KEY: hasOAuthCredentials() ? "" : (credentials?.anthropicApiKey || ""),
     WORKER_PROVIDER: task.workerProvider || "anthropic",
     OPENAI_API_KEY: credentials?.openaiApiKey || "",
     GOOGLE_API_KEY: credentials?.googleApiKey || "",
@@ -565,7 +576,7 @@ export async function spawnManagerWorker(
     MANAGER_PROVIDER: credentials?.managerProvider || "anthropic",
     MANAGER_MODEL: credentials?.managerModelId || "",
 
-    ANTHROPIC_API_KEY: credentials?.anthropicApiKey || "",
+    ANTHROPIC_API_KEY: hasOAuthCredentials() ? "" : (credentials?.anthropicApiKey || ""),
     OPENAI_API_KEY: credentials?.openaiApiKey || "",
     GOOGLE_API_KEY: credentials?.googleApiKey || "",
 

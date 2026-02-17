@@ -319,6 +319,24 @@ export async function setupCommand(): Promise<void> {
   );
   console.log();
 
+  // Optional: GitHub reviewer token (separate account for PR approvals)
+  const { githubReviewerToken } = await inquirer.prompt([
+    {
+      type: "password",
+      name: "githubReviewerToken",
+      message: "GitHub Reviewer PAT (optional, for PR approvals):",
+      mask: "*",
+      default: "",
+    },
+  ]);
+
+  if (githubReviewerToken) {
+    console.log(chalk.green("  ✓") + " Reviewer token configured (avoids self-approval restriction)");
+  } else {
+    console.log(chalk.dim("  Skipped — will use reviewer token from org Settings if configured."));
+  }
+  console.log();
+
   const { agentId } = await inquirer.prompt([
     {
       type: "input",
@@ -336,7 +354,7 @@ export async function setupCommand(): Promise<void> {
     maxWorkers: 1,
     pollIntervalMs: 5000,
     heartbeatIntervalMs: 30000,
-    tokens: { github: "", bitbucket: "", gitlab: "" }, // SCM tokens come from org Settings
+    tokens: { github: "", bitbucket: "", gitlab: "", githubReviewer: githubReviewerToken || "" }, // SCM tokens come from org Settings
     setupCompletedAt: new Date().toISOString(),
   };
 

@@ -368,6 +368,8 @@ function runClaudeCliWithLogs(
   return new Promise((resolve, reject) => {
     const cleanEnv = { ...process.env };
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+    delete cleanEnv.CLAUDECODE;
+    delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
 
     const child = spawn(
       claudePath,

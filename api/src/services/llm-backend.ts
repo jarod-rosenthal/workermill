@@ -228,6 +228,8 @@ class ClaudeCliBackend implements LLMBackend {
       // Let Claude CLI manage its own auth via ~/.claude/.credentials.json
       const cleanEnv = { ...process.env };
       delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+      delete cleanEnv.CLAUDECODE;
+      delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
 
       // Use stream-json to get usage data from the result event
       const args = [
@@ -358,6 +360,8 @@ class ClaudeCliBackend implements LLMBackend {
     // Let Claude CLI manage its own auth
     const cleanEnv = { ...process.env };
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+    delete cleanEnv.CLAUDECODE;
+    delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
 
     const streamArgs = [
       "--print",

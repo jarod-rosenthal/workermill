@@ -100,16 +100,16 @@ await build({
 console.log("✓ dist/manager-worker.js bundled from worker/manager/index.ts");
 
 // Step 5: Bundle unified entry point (for standalone binary compilation)
+// Bundles directly from TypeScript source (not tsc output) because the shims
+// import from ../../worker/ which is outside tsc's rootDir. esbuild handles TS natively.
 // This inlines ALL dependencies (not external) so the binary is self-contained.
 await build({
   ...shared,
-  entryPoints: ["dist/entry.js"],
-  outfile: "dist/entry.bundle.js",
+  entryPoints: ["src/entry.ts"],
+  outfile: "dist/entry.js",
   packages: undefined, // Override shared.packages: inline ALL npm packages
   external: [], // Nothing external — everything bundled into one file
 });
-rmSync("dist/entry.js");
-renameSync("dist/entry.bundle.js", "dist/entry.js");
 console.log("✓ dist/entry.js unified bundle (for binary compilation)");
 
 // Remove all other .js files from dist/ (they're now bundled)

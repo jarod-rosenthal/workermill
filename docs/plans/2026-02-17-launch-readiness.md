@@ -92,8 +92,8 @@
 ### 13. Missing Open Graph / social meta tags
 **File:** `frontend/index.html`
 **Problem:** No og:title, og:description, og:image, or Twitter Card tags.
-**Fix:** Add standard meta tags for social sharing.
-**Status:** TODO
+**Fix:** Added og:title, og:description, og:url, og:site_name, og:type, twitter:card, twitter:title, twitter:description to index.html.
+**Status:** FIXED
 
 ### 14. Coordination feed empty state for single-expert tasks
 **File:** `CoordinationFeed.tsx`
@@ -103,8 +103,8 @@
 
 ### 15. Log streaming has no keep-alive
 **Problem:** SSE log endpoint doesn't send heartbeats. Browser closes connection after ~30s inactivity.
-**Fix:** Add SSE keep-alive/heartbeat.
-**Status:** TODO
+**Actual state:** Already has a ping every 20 seconds (`setInterval(sendPing, 20000)` at `logs.ts:432`). Connection cleanup is also correct — both `clearInterval()` calls and event unsubscribes fire on `req.on("close")`.
+**Status:** ALREADY FIXED (no change needed)
 
 ### 16. Dashboard table not responsive
 **File:** `MainDashboard.tsx`
@@ -114,9 +114,78 @@
 
 ---
 
+---
+
+## Round 2 — Deep Dive Findings (2026-02-17)
+
+### 17. Welcome email sent from founder's personal address
+**File:** `api/src/services/email/welcome-emails.ts:254`
+**Problem:** Emails sent from `Jarod Rosenthal <jarod.rosenthal@workermill.com>` — users reply to founder instead of support.
+**Fix:** Changed to `WorkerMill <support@workermill.com>`.
+**Status:** FIXED
+
+### 18. OCS references in backend API (swagger, utils, routes)
+**Files:** `api/src/config/swagger.ts`, `api/src/utils/jira.ts`, `api/src/utils/linear.ts`, `api/src/routes/tasks/crud.ts`
+**Problem:** Swagger docs and JSDoc comments still used OCS-123, OCS-19, OCS-410 examples.
+**Fix:** Replaced all with PROJ-123, PROJ-19, PROJ-410.
+**Status:** FIXED
+
+### 19. Hardcoded test email in auth middleware
+**File:** `api/src/middleware/auth.ts:50, 133, 285, 397`
+**Problem:** Local-mode auth used `admin@localhost` to find dev user. Not a production risk (gated by `EXECUTION_MODE === "local"`) but unnecessarily specific.
+**Fix:** Changed to `{ role: "admin" }` lookup — finds any admin user for local dev.
+**Status:** FIXED
+
+### 20. Stripe price fallback uses invalid literal string
+**File:** `api/src/config/index.ts:142-144`
+**Problem:** If `STRIPE_PRICE_PRO` env var not set, defaults to `"price_pro"` literal — not a valid Stripe price ID. Checkout would fail with cryptic error.
+**Fix:** Changed fallback to empty string so the existing `if (!priceId)` guard catches it cleanly.
+**Status:** FIXED
+
+### 21. Card description and comment content have no length limit
+**Files:** `api/src/routes/boards.ts:1117, 1696`
+**Problem:** Card description and comment body accepted unlimited text — storage abuse vector.
+**Fix:** Added `.isLength({ max: 5000 })` to both validators.
+**Status:** FIXED
+
+### 22. Card number generation doesn't check org ownership
+**File:** `api/src/routes/boards.ts:1146`
+**Problem:** Raw SQL UPDATE to increment card number only checked board ID, not org ID.
+**Fix:** Added `AND "org_id" = $2` to WHERE clause.
+**Status:** FIXED
+
+### 23. Label delete doesn't verify board org ownership
+**File:** `api/src/routes/boards.ts:1613`
+**Problem:** Delete card-label only checked cardId+labelId, not that the board belongs to the requesting org.
+**Fix:** Added board ownership verification before delete.
+**Status:** FIXED
+
+### 24. VerifyEmail resend button disabled when email empty
+**File:** `frontend/src/pages/VerifyEmail.tsx:315`
+**Problem:** Resend code button was disabled if email field was empty — user got stuck if URL param was lost after code expired.
+**Fix:** Removed `!email` from disabled condition. Handler already shows "Please enter your email" if field is empty.
+**Status:** FIXED
+
+### 25. Expired invite has no recovery path
+**File:** `frontend/src/pages/AcceptInvite.tsx:243`
+**Problem:** Error state showed "request a new one" but had no link or contact info.
+**Fix:** Added support email link and guidance to contact team admin.
+**Status:** FIXED
+
+### 26. Dead pages bloating bundle (~3,700 LOC)
+**Files:** `PricingPage.tsx`, `ProductPage.tsx`, `SolutionsPage.tsx`, `Build.tsx`
+**Problem:** 4 orphaned page files never imported or routed anywhere.
+**Fix:** Deleted all 4 files.
+**Status:** FIXED
+
+### 27. Missing OpenGraph meta tags
+**(See item 13 above — FIXED)**
+
+---
+
 ## Low — Cleanup items
 
-- Pro-only features shown grayed out in Settings — could hide entirely or improve "Upgrade" messaging
+- ~~Pro-only features shown grayed out in Settings — could hide entirely or improve "Upgrade" messaging~~ FIXED — LockedOverlay now links to /pricing with hover highlight
 - `VITE_API_URL` fallback to empty string could cause subtle issues
 - Coordination feed lacks timestamps on messages
 - Coordination feed doesn't auto-scroll to new messages

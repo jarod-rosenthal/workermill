@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import {
   CheckCircle,
   Crown,
@@ -71,12 +72,17 @@ function ProBadge() {
 
 function LockedOverlay() {
   return (
-    <div className="absolute inset-0 bg-card/60 backdrop-blur-[1px] rounded-xl flex items-center justify-center z-10">
+    <Link
+      to="/pricing"
+      className="absolute inset-0 bg-card/60 backdrop-blur-[1px] rounded-xl flex items-center justify-center z-10 group cursor-pointer"
+    >
       <div className="flex flex-col items-center gap-1.5">
-        <Lock className="w-5 h-5 text-muted-foreground/60" />
-        <span className="text-xs text-muted-foreground/80 font-medium">Upgrade to Pro</span>
+        <Lock className="w-5 h-5 text-muted-foreground/60 group-hover:text-amber-400 transition-colors" />
+        <span className="text-xs text-muted-foreground/80 font-medium group-hover:text-amber-400 transition-colors">
+          Upgrade to Pro
+        </span>
       </div>
-    </div>
+    </Link>
   );
 }
 

@@ -1114,7 +1114,7 @@ router.post(
   param("boardId").isUUID(),
   body("columnId").isUUID(),
   body("title").isString().notEmpty().isLength({ max: 500 }),
-  body("description").optional().isString(),
+  body("description").optional().isString().isLength({ max: 5000 }),
   body("priority").optional().isIn(["urgent", "high", "medium", "low"]),
   body("dueDate").optional().isISO8601(),
   body("coverColor").optional().isString().isLength({ max: 20 }),
@@ -1142,10 +1142,10 @@ router.post(
 
       const cardRepo = AppDataSource.getRepository(KbCard);
 
-      // Atomically claim the next card number
+      // Atomically claim the next card number (org check via board lookup above)
       const [{ next_num }] = await AppDataSource.query(
-        `UPDATE "kb_boards" SET "next_card_number" = "next_card_number" + 1 WHERE "id" = $1 RETURNING "next_card_number" - 1 AS next_num`,
-        [boardId],
+        `UPDATE "kb_boards" SET "next_card_number" = "next_card_number" + 1 WHERE "id" = $1 AND "org_id" = $2 RETURNING "next_card_number" - 1 AS next_num`,
+        [boardId, org.id],
       );
 
       const maxPos = await cardRepo
@@ -1618,8 +1618,18 @@ router.delete(
   validateRequest,
   async (req: Request, res: Response) => {
     try {
+      const org = req.organization!;
+      const boardId = req.params.boardId as string;
       const cardId = req.params.cardId as string;
       const labelId = req.params.labelId as string;
+
+      // Verify board belongs to org
+      const boardRepo = AppDataSource.getRepository(KbBoard);
+      const board = await boardRepo.findOne({ where: { id: boardId, orgId: org.id } });
+      if (!board) {
+        res.status(404).json({ error: "Board not found" });
+        return;
+      }
 
       const clRepo = AppDataSource.getRepository(KbCardLabel);
       const cl = await clRepo.findOne({ where: { cardId, labelId } });
@@ -1693,7 +1703,7 @@ router.post(
   "/:boardId/cards/:cardId/comments",
   param("boardId").isUUID(),
   param("cardId").isUUID(),
-  body("content").isString().notEmpty(),
+  body("content").isString().notEmpty().isLength({ max: 5000 }),
   validateRequest,
   async (req: Request, res: Response) => {
     try {

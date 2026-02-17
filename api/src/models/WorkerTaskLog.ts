@@ -32,7 +32,8 @@ export type WorkerLogType =
   | "claude_output" // Claude agent output
   | "tool_use" // Tool invocation
   | "file_edit" // File edit operation
-  | "bash_command"; // Bash command execution
+  | "bash_command" // Bash command execution
+  | "code_event"; // Live code change (Write/Edit from worker)
 
 export type WorkerLogSeverity = "debug" | "info" | "warning" | "error";
 

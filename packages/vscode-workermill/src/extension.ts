@@ -14,6 +14,7 @@ import { FeedViewProvider } from "./feed-view";
 import { StatusBar } from "./status-bar";
 import { NotificationManager } from "./notifications";
 import { LogTerminalManager } from "./log-terminal";
+import { LiveDiffPanel } from "./live-diff-panel";
 
 let client: AgentClient;
 let statusBar: StatusBar;
@@ -231,6 +232,13 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.showErrorMessage(`Failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }),
+
+    // Open live code changes panel for a running task (eye icon in tree)
+    vscode.commands.registerCommand("workermill.openLiveDiff", (treeItem?: { task?: { id: string; summary: string; status: string } }) => {
+      const task = treeItem?.task;
+      if (!task?.id || !client.isConnected()) return;
+      LiveDiffPanel.createOrShow(client, task as any);
+    }),
   );
 
   // Connect to agent
@@ -251,6 +259,7 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
+  LiveDiffPanel.disposeAll();
   if (logManager) logManager.dispose();
   if (statusBar) statusBar.dispose();
   if (notifications) notifications.dispose();

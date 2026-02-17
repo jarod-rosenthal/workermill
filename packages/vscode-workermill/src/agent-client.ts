@@ -50,6 +50,20 @@ export interface IssueInfo {
   project: { key: string; name: string } | null;
 }
 
+export interface CodeEventRecord {
+  id: string;
+  filePath: string | null;
+  message: string;
+  metadata: {
+    toolName: "Write" | "Edit";
+    expert: string | null;
+    oldStr: string | null;
+    newStr: string | null;
+    isWrite?: boolean;
+  } | null;
+  createdAt: string;
+}
+
 export class AgentClient extends EventEmitter {
   private port: number | null = null;
   private connected = false;
@@ -164,6 +178,12 @@ export class AgentClient extends EventEmitter {
   async getCloudLogs(taskId: string, since?: string): Promise<unknown[]> {
     const qs = since ? `?since=${encodeURIComponent(since)}` : "";
     return this.get<unknown[]>(`/api/tasks/${taskId}/logs${qs}`);
+  }
+
+  /** Get code events (Write/Edit) for a task, supports incremental polling via since */
+  async getCodeEvents(taskId: string, since?: string): Promise<CodeEventRecord[]> {
+    const qs = since ? `?since=${encodeURIComponent(since)}` : "";
+    return this.get<CodeEventRecord[]>(`/api/tasks/${taskId}/code-events${qs}`);
   }
 
   /** Subscribe to log stream for a task */

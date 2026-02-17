@@ -3,6 +3,7 @@ import { GetLogEventsCommand } from "@aws-sdk/client-cloudwatch-logs";
 import { authenticateRequest, authenticateSSE, authenticateApiKey } from "../../middleware/auth.js";
 import { asyncHandler } from "../../middleware/error-handler.js";
 import { AppDataSource } from "../../db/connection.js";
+import { Not } from "typeorm";
 import { WorkerTask, WorkerTaskLog, WorkerTaskError } from "../../models/index.js";
 import type { WorkerLogType, WorkerLogSeverity } from "../../models/WorkerTaskLog.js";
 import { logger } from "../../utils/logger.js";
@@ -55,15 +56,16 @@ router.get(
       return;
     }
 
-    // Parse cursor if provided
-    const whereClause: any = { taskId };
+    // Parse cursor if provided (exclude code_event — has its own endpoint)
+    const whereClause: any = { taskId, type: Not("code_event") };
     if (since) {
       const cursor = parseCursor(since);
       if (cursor) {
-        // Get logs after cursor position
+        // Get logs after cursor position (exclude code_event — has its own endpoint)
         const queryBuilder = logRepo
           .createQueryBuilder("log")
           .where("log.taskId = :taskId", { taskId })
+          .andWhere("log.type != :excludeType", { excludeType: "code_event" })
           .andWhere(
             "(log.createdAt > :lastCreatedAt OR (log.createdAt = :lastCreatedAt AND log.id > :lastId))",
             { lastCreatedAt: cursor.lastCreatedAt, lastId: cursor.lastId }
@@ -143,6 +145,7 @@ router.get("/logs/:taskId/all", authenticateApiKey, async (req: Request, res: Re
     const taskId = req.params.taskId as string;
     const org = req.organization!;
     const limit = req.query.limit ? parseInt(String(req.query.limit)) : 500;
+    const since = req.query.since ? String(req.query.since) : null;
 
     // Verify task belongs to org
     const taskRepo = AppDataSource.getRepository(WorkerTask);
@@ -153,13 +156,22 @@ router.get("/logs/:taskId/all", authenticateApiKey, async (req: Request, res: Re
       return;
     }
 
-    // Fetch all logs ordered by creation time
+    // Fetch logs ordered by creation time (exclude code_event — has its own endpoint)
+    // Supports incremental polling via ?since=ISO8601
     const logRepo = AppDataSource.getRepository(WorkerTaskLog);
-    const logs = await logRepo.find({
-      where: { taskId },
-      order: { createdAt: "ASC" },
-      take: limit,
-    });
+    const qb = logRepo
+      .createQueryBuilder("log")
+      .where("log.task_id = :taskId", { taskId })
+      .andWhere("log.type != :excludeType", { excludeType: "code_event" });
+
+    if (since) {
+      qb.andWhere("log.created_at > :since", { since: new Date(since) });
+    }
+
+    const logs = await qb
+      .orderBy("log.created_at", "ASC")
+      .take(limit)
+      .getMany();
 
     res.json(logs.map((log) => ({
       id: log.id,
@@ -330,9 +342,11 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
       }
 
       // Query for new logs after cursor position (handles timestamp ties with ID comparison)
+      // Exclude code_event — those have their own dedicated endpoint + LiveDiffPanel
       const newLogs = await logRepo
         .createQueryBuilder("log")
         .where("log.taskId = :taskId", { taskId })
+        .andWhere("log.type != :excludeType", { excludeType: "code_event" })
         .andWhere(
           "(log.createdAt > :lastCreatedAt OR (log.createdAt = :lastCreatedAt AND log.id > :lastId))",
           { lastCreatedAt: cursor.lastCreatedAt, lastId: cursor.lastId }

@@ -292,9 +292,25 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     try {
       const { params: qp } = parseUrl(req.url || "");
       const since = qp.since || "";
-      const limit = qp.limit || "200";
+      const limit = qp.limit || "500";
       let apiPath = `/api/control-center/logs/${logsMatch[1]}/all?limit=${limit}`;
       if (since) apiPath += `&since=${encodeURIComponent(since)}`;
+      const result = await cloudProxy("GET", apiPath);
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // GET /api/tasks/:id/code-events — proxy code events from cloud API
+  const codeEventsMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/code-events$/);
+  if (req.method === "GET" && codeEventsMatch) {
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const { params: qp } = parseUrl(req.url || "");
+      const since = qp.since || "";
+      let apiPath = `/api/control-center/code-events/${codeEventsMatch[1]}`;
+      if (since) apiPath += `?since=${encodeURIComponent(since)}`;
       const result = await cloudProxy("GET", apiPath);
       return json(res, result);
     } catch (err) {

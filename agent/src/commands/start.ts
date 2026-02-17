@@ -65,10 +65,9 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
 
     // Spawn the CLI with "start" (no --detach) as a detached child, redirecting output to log file
     const logFd = openSync(logFile, "a");
-    const child = spawn("workermill-agent", ["start"], {
+    const child = spawn(process.execPath, ["start"], {
       detached: true,
       stdio: ["ignore", logFd, logFd],
-      shell: true, // Required on Windows to find .cmd wrappers
     });
 
     if (child.pid) {

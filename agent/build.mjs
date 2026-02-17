@@ -13,6 +13,8 @@ import { build } from "esbuild";
 import { rmSync, readdirSync, statSync, readFileSync, writeFileSync, renameSync, chmodSync } from "fs";
 import { join } from "path";
 
+const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
+
 // Clean dist/ of .d.ts and .d.ts.map files — we don't publish type definitions
 function cleanTypes(dir) {
   try {
@@ -46,6 +48,9 @@ const shared = {
   sourcemap: false,
   // Drop console.debug calls (keep console.log/error/warn for user-facing output)
   drop: [],
+  define: {
+    __AGENT_VERSION__: JSON.stringify(pkg.version),
+  },
 };
 
 // Strip shebang from tsc output before bundling (esbuild treats it as syntax error)
@@ -94,8 +99,21 @@ await build({
 });
 console.log("✓ dist/manager-worker.js bundled from worker/manager/index.ts");
 
+// Step 5: Bundle unified entry point (for standalone binary compilation)
+// This inlines ALL dependencies (not external) so the binary is self-contained.
+await build({
+  ...shared,
+  entryPoints: ["dist/entry.js"],
+  outfile: "dist/entry.bundle.js",
+  packages: undefined, // Override shared.packages: inline ALL npm packages
+  external: [], // Nothing external — everything bundled into one file
+});
+rmSync("dist/entry.js");
+renameSync("dist/entry.bundle.js", "dist/entry.js");
+console.log("✓ dist/entry.js unified bundle (for binary compilation)");
+
 // Remove all other .js files from dist/ (they're now bundled)
-const keepFiles = new Set(["cli.js", "index.js", "worker.js", "manager-worker.js"]);
+const keepFiles = new Set(["cli.js", "index.js", "worker.js", "manager-worker.js", "entry.js"]);
 
 function cleanUnbundled(dir) {
   try {

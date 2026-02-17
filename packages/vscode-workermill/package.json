@@ -1,0 +1,104 @@
+{
+  "name": "workermill",
+  "displayName": "WorkerMill",
+  "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
+  "version": "0.1.0",
+  "publisher": "workermill",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/workermill/workermill"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "coding",
+    "agents",
+    "workermill",
+    "automation"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "workermill",
+          "title": "WorkerMill",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "workermill": [
+        {
+          "id": "workermill.teamPanel",
+          "name": "Team"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "workermill.runTask",
+        "title": "WorkerMill: Run Task..."
+      },
+      {
+        "command": "workermill.talkToWorker",
+        "title": "WorkerMill: Talk to Worker..."
+      },
+      {
+        "command": "workermill.showTeamPanel",
+        "title": "WorkerMill: Show Team Panel"
+      },
+      {
+        "command": "workermill.showTaskLogs",
+        "title": "WorkerMill: Show Task Logs"
+      },
+      {
+        "command": "workermill.approvePlan",
+        "title": "WorkerMill: Approve Plan"
+      },
+      {
+        "command": "workermill.refreshTasks",
+        "title": "WorkerMill: Refresh Tasks",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "workermill.refreshTasks",
+          "when": "view == workermill.teamPanel",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "workermill.runTask",
+          "group": "workermill@1",
+          "when": "explorerResourceIsFolder"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outdir=dist --external:vscode --format=cjs --platform=node --sourcemap",
+    "watch": "esbuild src/extension.ts --bundle --outdir=dist --external:vscode --format=cjs --platform=node --sourcemap --watch",
+    "typecheck": "tsc --noEmit",
+    "package": "npx @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.5.0"
+  }
+}

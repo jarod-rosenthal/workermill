@@ -12,6 +12,7 @@ import { startPolling, startHeartbeat, stopPolling } from "./poller.js";
 import { stopAll } from "./spawner.js";
 import { AGENT_VERSION } from "./version.js";
 import { selfUpdate, restartAgent } from "./updater.js";
+import { startLocalApi, stopLocalApi } from "./local-api.js";
 
 export { loadConfig, loadConfigFromFile, validatePrerequisites, getSystemInfo, findClaudePath } from "./config.js";
 export type { AgentConfig } from "./config.js";
@@ -83,6 +84,15 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
   startPolling(config);
   startHeartbeat(config);
 
+  // Start local API server for VS Code extension and other local clients
+  let localApiPort: number | undefined;
+  try {
+    localApiPort = await startLocalApi(config);
+    console.log(`  ${chalk.dim("Local API:")} http://127.0.0.1:${localApiPort}/api/status`);
+  } catch (err) {
+    console.log(`  ${chalk.yellow("⚠")} Local API failed to start: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   console.log(chalk.dim("  ─────────────────────────────────────"));
   console.log(`  ${chalk.green("●")} Agent is running. ${chalk.dim("Press Ctrl+C to stop.")}`);
   console.log();
@@ -93,6 +103,8 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
     console.log(chalk.dim("  Shutting down..."));
     // Stop poll/heartbeat loops first so nothing re-fires during cleanup
     stopPolling();
+    // Stop local API server
+    await stopLocalApi();
     try {
       await api.post("/api/agent/deregister", { agentId: config.agentId });
     } catch {

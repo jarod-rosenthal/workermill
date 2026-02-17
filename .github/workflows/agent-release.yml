@@ -1,0 +1,48 @@
+name: Agent Binary Release
+
+on:
+  push:
+    tags:
+      - 'agent-v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: cd agent && npm ci
+
+      - name: Build bundles
+        run: cd agent && npm run build
+
+      - name: Compile binaries
+        run: |
+          cd agent
+          mkdir -p dist/bin
+          bun build --compile --target=bun-linux-x64 dist/entry.js --outfile dist/bin/workermill-agent-linux-x64
+          bun build --compile --target=bun-darwin-x64 dist/entry.js --outfile dist/bin/workermill-agent-darwin-x64
+          bun build --compile --target=bun-darwin-arm64 dist/entry.js --outfile dist/bin/workermill-agent-darwin-arm64
+          bun build --compile --target=bun-windows-x64 dist/entry.js --outfile dist/bin/workermill-agent-win-x64.exe
+          ls -lh dist/bin/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            agent/dist/bin/workermill-agent-linux-x64
+            agent/dist/bin/workermill-agent-darwin-x64
+            agent/dist/bin/workermill-agent-darwin-arm64
+            agent/dist/bin/workermill-agent-win-x64.exe
+            agent/install.sh
+            agent/install.ps1
+          generate_release_notes: true

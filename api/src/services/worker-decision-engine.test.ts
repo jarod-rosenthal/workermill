@@ -465,7 +465,7 @@ describe("parseReviewOutcome", () => {
 describe("routeQuestion", () => {
   it("routes to explicit target persona (tier 1) when idle", () => {
     const result = routeQuestion({
-      questionText: "Can you check the CSS?",
+      question: "Can you check the CSS?",
       targetPersona: "frontend_developer",
       idleExperts: ["frontend_developer", "backend_developer"],
       allExperts: ["frontend_developer", "backend_developer", "qa_engineer"],
@@ -477,7 +477,7 @@ describe("routeQuestion", () => {
 
   it("does NOT route to explicit target if not idle (falls through)", () => {
     const result = routeQuestion({
-      questionText: "Can you check the CSS?",
+      question: "Can you check the CSS?",
       targetPersona: "frontend_developer",
       idleExperts: ["backend_developer"],
       allExperts: ["frontend_developer", "backend_developer"],
@@ -490,7 +490,7 @@ describe("routeQuestion", () => {
 
   it("routes by keyword matching (tier 2) - security", () => {
     const result = routeQuestion({
-      questionText: "Is this vulnerable to SQL injection security issue?",
+      question: "Is this vulnerable to SQL injection security issue?",
       idleExperts: ["security_engineer", "backend_developer"],
       allExperts: ["security_engineer", "backend_developer"],
     });
@@ -501,7 +501,7 @@ describe("routeQuestion", () => {
 
   it("routes by keyword matching (tier 2) - database", () => {
     const result = routeQuestion({
-      questionText: "How should I handle this SQL migration?",
+      question: "How should I handle this SQL migration?",
       idleExperts: ["database_administrator", "backend_developer"],
       allExperts: ["database_administrator", "backend_developer"],
     });
@@ -512,7 +512,7 @@ describe("routeQuestion", () => {
 
   it("routes by keyword matching (tier 2) - frontend", () => {
     const result = routeQuestion({
-      questionText: "The React component has a CSS issue",
+      question: "The React component has a CSS issue",
       idleExperts: ["frontend_developer", "backend_developer"],
       allExperts: ["frontend_developer", "backend_developer"],
     });
@@ -523,7 +523,7 @@ describe("routeQuestion", () => {
 
   it("routes by keyword matching (tier 2) - devops", () => {
     const result = routeQuestion({
-      questionText: "We need to fix the Docker deployment pipeline",
+      question: "We need to fix the Docker deployment pipeline",
       idleExperts: ["devops_engineer", "backend_developer"],
       allExperts: ["devops_engineer", "backend_developer"],
     });
@@ -534,7 +534,7 @@ describe("routeQuestion", () => {
 
   it("routes by keyword matching (tier 2) - testing", () => {
     const result = routeQuestion({
-      questionText: "We need better test coverage for this module",
+      question: "We need better test coverage for this module",
       idleExperts: ["qa_engineer", "backend_developer"],
       allExperts: ["qa_engineer", "backend_developer"],
     });
@@ -545,7 +545,7 @@ describe("routeQuestion", () => {
 
   it("routes by keyword matching (tier 2) - api", () => {
     const result = routeQuestion({
-      questionText: "The REST endpoint is returning 500 errors",
+      question: "The REST endpoint is returning 500 errors",
       idleExperts: ["api_developer", "backend_developer"],
       allExperts: ["api_developer", "backend_developer"],
     });
@@ -556,7 +556,7 @@ describe("routeQuestion", () => {
 
   it("falls back to first idle expert (tier 3)", () => {
     const result = routeQuestion({
-      questionText: "Can someone take a look at this?",
+      question: "Can someone take a look at this?",
       idleExperts: ["backend_developer", "qa_engineer"],
       allExperts: ["backend_developer", "qa_engineer"],
     });
@@ -567,7 +567,7 @@ describe("routeQuestion", () => {
 
   it("skips non-coding personas in tier 3 fallback", () => {
     const result = routeQuestion({
-      questionText: "Can someone take a look at this build error?",
+      question: "Can someone take a look at this build error?",
       idleExperts: [
         "support_agent",
         "project_manager",
@@ -590,7 +590,7 @@ describe("routeQuestion", () => {
 
   it("returns null when only non-coding personas are idle", () => {
     const result = routeQuestion({
-      questionText: "Can someone help with this?",
+      question: "Can someone help with this?",
       idleExperts: ["support_agent", "project_manager"],
       allExperts: ["support_agent", "project_manager", "backend_developer"],
     });
@@ -601,7 +601,7 @@ describe("routeQuestion", () => {
 
   it("returns null when no experts are idle", () => {
     const result = routeQuestion({
-      questionText: "Can someone help?",
+      question: "Can someone help?",
       idleExperts: [],
       allExperts: ["backend_developer", "qa_engineer"],
     });

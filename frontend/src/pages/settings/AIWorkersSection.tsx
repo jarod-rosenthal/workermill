@@ -288,9 +288,42 @@ export function AIWorkersSection({
             icon={<BarChart3 className="w-4 h-4" />}
             iconBgColor="bg-purple-500/20"
             iconColor="text-purple-500"
-            summary={`${PROVIDER_OPTIONS.find((p) => p.value === settings.planningAgentProvider)?.label.split(" ")[0] || "Anthropic"} - ${settings.storyCalibrationMultiplier}x`}
+            summary={`${PROVIDER_OPTIONS.find((p) => p.value === settings.planningAgentProvider)?.label.split(" ")[0] || "Anthropic"} - ${settings.planningMode === "simplified" ? "Simplified" : "Strict"} - ${settings.storyCalibrationMultiplier}x`}
           >
             <div className="space-y-6">
+              {/* Planning Mode Toggle */}
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-3">Planning Mode</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => updateSetting("planningMode", "strict")}
+                    className={`p-3 rounded-lg border-2 transition-all text-left ${
+                      settings.planningMode !== "simplified"
+                        ? "border-purple-500 bg-purple-500/10"
+                        : "border-border bg-background/50 hover:border-purple-500/50"
+                    }`}
+                  >
+                    <div className="text-sm font-medium text-foreground">Strict</div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Full planner-critic loop — plan must score 85+ to proceed (up to 3 attempts)
+                    </p>
+                  </button>
+                  <button
+                    onClick={() => updateSetting("planningMode", "simplified")}
+                    className={`p-3 rounded-lg border-2 transition-all text-left ${
+                      settings.planningMode === "simplified"
+                        ? "border-purple-500 bg-purple-500/10"
+                        : "border-border bg-background/50 hover:border-purple-500/50"
+                    }`}
+                  >
+                    <div className="text-sm font-medium text-foreground">Simplified</div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Single planning pass — critic feedback is incorporated but never blocks
+                    </p>
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-medium text-muted-foreground mb-2">Provider</label>

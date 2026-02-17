@@ -88,6 +88,7 @@ router.get("/", async (req: Request, res: Response) => {
       // Planning Agent Settings (Project Manager)
       planningAgentProvider: org.planningAgentProvider || "anthropic",
       planningAgentModel: org.planningAgentModel || "",
+      planningMode: org.planningMode || "strict",
       storyCalibrationMultiplier: org.storyCalibrationMultiplier ?? 0.4,
 
       // Email Settings
@@ -219,6 +220,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       // Planning Agent Settings (Project Manager)
       planningAgentProvider,
       planningAgentModel,
+      planningMode,
       storyCalibrationMultiplier,
 
       // Cost Settings
@@ -645,6 +647,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         });
         org.planningAgentProvider = inferredProvider;
       }
+    }
+
+    if (planningMode !== undefined) {
+      const validModes = ["strict", "simplified"];
+      if (!validModes.includes(planningMode)) {
+        res.status(400).json({ error: "planningMode must be 'strict' or 'simplified'" });
+        return;
+      }
+      org.planningMode = planningMode;
     }
 
     if (storyCalibrationMultiplier !== undefined) {
@@ -1122,6 +1133,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         maxPerStoryRevisions: org.maxPerStoryRevisions,
         planningAgentProvider: org.planningAgentProvider,
         planningAgentModel: org.planningAgentModel,
+        planningMode: org.planningMode,
         storyCalibrationMultiplier: org.storyCalibrationMultiplier,
         costAlertThresholdUsd: org.costAlertThresholdUsd,
         dailyBudgetLimitUsd: org.dailyBudgetLimitUsd,

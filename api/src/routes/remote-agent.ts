@@ -1056,6 +1056,7 @@ router.get(
       provider,
       maxStories,
       maxTargetFiles: computeMaxTargetFiles((task.description || "").length),
+      planningMode: org.planningMode || "strict",
     });
   }),
 );

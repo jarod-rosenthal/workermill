@@ -328,22 +328,47 @@ export function buildCriticPrompt(
 
 /**
  * Parse critic JSON response from raw Claude CLI output.
+ * Uses bracket-matching (extractBalancedJson) instead of lazy regex to handle
+ * backtick sequences in reasoning text that break the /```json([\s\S]*?)```/ pattern.
  */
 export function parseCriticResponse(text: string): CriticResult {
-  let jsonText = text.trim();
-
-  // Handle markdown code blocks
-  if (jsonText.includes("```")) {
-    const match = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (match) jsonText = match[1].trim();
+  // Strategy 1: Find ```json fence and extract balanced JSON after it
+  const jsonFenceStart = text.indexOf("```json");
+  if (jsonFenceStart !== -1) {
+    const braceStart = text.indexOf("{", jsonFenceStart + 7);
+    if (braceStart !== -1) {
+      const extracted = extractBalancedJson(text, braceStart);
+      if (extracted) {
+        return parseCriticJson(extracted);
+      }
+    }
   }
 
-  // Find JSON object if preceded by reasoning text
-  const jsonStart = jsonText.indexOf("{");
-  if (jsonStart > 0) {
-    jsonText = jsonText.substring(jsonStart);
+  // Strategy 2: Find plain ``` fence and extract balanced JSON after it
+  if (text.includes("```")) {
+    const fenceStart = text.indexOf("```");
+    const braceStart = text.indexOf("{", fenceStart + 3);
+    if (braceStart !== -1) {
+      const extracted = extractBalancedJson(text, braceStart);
+      if (extracted) {
+        return parseCriticJson(extracted);
+      }
+    }
   }
 
+  // Strategy 3: Find raw JSON object from first {
+  const braceStart = text.indexOf("{");
+  if (braceStart !== -1) {
+    const extracted = extractBalancedJson(text, braceStart);
+    if (extracted) {
+      return parseCriticJson(extracted);
+    }
+  }
+
+  throw new Error("No JSON found in critic response");
+}
+
+function parseCriticJson(jsonText: string): CriticResult {
   const result = JSON.parse(jsonText) as {
     approved: boolean;
     score: number;

@@ -51,37 +51,96 @@ export async function addPlanningLog(taskId: string, message: string): Promise<v
 }
 
 /**
- * Parse JSON from LLM response text, handling markdown code blocks
+ * Extract a balanced JSON object from a string starting at the given position.
+ * Properly handles nested braces, strings with escaped characters, and code
+ * blocks embedded in JSON string values (which contain triple backticks).
+ */
+function extractBalancedJson(text: string, start: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (ch === "\\") {
+      if (inString) escape = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        return text.substring(start, i + 1);
+      }
+    }
+  }
+
+  return null; // Unbalanced
+}
+
+/**
+ * Parse JSON from LLM response text, handling markdown code blocks.
+ * Uses bracket-matching instead of lazy regex to handle backticks in reasoning text.
  */
 export function parseJsonResponse<T>(text: string): T {
-  let jsonText = text.trim();
-  // Handle markdown code blocks
-  if (jsonText.startsWith("```")) {
-    const match = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (match) jsonText = match[1].trim();
+  // Strategy 1: Find ```json fence and extract balanced JSON
+  const jsonFenceStart = text.indexOf("```json");
+  if (jsonFenceStart !== -1) {
+    const braceStart = text.indexOf("{", jsonFenceStart + 7);
+    if (braceStart !== -1) {
+      const extracted = extractBalancedJson(text, braceStart);
+      if (extracted) return JSON.parse(extracted) as T;
+    }
   }
-  return JSON.parse(jsonText) as T;
+
+  // Strategy 2: Find raw JSON from first {
+  const braceStart = text.indexOf("{");
+  if (braceStart !== -1) {
+    const extracted = extractBalancedJson(text, braceStart);
+    if (extracted) return JSON.parse(extracted) as T;
+  }
+
+  throw new Error("No JSON found in response");
 }
 
 /**
  * Parse execution plan JSON from LLM text response.
- * Handles markdown code blocks and validates structure.
+ * Uses bracket-matching instead of lazy regex to handle backticks in reasoning text.
  */
 export function parseExecutionPlanJson(text: string): ExecutionPlan {
-  let jsonText = text.trim();
-
-  // Extract JSON from markdown code blocks if present
-  if (jsonText.startsWith("```")) {
-    const match = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (match) jsonText = match[1].trim();
-  }
-
-  // Also handle case where response has text before/after JSON
-  const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
-  if (jsonMatch) jsonText = jsonMatch[0];
-
   try {
-    return JSON.parse(jsonText) as ExecutionPlan;
+    // Strategy 1: Find ```json fence and extract balanced JSON
+    const jsonFenceStart = text.indexOf("```json");
+    if (jsonFenceStart !== -1) {
+      const braceStart = text.indexOf("{", jsonFenceStart + 7);
+      if (braceStart !== -1) {
+        const extracted = extractBalancedJson(text, braceStart);
+        if (extracted) return JSON.parse(extracted) as ExecutionPlan;
+      }
+    }
+
+    // Strategy 2: Find raw JSON from first {
+    const braceStart = text.indexOf("{");
+    if (braceStart !== -1) {
+      const extracted = extractBalancedJson(text, braceStart);
+      if (extracted) return JSON.parse(extracted) as ExecutionPlan;
+    }
+
+    throw new Error("No JSON found in plan response");
   } catch (error) {
     logger.error("Failed to parse execution plan JSON", {
       error: error instanceof Error ? error.message : String(error),

@@ -370,23 +370,74 @@ Rules:
 // ============================================================================
 
 /**
+ * Extract a balanced JSON object from a string starting at the given position.
+ * Properly handles nested braces, strings with escaped characters, and code
+ * blocks embedded in JSON string values (which contain triple backticks).
+ */
+function extractBalancedJson(text: string, start: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (ch === "\\") {
+      if (inString) escape = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        return text.substring(start, i + 1);
+      }
+    }
+  }
+
+  return null; // Unbalanced
+}
+
+/**
  * Parse plan JSON response and normalize structure.
  * Handles responses with reasoning text before the JSON block.
+ * Uses bracket-matching instead of lazy regex to handle backticks in reasoning text.
  */
 function parsePlanResponse(text: string): ExecutionPlanV2 {
-  // Try to extract JSON from the response (handle markdown code blocks anywhere in the text)
-  let jsonText = text.trim();
+  let jsonText: string | null = null;
 
-  // Look for JSON in a code block (```json ... ``` or ``` ... ```)
-  const codeBlockMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlockMatch) {
-    jsonText = codeBlockMatch[1].trim();
-  } else {
-    // If no code block, try to find raw JSON object (starting with {)
-    const jsonStartIndex = jsonText.indexOf("{");
-    if (jsonStartIndex !== -1) {
-      jsonText = jsonText.substring(jsonStartIndex);
+  // Strategy 1: Find ```json fence and extract balanced JSON after it
+  const jsonFenceStart = text.indexOf("```json");
+  if (jsonFenceStart !== -1) {
+    const braceStart = text.indexOf("{", jsonFenceStart + 7);
+    if (braceStart !== -1) {
+      jsonText = extractBalancedJson(text, braceStart);
     }
+  }
+
+  // Strategy 2: Find raw JSON object from first {
+  if (!jsonText) {
+    const braceStart = text.indexOf("{");
+    if (braceStart !== -1) {
+      jsonText = extractBalancedJson(text, braceStart);
+    }
+  }
+
+  if (!jsonText) {
+    throw new Error("No JSON found in plan response");
   }
 
   const input = JSON.parse(jsonText) as {
@@ -415,14 +466,31 @@ function parsePlanResponse(text: string): ExecutionPlanV2 {
 }
 
 /**
- * Parse critic JSON response
+ * Parse critic JSON response.
+ * Uses bracket-matching instead of lazy regex to handle backticks in reasoning text.
  */
 function parseCriticResponse(text: string): CriticResult & { model: string } {
-  // Try to extract JSON from the response
-  let jsonText = text.trim();
-  if (jsonText.startsWith("```")) {
-    const match = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (match) jsonText = match[1].trim();
+  let jsonText: string | null = null;
+
+  // Strategy 1: Find ```json fence and extract balanced JSON
+  const jsonFenceStart = text.indexOf("```json");
+  if (jsonFenceStart !== -1) {
+    const braceStart = text.indexOf("{", jsonFenceStart + 7);
+    if (braceStart !== -1) {
+      jsonText = extractBalancedJson(text, braceStart);
+    }
+  }
+
+  // Strategy 2: Find raw JSON from first {
+  if (!jsonText) {
+    const braceStart = text.indexOf("{");
+    if (braceStart !== -1) {
+      jsonText = extractBalancedJson(text, braceStart);
+    }
+  }
+
+  if (!jsonText) {
+    throw new Error("No JSON found in critic response");
   }
 
   const result = JSON.parse(jsonText) as {

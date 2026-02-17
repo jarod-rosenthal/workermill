@@ -13,6 +13,7 @@ import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import type { AgentConfig } from "./config.js";
+import { agentEvents } from "./local-api.js";
 
 /** Timestamp prefix */
 function ts(): string {
@@ -346,11 +347,21 @@ export async function spawnWorker(
   };
   activeProcesses.set(task.id, active);
 
+  // Notify local API clients
+  agentEvents.emit("task:started", {
+    id: task.id,
+    summary: task.summary,
+    persona: task.workerPersona,
+    model: task.workerModel,
+    repo: task.githubRepo,
+  });
+
   // Stream stdout/stderr
   proc.stdout?.on("data", (data: Buffer) => {
     const lines = data.toString().split("\n").filter((l) => l.trim());
     for (const line of lines) {
       console.log(`${ts()} ${taskLabel} ${chalk.dim(redactSecrets(line))}`);
+      agentEvents.emit("task:log", { id: task.id, line: redactSecrets(line), severity: "info" });
       if (line.includes("::result::")) {
         active.resultEmitted = true;
       }
@@ -361,6 +372,7 @@ export async function spawnWorker(
     const lines = data.toString().split("\n").filter((l) => l.trim());
     for (const line of lines) {
       console.log(`${ts()} ${taskLabel} ${chalk.red(redactSecrets(line))}`);
+      agentEvents.emit("task:log", { id: task.id, line: redactSecrets(line), severity: "error" });
     }
   });
 
@@ -371,6 +383,13 @@ export async function spawnWorker(
     const icon = code === 0 ? chalk.green("✓") : chalk.red("✗");
     const status = code === 0 ? chalk.green("completed") : chalk.red(`failed (exit ${code})`);
     console.log(`${ts()} ${taskLabel} ${icon} Worker ${status} ${chalk.dim(`(${duration}s)`)}`);
+
+    // Notify local API clients
+    if (code === 0) {
+      agentEvents.emit("task:completed", { id: task.id, exitCode: code, duration });
+    } else {
+      agentEvents.emit("task:failed", { id: task.id, exitCode: code, duration });
+    }
 
     // Safety net: post fallback completion if no ::result:: marker
     if (!active.resultEmitted) {

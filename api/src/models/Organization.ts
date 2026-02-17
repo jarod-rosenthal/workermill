@@ -153,6 +153,12 @@ export class Organization {
   @Column({ name: "api_key", type: "varchar", length: 255, nullable: true })
   apiKey: string | null;
 
+  @Column({ name: "api_key_hash", type: "varchar", length: 255, nullable: true })
+  apiKeyHash: string | null;
+
+  @Column({ name: "api_key_prefix", type: "varchar", length: 12, nullable: true })
+  apiKeyPrefix: string | null;
+
   @Column({ name: "jira_webhook_secret", type: "varchar", length: 255, nullable: true })
   jiraWebhookSecret: string | null;
 

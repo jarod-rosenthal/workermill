@@ -2,6 +2,7 @@ import { AppDataSource } from "./connection.js";
 import { Organization, User, UserOrganization } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import { randomUUID } from "crypto";
+import bcrypt from "bcrypt";
 
 /**
  * Seed initial data for WorkerMill
@@ -19,15 +20,19 @@ async function seed() {
 
     if (!org) {
       // Create organization
+      const seedRawKey = `org_${randomUUID().replace(/-/g, "")}`;
       org = orgRepo.create({
         name: "OnCallShift",
         plan: "enterprise",
-        apiKey: `org_${randomUUID().replace(/-/g, "")}`,
+        apiKey: seedRawKey, // Keep raw key for spawner use (ECS/local workers)
+        apiKeyHash: await bcrypt.hash(seedRawKey, 10),
+        apiKeyPrefix: seedRawKey.substring(0, 12),
         scmProvider: "bitbucket",
         defaultBitbucketRepo: "oncallshift/oncallshift-api",
       });
       await orgRepo.save(org);
       logger.info("Created organization", { orgId: org.id, name: org.name });
+      logger.info("Organization API key (one-time display)", { apiKey: seedRawKey });
     } else {
       logger.info("Organization already exists", { orgId: org.id });
     }
@@ -69,7 +74,7 @@ async function seed() {
 
     console.log("\n=== Seed Complete ===");
     console.log(`Organization: ${org.name}`);
-    console.log(`API Key: ${org.apiKey}`);
+    console.log(`API Key: (hashed — shown at creation time only)`);
     console.log(`User: ${user.email} (${user.role})`);
     console.log("");
 

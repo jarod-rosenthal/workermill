@@ -20,6 +20,7 @@ import { notifyNewSignup } from "../services/admin-notifications.js";
 import { sendWelcomeEmail } from "../services/email/index.js";
 import { getDefaultOrganization } from "../services/user-organizations.js";
 import { randomBytes, randomUUID } from "crypto";
+import bcrypt from "bcrypt";
 import { authenticateUserAllowNoOrg } from "../middleware/auth.js";
 import axios from "axios";
 import {
@@ -460,12 +461,15 @@ router.post(
           slug = `${baseSlug}-${slugSuffix}`;
         }
 
+        const signupRawKey = `org_${randomUUID().replace(/-/g, "")}`;
         org = orgRepo.create({
           name: organizationName,
           slug,
           plan: "free",
           taskQuota: 0, // Unlimited tasks (feature-gated, not quota-based)
-          apiKey: randomBytes(32).toString("hex"), // Generate API key for org
+          apiKey: signupRawKey, // Keep raw key for spawner use (ECS/local workers)
+          apiKeyHash: await bcrypt.hash(signupRawKey, 10),
+          apiKeyPrefix: signupRawKey.substring(0, 12),
         });
         await orgRepo.save(org);
 
@@ -884,12 +888,15 @@ router.post(
         }
 
         // Create new organization
+        const setupRawKey = `org_${randomUUID().replace(/-/g, "")}`;
         const org = orgRepo.create({
           name: organizationName,
           slug,
           plan: "free",
           taskQuota: 0, // Unlimited tasks (feature-gated, not quota-based)
-          apiKey: randomBytes(32).toString("hex"),
+          apiKey: setupRawKey, // Keep raw key for spawner use (ECS/local workers)
+          apiKeyHash: await bcrypt.hash(setupRawKey, 10),
+          apiKeyPrefix: setupRawKey.substring(0, 12),
         });
         await orgRepo.save(org);
 
@@ -1450,13 +1457,16 @@ router.post(
         }
 
         // Create new organization linked to Azure tenant
+        const msRawKey = `org_${randomUUID().replace(/-/g, "")}`;
         org = orgRepo.create({
           name: orgName,
           slug,
           azureTenantId: tenantId,
           plan: "free",
           taskQuota: 0, // Unlimited tasks (feature-gated, not quota-based)
-          apiKey: randomBytes(32).toString("hex"),
+          apiKey: msRawKey, // Keep raw key for spawner use (ECS/local workers)
+          apiKeyHash: await bcrypt.hash(msRawKey, 10),
+          apiKeyPrefix: msRawKey.substring(0, 12),
         });
         await orgRepo.save(org);
         isNewOrg = true;

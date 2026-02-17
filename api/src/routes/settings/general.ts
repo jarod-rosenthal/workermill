@@ -353,6 +353,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         res.status(400).json({ error: "warmPoolSize must be between 0 and 5" });
         return;
       }
+      if (size > 0 && !planFeatures.warmPool) {
+        res.status(403).json({ error: "Warm container pool requires Pro plan or higher." });
+        return;
+      }
       org.warmPoolSize = size;
     }
 

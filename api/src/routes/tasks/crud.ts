@@ -1,6 +1,8 @@
 import { Router, Request, Response } from "express";
 import { AppDataSource } from "../../db/connection.js";
-import { WorkerTask } from "../../models/index.js";
+import { WorkerTask, PLAN_FEATURES } from "../../models/index.js";
+import type { OrganizationPlan } from "../../models/Organization.js";
+import { RemoteAgent } from "../../models/RemoteAgent.js";
 import { authenticateRequest } from "../../middleware/auth.js";
 import { logger } from "../../utils/logger.js";
 import { body, param, query, validateRequest } from "../../middleware/validation.js";
@@ -323,6 +325,34 @@ router.post(
       repoOverride,
       targetRepo,
     });
+
+    // Pre-flight: Verify the org has a way to execute tasks
+    const planFeats = PLAN_FEATURES[(org.plan as OrganizationPlan)] ?? PLAN_FEATURES.free;
+    if (!planFeats.cloudExecution) {
+      // Free tier can only execute via remote agent — check if one is registered
+      const agentRepo = AppDataSource.getRepository(RemoteAgent);
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+      const onlineAgent = await agentRepo
+        .createQueryBuilder("agent")
+        .where("agent.orgId = :orgId", { orgId: org.id })
+        .andWhere("agent.lastHeartbeatAt > :cutoff", { cutoff: twoMinutesAgo })
+        .getOne();
+      if (!onlineAgent) {
+        const anyAgent = await agentRepo.findOne({ where: { orgId: org.id } });
+        if (!anyAgent) {
+          res.status(400).json({
+            error: "No remote agent installed. Install the WorkerMill agent to run tasks.",
+            docs: "https://workermill.com/docs/remote-agent",
+          });
+          return;
+        } else {
+          res.status(400).json({
+            error: "Remote agent is offline. Start the agent with 'workermill-agent start' to run tasks.",
+          });
+          return;
+        }
+      }
+    }
 
     // Map issueTrackerProvider to ticketSystem value
     const ticketSystem = issueTrackerProvider === "github-issues" ? "github" : issueTrackerProvider as "jira" | "linear";

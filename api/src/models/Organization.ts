@@ -225,18 +225,18 @@ export class Organization {
   @Column({ name: "cost_reset_at", type: "timestamp", nullable: true })
   costResetAt: Date | null;
 
-  // Data Management Settings
-  @Column({ name: "log_retention_days", type: "int", default: 30 })
+  // Data Management Settings (defaults match free tier limits)
+  @Column({ name: "log_retention_days", type: "int", default: 14 })
   logRetentionDays: number;
 
   @Column({ name: "task_retention_days", type: "int", default: 90 })
   taskRetentionDays: number;
 
-  // Worker Settings
-  @Column({ name: "max_concurrent_workers", type: "int", default: 3 })
+  // Worker Settings (defaults match free tier limits)
+  @Column({ name: "max_concurrent_workers", type: "int", default: 1 })
   maxConcurrentWorkers: number;
 
-  @Column({ name: "max_parallel_experts", type: "int", default: 4 })
+  @Column({ name: "max_parallel_experts", type: "int", default: 3 })
   maxParallelExperts: number;
 
   @Column({ name: "default_max_retries", type: "int", default: 3 })
@@ -245,7 +245,7 @@ export class Organization {
   @Column({ name: "task_cooldown_seconds", type: "int", default: 30 })
   taskCooldownSeconds: number;
 
-  @Column({ name: "default_worker_model", type: "varchar", length: 100, default: "claude-opus-4-6" })
+  @Column({ name: "default_worker_model", type: "varchar", length: 100, default: "claude-sonnet-4-5-20250929" })
   defaultWorkerModel: string;
 
   @Column({ name: "default_worker_persona", type: "varchar", length: 50, default: "backend_developer" })

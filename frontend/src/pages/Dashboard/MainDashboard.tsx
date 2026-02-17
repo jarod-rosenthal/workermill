@@ -3425,7 +3425,7 @@ export default function Dashboard() {
             </h2>
           </div>
           <div className="overflow-x-auto overflow-y-visible rounded-b-xl min-h-[280px]">
-            <table className="w-full">
+            <table className="w-full min-w-[900px]">
               <thead>
                 <tr className="text-xs text-muted-foreground border-b border-border">
                   <th className="text-left p-3">Task</th>

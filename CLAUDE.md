@@ -102,9 +102,9 @@ When fixing orchestrator bugs:
 - Use `./deploy.sh --frontend` (NOT `--env dev`)
 - Use `./deploy.sh --worker` (NOT `--env dev`)
 
-***REMOVED******REMOVED******REMOVED*** DO NOT Publish Agent Without Bumping Version
+***REMOVED******REMOVED******REMOVED*** DO NOT Release Agent Without Bumping Version
 
-npm rejects same-version publishes. **Always bump `agent/package.json` version before `npm publish`.**
+**Always bump `agent/package.json` version before releasing.** The version is embedded at compile time via esbuild `define`. To release: bump version → `git tag agent-v<version>` → `git push --tags` → GitHub Actions builds binaries. npm publish is still supported as a fallback: `cd agent && npm run build && npm publish --access public`.
 
 ***REMOVED******REMOVED******REMOVED*** Rebuild Worker Image After worker/ Changes
 
@@ -153,7 +153,10 @@ The `worker/epic/*.ts` files are **compiled by `tsc`** during the Docker build. 
 | Integration tests (watch) | `cd api && npm run test:integration:watch` |
 | **Validated implementation** | `/val-imp [plan-file]` |
 | **Start remote agent** | `workermill-agent start` |
-| **Publish agent to npm** | `cd agent && npm run build && npm publish --access public` |
+| **Install remote agent** | `curl -fsSL https://workermill.com/install.sh \| bash` |
+| **Build agent binary** | `cd agent && npm run build && bun build --compile dist/entry.js --outfile dist/bin/workermill-agent` |
+| **Release agent binary** | Bump version → `git tag agent-v<version>` → `git push --tags` |
+| **Publish agent to npm** | `cd agent && npm run build && npm publish --access public` (fallback) |
 
 **Key files:**
 - API routes: `api/src/routes/`
@@ -234,8 +237,7 @@ Run WorkerMill entirely locally with workers as Claude Code processes (instead o
 ***REMOVED******REMOVED******REMOVED*** Prerequisites
 
 - Docker (for PostgreSQL)
-- Node.js >= 20
-- Claude CLI: `npm install -g @anthropic-ai/claude-code`
+- Claude CLI: `curl -fsSL https://claude.ai/install.sh | bash` (or `winget install Anthropic.ClaudeCode` on Windows)
 - Claude Max subscription
 
 ***REMOVED******REMOVED******REMOVED*** Setup
@@ -333,7 +335,19 @@ lsof -ti :5173 -ti :5174 2>/dev/null | xargs -r kill -9
 
 ***REMOVED******REMOVED******REMOVED*** Remote Agent Mode
 
-Run workers locally while using the **cloud** dashboard (workermill.com). `npm install -g @workermill/agent && workermill-agent setup && workermill-agent start`. Key difference: `API_BASE_URL` points to `https://workermill.com` instead of `localhost`.
+Run workers locally while using the **cloud** dashboard (workermill.com). No Node.js required.
+
+```bash
+***REMOVED*** Install (one-liner, no prerequisites beyond Claude CLI)
+curl -fsSL https://workermill.com/install.sh | bash   ***REMOVED*** Mac/Linux
+irm https://workermill.com/install.ps1 | iex           ***REMOVED*** Windows (PowerShell)
+
+***REMOVED*** Setup and start
+workermill-agent setup
+workermill-agent start
+```
+
+Key difference: `API_BASE_URL` points to `https://workermill.com` instead of `localhost`. The agent is a standalone binary — workers spawn as self-invocations of the same binary with `__WORKERMILL_MODE` env var.
 
 ***REMOVED******REMOVED******REMOVED*** Local Architecture
 
@@ -352,7 +366,7 @@ WorkerMill is mission control for autonomous AI coding agents - a real-time moni
 - **Worker Containers**: Docker images with Claude Code for task execution (`worker/`)
 - **Testing**: Vitest (API unit/integration), Playwright (E2E)
 
-**Requirements:** Node.js >= 20.0.0
+**Requirements:** Node.js >= 20.0.0 (for API/frontend development; the remote agent binary has no Node.js dependency)
 
 **Current Development Phase:** Production deployment testing with **oncallshift** repositories (Bitbucket). Jira tickets from the **OCS** project trigger AI worker tasks against the split repos: `oncallshift-api`, `oncallshift-web`, `oncallshift-mobile`.
 
@@ -401,15 +415,14 @@ User-facing documentation is at https://workermill.com/docs (overview, quick sta
 
 ***REMOVED******REMOVED******REMOVED*** Worker Image Registry
 
-Worker images are private ECR only. Remote agent machines require AWS credentials with ECR read access.
+Worker images are private ECR only — used by **cloud ECS tasks** and **local WorkerMill Docker mode**.
 
 | Registry | URL | Consumer |
 |----------|-----|----------|
-| **Private ECR** | `AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest` | Cloud ECS tasks + Remote agent CLI |
+| **Private ECR** | `AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest` | Cloud ECS tasks |
 
 - `--worker` pushes to private ECR and updates the ECS task definition
-- Remote agent authenticates to ECR automatically using ambient AWS credentials
-- After deploying worker changes, remote machines auto-pull on next spawn (`--pull always`)
+- **Remote agent** does NOT use Docker — workers run as native processes via the agent binary. Worker code is bundled into the agent at build time. To update remote agent workers, release a new agent binary.
 
 ***REMOVED******REMOVED******REMOVED*** Database Migrations
 
@@ -634,11 +647,15 @@ await repo.update({ id, status: "queued" }, { status: "running" });
 
 `router.use(middleware)` runs for ALL routes defined AFTER it, not just routes in the same file section. If you add a global `router.use(authenticateApiKey)` in a route file, any route defined below it will require API key auth — even if you intended it for JWT/dashboard auth. **Always check route ordering when mixing auth strategies.**
 
-***REMOVED******REMOVED******REMOVED*** Agent Package is Published to npm
+***REMOVED******REMOVED******REMOVED*** Agent is Distributed as Standalone Binary
 
-`@workermill/agent` is published to **npmjs.com** under the `workermill` org. Editing `agent/src/` locally does NOTHING to running agents. To release changes:
-1. `cd agent && npm run build && npm publish --access public` (requires npm login + OTP via email)
-2. On the remote machine: `npm install -g @workermill/agent` (or `@workermill/agent@latest` to force update)
+`@workermill/agent` is built as a standalone native binary via `bun build --compile` (also still published to npm as fallback). Editing `agent/src/` locally does NOTHING to running agents. To release changes:
+1. Bump version in `agent/package.json`
+2. `cd agent && npm run build` (produces `dist/entry.js` unified bundle)
+3. Tag `agent-v<version>` and push → GitHub Actions builds all platforms and creates a Release
+4. Remote machines: `workermill-agent update` (self-updates from GitHub Releases)
+
+**Polyglot binary:** The single binary serves CLI, worker, and manager roles via `__WORKERMILL_MODE` env var. Workers spawn by re-invoking `process.execPath` with the mode set.
 
 Three separate spawners exist: (1) `agent/src/spawner.ts` = remote agent CLI, (2) `api/src/services/local-epic-spawner.ts` = local dev, (3) ECS = cloud. **Always ask which environment before making spawner changes.**
 

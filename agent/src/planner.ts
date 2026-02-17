@@ -601,7 +601,12 @@ export async function planTask(
   const promptResponse = await api.get("/api/agent/planning-prompt", {
     params: { taskId: task.id },
   });
-  const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories, maxTargetFiles: apiMaxTargetFiles } = promptResponse.data;
+  const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories, maxTargetFiles: apiMaxTargetFiles, planningMode: apiPlanningMode } = promptResponse.data;
+  const isSimplifiedMode = apiPlanningMode === "simplified";
+  if (isSimplifiedMode) {
+    console.log(`${ts()} ${taskLabel} Planning mode: ${chalk.yellow("simplified")} (single pass + refinement)`);
+    await postLog(task.id, `${PREFIX} Planning mode: simplified — critic feedback will be incorporated but never blocks`);
+  }
   const maxStories: number = typeof apiMaxStories === "number" ? apiMaxStories : 8;
 
   const cliModel = model;
@@ -844,9 +849,13 @@ export async function planTask(
       return await postValidatedPlan(task.id, plan, config.agentId, taskLabel, elapsed, undefined, undefined, criticHistory, totalFileCapTruncations, planningDurationMs, iteration);
     }
 
-    if (criticResult.approved || criticResult.score >= AUTO_APPROVAL_THRESHOLD) {
-      // Approved — but run a refinement pass so critic feedback isn't wasted
-      const msg = `${PREFIX} Critic approved (score: ${criticResult.score}/100)`;
+    if (isSimplifiedMode || criticResult.approved || criticResult.score >= AUTO_APPROVAL_THRESHOLD) {
+      // In simplified mode: always treat as approved regardless of score
+      // In strict mode: only approved if score >= threshold
+      const modeLabel = isSimplifiedMode && !criticResult.approved && criticResult.score < AUTO_APPROVAL_THRESHOLD
+        ? "Simplified mode — auto-approved"
+        : "Critic approved";
+      const msg = `${PREFIX} ${modeLabel} (score: ${criticResult.score}/100)`;
       console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} ${msg}`);
       await postLog(task.id, msg);
       if (criticResult.risks.length > 0) {

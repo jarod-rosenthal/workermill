@@ -73,7 +73,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 // Users with support admin privileges (can see internal notes, change status, etc.)
 const SUPPORT_ADMIN_EMAILS = [
-  "admin@localhost",
+  "support@workermill.com",
 ];
 
 export default function SupportTicketDetail() {

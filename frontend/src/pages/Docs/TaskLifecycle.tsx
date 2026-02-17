@@ -281,15 +281,15 @@ const failureStates = [
 const workflowModes = [
   {
     id: "default",
-    name: "Team Planning (Default)",
+    name: "Epic Planning (Default)",
     labels: ["workermill"],
     labelDescription: "Only the workermill label",
     icon: FileText,
     color: "text-green-500",
     bgColor: "bg-green-500/10",
     borderColor: "border-green-500/30",
-    description: "Planning Agent analyzes your ticket and launches Team Planning — decomposing tasks into stories executed in parallel by specialized experts.",
-    steps: ["Team Planning", "Parallel Execution", "PR Created", "Approval", "Deploy & Merge"],
+    description: "Planning Agent analyzes your ticket and decomposes tasks into stories executed in parallel by specialized experts.",
+    steps: ["Planning", "Parallel Execution", "PR Created", "Approval", "Deploy & Merge"],
     keyPoints: [
       "Planning Agent decomposes tickets into smaller stories",
       "Multiple AI experts work in parallel",
@@ -354,7 +354,7 @@ const workflowModes = [
 
 // Label combinations reference
 const labelReference = [
-  { labels: ["workermill"], workflow: "Team Planning (Default)", description: "Decomposes task into parallel stories" },
+  { labels: ["workermill"], workflow: "Epic Planning (Default)", description: "Decomposes task into parallel stories" },
   { labels: ["workermill", "deploy"], workflow: "Auto-Deploy", description: "Auto-merge PR and deploy, no approval required" },
   { labels: ["workermill", "review"], workflow: "Auto Review", description: "Tech Lead Reviewer AI reviews PR before deploy" },
   { labels: ["workermill", "critic"], workflow: "Critic Validation", description: "Planner-Critic validates plan before execution" },
@@ -418,7 +418,7 @@ const advancedFeatures = [
   },
   {
     id: "team-planning",
-    title: "Team Planning",
+    title: "Epic Planning",
     icon: FileText,
     color: "text-green-500",
     bgColor: "bg-green-500/10",
@@ -585,7 +585,7 @@ export default function TaskLifecycle() {
           <ul className="space-y-2 text-sm text-muted-foreground">
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
-              <span><strong className="text-foreground">Team Planning is the default</strong> — just add the <code className="px-1 bg-muted rounded">workermill</code> label for automatic task decomposition and parallel execution.</span>
+              <span><strong className="text-foreground">Planning is the default</strong> — just add the <code className="px-1 bg-muted rounded">workermill</code> label for automatic task decomposition and parallel execution.</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>

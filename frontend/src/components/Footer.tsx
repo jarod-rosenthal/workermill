@@ -23,17 +23,14 @@ const footerColumns: FooterColumn[] = [
   {
     title: "Resources",
     links: [
-      { label: "Changelog", href: "/changelog" },
-      { label: "Status", href: "https://workermill.com/status", external: true },
+      { label: "Status", href: "https://status.workermill.com", external: true },
     ],
   },
   {
-    title: "Company",
+    title: "Contact",
     links: [
-      { label: "About", href: "/about" },
-      { label: "Blog", href: "/blog" },
-      { label: "Careers", href: "/careers" },
-      { label: "Contact", href: "/contact" },
+      { label: "Support", href: "mailto:support@workermill.com", external: true },
+      { label: "Sales", href: "mailto:sales@workermill.com", external: true },
     ],
   },
 ];

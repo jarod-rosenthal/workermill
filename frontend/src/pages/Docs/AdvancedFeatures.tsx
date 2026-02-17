@@ -42,7 +42,7 @@ import {
   Gauge,
 } from "lucide-react";
 
-// Team Planning stages
+// Epic Planning stages
 const teamPlanningStages = [
   {
     phase: "1",
@@ -51,7 +51,7 @@ const teamPlanningStages = [
     color: "text-blue-500",
     bgColor: "bg-blue-500/10",
     borderColor: "border-blue-500/30",
-    description: "Planning Agent analyzes your ticket and launches Team Planning",
+    description: "Planning Agent analyzes your ticket and creates an execution plan",
     details: [
       "Parse ticket summary, description, and acceptance criteria",
       "Analyze codebase structure and requirements",
@@ -254,7 +254,7 @@ const providerLabels = [
 const envVars = {
   core: [
     { name: "TASK_ID", required: true, description: "WorkerMill task UUID" },
-    { name: "JIRA_ISSUE_KEY", required: true, description: "Jira ticket key (e.g., OCS-123)" },
+    { name: "JIRA_ISSUE_KEY", required: true, description: "Jira ticket key (e.g., PROJ-123)" },
     { name: "GITHUB_REPO", required: true, description: "Target repository (owner/repo)" },
     { name: "WORKER_PERSONA", required: true, description: "Worker role (backend_developer, etc.)" },
     { name: "CLAUDE_MODEL", required: true, description: "Model identifier" },
@@ -267,7 +267,7 @@ const envVars = {
     { name: "OLLAMA_HOST", required: false, description: "Ollama server URL" },
   ],
   features: [
-    { name: "USE_PRD_ORCHESTRATION", required: false, description: "Enable Team Planning mode" },
+    { name: "USE_PRD_ORCHESTRATION", required: false, description: "Enable Epic Planning mode" },
     { name: "PRD_ORCHESTRATION_MAX_STORIES", required: false, description: "Maximum stories per plan (1-50)" },
     { name: "CHECKPOINT_ENABLED", required: false, description: "Enable state persistence" },
     { name: "CHECKPOINT_INTERVAL", required: false, description: "Sync interval in seconds (default: 60)" },
@@ -291,7 +291,7 @@ export default function AdvancedFeatures() {
         <h1 className="text-3xl font-bold text-foreground mb-2">Advanced Features</h1>
         <p className="text-muted-foreground">
           Comprehensive documentation for WorkerMill's advanced orchestration capabilities:
-          Team Planning, Worker Checkpointing, Multi-Worker Coordination, and AI Provider Support.
+          Epic Planning, Worker Checkpointing, Multi-Worker Coordination, and AI Provider Support.
         </p>
       </div>
 
@@ -301,7 +301,7 @@ export default function AdvancedFeatures() {
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
           <a href="***REMOVED***team-planning" className="flex items-center gap-2 p-3 rounded-lg bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 transition-colors">
             <FileText className="w-4 h-4 text-green-500" />
-            <span className="text-sm font-medium text-foreground">Team Planning</span>
+            <span className="text-sm font-medium text-foreground">Epic Planning</span>
           </a>
           <a href="***REMOVED***checkpointing" className="flex items-center gap-2 p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 transition-colors">
             <Save className="w-4 h-4 text-blue-500" />
@@ -343,16 +343,16 @@ export default function AdvancedFeatures() {
             <FileText className="w-6 h-6 text-green-500" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-foreground">Team Planning</h2>
+            <h2 className="text-2xl font-bold text-foreground">Epic Planning</h2>
             <p className="text-sm text-muted-foreground">Multi-story execution engine for complex tasks</p>
           </div>
         </div>
 
-        {/* Team Planning Overview */}
+        {/* Epic Planning Overview */}
         <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-6">
-          <h3 className="font-semibold text-foreground mb-3">What is Team Planning?</h3>
+          <h3 className="font-semibold text-foreground mb-3">What is Epic Planning?</h3>
           <p className="text-muted-foreground mb-4">
-            When a task is created, the Planning Agent analyzes your ticket and launches Team Planning — transforming
+            When a task is created, the Planning Agent analyzes your ticket and creates an execution plan — transforming
             complex requirements into coordinated, parallel implementation workflows. It decomposes requirements into
             discrete "stories" with dependencies, then orchestrates their parallel execution with real-time progress tracking.
           </p>
@@ -378,7 +378,7 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* Team Planning Workflow Phases */}
+        {/* Epic Planning Workflow Phases */}
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-foreground">Workflow Phases</h3>
           <div className="space-y-0">
@@ -422,7 +422,7 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* Team Planning Configuration */}
+        {/* Epic Planning Configuration */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border bg-muted/30">
             <h3 className="font-semibold text-foreground flex items-center gap-2">
@@ -438,7 +438,7 @@ export default function AdvancedFeatures() {
                   <tbody className="divide-y divide-border">
                     <tr>
                       <td className="py-2 text-muted-foreground">usePrdOrchestration</td>
-                      <td className="py-2 text-foreground">Enable Team Planning</td>
+                      <td className="py-2 text-foreground">Enable Epic Planning</td>
                     </tr>
                     <tr>
                       <td className="py-2 text-muted-foreground">prdMaxStories</td>
@@ -470,7 +470,7 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* Team Planning Result Mapping */}
+        {/* Epic Planning Result Mapping */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border bg-muted/30">
             <h3 className="font-semibold text-foreground">Result Mapping</h3>
@@ -569,7 +569,7 @@ export default function AdvancedFeatures() {
   "stage": "implementing",
 
   "repoCloned": true,
-  "branch": "ai/OCS-123",
+  "branch": "ai/PROJ-123",
   "commits": ["abc123", "def456"],
 
   "filesAnalyzed": ["src/api.ts", "src/main.ts"],
@@ -1725,7 +1725,7 @@ export default function AdvancedFeatures() {
               <ul className="space-y-1 text-sm text-muted-foreground">
                 <li>- Simple tasks use efficient models</li>
                 <li>- Complex tasks use flagship models</li>
-                <li>- Large tasks trigger Team Planning with multiple stories</li>
+                <li>- Large tasks trigger planning with multiple stories</li>
               </ul>
             </div>
             <div>

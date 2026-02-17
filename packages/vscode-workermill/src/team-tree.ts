@@ -1,26 +1,31 @@
 /**
- * Team Tree View — sidebar tree showing active tasks and expert status.
+ * Team Tree View — sidebar tree showing active tasks, backlog, and recent.
  *
  * Structure:
  *   Active Tasks (N)
  *     ├── OCS-142: Add dark mode
  *     │   └── backend_developer — running
  *     └── OCS-143: Fix auth redirect
+ *   Backlog (N)                          ← Jira tickets
+ *     ├── ▶ OCS-150: Improve search      To Do
+ *     └── ▶ OCS-151: Fix pagination       In Progress
  *   Recent (N)
  *     └── OCS-140: API rate limiting ✓
  */
 
 import * as vscode from "vscode";
-import { AgentClient, type TaskInfo } from "./agent-client";
+import { AgentClient, type TaskInfo, type IssueInfo } from "./agent-client";
 
-type TreeItem = TaskTreeItem | InfoTreeItem;
+type TreeItem = TaskTreeItem | IssueTreeItem | InfoTreeItem;
 
 export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<TreeItem | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private tasks: TaskInfo[] = [];
+  private issues: IssueInfo[] = [];
   private connected = false;
+  private issueLoadError: string | null = null;
 
   constructor(private client: AgentClient) {
     // Listen for task state changes
@@ -52,7 +57,20 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
     try {
       this.tasks = await this.client.getTasks();
     } catch { /* ignore */ }
+    await this.refreshIssues();
     this._onDidChangeTreeData.fire(undefined);
+  }
+
+  async refreshIssues(): Promise<void> {
+    if (!this.client.isConnected()) return;
+    try {
+      const result = await this.client.searchIssues();
+      this.issues = result.issues || [];
+      this.issueLoadError = null;
+    } catch {
+      // Issues endpoint may not be available (agent not connected to cloud)
+      this.issueLoadError = "Could not load issues";
+    }
   }
 
   getTreeItem(element: TreeItem): vscode.TreeItem {
@@ -71,6 +89,7 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
 
       const items: TreeItem[] = [];
 
+      // Active Tasks
       if (active.length > 0) {
         items.push(new InfoTreeItem(
           `Active Tasks (${active.length})`,
@@ -80,9 +99,42 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
           active.map((t) => new TaskTreeItem(t)),
         ));
       } else {
-        items.push(new InfoTreeItem("No active tasks", "Label a ticket or run a task to start", "$(inbox)"));
+        items.push(new InfoTreeItem("No active tasks", "Run a ticket from Backlog below", "$(inbox)"));
       }
 
+      // Backlog (Jira issues)
+      if (this.issueLoadError) {
+        items.push(new InfoTreeItem("Backlog", this.issueLoadError, "$(list-unordered)"));
+      } else if (this.issues.length > 0) {
+        // Filter out issues that already have an active task
+        const activeKeys = new Set(
+          this.tasks
+            .filter((t) => t.status === "running" || t.status === "planning")
+            .map((t) => {
+              // Extract issue key from summary (e.g. "OCS-142: Add dark mode" → "OCS-142")
+              const match = t.summary.match(/^([A-Z]+-\d+)/);
+              return match ? match[1] : null;
+            })
+            .filter(Boolean),
+        );
+        const backlogIssues = this.issues.filter((i) => !activeKeys.has(i.key));
+
+        if (backlogIssues.length > 0) {
+          items.push(new InfoTreeItem(
+            `Backlog (${backlogIssues.length})`,
+            undefined,
+            "$(list-unordered)",
+            vscode.TreeItemCollapsibleState.Expanded,
+            backlogIssues.map((i) => new IssueTreeItem(i)),
+          ));
+        } else {
+          items.push(new InfoTreeItem("Backlog", "All issues are being worked on", "$(list-unordered)"));
+        }
+      } else {
+        items.push(new InfoTreeItem("Backlog", "No issues found", "$(list-unordered)"));
+      }
+
+      // Recent
       if (recent.length > 0) {
         items.push(new InfoTreeItem(
           `Recent (${recent.length})`,
@@ -107,6 +159,18 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
       if (t.persona) items.push(new InfoTreeItem(t.persona, undefined, personaIcon(t.persona)));
       if (t.model) items.push(new InfoTreeItem(t.model, undefined, "$(hubot)"));
       if (t.repo) items.push(new InfoTreeItem(t.repo, undefined, "$(repo)"));
+      return items;
+    }
+
+    if (element instanceof IssueTreeItem) {
+      // Issue children — show details
+      const items: TreeItem[] = [];
+      const i = element.issue;
+      if (i.issueType) items.push(new InfoTreeItem(i.issueType, undefined, issueTypeIcon(i.issueType)));
+      if (i.priority) items.push(new InfoTreeItem(i.priority, undefined, priorityIcon(i.priority)));
+      if (i.assignee) items.push(new InfoTreeItem(i.assignee.displayName, undefined, "$(person)"));
+      if (i.project) items.push(new InfoTreeItem(i.project.name, undefined, "$(repo)"));
+      if (i.labels.length > 0) items.push(new InfoTreeItem(i.labels.join(", "), undefined, "$(tag)"));
       return items;
     }
 
@@ -139,6 +203,28 @@ class TaskTreeItem extends vscode.TreeItem {
     }
 
     this.contextValue = `task-${task.status}`;
+
+    // Click a task → show feed in sidebar + open terminal
+    this.command = {
+      command: "workermill.selectTask",
+      title: "Select Task",
+      arguments: [task],
+    };
+  }
+}
+
+class IssueTreeItem extends vscode.TreeItem {
+  constructor(public readonly issue: IssueInfo) {
+    const label = `${issue.key}: ${issue.summary}`;
+    const truncated = label.length > 55 ? label.substring(0, 55) + "..." : label;
+    super(truncated, vscode.TreeItemCollapsibleState.Collapsed);
+
+    this.id = `issue-${issue.key}`;
+    this.description = issue.status || "";
+    this.tooltip = `${issue.key}: ${issue.summary}\nStatus: ${issue.status || "Unknown"}\nType: ${issue.issueType || "Unknown"}\nPriority: ${issue.priority || "None"}\nAssignee: ${issue.assignee?.displayName || "Unassigned"}`;
+
+    this.iconPath = new vscode.ThemeIcon("circle-outline", statusColor(issue.status));
+    this.contextValue = "issue";
   }
 }
 
@@ -172,4 +258,36 @@ function personaIcon(persona: string): string {
     planning_agent: "$(lightbulb)",
   };
   return map[persona] || "$(person)";
+}
+
+function issueTypeIcon(issueType: string): string {
+  const lower = issueType.toLowerCase();
+  if (lower === "bug") return "$(bug)";
+  if (lower === "story" || lower === "user story") return "$(bookmark)";
+  if (lower === "epic") return "$(layers)";
+  if (lower === "task") return "$(tasklist)";
+  if (lower === "sub-task" || lower === "subtask") return "$(list-tree)";
+  return "$(issue-opened)";
+}
+
+function priorityIcon(priority: string): string {
+  const lower = priority.toLowerCase();
+  if (lower === "highest" || lower === "blocker") return "$(arrow-up)";
+  if (lower === "high" || lower === "critical") return "$(chevron-up)";
+  if (lower === "medium") return "$(dash)";
+  if (lower === "low") return "$(chevron-down)";
+  if (lower === "lowest") return "$(arrow-down)";
+  return "$(dash)";
+}
+
+function statusColor(status: string | null): vscode.ThemeColor | undefined {
+  if (!status) return undefined;
+  const lower = status.toLowerCase();
+  if (lower === "done" || lower === "closed" || lower === "resolved") {
+    return new vscode.ThemeColor("charts.green");
+  }
+  if (lower === "in progress" || lower === "in review") {
+    return new vscode.ThemeColor("charts.blue");
+  }
+  return undefined; // default color for "To Do" etc.
 }

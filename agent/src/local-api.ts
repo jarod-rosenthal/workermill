@@ -285,6 +285,23 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
+  // GET /api/tasks/:id/logs — proxy logs from cloud API
+  const logsMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/logs$/);
+  if (req.method === "GET" && logsMatch) {
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const { params: qp } = parseUrl(req.url || "");
+      const since = qp.since || "";
+      const limit = qp.limit || "200";
+      let apiPath = `/api/control-center/logs/${logsMatch[1]}/all?limit=${limit}`;
+      if (since) apiPath += `&since=${encodeURIComponent(since)}`;
+      const result = await cloudProxy("GET", apiPath);
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
   // ── SSE streams ──
 
   if (req.method === "GET" && path === "/api/stream/tasks") {
@@ -410,6 +427,33 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       stopTask(cancelMatch[1]);
       // Cancel on cloud
       const result = await cloudProxy("POST", `/api/tasks/${cancelMatch[1]}/cancel`, {});
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // GET /api/issues — search Jira issues (proxied from cloud API)
+  if (req.method === "GET" && path === "/api/issues") {
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const { params: qp } = parseUrl(req.url || "");
+      const qs = Object.entries(qp)
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+        .join("&");
+      const apiPath = `/api/issues${qs ? `?${qs}` : ""}`;
+      const result = await cloudProxy("GET", apiPath);
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // GET /api/issues/projects — list Jira projects (proxied from cloud API)
+  if (req.method === "GET" && path === "/api/issues/projects") {
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("GET", "/api/issues/projects");
       return json(res, result);
     } catch (err) {
       return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);

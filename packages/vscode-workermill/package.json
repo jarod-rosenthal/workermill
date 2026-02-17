@@ -21,7 +21,8 @@
     "coding",
     "agents",
     "workermill",
-    "automation"
+    "automation",
+    "jira"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -42,6 +43,11 @@
         {
           "id": "workermill.teamPanel",
           "name": "Team"
+        },
+        {
+          "id": "workermill.feedPanel",
+          "name": "Activity",
+          "type": "webview"
         }
       ]
     },
@@ -49,6 +55,11 @@
       {
         "command": "workermill.runTask",
         "title": "WorkerMill: Run Task..."
+      },
+      {
+        "command": "workermill.runIssue",
+        "title": "WorkerMill: Run Issue",
+        "icon": "$(play)"
       },
       {
         "command": "workermill.talkToWorker",
@@ -78,6 +89,13 @@
           "command": "workermill.refreshTasks",
           "when": "view == workermill.teamPanel",
           "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "workermill.runIssue",
+          "when": "viewItem == issue",
+          "group": "inline"
         }
       ],
       "explorer/context": [

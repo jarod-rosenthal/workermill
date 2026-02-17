@@ -1,17 +1,16 @@
 /**
  * WorkerMill VS Code Extension
  *
- * Connects to the local WorkerMill agent and provides:
- * - Sidebar Team Panel (tree view of tasks and experts)
- * - Status bar item with task count
- * - Native notifications for blockers, completions, failures
- * - Command palette commands for task management
- * - Live log streaming in output channels
+ * Layout:
+ * - Left sidebar: Team tree (task list) + Activity feed (expert collaboration)
+ * - Bottom terminal: Live task logs as pseudoterminal tabs
+ * - Editor area: untouched — just your code
  */
 
 import * as vscode from "vscode";
 import { AgentClient } from "./agent-client";
 import { TeamTreeProvider } from "./team-tree";
+import { FeedViewProvider } from "./feed-view";
 import { StatusBar } from "./status-bar";
 import { NotificationManager } from "./notifications";
 import { LogTerminalManager } from "./log-terminal";
@@ -20,39 +19,83 @@ let client: AgentClient;
 let statusBar: StatusBar;
 let notifications: NotificationManager;
 let logManager: LogTerminalManager;
+let feedView: FeedViewProvider;
 
 export function activate(context: vscode.ExtensionContext): void {
-  // Initialize agent client
   client = new AgentClient();
 
-  // Set up tree view
+  // Sidebar: Team tree view
   const treeProvider = new TeamTreeProvider(client);
   const treeView = vscode.window.createTreeView("workermill.teamPanel", {
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
 
-  // Set up status bar
+  // Sidebar: Activity feed (WebviewView below the tree)
+  feedView = new FeedViewProvider(client);
+  const feedViewDisposable = vscode.window.registerWebviewViewProvider(
+    FeedViewProvider.viewType,
+    feedView,
+    { webviewOptions: { retainContextWhenHidden: true } },
+  );
+
+  // Status bar
   statusBar = new StatusBar(client);
 
-  // Set up notifications
+  // Notifications
   notifications = new NotificationManager(client);
 
-  // Set up log terminal manager
+  // Terminal log manager
   logManager = new LogTerminalManager(client);
 
   // Register commands
   context.subscriptions.push(
     treeView,
+    feedViewDisposable,
 
     vscode.commands.registerCommand("workermill.refreshTasks", () => {
       treeProvider.refresh();
+    }),
+
+    // Click task in tree → show feed + open terminal
+    vscode.commands.registerCommand("workermill.selectTask", (task: { id: string; summary: string; status: string; persona?: string; model?: string; repo?: string; startedAt: string }) => {
+      // Load coordination feed in the sidebar
+      feedView.showTask(task);
+      // Open log terminal for this task
+      logManager.openLogs(task.id, task.summary);
     }),
 
     vscode.commands.registerCommand("workermill.showTeamPanel", () => {
       vscode.commands.executeCommand("workermill.teamPanel.focus");
     }),
 
+    // Run a Jira issue from the tree view (inline play button)
+    vscode.commands.registerCommand("workermill.runIssue", async (issueItem?: { issue?: { key: string; summary: string } }) => {
+      if (!client.isConnected()) {
+        vscode.window.showErrorMessage("WorkerMill agent is not running. Start with: workermill-agent start");
+        return;
+      }
+
+      const issueKey = issueItem?.issue?.key;
+      if (!issueKey) return;
+
+      const confirm = await vscode.window.showInformationMessage(
+        `Run "${issueKey}: ${issueItem.issue.summary}" with WorkerMill?`,
+        "Run",
+        "Cancel",
+      );
+      if (confirm !== "Run") return;
+
+      try {
+        await client.runIssue(issueKey);
+        vscode.window.showInformationMessage(`WorkerMill: ${issueKey} submitted`);
+        treeProvider.refresh();
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to run issue: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }),
+
+    // Search and run via quick pick (command palette)
     vscode.commands.registerCommand("workermill.runTask", async () => {
       if (!client.isConnected()) {
         vscode.window.showErrorMessage("WorkerMill agent is not running. Start with: workermill-agent start");
@@ -60,19 +103,21 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       const input = await vscode.window.showInputBox({
-        prompt: "Enter a ticket key (e.g., OCS-142) or task description",
-        placeHolder: "OCS-142 or 'Add dark mode toggle to settings page'",
+        prompt: "Enter a ticket key (e.g., OCS-142)",
+        placeHolder: "OCS-142",
       });
 
       if (!input) return;
 
       try {
-        // Determine if it's a ticket key or free-text description
-        const isTicketKey = /^[A-Z]+-\d+$/.test(input.trim());
-        if (isTicketKey) {
-          await client.talkToWorker("run", input.trim()); // TODO: use proper run endpoint
+        const issueKey = input.trim().toUpperCase();
+        if (/^[A-Z]+-\d+$/.test(issueKey)) {
+          await client.runIssue(issueKey);
+          vscode.window.showInformationMessage(`WorkerMill: ${issueKey} submitted`);
+          treeProvider.refresh();
+        } else {
+          vscode.window.showWarningMessage("Please enter a valid ticket key (e.g., OCS-142)");
         }
-        vscode.window.showInformationMessage(`WorkerMill: Task "${input}" submitted`);
       } catch (err) {
         vscode.window.showErrorMessage(`Failed to create task: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -93,7 +138,6 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        // Pick a task
         const selected = activeTasks.length === 1
           ? activeTasks[0]
           : await vscode.window.showQuickPick(

@@ -850,11 +850,11 @@ export default function Settings() {
   // Validation
   const validateSettings = (): boolean => {
     const errors: ValidationErrors = {};
-    if (settings.logRetentionDays < 1 || settings.logRetentionDays > 365) {
-      errors.logRetentionDays = "Must be between 1 and 365 days";
+    if (settings.logRetentionDays !== -1 && (settings.logRetentionDays < 1 || settings.logRetentionDays > 365)) {
+      errors.logRetentionDays = "Must be between 1 and 365 days (or -1 for unlimited)";
     }
-    if (settings.taskRetentionDays < 1 || settings.taskRetentionDays > 730) {
-      errors.taskRetentionDays = "Must be between 1 and 730 days";
+    if (settings.taskRetentionDays !== -1 && (settings.taskRetentionDays < 1 || settings.taskRetentionDays > 730)) {
+      errors.taskRetentionDays = "Must be between 1 and 730 days (or -1 for unlimited)";
     }
     if (settings.maxConcurrentWorkers < 1 || settings.maxConcurrentWorkers > 14) {
       errors.maxConcurrentWorkers = "Must be between 1 and 14 workers";

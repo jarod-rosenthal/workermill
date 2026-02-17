@@ -300,8 +300,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     // Validate and update Data Management settings
     if (logRetentionDays !== undefined) {
       const days = parseInt(logRetentionDays, 10);
-      if (isNaN(days) || days < 1 || days > 365) {
-        res.status(400).json({ error: "logRetentionDays must be between 1 and 365" });
+      if (isNaN(days) || (days !== -1 && (days < 1 || days > 365))) {
+        res.status(400).json({ error: "logRetentionDays must be between 1 and 365 (or -1 for unlimited)" });
         return;
       }
       org.logRetentionDays = days;
@@ -309,8 +309,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     if (taskRetentionDays !== undefined) {
       const days = parseInt(taskRetentionDays, 10);
-      if (isNaN(days) || days < 1 || days > 730) {
-        res.status(400).json({ error: "taskRetentionDays must be between 1 and 730" });
+      if (isNaN(days) || (days !== -1 && (days < 1 || days > 730))) {
+        res.status(400).json({ error: "taskRetentionDays must be between 1 and 730 (or -1 for unlimited)" });
         return;
       }
       org.taskRetentionDays = days;

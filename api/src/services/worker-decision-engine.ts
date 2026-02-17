@@ -382,6 +382,20 @@ const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   ollama: "qwen2.5-coder:32b",
 };
 
+// ─── Question Routing Filters ────────────────────────────────────────────────
+
+/**
+ * Personas excluded from Tier 3 (round-robin) question routing.
+ * These non-coding personas give poor answers to technical questions.
+ * They can still answer questions explicitly targeted at them (Tier 1).
+ */
+const QUESTION_INELIGIBLE_PERSONAS = new Set([
+  "support_agent",
+  "project_manager",
+  "tech_writer",
+  "ml_engineer",
+]);
+
 // ─── Keyword-to-Specialty Mapping (for question routing) ─────────────────────
 
 const KEYWORD_SPECIALTY: { keywords: RegExp; persona: string }[] = [
@@ -900,10 +914,13 @@ export function routeQuestion(
     }
   }
 
-  // Tier 3: first idle expert
-  if (req.idleExperts.length > 0) {
+  // Tier 3: first idle expert (excluding non-coding personas)
+  const eligibleExperts = req.idleExperts.filter(
+    (p) => !QUESTION_INELIGIBLE_PERSONAS.has(p),
+  );
+  if (eligibleExperts.length > 0) {
     return {
-      targetExpert: req.idleExperts[0],
+      targetExpert: eligibleExperts[0],
       routingTier: 3,
       reason: "Fallback to first idle expert",
     };

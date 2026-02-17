@@ -157,6 +157,10 @@ The `worker/epic/*.ts` files are **compiled by `tsc`** during the Docker build. 
 | **Build agent binary** | `cd agent && npm run build && bun build --compile dist/entry.js --outfile dist/bin/workermill-agent` |
 | **Release agent binary** | Bump version → `git tag agent-v<version>` → `git push --tags` |
 | **Publish agent to npm** | `cd agent && npm run build && npm publish --access public` (fallback) |
+| Build VS Code extension | `cd packages/vscode-workermill && npm run build` |
+| Watch VS Code extension | `cd packages/vscode-workermill && npm run watch` |
+| Package VS Code extension | `cd packages/vscode-workermill && npm run package` |
+| Type check VS Code extension | `cd packages/vscode-workermill && npm run typecheck` |
 
 **Key files:**
 - API routes: `api/src/routes/`
@@ -173,6 +177,8 @@ The `worker/epic/*.ts` files are **compiled by `tsc`** during the Docker build. 
 - Integration tests: `api/src/__tests__/integration/`
 - E2E tests: `frontend/e2e/`
 - MCP servers: `packages/workermill-mcp/`, `packages/oncallshift-mcp/`
+- VS Code extension: `packages/vscode-workermill/` (sidebar tree, activity feed, log terminals)
+- Remote agent: `agent/src/` (CLI binary, local API server, planner, spawner)
 - Local WorkerMill: `bin/local-workermill`, `docker-compose.local.yml`
 
 ---
@@ -295,6 +301,7 @@ EOF
 | Worker isolation | Container per task | Worktree per task |
 | Cost | Pay-per-token | Claude Max subscription |
 | Log streaming | SSE via API | SSE via API (same) |
+| Client surfaces | Web dashboard, VS Code extension | Web dashboard, VS Code extension (both work) |
 
 ***REMOVED******REMOVED******REMOVED*** Local Development Filesystem (CRITICAL — READ THIS)
 
@@ -349,6 +356,45 @@ workermill-agent start
 
 Key difference: `API_BASE_URL` points to `https://workermill.com` instead of `localhost`. The agent is a standalone binary — workers spawn as self-invocations of the same binary with `__WORKERMILL_MODE` env var.
 
+***REMOVED******REMOVED******REMOVED*** VS Code Extension (IDE Companion)
+
+The VS Code extension (`packages/vscode-workermill/`) connects to the remote agent's local API to provide an IDE-native WorkerMill experience. It discovers the agent via `~/.workermill/agent.port` and communicates over HTTP + SSE.
+
+**Layout (zero wasted real estate):**
+- **Left sidebar — Team tree**: Active Tasks (running/planning), Backlog (Jira issues with inline play buttons), Recent (completed/failed)
+- **Left sidebar — Activity feed**: WebView below the tree showing expert coordination for the selected task
+- **Bottom terminal**: Pseudoterminal tabs with curated task logs (same output as the web dashboard, NOT raw stdout)
+- **Editor area**: Untouched — just your code
+
+**Key commands:**
+| Command | What it does |
+|---------|-------------|
+| `WorkerMill: Run Task...` | Enter a ticket key (e.g. OCS-142) and submit it |
+| `WorkerMill: Run Issue` | Inline play button on Backlog items — click to run |
+| `WorkerMill: Talk to Worker...` | Send a message to a running worker |
+| `WorkerMill: Show Task Logs` | Open a pseudoterminal tab for a running task |
+| `WorkerMill: Approve Plan` | Approve/reject plans awaiting review |
+| `WorkerMill: Refresh Tasks` | Refresh the sidebar tree |
+
+**Architecture:**
+```
+VS Code Extension → Agent Local API (127.0.0.1:PORT) → Cloud API (workermill.com)
+                    ↑ discovered via ~/.workermill/agent.port
+```
+
+The agent local API (`agent/src/local-api.ts`) proxies requests to the cloud API and provides SSE streams for real-time task/log updates. The extension polls cloud logs (not raw stdout) so terminal output matches the web dashboard exactly.
+
+**Key files:**
+- `packages/vscode-workermill/src/extension.ts` — activation, command registration
+- `packages/vscode-workermill/src/agent-client.ts` — HTTP/SSE client for agent local API
+- `packages/vscode-workermill/src/team-tree.ts` — sidebar tree (Active/Backlog/Recent)
+- `packages/vscode-workermill/src/feed-view.ts` — WebView activity feed
+- `packages/vscode-workermill/src/log-terminal.ts` — pseudoterminal log tabs
+- `packages/vscode-workermill/src/status-bar.ts` — status bar indicator
+- `packages/vscode-workermill/src/notifications.ts` — VS Code notifications
+
+**Building:** `cd packages/vscode-workermill && npm run build` (esbuild, outputs `dist/extension.js`). Package for marketplace: `npm run package` (produces `.vsix`).
+
 ***REMOVED******REMOVED******REMOVED*** Local Architecture
 
 API (`tsx watch`) and Frontend (Vite) auto-reload. PostgreSQL and Worker run as Docker containers — **Worker does NOT auto-reload** (see "Rebuild Worker Image" in Critical Rules).
@@ -362,6 +408,8 @@ WorkerMill is mission control for autonomous AI coding agents - a real-time moni
 **Stack:**
 - **Backend API**: Express + TypeScript + TypeORM + PostgreSQL (`api/`)
 - **Frontend**: React 19 + Vite + TailwindCSS + Zustand (`frontend/`)
+- **Remote Agent**: Standalone binary CLI + local HTTP API (`agent/`)
+- **VS Code Extension**: IDE companion — sidebar tree, activity feed, log terminals (`packages/vscode-workermill/`)
 - **Infrastructure**: Terraform → AWS (ECS Fargate, RDS, S3, CloudFront) in us-east-1
 - **Worker Containers**: Docker images with Claude Code for task execution (`worker/`)
 - **Testing**: Vitest (API unit/integration), Playwright (E2E)
@@ -400,6 +448,8 @@ Focus on these directories (production services):
 - `api/` - Backend API deployed to ECS
 - `frontend/` - React dashboard deployed to CloudFront
 - `worker/` - Worker container images
+- `agent/` - Remote agent CLI (standalone binary, published to npm as fallback)
+- `packages/vscode-workermill/` - VS Code extension (IDE companion for remote agent)
 - `packages/workermill-mcp/` - WorkerMill MCP server (published to npm)
 - `packages/oncallshift-mcp/` - OncallShift MCP server (published to npm)
 
@@ -521,11 +571,14 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 | `settings.ts` | Organization settings CRUD |
 | `billing.ts` | Stripe billing (Free/Pro/Enterprise plans) |
 | `coordination.ts` | Multi-worker file locking |
+| `issues.ts` | Jira issue search and project listing (used by VS Code extension) |
 
 ***REMOVED******REMOVED******REMOVED*** Task Flow
 
 ```
-Jira webhook → API receives task → Queue → Claim task → Spawn ECS container → Monitor → Parse output markers (::result::, ::pr_url::) → Update status
+Jira webhook ─────────────────┐
+VS Code extension (Run Issue) ─┤→ API receives task → Queue → Claim task → Spawn worker → Monitor → Parse output markers (::result::, ::pr_url::) → Update status
+Dashboard (Run Task) ──────────┘
 ```
 
 ***REMOVED******REMOVED******REMOVED*** Worker System

@@ -39,6 +39,17 @@ export interface LogLine {
   severity: "info" | "error";
 }
 
+export interface IssueInfo {
+  key: string;
+  summary: string;
+  status: string | null;
+  assignee: { displayName: string; accountId: string } | null;
+  issueType: string | null;
+  priority: string | null;
+  labels: string[];
+  project: { key: string; name: string } | null;
+}
+
 export class AgentClient extends EventEmitter {
   private port: number | null = null;
   private connected = false;
@@ -118,6 +129,41 @@ export class AgentClient extends EventEmitter {
   /** Cancel a task */
   async cancelTask(taskId: string): Promise<void> {
     await this.post(`/api/tasks/${taskId}/cancel`, {});
+  }
+
+  /** Get coordination feed for a task (proxied from cloud API) */
+  async getCoordinationFeed(taskId: string): Promise<unknown> {
+    return this.get(`/api/tasks/${taskId}/coordination`);
+  }
+
+  /** Get rich task detail including story progress (proxied from cloud API) */
+  async getTaskDetail(taskId: string): Promise<unknown> {
+    return this.get(`/api/tasks/${taskId}/detail`);
+  }
+
+  /** Search Jira issues */
+  async searchIssues(query?: string, project?: string): Promise<{ issues: IssueInfo[] }> {
+    const params: string[] = [];
+    if (query) params.push(`q=${encodeURIComponent(query)}`);
+    if (project) params.push(`project=${encodeURIComponent(project)}`);
+    const qs = params.length > 0 ? `?${params.join("&")}` : "";
+    return this.get<{ issues: IssueInfo[] }>(`/api/issues${qs}`);
+  }
+
+  /** List Jira projects */
+  async getProjects(): Promise<{ projects: Array<{ key: string; name: string }> }> {
+    return this.get<{ projects: Array<{ key: string; name: string }> }>("/api/issues/projects");
+  }
+
+  /** Run a Jira issue as a WorkerMill task */
+  async runIssue(issueKey: string): Promise<unknown> {
+    return this.post("/api/tasks/run", { jiraIssueKey: issueKey });
+  }
+
+  /** Get cloud-stored logs for a task (all phases: planning + execution) */
+  async getCloudLogs(taskId: string, since?: string): Promise<unknown[]> {
+    const qs = since ? `?since=${encodeURIComponent(since)}` : "";
+    return this.get<unknown[]>(`/api/tasks/${taskId}/logs${qs}`);
   }
 
   /** Subscribe to log stream for a task */

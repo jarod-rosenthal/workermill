@@ -59,7 +59,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
     const intermediateDisplayMinutes = org.intermediateTaskDisplayMinutes || 15;
     const intermediateCutoff = new Date(Date.now() - intermediateDisplayMinutes * 60 * 1000);
     // Statuses that always indicate active work
-    const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing", "planning", "pending_plan_approval", "dispatching"];
+    const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing", "planning", "pending_plan_approval", "dispatching", "reviewing", "consolidating"];
     // Intermediate statuses that should only show if recent (configurable, default 60 min)
     const intermediateStatuses = [
       "pr_created", "review_requested", "manager_review", "review_pending",
@@ -118,7 +118,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
 
     // Build response
     // "Active" = tasks where a worker is actually executing (not queued, not waiting)
-    const executingStatuses = ["claimed", "environment_setup", "executing", "planning", "dispatching", "pending_plan_approval"];
+    const executingStatuses = ["claimed", "environment_setup", "executing", "planning", "dispatching", "pending_plan_approval", "reviewing", "consolidating"];
     const stats = {
       totalWorkers: 7,
       activeWorkers: allTasks.filter(t => executingStatuses.includes(t.status)).length,

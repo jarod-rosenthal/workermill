@@ -14,6 +14,28 @@ import * as fs from "fs";
 import * as os from "os";
 import type { AgentConfig } from "./config.js";
 import { agentEvents } from "./local-api.js";
+import { fileURLToPath } from "url";
+
+/**
+ * Detect whether we're running as a compiled binary or via Node.js.
+ * Returns { command, args } for spawning child processes with __WORKERMILL_MODE.
+ *
+ * Binary mode: process.execPath IS the binary → spawn(binary, [])
+ * Node.js mode: process.execPath is `node` → spawn(node, [entryScript])
+ */
+function getSpawnArgs(): { command: string; args: string[] } {
+  // If process.execPath ends with 'node' or 'node.exe', we're in Node.js mode
+  const execName = path.basename(process.execPath).replace(/\.exe$/i, "");
+  if (execName === "node" || execName === "nodejs") {
+    // Resolve the entry.js script path relative to this module
+    const thisFile = fileURLToPath(import.meta.url);
+    const distDir = path.dirname(thisFile);
+    const entryScript = path.join(distDir, "entry.js");
+    return { command: process.execPath, args: [entryScript] };
+  }
+  // Compiled binary — re-invoke self
+  return { command: process.execPath, args: [] };
+}
 
 /** Timestamp prefix */
 function ts(): string {
@@ -325,7 +347,8 @@ export async function spawnWorker(
   console.log(`${ts()} ${taskLabel} ${chalk.dim(`  review=${reviewEnabled} model=${task.workerModel} repo=${task.githubRepo}`)}`);
 
   // Spawn worker process (re-invokes self with __WORKERMILL_MODE)
-  const proc = spawn(process.execPath, [], {
+  const { command: spawnCmd, args: spawnArgs } = getSpawnArgs();
+  const proc = spawn(spawnCmd, spawnArgs, {
     env: { ...childEnv, __WORKERMILL_MODE: "worker" },
     cwd: workDir,
     stdio: ["ignore", "pipe", "pipe"],
@@ -593,7 +616,8 @@ export async function spawnManagerWorker(
 
   console.log(`${ts()} ${taskLabel} ${chalk.magenta("◆ MANAGER")} Starting ${task.managerAction}`);
 
-  const proc = spawn(process.execPath, [], {
+  const { command: mgrCmd, args: mgrArgs } = getSpawnArgs();
+  const proc = spawn(mgrCmd, mgrArgs, {
     env: { ...childEnv, __WORKERMILL_MODE: "manager" },
     cwd: workDir,
     stdio: ["ignore", "pipe", "pipe"],

@@ -589,10 +589,18 @@ export async function canCreateTask(org: Organization): Promise<{
     };
   }
 
-  // All plans allow unlimited tasks
+  // Enforce task quota if set (quota of -1 or 0 means unlimited)
+  if (org.taskQuota > 0 && org.taskUsageThisMonth >= org.taskQuota) {
+    return {
+      allowed: false,
+      reason: `Monthly task limit reached (${org.taskUsageThisMonth}/${org.taskQuota}). Upgrade your plan for more tasks.`,
+      usage: { used: org.taskUsageThisMonth, quota: org.taskQuota },
+    };
+  }
+
   return {
     allowed: true,
-    usage: { used: org.taskUsageThisMonth, quota: -1 },
+    usage: { used: org.taskUsageThisMonth, quota: org.taskQuota > 0 ? org.taskQuota : -1 },
   };
 }
 

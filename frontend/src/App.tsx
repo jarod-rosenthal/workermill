@@ -419,8 +419,19 @@ function App() {
           <Route path="/epics" element={<Navigate to="/boards" replace />} />
           <Route path="/epics/:id" element={<Navigate to="/boards" replace />} />
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* 404 */}
+          <Route path="*" element={
+            <div className="min-h-screen flex items-center justify-center bg-background p-4">
+              <div className="text-center max-w-md">
+                <p className="text-7xl font-bold text-muted-foreground/30 mb-4">404</p>
+                <h1 className="text-2xl font-semibold text-foreground mb-2">Page not found</h1>
+                <p className="text-muted-foreground mb-6">The page you're looking for doesn't exist or has been moved.</p>
+                <a href="/" className="inline-block px-6 py-2.5 bg-primary text-primary-foreground font-medium rounded-xl hover:bg-primary/90 transition-colors">
+                  Go Home
+                </a>
+              </div>
+            </div>
+          } />
         </Routes>
       </BrowserRouter>
     </ToastProvider>

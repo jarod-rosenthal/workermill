@@ -164,8 +164,12 @@ async function runCriticWithClaudeCli(
   const claudePath = process.env.CLAUDE_CLI_PATH || "/home/user/.local/bin/claude";
 
   return new Promise((resolve, reject) => {
-    // Pass environment to Claude CLI - keep OAuth token for local mode authentication
+    // Pass environment to Claude CLI - keep OAuth token for local mode authentication.
+    // Strip CLAUDECODE/CLAUDE_CODE_ENTRYPOINT — prevents nested-session guard when
+    // the API was started from within a Claude Code terminal.
     const cleanEnv = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
+    delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
 
     const claude = spawn(
       claudePath,

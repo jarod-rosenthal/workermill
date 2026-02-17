@@ -359,8 +359,12 @@ async function runWithClaudeCli(
     // Let Claude CLI manage its own auth via ~/.claude/.credentials.json
     // Do NOT pass CLAUDE_CODE_OAUTH_TOKEN — it bypasses CLI's built-in token refresh,
     // causing 401 errors when the access token expires mid-run.
+    // Strip CLAUDECODE/CLAUDE_CODE_ENTRYPOINT — prevents nested-session guard when
+    // the API was started from within a Claude Code terminal.
     const cleanEnv = { ...process.env };
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+    delete cleanEnv.CLAUDECODE;
+    delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
 
     // Use stream-json to get real-time streaming output instead of buffering everything
     // --verbose is required for stream-json with --print

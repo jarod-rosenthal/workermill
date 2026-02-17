@@ -611,7 +611,12 @@ export async function planTask(
     process.env.CLAUDE_CLI_PATH || findClaudePath() || "claude";
 
   const cleanEnv = { ...process.env };
+  // Strip all Claude Code session vars — if the agent was started from within
+  // a Claude Code terminal, these trigger the nested-session guard and the
+  // spawned CLI refuses to start.
   delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+  delete cleanEnv.CLAUDECODE;
+  delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
 
   // Resolve provider API key for non-Anthropic planning
   const providerApiKey = resolveProviderApiKey(provider, credentials);

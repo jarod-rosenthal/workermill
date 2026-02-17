@@ -22,6 +22,7 @@ import {
 } from "./spawner.js";
 import { AGENT_VERSION } from "./version.js";
 import { selfUpdate, restartAgent } from "./updater.js";
+import { agentEvents } from "./local-api.js";
 
 // Track tasks currently being planned (to avoid double-dispatching)
 const planningInProgress = new Set<string>();
@@ -207,6 +208,7 @@ async function handlePlanningTask(
   console.log();
   console.log(`${ts()} ${chalk.magenta("◆ PLANNING")} ${taskLabel} ${task.summary.substring(0, 60)}`);
   planningInProgress.add(task.id);
+  agentEvents.emit("task:planning", { id: task.id, summary: task.summary });
 
   // Run planning asynchronously (don't block the poll loop)
   planTask(task, config, credentials)
@@ -216,8 +218,12 @@ async function handlePlanningTask(
       } else {
         console.log(`${ts()} ${chalk.red("✗")} Planning failed for ${taskLabel}`);
       }
+      agentEvents.emit("task:plan_done", { id: task.id, success });
     })
-    .catch((err) => console.error(`${ts()} ${chalk.red("✗")} Planning error for ${taskLabel}:`, err.message || err))
+    .catch((err) => {
+      console.error(`${ts()} ${chalk.red("✗")} Planning error for ${taskLabel}:`, err.message || err);
+      agentEvents.emit("task:plan_done", { id: task.id, success: false });
+    })
     .finally(() => planningInProgress.delete(task.id));
 }
 

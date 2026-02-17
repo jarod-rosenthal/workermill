@@ -123,7 +123,7 @@ async function getJiraCredentials(orgId: string): Promise<{
  * Fetch Jira issue details by key
  *
  * @param orgId - Organization ID for credential lookup
- * @param issueKey - Jira issue key (e.g., "OCS-123")
+ * @param issueKey - Jira issue key (e.g., "PROJ-123")
  */
 export async function fetchJiraIssue(orgId: string, issueKey: string): Promise<{
   summary: string;
@@ -456,7 +456,7 @@ export async function convertToEpic(orgId: string, issueKey: string): Promise<bo
 
 /**
  * Create a Jira Story linked to an Epic
- * Returns the created story key (e.g., "OCS-410") or null on failure
+ * Returns the created story key (e.g., "PROJ-410") or null on failure
  *
  * @param orgId - Organization ID for credential lookup
  * @param epicKey - Parent Epic key
@@ -602,7 +602,7 @@ export async function createJiraStory(
 
 /**
  * Create a Jira sub-task under a parent issue
- * Returns the created sub-task key (e.g., "OCS-410") or null on failure
+ * Returns the created sub-task key (e.g., "PROJ-410") or null on failure
  *
  * @param orgId - Organization ID for credential lookup
  * @param parentIssueKey - Parent issue key

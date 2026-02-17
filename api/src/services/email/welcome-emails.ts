@@ -251,8 +251,7 @@ export async function sendWelcomeEmail(
   const client = getSESClient();
   const firstName = user.fullName?.split(" ")[0] || "there";
 
-  // From address: Jarod Rosenthal <jarod.rosenthal@workermill.com>
-  const fromAddress = "Jarod Rosenthal <jarod.rosenthal@workermill.com>";
+  const fromAddress = "WorkerMill <support@workermill.com>";
   const subject = `Welcome to WorkerMill, ${firstName}!`;
   const htmlBody = generateWelcomeEmailHtml(user, organization, joinedViaInvite);
   const textBody = generateWelcomeEmailText(user, organization, joinedViaInvite);

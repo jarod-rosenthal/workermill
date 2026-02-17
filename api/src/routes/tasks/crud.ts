@@ -36,8 +36,8 @@ router.use(authenticateRequest);
  *             properties:
  *               jiraIssueKey:
  *                 type: string
- *                 description: Jira issue key (e.g., OCS-123)
- *                 example: OCS-123
+ *                 description: Jira issue key (e.g., PROJ-123)
+ *                 example: PROJ-123
  *               workerPersona:
  *                 type: string
  *                 description: Worker persona/role to use

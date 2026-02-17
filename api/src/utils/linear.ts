@@ -85,7 +85,7 @@ async function getLinearCredentials(orgId: string): Promise<{
  * Fetch Linear issue details by identifier
  *
  * @param orgId - Organization ID for credential lookup
- * @param issueIdentifier - Linear issue identifier (e.g., "OCS-19")
+ * @param issueIdentifier - Linear issue identifier (e.g., "PROJ-19")
  */
 export async function fetchLinearIssue(orgId: string, issueIdentifier: string): Promise<{
   summary: string;
@@ -184,7 +184,7 @@ export async function fetchLinearIssue(orgId: string, issueIdentifier: string): 
  * Post a comment to a Linear issue
  *
  * @param orgId - Organization ID for credential lookup
- * @param issueIdentifier - Linear issue identifier (e.g., "OCS-19")
+ * @param issueIdentifier - Linear issue identifier (e.g., "PROJ-19")
  * @param body - Comment body (markdown supported)
  */
 /**

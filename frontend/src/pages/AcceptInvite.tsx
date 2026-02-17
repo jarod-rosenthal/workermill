@@ -240,7 +240,13 @@ export default function AcceptInvite() {
             <h2 className="text-2xl font-bold text-foreground mb-2">
               Invalid Invitation
             </h2>
-            <p className="text-muted-foreground mb-6">{error}</p>
+            <p className="text-muted-foreground mb-4">{error}</p>
+            <p className="text-sm text-muted-foreground mb-6">
+              Need a new invite? Contact your team admin or reach out to{" "}
+              <a href="mailto:support@workermill.com" className="text-primary hover:underline">
+                support@workermill.com
+              </a>
+            </p>
             <Link
               to="/"
               className="inline-block py-2 px-4 bg-muted hover:bg-muted/80 text-foreground font-medium rounded-xl transition-colors"

@@ -140,8 +140,8 @@ export const config = {
     secretKey: process.env.STRIPE_SECRET_KEY || "",
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
     prices: {
-      pro: process.env.STRIPE_PRICE_PRO || "price_pro",
-      enterprise: process.env.STRIPE_PRICE_ENTERPRISE || "price_enterprise",
+      pro: process.env.STRIPE_PRICE_PRO || "",
+      enterprise: process.env.STRIPE_PRICE_ENTERPRISE || "",
     },
   },
 

@@ -312,7 +312,7 @@ export default function VerifyEmail() {
               </p>
               <button
                 onClick={handleResend}
-                disabled={isResending || !email}
+                disabled={isResending}
                 className="text-sm text-primary hover:underline font-medium disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
               >
                 {isResending ? (

@@ -10,8 +10,15 @@
  */
 
 import { build } from "esbuild";
+import { builtinModules } from "module";
 import { rmSync, readdirSync, statSync, readFileSync, writeFileSync, renameSync, chmodSync } from "fs";
 import { join } from "path";
+
+// Node.js built-in modules must remain external in the unified bundle.
+// Both Bun and Node.js runtimes provide these natively. Without this,
+// CJS packages (like form-data via axios) get wrapped in a require() shim
+// that fails under Node.js ESM ("Dynamic require of X is not supported").
+const nodeBuiltins = builtinModules.flatMap((m) => [m, `node:${m}`]);
 
 const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
 
@@ -103,12 +110,21 @@ console.log("✓ dist/manager-worker.js bundled from worker/manager/index.ts");
 // Bundles directly from TypeScript source (not tsc output) because the shims
 // import from ../../worker/ which is outside tsc's rootDir. esbuild handles TS natively.
 // This inlines ALL dependencies (not external) so the binary is self-contained.
+//
+// The createRequire banner provides a `require` function for Node.js ESM mode.
+// CJS packages (form-data via axios) use require() for builtins — esbuild wraps these
+// in a shim that checks `typeof require`. In Bun, require is always available.
+// In Node.js ESM, it's not — so we create one from import.meta.url.
 await build({
   ...shared,
   entryPoints: ["src/entry.ts"],
   outfile: "dist/entry.js",
   packages: undefined, // Override shared.packages: inline ALL npm packages
-  external: [], // Nothing external — everything bundled into one file
+  external: nodeBuiltins, // Keep Node builtins external (provided by Bun & Node.js runtimes)
+  banner: {
+    js: `import { createRequire as __createRequire } from "module";
+var require = (typeof globalThis.require !== "undefined") ? globalThis.require : __createRequire(import.meta.url);`,
+  },
 });
 console.log("✓ dist/entry.js unified bundle (for binary compilation)");
 

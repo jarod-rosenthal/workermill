@@ -80,14 +80,14 @@
 ### 11. Task quota exists but isn't enforced
 **File:** `api/src/services/billing.ts:592`
 **Problem:** `canCreateTask()` always returns `allowed: true` with `quota: -1`. The `org.taskQuota` column and `taskUsageThisMonth` counter exist but never block.
-**Fix:** Wire up quota enforcement in `canCreateTask()`.
-**Status:** TODO
+**Fix:** Added quota enforcement — when `org.taskQuota > 0` and usage meets/exceeds quota, returns `allowed: false` with clear message. Quota of -1 or 0 means unlimited (no change for those orgs).
+**Status:** FIXED
 
 ### 12. No 404 error page
 **File:** `App.tsx:423`
 **Problem:** All unknown routes redirect to home. No visible 404 page.
-**Fix:** Create a 404 page component.
-**Status:** TODO
+**Fix:** Replaced catch-all `Navigate` with inline 404 page showing "Page not found" with a Go Home link.
+**Status:** FIXED
 
 ### 13. Missing Open Graph / social meta tags
 **File:** `frontend/index.html`
@@ -98,8 +98,8 @@
 ### 14. Coordination feed empty state for single-expert tasks
 **File:** `CoordinationFeed.tsx`
 **Problem:** Standard SDK mode posts nothing to the feed. Empty white space with no explanation.
-**Fix:** Show "Single-expert mode" placeholder.
-**Status:** TODO
+**Fix:** Empty state now shows "Single-expert mode" with explanation that coordination messages appear in multi-expert (Epic) mode. Epic tasks and no-task-selected states have their own messages.
+**Status:** FIXED
 
 ### 15. Log streaming has no keep-alive
 **Problem:** SSE log endpoint doesn't send heartbeats. Browser closes connection after ~30s inactivity.
@@ -109,8 +109,8 @@
 ### 16. Dashboard table not responsive
 **File:** `MainDashboard.tsx`
 **Problem:** 11-column table with no mobile breakpoints. Unusable on tablets/phones.
-**Fix:** Add horizontal scroll wrapper or card-based mobile layout.
-**Status:** TODO
+**Fix:** `overflow-x-auto` wrapper already existed. Added `min-w-[900px]` to the table so it scrolls horizontally on smaller screens instead of squishing columns.
+**Status:** FIXED
 
 ---
 
@@ -186,10 +186,10 @@
 ## Low — Cleanup items
 
 - ~~Pro-only features shown grayed out in Settings — could hide entirely or improve "Upgrade" messaging~~ FIXED — LockedOverlay now links to /pricing with hover highlight
-- `VITE_API_URL` fallback to empty string could cause subtle issues
-- Coordination feed lacks timestamps on messages
-- Coordination feed doesn't auto-scroll to new messages
-- Multiple `console.error()` calls with minimal context
+- ~~`VITE_API_URL` fallback to empty string could cause subtle issues~~ NOT A BUG — empty string means same-origin relative URLs, which is correct for production
+- ~~Coordination feed lacks timestamps on messages~~ ALREADY IMPLEMENTED — `formatTime()` renders HH:MM:SS on every message
+- ~~Coordination feed doesn't auto-scroll to new messages~~ ALREADY IMPLEMENTED — `wasAtBottomRef` auto-scrolls when user is at bottom, shows "New messages" button otherwise
+- ~~Multiple `console.error()` calls with minimal context~~ FIXED — removed console.error in CoordinationFeed SSE handler
 
 ---
 

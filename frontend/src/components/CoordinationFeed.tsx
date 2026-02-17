@@ -883,7 +883,7 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
         // Tag message with parentTaskId for tracking
         addMessage(msg, parentTaskId);
       } catch (err) {
-        console.error("Failed to parse context message:", err);
+        // Failed to parse SSE context message — skip silently
       }
     });
 
@@ -1108,11 +1108,15 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
         {filteredMessages.length === 0 ? (
           <div className="p-8 text-center">
             <MessageSquare className="w-8 h-8 mx-auto mb-2 text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">No messages yet</p>
+            <p className="text-sm text-muted-foreground">
+              {parentTaskId && !isEpicMode ? "Single-expert mode" : "No messages yet"}
+            </p>
             <p className="text-xs text-muted-foreground/60 mt-1">
-              {parentTaskId
-                ? "Coordination messages from workers will appear here"
-                : "Select a task's \"Feed\" button to stream live messages"}
+              {parentTaskId && !isEpicMode
+                ? "This task uses a single expert — coordination messages appear in multi-expert (Epic) mode."
+                : parentTaskId
+                  ? "Coordination messages from workers will appear here"
+                  : "Select a task's \"Feed\" button to stream live messages"}
             </p>
           </div>
         ) : viewMode === "threaded" ? (

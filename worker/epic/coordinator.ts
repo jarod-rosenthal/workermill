@@ -1612,7 +1612,7 @@ export class EpicCoordinator {
       // Route via Decision API for specialty matching
       const orphanRouting = await this.decisionClient.routeQuestion({
         question: question.content,
-        fromPersona: question.fromPersona,
+        targetPersona: (question.metadata?.targetPersona as string) || undefined,
         idleExperts: stillIdleExperts,
       });
       let responder: ExpertPersona | null = null;
@@ -1738,6 +1738,11 @@ export class EpicCoordinator {
 
       // Skip blocked stories (due to dependency failure)
       if (this.blockedStoryIndices.has(story.storyIndex)) {
+        continue;
+      }
+
+      // Skip failed stories (escalated blocker, awaiting human resolution)
+      if (this.failedStoryIndices.has(story.storyIndex)) {
         continue;
       }
 
@@ -2116,7 +2121,7 @@ export class EpicCoordinator {
       // Route via Decision API — handles metadata targets, content-based routing, and tier selection
       const routing = await this.decisionClient.routeQuestion({
         question: question.content,
-        fromPersona: question.metadata?.targetPersona as string || question.fromPersona,
+        targetPersona: (question.metadata?.targetPersona as string) || undefined,
         idleExperts: idleExpertNames,
       });
 
@@ -2413,7 +2418,7 @@ export class EpicCoordinator {
     );
 
     // Check if there are no more ready stories to claim
-    // Filter out: stories already completed OR stories with no matching expert
+    // Filter out: stories already completed, failed, blocked, OR stories with no matching expert
     const readyToClaim = readyStories.filter((ready) => {
       const storyIndex = (ready.metadata?.storyIndex as number) || 0;
       const storyPersona = (ready.metadata?.persona as string) || "";
@@ -2423,6 +2428,12 @@ export class EpicCoordinator {
         (c) => (c.metadata?.storyIndex as number) === storyIndex
       );
       if (isCompleted) return false;
+
+      // Skip if failed (escalated blocker, awaiting human resolution)
+      if (this.failedStoryIndices.has(storyIndex)) return false;
+
+      // Skip if blocked (dependency on a failed story)
+      if (this.blockedStoryIndices.has(storyIndex)) return false;
 
       // Skip if no expert can handle this persona
       const hasMatchingExpert = matchPersonaToExpert(storyPersona) !== null;
@@ -2434,6 +2445,24 @@ export class EpicCoordinator {
 
       return true;
     });
+
+    // Deadlock detection: all experts idle, no claimable stories, but failed/blocked stories remain
+    if (allIdle && readyToClaim.length === 0 && (this.failedStoryIndices.size > 0 || this.blockedStoryIndices.size > 0) && completions.length > 0) {
+      const failedList = Array.from(this.failedStoryIndices).sort((a, b) => a - b);
+      const blockedList = Array.from(this.blockedStoryIndices).sort((a, b) => a - b);
+      console.log(`[Epic] Deadlock detected — failed stories: [${failedList}], blocked stories: [${blockedList}]`);
+      this.postLog(
+        `Task cannot proceed — story ${failedList.join(", ")} failed and stories ${blockedList.join(", ")} are blocked. ` +
+        `${completions.length} of ${readyStories.length} stories completed successfully.`
+      );
+      this.missionActive = false;
+      await this.updateTaskStatus(
+        "failed",
+        undefined,
+        `Stories ${failedList.join(", ")} failed (blocker not resolved). ${completions.length}/${readyStories.length} stories completed.`
+      );
+      return;
+    }
 
     if (allIdle && readyToClaim.length === 0 && completions.length > 0) {
       console.log("[Epic] All stories finished. Processing completion...");

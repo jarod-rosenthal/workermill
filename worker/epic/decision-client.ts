@@ -71,9 +71,9 @@ export interface ParseReviewOutcomeResponse {
 /** Request for POST /route-question */
 export interface RouteQuestionRequest {
   question: string;
-  fromPersona?: string;
+  targetPersona?: string;
   idleExperts?: string[];
-  storyContext?: string;
+  allExperts?: string[];
 }
 
 /** Response from POST /route-question */

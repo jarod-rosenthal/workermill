@@ -19,7 +19,10 @@ import {
   KbStarredBoard,
   Organization,
   WorkerTask,
+  PLAN_FEATURES,
 } from "../models/index.js";
+import type { OrganizationPlan } from "../models/Organization.js";
+import { RemoteAgent } from "../models/RemoteAgent.js";
 import type { WorkerPersona } from "../models/WorkerTask.js";
 import { syncKbCardColumn } from "../services/task-monitor.js";
 import { authenticateUser } from "../middleware/auth.js";
@@ -210,6 +213,27 @@ async function runCardAsWorkerTask(
   const githubRepo = card.githubRepo || org.getDefaultRepo();
   if (!githubRepo) {
     throw new Error("No repository configured for organization");
+  }
+
+  // Pre-flight: Verify the org has a way to execute tasks
+  const planFeats = PLAN_FEATURES[(org.plan as OrganizationPlan)] ?? PLAN_FEATURES.free;
+  if (!planFeats.cloudExecution) {
+    // Free tier can only execute via remote agent — check if one is registered
+    const agentRepo = AppDataSource.getRepository(RemoteAgent);
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+    const onlineAgent = await agentRepo
+      .createQueryBuilder("agent")
+      .where("agent.orgId = :orgId", { orgId: org.id })
+      .andWhere("agent.lastHeartbeatAt > :cutoff", { cutoff: twoMinutesAgo })
+      .getOne();
+    if (!onlineAgent) {
+      const anyAgent = await agentRepo.findOne({ where: { orgId: org.id } });
+      if (!anyAgent) {
+        throw new Error("No remote agent installed. Install the WorkerMill agent to run tasks: https://workermill.com/docs/remote-agent");
+      } else {
+        throw new Error("Remote agent is offline. Start the agent with 'workermill-agent start' to run tasks.");
+      }
+    }
   }
 
   // Build card description for worker
@@ -1493,7 +1517,9 @@ router.post(
         res.status(409).json({ error: msg });
         return;
       }
-      if (msg === "No repository configured for organization") {
+      if (msg === "No repository configured for organization" ||
+          msg.startsWith("No remote agent installed") ||
+          msg.startsWith("Remote agent is offline")) {
         res.status(400).json({ error: msg });
         return;
       }

@@ -443,9 +443,12 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
 
     try {
       // Update task status
+      await taskRepo.update({ id: task.id }, {
+        status: "executing",
+        startedAt: new Date(),
+      });
       task.status = "executing";
       task.startedAt = new Date();
-      await taskRepo.save(task);
 
       // Fetch credentials from Secrets Manager (same as ECS path)
       // Provides GitHub token, reviewer token, and SCM credentials
@@ -516,9 +519,10 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
         taskId: task.id,
         error: errorMessage,
       });
-      task.status = "failed";
-      task.errorMessage = `Local Epic spawn failed: ${errorMessage}`;
-      await taskRepo.save(task);
+      await taskRepo.update({ id: task.id }, {
+        status: "failed",
+        errorMessage: `Local Epic spawn failed: ${errorMessage}`,
+      });
     }
     return;
   }
@@ -603,8 +607,11 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   });
 
   // Update task status
+  await taskRepo.update({ id: task.id }, {
+    status: "environment_setup",
+    providersUsed: task.providersUsed,
+  });
   task.status = "environment_setup";
-  await taskRepo.save(task);
 
   await logTaskEvent(
     task.id,
@@ -642,11 +649,16 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     await assignTaskToContainer(warmContainer.id, task.id, fullEnv);
 
     // Update task with warm container's ECS info
+    await taskRepo.update({ id: task.id }, {
+      ecsTaskArn: warmContainer.ecsTaskArn,
+      ecsTaskId: warmContainer.ecsTaskId,
+      status: "executing",
+      startedAt: new Date(),
+    });
     task.ecsTaskArn = warmContainer.ecsTaskArn;
     task.ecsTaskId = warmContainer.ecsTaskId;
     task.status = "executing";
     task.startedAt = new Date();
-    await taskRepo.save(task);
 
     await logTaskEvent(
       task.id,
@@ -696,11 +708,16 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     });
 
     // Update task with ECS info
+    await taskRepo.update({ id: task.id }, {
+      ecsTaskArn: result.taskArn,
+      ecsTaskId: result.taskId,
+      status: "executing",
+      startedAt: new Date(),
+    });
     task.ecsTaskArn = result.taskArn;
     task.ecsTaskId = result.taskId;
     task.status = "executing";
     task.startedAt = new Date();
-    await taskRepo.save(task);
 
     await logTaskEvent(
       task.id,
@@ -726,9 +743,10 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
       error: error instanceof Error ? error.message : String(error),
     });
 
-    task.status = "failed";
-    task.errorMessage = `Failed to spawn Epic container: ${error instanceof Error ? error.message : String(error)}`;
-    await taskRepo.save(task);
+    await taskRepo.update({ id: task.id }, {
+      status: "failed",
+      errorMessage: `Failed to spawn Epic container: ${error instanceof Error ? error.message : String(error)}`,
+    });
 
     throw error;
   }
@@ -872,8 +890,11 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
   }
 
   // Update task status
+  await taskRepo.update({ id: task.id }, {
+    status: "environment_setup",
+    providersUsed: task.providersUsed,
+  });
   task.status = "environment_setup";
-  await taskRepo.save(task);
 
   await logTaskEvent(
     task.id,
@@ -911,11 +932,16 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
     await assignTaskToContainer(warmContainer.id, task.id, fullEnv);
 
     // Update task with warm container's ECS info
+    await taskRepo.update({ id: task.id }, {
+      ecsTaskArn: warmContainer.ecsTaskArn,
+      ecsTaskId: warmContainer.ecsTaskId,
+      status: "executing",
+      startedAt: new Date(),
+    });
     task.ecsTaskArn = warmContainer.ecsTaskArn;
     task.ecsTaskId = warmContainer.ecsTaskId;
     task.status = "executing";
     task.startedAt = new Date();
-    await taskRepo.save(task);
 
     await logTaskEvent(
       task.id,
@@ -965,11 +991,16 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
     });
 
     // Update task with ECS info
+    await taskRepo.update({ id: task.id }, {
+      ecsTaskArn: result.taskArn,
+      ecsTaskId: result.taskId,
+      status: "executing",
+      startedAt: new Date(),
+    });
     task.ecsTaskArn = result.taskArn;
     task.ecsTaskId = result.taskId;
     task.status = "executing";
     task.startedAt = new Date();
-    await taskRepo.save(task);
 
     await logTaskEvent(
       task.id,
@@ -996,9 +1027,10 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
       error: error instanceof Error ? error.message : String(error),
     });
 
-    task.status = "failed";
-    task.errorMessage = `Failed to spawn multi-expert container: ${error instanceof Error ? error.message : String(error)}`;
-    await taskRepo.save(task);
+    await taskRepo.update({ id: task.id }, {
+      status: "failed",
+      errorMessage: `Failed to spawn multi-expert container: ${error instanceof Error ? error.message : String(error)}`,
+    });
 
     throw error;
   }
@@ -1078,10 +1110,14 @@ export async function spawnMultiPersonaContainer(task: WorkerTask): Promise<void
   }
 
   // Update task status
+  await taskRepo.update({ id: task.id }, {
+    status: "environment_setup",
+    currentSubtaskIndex: 0,
+    subtaskResults: [],
+  });
   task.status = "environment_setup";
   task.currentSubtaskIndex = 0;
   task.subtaskResults = [];
-  await taskRepo.save(task);
 
   // Spawn ECS task with multi-persona environment
   const runner = getECSTaskRunner();
@@ -1104,11 +1140,16 @@ export async function spawnMultiPersonaContainer(task: WorkerTask): Promise<void
     });
 
     // Update task with ECS info
+    await taskRepo.update({ id: task.id }, {
+      ecsTaskArn: result.taskArn,
+      ecsTaskId: result.taskId,
+      status: "executing",
+      startedAt: new Date(),
+    });
     task.ecsTaskArn = result.taskArn;
     task.ecsTaskId = result.taskId;
     task.status = "executing";
     task.startedAt = new Date();
-    await taskRepo.save(task);
 
     await logTaskEvent(
       task.id,
@@ -1127,9 +1168,10 @@ export async function spawnMultiPersonaContainer(task: WorkerTask): Promise<void
       error: error instanceof Error ? error.message : String(error),
     });
 
-    task.status = "failed";
-    task.errorMessage = `Failed to spawn multi-persona container: ${error instanceof Error ? error.message : String(error)}`;
-    await taskRepo.save(task);
+    await taskRepo.update({ id: task.id }, {
+      status: "failed",
+      errorMessage: `Failed to spawn multi-persona container: ${error instanceof Error ? error.message : String(error)}`,
+    });
 
     throw error;
   }
@@ -1194,16 +1236,16 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
             oldScmProvider: task.scmProvider,
             newScmProvider: scmProviderToUse,
           });
+          await taskRepo.update({ id: task.id }, { scmProvider: scmProviderToUse });
           task.scmProvider = scmProviderToUse;
-          await taskRepo.save(task);
         }
 
         const repoId = scmProvider.parseRepoIdentifier(repoToUse);
         const branchCreated = await scmProvider.createBranch(repoId, featureBranch, "main");
 
         if (branchCreated) {
+          await taskRepo.update({ id: task.id }, { githubBranch: featureBranch });
           task.githubBranch = featureBranch;
-          await taskRepo.save(task);
 
           await logTaskEvent(task.id, "info", `📌 Created feature branch: ${featureBranch}`);
           logger.info("Created feature branch for V2 workflow", {
@@ -1315,7 +1357,7 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
 
     // Convert V2 plan steps to subtask definitions
     task.subtasksJson = convertPlanToSubtasks(plan);
-    await taskRepo.save(task);
+    await taskRepo.update({ id: task.id }, { subtasksJson: task.subtasksJson });
 
     // Spawn single container with all subtasks
     await spawnMultiPersonaContainer(task);
@@ -1348,8 +1390,8 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
   );
 
   // Update task status to executing
+  await taskRepo.update({ id: task.id }, { status: "executing" });
   task.status = "executing";
-  await taskRepo.save(task);
 
   // Loop through steps starting from currentStepIndex
   while (task.currentStepIndex < totalSteps) {
@@ -1379,8 +1421,8 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
     );
 
     // Reset retry count for this new step
+    await taskRepo.update({ id: task.id }, { currentStepRetryCount: 0 });
     task.currentStepRetryCount = 0;
-    await taskRepo.save(task);
 
     // Execute the step
     const result = await executeStep(task, step);
@@ -1398,8 +1440,8 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
       }
 
       // Move to next step
+      await taskRepo.update({ id: task.id }, { currentStepIndex: stepIndex + 1 });
       task.currentStepIndex = stepIndex + 1;
-      await taskRepo.save(task);
 
       logger.info("Step completed successfully", {
         taskId,
@@ -1522,10 +1564,12 @@ export async function executeStep(
   };
 
   // Update task status to environment_setup
+  await taskRepo.update({ id: task.id }, {
+    status: "environment_setup",
+    workerPersona: step.persona,
+  });
   task.status = "environment_setup";
-  // Update persona to match the step's persona
   task.workerPersona = step.persona;
-  await taskRepo.save(task);
 
   await logTaskEvent(
     task.id,
@@ -1549,11 +1593,16 @@ export async function executeStep(
     const result = await runner.runWorkerTask(task, credentials);
 
     // Update task with ECS info
+    await taskRepo.update({ id: task.id }, {
+      ecsTaskArn: result.taskArn,
+      ecsTaskId: result.taskId,
+      status: "executing",
+      startedAt: new Date(),
+    });
     task.ecsTaskArn = result.taskArn;
     task.ecsTaskId = result.taskId;
     task.status = "executing";
     task.startedAt = new Date();
-    await taskRepo.save(task);
 
     await logTaskEvent(
       task.id,
@@ -1795,13 +1844,17 @@ export async function recordStepCompletion(
     committedAt: new Date().toISOString(),
   };
 
-  // Add to commit history
-  if (!task.commitHistory) {
-    task.commitHistory = [];
-  }
-  task.commitHistory.push(commit);
-
-  await taskRepo.save(task);
+  // Atomic JSONB append to commit history
+  await taskRepo
+    .createQueryBuilder()
+    .update(WorkerTask)
+    .set({
+      commitHistory: () =>
+        `COALESCE("commit_history", '[]'::jsonb) || :newCommit::jsonb`,
+    })
+    .where("id = :id", { id: taskId })
+    .setParameters({ newCommit: JSON.stringify(commit) })
+    .execute();
 
   logger.info("Recorded step completion", {
     taskId,
@@ -1854,9 +1907,17 @@ async function handleStepFailure(
 
   switch (recovery.action) {
     case "RETRY_STEP":
-      // Simple retry - increment retry count and continue
+      // Simple retry - atomic increment of retry count + persist any new constraints
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          currentStepRetryCount: () => '"current_step_retry_count" + 1',
+          contextSidecar: task.contextSidecar,
+        })
+        .where("id = :id", { id: task.id })
+        .execute();
       task.currentStepRetryCount += 1;
-      await taskRepo.save(task);
 
       await logTaskEvent(
         task.id,
@@ -1875,7 +1936,11 @@ async function handleStepFailure(
       if (recovery.newConstraint) {
         task.addConstraint(recovery.newConstraint);
       }
-      await taskRepo.save(task);
+      await taskRepo.update({ id: task.id }, {
+        currentStepRetryCount: task.currentStepRetryCount,
+        executionPlanV2: task.executionPlanV2,
+        contextSidecar: task.contextSidecar,
+      });
 
       await logTaskEvent(
         task.id,
@@ -1902,7 +1967,12 @@ async function handleStepFailure(
       if (recovery.newConstraint) {
         task.addConstraint(recovery.newConstraint);
       }
-      await taskRepo.save(task);
+      await taskRepo.update({ id: task.id }, {
+        currentStepIndex: targetIndex,
+        currentStepRetryCount: 0,
+        commitHistory: task.commitHistory,
+        contextSidecar: task.contextSidecar,
+      });
 
       await logTaskEvent(
         task.id,
@@ -1916,9 +1986,11 @@ async function handleStepFailure(
     case "ESCALATE":
     default:
       // Escalate to human - stop pipeline
-      task.status = "escalated";
-      task.errorMessage = recovery.reason || result.errorMessage || "Step failed and could not recover";
-      await taskRepo.save(task);
+      await taskRepo.update({ id: task.id }, {
+        status: "escalated",
+        errorMessage: recovery.reason || result.errorMessage || "Step failed and could not recover",
+        contextSidecar: task.contextSidecar,
+      });
 
       await logTaskEvent(
         task.id,
@@ -2014,9 +2086,10 @@ export async function createConsolidatedPR(task: WorkerTask): Promise<void> {
 
   if (commitCount === 0) {
     // No commits means no changes were made
-    task.status = "completed";
-    task.completedAt = new Date();
-    await taskRepo.save(task);
+    await taskRepo.update({ id: task.id }, {
+      status: "completed",
+      completedAt: new Date(),
+    });
 
     await logTaskEvent(
       task.id,
@@ -2078,20 +2151,16 @@ _Jira: ${task.jiraIssueKey || "N/A"}_
   });
 
   if (prResult.success) {
-    task.githubPrUrl = prResult.prUrl || null;
-    task.githubPrNumber = prResult.prNumber || null;
-
     // Determine final status based on workflow mode
-    if (task.deploymentEnabled) {
-      // Auto-deploy: mark as deployed (worker will have merged and deployed)
-      task.status = "deployed";
-    } else {
-      // Standard: wait for review
-      task.status = "review_requested";
-    }
+    const finalStatus = task.deploymentEnabled ? "deployed" : "review_requested";
 
-    task.completedAt = new Date();
-    await taskRepo.save(task);
+    await taskRepo.update({ id: task.id }, {
+      githubPrUrl: prResult.prUrl || null,
+      githubPrNumber: prResult.prNumber || null,
+      status: finalStatus,
+      completedAt: new Date(),
+    });
+    task.status = finalStatus;
 
     await logTaskEvent(
       task.id,
@@ -2112,10 +2181,11 @@ _Jira: ${task.jiraIssueKey || "N/A"}_
     });
   } else {
     // PR creation failed - mark as completed but log the issue
-    task.status = "completed";
-    task.completedAt = new Date();
-    task.errorMessage = "PR creation failed - changes committed but no PR";
-    await taskRepo.save(task);
+    await taskRepo.update({ id: task.id }, {
+      status: "completed",
+      completedAt: new Date(),
+      errorMessage: "PR creation failed - changes committed but no PR",
+    });
 
     await logTaskEvent(
       task.id,
@@ -2199,10 +2269,14 @@ export async function resumeV2Pipeline(taskId: string): Promise<void> {
   );
 
   // Clear any stale ECS references
+  await taskRepo.update({ id: task.id }, {
+    ecsTaskArn: null,
+    ecsTaskId: null,
+    status: "queued",
+  });
   task.ecsTaskArn = null;
   task.ecsTaskId = null;
   task.status = "queued";
-  await taskRepo.save(task);
 
   // Run the pipeline (it will continue from currentStepIndex)
   await runSequentialPipeline(taskId);

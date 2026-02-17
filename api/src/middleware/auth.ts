@@ -214,16 +214,19 @@ export async function authenticateApiKey(
       return;
     }
 
-    // First, try Organization API key (fast path - direct lookup)
+    // First, try Organization API key (prefix + bcrypt verification)
     const orgRepo = AppDataSource.getRepository(Organization);
-    const org = await orgRepo.findOne({
-      where: { apiKey },
+    const orgKeyPrefix = apiKey.substring(0, 12);
+    const orgs = await orgRepo.find({
+      where: { apiKeyPrefix: orgKeyPrefix },
     });
 
-    if (org) {
-      req.organization = org;
-      next();
-      return;
+    for (const org of orgs) {
+      if (org.apiKeyHash && (await bcrypt.compare(apiKey, org.apiKeyHash))) {
+        req.organization = org;
+        next();
+        return;
+      }
     }
 
     // If not an org key, try User API key (usr_... prefix)

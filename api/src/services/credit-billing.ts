@@ -114,8 +114,23 @@ export async function deductUsage(
     paidCreditsUsed = totalDeduction;
   }
 
-  // Deduct from credit balance
-  org.creditBalanceCents = Math.max(0, org.creditBalanceCents - totalDeduction);
+  // Deduct from credit balance atomically
+  await orgRepo
+    .createQueryBuilder()
+    .update(Organization)
+    .set({
+      creditBalanceCents: () =>
+        `GREATEST(0, "credit_balance_cents" - :deduction)`,
+      freeCreditsRemainingCents: () =>
+        `GREATEST(0, "free_credits_remaining_cents" - :freeUsed)`,
+    })
+    .setParameter("deduction", totalDeduction)
+    .setParameter("freeUsed", freeCreditsUsed)
+    .where("id = :id", { id: org.id })
+    .execute();
+
+  // Refresh org to get updated balance
+  Object.assign(org, await orgRepo.findOneBy({ id: org.id }));
 
   const balanceAfter = org.creditBalanceCents;
 
@@ -131,9 +146,6 @@ export async function deductUsage(
     feeCents,
   });
   await txRepo.save(transaction);
-
-  // Save updated org balance
-  await orgRepo.save(org);
 
   logger.info("Credit usage deducted", {
     orgId,
@@ -194,21 +206,38 @@ export async function addCredits(
     throw new Error(`Organization not found: ${orgId}`);
   }
 
-  // Update balance
-  org.creditBalanceCents = (org.creditBalanceCents || 0) + amountCents;
+  // Update balance atomically - increment creditBalanceCents
+  const qb = orgRepo
+    .createQueryBuilder()
+    .update(Organization)
+    .set({
+      creditBalanceCents: () => `"credit_balance_cents" + :amount`,
+    })
+    .setParameter("amount", amountCents)
+    .where("id = :id", { id: org.id });
 
-  // If adding bonus/free credits, also track in free credits
+  // If adding bonus/free credits, also increment free credits
   if (type === "bonus") {
-    org.freeCreditsRemainingCents =
-      (org.freeCreditsRemainingCents || 0) + amountCents;
+    qb.set({
+      creditBalanceCents: () => `"credit_balance_cents" + :amount`,
+      freeCreditsRemainingCents: () =>
+        `"free_credits_remaining_cents" + :amount`,
+    });
   }
+
+  await qb.execute();
 
   // Unpause billing if it was paused
   if (org.billingPaused) {
-    org.billingPaused = false;
-    org.billingPausedReason = null;
+    await orgRepo.update(
+      { id: org.id },
+      { billingPaused: false, billingPausedReason: null as unknown as string },
+    );
     logger.info("Billing unpaused after credit addition", { orgId });
   }
+
+  // Refresh org to get updated balance
+  Object.assign(org, await orgRepo.findOneBy({ id: org.id }));
 
   const balanceAfter = org.creditBalanceCents;
 
@@ -223,8 +252,6 @@ export async function addCredits(
     stripeChargeId: metadata?.stripeChargeId,
   });
   await txRepo.save(transaction);
-
-  await orgRepo.save(org);
 
   logger.info("Credits added", {
     orgId,
@@ -271,8 +298,8 @@ export async function processSignupDeposit(
       metadata: { orgId: org.id, orgName: org.name },
     });
     customerId = customer.id;
+    await orgRepo.update({ id: org.id }, { stripeCustomerId: customerId });
     org.stripeCustomerId = customerId;
-    await orgRepo.save(org);
   }
 
   // Attach payment method to customer
@@ -324,8 +351,8 @@ export async function processSignupDeposit(
     }
 
     // Mark signup deposit as completed
+    await orgRepo.update({ id: org.id }, { signupDepositCompleted: true });
     org.signupDepositCompleted = true;
-    await orgRepo.save(org);
 
     logger.info("Signup deposit processed", {
       orgId,
@@ -369,9 +396,13 @@ export async function processAutoRecharge(
 
   if (!defaultPm) {
     // Pause billing - no payment method
-    org.billingPaused = true;
-    org.billingPausedReason = "No default payment method for auto-recharge";
-    await orgRepo.save(org);
+    await orgRepo.update(
+      { id: org.id },
+      {
+        billingPaused: true,
+        billingPausedReason: "No default payment method for auto-recharge",
+      },
+    );
 
     logger.warn("Auto-recharge failed: no payment method", { orgId });
     return { success: false, error: "No default payment method" };
@@ -420,9 +451,13 @@ export async function processAutoRecharge(
       error instanceof Error ? error.message : "Payment failed";
 
     // Pause billing
-    org.billingPaused = true;
-    org.billingPausedReason = `Auto-recharge failed: ${errorMessage}`;
-    await orgRepo.save(org);
+    await orgRepo.update(
+      { id: org.id },
+      {
+        billingPaused: true,
+        billingPausedReason: `Auto-recharge failed: ${errorMessage}`,
+      },
+    );
 
     logger.error("Auto-recharge failed", { orgId, error: errorMessage });
 
@@ -461,8 +496,8 @@ export async function createSetupIntent(
       metadata: { orgId: org.id, orgName: org.name },
     });
     customerId = customer.id;
+    await orgRepo.update({ id: org.id }, { stripeCustomerId: customerId });
     org.stripeCustomerId = customerId;
-    await orgRepo.save(org);
   }
 
   const setupIntent = await stripe.setupIntents.create({
@@ -794,23 +829,26 @@ export async function updateAutoRechargeSettings(
     throw new Error(`Organization not found: ${orgId}`);
   }
 
+  const updateData: {
+    autoRechargeEnabled?: boolean;
+    autoRechargeThresholdCents?: number;
+    autoRechargeAmountCents?: number;
+  } = {};
   if (settings.enabled !== undefined) {
-    org.autoRechargeEnabled = settings.enabled;
+    updateData.autoRechargeEnabled = settings.enabled;
   }
   if (settings.thresholdCents !== undefined) {
-    org.autoRechargeThresholdCents = settings.thresholdCents;
+    updateData.autoRechargeThresholdCents = settings.thresholdCents;
   }
   if (settings.amountCents !== undefined) {
-    org.autoRechargeAmountCents = settings.amountCents;
+    updateData.autoRechargeAmountCents = settings.amountCents;
   }
 
-  await orgRepo.save(org);
+  await orgRepo.update({ id: org.id }, updateData);
 
   logger.info("Auto-recharge settings updated", {
     orgId,
-    enabled: org.autoRechargeEnabled,
-    thresholdCents: org.autoRechargeThresholdCents,
-    amountCents: org.autoRechargeAmountCents,
+    ...updateData,
   });
 }
 
@@ -913,9 +951,13 @@ export async function handlePaymentIntentFailed(
     const org = await orgRepo.findOne({ where: { id: orgId } });
 
     if (org && !org.billingPaused) {
-      org.billingPaused = true;
-      org.billingPausedReason = `Auto-recharge failed: ${paymentIntent.last_payment_error?.message || "Payment declined"}`;
-      await orgRepo.save(org);
+      await orgRepo.update(
+        { id: org.id },
+        {
+          billingPaused: true,
+          billingPausedReason: `Auto-recharge failed: ${paymentIntent.last_payment_error?.message || "Payment declined"}`,
+        },
+      );
 
       logger.warn("Billing paused due to auto-recharge failure", {
         orgId,
@@ -1030,9 +1072,21 @@ export async function handleChargeRefunded(
     return;
   }
 
-  // Deduct the refunded amount
+  // Deduct the refunded amount atomically
   const refundCents = charge.amount_refunded;
-  org.creditBalanceCents = Math.max(0, org.creditBalanceCents - refundCents);
+  await orgRepo
+    .createQueryBuilder()
+    .update(Organization)
+    .set({
+      creditBalanceCents: () =>
+        `GREATEST(0, "credit_balance_cents" - :refund)`,
+    })
+    .setParameter("refund", refundCents)
+    .where("id = :id", { id: org.id })
+    .execute();
+
+  // Refresh org to get updated balance
+  Object.assign(org, await orgRepo.findOneBy({ id: org.id }));
 
   const balanceAfter = org.creditBalanceCents;
 
@@ -1046,8 +1100,6 @@ export async function handleChargeRefunded(
     stripeChargeId: charge.id,
   });
   await txRepo.save(transaction);
-
-  await orgRepo.save(org);
 
   logger.info("Refund processed", {
     orgId,

@@ -57,6 +57,7 @@ export interface Settings {
   // Planning Agent (Project Manager) settings
   planningAgentProvider: string;
   planningAgentModel: string;
+  planningMode: string;
   storyCalibrationMultiplier: number;
   costAlertThresholdUsd: number | null;
   // Budget Limits (AI FinOps)

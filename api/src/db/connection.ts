@@ -230,6 +230,7 @@ import { AddLogDeletionSafeguard1706688000048 } from "./migrations/1706688000048
 import { AddGithubRepoToKbCards1706688000049 } from "./migrations/1706688000049-AddGithubRepoToKbCards.js";
 import { AddBoardIssueKeys1706688000050 } from "./migrations/1706688000050-AddBoardIssueKeys.js";
 import { AddReviewingConsolidatingStatus1739750400000 } from "./migrations/1739750400000-AddReviewingConsolidatingStatus.js";
+import { AddPlanningMode1739750400001 } from "./migrations/1739750400001-AddPlanningMode.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -477,6 +478,7 @@ export const AppDataSource = new DataSource({
     AddGithubRepoToKbCards1706688000049,
     AddBoardIssueKeys1706688000050,
     AddReviewingConsolidatingStatus1739750400000,
+    AddPlanningMode1739750400001,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

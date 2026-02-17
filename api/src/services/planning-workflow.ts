@@ -431,6 +431,12 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     // Skip critic validation if criticEnabled is false (no 'critic' label)
     const skipCritic = !task.criticEnabled;
 
+    // Simplified planning mode: run planner once, critic once, always approve
+    // Achieved by setting maxAttempts=1 — generateValidatedPlan will do one
+    // iteration and use best-plan fallback if critic rejects
+    const orgPlanningMode = task.organization?.planningMode || "strict";
+    const maxAttempts = orgPlanningMode === "simplified" ? 1 : 3;
+
     // Periodic heartbeat log so the terminal doesn't appear dead during planning.
     // First update at 30s, then every 60s — minimal, not spammy.
     const planStartTime = Date.now();
@@ -461,7 +467,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       executionPlanV2 = await generateValidatedPlan(
         prd,
         agentConfig,
-        3,
+        maxAttempts,
         progressCallback,
         skipCritic,
         streamProgressCallback,

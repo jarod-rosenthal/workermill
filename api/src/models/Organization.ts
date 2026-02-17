@@ -351,6 +351,9 @@ export class Organization {
   @Column({ name: "planning_agent_model", type: "varchar", length: 100, default: "claude-sonnet-4-5-20250929" })
   planningAgentModel: string; // Model used for planning/decomposition (Project Manager)
 
+  @Column({ name: "planning_mode", type: "varchar", length: 20, default: "strict" })
+  planningMode: string; // "strict" (full critic loop) or "simplified" (single pass + refinement)
+
   @Column({ name: "story_calibration_multiplier", type: "decimal", precision: 3, scale: 2, default: 0.4 })
   storyCalibrationMultiplier: number; // Temperature dial: 0.3-1.0, lower = fewer stories
 

@@ -565,6 +565,40 @@ describe("routeQuestion", () => {
     expect(result.routingTier).toBe(3);
   });
 
+  it("skips non-coding personas in tier 3 fallback", () => {
+    const result = routeQuestion({
+      questionText: "Can someone take a look at this build error?",
+      idleExperts: [
+        "support_agent",
+        "project_manager",
+        "tech_writer",
+        "ml_engineer",
+        "backend_developer",
+      ],
+      allExperts: [
+        "support_agent",
+        "project_manager",
+        "tech_writer",
+        "ml_engineer",
+        "backend_developer",
+      ],
+    });
+
+    expect(result.targetExpert).toBe("backend_developer");
+    expect(result.routingTier).toBe(3);
+  });
+
+  it("returns null when only non-coding personas are idle", () => {
+    const result = routeQuestion({
+      questionText: "Can someone help with this?",
+      idleExperts: ["support_agent", "project_manager"],
+      allExperts: ["support_agent", "project_manager", "backend_developer"],
+    });
+
+    expect(result.targetExpert).toBeNull();
+    expect(result.routingTier).toBe(3);
+  });
+
   it("returns null when no experts are idle", () => {
     const result = routeQuestion({
       questionText: "Can someone help?",

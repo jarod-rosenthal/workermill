@@ -21,6 +21,7 @@ export interface AgentConfig {
   githubToken: string;
   bitbucketToken: string;
   gitlabToken: string;
+  githubReviewerToken: string;
 }
 
 export interface FileConfig {
@@ -34,6 +35,7 @@ export interface FileConfig {
     github: string;
     bitbucket: string;
     gitlab: string;
+    githubReviewer?: string;
   };
   setupCompletedAt: string;
 }
@@ -99,6 +101,7 @@ export function loadConfigFromFile(): AgentConfig {
     githubToken: fc.tokens?.github || "",
     bitbucketToken: fc.tokens?.bitbucket || "",
     gitlabToken: fc.tokens?.gitlab || "",
+    githubReviewerToken: fc.tokens?.githubReviewer || "",
   };
 }
 
@@ -148,6 +151,7 @@ export function loadConfig(): AgentConfig {
     githubToken: process.env.GITHUB_TOKEN || "",
     bitbucketToken: process.env.BITBUCKET_TOKEN || "",
     gitlabToken: process.env.GITLAB_TOKEN || "",
+    githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN || "",
   };
 }
 

@@ -349,6 +349,13 @@ export async function getOrgCredentials(
       issueTrackerProvider: org.issueTrackerProvider || "jira",
     };
 
+    // Fetch GitHub reviewer token (separate account for PR approvals)
+    const reviewerToken =
+      await getOrgIntegrationSecret("github-reviewer-token");
+    if (reviewerToken) {
+      credentials.githubReviewerToken = reviewerToken;
+    }
+
     // Fetch manager provider API keys (for Epic inline reviewer)
     // These are needed when the manager uses non-Anthropic providers
     try {

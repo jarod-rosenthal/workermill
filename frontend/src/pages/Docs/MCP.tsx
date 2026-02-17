@@ -91,7 +91,7 @@ const usageExamples = [
   {
     title: "Create task from Jira",
     description: "Start a new task from a Jira issue",
-    command: 'workermill_create_task(jiraIssueKey: "OCS-123")',
+    command: 'workermill_create_task(jiraIssueKey: "PROJ-123")',
   },
   {
     title: "Check orchestrator",
@@ -280,7 +280,7 @@ export default function MCP() {
           <div className="mt-4 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
             <p className="text-sm text-blue-500">
               <strong>Tip:</strong> You can ask Claude naturally like "Show me all running tasks" or
-              "Create a task for OCS-456" and it will use the appropriate MCP tools.
+              "Create a task for PROJ-456" and it will use the appropriate MCP tools.
             </p>
           </div>
         </div>

@@ -29,7 +29,7 @@ const mockMarketingData: MarketingDashboardData = {
       type: 'feature',
       status: 'shipped',
       releaseDate: '2025-01-10',
-      jiraKeys: ['OCS-201', 'OCS-205'],
+      jiraKeys: ['ACME-201', 'ACME-205'],
       prNumbers: [156, 158, 160],
     },
     {
@@ -40,7 +40,7 @@ const mockMarketingData: MarketingDashboardData = {
       type: 'feature',
       status: 'in_progress',
       plannedDate: '2025-01-25',
-      jiraKeys: ['OCS-210', 'OCS-212'],
+      jiraKeys: ['ACME-210', 'ACME-212'],
     },
     {
       id: '3',
@@ -50,7 +50,7 @@ const mockMarketingData: MarketingDashboardData = {
       type: 'feature',
       status: 'planned',
       plannedDate: '2025-02-08',
-      jiraKeys: ['OCS-220'],
+      jiraKeys: ['ACME-220'],
     },
     {
       id: '4',

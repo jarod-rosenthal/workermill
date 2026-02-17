@@ -54,6 +54,7 @@ import {
   Monitor,
   LayoutGrid,
   FileCode,
+  ArrowRight,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../../components/RalphProgress";
 import type { PlanningProgressData } from "../../components/PlanningProgress";
@@ -3746,8 +3747,31 @@ export default function Dashboard() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={11} className="p-8 text-center text-muted-foreground">
-                      No tasks yet
+                    <td colSpan={11} className="p-12 text-center">
+                      <div className="max-w-md mx-auto">
+                        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                          <Rocket className="w-7 h-7 text-primary/60" />
+                        </div>
+                        <p className="text-foreground font-medium mb-1">No tasks yet</p>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          Run your first AI task from a board card, or create one directly with the <strong>Run Task</strong> button above.
+                        </p>
+                        <div className="flex items-center justify-center gap-3">
+                          <a
+                            href="/boards"
+                            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:text-primary/80 transition-colors"
+                          >
+                            Go to Boards <ArrowRight className="w-3.5 h-3.5" />
+                          </a>
+                          <span className="text-muted-foreground/40">|</span>
+                          <a
+                            href="/docs/quick-start"
+                            className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            Quick Start Guide <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -3849,7 +3873,7 @@ export default function Dashboard() {
                       </button>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Jira or Linear issue key (e.g., OCS-123 or PROJECT-456)
+                      Jira or Linear issue key (e.g., ACME-123 or PROJECT-456)
                     </p>
                     {/* Cost Estimate Display */}
                     {costEstimate && (

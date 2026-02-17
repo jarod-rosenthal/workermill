@@ -267,7 +267,7 @@ export default function Integrations() {
               <h4 className="text-sm font-medium text-foreground mb-3">What WorkerMill Does</h4>
               <ul className="space-y-2">
                 {[
-                  "Creates branch from ticket key (e.g., feature/OCS-123)",
+                  "Creates branch from ticket key (e.g., feature/PROJ-123)",
                   "Commits code changes with descriptive messages",
                   "Opens pull request with summary and test results",
                   "Links PR back to issue tracker",

@@ -73,7 +73,7 @@ const mockRecentActivity: ActivityItem[] = [
     description: '15 files updated, 200 lines changed',
     timestamp: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
     severity: 'success',
-    jiraKey: 'OCS-456',
+    jiraKey: 'PROJ-456',
   },
   {
     id: '2',

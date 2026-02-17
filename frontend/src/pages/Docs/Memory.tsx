@@ -37,7 +37,7 @@ const memoryTypes = [
     color: "blue",
     description: "Historical records of task executions, decisions made, and their outcomes",
     examples: [
-      "Task OCS-123 completed successfully with 2 retries",
+      "Task PROJ-123 completed successfully with 2 retries",
       "PR #456 was rejected due to missing tests",
       "Deployment to staging failed - rollback executed",
       "Code review requested changes to error handling",

@@ -1,16 +1,26 @@
 import { Router, Request, Response } from "express";
 import { authenticateApiKey } from "../../middleware/auth.js";
-import { body, validateRequest } from "../../middleware/validation.js";
+import {
+  body,
+  param,
+  query,
+  validateRequest,
+} from "../../middleware/validation.js";
+import { asyncHandler } from "../../middleware/error-handler.js";
 import { AppDataSource } from "../../db/connection.js";
-import { WorkerTask } from "../../models/index.js";
-import { codeEventEmitter, type CodeEvent } from "../../services/code-events.js";
+import { WorkerTask, WorkerTaskLog } from "../../models/index.js";
+import {
+  codeEventEmitter,
+  type CodeEvent,
+} from "../../services/code-events.js";
+import { MoreThan } from "typeorm";
 
 const router = Router();
 
 /**
  * POST /api/control-center/code-events
  * Receive code write/edit events from worker containers for Live Code Viewer.
- * Ephemeral — emits to in-memory EventEmitter, NO database write.
+ * Persists to WorkerTaskLog AND emits to in-memory EventEmitter for SSE.
  * Uses API key authentication (x-api-key header) for org verification.
  */
 router.post(
@@ -26,7 +36,7 @@ router.post(
   body("newStr").optional().isString(),
   body("expert").optional().isString(),
   validateRequest,
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const org = req.organization!;
     const { taskId, toolName, filePath, content, oldStr, newStr, expert } =
       req.body;
@@ -41,7 +51,7 @@ router.post(
       return;
     }
 
-    // Emit to in-memory EventEmitter — NO database write
+    // Emit to in-memory EventEmitter for SSE clients
     const event: CodeEvent = {
       taskId,
       toolName,
@@ -57,8 +67,78 @@ router.post(
 
     codeEventEmitter.emitCodeEvent(taskId, event);
 
+    // Persist to WorkerTaskLog for historical retrieval
+    const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+    const action = toolName === "Write" ? "Wrote" : "Edited";
+    const logData = WorkerTaskLog.create(taskId, "code_event", `${action} ${filePath}`, {
+      filePath,
+      metadata: {
+        toolName,
+        expert: expert || null,
+        oldStr: oldStr ? oldStr.substring(0, 50_000) : null,
+        newStr: newStr ? newStr.substring(0, 50_000) : null,
+        isWrite: toolName === "Write",
+      },
+    });
+    const log = logRepo.create(logData);
+    await logRepo.save(log);
+
     res.status(202).json({ ok: true });
-  },
+  }),
+);
+
+/**
+ * GET /api/control-center/code-events/:taskId
+ * Fetch persisted code events for a task. Supports incremental polling via ?since=ISO8601.
+ * Used by the VS Code extension's LiveDiffPanel (via agent local-api proxy).
+ */
+router.get(
+  "/code-events/:taskId",
+  authenticateApiKey,
+  param("taskId").isUUID().withMessage("taskId must be a valid UUID"),
+  query("since").optional().isISO8601().withMessage("since must be an ISO8601 date"),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const taskId = req.params.taskId as string;
+    const since = req.query.since ? String(req.query.since) : null;
+
+    // Verify task belongs to org
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId: org.id },
+    });
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+
+    const whereClause: Record<string, unknown> = {
+      taskId,
+      type: "code_event" as const,
+    };
+    if (since) {
+      whereClause.createdAt = MoreThan(new Date(since));
+    }
+
+    const logs = await logRepo.find({
+      where: whereClause,
+      order: { createdAt: "ASC" },
+      take: 500,
+    });
+
+    res.json(
+      logs.map((log) => ({
+        id: log.id,
+        filePath: log.filePath,
+        message: log.message,
+        metadata: log.metadata,
+        createdAt: log.createdAt,
+      })),
+    );
+  }),
 );
 
 export default router;

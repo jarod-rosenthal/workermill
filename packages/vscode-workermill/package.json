@@ -81,6 +81,11 @@
         "command": "workermill.refreshTasks",
         "title": "WorkerMill: Refresh Tasks",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "workermill.openLiveDiff",
+        "title": "WorkerMill: Live Code Changes",
+        "icon": "$(eye)"
       }
     ],
     "menus": {
@@ -95,6 +100,11 @@
         {
           "command": "workermill.runIssue",
           "when": "viewItem == issue",
+          "group": "inline"
+        },
+        {
+          "command": "workermill.openLiveDiff",
+          "when": "viewItem == task-running || viewItem == task-planning",
           "group": "inline"
         }
       ],

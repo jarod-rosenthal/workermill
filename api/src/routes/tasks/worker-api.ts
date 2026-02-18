@@ -387,7 +387,7 @@ router.post("/:id/worker-progress", authenticateApiKey, async (req: Request, res
       .execute();
 
     // Sync InternalTask status for progress statuses that correspond to column moves
-    if (task.internalTaskId && ["review_requested", "pr_created"].includes(status)) {
+    if (task.internalTaskId && ["review_requested", "pr_created", "pr_approved"].includes(status)) {
       try {
         await syncInternalTaskStatus(task, status);
       } catch (syncError) {
@@ -400,7 +400,7 @@ router.post("/:id/worker-progress", authenticateApiKey, async (req: Request, res
     }
 
     // Sync KbCard column for progress statuses (moves card across board swim lanes)
-    if (["review_requested", "pr_created"].includes(status)) {
+    if (["review_requested", "pr_created", "pr_approved"].includes(status)) {
       try {
         await syncKbCardColumn(taskId, status);
       } catch (syncError) {

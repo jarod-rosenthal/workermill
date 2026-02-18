@@ -11,6 +11,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { exec } from "child_process";
 import { AgentClient, type TaskInfo, type IssueInfo } from "./agent-client";
 import { TeamTreeProvider } from "./team-tree";
 import { FeedViewProvider } from "./feed-view";
@@ -502,6 +503,122 @@ export function activate(context: vscode.ExtensionContext): void {
               `Failed to cancel: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
+        }
+      },
+    ),
+
+    // Build a board from a PRD (.md file) — context menu + editor title button
+    vscode.commands.registerCommand(
+      "workermill.buildFromPrd",
+      async (uri?: vscode.Uri) => {
+        if (!client.isConnected()) {
+          vscode.window.showErrorMessage(
+            "WorkerMill agent is not running. Start with: workermill-agent start",
+          );
+          return;
+        }
+
+        // Get file content — from context menu URI or active editor
+        let fileContent: string;
+        let fileUri: vscode.Uri | undefined;
+
+        if (uri) {
+          fileUri = uri;
+          const bytes = await vscode.workspace.fs.readFile(uri);
+          fileContent = Buffer.from(bytes).toString("utf-8");
+        } else {
+          const editor = vscode.window.activeTextEditor;
+          if (!editor || editor.document.languageId !== "markdown") {
+            vscode.window.showWarningMessage(
+              "Open a .md file or right-click one in the explorer.",
+            );
+            return;
+          }
+          fileUri = editor.document.uri;
+          fileContent = editor.document.getText();
+        }
+
+        if (!fileContent.trim()) {
+          vscode.window.showWarningMessage("The selected file is empty.");
+          return;
+        }
+
+        // Detect git remote for githubRepo
+        let githubRepo: string | undefined;
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(fileUri);
+        const cwd = workspaceFolder?.uri.fsPath || path.dirname(fileUri.fsPath);
+
+        try {
+          const remoteUrl = await new Promise<string>((resolve, reject) => {
+            exec(
+              "git remote get-url origin",
+              { cwd, timeout: 5000 },
+              (err, stdout) => {
+                if (err) reject(err);
+                else resolve(stdout.trim());
+              },
+            );
+          });
+
+          // Parse remote URL to owner/repo format
+          // Handles: git@github.com:owner/repo.git, https://github.com/owner/repo.git
+          const match = remoteUrl.match(
+            /(?:github\.com)[:/]([^/]+\/[^/]+?)(?:\.git)?$/,
+          );
+          if (match) {
+            githubRepo = match[1];
+          }
+        } catch {
+          // Not a git repo or no remote — continue without githubRepo
+        }
+
+        // Infer board name from first ***REMOVED*** heading
+        const headingMatch = fileContent.match(/^***REMOVED***\s+(.+)$/m);
+        const inferredName = headingMatch ? headingMatch[1].trim() : undefined;
+
+        // Ask for board name
+        const boardName = await vscode.window.showInputBox({
+          prompt: "Board name for the PRD",
+          value: inferredName || "",
+          placeHolder: "e.g. User Authentication Redesign",
+        });
+
+        if (boardName === undefined) return; // cancelled
+
+        // Call the agent API with progress indicator
+        try {
+          const result = await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: "WorkerMill: Decomposing PRD...",
+              cancellable: false,
+            },
+            async () => {
+              return client.buildFromPrd({
+                source: "text",
+                content: fileContent,
+                githubRepo,
+                boardName: boardName || undefined,
+              });
+            },
+          );
+
+          const action = await vscode.window.showInformationMessage(
+            `WorkerMill: Created board "${result.boardName}" with ${result.cardCount} cards`,
+            "Open in Dashboard",
+          );
+
+          if (action === "Open in Dashboard") {
+            vscode.env.openExternal(
+              vscode.Uri.parse(
+                `https://workermill.com/boards/${result.boardId}`,
+              ),
+            );
+          }
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed to build from PRD: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       },
     ),

@@ -8,12 +8,15 @@ import {
   ArrowUp,
   ArrowDown,
   Minus,
+  Lock,
 } from "lucide-react";
 import type { Card } from "../../lib/boards-api";
 
 interface CardItemProps {
   card: Card;
   onClick: () => void;
+  isBlocked?: boolean;
+  dependencyCount?: number;
 }
 
 const PRIORITY_CONFIG: Record<
@@ -132,7 +135,12 @@ function formatDueDate(dateStr: string): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export default function CardItem({ card, onClick }: CardItemProps) {
+export default function CardItem({
+  card,
+  onClick,
+  isBlocked,
+  dependencyCount,
+}: CardItemProps) {
   const {
     attributes,
     listeners,
@@ -162,12 +170,22 @@ export default function CardItem({ card, onClick }: CardItemProps) {
       {...attributes}
       {...listeners}
       onClick={onClick}
-      className={`group rounded-lg border bg-card p-3 cursor-pointer transition-all hover:border-primary/50 hover:shadow-md ${
+      className={`group relative rounded-lg border bg-card p-3 cursor-pointer transition-all hover:border-primary/50 hover:shadow-md ${
         isDragging
           ? "opacity-50 shadow-lg border-primary/50 rotate-2"
           : "border-border"
-      }`}
+      } ${isBlocked ? "opacity-50" : ""}`}
     >
+      {/* Blocked indicator */}
+      {isBlocked && (
+        <div
+          className="absolute top-1 right-1 text-gray-400"
+          title="Blocked by dependencies"
+        >
+          <Lock className="w-3.5 h-3.5" />
+        </div>
+      )}
+
       {/* Cover color */}
       {card.coverColor && (
         <div
@@ -254,6 +272,17 @@ export default function CardItem({ card, onClick }: CardItemProps) {
               className={`w-1.5 h-1.5 rounded-full ${getCardWorkerDotStyle(card.workerStatus)}`}
             />
             {getCardWorkerStatusLabel(card.workerStatus)}
+          </span>
+        )}
+
+        {/* Dependency count */}
+        {dependencyCount != null && dependencyCount > 0 && (
+          <span
+            className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground"
+            title={`${dependencyCount} ${dependencyCount === 1 ? "dependency" : "dependencies"}`}
+          >
+            <Lock className="w-3 h-3" />
+            {dependencyCount}
           </span>
         )}
       </div>

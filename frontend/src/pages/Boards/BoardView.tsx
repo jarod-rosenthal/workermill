@@ -7,6 +7,7 @@ import {
   Plus,
   Columns3,
   X,
+  Play,
 } from "lucide-react";
 import {
   DndContext,
@@ -29,6 +30,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useBoardsStore } from "../../store/boards-store";
 import type { Card, Column } from "../../lib/boards-api";
+import { runAllCards } from "../../lib/boards-api";
 import ColumnHeader from "./ColumnHeader";
 import CardItem from "./CardItem";
 import CardDetail from "./CardDetail";
@@ -38,6 +40,7 @@ import CardDetail from "./CardDetail";
 interface SortableColumnProps {
   column: Column;
   boardId: string;
+  blockedCardIds: Set<string>;
   onAddCard: (columnId: string) => void;
   onCardClick: (card: Card) => void;
   onRenameColumn: (colId: string, name: string) => void;
@@ -49,6 +52,7 @@ interface SortableColumnProps {
 function SortableColumn({
   column,
   boardId,
+  blockedCardIds,
   onAddCard,
   onCardClick,
   onRenameColumn,
@@ -108,6 +112,8 @@ function SortableColumn({
               key={card.id}
               card={card}
               onClick={() => onCardClick(card)}
+              isBlocked={blockedCardIds.has(card.id)}
+              dependencyCount={card.dependencies?.length}
             />
           ))}
         </div>
@@ -146,6 +152,7 @@ export default function BoardView() {
   const [newColumnName, setNewColumnName] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<"card" | "column" | null>(null);
+  const [runAllLoading, setRunAllLoading] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -192,6 +199,53 @@ export default function BoardView() {
     }, 10_000);
     return () => clearInterval(interval);
   }, [hasActiveWorkerCards, boardId, fetchBoardDetail]);
+
+  // Compute blocked card IDs: a card is blocked if it has dependencies
+  // and any dependency card's workerStatus is not in a terminal state
+  const blockedCardIds = useMemo(() => {
+    if (!currentBoard) return new Set<string>();
+    const terminalStatuses = new Set(["completed", "deployed"]);
+    // Build a map of cardId -> workerStatus for fast lookup
+    const cardStatusMap = new Map<string, string | null>();
+    for (const col of currentBoard.columns) {
+      for (const card of col.cards) {
+        cardStatusMap.set(card.id, card.workerStatus);
+      }
+    }
+    const blocked = new Set<string>();
+    for (const col of currentBoard.columns) {
+      for (const card of col.cards) {
+        if (card.dependencies && card.dependencies.length > 0) {
+          const anyIncomplete = card.dependencies.some((dep) => {
+            const status = cardStatusMap.get(dep.cardId);
+            return !status || !terminalStatuses.has(status);
+          });
+          if (anyIncomplete) {
+            blocked.add(card.id);
+          }
+        }
+      }
+    }
+    return blocked;
+  }, [currentBoard]);
+
+  // Run all cards on the board
+  const handleRunAll = useCallback(async () => {
+    if (!boardId || runAllLoading) return;
+    setRunAllLoading(true);
+    try {
+      const result = await runAllCards(boardId);
+      const count = result?.tasksCreated ?? 0;
+      alert(`Started ${count} AI worker task${count === 1 ? "" : "s"}`);
+      fetchBoardDetail(boardId);
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to run all cards";
+      alert(msg);
+    } finally {
+      setRunAllLoading(false);
+    }
+  }, [boardId, runAllLoading, fetchBoardDetail]);
 
   // Auto-open card detail when ?card= query param is present
   useEffect(() => {
@@ -477,8 +531,23 @@ export default function BoardView() {
                 {currentBoard.description}
               </span>
             )}
+            {currentBoard.prdContent && (
+              <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 rounded text-xs font-medium">
+                From PRD
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
+            {currentBoard.prdContent && (
+              <button
+                onClick={handleRunAll}
+                disabled={runAllLoading}
+                className="px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm rounded-lg flex items-center gap-1.5"
+              >
+                <Play className="w-3.5 h-3.5" />
+                {runAllLoading ? "Running..." : "Run All"}
+              </button>
+            )}
             <div className="relative">
               {showAddColumn ? (
                 <div className="flex items-center gap-1">
@@ -561,6 +630,7 @@ export default function BoardView() {
                   key={column.id}
                   column={column}
                   boardId={boardId!}
+                  blockedCardIds={blockedCardIds}
                   onAddCard={handleAddCard}
                   onCardClick={setSelectedCard}
                   onRenameColumn={handleRenameColumn}

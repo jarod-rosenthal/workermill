@@ -93,6 +93,9 @@ export interface BoardDetail {
   description: string | null;
   isStarred: boolean;
   columns: Column[];
+  prdContent: string | null;
+  prdSource: string | null;
+  githubRepo: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -414,6 +417,39 @@ export async function runAllCards(boardId: string) {
 export async function cancelAllCards(boardId: string) {
   const { data } = await apiClient.post(`/boards/${boardId}/cancel-all`);
   return data;
+}
+
+// PRD Decomposition
+export interface DecomposeResult {
+  boardId: string;
+  boardName: string;
+  prefix: string;
+  cardCount: number;
+  cards: {
+    id: string;
+    cardNumber: number;
+    title: string;
+    dependencies: number[];
+    estimatedSteps: number;
+  }[];
+  trackerSync?: {
+    synced: number;
+    failed: number;
+    tracker: string;
+    issueKeys: string[];
+  } | null;
+}
+
+export async function decomposePrd(data: {
+  source: "text" | "file" | "url" | "repo";
+  content?: string;
+  fileUrl?: string;
+  repoPath?: string;
+  githubRepo?: string;
+  boardName?: string;
+}): Promise<DecomposeResult> {
+  const response = await apiClient.post("/prd/decompose", data);
+  return response.data;
 }
 
 // Card dependencies

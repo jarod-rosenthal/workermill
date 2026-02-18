@@ -86,10 +86,20 @@
         "command": "workermill.openLiveDiff",
         "title": "WorkerMill: Live Code Changes",
         "icon": "$(eye)"
+      },
+      {
+        "command": "workermill.searchIssues",
+        "title": "WorkerMill: Search Issues...",
+        "icon": "$(search)"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "workermill.searchIssues",
+          "when": "view == workermill.teamPanel",
+          "group": "navigation"
+        },
         {
           "command": "workermill.refreshTasks",
           "when": "view == workermill.teamPanel",

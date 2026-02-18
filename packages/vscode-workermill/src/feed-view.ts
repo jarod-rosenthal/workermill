@@ -77,6 +77,18 @@ export class FeedViewProvider implements vscode.WebviewViewProvider {
     this.view.webview.html = getIdleHtml();
   }
 
+  /** Notify that the currently-displayed task has finished */
+  onTaskFinished(taskId: string, finalStatus: "completed" | "failed"): void {
+    if (this.currentTaskId !== taskId) return;
+    this.stopPolling();
+    // Do one final poll to capture any last coordination items, then notify webview
+    this.pollUpdates().then(() => {
+      if (this.view) {
+        this.view.webview.postMessage({ type: "taskFinished", status: finalStatus });
+      }
+    });
+  }
+
   private stopPolling(): void {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
@@ -284,6 +296,20 @@ window.addEventListener('message', (event) => {
   if (msg.type === 'coordination') {
     const items = msg.data?.contexts || msg.data || [];
     if (Array.isArray(items)) items.forEach(addFeedItem);
+  }
+  if (msg.type === 'taskFinished') {
+    var banner = document.createElement('div');
+    banner.className = 'feed-item ' + (msg.status === 'completed' ? 'completion' : 'blocker');
+    banner.innerHTML =
+      '<div class="feed-persona">System</div>' +
+      '<div class="feed-content" style="font-weight:600;">Task ' + esc(msg.status) + '</div>' +
+      '<div class="feed-time">' + formatTime(new Date().toISOString()) + '</div>';
+    feed.appendChild(banner);
+    feed.scrollTop = feed.scrollHeight;
+    document.getElementById('statusBadge').textContent = msg.status;
+    document.getElementById('statusBadge').style.color = msg.status === 'completed' ? 'var(--green)' : 'var(--red)';
+    document.getElementById('talkInput').disabled = true;
+    document.getElementById('talkInput').placeholder = 'Task ' + msg.status;
   }
   if (msg.type === 'taskDetail') {
     const d = msg.data;

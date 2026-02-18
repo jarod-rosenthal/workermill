@@ -11,7 +11,7 @@
  */
 
 import * as vscode from "vscode";
-import type { AgentClient } from "./agent-client";
+import type { AgentClient, TaskInfo } from "./agent-client";
 
 // ANSI color codes
 const RESET = "\x1b[0m";
@@ -65,6 +65,24 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
     if (this.pollTimer) clearInterval(this.pollTimer);
   }
 
+  /** Stop polling and write a final status line */
+  onTaskFinished(status: "completed" | "failed"): void {
+    // Do one last poll to capture final logs, then stop
+    this.pollCloudLogs().then(() => {
+      if (this.disposed) return;
+      this.writeLine("");
+      this.writeLine(
+        status === "completed"
+          ? `${GREEN}${BOLD}--- Task completed ---${RESET}`
+          : `${RED}${BOLD}--- Task failed ---${RESET}`,
+      );
+      if (this.pollTimer) {
+        clearInterval(this.pollTimer);
+        this.pollTimer = null;
+      }
+    });
+  }
+
   private writeLine(text: string): void {
     // Pseudoterminal needs \r\n for proper line breaks
     this.writeEmitter.fire(text + "\r\n");
@@ -76,10 +94,19 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
       const raw = await this.client.getCloudLogs(this.taskId, this.lastLogTimestamp || undefined);
 
       // Handle both flat array and wrapped { logs: [...] } response formats
-      const logs = (Array.isArray(raw) ? raw : (raw as { logs?: unknown[] })?.logs) as Array<{
-        id: string; message: string; type?: string; severity?: string; createdAt: string;
-        stdout?: string; stderr?: string; command?: string; exitCode?: number;
-      }> | undefined;
+      const logs = (Array.isArray(raw) ? raw : (raw as { logs?: unknown[] })?.logs) as
+        | Array<{
+            id: string;
+            message: string;
+            type?: string;
+            severity?: string;
+            createdAt: string;
+            stdout?: string;
+            stderr?: string;
+            command?: string;
+            exitCode?: number;
+          }>
+        | undefined;
       if (!logs) return;
 
       for (const log of logs) {
@@ -88,9 +115,7 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
 
         // Colorize based on structured severity/type from the curated log
         if (log.message) {
-          const color = log.severity === "error" ? RED
-            : log.severity === "warn" ? YELLOW
-            : null;
+          const color = log.severity === "error" ? RED : log.severity === "warn" ? YELLOW : null;
           this.writeLine(color ? color + log.message + RESET : colorize(log.message));
         }
 
@@ -100,12 +125,15 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
 
         this.lastLogTimestamp = log.createdAt;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 }
 
 export class LogTerminalManager {
   private terminals = new Map<string, vscode.Terminal>();
+  private ptys = new Map<string, TaskPseudoterminal>();
   private client: AgentClient;
 
   constructor(client: AgentClient) {
@@ -114,7 +142,11 @@ export class LogTerminalManager {
     // Clean up references when terminals are closed by the user
     vscode.window.onDidCloseTerminal((t) => {
       for (const [id, term] of this.terminals) {
-        if (term === t) { this.terminals.delete(id); break; }
+        if (term === t) {
+          this.terminals.delete(id);
+          this.ptys.delete(id);
+          break;
+        }
       }
     });
   }
@@ -137,7 +169,27 @@ export class LogTerminalManager {
     });
 
     this.terminals.set(taskId, terminal);
+    this.ptys.set(taskId, pty);
     terminal.show();
+  }
+
+  /** Notify that a task has finished — stop polling its log terminal */
+  onTaskFinished(taskId: string, status: "completed" | "failed"): void {
+    const pty = this.ptys.get(taskId);
+    if (pty) {
+      pty.onTaskFinished(status);
+    }
+  }
+
+  /** Remove PTYs for tasks no longer in the agent's task list */
+  reconcile(activeTasks: TaskInfo[]): void {
+    const activeIds = new Set(activeTasks.map((t) => t.id));
+    for (const [id, pty] of this.ptys) {
+      if (!activeIds.has(id)) {
+        pty.onTaskFinished("completed");
+        this.ptys.delete(id);
+      }
+    }
   }
 
   dispose(): void {
@@ -145,5 +197,6 @@ export class LogTerminalManager {
       terminal.dispose();
     }
     this.terminals.clear();
+    this.ptys.clear();
   }
 }

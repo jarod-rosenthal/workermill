@@ -65,11 +65,25 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
     if (!this.client.isConnected()) return;
     try {
       const result = await this.client.searchIssues();
-      this.issues = result.issues || [];
+      // Filter out completed issues client-side
+      const doneStatuses = new Set(["done", "closed", "resolved"]);
+      this.issues = (result.issues || []).filter(
+        (i) => !i.status || !doneStatuses.has(i.status.toLowerCase()),
+      );
       this.issueLoadError = null;
+    } catch (err) {
+      this.issueLoadError = err instanceof Error ? err.message : "Could not load issues";
+    }
+  }
+
+  /** Search issues via the agent (for search command) */
+  async searchIssues(query?: string, project?: string): Promise<IssueInfo[]> {
+    if (!this.client.isConnected()) return [];
+    try {
+      const result = await this.client.searchIssues(query, project);
+      return result.issues || [];
     } catch {
-      // Issues endpoint may not be available (agent not connected to cloud)
-      this.issueLoadError = "Could not load issues";
+      return [];
     }
   }
 

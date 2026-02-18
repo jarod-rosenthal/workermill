@@ -304,7 +304,12 @@ export class AgentClient extends EventEmitter {
         res.on("data", (c) => body += c);
         res.on("end", () => {
           try {
-            resolve(JSON.parse(body) as T);
+            const parsed = JSON.parse(body);
+            if (res.statusCode && res.statusCode >= 400) {
+              reject(new Error((parsed as { error?: string })?.error || `HTTP ${res.statusCode}`));
+              return;
+            }
+            resolve(parsed as T);
           } catch {
             reject(new Error("Invalid JSON response"));
           }
@@ -333,7 +338,12 @@ export class AgentClient extends EventEmitter {
         res.on("data", (c) => respBody += c);
         res.on("end", () => {
           try {
-            resolve(JSON.parse(respBody));
+            const parsed = JSON.parse(respBody);
+            if (res.statusCode && res.statusCode >= 400) {
+              reject(new Error((parsed as { error?: string })?.error || `HTTP ${res.statusCode}`));
+              return;
+            }
+            resolve(parsed);
           } catch {
             resolve(respBody);
           }

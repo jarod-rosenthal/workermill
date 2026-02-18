@@ -8,7 +8,7 @@
  */
 
 import * as vscode from "vscode";
-import { AgentClient } from "./agent-client";
+import { AgentClient, type TaskInfo } from "./agent-client";
 import { TeamTreeProvider } from "./team-tree";
 import { FeedViewProvider } from "./feed-view";
 import { StatusBar } from "./status-bar";
@@ -21,6 +21,10 @@ let statusBar: StatusBar;
 let notifications: NotificationManager;
 let logManager: LogTerminalManager;
 let feedView: FeedViewProvider;
+
+// Track which task the feed is currently showing
+let currentFeedTaskId: string | null = null;
+let currentFeedTaskStatus: string | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
   client = new AgentClient();
@@ -49,6 +53,61 @@ export function activate(context: vscode.ExtensionContext): void {
   // Terminal log manager
   logManager = new LogTerminalManager(client);
 
+  // ── Task lifecycle auto-sync ──
+
+  // Auto-switch feed to new task when it starts (only if feed is idle or showing finished task)
+  client.on(
+    "task:started",
+    (info: { id: string; summary: string; persona?: string; model?: string; repo?: string }) => {
+      if (
+        !currentFeedTaskId ||
+        currentFeedTaskStatus === "completed" ||
+        currentFeedTaskStatus === "failed"
+      ) {
+        const taskInfo: TaskInfo = {
+          ...info,
+          status: "running",
+          startedAt: new Date().toISOString(),
+        };
+        feedView.showTask(taskInfo);
+        currentFeedTaskId = info.id;
+        currentFeedTaskStatus = "running";
+      }
+      // Auto-open log terminal for new task
+      logManager.openLogs(info.id, info.summary);
+    },
+  );
+
+  // Stop feed polling when task completes
+  client.on("task:completed", (info: { id: string }) => {
+    if (currentFeedTaskId === info.id) {
+      currentFeedTaskStatus = "completed";
+      feedView.onTaskFinished(info.id, "completed");
+    }
+    logManager.onTaskFinished(info.id, "completed");
+  });
+
+  client.on("task:failed", (info: { id: string }) => {
+    if (currentFeedTaskId === info.id) {
+      currentFeedTaskStatus = "failed";
+      feedView.onTaskFinished(info.id, "failed");
+    }
+    logManager.onTaskFinished(info.id, "failed");
+  });
+
+  // Reconcile state when agent sends updated task list (e.g., after cleanup)
+  client.on("snapshot", (tasks: TaskInfo[]) => {
+    logManager.reconcile(tasks);
+    // If the task we're watching was removed from the agent, reset tracking
+    if (currentFeedTaskId) {
+      const stillExists = tasks.some((t) => t.id === currentFeedTaskId);
+      if (!stillExists) {
+        currentFeedTaskId = null;
+        currentFeedTaskStatus = null;
+      }
+    }
+  });
+
   // Register commands
   context.subscriptions.push(
     treeView,
@@ -59,47 +118,59 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     // Click task in tree → show feed + open terminal
-    vscode.commands.registerCommand("workermill.selectTask", (task: { id: string; summary: string; status: string; persona?: string; model?: string; repo?: string; startedAt: string }) => {
-      // Load coordination feed in the sidebar
-      feedView.showTask(task);
-      // Open log terminal for this task
-      logManager.openLogs(task.id, task.summary);
-    }),
+    vscode.commands.registerCommand(
+      "workermill.selectTask",
+      (task: TaskInfo) => {
+        feedView.showTask(task);
+        currentFeedTaskId = task.id;
+        currentFeedTaskStatus = task.status;
+        logManager.openLogs(task.id, task.summary);
+      },
+    ),
 
     vscode.commands.registerCommand("workermill.showTeamPanel", () => {
       vscode.commands.executeCommand("workermill.teamPanel.focus");
     }),
 
     // Run a Jira issue from the tree view (inline play button)
-    vscode.commands.registerCommand("workermill.runIssue", async (issueItem?: { issue?: { key: string; summary: string } }) => {
-      if (!client.isConnected()) {
-        vscode.window.showErrorMessage("WorkerMill agent is not running. Start with: workermill-agent start");
-        return;
-      }
+    vscode.commands.registerCommand(
+      "workermill.runIssue",
+      async (issueItem?: { issue?: { key: string; summary: string } }) => {
+        if (!client.isConnected()) {
+          vscode.window.showErrorMessage(
+            "WorkerMill agent is not running. Start with: workermill-agent start",
+          );
+          return;
+        }
 
-      const issueKey = issueItem?.issue?.key;
-      if (!issueKey) return;
+        const issueKey = issueItem?.issue?.key;
+        if (!issueKey) return;
 
-      const confirm = await vscode.window.showInformationMessage(
-        `Run "${issueKey}: ${issueItem.issue.summary}" with WorkerMill?`,
-        "Run",
-        "Cancel",
-      );
-      if (confirm !== "Run") return;
+        const confirm = await vscode.window.showInformationMessage(
+          `Run "${issueKey}: ${issueItem?.issue?.summary}" with WorkerMill?`,
+          "Run",
+          "Cancel",
+        );
+        if (confirm !== "Run") return;
 
-      try {
-        await client.runIssue(issueKey);
-        vscode.window.showInformationMessage(`WorkerMill: ${issueKey} submitted`);
-        treeProvider.refresh();
-      } catch (err) {
-        vscode.window.showErrorMessage(`Failed to run issue: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }),
+        try {
+          await client.runIssue(issueKey);
+          vscode.window.showInformationMessage(`WorkerMill: ${issueKey} submitted`);
+          treeProvider.refresh();
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed to run issue: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      },
+    ),
 
     // Search and run via quick pick (command palette)
     vscode.commands.registerCommand("workermill.runTask", async () => {
       if (!client.isConnected()) {
-        vscode.window.showErrorMessage("WorkerMill agent is not running. Start with: workermill-agent start");
+        vscode.window.showErrorMessage(
+          "WorkerMill agent is not running. Start with: workermill-agent start",
+        );
         return;
       }
 
@@ -120,7 +191,66 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.window.showWarningMessage("Please enter a valid ticket key (e.g., OCS-142)");
         }
       } catch (err) {
-        vscode.window.showErrorMessage(`Failed to create task: ${err instanceof Error ? err.message : String(err)}`);
+        vscode.window.showErrorMessage(
+          `Failed to create task: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }),
+
+    // Search Jira issues and run from QuickPick
+    vscode.commands.registerCommand("workermill.searchIssues", async () => {
+      if (!client.isConnected()) {
+        vscode.window.showErrorMessage("WorkerMill agent is not running.");
+        return;
+      }
+
+      // Step 1: Get search text
+      const query = await vscode.window.showInputBox({
+        prompt: "Search issues in your issue tracker",
+        placeHolder: "e.g. dark mode, authentication, OCS-142...",
+      });
+      if (query === undefined) return; // cancelled
+
+      // Step 2: Search
+      const results = await treeProvider.searchIssues(query || undefined);
+      if (results.length === 0) {
+        vscode.window.showInformationMessage(
+          query ? `No issues found for "${query}".` : "No issues found.",
+        );
+        return;
+      }
+
+      // Step 3: Show results in QuickPick
+      const items = results.map((i) => ({
+        label: `${i.key}: ${i.summary}`,
+        description: i.status || "",
+        detail: [i.issueType, i.priority, i.assignee?.displayName].filter(Boolean).join(" | "),
+        issue: i,
+      }));
+
+      const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: `${results.length} issues found — select to run`,
+        matchOnDescription: true,
+        matchOnDetail: true,
+      });
+
+      if (!selected) return;
+
+      const confirm = await vscode.window.showInformationMessage(
+        `Run "${selected.issue.key}: ${selected.issue.summary}" with WorkerMill?`,
+        "Run",
+        "Cancel",
+      );
+      if (confirm !== "Run") return;
+
+      try {
+        await client.runIssue(selected.issue.key);
+        vscode.window.showInformationMessage(`WorkerMill: ${selected.issue.key} submitted`);
+        treeProvider.refresh();
+      } catch (err) {
+        vscode.window.showErrorMessage(
+          `Failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }),
 
@@ -139,12 +269,24 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        const selected = activeTasks.length === 1
-          ? activeTasks[0]
-          : await vscode.window.showQuickPick(
-              activeTasks.map((t) => ({ label: t.summary, description: t.persona || "", detail: t.id, task: t })),
-              { placeHolder: "Select a task to message" },
-            ).then((item) => item ? (item as unknown as { task: typeof activeTasks[0] }).task : undefined);
+        const selected =
+          activeTasks.length === 1
+            ? activeTasks[0]
+            : await vscode.window
+                .showQuickPick(
+                  activeTasks.map((t) => ({
+                    label: t.summary,
+                    description: t.persona || "",
+                    detail: t.id,
+                    task: t,
+                  })),
+                  { placeHolder: "Select a task to message" },
+                )
+                .then((item) =>
+                  item
+                    ? (item as unknown as { task: (typeof activeTasks)[0] }).task
+                    : undefined,
+                );
 
         if (!selected) return;
 
@@ -158,7 +300,9 @@ export function activate(context: vscode.ExtensionContext): void {
         await client.talkToWorker(selected.id, message);
         vscode.window.showInformationMessage("Message sent to worker.");
       } catch (err) {
-        vscode.window.showErrorMessage(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+        vscode.window.showErrorMessage(
+          `Failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }),
 
@@ -170,25 +314,41 @@ export function activate(context: vscode.ExtensionContext): void {
 
       try {
         const tasks = await client.getTasks();
-        const activeTasks = tasks.filter((t) => t.status === "running" || t.status === "planning");
+        const activeTasks = tasks.filter(
+          (t) => t.status === "running" || t.status === "planning",
+        );
 
         if (activeTasks.length === 0) {
           vscode.window.showInformationMessage("No active tasks.");
           return;
         }
 
-        const selected = activeTasks.length === 1
-          ? activeTasks[0]
-          : await vscode.window.showQuickPick(
-              activeTasks.map((t) => ({ label: t.summary, description: t.status, detail: t.id, task: t })),
-              { placeHolder: "Select a task to view logs" },
-            ).then((item) => item ? (item as unknown as { task: typeof activeTasks[0] }).task : undefined);
+        const selected =
+          activeTasks.length === 1
+            ? activeTasks[0]
+            : await vscode.window
+                .showQuickPick(
+                  activeTasks.map((t) => ({
+                    label: t.summary,
+                    description: t.status,
+                    detail: t.id,
+                    task: t,
+                  })),
+                  { placeHolder: "Select a task to view logs" },
+                )
+                .then((item) =>
+                  item
+                    ? (item as unknown as { task: (typeof activeTasks)[0] }).task
+                    : undefined,
+                );
 
         if (!selected) return;
 
         logManager.openLogs(selected.id, selected.summary);
       } catch (err) {
-        vscode.window.showErrorMessage(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+        vscode.window.showErrorMessage(
+          `Failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }),
 
@@ -229,16 +389,21 @@ export function activate(context: vscode.ExtensionContext): void {
           }
         }
       } catch (err) {
-        vscode.window.showErrorMessage(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+        vscode.window.showErrorMessage(
+          `Failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }),
 
     // Open live code changes panel for a running task (eye icon in tree)
-    vscode.commands.registerCommand("workermill.openLiveDiff", (treeItem?: { task?: { id: string; summary: string; status: string } }) => {
-      const task = treeItem?.task;
-      if (!task?.id || !client.isConnected()) return;
-      LiveDiffPanel.createOrShow(client, task as any);
-    }),
+    vscode.commands.registerCommand(
+      "workermill.openLiveDiff",
+      (treeItem?: { task?: { id: string; summary: string; status: string } }) => {
+        const task = treeItem?.task;
+        if (!task?.id || !client.isConnected()) return;
+        LiveDiffPanel.createOrShow(client, task as any);
+      },
+    ),
   );
 
   // Connect to agent

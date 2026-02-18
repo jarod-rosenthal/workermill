@@ -487,7 +487,7 @@ export default function TaskLifecycle() {
             Workflow Modes
           </h2>
           <p className="text-muted-foreground mt-2">
-            Control how WorkerMill processes your tasks using <strong className="text-foreground">Jira labels</strong>.
+            Control how WorkerMill processes your tasks using <strong className="text-foreground">issue tracker labels</strong> (Jira, Linear, GitHub Issues).
             The <code className="px-1.5 py-0.5 bg-muted rounded text-sm">workermill</code> label is required.
             Add other labels to change the workflow.
           </p>
@@ -543,7 +543,7 @@ export default function TaskLifecycle() {
           <div className="p-4 border-b border-border bg-muted/30">
             <h3 className="font-semibold text-foreground flex items-center gap-2">
               <Tag className="w-4 h-4" />
-              Jira Label Reference
+              Label Reference
             </h3>
           </div>
           <div className="overflow-x-auto">

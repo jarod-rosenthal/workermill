@@ -357,7 +357,7 @@ export default function Integrations() {
               <ul className="space-y-2">
                 {[
                   "Configure BitBucket in Settings → Integrations",
-                  "Add app password with repository write access",
+                  "Add Repository Access Token with repository write access",
                   "Set up webhook to /api/webhooks/bitbucket",
                   "Works with Jira for end-to-end Atlassian workflow",
                 ].map((item, i) => (
@@ -583,7 +583,7 @@ export default function Integrations() {
         </div>
       </section>
 
-      {/* OnCallShift Integration */}
+      {/* Incident Management Integration */}
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
           <Shield className="w-5 h-5 text-red-500" />
@@ -594,10 +594,10 @@ export default function Integrations() {
             <div className="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center">
               <Shield className="w-5 h-5 text-red-500" />
             </div>
-            <h3 className="text-lg font-semibold text-foreground">OnCallShift</h3>
+            <h3 className="text-lg font-semibold text-foreground">Incident Response</h3>
           </div>
           <p className="text-muted-foreground">
-            Connect WorkerMill with OnCallShift for intelligent incident response. AI workers can
+            Connect WorkerMill with your incident management platform for intelligent incident response. AI workers can
             automatically investigate alerts, create fix PRs, and coordinate with on-call engineers.
           </p>
 
@@ -623,7 +623,7 @@ export default function Integrations() {
               <h4 className="text-sm font-medium text-foreground mb-3">Setup</h4>
               <ul className="space-y-2">
                 {[
-                  "OnCallShift API key",
+                  "Incident platform API key",
                   "Service mapping configuration",
                   "Runbook integration (optional)",
                   "Escalation policy linking",

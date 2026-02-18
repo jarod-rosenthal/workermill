@@ -26,7 +26,7 @@ const cliCommands = [
   {
     command: "workermill-agent setup",
     description:
-      "Interactive wizard that checks prerequisites, installs Claude CLI if needed, validates your API key, and pulls the worker Docker image.",
+      "Interactive wizard that checks prerequisites, installs Claude CLI if needed, validates your API key, and configures SCM tokens.",
   },
   {
     command: "workermill-agent start",
@@ -54,18 +54,13 @@ const cliCommands = [
       "Live-tail agent logs (like tail -f). Use -n to control how many lines to show initially.",
   },
   {
-    command: "workermill-agent pull",
+    command: "workermill-agent update",
     description:
-      "Pull the latest worker Docker image from the registry.",
+      "Self-update the agent binary to the latest version from GitHub Releases.",
   },
 ];
 
 const troubleshootingItems = [
-  {
-    problem: "Docker is not running",
-    solution:
-      "Start Docker Desktop and wait for it to fully initialize. On Windows, ensure Docker is in Linux containers mode (right-click the Docker tray icon).",
-  },
   {
     problem: "Authentication failed (401)",
     solution:
@@ -77,9 +72,9 @@ const troubleshootingItems = [
       "On Windows, winget updates PATH but the current terminal doesn't see it. Close your terminal, open a new one, and try again.",
   },
   {
-    problem: "Worker container killed (exit 137)",
+    problem: "Worker process killed unexpectedly",
     solution:
-      "The container ran out of memory. Ensure Docker Desktop has at least 6 GB of RAM allocated (Settings > Resources).",
+      "The worker ran out of memory. Ensure your machine has at least 8 GB of RAM available for worker processes.",
   },
   {
     problem: "Agent shows online but no tasks are picked up",
@@ -127,8 +122,8 @@ export default function LocalAgent() {
           </div>
           <h3 className="font-semibold text-foreground">Your Infrastructure</h3>
           <p className="text-sm text-muted-foreground">
-            Code stays on your machine. Workers run in isolated Docker
-            containers with no external access to your filesystem.
+            Code stays on your machine. Workers run as isolated native
+            processes with no external access to your filesystem.
           </p>
         </div>
         <div className="bg-card border border-border rounded-xl p-5 space-y-2">
@@ -231,28 +226,6 @@ export default function LocalAgent() {
               <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
               <div>
                 <span className="text-sm font-medium text-foreground">
-                  Docker Desktop
-                </span>
-                <p className="text-xs text-muted-foreground">
-                  Linux containers mode required on Windows
-                </p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3">
-              <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-              <div>
-                <span className="text-sm font-medium text-foreground">
-                  Node.js 20+
-                </span>
-                <p className="text-xs text-muted-foreground">
-                  Required for the agent CLI
-                </p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3">
-              <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-              <div>
-                <span className="text-sm font-medium text-foreground">
                   Claude Max subscription
                 </span>
                 <p className="text-xs text-muted-foreground">
@@ -264,15 +237,16 @@ export default function LocalAgent() {
               <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
               <div>
                 <span className="text-sm font-medium text-foreground">
-                  Git for Windows
+                  Git
                 </span>
                 <p className="text-xs text-muted-foreground">
-                  Windows only — provides Git Bash for Claude CLI
+                  Required for repository operations and Claude CLI
                 </p>
               </div>
             </div>
           </div>
           <p className="text-xs text-muted-foreground mt-4">
+            The agent is a standalone binary — no Docker or Node.js required.
             The setup wizard checks all prerequisites and installs Claude CLI
             automatically if missing.
           </p>
@@ -303,16 +277,16 @@ export default function LocalAgent() {
                   </span>
                 </div>
                 <p className="text-muted-foreground mb-4">
-                  Install the WorkerMill agent globally via npm.
+                  Install the WorkerMill agent. No Node.js required — it's a standalone binary.
                 </p>
                 <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
                   <code className="text-foreground">
-                    npm install -g @workermill/agent
+                    curl -fsSL https://workermill.com/install.sh | bash
                   </code>
                   <button
                     onClick={() =>
                       copyToClipboard(
-                        "npm install -g @workermill/agent",
+                        "curl -fsSL https://workermill.com/install.sh | bash",
                         "install",
                       )
                     }
@@ -370,16 +344,13 @@ export default function LocalAgent() {
                   </p>
                   <div className="bg-muted/30 rounded-lg p-4 font-mono text-xs space-y-1.5">
                     <div className="text-green-500">
-                      ✓ Docker (27.5.1)
-                    </div>
-                    <div className="text-green-500">
                       ✓ Claude CLI (1.0.22)
                     </div>
                     <div className="text-green-500">
                       ✓ Claude authenticated
                     </div>
                     <div className="text-green-500">
-                      ✓ Node.js (v22.14.0)
+                      ✓ Git available
                     </div>
                     <div className="text-muted-foreground mt-2">
                       Configuration
@@ -398,12 +369,6 @@ export default function LocalAgent() {
                     </div>
                     <div className="text-muted-foreground">
                       ? Agent name: agent-workstation
-                    </div>
-                    <div className="text-muted-foreground mt-2">
-                      Pulling worker image (~1.1 GB)...
-                    </div>
-                    <div className="text-green-500">
-                      ✓ Worker image pulled
                     </div>
                     <div className="text-green-500 mt-2 font-bold">
                       Setup complete!
@@ -497,7 +462,7 @@ export default function LocalAgent() {
                   </div>
                   <div className="text-muted-foreground">
                     &nbsp; Model:&nbsp;&nbsp;&nbsp;&nbsp;{" "}
-                    <span className="text-yellow-500">claude-sonnet-4-20250514</span>
+                    <span className="text-yellow-500">claude-sonnet-4-6</span>
                   </div>
                   <div className="text-muted-foreground">
                     &nbsp; ─────────────────────────────────────
@@ -550,7 +515,7 @@ export default function LocalAgent() {
                   </li>
                   <li>
                     Watch the agent terminal — it will claim the task and spawn a
-                    Docker worker
+                    worker process
                   </li>
                   <li>
                     Monitor progress on the dashboard with real-time log
@@ -607,12 +572,12 @@ export default function LocalAgent() {
               </div>
               <div>
                 <h4 className="font-medium text-foreground">
-                  3. Workers execute in Docker
+                  3. Workers execute as native processes
                 </h4>
                 <p className="text-sm text-muted-foreground">
-                  Each story spawns an isolated Docker container running the
-                  WorkerMill worker image. Workers clone your repository, make
-                  changes, and create pull requests — all inside the container.
+                  Each story spawns an isolated native process running Claude CLI.
+                  Workers clone your repository, make changes, and create pull
+                  requests — all on your machine.
                 </p>
               </div>
             </div>
@@ -625,7 +590,7 @@ export default function LocalAgent() {
                   4. Logs stream to the cloud
                 </h4>
                 <p className="text-sm text-muted-foreground">
-                  Worker containers post logs and status updates directly to the
+                  Worker processes post logs and status updates directly to the
                   WorkerMill API. You see everything in real-time on the
                   dashboard — identical to cloud-hosted workers.
                 </p>
@@ -651,8 +616,8 @@ export default function LocalAgent() {
   │         │ spawns                                    │
   │         ▼                                           │
   │  ┌──────────────┐  ┌──────────────┐                 │
-  │  │  Docker      │  │  Docker      │  ...            │
-  │  │  Worker 1    │  │  Worker 2    │                 │
+  │  │  Worker 1    │  │  Worker 2    │  ...            │
+  │  │  (process)   │  │  (process)   │                 │
   │  └──────┬───────┘  └──────┬───────┘                 │
   └─────────┼─────────────────┼─────────────────────────┘
             │                 │
@@ -736,8 +701,7 @@ export default function LocalAgent() {
     "github": "ghp_xxxxxxxxxxxx",
     "bitbucket": "",
     "gitlab": ""
-  },
-  "workerImage": "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest"
+  }
 }`}</pre>
           </div>
           <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -782,7 +746,7 @@ export default function LocalAgent() {
                     <code className="text-xs">maxWorkers</code>
                   </td>
                   <td className="px-4 py-2.5 text-muted-foreground text-xs">
-                    Max parallel Docker containers (can be overridden by cloud settings)
+                    Max parallel worker processes (can be overridden by cloud settings)
                   </td>
                 </tr>
                 <tr>
@@ -791,14 +755,6 @@ export default function LocalAgent() {
                   </td>
                   <td className="px-4 py-2.5 text-muted-foreground text-xs">
                     SCM personal access tokens — set the one matching your org's provider
-                  </td>
-                </tr>
-                <tr>
-                  <td className="px-4 py-2.5">
-                    <code className="text-xs">workerImage</code>
-                  </td>
-                  <td className="px-4 py-2.5 text-muted-foreground text-xs">
-                    Docker image used for worker containers (updated automatically)
                   </td>
                 </tr>
               </tbody>
@@ -821,15 +777,14 @@ export default function LocalAgent() {
             </h3>
             <ul className="text-sm text-muted-foreground space-y-1.5 list-disc list-inside">
               <li>
-                Docker Desktop must be in{" "}
-                <strong className="text-foreground">
-                  Linux containers mode
-                </strong>{" "}
-                (right-click Docker tray icon to switch)
-              </li>
-              <li>
                 Git for Windows is required — Claude CLI needs Git Bash to
                 function
+              </li>
+              <li>
+                Install via PowerShell:{" "}
+                <code className="bg-muted px-1 py-0.5 rounded text-xs">
+                  irm https://workermill.com/install.ps1 | iex
+                </code>
               </li>
               <li>
                 Claude CLI is installed via{" "}
@@ -848,8 +803,10 @@ export default function LocalAgent() {
             </h3>
             <ul className="text-sm text-muted-foreground space-y-1.5 list-disc list-inside">
               <li>
-                Docker Desktop recommended. Allocate at least 6 GB RAM in
-                Docker Settings &gt; Resources
+                Install via:{" "}
+                <code className="bg-muted px-1 py-0.5 rounded text-xs">
+                  curl -fsSL https://workermill.com/install.sh | bash
+                </code>
               </li>
               <li>
                 Claude CLI installed via Homebrew (
@@ -867,21 +824,16 @@ export default function LocalAgent() {
             </h3>
             <ul className="text-sm text-muted-foreground space-y-1.5 list-disc list-inside">
               <li>
-                Docker Engine or Docker Desktop. If using WSL, Docker Desktop
-                with WSL integration is recommended
+                Install via:{" "}
+                <code className="bg-muted px-1 py-0.5 rounded text-xs">
+                  curl -fsSL https://workermill.com/install.sh | bash
+                </code>
               </li>
               <li>
                 Claude CLI installed via{" "}
                 <code className="bg-muted px-1 py-0.5 rounded text-xs">
                   curl -fsSL https://claude.ai/install.sh | bash
                 </code>
-              </li>
-              <li>
-                Ensure your user is in the{" "}
-                <code className="bg-muted px-1 py-0.5 rounded text-xs">
-                  docker
-                </code>{" "}
-                group to run containers without sudo
               </li>
             </ul>
           </div>
@@ -918,16 +870,16 @@ export default function LocalAgent() {
         <div className="bg-card border border-border rounded-xl p-6 space-y-4">
           <div>
             <h3 className="font-medium text-foreground mb-2">
-              Update the agent CLI
+              Update the agent
             </h3>
             <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
               <code className="text-foreground">
-                npm update -g @workermill/agent
+                workermill-agent update
               </code>
               <button
                 onClick={() =>
                   copyToClipboard(
-                    "npm update -g @workermill/agent",
+                    "workermill-agent update",
                     "update-cli",
                   )
                 }
@@ -940,30 +892,8 @@ export default function LocalAgent() {
                 )}
               </button>
             </div>
-          </div>
-          <div>
-            <h3 className="font-medium text-foreground mb-2">
-              Update the worker image
-            </h3>
-            <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
-              <code className="text-foreground">workermill-agent pull</code>
-              <button
-                onClick={() =>
-                  copyToClipboard("workermill-agent pull", "update-image")
-                }
-                className="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {copied === "update-image" ? (
-                  <CheckCircle className="w-4 h-4 text-green-500" />
-                ) : (
-                  <Copy className="w-4 h-4" />
-                )}
-              </button>
-            </div>
             <p className="text-xs text-muted-foreground mt-2">
-              The agent also auto-pulls the image on{" "}
-              <code className="bg-muted px-1 py-0.5 rounded">start</code> if
-              it's not found locally.
+              Self-updates the agent binary from GitHub Releases to the latest version.
             </p>
           </div>
         </div>

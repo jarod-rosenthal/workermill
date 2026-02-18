@@ -11,6 +11,7 @@ import { logger } from "../../utils/logger.js";
 import { logTaskCreated } from "../../services/audit.js";
 import { trackLegacyWebhookUsage } from "../../services/legacy-webhook-alert.js";
 import { syncIssueRelationships } from "../../services/task-relationship-sync.js";
+import { KbCard } from "../../models/KbCard.js";
 import { fetchLinearIssue } from "../../utils/linear.js";
 import { body, validateRequest } from "../../middleware/validation.js";
 import {
@@ -254,6 +255,22 @@ router.post(
       return;
     }
 
+    // PRD dedup: skip task creation if this issue was created by PRD decomposition
+    const boardCardRepo = AppDataSource.getRepository(KbCard);
+    const prdCard = await boardCardRepo
+      .createQueryBuilder("card")
+      .innerJoin("card.board", "board")
+      .where("board.orgId = :orgId", { orgId: org.id })
+      .andWhere("board.prd_content IS NOT NULL")
+      .andWhere("card.title = :title", { title })
+      .getOne();
+
+    if (prdCard) {
+      logger.info("Linear webhook: skipping PRD-synced ticket", { issueIdentifier, title });
+      res.json({ status: "ignored", reason: "PRD-managed ticket" });
+      return;
+    }
+
     // Check for repo override label (e.g., "repo:astrofog")
     // If repo doesn't include owner (no "/"), prepend owner from defaultGithubRepo
     const repoLabel = labelNames.find((l: string) => l.startsWith("repo:"));
@@ -471,6 +488,22 @@ router.post(
 
       if (existingTask && existingTask.status === "cancelled") {
         res.json({ status: "ignored", reason: "Task cancelled" });
+        return;
+      }
+
+      // PRD dedup: skip task creation if this issue was created by PRD decomposition
+      const boardCardRepo = AppDataSource.getRepository(KbCard);
+      const prdCard = await boardCardRepo
+        .createQueryBuilder("card")
+        .innerJoin("card.board", "board")
+        .where("board.orgId = :orgId", { orgId: org.id })
+        .andWhere("board.prd_content IS NOT NULL")
+        .andWhere("card.title = :title", { title })
+        .getOne();
+
+      if (prdCard) {
+        logger.info("Linear webhook: skipping PRD-synced ticket", { issueIdentifier, title });
+        res.json({ status: "ignored", reason: "PRD-managed ticket" });
         return;
       }
 

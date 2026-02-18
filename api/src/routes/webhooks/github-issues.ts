@@ -10,6 +10,7 @@ import { inferPersonaFromJiraIssue } from "../../services/persona-inference.js";
 import { logger } from "../../utils/logger.js";
 import { logTaskCreated } from "../../services/audit.js";
 import { trackLegacyWebhookUsage } from "../../services/legacy-webhook-alert.js";
+import { KbCard } from "../../models/KbCard.js";
 import {
   body,
   header,
@@ -259,6 +260,22 @@ router.post(
       return;
     }
 
+    // PRD dedup: skip task creation if this issue was created by PRD decomposition
+    const boardCardRepo = AppDataSource.getRepository(KbCard);
+    const prdCard = await boardCardRepo
+      .createQueryBuilder("card")
+      .innerJoin("card.board", "board")
+      .where("board.orgId = :orgId", { orgId: org.id })
+      .andWhere("board.prd_content IS NOT NULL")
+      .andWhere("card.title = :title", { title })
+      .getOne();
+
+    if (prdCard) {
+      logger.info("GitHub Issues webhook: skipping PRD-synced ticket", { issueKey, title });
+      res.json({ status: "ignored", reason: "PRD-managed ticket" });
+      return;
+    }
+
     // Check for repo override label (e.g., "repo:astrofog")
     // For GitHub Issues: label override > issue's repo > org default
     // If repo doesn't include owner (no "/"), prepend owner from defaultGithubRepo
@@ -480,6 +497,22 @@ router.post(
 
       if (existingTask && existingTask.status === "cancelled") {
         res.json({ status: "ignored", reason: "Task cancelled" });
+        return;
+      }
+
+      // PRD dedup: skip task creation if this issue was created by PRD decomposition
+      const boardCardRepo = AppDataSource.getRepository(KbCard);
+      const prdCard = await boardCardRepo
+        .createQueryBuilder("card")
+        .innerJoin("card.board", "board")
+        .where("board.orgId = :orgId", { orgId: org.id })
+        .andWhere("board.prd_content IS NOT NULL")
+        .andWhere("card.title = :title", { title })
+        .getOne();
+
+      if (prdCard) {
+        logger.info("GitHub Issues webhook: skipping PRD-synced ticket", { issueKey, title });
+        res.json({ status: "ignored", reason: "PRD-managed ticket" });
         return;
       }
 

@@ -382,6 +382,21 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
+  // POST /api/prd/build — decompose PRD via cloud API
+  if (req.method === "POST" && path === "/api/prd/build") {
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const body = JSON.parse(await readBody(req));
+      const result = await cloudProxy("POST", "/api/prd/decompose", body);
+      return json(res, result, 201);
+    } catch (err: unknown) {
+      const e = err as { status?: number; data?: unknown; message?: string };
+      const status = e.status || 500;
+      if (e.data) return json(res, e.data, status);
+      return json(res, { error: e.message || String(err) }, status);
+    }
+  }
+
   // POST /api/tasks/:id/talk — send message to worker
   const talkMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/talk$/);
   if (req.method === "POST" && talkMatch) {

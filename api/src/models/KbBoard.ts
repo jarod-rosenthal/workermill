@@ -36,6 +36,15 @@ export class KbBoard {
   @Column({ type: "varchar", length: 50, nullable: true })
   template: string | null;
 
+  @Column({ name: "prd_content", type: "text", nullable: true })
+  prdContent: string | null;
+
+  @Column({ name: "prd_source", type: "varchar", length: 20, nullable: true })
+  prdSource: string | null;
+
+  @Column({ name: "github_repo", type: "varchar", length: 255, nullable: true })
+  githubRepo: string | null;
+
   @Column({ type: "varchar", length: 10 })
   prefix: string;
 

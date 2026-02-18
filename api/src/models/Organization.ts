@@ -396,6 +396,9 @@ export class Organization {
   @Column({ name: "remote_agent_only", type: "boolean", default: false })
   remoteAgentOnly: boolean; // When true, cloud ECS will never pick up tasks — only remote agents
 
+  @Column({ name: "prd_auto_run", type: "boolean", default: false })
+  prdAutoRun: boolean;
+
   @Column({
     name: "default_email_preferences",
     type: "jsonb",

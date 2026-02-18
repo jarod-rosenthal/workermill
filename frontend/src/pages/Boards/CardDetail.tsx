@@ -488,6 +488,44 @@ export default function CardDetail({
                 </div>
               )}
 
+              {/* Dependencies */}
+              {card.dependencies && card.dependencies.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-xs font-medium text-gray-400 uppercase mb-2">
+                    Depends on
+                  </h4>
+                  <div className="flex flex-wrap gap-1.5">
+                    {card.dependencies.map((dep) => (
+                      <span
+                        key={dep.cardId}
+                        className="px-2 py-0.5 bg-gray-700 rounded text-xs text-gray-300"
+                      >
+                        {dep.title}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Dependents */}
+              {card.dependents && card.dependents.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-xs font-medium text-gray-400 uppercase mb-2">
+                    Blocks
+                  </h4>
+                  <div className="flex flex-wrap gap-1.5">
+                    {card.dependents.map((dep) => (
+                      <span
+                        key={dep.cardId}
+                        className="px-2 py-0.5 bg-gray-700 rounded text-xs text-gray-300"
+                      >
+                        {dep.title}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Checklist */}
               <div>
                 <div className="flex items-center justify-between mb-2">

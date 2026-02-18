@@ -1,5 +1,5 @@
 const stats = [
-  { value: "105", label: "Stories shipped in one build (OnCallShift)" },
+  { value: "105", label: "Stories shipped in a single epic build" },
   { value: "$142", label: "Total cost for a full platform rebuild" },
   { value: "18hrs", label: "From spec to production-ready code" },
   { value: "24/7", label: "Executes your backlog while you sleep" },

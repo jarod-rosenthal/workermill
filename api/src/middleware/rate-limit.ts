@@ -2,6 +2,17 @@ import rateLimit from "express-rate-limit";
 import { logger } from "../utils/logger.js";
 
 /**
+ * Extract a user/org-scoped key for rate limiting.
+ * Falls back to IP when no auth context is available.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function userOrgKey(req: any): string {
+  if (req.user?.id) return `user:${req.user.id}`;
+  if (req.organization?.id) return `org:${req.organization.id}`;
+  return req.ip || "unknown";
+}
+
+/**
  * Rate limiter for webhook endpoints (Jira, GitHub, Linear)
  * 100 requests per minute per IP
  * These are public endpoints that receive external service calls
@@ -24,11 +35,12 @@ export const webhookLimiter = rateLimit({
 
 /**
  * Rate limiter for authenticated API endpoints
- * 200 requests per minute per IP (higher since they require authentication)
+ * 200 requests per minute per user/org (keyed by authenticated identity)
  */
 export const authenticatedLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 200,
+  keyGenerator: userOrgKey,
   message: { error: "Too many requests, please try again later" },
   standardHeaders: true,
   legacyHeaders: false,
@@ -55,6 +67,27 @@ export const strictLimiter = rateLimit({
   legacyHeaders: false,
   handler: (req, res, _next, options) => {
     logger.warn("Strict rate limit exceeded", {
+      ip: req.ip,
+      path: req.path,
+      method: req.method,
+    });
+    res.status(options.statusCode).json(options.message);
+  },
+});
+
+/**
+ * Rate limiter for task creation — prevents abuse of the free tier
+ * 20 tasks per hour per user/org
+ */
+export const taskCreationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 20,
+  keyGenerator: userOrgKey,
+  message: { error: "Task creation rate limit exceeded. Try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res, _next, options) => {
+    logger.warn("Task creation rate limit exceeded", {
       ip: req.ip,
       path: req.path,
       method: req.method,

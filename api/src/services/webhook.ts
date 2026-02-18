@@ -70,15 +70,19 @@ export async function verifyWebhookBySlug(
   const orgRepo = AppDataSource.getRepository(Organization);
   const endpointRepo = AppDataSource.getRepository(WebhookEndpoint);
 
+  // Use a generic error for all verification failures to prevent org enumeration.
+  // Attackers must not be able to distinguish "org doesn't exist" from "bad signature".
+  const genericFailure: WebhookVerificationResult = {
+    success: false,
+    error: "Webhook verification failed",
+    statusCode: 404,
+  };
+
   // 1. Find org by slug
   const org = await orgRepo.findOne({ where: { slug: orgSlug } });
   if (!org) {
     logger.warn("Webhook org not found by slug", { orgSlug, integrationType });
-    return {
-      success: false,
-      error: "Organization not found",
-      statusCode: 404,
-    };
+    return genericFailure;
   }
 
   // 2. Get webhook endpoint config for this org + integration
@@ -92,11 +96,7 @@ export async function verifyWebhookBySlug(
       orgSlug,
       integrationType,
     });
-    return {
-      success: false,
-      error: "Webhook not configured for this organization",
-      statusCode: 404,
-    };
+    return genericFailure;
   }
 
   // 3. Verify signature (unless explicitly disabled for testing)
@@ -112,11 +112,7 @@ export async function verifyWebhookBySlug(
           orgSlug,
           integrationType,
         });
-        return {
-          success: false,
-          error: "Invalid webhook token",
-          statusCode: 401,
-        };
+        return genericFailure;
       }
     } else {
       // Use HMAC verification for Jira, GitHub, Linear, BitBucket, Email
@@ -128,11 +124,7 @@ export async function verifyWebhookBySlug(
           signatureHeader,
           receivedSignaturePrefix: signature?.substring(0, 20) + "...",
         });
-        return {
-          success: false,
-          error: "Invalid webhook signature",
-          statusCode: 401,
-        };
+        return genericFailure;
       }
     }
   }

@@ -613,7 +613,7 @@ router.get(
         order: { position: "ASC" },
       });
 
-      // Load cards with labels, checklist items, and worker task
+      // Load cards with labels, checklist items, worker task, and dependencies
       const cardRepo = AppDataSource.getRepository(KbCard);
       const cards = await cardRepo
         .createQueryBuilder("card")
@@ -622,6 +622,10 @@ router.get(
         .leftJoinAndSelect("cardLabels.label", "label")
         .leftJoinAndSelect("card.checklistItems", "checklist")
         .leftJoinAndSelect("card.workerTask", "workerTask")
+        .leftJoinAndSelect("card.dependencies", "dependencies")
+        .leftJoinAndSelect("dependencies.dependsOnCard", "depCard")
+        .leftJoinAndSelect("card.dependents", "dependents")
+        .leftJoinAndSelect("dependents.card", "depByCard")
         .orderBy("card.position", "ASC")
         .getMany();
 
@@ -654,6 +658,9 @@ router.get(
           description: board.description,
           position: board.position,
           template: board.template,
+          prdContent: board.prdContent,
+          prdSource: board.prdSource,
+          githubRepo: board.githubRepo,
           isStarred: !!star,
           createdAt: board.createdAt,
           updatedAt: board.updatedAt,
@@ -694,6 +701,14 @@ router.get(
                 position: item.position,
                 createdAt: item.createdAt,
               })) || [],
+              dependencies: (card.dependencies || []).map((d) => ({
+                cardId: d.dependsOnCardId,
+                title: d.dependsOnCard?.title || null,
+              })),
+              dependents: (card.dependents || []).map((d) => ({
+                cardId: d.cardId,
+                title: d.card?.title || null,
+              })),
               commentCount: commentCountMap.get(card.id) || 0,
               createdAt: card.createdAt,
               updatedAt: card.updatedAt,
@@ -1500,6 +1515,25 @@ router.post(
       const card = await cardRepo.findOne({ where: { id: cardId, boardId } });
       if (!card) {
         res.status(404).json({ error: "Card not found" });
+        return;
+      }
+
+      // Enforce dependencies — block if any dependency card's worker task is not completed/deployed
+      const depRepo = AppDataSource.getRepository(KbCardDependency);
+      const deps = await depRepo.find({
+        where: { cardId },
+        relations: ["dependsOnCard", "dependsOnCard.workerTask"],
+      });
+      const unmetDeps = deps.filter((d) => {
+        const depTask = d.dependsOnCard?.workerTask;
+        return !depTask || !["completed", "deployed"].includes(depTask.status);
+      });
+      if (unmetDeps.length > 0) {
+        const blockers = unmetDeps.map((d) => d.dependsOnCard?.title).join(", ");
+        res.status(409).json({
+          error: `Card is blocked by: ${blockers}`,
+          blockedBy: unmetDeps.map((d) => d.dependsOnCardId),
+        });
         return;
       }
 

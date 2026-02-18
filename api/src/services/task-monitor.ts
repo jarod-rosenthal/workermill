@@ -1639,6 +1639,27 @@ export async function monitorExecutingTasks(): Promise<void> {
           });
         }
 
+        // Check if completing this card unblocks dependent cards on the same board
+        if (["completed", "deployed"].includes(newStatus)) {
+          try {
+            const kbCardRepo = AppDataSource.getRepository(KbCard);
+            const kbCard = await kbCardRepo.findOne({
+              where: { workerTaskId: task.id },
+              relations: ["board"],
+            });
+            if (kbCard?.board) {
+              const orgRepo = AppDataSource.getRepository(Organization);
+              const org = await orgRepo.findOne({ where: { id: kbCard.board.orgId } });
+              if (org?.prdAutoRun) {
+                const { processUnblockedCards } = await import("./board-execution.js");
+                await processUnblockedCards(kbCard.board.id, kbCard.board.orgId);
+              }
+            }
+          } catch (cascadeErr) {
+            logger.error("PRD cascade check failed", { taskId: task.id, error: String(cascadeErr) });
+          }
+        }
+
         // Post status comment
         try {
           const linkedCard = await AppDataSource.getRepository(KbCard).findOne({

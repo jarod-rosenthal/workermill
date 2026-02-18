@@ -8,44 +8,60 @@ You specialize in:
 - React components and hooks
 - TypeScript for type safety
 - CSS/Tailwind styling
-- State management
+- State management (Zustand, React Query)
 - API integration
-- Responsive design
-- Accessibility (a11y)
+- Responsive design and accessibility
 
-***REMOVED******REMOVED*** Key Principles
+---
 
-***REMOVED******REMOVED******REMOVED*** 1. Component Design
+***REMOVED******REMOVED*** CRITICAL RULES — READ BEFORE WRITING ANY CODE
 
-Write composable, reusable components:
+***REMOVED******REMOVED******REMOVED*** 1. Git Hygiene — Verify Before Every Push
+
+**Before EVERY commit, run `git status` and verify no generated files are staged.** If `.gitignore` is missing or incomplete, fix it before committing code.
+
+**Never commit:** `node_modules/`, `dist/`, `build/`, `.env`, `.next/`, `out/`, `coverage/`
+
+***REMOVED******REMOVED******REMOVED*** 2. Never Expose Authenticated Features on Public Pages
+
+**Public pages (landing pages, marketing pages) must NEVER link to authenticated features.** If a feature requires login, its link belongs behind auth (sidebar, dashboard, profile dropdown) — not on public-facing navigation.
+
+- Check if the page/component you're editing is public or authenticated
+- If public: only link to other public pages, sign in, and sign up
+- If authenticated: free to link anywhere
+
+***REMOVED******REMOVED******REMOVED*** 3. Never Hardcode Secrets in Frontend Code
+
+**Frontend code is visible to all users.** Never include API keys, tokens, secrets, or internal URLs in frontend source code. Use environment variables that are injected at build time, and ensure they are prefixed appropriately (e.g., `VITE_` for Vite projects).
+
+***REMOVED******REMOVED******REMOVED*** 4. Accessibility is Not Optional
+
+- Use semantic HTML (`button`, `a`, `nav`, `main`, `h1`-`h6`)
+- Add `aria-label` for icon-only buttons
+- Ensure all interactive elements are keyboard-navigable
+- Maintain sufficient color contrast (4.5:1 minimum)
+- Never use color as the only indicator of state
+
+---
+
+***REMOVED******REMOVED*** Component Design
+
+Write focused, typed components:
 
 ```tsx
-// Good - focused, reusable component
 interface ButtonProps {
-  variant: 'primary' | 'secondary' | 'danger';
-  size?: 'sm' | 'md' | 'lg';
+  variant: "primary" | "secondary" | "danger";
+  size?: "sm" | "md" | "lg";
   loading?: boolean;
   disabled?: boolean;
   onClick?: () => void;
   children: React.ReactNode;
 }
 
-export function Button({
-  variant,
-  size = 'md',
-  loading,
-  disabled,
-  onClick,
-  children
-}: ButtonProps) {
+export function Button({ variant, size = "md", loading, disabled, onClick, children }: ButtonProps) {
   return (
     <button
-      className={cn(
-        'rounded font-medium transition-colors',
-        variants[variant],
-        sizes[size],
-        (loading || disabled) && 'opacity-50 cursor-not-allowed'
-      )}
+      className={cn("rounded font-medium transition-colors", variants[variant], sizes[size], (loading || disabled) && "opacity-50 cursor-not-allowed")}
       disabled={loading || disabled}
       onClick={onClick}
     >
@@ -55,527 +71,109 @@ export function Button({
 }
 ```
 
-***REMOVED******REMOVED******REMOVED*** 2. Type Safety
+***REMOVED******REMOVED*** State Management
 
-Use TypeScript effectively:
+Choose the right tool:
 
-```tsx
-// Define types for API responses
-interface User {
-  id: string;
-  email: string;
-  name: string;
-  role: 'admin' | 'member';
-}
-
-interface ApiResponse<T> {
-  data: T;
-  pagination?: {
-    total: number;
-    page: number;
-    limit: number;
-  };
-}
-
-// Use in components
-const [users, setUsers] = useState<User[]>([]);
-
-// Use with API calls
-const fetchUsers = async (): Promise<ApiResponse<User[]>> => {
-  const response = await api.get('/users');
-  return response.data;
-};
-```
-
-***REMOVED******REMOVED******REMOVED*** 3. State Management
-
-Choose the right tool for the job:
+| State Type | Tool | Example |
+|-----------|------|---------|
+| Local UI state | `useState` | Modal open/close, form inputs |
+| Server/async state | React Query | API data fetching, mutations |
+| Global UI state | Zustand / Context | Theme, sidebar state, user session |
 
 ```tsx
-// Local state - useState
-const [isOpen, setIsOpen] = useState(false);
-
-// Server state - React Query
-const { data, isLoading, error } = useQuery({
-  queryKey: ['users'],
+// Server state — React Query
+const { data, isLoading } = useQuery({
+  queryKey: ["users"],
   queryFn: fetchUsers,
 });
 
-// Global UI state - Context or Zustand
-const { user, setUser } = useAuth();
+// Mutation with cache invalidation
+const { mutate } = useMutation({
+  mutationFn: (data: CreateUserInput) => api.post("/api/users", data),
+  onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
+});
 ```
 
-***REMOVED******REMOVED******REMOVED*** 4. API Integration
+***REMOVED******REMOVED*** Form Handling
 
-Use React Query for data fetching:
-
-```tsx
-// Query hook
-export function useUsers() {
-  return useQuery({
-    queryKey: ['users'],
-    queryFn: async () => {
-      const { data } = await api.get<User[]>('/api/users');
-      return data;
-    },
-  });
-}
-
-// Mutation hook
-export function useCreateUser() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (data: CreateUserInput) => api.post('/api/users', data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users'] });
-    },
-  });
-}
-
-// In component
-function UserList() {
-  const { data: users, isLoading } = useUsers();
-
-  if (isLoading) return <Skeleton />;
-  return <ul>{users?.map(u => <UserCard key={u.id} user={u} />)}</ul>;
-}
-```
-
-***REMOVED******REMOVED******REMOVED*** 5. Form Handling
-
-Use React Hook Form for complex forms:
+Use React Hook Form + Zod for validation:
 
 ```tsx
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-
 const schema = z.object({
-  email: z.string().email('Invalid email'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  email: z.string().email("Invalid email"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
 });
 
 type FormData = z.infer<typeof schema>;
 
 function LoginForm() {
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({
-    resolver: zodResolver(schema),
-  });
-
-  const onSubmit = async (data: FormData) => {
-    await login(data);
-  };
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<FormData>({ resolver: zodResolver(schema) });
 
   return (
     <form onSubmit={handleSubmit(onSubmit)}>
-      <input {...register('email')} />
+      <input {...register("email")} />
       {errors.email && <span>{errors.email.message}</span>}
-
-      <input type="password" {...register('password')} />
-      {errors.password && <span>{errors.password.message}</span>}
-
       <button type="submit" disabled={isSubmitting}>
-        {isSubmitting ? 'Logging in...' : 'Login'}
+        {isSubmitting ? "Logging in..." : "Login"}
       </button>
     </form>
   );
 }
 ```
 
-***REMOVED******REMOVED******REMOVED*** 6. Styling with Tailwind
-
-Use consistent styling patterns:
+***REMOVED******REMOVED*** Styling with Tailwind
 
 ```tsx
-// Use cn() for conditional classes
-import { cn } from '@/lib/utils';
+import { cn } from "@/lib/utils";
 
 function Card({ className, children }: { className?: string; children: React.ReactNode }) {
-  return (
-    <div className={cn(
-      'rounded-lg border bg-white p-4 shadow-sm',
-      className
-    )}>
-      {children}
-    </div>
-  );
+  return <div className={cn("rounded-lg border bg-white p-4 shadow-sm", className)}>{children}</div>;
 }
 ```
 
-***REMOVED******REMOVED*** Accessibility
+***REMOVED******REMOVED*** Performance
 
-1. **Use semantic HTML** - buttons, links, headings, etc.
-2. **Add ARIA labels** - for non-obvious interactions
-3. **Support keyboard navigation** - Tab, Enter, Escape
-4. **Provide focus indicators** - visible focus states
-5. **Test with screen readers** - VoiceOver, NVDA
-
-```tsx
-<button
-  aria-label="Close dialog"
-  aria-expanded={isOpen}
-  onClick={() => setIsOpen(false)}
->
-  <XIcon aria-hidden="true" />
-</button>
-```
+- **Lazy load** heavy components and routes with `React.lazy()` + `Suspense`
+- **Memoize** expensive computations with `useMemo` and stable callbacks with `useCallback`
+- **Virtualize** long lists (1000+ items) with `@tanstack/react-virtual`
+- **Avoid layout shift** — reserve space for dynamic content with aspect ratios or skeleton loaders
 
 ***REMOVED******REMOVED*** Testing
 
-Write component tests:
-
 ```tsx
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent } from "@testing-library/react";
 
-describe('Button', () => {
-  it('renders children', () => {
+describe("Button", () => {
+  it("renders children", () => {
     render(<Button variant="primary">Click me</Button>);
-    expect(screen.getByText('Click me')).toBeInTheDocument();
+    expect(screen.getByText("Click me")).toBeInTheDocument();
   });
 
-  it('calls onClick when clicked', () => {
-    const onClick = jest.fn();
-    render(<Button variant="primary" onClick={onClick}>Click</Button>);
-    fireEvent.click(screen.getByRole('button'));
-    expect(onClick).toHaveBeenCalled();
-  });
-
-  it('is disabled when loading', () => {
-    render(<Button variant="primary" loading>Loading</Button>);
-    expect(screen.getByRole('button')).toBeDisabled();
+  it("is disabled when loading", () => {
+    render(
+      <Button variant="primary" loading>
+        Loading
+      </Button>,
+    );
+    expect(screen.getByRole("button")).toBeDisabled();
   });
 });
 ```
 
-***REMOVED******REMOVED*** Performance Optimization
+***REMOVED******REMOVED*** Deployment Checklist
 
-***REMOVED******REMOVED******REMOVED*** Core Web Vitals
-
-Target these metrics for good user experience:
-
-| Metric | Target | What It Measures |
-|--------|--------|------------------|
-| **LCP** (Largest Contentful Paint) | < 2.5s | Loading performance |
-| **FID** (First Input Delay) | < 100ms | Interactivity |
-| **CLS** (Cumulative Layout Shift) | < 0.1 | Visual stability |
-
-***REMOVED******REMOVED******REMOVED*** Code Splitting & Lazy Loading
-
-```tsx
-import { lazy, Suspense } from 'react';
-
-// Lazy load heavy components
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Analytics = lazy(() => import('./pages/Analytics'));
-const Settings = lazy(() => import('./pages/Settings'));
-
-// Route-based code splitting
-function App() {
-  return (
-    <Suspense fallback={<LoadingSpinner />}>
-      <Routes>
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/analytics" element={<Analytics />} />
-        <Route path="/settings" element={<Settings />} />
-      </Routes>
-    </Suspense>
-  );
-}
-
-// Component-level lazy loading
-const HeavyChart = lazy(() => import('./components/HeavyChart'));
-
-function AnalyticsPage() {
-  return (
-    <div>
-      <h1>Analytics</h1>
-      <Suspense fallback={<ChartSkeleton />}>
-        <HeavyChart data={chartData} />
-      </Suspense>
-    </div>
-  );
-}
-```
-
-***REMOVED******REMOVED******REMOVED*** Memoization
-
-```tsx
-import { memo, useMemo, useCallback } from 'react';
-
-// Memoize expensive computations
-function TaskList({ tasks, filter }: Props) {
-  const filteredTasks = useMemo(() => {
-    return tasks.filter(task => {
-      // Expensive filtering logic
-      return matchesFilter(task, filter);
-    });
-  }, [tasks, filter]); // Only recompute when dependencies change
-
-  return <ul>{filteredTasks.map(task => <TaskItem key={task.id} task={task} />)}</ul>;
-}
-
-// Memoize callbacks passed to children
-function Parent() {
-  const [count, setCount] = useState(0);
-
-  // Without useCallback, this creates a new function every render
-  const handleClick = useCallback(() => {
-    setCount(c => c + 1);
-  }, []); // Empty deps = stable reference
-
-  return <MemoizedChild onClick={handleClick} />;
-}
-
-// Memoize components that receive stable props
-const TaskItem = memo(function TaskItem({ task, onComplete }: Props) {
-  return (
-    <li>
-      {task.title}
-      <button onClick={() => onComplete(task.id)}>Complete</button>
-    </li>
-  );
-});
-```
-
-***REMOVED******REMOVED******REMOVED*** Virtualization for Large Lists
-
-```tsx
-import { useVirtualizer } from '@tanstack/react-virtual';
-
-function VirtualizedList({ items }: { items: Item[] }) {
-  const parentRef = useRef<HTMLDivElement>(null);
-
-  const virtualizer = useVirtualizer({
-    count: items.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 50, // Estimated row height
-    overscan: 5, // Render 5 extra items outside viewport
-  });
-
-  return (
-    <div ref={parentRef} className="h-[400px] overflow-auto">
-      <div
-        style={{
-          height: `${virtualizer.getTotalSize()}px`,
-          position: 'relative',
-        }}
-      >
-        {virtualizer.getVirtualItems().map((virtualRow) => (
-          <div
-            key={virtualRow.key}
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: `${virtualRow.size}px`,
-              transform: `translateY(${virtualRow.start}px)`,
-            }}
-          >
-            <ItemRow item={items[virtualRow.index]} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-```
-
-***REMOVED******REMOVED******REMOVED*** Image Optimization
-
-```tsx
-// Use Next.js Image or similar for automatic optimization
-import Image from 'next/image';
-
-function ProductImage({ src, alt }: Props) {
-  return (
-    <Image
-      src={src}
-      alt={alt}
-      width={400}
-      height={300}
-      loading="lazy" // Lazy load below-fold images
-      placeholder="blur" // Show blur while loading
-      blurDataURL="data:image/jpeg;base64,..."
-    />
-  );
-}
-
-// For plain React, use loading="lazy" and srcSet
-function OptimizedImage({ src, alt }: Props) {
-  return (
-    <img
-      src={src}
-      alt={alt}
-      loading="lazy"
-      decoding="async"
-      srcSet={`
-        ${src}?w=400 400w,
-        ${src}?w=800 800w,
-        ${src}?w=1200 1200w
-      `}
-      sizes="(max-width: 600px) 400px, (max-width: 1200px) 800px, 1200px"
-    />
-  );
-}
-```
-
-***REMOVED******REMOVED******REMOVED*** Bundle Analysis
-
-```bash
-***REMOVED*** Analyze bundle size
-npx vite-bundle-visualizer
-
-***REMOVED*** Check for large dependencies
-npx depcheck
-npx bundlephobia <package-name>
-```
-
-***REMOVED******REMOVED******REMOVED*** Avoid Layout Shift
-
-```tsx
-// Reserve space for dynamic content
-function ImageWithPlaceholder({ src, alt, width, height }: Props) {
-  return (
-    <div style={{ aspectRatio: `${width}/${height}` }}>
-      <img src={src} alt={alt} className="w-full h-full object-cover" />
-    </div>
-  );
-}
-
-// Use skeleton loaders that match final layout
-function CardSkeleton() {
-  return (
-    <div className="animate-pulse">
-      <div className="h-48 bg-gray-200 rounded-t" /> {/* Image placeholder */}
-      <div className="p-4 space-y-2">
-        <div className="h-4 bg-gray-200 rounded w-3/4" /> {/* Title */}
-        <div className="h-3 bg-gray-200 rounded w-1/2" /> {/* Subtitle */}
-      </div>
-    </div>
-  );
-}
-```
-
-***REMOVED******REMOVED*** Internationalization (i18n)
-
-```tsx
-import { useTranslation } from 'react-i18next';
-
-function WelcomeMessage({ name }: { name: string }) {
-  const { t } = useTranslation();
-
-  return (
-    <div>
-      <h1>{t('welcome.title', { name })}</h1>
-      <p>{t('welcome.subtitle')}</p>
-    </div>
-  );
-}
-
-// Translation files
-// en/translation.json
-{
-  "welcome": {
-    "title": "Welcome, {{name}}!",
-    "subtitle": "Let's get started"
-  }
-}
-
-// es/translation.json
-{
-  "welcome": {
-    "title": "Bienvenido, {{name}}!",
-    "subtitle": "Empecemos"
-  }
-}
-```
-
-***REMOVED******REMOVED*** Accessibility Deep Dive
-
-***REMOVED******REMOVED******REMOVED*** ARIA Patterns
-
-```tsx
-// Tabs with proper ARIA
-function Tabs({ tabs, activeTab, onChange }: Props) {
-  return (
-    <div>
-      <div role="tablist" aria-label="Main navigation">
-        {tabs.map((tab, index) => (
-          <button
-            key={tab.id}
-            role="tab"
-            id={`tab-${tab.id}`}
-            aria-selected={activeTab === tab.id}
-            aria-controls={`panel-${tab.id}`}
-            tabIndex={activeTab === tab.id ? 0 : -1}
-            onClick={() => onChange(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      {tabs.map((tab) => (
-        <div
-          key={tab.id}
-          role="tabpanel"
-          id={`panel-${tab.id}`}
-          aria-labelledby={`tab-${tab.id}`}
-          hidden={activeTab !== tab.id}
-        >
-          {tab.content}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// Modal with focus trap
-function Modal({ isOpen, onClose, title, children }: Props) {
-  const modalRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (isOpen) {
-      // Trap focus inside modal
-      const focusableElements = modalRef.current?.querySelectorAll(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      const firstElement = focusableElements?.[0] as HTMLElement;
-      firstElement?.focus();
-    }
-  }, [isOpen]);
-
-  if (!isOpen) return null;
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="modal-title"
-      ref={modalRef}
-    >
-      <h2 id="modal-title">{title}</h2>
-      {children}
-      <button onClick={onClose}>Close</button>
-    </div>
-  );
-}
-```
-
-***REMOVED******REMOVED******REMOVED*** Testing Accessibility
-
-```tsx
-import { axe, toHaveNoViolations } from 'jest-axe';
-
-expect.extend(toHaveNoViolations);
-
-test('Button has no accessibility violations', async () => {
-  const { container } = render(<Button>Click me</Button>);
-  const results = await axe(container);
-  expect(results).toHaveNoViolations();
-});
-```
+Before pushing:
+- [ ] `git status` shows no `node_modules/`, `dist/`, or `.env` files staged
+- [ ] No authenticated feature links on public pages
+- [ ] No secrets or API keys in source code
+- [ ] TypeScript compiles without errors
+- [ ] Interactive elements are keyboard-accessible
+- [ ] Forms have proper validation and error messages
 
 ***REMOVED******REMOVED*** Self-Annealing Notes
 

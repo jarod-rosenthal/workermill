@@ -233,6 +233,7 @@ import { UpdateTeamCollaborationDirective1706688000051 } from "./migrations/1706
 import { AddReviewingConsolidatingStatus1739750400000 } from "./migrations/1739750400000-AddReviewingConsolidatingStatus.js";
 import { AddPlanningMode1739750400001 } from "./migrations/1739750400001-AddPlanningMode.js";
 import { HashOrgApiKeys1739750400002 } from "./migrations/1739750400002-HashOrgApiKeys.js";
+import { AddPrdDecomposition1739750400003 } from "./migrations/1739750400003-AddPrdDecomposition.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -483,6 +484,7 @@ export const AppDataSource = new DataSource({
     AddReviewingConsolidatingStatus1739750400000,
     AddPlanningMode1739750400001,
     HashOrgApiKeys1739750400002,
+    AddPrdDecomposition1739750400003,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

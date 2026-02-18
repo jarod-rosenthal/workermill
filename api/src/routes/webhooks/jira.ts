@@ -17,6 +17,7 @@ import { logger } from "../../utils/logger.js";
 import { extractTextFromADF } from "../../utils/jira.js";
 import { trackLegacyWebhookUsage } from "../../services/legacy-webhook-alert.js";
 import { syncIssueRelationships } from "../../services/task-relationship-sync.js";
+import { KbCard } from "../../models/KbCard.js";
 import {
   body,
   header,
@@ -389,6 +390,23 @@ router.post(
         taskId: existingTask.id,
         taskStatus: existingTask.status,
       });
+      return;
+    }
+
+    // PRD dedup: skip task creation if this issue was created by PRD decomposition
+    // (i.e., a card on a PRD board with a matching title already exists for this org)
+    const boardCardRepo = AppDataSource.getRepository(KbCard);
+    const prdCard = await boardCardRepo
+      .createQueryBuilder("card")
+      .innerJoin("card.board", "board")
+      .where("board.orgId = :orgId", { orgId: org.id })
+      .andWhere("board.prd_content IS NOT NULL")
+      .andWhere("card.title = :title", { title: summary })
+      .getOne();
+
+    if (prdCard) {
+      logger.info("Jira webhook: skipping PRD-synced ticket", { issueKey, summary });
+      res.json({ status: "ignored", reason: "PRD-managed ticket" });
       return;
     }
 
@@ -801,6 +819,22 @@ router.post(
           reason: "Task was cancelled - remove and re-add label to restart",
           taskId: existingTask.id,
         });
+        return;
+      }
+
+      // PRD dedup: skip task creation if this issue was created by PRD decomposition
+      const boardCardRepo = AppDataSource.getRepository(KbCard);
+      const prdCard = await boardCardRepo
+        .createQueryBuilder("card")
+        .innerJoin("card.board", "board")
+        .where("board.orgId = :orgId", { orgId: org.id })
+        .andWhere("board.prd_content IS NOT NULL")
+        .andWhere("card.title = :title", { title: summary })
+        .getOne();
+
+      if (prdCard) {
+        logger.info("Jira webhook: skipping PRD-synced ticket", { issueKey, summary });
+        res.json({ status: "ignored", reason: "PRD-managed ticket" });
         return;
       }
 

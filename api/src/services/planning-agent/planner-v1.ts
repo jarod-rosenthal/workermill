@@ -499,7 +499,7 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   // planning agent's reasoning (codebase analysis, risk assessment, etc.).
   // Chunk by lines; cap at 10KB to avoid overwhelming the log table.
   const rawText = response.text;
-  const LOG_PREFIX = "[🗺️ planning_agent 🤖]";
+  const LOG_PREFIX = "[💡 planning_agent 🤖]";
   const MAX_LOG_BYTES = 10_000;
   let loggedBytes = 0;
   for (const line of rawText.split("\n")) {

@@ -346,22 +346,22 @@ const CATEGORY_INFO: Record<
 // ─── Persona & Provider Icons ────────────────────────────────────────────────
 
 const PERSONA_ICONS: Record<string, string> = {
-  frontend_developer: "\uD83C\uDFA8",
-  backend_developer: "\u2699\uFE0F",
-  devops_engineer: "\uD83D\uDD27",
-  security_engineer: "\uD83D\uDD12",
-  qa_engineer: "\uD83E\uDDEA",
-  tech_writer: "\uD83D\uDCDD",
-  project_manager: "\uD83D\uDCCB",
-  api_developer: "\uD83D\uDD0C",
-  database_administrator: "\uD83D\uDDC4\uFE0F",
-  ml_engineer: "\uD83E\uDDE0",
-  data_engineer: "\uD83D\uDCCA",
-  mobile_developer_ios: "\uD83D\uDCF1",
-  mobile_developer_android: "\uD83E\uDD16",
-  tech_lead: "\uD83D\uDC68\u200D\uD83D\uDCBC",
-  planning_agent: "\uD83D\uDDFA\uFE0F",
-  manager: "\uD83D\uDC54",
+  frontend_developer: "\uD83C\uDFA8",      // 🎨
+  backend_developer: "\uD83D\uDCBB",       // 💻 (was ⚙️ — narrow in terminals)
+  devops_engineer: "\uD83D\uDD27",         // 🔧
+  security_engineer: "\uD83D\uDD12",       // 🔒
+  qa_engineer: "\uD83E\uDDEA",             // 🧪
+  tech_writer: "\uD83D\uDCDD",             // 📝
+  project_manager: "\uD83D\uDCCB",         // 📋
+  api_developer: "\uD83D\uDD0C",           // 🔌
+  database_administrator: "\uD83D\uDCBE",  // 💾 (was 🗄️ — FE0F renders inconsistently)
+  ml_engineer: "\uD83E\uDDE0",             // 🧠
+  data_engineer: "\uD83D\uDCCA",           // 📊
+  mobile_developer_ios: "\uD83D\uDCF1",    // 📱
+  mobile_developer_android: "\uD83E\uDD16", // 🤖
+  tech_lead: "\uD83D\uDC51",               // 👑 (was 👨‍💼 — ZWJ renders inconsistently)
+  planning_agent: "\uD83D\uDCA1",          // 💡 (was 🗺️ — FE0F renders inconsistently)
+  manager: "\uD83D\uDC54",                 // 👔
 };
 
 const PROVIDER_ICONS: Record<string, string> = {

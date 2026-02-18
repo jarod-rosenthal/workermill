@@ -18,10 +18,13 @@ import { StatusBar } from "./status-bar";
 import { NotificationManager } from "./notifications";
 import { LogTerminalManager } from "./log-terminal";
 import { LiveDiffPanel } from "./live-diff-panel";
+import { TaskDetailPanel } from "./task-detail-panel";
 import {
   isAgentInstalled,
+  isAgentConfigured,
   installAgent,
   startAgentProcess,
+  stopAgentProcess,
 } from "./agent-installer";
 
 let client: AgentClient;
@@ -83,6 +86,8 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       // Auto-open log terminal for new task
       logManager.openLogs(info.id, info.summary);
+      // Bring activity feed into focus so user sees expert collaboration
+      vscode.commands.executeCommand("workermill.feedPanel.focus");
     },
   );
 
@@ -125,7 +130,7 @@ export function activate(context: vscode.ExtensionContext): void {
       treeProvider.refresh();
     }),
 
-    // Click task in tree → show feed + open terminal
+    // Click task in tree → show detail panel + feed + open terminal
     vscode.commands.registerCommand(
       "workermill.selectTask",
       (task: TaskInfo) => {
@@ -133,6 +138,7 @@ export function activate(context: vscode.ExtensionContext): void {
         currentFeedTaskId = task.id;
         currentFeedTaskStatus = task.status;
         logManager.openLogs(task.id, task.summary);
+        TaskDetailPanel.createOrShow(client, task);
       },
     ),
 
@@ -173,6 +179,8 @@ export function activate(context: vscode.ExtensionContext): void {
           await client.runIssue(issueKey);
           vscode.window.showInformationMessage(`WorkerMill: ${issueKey} submitted`);
           treeProvider.refresh();
+          // Reveal sidebar so user sees the task appear
+          vscode.commands.executeCommand("workermill.teamPanel.focus");
         } catch (err) {
           vscode.window.showErrorMessage(
             `Failed to run issue: ${err instanceof Error ? err.message : String(err)}`,
@@ -203,6 +211,8 @@ export function activate(context: vscode.ExtensionContext): void {
           await client.runIssue(issueKey);
           vscode.window.showInformationMessage(`WorkerMill: ${issueKey} submitted`);
           treeProvider.refresh();
+          // Reveal sidebar so user sees the task appear
+          vscode.commands.executeCommand("workermill.teamPanel.focus");
         } else {
           vscode.window.showWarningMessage("Please enter a valid ticket key (e.g., OCS-142)");
         }
@@ -263,6 +273,8 @@ export function activate(context: vscode.ExtensionContext): void {
         await client.runIssue(selected.issue.key);
         vscode.window.showInformationMessage(`WorkerMill: ${selected.issue.key} submitted`);
         treeProvider.refresh();
+        // Reveal sidebar so user sees the task appear
+        vscode.commands.executeCommand("workermill.teamPanel.focus");
       } catch (err) {
         vscode.window.showErrorMessage(
           `Failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -504,10 +516,66 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       }
     }),
+
+    // Start agent
+    vscode.commands.registerCommand("workermill.startAgent", async () => {
+      if (!isAgentInstalled()) {
+        const choice = await vscode.window.showInformationMessage(
+          "WorkerMill agent is not installed.",
+          "Install",
+        );
+        if (choice === "Install") {
+          vscode.commands.executeCommand("workermill.installAgent");
+        }
+        return;
+      }
+      if (!isAgentConfigured()) {
+        const terminal = vscode.window.createTerminal("WorkerMill Setup");
+        terminal.show();
+        terminal.sendText("workermill-agent setup");
+        vscode.window.showInformationMessage(
+          "Run setup first, then start the agent.",
+        );
+        return;
+      }
+      startAgentProcess();
+      vscode.window.showInformationMessage("WorkerMill agent starting...");
+    }),
+
+    // Stop agent
+    vscode.commands.registerCommand("workermill.stopAgent", async () => {
+      if (!isAgentInstalled()) {
+        vscode.window.showWarningMessage("WorkerMill agent is not installed.");
+        return;
+      }
+      const stopped = await stopAgentProcess();
+      if (stopped) {
+        vscode.window.showInformationMessage("WorkerMill agent stopped.");
+      } else {
+        vscode.window.showWarningMessage("Agent may not be running or failed to stop.");
+      }
+    }),
+
+    // Restart agent
+    vscode.commands.registerCommand("workermill.restartAgent", async () => {
+      if (!isAgentInstalled()) {
+        vscode.window.showWarningMessage("WorkerMill agent is not installed.");
+        return;
+      }
+      vscode.window.showInformationMessage("Restarting WorkerMill agent...");
+      await stopAgentProcess();
+      // Brief delay to let the process fully exit
+      await new Promise((r) => setTimeout(r, 2000));
+      startAgentProcess();
+      vscode.window.showInformationMessage("WorkerMill agent restarted.");
+    }),
   );
 
-  // Check if agent binary is installed, prompt to install if missing
-  if (!isAgentInstalled()) {
+  // Auto-start agent if installed and configured, otherwise prompt to install
+  if (isAgentInstalled() && isAgentConfigured()) {
+    // Agent is ready — start it automatically so user doesn't have to
+    startAgentProcess();
+  } else if (!isAgentInstalled()) {
     vscode.window
       .showInformationMessage(
         "WorkerMill agent is not installed. Install it now to enable AI worker management.",
@@ -518,8 +586,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (choice !== "Install") return;
         const success = await installAgent();
         if (!success) return;
-        const configPath = path.join(os.homedir(), ".workermill", "config.json");
-        if (fs.existsSync(configPath)) {
+        if (isAgentConfigured()) {
           startAgentProcess();
         } else {
           const terminal = vscode.window.createTerminal("WorkerMill Setup");
@@ -551,6 +618,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   LiveDiffPanel.disposeAll();
+  TaskDetailPanel.disposeAll();
   if (logManager) logManager.dispose();
   if (statusBar) statusBar.dispose();
   if (notifications) notifications.dispose();

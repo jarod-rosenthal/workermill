@@ -220,3 +220,26 @@ export function startAgentProcess(): void {
   });
   child.unref();
 }
+
+/** Stop a running agent by invoking `workermill-agent stop`. */
+export async function stopAgentProcess(): Promise<boolean> {
+  const binary = getAgentBinaryPath();
+  if (!fs.existsSync(binary)) return false;
+
+  return new Promise((resolve) => {
+    const child = spawn(binary, ["stop"], { stdio: "ignore" });
+    child.on("close", (code) => resolve(code === 0));
+    child.on("error", () => resolve(false));
+    // Timeout after 20s (agent stop waits up to 15s internally)
+    setTimeout(() => {
+      try { child.kill(); } catch { /* ignore */ }
+      resolve(false);
+    }, 20_000);
+  });
+}
+
+/** Check if the agent config file exists (setup has been completed). */
+export function isAgentConfigured(): boolean {
+  const configPath = path.join(os.homedir(), ".workermill", "config.json");
+  return fs.existsSync(configPath);
+}

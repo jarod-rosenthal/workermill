@@ -37,7 +37,7 @@ export const PERSONA_CONFIGS: Record<WorkerPersona, PersonaConfig> = {
   },
   backend_developer: {
     id: 'backend_developer',
-    emoji: '⚙️',
+    emoji: '💻',
     label: 'Backend Developer',
     shortLabel: 'Backend',
     skills: ['Node.js', 'Express', 'PostgreSQL', 'REST APIs'],
@@ -125,7 +125,7 @@ export const PERSONA_CONFIGS: Record<WorkerPersona, PersonaConfig> = {
   },
   database_administrator: {
     id: 'database_administrator',
-    emoji: '🗄️',
+    emoji: '💾',
     label: 'Database Administrator',
     shortLabel: 'DBA',
     skills: ['PostgreSQL', 'MySQL', 'Query Optimization', 'Migrations'],

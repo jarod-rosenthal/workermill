@@ -1,0 +1,751 @@
+/**
+ * TaskDetailPanel — full task detail view in the main editor area.
+ *
+ * Opens as a WebviewPanel tab when the user clicks a task in the sidebar tree.
+ * Shows: task header, story progress, coordination feed, and action buttons.
+ * Polls for real-time updates.
+ */
+
+import * as vscode from "vscode";
+import type { AgentClient, TaskInfo } from "./agent-client";
+
+export class TaskDetailPanel {
+  static readonly viewType = "workermill.taskDetail";
+  private static currentPanels = new Map<string, TaskDetailPanel>();
+
+  private readonly panel: vscode.WebviewPanel;
+  private readonly client: AgentClient;
+  private readonly taskId: string;
+  private pollTimer: NodeJS.Timeout | null = null;
+  private disposed = false;
+
+  static createOrShow(client: AgentClient, task: TaskInfo): void {
+    const existing = TaskDetailPanel.currentPanels.get(task.id);
+    if (existing) {
+      existing.panel.reveal(vscode.ViewColumn.One);
+      return;
+    }
+    const title =
+      task.summary.length > 50
+        ? task.summary.substring(0, 50) + "..."
+        : task.summary;
+    const panel = vscode.window.createWebviewPanel(
+      TaskDetailPanel.viewType,
+      title,
+      { viewColumn: vscode.ViewColumn.One, preserveFocus: false },
+      { enableScripts: true, retainContextWhenHidden: true },
+    );
+    panel.iconPath = new vscode.ThemeIcon("tasklist");
+    new TaskDetailPanel(panel, client, task);
+  }
+
+  static disposeAll(): void {
+    for (const p of TaskDetailPanel.currentPanels.values()) p.dispose();
+  }
+
+  private constructor(
+    panel: vscode.WebviewPanel,
+    client: AgentClient,
+    task: TaskInfo,
+  ) {
+    this.panel = panel;
+    this.client = client;
+    this.taskId = task.id;
+    TaskDetailPanel.currentPanels.set(task.id, this);
+    this.panel.onDidDispose(() => this.dispose());
+    this.panel.webview.html = this.getHtml(task);
+
+    // Handle messages from the webview
+    this.panel.webview.onDidReceiveMessage(async (msg) => {
+      if (msg.type === "talk" && msg.message) {
+        try {
+          await this.client.talkToWorker(this.taskId, msg.message);
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed to send: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      } else if (msg.type === "approve-plan") {
+        try {
+          await this.client.approvePlan(this.taskId);
+          vscode.window.showInformationMessage("Plan approved.");
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      } else if (msg.type === "reject-plan") {
+        const feedback = await vscode.window.showInputBox({
+          prompt: "Feedback for the planner",
+          placeHolder: "What should be changed?",
+        });
+        if (feedback) {
+          try {
+            await this.client.rejectPlan(this.taskId, feedback);
+            vscode.window.showInformationMessage(
+              "Plan rejected with feedback.",
+            );
+          } catch (err) {
+            vscode.window.showErrorMessage(
+              `Failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+      } else if (msg.type === "cancel-task") {
+        const confirm = await vscode.window.showWarningMessage(
+          "Cancel this task?",
+          { modal: true },
+          "Cancel Task",
+        );
+        if (confirm === "Cancel Task") {
+          try {
+            await this.client.cancelTask(this.taskId);
+            vscode.window.showInformationMessage("Task cancelled.");
+          } catch (err) {
+            vscode.window.showErrorMessage(
+              `Failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+      } else if (msg.type === "blocker-response") {
+        try {
+          await this.client.respondToBlocker(
+            this.taskId,
+            msg.blockerId,
+            msg.action,
+            msg.guidance,
+          );
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    });
+
+    // Start polling after a brief delay
+    setTimeout(() => {
+      if (!this.disposed) {
+        this.poll();
+        this.pollTimer = setInterval(() => this.poll(), 3000);
+      }
+    }, 500);
+  }
+
+  private async poll(): Promise<void> {
+    if (this.disposed) return;
+
+    try {
+      const detail = await this.client.getTaskDetail(this.taskId);
+      this.panel.webview.postMessage({ type: "taskDetail", data: detail });
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      const coord = await this.client.getCoordinationFeed(this.taskId);
+      this.panel.webview.postMessage({ type: "coordination", data: coord });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    TaskDetailPanel.currentPanels.delete(this.taskId);
+    this.panel.dispose();
+  }
+
+  private getHtml(task: TaskInfo): string {
+    return /* html */ `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<style>
+  :root {
+    --bg: var(--vscode-editor-background, ***REMOVED***1e1e1e);
+    --bg-secondary: var(--vscode-sideBar-background, ***REMOVED***252526);
+    --bg-tertiary: var(--vscode-input-background, ***REMOVED***2d2d2d);
+    --border: var(--vscode-panel-border, ***REMOVED***3e3e42);
+    --text: var(--vscode-foreground, ***REMOVED***cccccc);
+    --text-dim: var(--vscode-descriptionForeground, ***REMOVED***808080);
+    --text-bright: var(--vscode-editor-foreground, ***REMOVED***ffffff);
+    --accent: var(--vscode-focusBorder, ***REMOVED***0098ff);
+    --green: ***REMOVED***4ec9b0; --yellow: ***REMOVED***dcdcaa; --red: ***REMOVED***f44747;
+    --orange: ***REMOVED***ce9178; --purple: ***REMOVED***c586c0; --cyan: ***REMOVED***9cdcfe;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px;
+    overflow-y: auto;
+    padding: 0;
+  }
+
+  /* Header */
+  .task-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+  }
+  .task-header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-bright);
+    line-height: 1.3;
+    margin-bottom: 10px;
+  }
+  .meta-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .badge {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: 500;
+  }
+  .badge-status {
+    color: ***REMOVED***1e1e1e;
+    font-weight: 600;
+  }
+  .badge-status.running { background: var(--green); }
+  .badge-status.planning { background: var(--yellow); }
+  .badge-status.completed { background: var(--green); }
+  .badge-status.failed { background: var(--red); }
+  .badge-status.escalated { background: var(--orange); }
+  .badge-info {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--cyan);
+  }
+  .badge-model {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--purple);
+  }
+
+  /* Info grid */
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .info-card {
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+  }
+  .info-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .info-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-bright);
+  }
+
+  /* Story progress */
+  .story-section {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: none;
+  }
+  .story-section.visible { display: block; }
+  .story-section h2 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 8px;
+  }
+  .progress-container {
+    background: var(--bg-tertiary);
+    border-radius: 6px;
+    height: 8px;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--green), var(--cyan));
+    border-radius: 6px;
+    transition: width 0.5s ease;
+    width: 0%;
+  }
+  .progress-label {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .progress-label span { color: var(--green); font-weight: 600; }
+
+  /* Blocker alert */
+  .blocker-section {
+    padding: 16px 24px;
+    display: none;
+  }
+  .blocker-section.visible { display: block; }
+  .blocker-box {
+    background: rgba(244, 71, 71, 0.1);
+    border: 1px solid var(--red);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .blocker-box h3 {
+    font-size: 13px;
+    color: var(--red);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .blocker-box p {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text);
+    margin-bottom: 10px;
+  }
+  .blocker-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  /* Actions bar */
+  .actions-bar {
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .action-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-tertiary);
+    color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .action-btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent);
+  }
+  .action-btn.primary {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  .action-btn.primary:hover { opacity: 0.9; }
+  .action-btn.danger {
+    border-color: var(--red);
+    color: var(--red);
+  }
+  .action-btn.danger:hover { background: rgba(244,71,71,0.15); }
+  .action-btn.success {
+    border-color: var(--green);
+    color: var(--green);
+  }
+  .action-btn.success:hover { background: rgba(78,201,176,0.15); }
+
+  /* Talk input */
+  .talk-section {
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .talk-input {
+    flex: 1;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 8px 12px;
+    font-size: 12px;
+    outline: none;
+    font-family: inherit;
+  }
+  .talk-input:focus { border-color: var(--accent); }
+  .talk-input::placeholder { color: var(--text-dim); }
+
+  /* Coordination feed */
+  .feed-section {
+    padding: 16px 24px;
+  }
+  .feed-section h2 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 12px;
+  }
+  .feed-empty {
+    text-align: center;
+    padding: 24px;
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+  .feed-item {
+    display: flex;
+    gap: 10px;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border-left: 3px solid var(--border);
+  }
+  .feed-item.question { border-left-color: var(--yellow); }
+  .feed-item.answer { border-left-color: var(--green); }
+  .feed-item.decision { border-left-color: var(--accent); }
+  .feed-item.blocker, .feed-item.blocker_detected { border-left-color: var(--red); }
+  .feed-item.blocker_resolved { border-left-color: var(--green); }
+  .feed-item.completion { border-left-color: var(--green); }
+  .feed-item.file_modified, .feed-item.file_created { border-left-color: var(--cyan); }
+  .feed-item.user_message { border-left-color: var(--purple); }
+  .feed-item.progress { border-left-color: var(--accent); }
+  .feed-item.warning { border-left-color: var(--orange); }
+  .feed-item.revision_requested { border-left-color: var(--orange); }
+  .feed-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  .feed-body { flex: 1; min-width: 0; }
+  .feed-persona {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--cyan);
+    margin-bottom: 2px;
+  }
+  .feed-persona .type-badge {
+    font-weight: 400;
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-left: 6px;
+  }
+  .feed-content {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text);
+    word-wrap: break-word;
+  }
+  .feed-time {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 3px;
+  }
+
+  /* Finished banner */
+  .finished-banner {
+    padding: 12px 24px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 13px;
+    display: none;
+  }
+  .finished-banner.visible { display: block; }
+  .finished-banner.completed { background: rgba(78,201,176,0.15); color: var(--green); }
+  .finished-banner.failed { background: rgba(244,71,71,0.15); color: var(--red); }
+
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<div class="task-header">
+  <h1 id="taskTitle">${esc(task.summary)}</h1>
+  <div class="meta-row">
+    <span id="statusBadge" class="badge badge-status ${task.status}">${task.status}</span>
+    ${task.persona ? `<span class="badge badge-info">${esc(task.persona)}</span>` : ""}
+    ${task.model ? `<span class="badge badge-model">${esc(task.model)}</span>` : ""}
+    ${task.repo ? `<span class="badge badge-info">${esc(task.repo)}</span>` : ""}
+  </div>
+</div>
+
+<div class="info-grid">
+  <div class="info-card">
+    <div class="info-label">Task ID</div>
+    <div class="info-value" style="font-size:12px; font-family: monospace;">${esc(task.id.substring(0, 12))}...</div>
+  </div>
+  <div class="info-card">
+    <div class="info-label">Started</div>
+    <div class="info-value" id="startedAt" style="font-size:12px;">${task.startedAt ? formatDate(task.startedAt) : "—"}</div>
+  </div>
+  <div class="info-card" id="costCard" style="display:none">
+    <div class="info-label">Cost</div>
+    <div class="info-value" id="costValue">—</div>
+  </div>
+  <div class="info-card" id="durationCard" style="display:none">
+    <div class="info-label">Duration</div>
+    <div class="info-value" id="durationValue">—</div>
+  </div>
+</div>
+
+<div class="story-section" id="storySection">
+  <h2>Story Progress</h2>
+  <div class="progress-container">
+    <div class="progress-fill" id="progressFill"></div>
+  </div>
+  <div class="progress-label">
+    <span id="storyCompleted">0</span> / <span id="storyTotal">0</span> stories completed
+    <span id="storyFailed" style="color: var(--red); display: none;"> (<span id="storyFailedCount">0</span> failed)</span>
+    <span style="float: right;"><span id="epicPercent" style="color: var(--green); font-weight: 600;">0%</span></span>
+  </div>
+</div>
+
+<div class="blocker-section" id="blockerSection">
+  <div class="blocker-box">
+    <h3>&***REMOVED***x26A0; <span id="blockerTitle">Blocker</span></h3>
+    <p id="blockerContent"></p>
+    <div class="blocker-actions">
+      <button class="action-btn primary" onclick="blockerAction('retry')">Retry</button>
+      <button class="action-btn" style="border-color: var(--yellow); color: var(--yellow);" onclick="blockerAction('skip')">Skip</button>
+      <button class="action-btn danger" onclick="blockerAction('abort')">Abort</button>
+    </div>
+  </div>
+</div>
+
+<div class="actions-bar" id="actionsBar">
+  <button class="action-btn danger" onclick="cancelTask()">Cancel Task</button>
+  <button class="action-btn success" id="approveBtn" style="display:none" onclick="approvePlan()">Approve Plan</button>
+  <button class="action-btn" id="rejectBtn" style="display:none" onclick="rejectPlan()">Reject Plan</button>
+</div>
+
+<div class="talk-section" id="talkSection">
+  <input class="talk-input" id="talkInput" type="text" placeholder="Send a message to the worker..." />
+  <button class="action-btn primary" onclick="sendMessage()">Send</button>
+</div>
+
+<div class="finished-banner" id="finishedBanner"></div>
+
+<div class="feed-section">
+  <h2>Activity Feed</h2>
+  <div id="feed">
+    <div class="feed-empty">Waiting for expert collaboration updates...</div>
+  </div>
+</div>
+
+<script>
+const vscode = acquireVsCodeApi();
+const feed = document.getElementById("feed");
+const talkInput = document.getElementById("talkInput");
+const seenFeedIds = new Set();
+let feedHasItems = false;
+let currentBlockerId = null;
+let taskStatus = "${task.status}";
+
+talkInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && talkInput.value.trim()) sendMessage();
+});
+
+function sendMessage() {
+  const msg = talkInput.value.trim();
+  if (!msg) return;
+  vscode.postMessage({ type: "talk", message: msg });
+  talkInput.value = "";
+  addFeedItem({
+    persona: "you",
+    messageType: "user_message",
+    content: msg,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+function approvePlan() { vscode.postMessage({ type: "approve-plan" }); }
+function rejectPlan() { vscode.postMessage({ type: "reject-plan" }); }
+function cancelTask() { vscode.postMessage({ type: "cancel-task" }); }
+
+function blockerAction(action) {
+  if (!currentBlockerId) return;
+  vscode.postMessage({ type: "blocker-response", blockerId: currentBlockerId, action: action });
+  document.getElementById("blockerSection").classList.remove("visible");
+  currentBlockerId = null;
+}
+
+const personaEmoji = {
+  frontend_developer: "\\u{1F3A8}",
+  backend_developer: "\\u{1F4BB}",
+  devops_engineer: "\\u{1F527}",
+  security_engineer: "\\u{1F512}",
+  qa_engineer: "\\u{1F9EA}",
+  database_administrator: "\\u{1F4BE}",
+  tech_writer: "\\u{1F4DD}",
+  project_manager: "\\u{1F4CB}",
+  api_developer: "\\u{1F50C}",
+  ml_engineer: "\\u{1F9E0}",
+  data_engineer: "\\u{1F4CA}",
+  mobile_developer_ios: "\\u{1F4F1}",
+  mobile_developer_android: "\\u{1F916}",
+  planning_agent: "\\u{1F4A1}",
+  tech_lead: "\\u{1F451}",
+  manager: "\\u{1F454}",
+  support_agent: "\\u{1F4AC}",
+  coordinator: "\\u{1F3AF}",
+  dashboard: "\\u{1F4CA}",
+  you: "\\u{1F464}",
+};
+function getEmoji(p) { return personaEmoji[p] || "\\u{1F916}"; }
+
+function formatTime(iso) {
+  try { return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
+  catch { return ""; }
+}
+
+function esc(s) {
+  return s ? s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
+}
+
+function addFeedItem(item) {
+  if (item.id && seenFeedIds.has(item.id)) return;
+  if (item.id) seenFeedIds.add(item.id);
+
+  if (!feedHasItems) {
+    feed.innerHTML = "";
+    feedHasItems = true;
+  }
+
+  const div = document.createElement("div");
+  div.className = "feed-item " + (item.messageType || "");
+  const typeLabel = (item.messageType || "").replace(/_/g, " ");
+  div.innerHTML =
+    '<div class="feed-avatar">' + getEmoji(item.persona) + "</div>" +
+    '<div class="feed-body">' +
+      '<div class="feed-persona">' + esc(item.persona || "system") +
+        '<span class="type-badge">' + typeLabel + "</span></div>" +
+      '<div class="feed-content">' + esc(item.content || "") + "</div>" +
+      '<div class="feed-time">' + formatTime(item.createdAt) + "</div>" +
+    "</div>";
+  feed.appendChild(div);
+  feed.scrollTop = feed.scrollHeight;
+
+  // Handle blockers
+  if (item.messageType === "blocker_detected" || item.messageType === "blocker") {
+    currentBlockerId = item.id;
+    document.getElementById("blockerSection").classList.add("visible");
+    document.getElementById("blockerTitle").textContent = "Blocker: " + (item.persona || "worker");
+    document.getElementById("blockerContent").textContent = item.content || "Worker needs help.";
+  }
+  if (item.messageType === "blocker_resolved") {
+    document.getElementById("blockerSection").classList.remove("visible");
+    currentBlockerId = null;
+  }
+}
+
+function updateStatus(status) {
+  if (status === taskStatus) return;
+  taskStatus = status;
+  const badge = document.getElementById("statusBadge");
+  badge.textContent = status;
+  badge.className = "badge badge-status " + status;
+
+  // Show/hide plan buttons
+  document.getElementById("approveBtn").style.display = status === "planning" ? "" : "none";
+  document.getElementById("rejectBtn").style.display = status === "planning" ? "" : "none";
+
+  // Show finished banner
+  if (status === "completed" || status === "failed") {
+    const banner = document.getElementById("finishedBanner");
+    banner.className = "finished-banner visible " + status;
+    banner.textContent = status === "completed" ? "\\u2705 Task completed successfully" : "\\u274C Task failed";
+    document.getElementById("talkSection").style.display = "none";
+    document.getElementById("actionsBar").style.display = "none";
+  }
+}
+
+window.addEventListener("message", (event) => {
+  const msg = event.data;
+
+  if (msg.type === "coordination") {
+    const items = msg.data?.contexts || msg.data || [];
+    if (Array.isArray(items)) items.forEach(addFeedItem);
+  }
+
+  if (msg.type === "taskDetail") {
+    const d = msg.data;
+    if (!d) return;
+
+    // Update status
+    if (d.status) updateStatus(d.status);
+
+    // Story progress
+    if (d.isEpicWorkflow && d.storiesTotal > 0) {
+      document.getElementById("storySection").classList.add("visible");
+      document.getElementById("storyCompleted").textContent = d.storiesCompleted || 0;
+      document.getElementById("storyTotal").textContent = d.storiesTotal || 0;
+      document.getElementById("epicPercent").textContent = (d.epicProgress || 0) + "%";
+      document.getElementById("progressFill").style.width = (d.epicProgress || 0) + "%";
+      if (d.storiesFailed > 0) {
+        document.getElementById("storyFailed").style.display = "";
+        document.getElementById("storyFailedCount").textContent = d.storiesFailed;
+      }
+    }
+
+    // Cost
+    if (d.cost != null) {
+      document.getElementById("costCard").style.display = "";
+      document.getElementById("costValue").textContent = typeof d.cost === "number" ? "$" + d.cost.toFixed(2) : String(d.cost);
+    }
+
+    // Duration
+    if (d.startedAt) {
+      document.getElementById("durationCard").style.display = "";
+      const start = new Date(d.startedAt).getTime();
+      const end = d.completedAt ? new Date(d.completedAt).getTime() : Date.now();
+      const mins = Math.round((end - start) / 60000);
+      document.getElementById("durationValue").textContent = mins < 60 ? mins + " min" : Math.floor(mins / 60) + "h " + (mins % 60) + "m";
+    }
+  }
+});
+
+// Initialize plan buttons visibility
+if ("${task.status}" === "planning") {
+  document.getElementById("approveBtn").style.display = "";
+  document.getElementById("rejectBtn").style.display = "";
+}
+</script>
+</body></html>`;
+  }
+}
+
+function esc(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}

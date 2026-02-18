@@ -177,7 +177,7 @@ Respond with ONLY the JSON object (no markdown, no explanation).`;
   // Post the raw LLM analysis text to dashboard logs
   {
     const rawText = response.text;
-    const LOG_PREFIX = "[🗺️ planning_agent 🤖]";
+    const LOG_PREFIX = "[💡 planning_agent 🤖]";
     const MAX_LOG_BYTES = 10_000;
     let loggedBytes = 0;
     for (const line of rawText.split("\n")) {

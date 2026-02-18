@@ -42,7 +42,7 @@ const terminalScripts = [
   ],
 ];
 
-const taskEmojis = ["🎨", "⚙️", "🔧", "🔒", "🧪", "📊"];
+const taskEmojis = ["🎨", "💻", "🔧", "🔒", "🧪", "📊"];
 const taskColors = [
   "from-purple-500",
   "from-blue-500",
@@ -59,7 +59,7 @@ export default function Hero() {
   // Tasks animation
   const [tasks, setTasks] = useState<AnimatedTask[]>([
     { id: 142, emoji: "🎨", key: "PROJ-142", status: "Queued", progress: 0, color: "from-purple-500" },
-    { id: 138, emoji: "⚙️", key: "PROJ-138", status: "Queued", progress: 0, color: "from-blue-500" },
+    { id: 138, emoji: "💻", key: "PROJ-138", status: "Queued", progress: 0, color: "from-blue-500" },
     { id: 145, emoji: "🔧", key: "PROJ-145", status: "Queued", progress: 0, color: "from-green-500" },
   ]);
 

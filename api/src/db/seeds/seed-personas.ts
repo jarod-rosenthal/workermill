@@ -30,7 +30,7 @@ const PERSONA_CONFIG: Record<
 > = {
   backend_developer: {
     name: "Backend Developer",
-    emoji: "⚙️",
+    emoji: "💻",
     color: "***REMOVED***3B82F6",
     shortLabel: "Backend",
     description:
@@ -156,7 +156,7 @@ const PERSONA_CONFIG: Record<
   },
   database_administrator: {
     name: "Database Administrator",
-    emoji: "🗄️",
+    emoji: "💾",
     color: "***REMOVED***8B5CF6",
     shortLabel: "DBA",
     description:

@@ -116,21 +116,21 @@ if (Object.keys(PROVIDER_ICONS).length === 0) {
 if (Object.keys(PERSONA_CONFIGS).length === 0) {
   PERSONA_CONFIGS = {
     frontend_developer: { emoji: '🎨' },
-    backend_developer: { emoji: '⚙️' },
+    backend_developer: { emoji: '💻' },
     devops_engineer: { emoji: '🔧' },
     security_engineer: { emoji: '🔒' },
     qa_engineer: { emoji: '🧪' },
     tech_writer: { emoji: '📝' },
     project_manager: { emoji: '📋' },
     api_developer: { emoji: '🔌' },
-    database_administrator: { emoji: '🗄️' },
+    database_administrator: { emoji: '💾' },
     ml_engineer: { emoji: '🧠' },
     mobile_developer_ios: { emoji: '📱' },
     mobile_developer_android: { emoji: '🤖' },
     data_engineer: { emoji: '📊' },
     manager: { emoji: '👔' },
-    tech_lead: { emoji: '👨‍💼' },
-    planning_agent: { emoji: '🗺️' },
+    tech_lead: { emoji: '👑' },
+    planning_agent: { emoji: '💡' },
   };
 }
 

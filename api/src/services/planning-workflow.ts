@@ -194,7 +194,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     await logTaskEvent(
       task.id,
       "status_change",
-      `[🗺️ planning_agent 🤖] Resuming with existing plan (retry ***REMOVED***${task.retryCount}) - skipping re-planning`,
+      `[💡 planning_agent 🤖] Resuming with existing plan (retry ***REMOVED***${task.retryCount}) - skipping re-planning`,
     );
 
     // Restore executionPlanV2 from planJson if needed — but ONLY if it's V2 format (has steps)
@@ -814,7 +814,7 @@ async function processLocalPlanningAgent(
   task: WorkerTask,
   taskRepo: ReturnType<typeof getTaskRepo>,
 ): Promise<void> {
-  const prefix = "[🗺️ planning_agent 🤖]";
+  const prefix = "[💡 planning_agent 🤖]";
   const targetRepo =
     task.githubRepo || process.env.TARGET_REPO_PATH || "unknown";
 

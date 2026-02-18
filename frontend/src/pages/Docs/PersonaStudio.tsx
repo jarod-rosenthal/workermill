@@ -274,7 +274,7 @@ export default function PersonaStudio() {
             { emoji: "📱", name: "Mobile Developer", slug: "mobile_developer" },
             { emoji: "🔒", name: "Security Engineer", slug: "security_engineer" },
             { emoji: "🔬", name: "QA Engineer", slug: "qa_engineer" },
-            { emoji: "⚙️", name: "DevOps Engineer", slug: "devops_engineer" },
+            { emoji: "🔧", name: "DevOps Engineer", slug: "devops_engineer" },
             { emoji: "📊", name: "Data Engineer", slug: "data_engineer" },
             { emoji: "🤖", name: "ML Engineer", slug: "ml_engineer" },
             { emoji: "🏗️", name: "Architect", slug: "architect" },
@@ -282,7 +282,7 @@ export default function PersonaStudio() {
             { emoji: "🎯", name: "Product Manager", slug: "product_manager" },
             { emoji: "👔", name: "Project Manager", slug: "project_manager" },
             { emoji: "📈", name: "Business Analyst", slug: "business_analyst" },
-            { emoji: "👨‍💼", name: "Tech Lead Reviewer", slug: "tech_lead" },
+            { emoji: "👑", name: "Tech Lead Reviewer", slug: "tech_lead" },
           ].map((persona) => (
             <div
               key={persona.slug}

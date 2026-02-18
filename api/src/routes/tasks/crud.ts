@@ -1,6 +1,8 @@
 import { Router, Request, Response } from "express";
 import { AppDataSource } from "../../db/connection.js";
 import { WorkerTask, PLAN_FEATURES } from "../../models/index.js";
+import { KbCard } from "../../models/KbCard.js";
+import { KbBoard } from "../../models/KbBoard.js";
 import type { OrganizationPlan } from "../../models/Organization.js";
 import { RemoteAgent } from "../../models/RemoteAgent.js";
 import { authenticateRequest } from "../../middleware/auth.js";
@@ -9,10 +11,45 @@ import { body, param, query, validateRequest } from "../../middleware/validation
 import { fetchJiraIssue } from "../../utils/jira.js";
 import { fetchLinearIssue } from "../../utils/linear.js";
 import { inferPersonaFromJiraIssue } from "../../services/persona-inference.js";
+import { syncKbCardColumn } from "../../services/task-monitor.js";
 import { normalizeRepoWithOwner } from "./helpers.js";
 import { taskCreationLimiter } from "../../middleware/rate-limit.js";
 
 const router = Router();
+
+/**
+ * Fetch an internal board card by its issue key (e.g. "WM-42").
+ * Parses the prefix and card number, then looks up the KbCard.
+ */
+async function fetchBoardCard(
+  orgId: string,
+  issueKey: string,
+): Promise<{ summary: string; description: string; labels: string[] } | null> {
+  const match = issueKey.match(/^([A-Za-z]+)-(\d+)$/);
+  if (!match) return null;
+
+  const [, prefix, numStr] = match;
+  const cardNumber = parseInt(numStr, 10);
+
+  const cardRepo = AppDataSource.getRepository(KbCard);
+  const card = await cardRepo.findOne({
+    where: {
+      cardNumber,
+      board: { prefix: prefix.toUpperCase(), orgId },
+    },
+    relations: ["board", "cardLabels", "cardLabels.label"],
+  });
+
+  if (!card) return null;
+
+  return {
+    summary: card.title,
+    description: card.description || "",
+    labels: (card.cardLabels || [])
+      .map((cl) => cl.label?.name)
+      .filter(Boolean) as string[],
+  };
+}
 
 // All routes require authentication
 router.use(authenticateRequest);
@@ -138,7 +175,20 @@ router.post(
 
     let issueData: { summary: string; description: string; labels: string[] } | null = null;
 
-    if (issueTrackerProvider === "linear") {
+    if (issueTrackerProvider === "internal") {
+      // Fetch from internal KbBoard/KbCard
+      issueData = await fetchBoardCard(org.id, jiraIssueKey);
+      if (issueData) {
+        logger.info("Fetched internal board card details for task", {
+          issueKey: jiraIssueKey,
+          summary: issueData.summary,
+          descriptionLength: issueData.description?.length || 0,
+          labels: issueData.labels,
+        });
+      } else {
+        logger.warn("Could not fetch internal board card - using defaults", { issueKey: jiraIssueKey });
+      }
+    } else if (issueTrackerProvider === "linear") {
       // Fetch from Linear
       issueData = await fetchLinearIssue(org.id, jiraIssueKey);
       if (issueData) {
@@ -152,17 +202,20 @@ router.post(
         logger.warn("Could not fetch Linear issue details - using defaults", { issueKey: jiraIssueKey });
       }
     } else {
-      // Default to Jira
+      // Default to Jira (also try internal boards as fallback)
       issueData = await fetchJiraIssue(org.id, jiraIssueKey);
+      if (!issueData) {
+        issueData = await fetchBoardCard(org.id, jiraIssueKey);
+      }
       if (issueData) {
-        logger.info("Fetched Jira issue details for manual task", {
+        logger.info("Fetched issue details for manual task", {
           jiraIssueKey,
           summary: issueData.summary,
           descriptionLength: issueData.description?.length || 0,
           labels: issueData.labels,
         });
       } else {
-        logger.warn("Could not fetch Jira issue details - using defaults", { jiraIssueKey });
+        logger.warn("Could not fetch issue details - using defaults", { jiraIssueKey });
       }
     }
 
@@ -365,7 +418,9 @@ router.post(
     }
 
     // Map issueTrackerProvider to ticketSystem value
-    const ticketSystem = issueTrackerProvider === "github-issues" ? "github" : issueTrackerProvider as "jira" | "linear";
+    const ticketSystem = issueTrackerProvider === "github-issues"
+      ? "github"
+      : (issueTrackerProvider as "jira" | "linear" | "internal");
 
     // Create new task
     const task = taskRepo.create({
@@ -393,6 +448,26 @@ router.post(
     });
 
     await taskRepo.save(task);
+
+    // Link to KbCard and move it on the board (same as board run endpoint)
+    if (issueTrackerProvider === "internal" || (!issueData && issueTrackerProvider === "jira")) {
+      // Try to find the matching KbCard
+      const keyMatch = jiraIssueKey.match(/^([A-Za-z]+)-(\d+)$/);
+      if (keyMatch) {
+        const cardRepo = AppDataSource.getRepository(KbCard);
+        const card = await cardRepo.findOne({
+          where: {
+            cardNumber: parseInt(keyMatch[2], 10),
+            board: { prefix: keyMatch[1].toUpperCase(), orgId: org.id },
+          },
+          relations: ["board"],
+        });
+        if (card) {
+          await cardRepo.update(card.id, { workerTaskId: task.id });
+          syncKbCardColumn(task.id, initialStatus === "planning" ? "planning" : "claimed").catch(() => {});
+        }
+      }
+    }
 
     logger.info("Created manual worker task", {
       taskId: task.id,

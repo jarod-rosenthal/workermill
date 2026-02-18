@@ -239,6 +239,13 @@ class IssueTreeItem extends vscode.TreeItem {
 
     this.iconPath = new vscode.ThemeIcon("circle-outline", statusColor(issue.status));
     this.contextValue = "issue";
+
+    // Click issue → show details in feed panel
+    this.command = {
+      command: "workermill.selectIssue",
+      title: "Show Issue Details",
+      arguments: [issue],
+    };
   }
 }
 

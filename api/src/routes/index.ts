@@ -35,4 +35,5 @@ export { default as showcaseRouter } from "./showcase.js";
 export { default as remoteAgentRouter } from "./remote-agent.js";
 export { default as boardsRouter } from "./boards.js";
 export { default as issuesRouter } from "./issues.js";
+export { default as prdRouter } from "./prd.js";
 export { testRouter } from "./test.js";

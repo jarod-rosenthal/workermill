@@ -34,17 +34,17 @@ const architectureFlow = [
     bgColor: "bg-green-500/10",
     borderColor: "border-green-500/30",
     description:
-      "Polls the cloud API for tasks, runs planning via Claude CLI, spawns Docker worker containers",
+      "Polls the cloud API for tasks, runs planning via Claude CLI, spawns native worker processes",
     location: "Your Machine",
   },
   {
-    component: "Worker Containers",
+    component: "Worker Processes",
     icon: Cpu,
     color: "text-purple-500",
     bgColor: "bg-purple-500/10",
     borderColor: "border-purple-500/30",
     description:
-      "Docker containers that clone repos, implement changes, and create PRs. Logs stream back to the dashboard.",
+      "Native processes that clone repos, implement changes, and create PRs. Logs stream back to the dashboard.",
     location: "Your Machine",
   },
 ];
@@ -68,7 +68,7 @@ const comparisonRows = [
   {
     aspect: "Execution",
     cloud: "ECS Fargate containers",
-    remote: "Local Docker containers",
+    remote: "Local native processes",
   },
   {
     aspect: "AI Cost",
@@ -212,12 +212,12 @@ export default function RemoteAgent() {
                 <h3 className="font-semibold text-foreground">Install</h3>
                 <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between mt-2">
                   <code className="text-foreground">
-                    npm install -g @workermill/agent
+                    curl -fsSL https://workermill.com/install.sh | bash
                   </code>
                   <button
                     onClick={() =>
                       copyToClipboard(
-                        "npm install -g @workermill/agent",
+                        "curl -fsSL https://workermill.com/install.sh | bash",
                         "install",
                       )
                     }
@@ -244,7 +244,7 @@ export default function RemoteAgent() {
                 </h3>
                 <p className="text-sm text-muted-foreground mt-1">
                   Interactive wizard — checks prerequisites, validates credentials,
-                  pulls Docker image.
+                  configures SCM tokens.
                 </p>
                 <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between mt-2">
                   <code className="text-foreground">workermill-agent setup</code>
@@ -322,8 +322,8 @@ export default function RemoteAgent() {
               },
               {
                 step: "4",
-                label: "Docker Executes",
-                desc: "Workers run locally",
+                label: "Workers Execute",
+                desc: "Native processes locally",
               },
               { step: "5", label: "PR Created", desc: "Logs stream to cloud" },
             ].map((item, idx, arr) => (
@@ -403,38 +403,37 @@ export default function RemoteAgent() {
             <div className="bg-background rounded-lg p-4 border border-border">
               <h4 className="font-medium text-foreground mb-2 flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-blue-500" />
-                Codebase Analyst
+                Repo Clone
               </h4>
               <p className="text-xs text-muted-foreground">
-                Explores repo structure, identifies frameworks, patterns, and
-                conventions the planner should follow.
+                Shallow-clones the target repository to a temporary directory
+                for direct codebase access.
               </p>
             </div>
             <div className="bg-background rounded-lg p-4 border border-border">
               <h4 className="font-medium text-foreground mb-2 flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-green-500" />
-                Requirements Analyst
+                Single-Agent Planning
               </h4>
               <p className="text-xs text-muted-foreground">
-                Analyzes the task description for acceptance criteria,
-                ambiguities, and edge cases.
+                A single planner with Claude CLI explores the repo, identifies patterns,
+                and decomposes the task into stories with expert assignments.
               </p>
             </div>
             <div className="bg-background rounded-lg p-4 border border-border">
               <h4 className="font-medium text-foreground mb-2 flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-amber-500" />
-                Risk Analyst
+                Critic Validation
               </h4>
               <p className="text-xs text-muted-foreground">
-                Searches for affected files, dependencies, and test coverage
-                gaps that could cause issues.
+                An optional critic reviews the plan for quality (threshold: 85/100).
+                Up to 3 iterations before the plan is finalized.
               </p>
             </div>
           </div>
           <p className="text-sm text-muted-foreground">
-            All three reports are fed into the Planning Agent for a more
-            thorough, context-aware plan. This runs automatically — no
-            configuration needed.
+            The planner has direct tool access to the cloned repo (Glob, Read, Grep)
+            for context-aware planning. This runs automatically — no configuration needed.
           </p>
         </div>
       </section>
@@ -447,20 +446,6 @@ export default function RemoteAgent() {
             Prerequisites
           </h4>
           <ul className="space-y-2 text-sm text-muted-foreground">
-            <li className="flex items-start gap-2">
-              <span className="text-amber-500">•</span>
-              <span>
-                <strong className="text-foreground">Docker</strong> — workers run
-                in Docker containers
-              </span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="text-amber-500">•</span>
-              <span>
-                <strong className="text-foreground">Node.js 20+</strong> — for
-                the agent CLI
-              </span>
-            </li>
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
               <span>
@@ -478,6 +463,9 @@ export default function RemoteAgent() {
               </span>
             </li>
           </ul>
+          <p className="text-xs text-muted-foreground mt-3">
+            The agent is a standalone binary — no Docker or Node.js required.
+          </p>
         </div>
       </section>
     </div>

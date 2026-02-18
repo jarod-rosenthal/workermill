@@ -109,7 +109,7 @@ export default function QuickStart() {
             Workers run on your machine using your Claude Max subscription. Code never leaves your computer.
           </p>
           <div className="text-sm text-muted-foreground">
-            <strong className="text-foreground">Requires:</strong> Claude Max subscription, Node.js 20+
+            <strong className="text-foreground">Requires:</strong> Claude Max subscription
           </div>
         </div>
 
@@ -152,11 +152,11 @@ export default function QuickStart() {
                   <h3 className="font-semibold text-foreground text-lg">Install the CLI</h3>
                   <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">1 min</span>
                 </div>
-                <p className="text-muted-foreground mb-4">Install the WorkerMill CLI globally.</p>
+                <p className="text-muted-foreground mb-4">Install the WorkerMill agent. No Node.js required.</p>
                 <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
-                  <code className="text-foreground">npm install -g @workermill/agent</code>
+                  <code className="text-foreground">curl -fsSL https://workermill.com/install.sh | bash</code>
                   <button
-                    onClick={() => copyToClipboard("npm install -g @workermill/agent", "install")}
+                    onClick={() => copyToClipboard("curl -fsSL https://workermill.com/install.sh | bash", "install")}
                     className="text-muted-foreground hover:text-foreground"
                   >
                     <Copy className="w-4 h-4" />
@@ -190,7 +190,7 @@ export default function QuickStart() {
                     </button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Validates prerequisites, pulls the worker Docker image, and stores configuration in ~/.workermill/config.json.
+                    Validates prerequisites, configures your API key and SCM tokens, and stores configuration in ~/.workermill/config.json.
                   </p>
                 </div>
               </div>

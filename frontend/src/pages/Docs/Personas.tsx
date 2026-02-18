@@ -36,7 +36,7 @@ const personas = [
       "Adding new pages or views",
       "Accessibility improvements",
     ],
-    model: "claude-sonnet-4",
+    model: "claude-sonnet-4-6",
   },
   {
     id: "backend_developer",
@@ -55,7 +55,7 @@ const personas = [
       "Data validation",
       "Performance optimization",
     ],
-    model: "claude-sonnet-4",
+    model: "claude-sonnet-4-6",
   },
   {
     id: "devops_engineer",
@@ -74,7 +74,7 @@ const personas = [
       "Cloud resource management",
       "Deployment scripts",
     ],
-    model: "claude-sonnet-4",
+    model: "claude-sonnet-4-6",
   },
   {
     id: "security_engineer",
@@ -112,7 +112,7 @@ const personas = [
       "Bug reproduction scripts",
       "Test fixture creation",
     ],
-    model: "claude-sonnet-4",
+    model: "claude-sonnet-4-6",
   },
   {
     id: "tech_writer",
@@ -131,7 +131,7 @@ const personas = [
       "User guides",
       "Architecture documentation",
     ],
-    model: "claude-sonnet-4",
+    model: "claude-sonnet-4-6",
   },
   {
     id: "project_manager",
@@ -150,7 +150,7 @@ const personas = [
       "Sprint planning support",
       "Documentation review",
     ],
-    model: "claude-sonnet-4",
+    model: "claude-sonnet-4-6",
   },
   {
     id: "api_developer",
@@ -168,7 +168,7 @@ const personas = [
       "GraphQL schema design",
       "Client SDK generation",
     ],
-    model: "claude-sonnet-4",
+    model: "claude-sonnet-4-6",
   },
   {
     id: "database_administrator",
@@ -186,7 +186,7 @@ const personas = [
       "Database migrations",
       "Performance tuning",
     ],
-    model: "claude-sonnet-4",
+    model: "claude-sonnet-4-6",
   },
   {
     id: "data_engineer",
@@ -204,7 +204,7 @@ const personas = [
       "Data quality checks",
       "Stream processing setup",
     ],
-    model: "claude-sonnet-4",
+    model: "claude-sonnet-4-6",
   },
   {
     id: "ml_engineer",
@@ -222,7 +222,7 @@ const personas = [
       "Model deployment",
       "Experiment tracking",
     ],
-    model: "claude-sonnet-4",
+    model: "claude-sonnet-4-6",
   },
   {
     id: "mobile_developer_ios",
@@ -240,7 +240,7 @@ const personas = [
       "App Store submission",
       "iOS-specific features",
     ],
-    model: "claude-sonnet-4",
+    model: "claude-sonnet-4-6",
   },
   {
     id: "mobile_developer_android",
@@ -258,7 +258,7 @@ const personas = [
       "Play Store submission",
       "Android-specific features",
     ],
-    model: "claude-sonnet-4",
+    model: "claude-sonnet-4-6",
   },
   {
     id: "tech_lead",

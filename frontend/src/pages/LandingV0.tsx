@@ -1,14 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Home,
-  Search,
-  FolderOpen,
-  LayoutTemplate,
-  Sparkles,
-  Layers,
-  Zap,
-} from "lucide-react";
+import { Home, Search, FolderOpen, Sparkles } from "lucide-react";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
 import { StatsSection } from "./Home/v0/StatsSection";
@@ -42,17 +34,6 @@ interface StackTemplateOption {
   language: string;
 }
 
-// ─── Category tabs derived from starter tags ────────────────────────────────
-
-const TEMPLATE_CATEGORIES = [
-  "All",
-  "SaaS",
-  "APIs",
-  "E-Commerce",
-  "CMS",
-  "Dev Tools",
-];
-
 // ─── Sidebar ────────────────────────────────────────────────────────────────
 
 function Sidebar({
@@ -64,16 +45,11 @@ function Sidebar({
 
   const items = [
     { icon: Home, label: "Home", action: () => onNavigate("top") },
-    { icon: Search, label: "Search", action: () => onNavigate("templates") },
+    { icon: Search, label: "Search", action: () => onNavigate("showcase") },
     {
       icon: FolderOpen,
       label: "Projects",
       action: () => onNavigate("showcase"),
-    },
-    {
-      icon: LayoutTemplate,
-      label: "Templates",
-      action: () => onNavigate("templates"),
     },
     {
       icon: Sparkles,
@@ -98,49 +74,6 @@ function Sidebar({
   );
 }
 
-// ─── Template Card ──────────────────────────────────────────────────────────
-
-function TemplateCard({
-  project,
-  isSelected,
-  onSelect,
-}: {
-  project: StarterProjectOption;
-  isSelected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      onClick={onSelect}
-      className={`text-left p-4 rounded-xl transition-all hover:bg-neutral-800 ${
-        isSelected
-          ? "bg-neutral-800"
-          : "bg-neutral-900"
-      }`}
-    >
-      <h3 className="text-sm font-semibold text-white mb-1.5">
-        {project.title}
-      </h3>
-      <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed mb-3">
-        {project.description}
-      </p>
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-800 text-slate-400">
-          {project.stackTemplate || "Auto"}
-        </span>
-        <span className="text-[10px] text-slate-500 flex items-center gap-1">
-          <Layers className="w-3 h-3" />
-          {project.estimatedStories} stories
-        </span>
-        <span className="text-[10px] text-slate-500 flex items-center gap-1">
-          <Zap className="w-3 h-3" />
-          {project.complexity}
-        </span>
-      </div>
-    </button>
-  );
-}
-
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function LandingV0() {
@@ -152,11 +85,8 @@ export default function LandingV0() {
   >([]);
   const [selectedStarter, setSelectedStarter] =
     useState<StarterProjectOption | null>(null);
-  const [activeCategory, setActiveCategory] = useState("All");
-
   // Refs for scroll targets
   const topRef = useRef<HTMLDivElement>(null);
-  const templatesRef = useRef<HTMLDivElement>(null);
   const showcaseRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -184,7 +114,6 @@ export default function LandingV0() {
   const handleSidebarNavigate = (target: string) => {
     const refMap: Record<string, React.RefObject<HTMLDivElement | null>> = {
       top: topRef,
-      templates: templatesRef,
       showcase: showcaseRef,
     };
     refMap[target]?.current?.scrollIntoView({ behavior: "smooth" });
@@ -193,16 +122,6 @@ export default function LandingV0() {
   // Show all starters (drop cli-tool, the smallest example)
   const allStarters = starterProjects.filter((p) => p.id !== "cli-tool");
   const displayStarters = allStarters.slice(0, 5);
-
-  // Filter templates by category
-  const filteredTemplates =
-    activeCategory === "All"
-      ? allStarters
-      : allStarters.filter((p) =>
-          p.tags?.some(
-            (t) => t.toLowerCase() === activeCategory.toLowerCase(),
-          ),
-        );
 
   return (
     <main className="min-h-screen relative overflow-hidden">
@@ -269,52 +188,6 @@ export default function LandingV0() {
               )}
             </div>
           </section>
-
-          {/* ─── Start with a template ─────────────────────────────────────── */}
-          {allStarters.length > 0 && (
-            <section ref={templatesRef} className="relative pb-16">
-              <div className="container mx-auto px-6 lg:px-8 max-w-6xl">
-                <h2 className="text-2xl font-bold text-white mb-6">
-                  Start with a template
-                </h2>
-
-                {/* Category tabs */}
-                <div className="flex items-center gap-1 mb-6 overflow-x-auto pb-1">
-                  {TEMPLATE_CATEGORIES.map((cat) => (
-                    <button
-                      key={cat}
-                      onClick={() => setActiveCategory(cat)}
-                      className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                        activeCategory === cat
-                          ? "bg-white text-slate-900"
-                          : "text-slate-400 hover:text-white hover:bg-white/10"
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Card grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredTemplates.map((project) => (
-                    <TemplateCard
-                      key={project.id}
-                      project={project}
-                      isSelected={selectedStarter?.id === project.id}
-                      onSelect={() => handleStarterSelect(project)}
-                    />
-                  ))}
-                </div>
-
-                {filteredTemplates.length === 0 && (
-                  <p className="text-sm text-slate-500 text-center py-8">
-                    No templates in this category yet.
-                  </p>
-                )}
-              </div>
-            </section>
-          )}
 
           {/* Showcase Section */}
           <div id="showcase" ref={showcaseRef}>

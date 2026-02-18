@@ -11,11 +11,7 @@ import {
   Layers,
   CheckCircle,
   Zap,
-  Shield,
-  Terminal,
   BarChart3,
-  FileText,
-  Workflow,
   Users,
   ChevronDown,
   GitPullRequest,
@@ -23,9 +19,12 @@ import {
   MessageSquare,
   FileCode,
   Rocket,
+  Calendar,
 } from "lucide-react";
 import { teamBoardEpics } from "../data/teamboard-showcase-data";
 import { taskPulseEpics } from "../data/taskpulse-showcase-data";
+import { calMillEpics } from "../data/calmill-showcase-data";
+import { onCallShiftEpics } from "../data/oncallshift-showcase-data";
 
 interface QualityScores {
   lint: string;
@@ -51,7 +50,7 @@ interface ShowcaseDetail {
   storyCount: number;
   cost: string;
   duration: string;
-  repoUrl: string;
+  repoUrl?: string;
   liveUrl?: string;
   category: string;
   personasUsed: string[];
@@ -65,14 +64,13 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     id: "oncallshift",
     name: "OnCallShift",
     tagline:
-      "Production incident management platform — built entirely by WorkerMill.",
+      "Production incident management platform — built across 13 sequential epics by AI workers.",
     description:
-      "Production incident management platform: on-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens.",
+      "Production incident management platform: on-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 68 database models, 40 API routes, 75 frontend pages, 31 mobile screens. 13 epics executed sequentially, each building on the last. Deployed to AWS at oncallshift.com.",
     stack: "Express + TypeScript + React + React Native + Terraform",
-    storyCount: 105,
-    cost: "$142.00",
+    storyCount: 153,
+    cost: "Claude Max",
     duration: "~18 hrs",
-    repoUrl: "https://github.com/workermill-examples/oncallshift",
     liveUrl: "https://oncallshift.com",
     category: "incident-management",
     personasUsed: [
@@ -81,100 +79,14 @@ const showcaseData: Record<string, ShowcaseDetail> = {
       "devops_engineer",
       "security_engineer",
       "qa_engineer",
-      "tech_writer",
     ],
     qualityScores: {
       lint: "0 errors",
       types: "0 errors",
-      tests: ">80% coverage",
+      tests: "22 unit + 13 E2E",
       security: "0 critical",
     },
-    stories: [
-      {
-        title: "Project scaffolding and database schema",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.80",
-        duration: "12 min",
-      },
-      {
-        title: "Authentication and user management",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$2.40",
-        duration: "18 min",
-      },
-      {
-        title: "Organization and team management",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "10 min",
-      },
-      {
-        title: "Service catalog and dependencies",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "8 min",
-      },
-      {
-        title: "Incident lifecycle and events",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$3.20",
-        duration: "22 min",
-      },
-      {
-        title: "On-call schedule management",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$2.80",
-        duration: "20 min",
-      },
-      {
-        title: "Alert routing and escalation policies",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$2.60",
-        duration: "16 min",
-      },
-      {
-        title: "Terraform infrastructure (ECS, RDS, ALB)",
-        persona: "devops_engineer",
-        status: "completed",
-        cost: "$3.40",
-        duration: "24 min",
-      },
-      {
-        title: "Frontend dashboard and incident views",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$4.20",
-        duration: "30 min",
-      },
-      {
-        title: "Mobile app screens and push notifications",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$3.80",
-        duration: "26 min",
-      },
-      {
-        title: "Security audit and hardening",
-        persona: "security_engineer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "10 min",
-      },
-      {
-        title: "Test suite and quality gates",
-        persona: "qa_engineer",
-        status: "completed",
-        cost: "$2.20",
-        duration: "14 min",
-      },
-    ],
+    stories: [],
     icon: <Zap className="w-5 h-5" />,
   },
   teamboard: {
@@ -239,526 +151,36 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     stories: [],
     icon: <BarChart3 className="w-5 h-5" />,
   },
-  shipapi: {
-    id: "shipapi",
-    name: "ShipAPI",
-    tagline: "Production REST API deployed to AWS via Terraform.",
+  calmill: {
+    id: "calmill",
+    name: "CalMill",
+    tagline:
+      "Open scheduling platform — built across 8 sequential epics by AI workers.",
     description:
-      "Inventory management API with JWT auth, rate limiting, full-text search, audit logging, and auto-generated OpenAPI docs. Full AWS deployment.",
-    stack: "FastAPI + SQLAlchemy + Terraform",
-    storyCount: 8,
-    cost: "$9.80",
-    duration: "35 min",
-    repoUrl: "https://github.com/workermill-examples/shipapi",
-    category: "api",
-    personasUsed: ["backend_developer", "devops_engineer", "qa_engineer"],
-    qualityScores: {
-      lint: "0 errors",
-      types: "0 errors (mypy strict)",
-      tests: ">80% coverage",
-      security: "0 critical",
-    },
-    stories: [
-      {
-        title: "FastAPI project setup and models",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "4 min",
-      },
-      {
-        title: "JWT and API key authentication",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "5 min",
-      },
-      {
-        title: "CRUD endpoints with pagination and search",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "6 min",
-      },
-      {
-        title: "Stock transfer and alert system",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "4 min",
-      },
-      {
-        title: "Audit logging middleware",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$0.80",
-        duration: "3 min",
-      },
-      {
-        title: "Terraform infrastructure (ECS + RDS + ALB)",
-        persona: "devops_engineer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "6 min",
-      },
-      {
-        title: "Seed data and OpenAPI docs",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$0.80",
-        duration: "3 min",
-      },
-      {
-        title: "Test suite and CI/CD pipeline",
-        persona: "qa_engineer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "4 min",
-      },
-    ],
-    icon: <Terminal className="w-5 h-5" />,
-  },
-  pulseview: {
-    id: "pulseview",
-    name: "PulseView",
-    tagline: "Real-time event analytics with always-alive demo data.",
-    description:
-      "Event ingestion API with real-time WebSocket dashboard: charts, heatmap, and searchable event table. Demo data generator keeps charts active.",
-    stack: "Express + React + Socket.io + GCP",
-    storyCount: 12,
-    cost: "$18.40",
-    duration: "62 min",
-    repoUrl: "https://github.com/workermill-examples/pulseview",
-    category: "analytics",
+      "Full-stack scheduling platform with event types, timezone-aware availability, public booking pages, team round-robin scheduling, Google Calendar integration, email notifications, and 202 unit tests. 8 epics executed sequentially, each building on the last. Deployed to Vercel at calmill.workermill.com.",
+    stack: "Next.js 16 + Prisma 7 + TailwindCSS 4 + Neon PostgreSQL",
+    storyCount: 48,
+    cost: "Claude Max",
+    duration: "~434 min",
+    repoUrl: "https://github.com/workermill-examples/calmill",
+    liveUrl: "https://calmill.workermill.com",
+    category: "scheduling",
     personasUsed: [
       "backend_developer",
       "frontend_developer",
-      "devops_engineer",
-    ],
-    qualityScores: {
-      lint: "0 errors",
-      types: "0 errors",
-      tests: ">60% coverage",
-      security: "0 critical",
-    },
-    stories: [
-      {
-        title: "Event ingestion API",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "5 min",
-      },
-      {
-        title: "PostgreSQL schema and BRIN indexes",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.00",
-        duration: "4 min",
-      },
-      {
-        title: "WebSocket real-time layer",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "6 min",
-      },
-      {
-        title: "Counter cards and line chart",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "5 min",
-      },
-      {
-        title: "Bar chart and pie chart",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "4 min",
-      },
-      {
-        title: "Heatmap visualization",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "6 min",
-      },
-      {
-        title: "Event table with search and sort",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "5 min",
-      },
-      {
-        title: "Time range and filter controls",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "4 min",
-      },
-      {
-        title: "Demo data generator",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.80",
-        duration: "6 min",
-      },
-      {
-        title: "Materialized views and aggregation",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "5 min",
-      },
-      {
-        title: "Terraform GCP deployment",
-        persona: "devops_engineer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "6 min",
-      },
-      {
-        title: "CI/CD and smoke tests",
-        persona: "qa_engineer",
-        status: "completed",
-        cost: "$1.80",
-        duration: "6 min",
-      },
-    ],
-    icon: <BarChart3 className="w-5 h-5" />,
-  },
-  docforge: {
-    id: "docforge",
-    name: "DocForge",
-    tagline: "Developer docs with CMS, search, and version history.",
-    description:
-      "Documentation platform with Stripe-like design, Meilisearch-powered search, Django admin CMS, and 15+ pages of generated API docs.",
-    stack: "Django + HTMX + Meilisearch",
-    storyCount: 10,
-    cost: "$12.60",
-    duration: "42 min",
-    repoUrl: "https://github.com/workermill-examples/docforge",
-    category: "documentation",
-    personasUsed: ["backend_developer", "frontend_developer", "tech_writer"],
-    qualityScores: {
-      lint: "0 errors",
-      types: "0 errors (mypy)",
-      tests: ">60% coverage",
-      security: "0 critical",
-    },
-    stories: [
-      {
-        title: "Django project and page model",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.00",
-        duration: "4 min",
-      },
-      {
-        title: "Page hierarchy and ordering",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "4 min",
-      },
-      {
-        title: "Markdown rendering and syntax highlighting",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.00",
-        duration: "3 min",
-      },
-      {
-        title: "Meilisearch integration",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "5 min",
-      },
-      {
-        title: "Django admin CMS with Markdown editor",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "4 min",
-      },
-      {
-        title: "Version history and diff view",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "5 min",
-      },
-      {
-        title: "Public docs frontend with sidebar",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "5 min",
-      },
-      {
-        title: "Dark mode and reading time",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$0.80",
-        duration: "3 min",
-      },
-      {
-        title: "Generate LaunchPad API documentation",
-        persona: "tech_writer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "5 min",
-      },
-      {
-        title: "Terraform AWS deployment",
-        persona: "devops_engineer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "4 min",
-      },
-    ],
-    icon: <FileText className="w-5 h-5" />,
-  },
-  envguard: {
-    id: "envguard",
-    name: "EnvGuard",
-    tagline: "Secret scanning CLI (Go) with tracking dashboard.",
-    description:
-      "Go CLI scanning codebases for leaked secrets using regex and entropy analysis. Web dashboard tracks results. Cross-platform binaries via goreleaser.",
-    stack: "Go + Cobra + Next.js",
-    storyCount: 12,
-    cost: "$22.30",
-    duration: "75 min",
-    repoUrl: "https://github.com/workermill-examples/envguard",
-    category: "security",
-    personasUsed: [
-      "backend_developer",
-      "frontend_developer",
-      "security_engineer",
-      "devops_engineer",
-    ],
-    qualityScores: {
-      lint: "0 errors (golangci-lint + eslint)",
-      types: "0 errors (go vet + tsc)",
-      tests: ">70% coverage",
-      security: "0 critical",
-    },
-    stories: [
-      {
-        title: "Go CLI scaffolding with Cobra",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "5 min",
-      },
-      {
-        title: "Regex pattern detection rules (30+)",
-        persona: "security_engineer",
-        status: "completed",
-        cost: "$2.40",
-        duration: "8 min",
-      },
-      {
-        title: "Shannon entropy analysis",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.80",
-        duration: "6 min",
-      },
-      {
-        title: "Git history scanning",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$2.00",
-        duration: "7 min",
-      },
-      {
-        title: "Output formats (table, JSON, SARIF)",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "5 min",
-      },
-      {
-        title: "Configuration file support",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "4 min",
-      },
-      {
-        title: "Dashboard API and data model",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "6 min",
-      },
-      {
-        title: "Dashboard frontend (projects, trends)",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$2.20",
-        duration: "8 min",
-      },
-      {
-        title: "Finding management UI",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$1.80",
-        duration: "6 min",
-      },
-      {
-        title: "CLI push command integration",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "5 min",
-      },
-      {
-        title: "Goreleaser cross-platform builds",
-        persona: "devops_engineer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "6 min",
-      },
-      {
-        title: "Test suite and CI pipeline",
-        persona: "qa_engineer",
-        status: "completed",
-        cost: "$3.70",
-        duration: "9 min",
-      },
-    ],
-    icon: <Shield className="w-5 h-5" />,
-  },
-  orderflow: {
-    id: "orderflow",
-    name: "OrderFlow",
-    tagline: "Event-driven microservices with monitoring dashboard.",
-    description:
-      "Three-service order processing (Order, Payment, Notification) via AWS SQS. Real-time monitoring dashboard shows animated message flow.",
-    stack: "Express + SQS + React + Terraform",
-    storyCount: 14,
-    cost: "$28.50",
-    duration: "95 min",
-    repoUrl: "https://github.com/workermill-examples/orderflow",
-    category: "microservices",
-    personasUsed: [
-      "backend_developer",
-      "frontend_developer",
-      "devops_engineer",
       "qa_engineer",
+      "devops_engineer",
+      "database_administrator",
+      "security_engineer",
     ],
     qualityScores: {
       lint: "0 errors",
       types: "0 errors",
-      tests: ">60% coverage",
+      tests: "202 unit + E2E",
       security: "0 critical",
     },
-    stories: [
-      {
-        title: "Order service with REST API",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.80",
-        duration: "6 min",
-      },
-      {
-        title: "Payment service with SQS consumer",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$2.20",
-        duration: "8 min",
-      },
-      {
-        title: "Notification service with webhook delivery",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "6 min",
-      },
-      {
-        title: "SQS queue setup and message schemas",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "5 min",
-      },
-      {
-        title: "Retry logic with exponential backoff",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "4 min",
-      },
-      {
-        title: "Monitoring service with WebSocket",
-        persona: "backend_developer",
-        status: "completed",
-        cost: "$2.00",
-        duration: "7 min",
-      },
-      {
-        title: "Dashboard service health cards",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$1.40",
-        duration: "5 min",
-      },
-      {
-        title: "Animated message flow diagram",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$2.40",
-        duration: "8 min",
-      },
-      {
-        title: "Live event log and order tracker",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$1.80",
-        duration: "6 min",
-      },
-      {
-        title: "Metrics dashboard and demo mode",
-        persona: "frontend_developer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "6 min",
-      },
-      {
-        title: "Terraform multi-service deployment",
-        persona: "devops_engineer",
-        status: "completed",
-        cost: "$2.80",
-        duration: "10 min",
-      },
-      {
-        title: "SQS queues and IAM policies",
-        persona: "devops_engineer",
-        status: "completed",
-        cost: "$1.60",
-        duration: "5 min",
-      },
-      {
-        title: "ALB path-based routing",
-        persona: "devops_engineer",
-        status: "completed",
-        cost: "$1.20",
-        duration: "4 min",
-      },
-      {
-        title: "Integration tests and CI/CD",
-        persona: "qa_engineer",
-        status: "completed",
-        cost: "$5.50",
-        duration: "15 min",
-      },
-    ],
-    icon: <Workflow className="w-5 h-5" />,
+    stories: [],
+    icon: <Calendar className="w-5 h-5" />,
   },
 };
 
@@ -791,10 +213,18 @@ function PersonaBadge({ persona }: { persona: string }) {
 export default function ShowcaseViewer() {
   const { projectId } = useParams<{ projectId: string }>();
   const project = projectId ? showcaseData[projectId] : undefined;
+  const isOnCallShift = projectId === "oncallshift";
   const isTeamBoard = projectId === "teamboard";
   const isTaskPulse = projectId === "taskpulse";
-  const isEpicBoard = isTeamBoard || isTaskPulse;
-  const epicBoardData = isTeamBoard ? teamBoardEpics : taskPulseEpics;
+  const isCalMill = projectId === "calmill";
+  const isEpicBoard = isOnCallShift || isTeamBoard || isTaskPulse || isCalMill;
+  const epicBoardData = isOnCallShift
+    ? onCallShiftEpics
+    : isTeamBoard
+      ? teamBoardEpics
+      : isCalMill
+        ? calMillEpics
+        : taskPulseEpics;
   const [expandedEpic, setExpandedEpic] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Record<string, "spec" | "log">>(
     {},
@@ -843,15 +273,17 @@ export default function ShowcaseViewer() {
                 Live site
               </a>
             )}
-            <a
-              href={project.repoUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 transition-colors text-foreground"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              View repo
-            </a>
+            {project.repoUrl && (
+              <a
+                href={project.repoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 transition-colors text-foreground"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                View repo
+              </a>
+            )}
           </div>
         </div>
       </header>
@@ -886,7 +318,13 @@ export default function ShowcaseViewer() {
             <div className="card-elevated border border-border/50 rounded-xl p-5">
               <div className="flex items-center gap-2 text-2xl font-bold text-foreground">
                 <FileCode className="w-5 h-5 text-muted-foreground" />
-                {isTaskPulse ? "18K" : "29K"}
+                {isOnCallShift
+                  ? "177K"
+                  : isCalMill
+                    ? "22K"
+                    : isTaskPulse
+                      ? "18K"
+                      : "29K"}
               </div>
               <div className="text-sm text-muted-foreground mt-1">
                 lines of code

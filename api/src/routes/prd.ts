@@ -239,6 +239,7 @@ router.post(
         repoPath,
         githubRepo,
         boardName: boardNameOverride,
+        syncToTracker,
       } = req.body;
 
       // ---------------------------------------------------------------
@@ -497,7 +498,20 @@ router.post(
       });
 
       // ---------------------------------------------------------------
-      // 4. Optionally trigger auto-run for unblocked cards
+      // 4. Sync to external tracker if requested
+      // ---------------------------------------------------------------
+      let trackerSync = null;
+      if (syncToTracker !== false) {
+        try {
+          const { syncBoardToTracker } = await import("../services/tracker-sync.js");
+          trackerSync = await syncBoardToTracker(result.board.id, org.id);
+        } catch (err) {
+          logger.warn("External tracker sync failed (non-blocking)", { error: String(err) });
+        }
+      }
+
+      // ---------------------------------------------------------------
+      // 5. Optionally trigger auto-run for unblocked cards
       // ---------------------------------------------------------------
       if (org.prdAutoRun) {
         try {
@@ -517,7 +531,7 @@ router.post(
       }
 
       // ---------------------------------------------------------------
-      // 5. Return response
+      // 6. Return response
       // ---------------------------------------------------------------
       logger.info("PRD decomposed into board", {
         boardId: result.board.id,
@@ -539,6 +553,7 @@ router.post(
           dependencies: result.decomposed.cards[i].dependencyIndices,
           estimatedSteps: result.decomposed.cards[i].estimatedSteps,
         })),
+        trackerSync,
       });
     } catch (error) {
       logger.error("Error decomposing PRD", {

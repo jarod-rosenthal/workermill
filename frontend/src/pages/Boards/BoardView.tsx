@@ -51,7 +51,7 @@ interface SortableColumnProps {
 
 function SortableColumn({
   column,
-  boardId,
+  boardId: _boardId,
   blockedCardIds,
   onAddCard,
   onCardClick,

@@ -26,6 +26,7 @@ import type { OrganizationPlan } from "../models/Organization.js";
 import { RemoteAgent } from "../models/RemoteAgent.js";
 import type { WorkerPersona } from "../models/WorkerTask.js";
 import { syncKbCardColumn } from "../services/task-monitor.js";
+import { resetCancelledTask } from "./tasks/lifecycle.js";
 import { authenticateUser } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
@@ -139,7 +140,12 @@ export async function runCardAsWorkerTask(
   // Check no active worker task already linked
   if (card.workerTaskId) {
     const existing = await workerTaskRepo.findOne({ where: { id: card.workerTaskId } });
-    if (existing && !["completed", "deployed", "failed", "cancelled", "review_rejected"].includes(existing.status)) {
+    if (existing && existing.status === "cancelled") {
+      await resetCancelledTask(existing);
+      syncKbCardColumn(existing.id, (existing.status as string) === "planning" ? "planning" : "claimed").catch(() => {});
+      return existing;
+    }
+    if (existing && !["completed", "deployed", "failed", "review_rejected"].includes(existing.status)) {
       throw new Error("Card already has an active worker task");
     }
   }

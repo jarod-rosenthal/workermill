@@ -14,6 +14,7 @@ import { KbColumn } from "./KbColumn.js";
 import { User } from "./User.js";
 import { WorkerTask } from "./WorkerTask.js";
 import type { KbCardLabel } from "./KbCardLabel.js";
+import type { KbCardDependency } from "./KbCardDependency.js";
 import type { KbComment } from "./KbComment.js";
 import type { KbChecklist } from "./KbChecklist.js";
 
@@ -87,6 +88,12 @@ export class KbCard {
 
   @OneToMany("KbCardLabel", "card")
   cardLabels: KbCardLabel[];
+
+  @OneToMany("KbCardDependency", "card")
+  dependencies: KbCardDependency[];
+
+  @OneToMany("KbCardDependency", "dependsOnCard")
+  dependents: KbCardDependency[];
 
   @OneToMany("KbComment", "card")
   comments: KbComment[];

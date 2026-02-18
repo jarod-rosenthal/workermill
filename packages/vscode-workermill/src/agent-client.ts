@@ -181,6 +181,20 @@ export class AgentClient extends EventEmitter {
     return this.get<unknown[]>(`/api/tasks/${taskId}/logs${qs}`);
   }
 
+  /** Build a board from a PRD document */
+  async buildFromPrd(payload: {
+    source: string;
+    content: string;
+    githubRepo?: string;
+    boardName?: string;
+  }): Promise<{ boardId: string; boardName: string; cardCount: number }> {
+    return this.post("/api/prd/build", payload) as Promise<{
+      boardId: string;
+      boardName: string;
+      cardCount: number;
+    }>;
+  }
+
   /** Get code events (Write/Edit) for a task, supports incremental polling via since */
   async getCodeEvents(taskId: string, since?: string): Promise<CodeEventRecord[]> {
     const qs = since ? `?since=${encodeURIComponent(since)}` : "";

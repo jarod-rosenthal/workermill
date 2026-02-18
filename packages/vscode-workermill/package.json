@@ -127,6 +127,11 @@
       {
         "command": "workermill.manualSetup",
         "title": "WorkerMill: Manual Setup"
+      },
+      {
+        "command": "workermill.buildFromPrd",
+        "title": "WorkerMill: Build from PRD",
+        "icon": "$(rocket)"
       }
     ],
     "menus": {
@@ -164,6 +169,18 @@
           "command": "workermill.runTask",
           "group": "workermill@1",
           "when": "explorerResourceIsFolder"
+        },
+        {
+          "command": "workermill.buildFromPrd",
+          "when": "resourceExtname == .md",
+          "group": "workermill@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "workermill.buildFromPrd",
+          "when": "resourceExtname == .md",
+          "group": "navigation"
         }
       ]
     },

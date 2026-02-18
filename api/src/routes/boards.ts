@@ -1774,9 +1774,12 @@ router.delete(
         return;
       }
 
-      // Only author can delete their comment
-      if (comment.authorId !== userId) {
-        res.status(403).json({ error: "You can only delete your own comments" });
+      // Any org member can delete comments on their board (agents leave comments users may want to clean up)
+      const boardId = req.params.boardId as string;
+      const org = req.organization!;
+      const board = await AppDataSource.getRepository(KbBoard).findOne({ where: { id: boardId, orgId: org.id } });
+      if (!board) {
+        res.status(404).json({ error: "Board not found" });
         return;
       }
 

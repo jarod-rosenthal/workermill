@@ -229,6 +229,7 @@ import { ConsolidatePlansToThreeTiers1706688000047 } from "./migrations/17066880
 import { AddLogDeletionSafeguard1706688000048 } from "./migrations/1706688000048-AddLogDeletionSafeguard.js";
 import { AddGithubRepoToKbCards1706688000049 } from "./migrations/1706688000049-AddGithubRepoToKbCards.js";
 import { AddBoardIssueKeys1706688000050 } from "./migrations/1706688000050-AddBoardIssueKeys.js";
+import { UpdateTeamCollaborationDirective1706688000051 } from "./migrations/1706688000051-UpdateTeamCollaborationDirective.js";
 import { AddReviewingConsolidatingStatus1739750400000 } from "./migrations/1739750400000-AddReviewingConsolidatingStatus.js";
 import { AddPlanningMode1739750400001 } from "./migrations/1739750400001-AddPlanningMode.js";
 import { HashOrgApiKeys1739750400002 } from "./migrations/1739750400002-HashOrgApiKeys.js";
@@ -478,6 +479,7 @@ export const AppDataSource = new DataSource({
     AddLogDeletionSafeguard1706688000048,
     AddGithubRepoToKbCards1706688000049,
     AddBoardIssueKeys1706688000050,
+    UpdateTeamCollaborationDirective1706688000051,
     AddReviewingConsolidatingStatus1739750400000,
     AddPlanningMode1739750400001,
     HashOrgApiKeys1739750400002,

@@ -109,6 +109,7 @@ router.get("/", async (req: Request, res: Response) => {
       autoDeployEnabled: org.autoDeployEnabled ?? false,
       autoImproveEnabled: org.autoImproveEnabled ?? false,
       autoSkillExtraction: org.autoSkillExtraction ?? true,
+      prdAutoRun: org.prdAutoRun ?? false,
 
       // Remote Agent Mode
       remoteAgentOnly: org.remoteAgentOnly ?? false,
@@ -255,6 +256,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       autoDeployEnabled,
       autoImproveEnabled,
       autoSkillExtraction,
+      prdAutoRun,
       remoteAgentOnly,
 
       // Quality Gate Settings
@@ -860,6 +862,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.autoSkillExtraction = Boolean(autoSkillExtraction);
     }
 
+    if (prdAutoRun !== undefined) {
+      org.prdAutoRun = Boolean(prdAutoRun);
+    }
+
     if (remoteAgentOnly !== undefined) {
       if (!planFeatures.cloudExecution && Boolean(remoteAgentOnly)) {
         res.status(403).json({ error: "Remote agent mode requires Pro plan or higher." });
@@ -1158,6 +1164,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         autoDeployEnabled: org.autoDeployEnabled,
         autoImproveEnabled: org.autoImproveEnabled,
         autoSkillExtraction: org.autoSkillExtraction,
+        prdAutoRun: org.prdAutoRun ?? false,
         remoteAgentOnly: org.remoteAgentOnly,
         qualityGateEnabled: org.qualityGateEnabled,
         minQualityScore: org.minQualityScore,

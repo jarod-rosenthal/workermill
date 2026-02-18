@@ -417,7 +417,7 @@ async function runWithClaudeCli(
     let currentPhase: PlanningPhase = "initializing";
     let toolCallCount = 0;
     let firstTextSeen = false;
-    let milestoneSent = { started: false, reading: false, analyzing: false, generating: false };
+    const milestoneSent = { started: false, reading: false, analyzing: false, generating: false };
 
     // Emit initial milestone
     onProgress?.("Planning agent started");

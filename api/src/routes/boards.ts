@@ -269,6 +269,7 @@ async function runCardAsWorkerTask(
     pipelineVersion,
     executionMode,
     criticEnabled: hasCriticLabel,
+    ticketSystem: "internal",
   });
 
   await workerTaskRepo.save(workerTask);

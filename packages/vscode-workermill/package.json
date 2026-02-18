@@ -91,6 +91,15 @@
         "command": "workermill.searchIssues",
         "title": "WorkerMill: Search Issues...",
         "icon": "$(search)"
+      },
+      {
+        "command": "workermill.installAgent",
+        "title": "WorkerMill: Install/Update Agent"
+      },
+      {
+        "command": "workermill.cancelTask",
+        "title": "WorkerMill: Cancel Task",
+        "icon": "$(debug-stop)"
       }
     ],
     "menus": {
@@ -114,6 +123,11 @@
         },
         {
           "command": "workermill.openLiveDiff",
+          "when": "viewItem == task-running || viewItem == task-planning",
+          "group": "inline"
+        },
+        {
+          "command": "workermill.cancelTask",
           "when": "viewItem == task-running || viewItem == task-planning",
           "group": "inline"
         }

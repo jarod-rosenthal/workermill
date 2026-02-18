@@ -7,7 +7,7 @@
  */
 
 import * as vscode from "vscode";
-import { AgentClient, type TaskInfo } from "./agent-client";
+import { AgentClient, type TaskInfo, type IssueInfo } from "./agent-client";
 
 export class FeedViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "workermill.feedPanel";
@@ -66,6 +66,15 @@ export class FeedViewProvider implements vscode.WebviewViewProvider {
     // Start polling
     this.pollTimer = setInterval(() => this.pollUpdates(), 3000);
     this.pollUpdates();
+  }
+
+  /** Show issue details in the feed panel */
+  showIssue(issue: IssueInfo): void {
+    if (!this.view) return;
+    this.stopPolling();
+    this.currentTaskId = null;
+    this.seenFeedIds.clear();
+    this.view.webview.html = getIssueHtml(issue);
   }
 
   /** Clear the feed (no task selected) */
@@ -325,6 +334,85 @@ window.addEventListener('message', (event) => {
   }
 });
 </script>
+</body></html>`;
+}
+
+function getIssueHtml(issue: IssueInfo): string {
+  const priorityColors: Record<string, string> = {
+    highest: "var(--red)", blocker: "var(--red)", critical: "var(--red)",
+    high: "var(--orange)", medium: "var(--yellow)", low: "var(--cyan)", lowest: "var(--text-dim)",
+  };
+  const priColor = priorityColors[(issue.priority || "").toLowerCase()] || "var(--text-dim)";
+
+  const descriptionHtml = issue.description
+    ? esc(issue.description).replace(/\n/g, "<br>")
+    : '<span style="color: var(--text-dim);">No description</span>';
+
+  return /*html*/ `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  :root {
+    --bg: transparent;
+    --bg-tertiary: var(--vscode-input-background, ***REMOVED***2d2d2d);
+    --border: var(--vscode-sideBar-border, ***REMOVED***3e3e42);
+    --text: var(--vscode-foreground, ***REMOVED***cccccc);
+    --text-dim: var(--vscode-descriptionForeground, ***REMOVED***808080);
+    --text-bright: var(--vscode-editor-foreground, ***REMOVED***ffffff);
+    --accent: var(--vscode-focusBorder, ***REMOVED***0098ff);
+    --green: ***REMOVED***4ec9b0; --yellow: ***REMOVED***dcdcaa; --red: ***REMOVED***f44747;
+    --orange: ***REMOVED***ce9178; --cyan: ***REMOVED***9cdcfe;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 12px; overflow-y: auto; }
+
+  .header { padding: 10px; border-bottom: 1px solid var(--border); }
+  .header .key { font-size: 11px; color: var(--accent); font-weight: 600; }
+  .header h2 { font-size: 13px; font-weight: 600; color: var(--text-bright); margin-top: 2px; line-height: 1.3; }
+  .meta { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .badge { font-size: 10px; background: var(--bg-tertiary); padding: 2px 7px; border-radius: 3px; }
+
+  .section { padding: 10px; border-bottom: 1px solid var(--border); }
+  .section-title { font-size: 10px; font-weight: 600; text-transform: uppercase; color: var(--text-dim); letter-spacing: 0.5px; margin-bottom: 6px; }
+  .description { font-size: 12px; line-height: 1.5; color: var(--text); white-space: pre-wrap; word-wrap: break-word; }
+
+  .detail-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 11px; }
+  .detail-label { color: var(--text-dim); }
+  .detail-value { color: var(--text-bright); text-align: right; }
+
+  .labels { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+  .label-tag { font-size: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); padding: 1px 6px; border-radius: 10px; color: var(--cyan); }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="key">${esc(issue.key)}</div>
+  <h2>${esc(issue.summary)}</h2>
+  <div class="meta">
+    <span class="badge" style="color: var(--green);">${esc(issue.status || "Unknown")}</span>
+    ${issue.issueType ? `<span class="badge">${esc(issue.issueType)}</span>` : ""}
+    ${issue.priority ? `<span class="badge" style="color: ${priColor};">${esc(issue.priority)}</span>` : ""}
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Description</div>
+  <div class="description">${descriptionHtml}</div>
+</div>
+
+<div class="section">
+  <div class="section-title">Details</div>
+  ${issue.assignee ? `<div class="detail-row"><span class="detail-label">Assignee</span><span class="detail-value">${esc(issue.assignee.displayName)}</span></div>` : ""}
+  ${issue.project ? `<div class="detail-row"><span class="detail-label">Project</span><span class="detail-value">${esc(issue.project.name)}</span></div>` : ""}
+  ${issue.labels.length > 0 ? `<div style="margin-top: 6px;"><div class="labels">${issue.labels.map((l) => `<span class="label-tag">${esc(l)}</span>`).join("")}</div></div>` : ""}
+</div>
+
 </body></html>`;
 }
 

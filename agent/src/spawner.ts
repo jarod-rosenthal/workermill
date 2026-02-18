@@ -373,6 +373,7 @@ export async function spawnWorker(
   // Notify local API clients
   agentEvents.emit("task:started", {
     id: task.id,
+    parentTaskId: task.parentTaskId || task.id,
     summary: task.summary,
     persona: task.workerPersona,
     model: task.workerModel,

@@ -42,6 +42,7 @@ export interface LogLine {
 export interface IssueInfo {
   key: string;
   summary: string;
+  description: string | null;
   status: string | null;
   assignee: { displayName: string; accountId: string } | null;
   issueType: string | null;

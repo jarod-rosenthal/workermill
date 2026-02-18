@@ -8,13 +8,21 @@
  */
 
 import * as vscode from "vscode";
-import { AgentClient, type TaskInfo } from "./agent-client";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import { AgentClient, type TaskInfo, type IssueInfo } from "./agent-client";
 import { TeamTreeProvider } from "./team-tree";
 import { FeedViewProvider } from "./feed-view";
 import { StatusBar } from "./status-bar";
 import { NotificationManager } from "./notifications";
 import { LogTerminalManager } from "./log-terminal";
 import { LiveDiffPanel } from "./live-diff-panel";
+import {
+  isAgentInstalled,
+  installAgent,
+  startAgentProcess,
+} from "./agent-installer";
 
 let client: AgentClient;
 let statusBar: StatusBar;
@@ -125,6 +133,14 @@ export function activate(context: vscode.ExtensionContext): void {
         currentFeedTaskId = task.id;
         currentFeedTaskStatus = task.status;
         logManager.openLogs(task.id, task.summary);
+      },
+    ),
+
+    // Click issue in tree → show details in feed panel
+    vscode.commands.registerCommand(
+      "workermill.selectIssue",
+      (issue: IssueInfo) => {
+        feedView.showIssue(issue);
       },
     ),
 
@@ -404,9 +420,119 @@ export function activate(context: vscode.ExtensionContext): void {
         LiveDiffPanel.createOrShow(client, task as any);
       },
     ),
+
+    // Cancel a running/planning task (stop button in tree)
+    vscode.commands.registerCommand(
+      "workermill.cancelTask",
+      async (treeItem?: { task?: TaskInfo }) => {
+        if (!client.isConnected()) {
+          vscode.window.showErrorMessage("WorkerMill agent is not running.");
+          return;
+        }
+
+        const task = treeItem?.task;
+        if (!task?.id) {
+          // Fallback: pick from active tasks
+          try {
+            const tasks = await client.getTasks();
+            const active = tasks.filter((t) => t.status === "running" || t.status === "planning");
+            if (active.length === 0) {
+              vscode.window.showInformationMessage("No active tasks to cancel.");
+              return;
+            }
+            const picked =
+              active.length === 1
+                ? active[0]
+                : await vscode.window
+                    .showQuickPick(
+                      active.map((t) => ({
+                        label: t.summary,
+                        description: t.status,
+                        task: t,
+                      })),
+                      { placeHolder: "Select a task to cancel" },
+                    )
+                    .then((item) =>
+                      item ? (item as unknown as { task: TaskInfo }).task : undefined,
+                    );
+            if (!picked) return;
+            return cancelWithConfirm(picked);
+          } catch (err) {
+            vscode.window.showErrorMessage(
+              `Failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            return;
+          }
+        }
+
+        return cancelWithConfirm(task);
+
+        async function cancelWithConfirm(t: TaskInfo): Promise<void> {
+          const confirm = await vscode.window.showWarningMessage(
+            `Cancel "${t.summary}"?`,
+            { modal: true },
+            "Cancel Task",
+          );
+          if (confirm !== "Cancel Task") return;
+          try {
+            await client.cancelTask(t.id);
+            vscode.window.showInformationMessage(`Task cancelled.`);
+          } catch (err) {
+            vscode.window.showErrorMessage(
+              `Failed to cancel: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+      },
+    ),
+
+    // Install/update agent binary from GitHub Releases
+    vscode.commands.registerCommand("workermill.installAgent", async () => {
+      const success = await installAgent();
+      if (success && !client.isConnected()) {
+        const configPath = path.join(os.homedir(), ".workermill", "config.json");
+        if (fs.existsSync(configPath)) {
+          startAgentProcess();
+          vscode.window.showInformationMessage("Agent starting...");
+        } else {
+          const terminal = vscode.window.createTerminal("WorkerMill Setup");
+          terminal.show();
+          terminal.sendText("workermill-agent setup");
+          vscode.window.showInformationMessage(
+            "Agent installed! Complete setup in the terminal, then run 'workermill-agent start'.",
+          );
+        }
+      }
+    }),
   );
 
-  // Connect to agent
+  // Check if agent binary is installed, prompt to install if missing
+  if (!isAgentInstalled()) {
+    vscode.window
+      .showInformationMessage(
+        "WorkerMill agent is not installed. Install it now to enable AI worker management.",
+        "Install",
+        "Later",
+      )
+      .then(async (choice) => {
+        if (choice !== "Install") return;
+        const success = await installAgent();
+        if (!success) return;
+        const configPath = path.join(os.homedir(), ".workermill", "config.json");
+        if (fs.existsSync(configPath)) {
+          startAgentProcess();
+        } else {
+          const terminal = vscode.window.createTerminal("WorkerMill Setup");
+          terminal.show();
+          terminal.sendText("workermill-agent setup");
+          vscode.window.showInformationMessage(
+            "Agent installed! Complete setup in the terminal, then run 'workermill-agent start'.",
+          );
+        }
+      });
+  }
+
+  // Connect to agent (reconnect loop handles timing if agent isn't ready yet)
   client.connect();
 
   // Log activation

@@ -57,7 +57,7 @@ function colorize(line: string): string {
   if (/^(Cloning|Fetching|git |From |To |branch )/i.test(line)) return CYAN + line + RESET;
   if (/::result::|::pr_url::|::learning::|::blocker::/.test(line)) return BOLD + MAGENTA + line + RESET;
 
-  // Persona-prefixed lines get persona color instead of DIM
+  // Persona-prefixed lines get persona color
   const p = extractPersona(line);
   if (p) {
     const color = PERSONA_COLORS[p.persona];
@@ -66,8 +66,11 @@ function colorize(line: string): string {
     return BOLD + color + prefix + RESET + color + body + RESET;
   }
 
-  // Non-persona bracketed lines (e.g. [THINKING]) stay dim
-  if (/^\[.*?\]/.test(line)) return DIM + line + RESET;
+  // Only dim truly internal/noise lines
+  if (/^\[(THINKING|WAITING|POLLING|HEARTBEAT|MUTEX)\b/i.test(line)) return DIM + line + RESET;
+
+  // Default: bright white so text isn't washed out by the terminal's default foreground
+  if (line.trim()) return WHITE + line + RESET;
   return line;
 }
 
@@ -77,8 +80,8 @@ function stripMarkdown(text: string): string {
     text
       // Code fences
       .replace(/^```\w*$/gm, "")
-      // Table separator rows (e.g. |---|---|)
-      .replace(/^\|[\s\-:|]+\|$/gm, "")
+      // Table separator rows (e.g. |---|---|) — handle optional leading whitespace
+      .replace(/^\s*\|[\s\-:|]+\|$/gm, "")
       // Horizontal rules
       .replace(/^[-*_]{3,}$/gm, "")
       // Headers → UPPERCASE
@@ -91,14 +94,16 @@ function stripMarkdown(text: string): string {
       .replace(/`([^`]+)`/g, "$1")
       // Links [text](url) → text (url)
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)")
-      // Table rows — strip leading/trailing pipes, keep cell content
-      .replace(/^\|(.+)\|$/gm, (_m, cells: string) =>
+      // Table rows — strip leading/trailing pipes, keep cell content (handle optional indent)
+      .replace(/^\s*\|(.+)\|$/gm, (_m, cells: string) =>
         cells
           .split("|")
           .map((c: string) => c.trim())
           .filter(Boolean)
           .join("  "),
       )
+      // Cap excessive leading whitespace (preserve up to 4 spaces for basic indentation)
+      .replace(/^([ \t]+)/gm, (_m, ws: string) => (ws.length > 4 ? "    " : ws))
       // Collapse 3+ consecutive blank lines to 1
       .replace(/\n{3,}/g, "\n\n")
   );
@@ -114,7 +119,7 @@ function collapseCommentBlock(message: string, type?: string): string | null {
   // Count markdown signals
   let signals = 0;
   for (const l of lines) {
-    if (/^\|.+\|$/.test(l)) signals++; // table row
+    if (/^\s*\|.+\|$/.test(l)) signals++; // table row
     if (/^***REMOVED***{1,6}\s/.test(l)) signals++; // header
     if (/\*\*.+\*\*/.test(l)) signals++; // bold
     if (/^```/.test(l)) signals++; // code fence

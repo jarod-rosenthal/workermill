@@ -13,6 +13,20 @@ const authors: Record<string, Author> = {
 
 export const blogPosts: BlogPost[] = [
   {
+    slug: "dark-factory-level-5-agentic-coding",
+    title: "Dark Factory: The Rise of Level 5 Agentic Coding",
+    excerpt:
+      "The manufacturing world has dark factories — fully automated plants that run with the lights off. Software development is next. Here's what Level 5 agentic coding looks like and why it's inevitable.",
+    date: "2026-02-18",
+    category: "ai-automation",
+    author: authors.jarod,
+    thumbnail:
+      "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=1200&h=600&fit=crop&q=80",
+    featured: true,
+    readingTime: 10,
+    tags: ["dark-factory", "agentic-coding", "autonomous", "future", "ai-agents"],
+  },
+  {
     slug: "introducing-workermill",
     title: "Introducing WorkerMill: Mission Control for AI Coding Agents",
     excerpt:
@@ -22,7 +36,6 @@ export const blogPosts: BlogPost[] = [
     author: authors.jarod,
     thumbnail:
       "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200&h=600&fit=crop&q=80",
-    featured: true,
     readingTime: 5,
     tags: ["launch", "product", "ai-agents"],
   },

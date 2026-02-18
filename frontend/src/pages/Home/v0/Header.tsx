@@ -8,6 +8,7 @@ const navItems: Array<{ label: string; href: string; isRoute?: boolean }> = [
   { label: "How It Works", href: "#how-it-works" },
   { label: "Pricing", href: "#pricing" },
   { label: "Docs", href: "/docs", isRoute: true },
+  { label: "Blog", href: "/blog", isRoute: true },
 ];
 
 function scrollToSection(e: React.MouseEvent<HTMLAnchorElement>, href: string) {

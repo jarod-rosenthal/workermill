@@ -27,6 +27,7 @@ import {
   startAgentProcess,
   stopAgentProcess,
 } from "./agent-installer";
+import { signUpWithGitHub, signInWithGitHub } from "./github-onboard";
 
 let client: AgentClient;
 let statusBar: StatusBar;
@@ -121,6 +122,12 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }
   });
+
+  // Output channel for diagnostics (Output > WorkerMill)
+  const outputChannel = vscode.window.createOutputChannel("WorkerMill");
+  context.subscriptions.push(outputChannel);
+  const log = (msg: string) => outputChannel.appendLine(msg);
+  log("WorkerMill extension activated");
 
   // Register commands
   context.subscriptions.push(
@@ -570,46 +577,52 @@ export function activate(context: vscode.ExtensionContext): void {
       startAgentProcess();
       vscode.window.showInformationMessage("WorkerMill agent restarted.");
     }),
-  );
 
-  // Output channel for diagnostics (Output > WorkerMill)
-  const outputChannel = vscode.window.createOutputChannel("WorkerMill");
-  context.subscriptions.push(outputChannel);
-  const log = (msg: string) => outputChannel.appendLine(msg);
-  log("WorkerMill extension activated");
+    vscode.commands.registerCommand(
+      "workermill.signUpWithGitHub",
+      async () => {
+        const success = await signUpWithGitHub(log);
+        if (success) {
+          client.connect();
+        }
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "workermill.signInWithGitHub",
+      async () => {
+        const success = await signInWithGitHub(log);
+        if (success) {
+          client.connect();
+        }
+      },
+    ),
+
+    vscode.commands.registerCommand("workermill.manualSetup", () => {
+      const terminal = vscode.window.createTerminal("WorkerMill Setup");
+      terminal.show();
+      terminal.sendText("workermill-agent setup");
+    }),
+  );
 
   // Diagnostic logging for agent auto-start
   const installed = isAgentInstalled();
   const configured = isAgentConfigured();
   log(`Agent binary: ${getAgentBinaryPath()}`);
   log(`Agent installed: ${installed}, configured: ${configured}`);
+  vscode.commands.executeCommand(
+    "setContext",
+    "workermill.agentConfigured",
+    configured,
+  );
 
-  // Auto-start agent if installed and configured, otherwise prompt to install
+  // Auto-start agent if installed and configured, otherwise let welcome view guide user
   if (installed && configured) {
     startAgentProcess(log);
-  } else if (!installed) {
-    log("Agent not installed — prompting user");
-    vscode.window
-      .showInformationMessage(
-        "WorkerMill agent is not installed. Install it now to enable AI worker management.",
-        "Install",
-        "Later",
-      )
-      .then(async (choice) => {
-        if (choice !== "Install") return;
-        const success = await installAgent();
-        if (!success) return;
-        if (isAgentConfigured()) {
-          startAgentProcess(log);
-        } else {
-          const terminal = vscode.window.createTerminal("WorkerMill Setup");
-          terminal.show();
-          terminal.sendText("workermill-agent setup");
-          vscode.window.showInformationMessage(
-            "Agent installed! Complete setup in the terminal, then run 'workermill-agent start'.",
-          );
-        }
-      });
+  } else if (!configured) {
+    log("Agent not configured — welcome view will guide the user");
+  } else if (installed && !configured) {
+    log("Agent installed but not configured — welcome view will guide the user");
   }
 
   // Connect to agent (reconnect loop handles timing if agent isn't ready yet)

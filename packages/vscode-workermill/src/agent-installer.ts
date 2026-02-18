@@ -11,6 +11,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as https from "https";
+import * as crypto from "crypto";
 import { spawn, execFileSync } from "child_process";
 
 const GITHUB_REPO = "workermill/workermill";
@@ -384,4 +385,33 @@ export async function stopAgentProcess(): Promise<boolean> {
 export function isAgentConfigured(): boolean {
   const configPath = path.join(os.homedir(), ".workermill", "config.json");
   return fs.existsSync(configPath);
+}
+
+/** Write agent config file for GitHub onboarding flow. */
+export function writeAgentConfig(opts: {
+  apiUrl: string;
+  apiKey: string;
+  githubToken: string;
+}): void {
+  const wmDir = path.join(os.homedir(), ".workermill");
+  fs.mkdirSync(wmDir, { recursive: true });
+  const configPath = path.join(wmDir, "config.json");
+  const config = {
+    apiUrl: opts.apiUrl,
+    apiKey: opts.apiKey,
+    agentId: crypto.randomUUID(),
+    maxWorkers: 1,
+    pollIntervalMs: 5000,
+    heartbeatIntervalMs: 30000,
+    tokens: {
+      github: opts.githubToken,
+      githubReviewer: opts.githubToken,
+      bitbucket: "",
+      gitlab: "",
+    },
+    setupCompletedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), {
+    mode: 0o600,
+  });
 }

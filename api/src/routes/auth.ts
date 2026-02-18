@@ -23,6 +23,8 @@ import { randomBytes, randomUUID } from "crypto";
 import bcrypt from "bcrypt";
 import { authenticateUserAllowNoOrg } from "../middleware/auth.js";
 import axios from "axios";
+import rateLimit from "express-rate-limit";
+import { saveOrgSecret } from "./settings/helpers.js";
 import {
   AdminCreateUserCommand,
   AdminSetUserPasswordCommand,
@@ -1727,5 +1729,242 @@ async function getCognitoTokensForUser(
     throw error;
   }
 }
+
+// =============================================================================
+// GitHub Onboarding (VS Code Extension)
+// =============================================================================
+
+const githubOnboardLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  message: { error: "Too many signup attempts" },
+});
+
+/**
+ * POST /api/auth/github-onboard
+ * Zero-friction signup via GitHub token (VS Code extension onboarding)
+ */
+router.post(
+  "/github-onboard",
+  githubOnboardLimiter,
+  [
+    body("githubToken").isString().notEmpty().withMessage("githubToken is required"),
+    body("githubUsername").isString().notEmpty().withMessage("githubUsername is required"),
+  ],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ error: errors.array()[0].msg });
+      }
+
+      const { githubToken, githubUsername } = req.body;
+
+      // Validate GitHub token and get user info
+      let githubUser: { login: string; name: string | null; id: number };
+      let primaryEmail: string;
+      try {
+        const [userResponse, emailsResponse] = await Promise.all([
+          axios.get("https://api.github.com/user", {
+            headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json" },
+          }),
+          axios.get("https://api.github.com/user/emails", {
+            headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json" },
+          }),
+        ]);
+
+        githubUser = userResponse.data;
+        const emails = emailsResponse.data as Array<{ email: string; primary: boolean; verified: boolean }>;
+        const primary = emails.find((e) => e.primary && e.verified);
+        if (!primary) {
+          return res.status(400).json({ error: "No verified primary email found on GitHub account" });
+        }
+        primaryEmail = primary.email;
+      } catch (err: any) {
+        logger.warn("GitHub token validation failed", { error: err.message });
+        return res.status(401).json({ error: "Invalid GitHub token" });
+      }
+
+      // Check for duplicate email
+      const userRepo = AppDataSource.getRepository(User);
+      const existingUser = await userRepo.findOne({ where: { email: primaryEmail } });
+      if (existingUser) {
+        return res.status(409).json({ error: "An account with this email already exists. Use /github-signin instead." });
+      }
+
+      // Create Cognito user
+      const tempPassword = randomBytes(32).toString("base64") + "!A1";
+      const name = githubUser.name || githubUsername;
+      const cognitoId = await createCognitoUserForMicrosoft(primaryEmail, name, tempPassword);
+
+      // Create Organization
+      const orgRepo = AppDataSource.getRepository(Organization);
+      // Use validated GitHub login for slug (not client-provided username)
+      const login = githubUser.login;
+      const baseSlug = login
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+
+      let slug = baseSlug;
+      let slugSuffix = 0;
+      while (await orgRepo.findOne({ where: { slug } })) {
+        slugSuffix++;
+        slug = `${baseSlug}-${slugSuffix}`;
+      }
+
+      const rawKey = `org_${randomUUID().replace(/-/g, "")}`;
+      const org = orgRepo.create({
+        name: `${login}'s org`,
+        slug,
+        plan: "free",
+        taskQuota: 0,
+        scmProvider: "github",
+        apiKeyHash: await bcrypt.hash(rawKey, 10),
+        apiKeyPrefix: rawKey.substring(0, 12),
+      });
+      await orgRepo.save(org);
+
+      // Create User
+      const user = userRepo.create({
+        cognitoId,
+        email: primaryEmail,
+        fullName: name,
+        role: "admin",
+        status: "active",
+        orgId: null,
+        tosAcceptedAt: new Date(),
+        tosVersion: TOS_VERSION,
+      });
+      await userRepo.save(user);
+
+      // Create UserOrganization
+      const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+      const membership = userOrgRepo.create({
+        userId: user.id,
+        orgId: org.id,
+        role: "admin",
+        isDefault: true,
+      });
+      await userOrgRepo.save(membership);
+
+      // Store GitHub token in Secrets Manager
+      const secretPrefix = `workermill/${config.environment}`;
+      await Promise.all([
+        saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via extension onboarding)"),
+        saveOrgSecret(org.id, "github-reviewer-token", githubToken, secretPrefix, "GitHub reviewer token (via extension onboarding)"),
+      ]);
+
+      // Fire notifications (non-blocking)
+      notifyNewSignup({ email: primaryEmail, fullName: name, organizationName: org.name }).catch(() => {});
+      sendWelcomeEmail(user, org, false).catch(() => {});
+
+      logger.info("GitHub onboard completed", { userId: user.id, orgId: org.id, email: primaryEmail });
+
+      res.status(201).json({
+        apiKey: rawKey,
+        apiUrl: config.apiBaseUrl,
+        orgSlug: slug,
+        userId: user.id,
+        email: primaryEmail,
+        name,
+      });
+    } catch (error) {
+      logger.error("GitHub onboard failed", { error });
+      res.status(500).json({ error: "GitHub onboarding failed" });
+    }
+  },
+);
+
+/**
+ * POST /api/auth/github-signin
+ * Existing account setup via GitHub token (VS Code extension)
+ */
+router.post(
+  "/github-signin",
+  githubOnboardLimiter,
+  [body("githubToken").isString().notEmpty().withMessage("githubToken is required")],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ error: errors.array()[0].msg });
+      }
+
+      const { githubToken } = req.body;
+
+      // Validate GitHub token and get user info
+      let primaryEmail: string;
+      let name: string;
+      try {
+        const [userResponse, emailsResponse] = await Promise.all([
+          axios.get("https://api.github.com/user", {
+            headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json" },
+          }),
+          axios.get("https://api.github.com/user/emails", {
+            headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json" },
+          }),
+        ]);
+
+        name = userResponse.data.name || userResponse.data.login;
+        const emails = emailsResponse.data as Array<{ email: string; primary: boolean; verified: boolean }>;
+        const primary = emails.find((e) => e.primary && e.verified);
+        if (!primary) {
+          return res.status(400).json({ error: "No verified primary email found on GitHub account" });
+        }
+        primaryEmail = primary.email;
+      } catch (err: any) {
+        logger.warn("GitHub token validation failed", { error: err.message });
+        return res.status(401).json({ error: "Invalid GitHub token" });
+      }
+
+      // Find existing user
+      const userRepo = AppDataSource.getRepository(User);
+      const user = await userRepo.findOne({ where: { email: primaryEmail } });
+      if (!user) {
+        return res.status(404).json({ error: "No account found with this email. Use /github-onboard to create one." });
+      }
+
+      // Get default org
+      const org = await getDefaultOrganization(user.id);
+      if (!org) {
+        return res.status(404).json({ error: "No organization found for this account" });
+      }
+
+      // Regenerate API key — necessary because bcrypt-hashed keys can't be recovered.
+      // Note: this invalidates any existing API key for the org.
+      const rawKey = `org_${randomUUID().replace(/-/g, "")}`;
+      const orgRepo = AppDataSource.getRepository(Organization);
+      await orgRepo.update(
+        { id: org.id },
+        {
+          apiKeyHash: await bcrypt.hash(rawKey, 10),
+          apiKeyPrefix: rawKey.substring(0, 12),
+        },
+      );
+
+      // Update GitHub tokens in Secrets Manager
+      const secretPrefix = `workermill/${config.environment}`;
+      await Promise.all([
+        saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via extension signin)"),
+        saveOrgSecret(org.id, "github-reviewer-token", githubToken, secretPrefix, "GitHub reviewer token (via extension signin)"),
+      ]);
+
+      logger.info("GitHub signin completed", { userId: user.id, orgId: org.id, email: primaryEmail });
+
+      res.json({
+        apiKey: rawKey,
+        apiUrl: config.apiBaseUrl,
+        orgSlug: org.slug,
+        userId: user.id,
+        email: primaryEmail,
+        name,
+      });
+    } catch (error) {
+      logger.error("GitHub signin failed", { error });
+      res.status(500).json({ error: "GitHub signin failed" });
+    }
+  },
+);
 
 export default router;

@@ -21,6 +21,7 @@ import {
   isDuplicateWebhook,
   verifyGitHubSignature,
 } from "./helpers.js";
+import { resetCancelledTask } from "../tasks/lifecycle.js";
 
 const router = Router();
 
@@ -216,7 +217,7 @@ router.post(
     }
 
     // If a terminal task exists (completed, failed, deployed), delete it to allow re-run
-    // BUT: Do NOT delete cancelled tasks - user explicitly stopped these
+    // NOTE: Cancelled tasks are handled separately below (reset in-place instead of delete+recreate)
     // BUT: Do NOT delete PRD parent tasks with children - cascade delete would wipe all child work!
     const deletableTerminalStates = ["completed", "deployed", "failed"];
     if (existingTask && deletableTerminalStates.includes(existingTask.status)) {
@@ -245,15 +246,17 @@ router.post(
       await taskRepo.remove(existingTask);
     }
 
-    // If task was cancelled, don't re-create it - user explicitly stopped it
+    // If task was cancelled, reset it for re-execution
     if (existingTask && existingTask.status === "cancelled") {
-      logger.info("Ignoring GitHub Issues webhook for cancelled task - user explicitly cancelled", {
+      await resetCancelledTask(existingTask);
+      logger.info("Reset cancelled task from GitHub Issues webhook", {
         taskId: existingTask.id,
         issueKey,
+        newStatus: existingTask.status,
       });
       res.json({
-        status: "ignored",
-        reason: "Task was cancelled by user - remove workermill label and re-add to restart",
+        status: "reset",
+        reason: "Cancelled task reset for re-execution",
         taskId: existingTask.id,
         taskStatus: existingTask.status,
       });
@@ -496,7 +499,8 @@ router.post(
       }
 
       if (existingTask && existingTask.status === "cancelled") {
-        res.json({ status: "ignored", reason: "Task cancelled" });
+        await resetCancelledTask(existingTask);
+        res.json({ status: "reset", reason: "Cancelled task reset for re-execution", taskId: existingTask.id });
         return;
       }
 

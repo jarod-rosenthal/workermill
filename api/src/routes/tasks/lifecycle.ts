@@ -409,4 +409,67 @@ router.post(
   }
 );
 
+/**
+ * Reset a cancelled task for re-execution.
+ * Archives old context, clears execution state, and sets status to queued/planning.
+ */
+export async function resetCancelledTask(task: WorkerTask): Promise<void> {
+  const taskRepo = AppDataSource.getRepository(WorkerTask);
+  const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+  // Archive old coordination context
+  try {
+    const archiveResult = await contextRepo.update(
+      { parentTaskId: task.id, archived: false },
+      { archived: true, archivedAt: new Date() },
+    );
+    if (archiveResult.affected && archiveResult.affected > 0) {
+      logger.info("Archived old context for cancelled task reset", {
+        taskId: task.id,
+        archivedCount: archiveResult.affected,
+      });
+    }
+  } catch (archiveError) {
+    logger.warn("Failed to archive old context for cancelled task reset", {
+      taskId: task.id,
+      error: archiveError instanceof Error ? archiveError.message : String(archiveError),
+    });
+  }
+
+  // Reset execution state
+  task.retryCount += 1;
+  task.errorMessage = null;
+  task.completedAt = null;
+  task.startedAt = null;
+  task.ecsTaskArn = null;
+  task.ecsTaskId = null;
+  task.githubPrUrl = null;
+  task.githubPrNumber = null;
+  task.githubBranch = null;
+  task.taskNotes = null;
+
+  // Determine status based on pipeline
+  const labels = (task.jiraFields?.labels as string[] | undefined) || [];
+  const needsPlanning = labels.includes("prd") || labels.includes("epic") ||
+    labels.includes("multi-provider") || task.pipelineVersion === "v2";
+
+  if (needsPlanning) {
+    task.status = "planning";
+    task.planJson = null;
+    task.planStatus = null;
+    task.planFeedback = null;
+    task.executionPlanV2 = null;
+  } else {
+    task.status = "queued";
+  }
+
+  await taskRepo.save(task);
+
+  logger.info("Reset cancelled task for re-run", {
+    taskId: task.id,
+    newStatus: task.status,
+    retryCount: task.retryCount,
+  });
+}
+
 export default router;

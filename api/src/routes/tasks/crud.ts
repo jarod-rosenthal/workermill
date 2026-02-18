@@ -13,6 +13,7 @@ import { fetchLinearIssue } from "../../utils/linear.js";
 import { inferPersonaFromJiraIssue } from "../../services/persona-inference.js";
 import { syncKbCardColumn } from "../../services/task-monitor.js";
 import { normalizeRepoWithOwner } from "./helpers.js";
+import { resetCancelledTask } from "./lifecycle.js";
 import { taskCreationLimiter } from "../../middleware/rate-limit.js";
 
 const router = Router();
@@ -159,6 +160,14 @@ router.post(
         error: "Task already exists and is not complete",
         taskId: existingTask.id,
       });
+      return;
+    }
+
+    // If existing task was cancelled, reset it for re-execution instead of creating a new one
+    if (existingTask && existingTask.status === "cancelled") {
+      await resetCancelledTask(existingTask);
+      syncKbCardColumn(existingTask.id, (existingTask.status as string) === "planning" ? "planning" : "claimed").catch(() => {});
+      res.status(200).json(existingTask);
       return;
     }
 

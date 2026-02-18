@@ -22,6 +22,7 @@ import { TaskDetailPanel } from "./task-detail-panel";
 import {
   isAgentInstalled,
   isAgentConfigured,
+  getAgentBinaryPath,
   installAgent,
   startAgentProcess,
   stopAgentProcess,
@@ -571,11 +572,23 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  // Output channel for diagnostics (Output > WorkerMill)
+  const outputChannel = vscode.window.createOutputChannel("WorkerMill");
+  context.subscriptions.push(outputChannel);
+  const log = (msg: string) => outputChannel.appendLine(msg);
+  log("WorkerMill extension activated");
+
+  // Diagnostic logging for agent auto-start
+  const installed = isAgentInstalled();
+  const configured = isAgentConfigured();
+  log(`Agent binary: ${getAgentBinaryPath()}`);
+  log(`Agent installed: ${installed}, configured: ${configured}`);
+
   // Auto-start agent if installed and configured, otherwise prompt to install
-  if (isAgentInstalled() && isAgentConfigured()) {
-    // Agent is ready — start it automatically so user doesn't have to
-    startAgentProcess();
-  } else if (!isAgentInstalled()) {
+  if (installed && configured) {
+    startAgentProcess(log);
+  } else if (!installed) {
+    log("Agent not installed — prompting user");
     vscode.window
       .showInformationMessage(
         "WorkerMill agent is not installed. Install it now to enable AI worker management.",
@@ -587,7 +600,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const success = await installAgent();
         if (!success) return;
         if (isAgentConfigured()) {
-          startAgentProcess();
+          startAgentProcess(log);
         } else {
           const terminal = vscode.window.createTerminal("WorkerMill Setup");
           terminal.show();
@@ -602,17 +615,12 @@ export function activate(context: vscode.ExtensionContext): void {
   // Connect to agent (reconnect loop handles timing if agent isn't ready yet)
   client.connect();
 
-  // Log activation
-  const outputChannel = vscode.window.createOutputChannel("WorkerMill");
-  context.subscriptions.push(outputChannel);
-  outputChannel.appendLine("WorkerMill extension activated");
-
   client.on("connected", (status) => {
-    outputChannel.appendLine(`Connected to agent ${status.agentId} (v${status.version})`);
+    log(`Connected to agent ${status.agentId} (v${status.version})`);
   });
 
   client.on("disconnected", () => {
-    outputChannel.appendLine("Agent disconnected — will retry in 5s");
+    log("Agent disconnected — will retry in 5s");
   });
 }
 

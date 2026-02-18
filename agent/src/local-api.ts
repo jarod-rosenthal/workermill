@@ -374,8 +374,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       const body = JSON.parse(await readBody(req));
       const result = await cloudProxy("POST", "/api/tasks", body);
       return json(res, result, 201);
-    } catch (err) {
-      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    } catch (err: unknown) {
+      const e = err as { status?: number; data?: unknown; message?: string };
+      const status = e.status || 500;
+      if (e.data) return json(res, e.data, status);
+      return json(res, { error: e.message || String(err) }, status);
     }
   }
 
@@ -447,20 +450,30 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // POST /api/tasks/:id/cancel
+  // POST /api/tasks/:id/cancel — always kill local process, best-effort cloud update
   const cancelMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/cancel$/);
   if (req.method === "POST" && cancelMatch) {
-    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    const taskId = cancelMatch[1];
+
+    // Always kill the local worker process first — this is the critical action
     try {
-      // Cancel locally
       const { stopTask } = await import("./spawner.js");
-      stopTask(cancelMatch[1]);
-      // Cancel on cloud
-      const result = await cloudProxy("POST", `/api/tasks/${cancelMatch[1]}/cancel`, {});
-      return json(res, result);
-    } catch (err) {
-      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      stopTask(taskId);
+    } catch { /* process may have already exited */ }
+
+    // Update local task state so the UI reflects cancellation immediately
+    const localTask = localTasks.get(taskId);
+    if (localTask) localTask.status = "failed";
+    agentEvents.emit("task:failed", { id: taskId });
+
+    // Best-effort cloud status update — don't fail if cloud is stale
+    if (cloudProxy) {
+      try {
+        await cloudProxy("POST", `/api/tasks/${taskId}/cancel`, {});
+      } catch { /* cloud may already consider it complete — that's OK */ }
     }
+
+    return json(res, { success: true, message: "Task cancelled" });
   }
 
   // GET /api/issues — search Jira issues (proxied from cloud API)
@@ -517,13 +530,27 @@ export function startLocalApi(config: AgentConfig): Promise<number> {
   agentConfig = config;
   startTime = Date.now();
 
-  // Set up cloud proxy using the agent's existing axios instance
+  // Set up cloud proxy using the agent's existing axios instance.
+  // Extract response data from axios errors so callers get the real API error message.
   import("./api.js").then(({ api }) => {
     setCloudProxy(async (method: string, path: string, body?: unknown) => {
-      const resp = method === "GET"
-        ? await api.get(path)
-        : await api.post(path, body);
-      return resp.data;
+      try {
+        const resp = method === "GET"
+          ? await api.get(path)
+          : await api.post(path, body);
+        return resp.data;
+      } catch (err: unknown) {
+        const axiosErr = err as { response?: { status?: number; data?: unknown } };
+        if (axiosErr.response?.data) {
+          const data = axiosErr.response.data as { error?: string };
+          const status = axiosErr.response.status || 500;
+          const apiError = new Error(data.error || `API error ${status}`);
+          (apiError as any).status = status;
+          (apiError as any).data = data;
+          throw apiError;
+        }
+        throw err;
+      }
     });
   });
 

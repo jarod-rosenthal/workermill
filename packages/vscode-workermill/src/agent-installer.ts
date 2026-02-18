@@ -11,7 +11,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as https from "https";
-import { spawn } from "child_process";
+import { spawn, execFileSync } from "child_process";
 
 const GITHUB_REPO = "workermill/workermill";
 
@@ -20,7 +20,8 @@ interface GHRelease {
   assets: Array<{ name: string; browser_download_url: string }>;
 }
 
-export function getAgentBinaryPath(): string {
+/** Canonical install location used by install.sh / install.ps1 and the installer. */
+function getCanonicalInstallPath(): string {
   if (process.platform === "win32") {
     const localAppData =
       process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
@@ -29,8 +30,44 @@ export function getAgentBinaryPath(): string {
   return path.join(os.homedir(), ".workermill", "bin", "workermill-agent");
 }
 
+/**
+ * Resolve the agent binary path.
+ * Checks: canonical install → direct PATH → login shell PATH (for nvm/brew/etc).
+ */
+export function getAgentBinaryPath(): string {
+  const canonical = getCanonicalInstallPath();
+  if (fs.existsSync(canonical)) return canonical;
+
+  const name = process.platform === "win32" ? "workermill-agent.exe" : "workermill-agent";
+
+  // Check direct PATH (works if nvm/etc is already in extension host PATH)
+  try {
+    const cmd = process.platform === "win32" ? "where.exe" : "which";
+    const result = execFileSync(cmd, [name], { encoding: "utf-8", timeout: 5000 }).trim();
+    const firstMatch = result.split("\n")[0];
+    if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
+  } catch { /* not on PATH */ }
+
+  // Check via login shell (nvm, brew, etc. are initialized in .bashrc/.zshrc)
+  if (process.platform !== "win32") {
+    try {
+      const shell = process.env.SHELL || "/bin/bash";
+      const result = execFileSync(shell, ["-l", "-c", `which ${name}`], {
+        encoding: "utf-8",
+        timeout: 5000,
+      }).trim();
+      const firstMatch = result.split("\n")[0];
+      if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
+    } catch { /* not found via login shell either */ }
+  }
+
+  // Return canonical as default (used as install target when binary doesn't exist yet)
+  return canonical;
+}
+
 export function isAgentInstalled(): boolean {
-  return fs.existsSync(getAgentBinaryPath());
+  const binary = getAgentBinaryPath();
+  return fs.existsSync(binary);
 }
 
 function getBinaryName(): string {
@@ -175,8 +212,8 @@ export async function installAgent(): Promise<boolean> {
 
         if (token.isCancellationRequested) return false;
 
-        // Ensure install directory exists
-        const binaryPath = getAgentBinaryPath();
+        // Ensure install directory exists (always install to canonical location)
+        const binaryPath = getCanonicalInstallPath();
         const installDir = path.dirname(binaryPath);
         fs.mkdirSync(installDir, { recursive: true });
 
@@ -211,31 +248,136 @@ export async function installAgent(): Promise<boolean> {
   );
 }
 
-/** Spawn the agent as a detached background process. */
-export function startAgentProcess(): void {
-  const binary = getAgentBinaryPath();
-  const child = spawn(binary, ["start", "--detach"], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
+/** Read the PID from the agent PID file, or 0 if missing/invalid. */
+function readAgentPid(): number {
+  const pidFile = path.join(os.homedir(), ".workermill", "agent.pid");
+  try {
+    return parseInt(fs.readFileSync(pidFile, "utf-8").trim(), 10) || 0;
+  } catch {
+    return 0;
+  }
 }
 
-/** Stop a running agent by invoking `workermill-agent stop`. */
+/** Check if a process is alive. */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Remove stale PID and port files. */
+function cleanAgentState(): void {
+  const wmDir = path.join(os.homedir(), ".workermill");
+  for (const name of ["agent.pid", "agent.port"]) {
+    try {
+      fs.unlinkSync(path.join(wmDir, name));
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Spawn the agent as a detached background process.
+ *
+ * We run `start` in foreground mode (NOT `--detach`) because the agent's
+ * --detach uses process.execPath which only works for the compiled binary.
+ * For npm-linked installs, process.execPath is the Node.js binary which
+ * can't re-invoke itself. Instead, we detach from the VS Code side by
+ * redirecting stdio to the log file and calling child.unref().
+ */
+export function startAgentProcess(log?: (msg: string) => void): void {
+  const binary = getAgentBinaryPath();
+  log?.(`Binary resolved to: ${binary}`);
+  log?.(`Binary exists: ${fs.existsSync(binary)}`);
+
+  // If agent is already running, don't start another
+  const existingPid = readAgentPid();
+  if (existingPid && isProcessAlive(existingPid)) {
+    log?.(`Agent already running (PID ${existingPid}) — skipping start`);
+    return;
+  }
+  if (existingPid) {
+    log?.(`Stale PID ${existingPid} found — cleaning up`);
+  }
+
+  // Agent is not running — clean up any stale state files
+  cleanAgentState();
+
+  // Redirect agent output to its log file
+  const wmDir = path.join(os.homedir(), ".workermill");
+  fs.mkdirSync(wmDir, { recursive: true });
+  const logFile = path.join(wmDir, "agent.log");
+  const logFd = fs.openSync(logFile, "a");
+
+  try {
+    const child = spawn(binary, ["start"], {
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+    });
+
+    child.on("error", (err) => {
+      log?.(`Spawn error: ${err.message}`);
+    });
+
+    child.unref();
+    log?.(`Agent spawned (child PID ${child.pid})`);
+  } catch (err) {
+    log?.(`Spawn failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    fs.closeSync(logFd);
+  }
+}
+
+/** Stop a running agent — tries graceful stop, then falls back to SIGTERM + cleanup. */
 export async function stopAgentProcess(): Promise<boolean> {
   const binary = getAgentBinaryPath();
-  if (!fs.existsSync(binary)) return false;
 
-  return new Promise((resolve) => {
-    const child = spawn(binary, ["stop"], { stdio: "ignore" });
-    child.on("close", (code) => resolve(code === 0));
-    child.on("error", () => resolve(false));
-    // Timeout after 20s (agent stop waits up to 15s internally)
-    setTimeout(() => {
-      try { child.kill(); } catch { /* ignore */ }
-      resolve(false);
-    }, 20_000);
-  });
+  // Try graceful stop via CLI command
+  if (fs.existsSync(binary)) {
+    const stopped = await new Promise<boolean>((resolve) => {
+      const child = spawn(binary, ["stop"], { stdio: "ignore" });
+      child.on("close", (code) => resolve(code === 0));
+      child.on("error", () => resolve(false));
+      setTimeout(() => {
+        try {
+          child.kill();
+        } catch {
+          /* ignore */
+        }
+        resolve(false);
+      }, 10_000);
+    });
+    if (stopped) {
+      cleanAgentState();
+      return true;
+    }
+  }
+
+  // Graceful stop failed — kill process directly via PID
+  const pid = readAgentPid();
+  if (pid && isProcessAlive(pid)) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      /* ignore */
+    }
+    // Wait briefly for it to die
+    await new Promise((r) => setTimeout(r, 1000));
+    if (isProcessAlive(pid)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  cleanAgentState();
+  return true;
 }
 
 /** Check if the agent config file exists (setup has been completed). */

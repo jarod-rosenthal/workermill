@@ -115,6 +115,18 @@
         "command": "workermill.cancelTask",
         "title": "WorkerMill: Cancel Task",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "workermill.signUpWithGitHub",
+        "title": "WorkerMill: Sign Up with GitHub"
+      },
+      {
+        "command": "workermill.signInWithGitHub",
+        "title": "WorkerMill: Sign In with GitHub"
+      },
+      {
+        "command": "workermill.manualSetup",
+        "title": "WorkerMill: Manual Setup"
       }
     ],
     "menus": {
@@ -154,7 +166,14 @@
           "when": "explorerResourceIsFolder"
         }
       ]
-    }
+    },
+    "viewsWelcome": [
+      {
+        "view": "workermill.teamPanel",
+        "contents": "Welcome to WorkerMill!\n\nConnect your GitHub account to start running AI workers on your repos.\n\n[Sign up with GitHub](command:workermill.signUpWithGitHub)\n\nAlready have an account?\n[Sign in with GitHub](command:workermill.signInWithGitHub)\n\n[Manual setup (API key)](command:workermill.manualSetup)",
+        "when": "!workermill.agentConfigured"
+      }
+    ]
   },
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --outdir=dist --external:vscode --format=cjs --platform=node --sourcemap",

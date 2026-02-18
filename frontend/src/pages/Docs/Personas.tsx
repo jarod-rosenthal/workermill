@@ -40,7 +40,7 @@ const personas = [
   },
   {
     id: "backend_developer",
-    emoji: "⚙️",
+    emoji: "💻",
     title: "Backend Developer",
     icon: Server,
     color: "text-blue-500",

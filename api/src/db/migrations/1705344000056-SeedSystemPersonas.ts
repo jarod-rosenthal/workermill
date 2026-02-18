@@ -11,7 +11,7 @@ export class SeedSystemPersonas1705344000056 implements MigrationInterface {
     {
       slug: "backend_developer",
       name: "Backend Developer",
-      emoji: "⚙️",
+      emoji: "💻",
       color: "#3B82F6",
       short_label: "Backend",
       description: "Specializes in REST APIs, database design, server-side logic, and backend architecture",
@@ -110,7 +110,7 @@ export class SeedSystemPersonas1705344000056 implements MigrationInterface {
     {
       slug: "database_administrator",
       name: "Database Administrator",
-      emoji: "🗄️",
+      emoji: "💾",
       color: "#8B5CF6",
       short_label: "DBA",
       description: "Specializes in database administration, optimization, and migrations",

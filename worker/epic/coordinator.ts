@@ -3028,7 +3028,7 @@ export class EpicCoordinator {
         const text = data.toString();
         for (const line of text.split("\n")) {
           if (line.trim()) {
-            // AI SDK executor already outputs with formatted prefix [👨‍💼 tech_lead 🔵]
+            // AI SDK executor already outputs with formatted prefix [👑 tech_lead 🔵]
             // Forward as-is to maintain consistent formatting
             console.log(line);
             allOutput += line + "\n";

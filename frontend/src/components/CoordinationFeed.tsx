@@ -33,18 +33,18 @@ const API_BASE = import.meta.env.VITE_API_URL || "";
 // Persona config for display
 const PERSONA_CONFIGS: Record<string, { emoji: string; shortLabel: string }> = {
   frontend_developer: { emoji: "🎨", shortLabel: "Frontend" },
-  backend_developer: { emoji: "⚙️", shortLabel: "Backend" },
+  backend_developer: { emoji: "💻", shortLabel: "Backend" },
   devops_engineer: { emoji: "🔧", shortLabel: "DevOps" },
   security_engineer: { emoji: "🔒", shortLabel: "Security" },
   qa_engineer: { emoji: "🧪", shortLabel: "QA" },
   tech_writer: { emoji: "📝", shortLabel: "Docs" },
   project_manager: { emoji: "📋", shortLabel: "PM" },
   api_developer: { emoji: "🔌", shortLabel: "API" },
-  database_administrator: { emoji: "🗄️", shortLabel: "DBA" },
+  database_administrator: { emoji: "💾", shortLabel: "DBA" },
   ml_engineer: { emoji: "🤖", shortLabel: "ML" },
   mobile_developer_ios: { emoji: "📱", shortLabel: "iOS" },
   mobile_developer_android: { emoji: "🤖", shortLabel: "Android" },
-  tech_lead: { emoji: "👨‍💼", shortLabel: "Tech Lead" },
+  tech_lead: { emoji: "👑", shortLabel: "Tech Lead" },
   manager: { emoji: "👔", shortLabel: "Manager" },
 };
 

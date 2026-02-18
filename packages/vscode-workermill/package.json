@@ -97,6 +97,21 @@
         "title": "WorkerMill: Install/Update Agent"
       },
       {
+        "command": "workermill.startAgent",
+        "title": "WorkerMill: Start Agent",
+        "icon": "$(play)"
+      },
+      {
+        "command": "workermill.stopAgent",
+        "title": "WorkerMill: Stop Agent",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "workermill.restartAgent",
+        "title": "WorkerMill: Restart Agent",
+        "icon": "$(debug-restart)"
+      },
+      {
         "command": "workermill.cancelTask",
         "title": "WorkerMill: Cancel Task",
         "icon": "$(debug-stop)"

@@ -144,7 +144,7 @@ export default function LandingV0() {
               </h1>
               <p className="mt-6 text-xl text-slate-400 max-w-3xl mx-auto text-center leading-relaxed">
                 WorkerMill is an autonomous AI engineering team. Features, tech debt, rewrites,
-                greenfield — it executes your tickets end-to-end — coded, tested, reviewed, and validated through your pipeline while you sleep.
+                greenfield — it executes your tickets end-to-end — coded, tested, reviewed, and validated through your pipeline.
               </p>
             </div>
           </section>

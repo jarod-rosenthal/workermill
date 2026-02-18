@@ -521,6 +521,30 @@ function buildCloneUrl(
   token: string,
   scmProvider: string,
 ): string {
+  // If repo is already a full URL, inject auth credentials into it
+  if (repo.startsWith("https://") || repo.startsWith("http://")) {
+    const url = new URL(repo);
+    switch (scmProvider) {
+      case "bitbucket":
+        url.username = "x-token-auth";
+        break;
+      case "gitlab":
+        url.username = "oauth2";
+        break;
+      case "github":
+      default:
+        url.username = "x-access-token";
+        break;
+    }
+    url.password = token;
+    // Ensure .git suffix
+    if (!url.pathname.endsWith(".git")) {
+      url.pathname += ".git";
+    }
+    return url.toString();
+  }
+
+  // Short form: owner/repo
   switch (scmProvider) {
     case "bitbucket":
       return `https://x-token-auth:${token}@bitbucket.org/${repo}.git`;
@@ -547,11 +571,13 @@ async function cloneTargetRepo(
 
   try {
     const cloneUrl = buildCloneUrl(repo, token, scmProvider);
+    // Log repo (redact token) so we can debug clone failures
+    const safeUrl = cloneUrl.replace(/\/\/[^@]+@/, "//***@");
     console.log(
-      `${ts()} ${taskLabel} ${chalk.dim("Cloning repo for planner...")}`,
+      `${ts()} ${taskLabel} ${chalk.dim(`Cloning repo for planner: ${safeUrl}`)}`,
     );
     execSync(`git clone --depth 1 --single-branch "${cloneUrl}" "${tmpDir}"`, {
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
       timeout: 60_000,
     });
     console.log(
@@ -559,9 +585,14 @@ async function cloneTargetRepo(
     );
     return tmpDir;
   } catch (error) {
+    // Extract stderr from the git process for the real error
+    const stderr = (error as { stderr?: Buffer })?.stderr?.toString()?.trim() || "";
     const errMsg = error instanceof Error ? error.message : String(error);
+    const detail = stderr || errMsg;
+    // Redact tokens from error output
+    const safeDetail = detail.replace(/ghp_[A-Za-z0-9]+/g, "ghp_***").replace(/ghs_[A-Za-z0-9]+/g, "ghs_***").replace(/x-token-auth:[^@]+/g, "x-token-auth:***");
     console.error(
-      `${ts()} ${taskLabel} ${chalk.yellow("⚠")} Clone failed, planner will run without repo access: ${errMsg.substring(0, 100)}`,
+      `${ts()} ${taskLabel} ${chalk.yellow("⚠")} Clone failed, planner will run without repo access: ${safeDetail.substring(0, 300)}`,
     );
     // Cleanup partial clone
     try {

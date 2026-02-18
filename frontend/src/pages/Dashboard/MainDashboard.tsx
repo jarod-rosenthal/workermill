@@ -798,7 +798,7 @@ export default function Dashboard() {
     }
   }, []);
 
-  // Fetch terminal logs from REST API (same as OnCallShift)
+  // Fetch terminal logs from REST API
   // Used for initial load and as polling fallback when SSE disconnects
   const fetchTerminalLogs = useCallback(async (taskId: string) => {
     try {
@@ -824,7 +824,7 @@ export default function Dashboard() {
 
           const logLines: StreamingLog[] = logs
             .filter((log: { id?: string; timestamp: string; cursor?: string }) => {
-              // Build event ID for deduplication (same format as OnCallShift)
+              // Build event ID for deduplication
               const eventId = log.cursor ||
                 (log.timestamp && log.id
                   ? `${new Date(log.timestamp).toISOString()}|${log.id}`
@@ -849,7 +849,7 @@ export default function Dashboard() {
 
           if (logLines.length > 0) {
             setStreamingLogs((prev) => {
-              // If no cursor (initial fetch), REPLACE logs (same as OnCallShift)
+              // If no cursor (initial fetch), REPLACE logs
               // If cursor exists (polling), APPEND new logs
               const prevLines = cursor ? (prev[taskId] || []) : [];
               const nextLines = [...prevLines, ...logLines];
@@ -889,7 +889,7 @@ export default function Dashboard() {
     }
   }, []);
 
-  // Start SSE log streaming for a task - uses database stream (same as OnCallShift)
+  // Start SSE log streaming for a task - uses database stream
   const startLogStream = useCallback((taskId: string) => {
     // Don't start if already streaming
     if (logEventSources.current[taskId]) return;
@@ -897,14 +897,14 @@ export default function Dashboard() {
     const token = localStorage.getItem("accessToken");
     if (!token) return;
 
-    // Build URL with cursor for resume support (same as OnCallShift)
+    // Build URL with cursor for resume support
     const tokenParam = `token=${encodeURIComponent(token)}`;
     const sinceCursor = terminalCursorsRef.current[taskId];
     const sinceParam = sinceCursor ? `since=${encodeURIComponent(sinceCursor)}` : "";
     const query = [tokenParam, sinceParam].filter(Boolean).join("&");
     const url = `${API_BASE}/api/control-center/logs/${taskId}/stream?${query}`;
 
-    // CRITICAL: Fetch initial logs FIRST, then connect to SSE for new logs (same as OnCallShift)
+    // CRITICAL: Fetch initial logs FIRST, then connect to SSE for new logs
     fetchTerminalLogs(taskId);
     // Also fetch persisted errors (survives client re-init)
     fetchPersistedErrors(taskId);
@@ -920,7 +920,7 @@ export default function Dashboard() {
     const onLogEvent = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
-        // Event ID for deduplication and cursor tracking (same as OnCallShift)
+        // Event ID for deduplication and cursor tracking
         const eventId =
           event.lastEventId ||
           data.cursor ||
@@ -2694,9 +2694,9 @@ export default function Dashboard() {
                                   </span>
                                 )}
                                 {/* Show revision counter under Tech Lead Review stage */}
-                                {step.isReviewStage && (task.revisionCount || 0) > 0 && (
+                                {step.isReviewStage && (
                                   <span className="text-xs text-amber-500 font-medium">
-                                    {task.revisionCount}/{task.maxReviewRevisions || 3}
+                                    {(task.revisionCount ?? 0) + 1}/{task.maxReviewRevisions || 3}
                                   </span>
                                 )}
                               </div>
@@ -3530,10 +3530,10 @@ export default function Dashboard() {
                                task.status === "escalated" ? "Escalated" :
                                task.status.replace(/_/g, " ").charAt(0).toUpperCase() + task.status.replace(/_/g, " ").slice(1)}
                             </span>
-                            {/* Show revision badge when in review workflow */}
-                            {task.revisionCount !== undefined && task.revisionCount > 0 && (
+                            {/* Show revision badge for tasks past execution */}
+                            {["pr_created", "review_requested", "pr_approved", "reviewing", "consolidating", "deployed", "completed", "revision_needed"].includes(task.status) && (
                               <span className="text-xs text-amber-500">
-                                Rev {task.revisionCount}/{task.maxReviewRevisions || 3}
+                                Rev {(task.revisionCount ?? 0) + 1}/{task.maxReviewRevisions || 3}
                               </span>
                             )}
                           </div>

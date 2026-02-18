@@ -120,9 +120,9 @@ export class WorkerTask {
   @Column({ name: "jira_issue_id", type: "varchar", length: 50, nullable: true })
   jiraIssueId: string | null;
 
-  // Which ticket system created this task (jira, linear, github, or null for internal/email/support)
+  // Which ticket system created this task (jira, linear, github, internal, or null)
   @Column({ name: "ticket_system", type: "varchar", length: 20, nullable: true })
-  ticketSystem: "jira" | "linear" | "github" | null;
+  ticketSystem: "jira" | "linear" | "github" | "internal" | null;
 
   // Internal task reference (for tasks from Kanban board)
   @Column({ name: "internal_task_id", type: "uuid", nullable: true })

@@ -20,6 +20,7 @@ import type { AgentConfig } from "./config.js";
 
 export interface LocalTaskInfo {
   id: string;
+  parentTaskId?: string;
   summary: string;
   status: "planning" | "running" | "completed" | "failed";
   persona?: string;
@@ -69,9 +70,10 @@ agentEvents.setMaxListeners(100);
  */
 const localTasks = new Map<string, LocalTaskInfo>();
 
-agentEvents.on("task:started", (info: { id: string; summary: string; persona?: string; model?: string; repo?: string }) => {
+agentEvents.on("task:started", (info: { id: string; parentTaskId?: string; summary: string; persona?: string; model?: string; repo?: string }) => {
   localTasks.set(info.id, {
     id: info.id,
+    parentTaskId: info.parentTaskId,
     summary: info.summary,
     status: "running",
     persona: info.persona,
@@ -383,8 +385,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
+      // Use parentTaskId if available — Epic workers poll PARENT_TASK_ID for commands
+      const localTask = localTasks.get(talkMatch[1]);
+      const commandTaskId = localTask?.parentTaskId || talkMatch[1];
       const result = await cloudProxy("POST", "/api/coordination/commands", {
-        taskId: talkMatch[1],
+        taskId: commandTaskId,
         type: "message",
         content: body.message || body.content,
       });
@@ -400,8 +405,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
+      // Use parentTaskId — Epic workers poll PARENT_TASK_ID for blocker responses
+      const localTask = localTasks.get(blockerMatch[1]);
+      const parentId = localTask?.parentTaskId || blockerMatch[1];
       const result = await cloudProxy("POST", "/api/coordination/blocker-response", {
-        parentTaskId: blockerMatch[1],
+        parentTaskId: parentId,
         blockerId: body.blockerId,
         action: body.action, // retry | skip | abort
         guidance: body.guidance,

@@ -536,6 +536,25 @@ export function AIWorkersSection({
                 )}
                 <p className="text-xs text-muted-foreground mt-1">Automatic retries for failed tasks (0-10)</p>
               </div>
+
+              {/* PRD Auto-Run */}
+              <div className="flex items-center justify-between p-4 bg-accent/5 border border-accent/20 rounded-xl">
+                <div>
+                  <h4 className="text-sm font-medium text-foreground">Auto-run PRD Cards</h4>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Automatically execute cards when dependencies are met (PRD boards only)
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.prdAutoRun}
+                    onChange={(e) => updateSetting("prdAutoRun", e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-accent/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
+                </label>
+              </div>
             </div>
           </CollapsibleSection>
 

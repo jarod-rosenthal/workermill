@@ -81,6 +81,7 @@ export interface Settings {
   autoReviewEnabled: boolean;
   autoDeployEnabled: boolean;
   autoSkillExtraction: boolean;
+  prdAutoRun: boolean;
   remoteAgentOnly: boolean;
   // Warm Container Pool settings
   warmPoolSize: number;

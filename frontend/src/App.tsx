@@ -191,15 +191,8 @@ function App() {
             }
           />
 
-          {/* Protected docs - requires authentication */}
-          <Route
-            path="/docs"
-            element={
-              <ProtectedRoute>
-                <DocsLayout />
-              </ProtectedRoute>
-            }
-          >
+          {/* Public docs - accessible without authentication */}
+          <Route path="/docs" element={<DocsLayout />}>
             <Route index element={<DocsOverview />} />
             <Route path="quick-start" element={<QuickStart />} />
             <Route path="local-agent" element={<LocalAgent />} />

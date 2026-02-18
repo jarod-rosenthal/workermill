@@ -19,7 +19,7 @@ export interface IssueTrackerConfig {
  * Build a URL to view an issue/ticket in the configured issue tracker.
  * Respects the organization's default issue tracker provider.
  *
- * @param issueKey - The issue key (e.g., "OCS-123", "ONC-19", "123")
+ * @param issueKey - The issue key (e.g., "PROJ-123", "APP-19", "123")
  * @param config - Issue tracker configuration from org settings
  * @returns The full URL to view the issue, or null if unable to build URL
  */

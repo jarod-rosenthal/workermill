@@ -467,7 +467,7 @@ router.post(
           slug,
           plan: "free",
           taskQuota: 0, // Unlimited tasks (feature-gated, not quota-based)
-          apiKey: signupRawKey, // Keep raw key for spawner use (ECS/local workers)
+
           apiKeyHash: await bcrypt.hash(signupRawKey, 10),
           apiKeyPrefix: signupRawKey.substring(0, 12),
         });
@@ -894,7 +894,7 @@ router.post(
           slug,
           plan: "free",
           taskQuota: 0, // Unlimited tasks (feature-gated, not quota-based)
-          apiKey: setupRawKey, // Keep raw key for spawner use (ECS/local workers)
+
           apiKeyHash: await bcrypt.hash(setupRawKey, 10),
           apiKeyPrefix: setupRawKey.substring(0, 12),
         });
@@ -1464,7 +1464,7 @@ router.post(
           azureTenantId: tenantId,
           plan: "free",
           taskQuota: 0, // Unlimited tasks (feature-gated, not quota-based)
-          apiKey: msRawKey, // Keep raw key for spawner use (ECS/local workers)
+
           apiKeyHash: await bcrypt.hash(msRawKey, 10),
           apiKeyPrefix: msRawKey.substring(0, 12),
         });

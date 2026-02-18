@@ -24,7 +24,6 @@ async function seed() {
       org = orgRepo.create({
         name: "OnCallShift",
         plan: "enterprise",
-        apiKey: seedRawKey, // Keep raw key for spawner use (ECS/local workers)
         apiKeyHash: await bcrypt.hash(seedRawKey, 10),
         apiKeyPrefix: seedRawKey.substring(0, 12),
         scmProvider: "bitbucket",

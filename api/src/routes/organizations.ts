@@ -315,8 +315,8 @@ router.post(
       const rawKey = `org_${randomUUID().replace(/-/g, "")}`;
       org.apiKeyHash = await bcrypt.hash(rawKey, 10);
       org.apiKeyPrefix = rawKey.substring(0, 12);
-      org.apiKey = rawKey; // Keep raw key for spawner use (ECS/local workers)
-      await orgRepo.save(org);
+      // Do NOT store raw key — only the hash and prefix
+      await orgRepo.update({ id: org.id }, { apiKeyHash: org.apiKeyHash, apiKeyPrefix: org.apiKeyPrefix });
 
       logger.info("Organization API key rotated", { orgId: org.id });
       res.json({

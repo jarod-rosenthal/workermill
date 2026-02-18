@@ -10,6 +10,7 @@ import { fetchJiraIssue } from "../../utils/jira.js";
 import { fetchLinearIssue } from "../../utils/linear.js";
 import { inferPersonaFromJiraIssue } from "../../services/persona-inference.js";
 import { normalizeRepoWithOwner } from "./helpers.js";
+import { taskCreationLimiter } from "../../middleware/rate-limit.js";
 
 const router = Router();
 
@@ -76,10 +77,19 @@ router.use(authenticateRequest);
  */
 router.post(
   "/",
-  body("jiraIssueKey").isString().notEmpty().withMessage("jiraIssueKey is required"),
-  body("workerPersona").optional().isString(),
-  body("workerModel").optional().isString(),
-  body("summary").optional().isString(),
+  taskCreationLimiter,
+  body("jiraIssueKey")
+    .isString()
+    .notEmpty()
+    .isLength({ max: 200 })
+    .withMessage("jiraIssueKey is required and must be ≤ 200 characters"),
+  body("workerPersona").optional().isString().isLength({ max: 100 }),
+  body("workerModel").optional().isString().isLength({ max: 100 }),
+  body("summary")
+    .optional()
+    .isString()
+    .isLength({ max: 5000 })
+    .withMessage("summary must be ≤ 5000 characters"),
   body("skipManagerReview").optional().isBoolean(),
   body("deploymentEnabled").optional().isBoolean(),
   body("improvementEnabled").optional().isBoolean(),

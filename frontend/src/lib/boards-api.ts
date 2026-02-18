@@ -43,6 +43,8 @@ export interface Card {
   commentCount: number;
   workerTaskId: string | null;
   workerStatus: string | null;
+  dependencies?: { cardId: string; title: string }[];
+  dependents?: { cardId: string; title: string }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -401,4 +403,39 @@ export async function runCard(
 export async function getActivity(boardId: string): Promise<Activity[]> {
   const response = await apiClient.get(`/boards/${boardId}/activity`);
   return response.data.activity ?? response.data;
+}
+
+// Board batch operations
+export async function runAllCards(boardId: string) {
+  const { data } = await apiClient.post(`/boards/${boardId}/run-all`);
+  return data;
+}
+
+export async function cancelAllCards(boardId: string) {
+  const { data } = await apiClient.post(`/boards/${boardId}/cancel-all`);
+  return data;
+}
+
+// Card dependencies
+export async function addCardDependency(
+  boardId: string,
+  cardId: string,
+  dependsOnCardId: string,
+) {
+  const { data } = await apiClient.post(
+    `/boards/${boardId}/cards/${cardId}/dependencies`,
+    { dependsOnCardId },
+  );
+  return data;
+}
+
+export async function removeCardDependency(
+  boardId: string,
+  cardId: string,
+  depCardId: string,
+) {
+  const { data } = await apiClient.delete(
+    `/boards/${boardId}/cards/${cardId}/dependencies/${depCardId}`,
+  );
+  return data;
 }

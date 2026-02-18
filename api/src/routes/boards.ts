@@ -17,6 +17,7 @@ import {
   KbChecklist,
   KbActivity,
   KbStarredBoard,
+  KbCardDependency,
   Organization,
   WorkerTask,
   PLAN_FEATURES,
@@ -121,7 +122,7 @@ async function logActivity(
 // Helper: Run a card as a WorkerTask
 // =============================================================================
 
-async function runCardAsWorkerTask(
+export async function runCardAsWorkerTask(
   cardId: string,
   orgId: string,
 ): Promise<WorkerTask> {
@@ -1526,6 +1527,253 @@ router.post(
       }
       logger.error("Error running card as worker task", { error });
       res.status(500).json({ error: "Failed to run card as worker task" });
+    }
+  }
+);
+
+// =============================================================================
+// Card Dependency Routes
+// =============================================================================
+
+/**
+ * POST /api/boards/:boardId/cards/:cardId/dependencies
+ * Add a dependency (cardId depends on dependsOnCardId)
+ */
+router.post(
+  "/:boardId/cards/:cardId/dependencies",
+  param("boardId").isUUID(),
+  param("cardId").isUUID(),
+  body("dependsOnCardId").isUUID(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const boardId = req.params.boardId as string;
+      const cardId = req.params.cardId as string;
+      const { dependsOnCardId } = req.body;
+
+      // Reject self-dependency
+      if (cardId === dependsOnCardId) {
+        res.status(400).json({ error: "A card cannot depend on itself" });
+        return;
+      }
+
+      // Verify board belongs to org
+      const boardRepo = AppDataSource.getRepository(KbBoard);
+      const board = await boardRepo.findOne({ where: { id: boardId, orgId: org.id } });
+      if (!board) {
+        res.status(404).json({ error: "Board not found" });
+        return;
+      }
+
+      // Verify both cards belong to the same board
+      const cardRepo = AppDataSource.getRepository(KbCard);
+      const card = await cardRepo.findOne({ where: { id: cardId, boardId } });
+      if (!card) {
+        res.status(404).json({ error: "Card not found" });
+        return;
+      }
+
+      const depCard = await cardRepo.findOne({ where: { id: dependsOnCardId, boardId } });
+      if (!depCard) {
+        res.status(404).json({ error: "Dependency card not found on this board" });
+        return;
+      }
+
+      // Check for existing dependency
+      const depRepo = AppDataSource.getRepository(KbCardDependency);
+      const existing = await depRepo.findOne({ where: { cardId, dependsOnCardId } });
+      if (existing) {
+        res.status(409).json({ error: "Dependency already exists" });
+        return;
+      }
+
+      const dep = depRepo.create({ cardId, dependsOnCardId });
+      await depRepo.save(dep);
+
+      await logActivity(boardId, req.user!.id, "dependency_added", "card", cardId, {
+        dependsOnCardId,
+      });
+
+      res.status(201).json({ dependency: dep });
+    } catch (error) {
+      logger.error("Error adding card dependency", { error });
+      res.status(500).json({ error: "Failed to add dependency" });
+    }
+  }
+);
+
+/**
+ * DELETE /api/boards/:boardId/cards/:cardId/dependencies/:depCardId
+ * Remove a dependency
+ */
+router.delete(
+  "/:boardId/cards/:cardId/dependencies/:depCardId",
+  param("boardId").isUUID(),
+  param("cardId").isUUID(),
+  param("depCardId").isUUID(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const boardId = req.params.boardId as string;
+      const cardId = req.params.cardId as string;
+      const depCardId = req.params.depCardId as string;
+
+      // Verify board belongs to org
+      const boardRepo = AppDataSource.getRepository(KbBoard);
+      const board = await boardRepo.findOne({ where: { id: boardId, orgId: org.id } });
+      if (!board) {
+        res.status(404).json({ error: "Board not found" });
+        return;
+      }
+
+      const depRepo = AppDataSource.getRepository(KbCardDependency);
+      const dep = await depRepo.findOne({ where: { cardId, dependsOnCardId: depCardId } });
+      if (!dep) {
+        res.status(404).json({ error: "Dependency not found" });
+        return;
+      }
+
+      await depRepo.remove(dep);
+
+      await logActivity(boardId, req.user!.id, "dependency_removed", "card", cardId, {
+        dependsOnCardId: depCardId,
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      logger.error("Error removing card dependency", { error });
+      res.status(500).json({ error: "Failed to remove dependency" });
+    }
+  }
+);
+
+/**
+ * GET /api/boards/:boardId/cards/:cardId/dependencies
+ * List dependencies for a card
+ */
+router.get(
+  "/:boardId/cards/:cardId/dependencies",
+  param("boardId").isUUID(),
+  param("cardId").isUUID(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const boardId = req.params.boardId as string;
+      const cardId = req.params.cardId as string;
+
+      // Verify board belongs to org
+      const boardRepo = AppDataSource.getRepository(KbBoard);
+      const board = await boardRepo.findOne({ where: { id: boardId, orgId: org.id } });
+      if (!board) {
+        res.status(404).json({ error: "Board not found" });
+        return;
+      }
+
+      const depRepo = AppDataSource.getRepository(KbCardDependency);
+      const deps = await depRepo.find({
+        where: { cardId },
+        relations: ["dependsOnCard"],
+      });
+
+      res.json({
+        dependencies: deps.map((d) => ({
+          cardId: d.dependsOnCardId,
+          title: d.dependsOnCard?.title || "",
+        })),
+      });
+    } catch (error) {
+      logger.error("Error listing card dependencies", { error });
+      res.status(500).json({ error: "Failed to list dependencies" });
+    }
+  }
+);
+
+// =============================================================================
+// Board Batch Operations
+// =============================================================================
+
+/**
+ * POST /api/boards/:boardId/run-all
+ * Execute all cards respecting dependencies
+ */
+router.post(
+  "/:boardId/run-all",
+  param("boardId").isUUID(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const boardId = req.params.boardId as string;
+
+      // Verify board belongs to org
+      const boardRepo = AppDataSource.getRepository(KbBoard);
+      const board = await boardRepo.findOne({ where: { id: boardId, orgId: org.id } });
+      if (!board) {
+        res.status(404).json({ error: "Board not found" });
+        return;
+      }
+
+      // Dynamic import — board-execution service may be created by a parallel task
+      const { processUnblockedCards } = await import("../services/board-execution.js");
+      const result = await processUnblockedCards(boardId, org.id);
+
+      await logActivity(boardId, req.user!.id, "run_all", "board", boardId);
+
+      res.json(result);
+    } catch (error) {
+      logger.error("Error running all cards", { error });
+      res.status(500).json({ error: "Failed to run all cards" });
+    }
+  }
+);
+
+/**
+ * POST /api/boards/:boardId/cancel-all
+ * Cancel all in-flight tasks for a board
+ */
+router.post(
+  "/:boardId/cancel-all",
+  param("boardId").isUUID(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const boardId = req.params.boardId as string;
+
+      // Verify board belongs to org
+      const boardRepo = AppDataSource.getRepository(KbBoard);
+      const board = await boardRepo.findOne({ where: { id: boardId, orgId: org.id } });
+      if (!board) {
+        res.status(404).json({ error: "Board not found" });
+        return;
+      }
+
+      // Load all cards with worker tasks
+      const cardRepo = AppDataSource.getRepository(KbCard);
+      const cards = await cardRepo.find({
+        where: { boardId },
+        relations: ["workerTask"],
+      });
+
+      const workerTaskRepo = AppDataSource.getRepository(WorkerTask);
+      let cancelled = 0;
+
+      for (const card of cards) {
+        if (card.workerTask && !card.workerTask.isTerminal()) {
+          await workerTaskRepo.update(card.workerTask.id, { status: "cancelled" });
+          cancelled++;
+        }
+      }
+
+      await logActivity(boardId, req.user!.id, "cancel_all", "board", boardId, { cancelled });
+
+      res.json({ cancelled });
+    } catch (error) {
+      logger.error("Error cancelling all tasks", { error });
+      res.status(500).json({ error: "Failed to cancel all tasks" });
     }
   }
 );

@@ -112,11 +112,17 @@ agentEvents.on("task:plan_done", (info: { id: string; success: boolean }) => {
 // Clean up old completed/failed tasks after 10 minutes
 setInterval(() => {
   const cutoff = Date.now() - 10 * 60 * 1000;
+  let didDelete = false;
   for (const [id, task] of localTasks) {
     if ((task.status === "completed" || task.status === "failed") &&
         new Date(task.startedAt).getTime() < cutoff) {
       localTasks.delete(id);
+      didDelete = true;
     }
+  }
+  // Notify connected clients about the updated task list
+  if (didDelete) {
+    broadcastSSE("tasks", "snapshot", Array.from(localTasks.values()));
   }
 }, 60_000);
 

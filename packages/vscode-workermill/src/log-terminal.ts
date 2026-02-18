@@ -8,20 +8,47 @@
  * Raw worker stdout/stderr is intentionally excluded — it contains noisy
  * internal orchestration output (epic coordinator, mutex checks, etc.)
  * that isn't useful to the end user.
+ *
+ * Large markdown blocks (PR comments, review output) are collapsed to a
+ * single summary line — the same content is already visible in the activity
+ * feed, on the ticket (Jira/GitHub), and in the web dashboard.
  */
 
 import * as vscode from "vscode";
 import type { AgentClient, TaskInfo } from "./agent-client";
 
-// ANSI color codes
+// ANSI color codes — bright variants for better contrast in dark/light themes
 const RESET = "\x1b[0m";
-const RED = "\x1b[31m";
-const GREEN = "\x1b[32m";
-const YELLOW = "\x1b[33m";
-const CYAN = "\x1b[36m";
-const MAGENTA = "\x1b[35m";
+const RED = "\x1b[91m";
+const GREEN = "\x1b[92m";
+const YELLOW = "\x1b[93m";
+const BLUE = "\x1b[94m";
+const MAGENTA = "\x1b[95m";
+const CYAN = "\x1b[96m";
+const WHITE = "\x1b[97m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
+
+// Persona → bright color mapping
+const PERSONA_COLORS: Record<string, string> = {
+  backend_developer: BLUE,
+  frontend_developer: CYAN,
+  qa_engineer: GREEN,
+  devops_engineer: YELLOW,
+  security_engineer: MAGENTA,
+  tech_lead: WHITE,
+  tech_writer: CYAN,
+  project_manager: YELLOW,
+};
+
+/** Extract persona name from `[emoji persona_name icon]` prefix */
+function extractPersona(line: string): { persona: string; prefixEnd: number } | null {
+  const m = line.match(/^\[.+?\s+(\w+)\s+.+?\]\s*/);
+  if (!m) return null;
+  const persona = m[1];
+  if (persona in PERSONA_COLORS) return { persona, prefixEnd: m[0].length };
+  return null;
+}
 
 function colorize(line: string): string {
   if (/error|Error|ERROR|FAIL|panic|fatal/i.test(line)) return RED + line + RESET;
@@ -29,8 +56,80 @@ function colorize(line: string): string {
   if (/✓|success|PASS|completed|approved|merged/i.test(line)) return GREEN + line + RESET;
   if (/^(Cloning|Fetching|git |From |To |branch )/i.test(line)) return CYAN + line + RESET;
   if (/::result::|::pr_url::|::learning::|::blocker::/.test(line)) return BOLD + MAGENTA + line + RESET;
+
+  // Persona-prefixed lines get persona color instead of DIM
+  const p = extractPersona(line);
+  if (p) {
+    const color = PERSONA_COLORS[p.persona];
+    const prefix = line.substring(0, p.prefixEnd);
+    const body = line.substring(p.prefixEnd);
+    return BOLD + color + prefix + RESET + color + body + RESET;
+  }
+
+  // Non-persona bracketed lines (e.g. [THINKING]) stay dim
   if (/^\[.*?\]/.test(line)) return DIM + line + RESET;
   return line;
+}
+
+/** Strip markdown syntax for terminal readability */
+function stripMarkdown(text: string): string {
+  return (
+    text
+      // Code fences
+      .replace(/^```\w*$/gm, "")
+      // Table separator rows (e.g. |---|---|)
+      .replace(/^\|[\s\-:|]+\|$/gm, "")
+      // Horizontal rules
+      .replace(/^[-*_]{3,}$/gm, "")
+      // Headers → UPPERCASE
+      .replace(/^***REMOVED***{1,6}\s+(.+)$/gm, (_m, h: string) => h.toUpperCase())
+      // Bold
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      // Italic
+      .replace(/\*(.+?)\*/g, "$1")
+      // Inline code
+      .replace(/`([^`]+)`/g, "$1")
+      // Links [text](url) → text (url)
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)")
+      // Table rows — strip leading/trailing pipes, keep cell content
+      .replace(/^\|(.+)\|$/gm, (_m, cells: string) =>
+        cells
+          .split("|")
+          .map((c: string) => c.trim())
+          .filter(Boolean)
+          .join("  "),
+      )
+      // Collapse 3+ consecutive blank lines to 1
+      .replace(/\n{3,}/g, "\n\n")
+  );
+}
+
+/** Collapse large markdown blocks (review output, merge validation) to a summary */
+function collapseCommentBlock(message: string, type?: string): string | null {
+  if (type !== "manager") return null;
+
+  const lines = message.split("\n");
+  if (lines.length < 5) return null;
+
+  // Count markdown signals
+  let signals = 0;
+  for (const l of lines) {
+    if (/^\|.+\|$/.test(l)) signals++; // table row
+    if (/^***REMOVED***{1,6}\s/.test(l)) signals++; // header
+    if (/\*\*.+\*\*/.test(l)) signals++; // bold
+    if (/^```/.test(l)) signals++; // code fence
+    if (signals >= 2) break;
+  }
+  if (signals < 2) return null;
+
+  // Find first non-empty, non-markdown-decoration line as preview
+  const preview =
+    lines.find((l) => l.trim() && !/^```|^***REMOVED***{1,6}\s|^\|[\s\-:|]+\||^[-*_]{3,}$/.test(l.trim())) ||
+    lines[0];
+  const sizeKB = Math.round(Buffer.byteLength(message, "utf8") / 1024);
+  const previewTrimmed = preview.trim().substring(0, 80);
+
+  return `${DIM}[collapsed ${lines.length} lines, ${sizeKB}KB] ${previewTrimmed}${lines.length > 1 ? "..." : ""}${RESET}`;
 }
 
 class TaskPseudoterminal implements vscode.Pseudoterminal {
@@ -52,7 +151,9 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
   }
 
   open(): void {
-    this.writeLine(`${DIM}WorkerMill — streaming logs for task ${this.taskId.substring(0, 8)}...${RESET}`);
+    this.writeLine(
+      `${DIM}WorkerMill — streaming logs for task ${this.taskId.substring(0, 8)}...${RESET}`,
+    );
     this.writeLine("");
 
     // Poll cloud logs — curated postLog() messages only (same as dashboard)
@@ -88,10 +189,19 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
     this.writeEmitter.fire(text + "\r\n");
   }
 
+  private writeMultiline(text: string): void {
+    for (const line of text.split("\n")) {
+      this.writeLine(colorize(line));
+    }
+  }
+
   private async pollCloudLogs(): Promise<void> {
     if (this.disposed) return;
     try {
-      const raw = await this.client.getCloudLogs(this.taskId, this.lastLogTimestamp || undefined);
+      const raw = await this.client.getCloudLogs(
+        this.taskId,
+        this.lastLogTimestamp || undefined,
+      );
 
       // Handle both flat array and wrapped { logs: [...] } response formats
       const logs = (Array.isArray(raw) ? raw : (raw as { logs?: unknown[] })?.logs) as
@@ -115,13 +225,31 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
 
         // Colorize based on structured severity/type from the curated log
         if (log.message) {
-          const color = log.severity === "error" ? RED : log.severity === "warn" ? YELLOW : null;
-          this.writeLine(color ? color + log.message + RESET : colorize(log.message));
+          // Try collapsing large markdown blocks first
+          const collapsed = collapseCommentBlock(log.message, log.type);
+          if (collapsed) {
+            this.writeLine(collapsed);
+          } else {
+            const cleaned = stripMarkdown(log.message);
+            const color =
+              log.severity === "error" ? RED : log.severity === "warn" ? YELLOW : null;
+            if (color) {
+              for (const line of cleaned.split("\n")) {
+                this.writeLine(color + line + RESET);
+              }
+            } else {
+              this.writeMultiline(cleaned);
+            }
+          }
         }
 
         // Show command output if present (e.g., test runs, build output)
-        if (log.stdout) this.writeLine(colorize(log.stdout));
-        if (log.stderr) this.writeLine(RED + log.stderr + RESET);
+        if (log.stdout) this.writeMultiline(log.stdout);
+        if (log.stderr) {
+          for (const line of log.stderr.split("\n")) {
+            this.writeLine(RED + line + RESET);
+          }
+        }
 
         this.lastLogTimestamp = log.createdAt;
       }

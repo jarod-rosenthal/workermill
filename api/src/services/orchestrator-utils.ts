@@ -116,11 +116,11 @@ export const PROVIDER_ICONS: Record<string, string> = {
 
 /**
  * Get formatted log prefix for planning agent output.
- * Format: [🗺️ planning_agent 🔷] for planning + provider visibility
+ * Format: [💡 planning_agent 🔷] for planning + provider visibility
  */
 export function getPlanningAgentPrefix(provider: string): string {
   const providerIcon = PROVIDER_ICONS[provider] || "🤖";
-  return `[🗺️ planning_agent ${providerIcon}]`;
+  return `[💡 planning_agent ${providerIcon}]`;
 }
 
 // =============================================================================

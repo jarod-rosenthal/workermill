@@ -265,10 +265,13 @@ function blockerAction(action) {
 }
 
 const personaEmoji = {
-  frontend_developer: '\\u{1F3A8}', backend_developer: '\\u{1F4BB}', devops_engineer: '\\u{2699}',
-  security_engineer: '\\u{1F6E1}', qa_engineer: '\\u{1F9EA}', database_administrator: '\\u{1F5C4}',
-  tech_writer: '\\u{1F4D6}', project_manager: '\\u{1F4CB}', planning_agent: '\\u{1F4A1}',
-  tech_lead: '\\u{1F454}', coordinator: '\\u{1F3AF}', dashboard: '\\u{1F4CA}', you: '\\u{1F464}',
+  frontend_developer: '\\u{1F3A8}', backend_developer: '\\u{1F4BB}', devops_engineer: '\\u{1F527}',
+  security_engineer: '\\u{1F512}', qa_engineer: '\\u{1F9EA}', database_administrator: '\\u{1F4BE}',
+  tech_writer: '\\u{1F4DD}', project_manager: '\\u{1F4CB}', api_developer: '\\u{1F50C}',
+  ml_engineer: '\\u{1F9E0}', data_engineer: '\\u{1F4CA}', mobile_developer_ios: '\\u{1F4F1}',
+  mobile_developer_android: '\\u{1F916}', planning_agent: '\\u{1F4A1}', tech_lead: '\\u{1F451}',
+  manager: '\\u{1F454}', support_agent: '\\u{1F4AC}', coordinator: '\\u{1F3AF}',
+  dashboard: '\\u{1F4CA}', you: '\\u{1F464}',
 };
 function getEmoji(p) { return personaEmoji[p] || '\\u{1F916}'; }
 function formatTime(iso) { try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } }

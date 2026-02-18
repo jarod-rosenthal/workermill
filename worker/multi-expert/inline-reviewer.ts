@@ -10,7 +10,7 @@ import { writeFileSync, unlinkSync } from "fs";
 import axios, { AxiosInstance } from "axios";
 
 // Tech Lead persona prefix for consistent logging
-const TECH_LEAD_PREFIX = "[👨‍💼 tech_lead]";
+const TECH_LEAD_PREFIX = "[👑 tech_lead]";
 
 /**
  * Review decision from Tech Lead.

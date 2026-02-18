@@ -201,7 +201,7 @@ async function postProgress(
 type PlanningPhase = "initializing" | "reading_repo" | "analyzing" | "generating_plan" | "validating" | "complete";
 
 /** Consistent prefix matching local workermill dashboard format */
-const PREFIX = "[🗺️ planning_agent 🤖]";
+const PREFIX = "[💡 planning_agent 🤖]";
 
 /** Format elapsed seconds as human-readable string (e.g. "28s", "1m 25s") */
 function formatElapsed(seconds: number): string {

@@ -9,7 +9,7 @@ const workerPersonas = [
   },
   {
     id: "backend_developer",
-    emoji: "⚙️",
+    emoji: "💻",
     title: "Backend Developer",
     description: "APIs, database design, server logic, and integrations",
   },
@@ -39,7 +39,7 @@ const workerPersonas = [
   },
   {
     id: "database_administrator",
-    emoji: "🗄️",
+    emoji: "💾",
     title: "Database Administrator",
     description: "Database optimization, migrations, and data modeling",
   },

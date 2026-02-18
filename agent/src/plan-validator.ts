@@ -587,7 +587,7 @@ export function formatRefinementFeedback(critic: CriticResult): string {
 }
 
 /** Consistent prefix matching planner dashboard format */
-const PREFIX = "[🗺️ planning_agent 🤖]";
+const PREFIX = "[💡 planning_agent 🤖]";
 
 /** Timestamp prefix for console logs */
 function ts(): string {

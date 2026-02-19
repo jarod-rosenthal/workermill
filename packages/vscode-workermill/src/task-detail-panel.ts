@@ -462,7 +462,11 @@ export class TaskDetailPanel {
   <div class="detail-links">
     <div class="detail-link" id="ticketRow" style="display:none">
       <span class="detail-link-label">Ticket</span>
-      <a class="detail-link-value" id="ticketLink" href="#"></a>
+      <span class="detail-link-value plain" id="ticketLink"></span>
+    </div>
+    <div class="detail-link" id="repoRow" style="display:none">
+      <span class="detail-link-label">Repo</span>
+      <span class="detail-link-value plain" id="repoName"></span>
     </div>
     <div class="detail-link" id="branchRow" style="display:none">
       <span class="detail-link-label">Branch</span>
@@ -565,26 +569,29 @@ window.addEventListener("message", (event) => {
       document.getElementById("durationValue").textContent = mins < 60 ? mins + " min" : Math.floor(mins / 60) + "h " + (mins % 60) + "m";
     }
 
-    // Task details (description, ticket, branch, PR)
-    if (d.description) {
-      document.getElementById("taskDescription").textContent = d.description;
+    // Task details (summary, ticket, branch, PR, repo)
+    if (d.summary) {
+      document.getElementById("taskDescription").textContent = d.summary;
     }
-    if (d.ticketUrl) {
+    if (d.jiraIssueKey) {
       document.getElementById("ticketRow").style.display = "";
       const ticketLink = document.getElementById("ticketLink");
-      ticketLink.textContent = d.ticketKey || d.ticketUrl;
-      ticketLink.setAttribute("href", d.ticketUrl);
+      ticketLink.textContent = d.jiraIssueKey;
     }
-    if (d.branchName) {
+    if (d.githubBranch) {
       document.getElementById("branchRow").style.display = "";
-      document.getElementById("branchName").textContent = d.branchName;
+      document.getElementById("branchName").textContent = d.githubBranch;
     }
-    if (d.prUrl) {
+    if (d.githubRepo) {
+      document.getElementById("repoRow").style.display = "";
+      document.getElementById("repoName").textContent = d.githubRepo;
+    }
+    if (d.githubPrUrl) {
       document.getElementById("prRow").style.display = "";
       const prLink = document.getElementById("prLink");
-      const prNum = d.prUrl.match(/\\/pull\\/(\\d+)/);
-      prLink.textContent = prNum ? "PR #" + prNum[1] : d.prUrl;
-      prLink.setAttribute("href", d.prUrl);
+      const prNum = d.githubPrUrl.match(/\\/pull\\/(\\d+)/);
+      prLink.textContent = prNum ? "PR #" + prNum[1] : d.githubPrUrl;
+      prLink.setAttribute("href", d.githubPrUrl);
     }
   }
 });

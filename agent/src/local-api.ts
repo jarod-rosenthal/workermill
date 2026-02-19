@@ -415,9 +415,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         if (settings?.planningApiKey) planningConfig.apiKey = settings.planningApiKey as string;
       } catch { /* fall back to defaults */ }
 
-      const providerLabel = planningConfig.provider.charAt(0).toUpperCase() + planningConfig.provider.slice(1);
-      const modelLabel = planningConfig.model || "default";
-      sendEvent("progress", { message: `Starting PRD decomposition via ${providerLabel} (${modelLabel})...` });
+      sendEvent("progress", { message: `Starting PRD decomposition...` });
 
       // Decompose PRD locally — routes to Claude Agent SDK (Anthropic) or Vercel AI SDK (others)
       const decomposed = await decomposePrdLocal(prdContent, planningConfig, (msg) => {
@@ -435,17 +433,21 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       sendEvent("done", { result });
       res.end();
     } catch (err: unknown) {
+      const e = err as { status?: number; data?: unknown; message?: string };
+      const errDetail = e.data
+        ? JSON.stringify(e.data)
+        : err instanceof Error ? err.message : String(err);
+      console.error("[local-api] PRD build error:", errDetail);
+
       // If headers already sent (SSE mode), send error event
       if (res.headersSent) {
-        const msg = err instanceof Error ? err.message : String(err);
-        res.write(`data: ${JSON.stringify({ type: "error", error: msg })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "error", error: errDetail })}\n\n`);
         res.end();
         return;
       } else {
-        const e = err as { status?: number; data?: unknown; message?: string };
         const status = e.status || 500;
         if (e.data) return json(res, e.data, status);
-        return json(res, { error: e.message || String(err) }, status);
+        return json(res, { error: errDetail }, status);
       }
     }
     return; // Response already ended in try or catch
@@ -691,8 +693,7 @@ async function decomposePrdLocal(
     resultText = await decomposePrdViaAgentSdk(prdContent, onProgress);
   } else {
     // Non-Anthropic provider — use Vercel AI SDK
-    const fullPrompt = `${PRD_SYSTEM_PROMPT}\n\n---\n\nDecompose this PRD into implementation cards:\n\n${prdContent}`;
-    resultText = await decomposePrdViaAiSdk(fullPrompt, planningConfig, onProgress);
+    resultText = await decomposePrdViaAiSdk(prdContent, planningConfig, onProgress);
   }
 
   const elapsed = Math.round((Date.now() - startTime) / 1000);
@@ -704,10 +705,18 @@ async function decomposePrdLocal(
 
   onProgress?.(`✅ Generation complete (${elapsed}s). Parsing JSON...`);
 
-  // Strip markdown fences if present
+  // Strip markdown fences if present (greedy match for large content)
   let jsonStr = resultText.trim();
-  const fenceMatch = jsonStr.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
-  if (fenceMatch) jsonStr = fenceMatch[1].trim();
+  const fenceMatch = jsonStr.match(/^```(?:json)?\s*\n([\s\S]*)\n\s*```\s*$/);
+  if (fenceMatch) {
+    jsonStr = fenceMatch[1].trim();
+  } else if (jsonStr.startsWith("```")) {
+    // Fallback: strip opening ``` line and closing ``` line
+    const lines = jsonStr.split("\n");
+    if (lines[0].match(/^```/)) lines.shift();
+    if (lines[lines.length - 1]?.match(/^```\s*$/)) lines.pop();
+    jsonStr = lines.join("\n").trim();
+  }
 
   const parsed = JSON.parse(jsonStr);
   if (!parsed.boardName || !Array.isArray(parsed.cards) || parsed.cards.length === 0) {
@@ -753,9 +762,9 @@ async function decomposePrdViaAgentSdk(
   const claudePath = findClaudePath();
   if (!claudePath) {
     clearInterval(heartbeat);
-    throw new Error("Claude CLI not found. Install it with: curl -fsSL https://claude.ai/install.sh | bash");
+    throw new Error("Claude Code CLI not found. Install it with: curl -fsSL https://claude.ai/install.sh | bash");
   }
-  onProgress?.(`Using Claude CLI: ${claudePath}`);
+  onProgress?.(`Generating cards...`);
 
   // Clean env to prevent nested-session detection
   const cleanEnv: Record<string, string | undefined> = { ...process.env };
@@ -830,18 +839,18 @@ async function decomposePrdViaAgentSdk(
 // ── Non-Anthropic path: Vercel AI SDK ──────────────────
 
 /**
- * Decompose PRD via Vercel AI SDK (OpenAI, Google, Ollama providers).
+ * Decompose PRD via Vercel AI SDK (any provider — OpenAI, Google, Ollama, Anthropic).
  * Uses the org's API key for the configured provider.
  */
 async function decomposePrdViaAiSdk(
-  prompt: string,
+  prdContent: string,
   config: { provider: string; model: string; apiKey?: string },
   onProgress?: (message: string) => void,
 ): Promise<string> {
   const { generateTextWithTools } = await import("./ai-sdk-generate.js");
 
   const startTime = Date.now();
-  onProgress?.(`Calling ${config.provider} (${config.model})...`);
+  onProgress?.(`Generating cards (${config.model})...`);
 
   const apiKey = config.apiKey || process.env[`${config.provider.toUpperCase()}_API_KEY`] || "";
   if (!apiKey && config.provider !== "ollama") {
@@ -852,14 +861,15 @@ async function decomposePrdViaAiSdk(
     provider: config.provider as "anthropic" | "openai" | "google" | "ollama",
     model: config.model,
     apiKey,
-    prompt,
-    enableTools: false, // Pure text generation — no file tools needed
+    prompt: `Decompose this PRD into implementation cards:\n\n${prdContent}`,
+    systemPrompt: PRD_SYSTEM_PROMPT,
+    enableTools: false,
     maxTokens: 16384,
     temperature: 0.7,
   });
 
   const elapsed = Math.round((Date.now() - startTime) / 1000);
-  onProgress?.(`✅ ${config.provider} responded (${elapsed}s)`);
+  onProgress?.(`Response received (${elapsed}s)`);
 
   // Parse lines for progress display
   for (const line of result.split("\n")) {

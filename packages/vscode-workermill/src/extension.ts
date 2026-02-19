@@ -596,7 +596,7 @@ export function activate(context: vscode.ExtensionContext): void {
               "\x1b[1m\x1b[94mWorkerMill PRD Decomposition\x1b[0m\r\n",
             );
             writeEmitter.fire(
-              "\x1b[2mDecomposing PRD via Claude CLI...\x1b[0m\r\n\r\n",
+              "\x1b[2mDecomposing PRD...\x1b[0m\r\n\r\n",
             );
           },
           close: () => {},

@@ -468,6 +468,7 @@ router.post(
           description: `Auto-generated from PRD decomposition`,
           position: (maxPos?.max ?? -1) + 1,
           prefix,
+          nextCardNumber: 1,
           createdById: user?.id || null,
         });
         await boardRepo.save(board);
@@ -495,7 +496,7 @@ router.post(
           `UPDATE "kb_boards" SET "next_card_number" = "next_card_number" + $1 WHERE "id" = $2 AND "org_id" = $3 RETURNING "next_card_number" - $1 AS next_num`,
           [cardCount, board.id, org.id],
         );
-        const startNumber = Number(next_num);
+        const startNumber = Number(next_num) || 1;
 
         // Create cards in the "To Do" column
         const createdCards: KbCard[] = [];
@@ -641,10 +642,12 @@ router.post(
         trackerSync,
       });
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
       logger.error("Error decomposing PRD", {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMsg,
+        stack: error instanceof Error ? error.stack : undefined,
       });
-      res.status(500).json({ error: "Failed to decompose PRD" });
+      res.status(500).json({ error: `PRD decomposition failed: ${errorMsg}` });
     }
   },
 );

@@ -32,7 +32,7 @@ const tiers: PricingTier[] = [
       "Local + BYOK execution",
       "MCP servers",
       "Basic analytics",
-      "14-day log retention",
+      "7-day log retention",
       "Community support",
     ],
     cta: "Get Started Free",
@@ -43,7 +43,7 @@ const tiers: PricingTier[] = [
     price: "$14.50",
     period: "/mo",
     description: "For developers and small teams who want speed",
-    highlight_line: "Up to 5 seats included",
+    highlight_line: "Up to 15 seats included",
     icon: <Sparkles className="w-5 h-5" />,
     highlighted: true,
     badge: "Launch Price",
@@ -53,7 +53,7 @@ const tiers: PricingTier[] = [
       "Codebase RAG",
       "5 concurrent workers",
       "Unlimited expert personas",
-      "Up to 5 users",
+      "Up to 15 users",
       "Cloud execution (ECS)",
       "Warm container pool",
       "Advanced analytics",
@@ -225,7 +225,7 @@ export function Pricing() {
             <div>
               <p className="font-medium text-foreground mb-1">Pro = All Providers + Scale</p>
               <p className="text-sm text-muted-foreground">
-                OpenAI, Google, Ollama + 5x parallel workers, cloud execution, 5 seats. Launch price: $14.50/mo.
+                OpenAI, Google, Ollama + 5x parallel workers, cloud execution, 15 seats. Launch price: $14.50/mo.
               </p>
             </div>
             <div>

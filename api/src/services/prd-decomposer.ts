@@ -8,6 +8,7 @@
  * 7-12 deliverables, dependency tracking, and persona assignment.
  */
 
+import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../utils/logger.js";
 
 // ============================================================================
@@ -117,51 +118,16 @@ estimatedSteps is the number of deliverables in the card (used for progress trac
 labels should include relevant technology or domain tags (e.g., "react", "api", "terraform", "auth").`;
 
 // ============================================================================
-// ANTHROPIC API TYPES
-// ============================================================================
-
-interface AnthropicMessage {
-  role: "user" | "assistant";
-  content: string;
-}
-
-interface AnthropicRequest {
-  model: string;
-  max_tokens: number;
-  system: string;
-  messages: AnthropicMessage[];
-}
-
-interface AnthropicContentBlock {
-  type: "text";
-  text: string;
-}
-
-interface AnthropicResponse {
-  content: AnthropicContentBlock[];
-  model: string;
-  stop_reason: string;
-  usage: {
-    input_tokens: number;
-    output_tokens: number;
-  };
-}
-
-interface AnthropicErrorResponse {
-  error?: {
-    type: string;
-    message: string;
-  };
-}
-
-// ============================================================================
 // MAIN FUNCTION
 // ============================================================================
 
 const DEFAULT_MODEL = "claude-sonnet-4-20250514";
 
 /**
- * Decompose a PRD into structured implementation cards by calling the Anthropic Messages API.
+ * Decompose a PRD into structured implementation cards using the Anthropic SDK.
+ *
+ * Auth priority: OAuth token (Claude Max) > explicit API key > ANTHROPIC_API_KEY env var.
+ * The SDK handles OAuth via `authToken` parameter (raw API does NOT support OAuth).
  *
  * @param prdContent - The full text of the PRD document
  * @param model - Anthropic model ID (e.g., "claude-sonnet-4-20250514")
@@ -175,93 +141,65 @@ export async function decomposePrd(
 ): Promise<DecomposedPrd> {
   // Prefer OAuth token (Claude Max) over API key — API keys may have no credits
   const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  const resolvedApiKey = oauthToken || apiKey || process.env.ANTHROPIC_API_KEY;
-  if (!resolvedApiKey) {
+  const resolvedApiKey = apiKey || process.env.ANTHROPIC_API_KEY;
+
+  if (!oauthToken && !resolvedApiKey) {
     throw new Error(
       "No Anthropic API key provided. Pass apiKey parameter or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN environment variable.",
     );
   }
-  const isOAuth = !!oauthToken;
 
   const resolvedModel = model || DEFAULT_MODEL;
 
-  logger.info("Decomposing PRD via Anthropic API", {
+  logger.info("Decomposing PRD via Anthropic SDK", {
     model: resolvedModel,
     prdLength: prdContent.length,
+    authMethod: oauthToken ? "oauth" : "api_key",
   });
 
-  // Build the request
-  const requestBody: AnthropicRequest = {
-    model: resolvedModel,
-    max_tokens: 16384,
-    system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: `Decompose this PRD into implementation cards:\n\n${prdContent}`,
-      },
-    ],
-  };
+  // Build SDK client — OAuth uses authToken, API key uses apiKey
+  const client = oauthToken
+    ? new Anthropic({ authToken: oauthToken })
+    : new Anthropic({ apiKey: resolvedApiKey });
 
-  // Call Anthropic Messages API
-  let response: Response;
+  let response: Anthropic.Message;
   try {
-    response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(isOAuth
-          ? { Authorization: `Bearer ${resolvedApiKey}` }
-          : { "x-api-key": resolvedApiKey }),
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify(requestBody),
+    response = await client.messages.create({
+      model: resolvedModel,
+      max_tokens: 16384,
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: `Decompose this PRD into implementation cards:\n\n${prdContent}`,
+        },
+      ],
     });
   } catch (error) {
-    logger.error("Failed to connect to Anthropic API", {
+    logger.error("Anthropic SDK error during PRD decomposition", {
       error: error instanceof Error ? error.message : String(error),
     });
     throw new Error(
-      `Failed to connect to Anthropic API: ${error instanceof Error ? error.message : String(error)}`,
+      `PRD decomposition failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
-  // Handle API errors
-  if (!response.ok) {
-    let errorMessage = `Anthropic API returned ${response.status} ${response.statusText}`;
-    try {
-      const errorData = (await response.json()) as AnthropicErrorResponse;
-      if (errorData.error?.message) {
-        errorMessage = `Anthropic API error: ${errorData.error.message}`;
-      }
-    } catch {
-      // Could not parse error body — use status-based message
-    }
-    logger.error("Anthropic API error during PRD decomposition", {
-      status: response.status,
-      errorMessage,
-    });
-    throw new Error(errorMessage);
-  }
-
-  // Parse the API response
-  const apiResponse = (await response.json()) as AnthropicResponse;
-
-  if (
-    !apiResponse.content ||
-    !Array.isArray(apiResponse.content) ||
-    apiResponse.content.length === 0
-  ) {
+  if (!response.content || response.content.length === 0) {
     throw new Error("Anthropic API returned empty content");
   }
 
-  const rawText = apiResponse.content[0].text;
+  const textBlock = response.content.find((b) => b.type === "text");
+  if (!textBlock || textBlock.type !== "text") {
+    throw new Error("Anthropic API returned no text content");
+  }
+
+  const rawText = textBlock.text;
 
   logger.info("Received PRD decomposition response", {
-    model: apiResponse.model,
-    stopReason: apiResponse.stop_reason,
-    inputTokens: apiResponse.usage?.input_tokens,
-    outputTokens: apiResponse.usage?.output_tokens,
+    model: response.model,
+    stopReason: response.stop_reason,
+    inputTokens: response.usage?.input_tokens,
+    outputTokens: response.usage?.output_tokens,
     responseLength: rawText.length,
   });
 

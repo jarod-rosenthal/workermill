@@ -43,9 +43,9 @@ const showcaseProjects: ShowcaseProject[] = [
     tagline:
       "Production incident management across 3 repos — API, web, and mobile — built entirely by WorkerMill.",
     description:
-      "177K lines across 3 repositories. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens, Terraform infrastructure. 13 epics executed sequentially across oncallshift-api, oncallshift-web, and oncallshift-mobile. Deployed to AWS at oncallshift.com.",
+      "177K lines across 3 repositories. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens, Terraform infrastructure. 24 epics executed sequentially across oncallshift-api, oncallshift-web, and oncallshift-mobile. Deployed to AWS at oncallshift.com.",
     stack: "Express + TypeScript + React + React Native + Terraform",
-    storyCount: 13,
+    storyCount: 24,
     cost: "Claude Max",
     duration: "~18 hrs",
     linesOfCode: "177,000",
@@ -239,71 +239,81 @@ export default function ShowcaseGallery() {
                 key={project.id}
                 className="card-elevated border border-border/50 rounded-2xl overflow-hidden card-hover group"
               >
-                {/* Clickable card body → build log */}
-                <Link
-                  to={`/showcase/${project.id}`}
-                  className="block px-6 pt-6 pb-4"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary">
-                        {project.icon}
+                {/* Card body — links to build log for non-oncallshift projects */}
+                {(() => {
+                  const cardBody = (
+                    <>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary">
+                            {project.icon}
+                          </div>
+                          <h3 className="text-lg font-semibold text-foreground">
+                            {project.name}
+                          </h3>
+                        </div>
+                        {project.liveUrl && <BuiltByBadge />}
                       </div>
-                      <h3 className="text-lg font-semibold text-foreground">
-                        {project.name}
-                      </h3>
-                    </div>
-                    {project.liveUrl && <BuiltByBadge />}
-                  </div>
-                  <p className="text-sm text-muted-foreground leading-relaxed mb-4">
-                    {project.description}
-                  </p>
-                  <div className="inline-block px-2.5 py-1 rounded-lg bg-primary/10 border border-primary/20 text-xs font-medium text-primary">
-                    {project.stack}
-                  </div>
+                      <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                        {project.description}
+                      </p>
+                      <div className="inline-block px-2.5 py-1 rounded-lg bg-primary/10 border border-primary/20 text-xs font-medium text-primary">
+                        {project.stack}
+                      </div>
 
-                  {/* Stats */}
-                  <div className="grid grid-cols-4 gap-3 mt-4 pt-4 border-t border-border/30">
-                    <div className="text-center">
-                      <div className="flex items-center justify-center gap-1 text-sm font-semibold text-foreground">
-                        <Layers className="w-3.5 h-3.5 text-muted-foreground" />
-                        {project.storyCount}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        stories
-                      </div>
-                    </div>
-                    {project.linesOfCode && (
-                      <div className="text-center">
-                        <div className="flex items-center justify-center gap-1 text-sm font-semibold text-emerald-400">
-                          <FileCode className="w-3.5 h-3.5" />
-                          {project.linesOfCode}
+                      {/* Stats */}
+                      <div className="grid grid-cols-4 gap-3 mt-4 pt-4 border-t border-border/30">
+                        <div className="text-center">
+                          <div className="flex items-center justify-center gap-1 text-sm font-semibold text-foreground">
+                            <Layers className="w-3.5 h-3.5 text-muted-foreground" />
+                            {project.storyCount}
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            stories
+                          </div>
                         </div>
-                        <div className="text-xs text-muted-foreground mt-0.5">
-                          lines
+                        {project.linesOfCode && (
+                          <div className="text-center">
+                            <div className="flex items-center justify-center gap-1 text-sm font-semibold text-emerald-400">
+                              <FileCode className="w-3.5 h-3.5" />
+                              {project.linesOfCode}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-0.5">
+                              lines
+                            </div>
+                          </div>
+                        )}
+                        <div className="text-center">
+                          <div className="flex items-center justify-center gap-1 text-sm font-semibold text-foreground">
+                            <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+                            {project.duration}
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            time
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="flex items-center justify-center gap-1 text-sm font-semibold text-amber-400">
+                            <Zap className="w-3.5 h-3.5" />
+                            {project.cost}
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            cost
+                          </div>
                         </div>
                       </div>
-                    )}
-                    <div className="text-center">
-                      <div className="flex items-center justify-center gap-1 text-sm font-semibold text-foreground">
-                        <Clock className="w-3.5 h-3.5 text-muted-foreground" />
-                        {project.duration}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        time
-                      </div>
+                    </>
+                  );
+                  return project.id !== "oncallshift" ? (
+                    <Link to={`/showcase/${project.id}`} className="block px-6 pt-6 pb-4">
+                      {cardBody}
+                    </Link>
+                  ) : (
+                    <div className="px-6 pt-6 pb-4">
+                      {cardBody}
                     </div>
-                    <div className="text-center">
-                      <div className="flex items-center justify-center gap-1 text-sm font-semibold text-amber-400">
-                        <Zap className="w-3.5 h-3.5" />
-                        {project.cost}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        cost
-                      </div>
-                    </div>
-                  </div>
-                </Link>
+                  );
+                })()}
 
                 {/* Actions */}
                 <div className="px-6 py-4 border-t border-border/30 flex gap-3">
@@ -329,13 +339,15 @@ export default function ShowcaseGallery() {
                       View repo
                     </a>
                   )}
-                  <Link
-                    to={`/showcase/${project.id}`}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 transition-colors text-foreground"
-                  >
-                    <Layers className="w-3 h-3" />
-                    Build log
-                  </Link>
+                  {project.id !== "oncallshift" && (
+                    <Link
+                      to={`/showcase/${project.id}`}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 transition-colors text-foreground"
+                    >
+                      <Layers className="w-3 h-3" />
+                      Build log
+                    </Link>
+                  )}
                 </div>
               </div>
             ),

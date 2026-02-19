@@ -1927,37 +1927,68 @@ export class EpicCoordinator {
     try {
       const result = await this.executor.executeStory(story, expert, totalStories, userFeedback);
 
-      // Handle rate limiting with credential rotation before normal result processing
+      // Handle rate limiting — escalate immediately as blocker (usage caps can last hours)
       if (result.rateLimited) {
-        const retries = this.rateLimitRetries.get(story.storyIndex) ?? 0;
-        if (retries >= 3) {
-          // Both accounts exhausted — fall through to normal failure handling
-          console.log(`[Epic] Rate limit retries exhausted for story ${story.storyIndex} (${retries} rotations)`);
-          this.rateLimitRetries.delete(story.storyIndex);
-          // Unregister and let failure handler deal with it
-          this.unregisterRunningStory(story.storyIndex);
-          await this.handleStoryFailure(story, expert, "Rate limited — all accounts exhausted after 3 rotations");
-          return;
-        }
+        console.log(`[Epic] Rate limit detected for story ${story.storyIndex} — escalating as blocker`);
+        this.rateLimitRetries.delete(story.storyIndex);
+        this.unregisterRunningStory(story.storyIndex);
 
-        this.rateLimitRetries.set(story.storyIndex, retries + 1);
-        const newAccount = this.credentialRotator.rotate();
-        console.log(`[Epic] Rate limited — rotated to ${newAccount} (retry ${retries + 1}/3)`);
-
-        // Post progress visible on dashboard coordination feed
+        // Post a rate_limited progress event for feed visibility
         await this.coordination.postContext(
-          "progress",
-          `Rate limited, switched to ${newAccount}. Retrying story ${story.storyIndex}... (attempt ${retries + 2})`,
+          "rate_limited",
+          "Anthropic usage limit reached — task paused.",
           expert,
           this.config.parentTaskId
         );
 
-        // Delay to let rate limit window pass
-        const delayMs = this.credentialRotator.discover() <= 1 ? 30000 : 5000;
-        await new Promise((r) => setTimeout(r, delayMs));
+        // Escalate as blocker with clear user-facing message
+        const readyStories = await this.coordination.getReadyStories();
+        const dependentStories = this.blockerManager
+          ? this.blockerManager.getDependentStories(story.storyIndex, readyStories)
+          : [];
 
-        // Re-queue story (recursive retry — don't unregister, don't count as failure)
-        return this.executeStoryAsync(story, expert, totalStories, userFeedback);
+        const summary = "Your Anthropic usage limit was reached. Check your plan at claude.ai/settings — if you have Extra Usage enabled with funds available, click Retry. Otherwise, wait for your limit to reset.";
+
+        await this.coordination.postContext(
+          "blocker",
+          summary,
+          expert,
+          undefined,
+          {
+            storyIndex: story.storyIndex,
+            storyTitle: story.title,
+            persona: expert,
+            errorCategory: "rate_limit",
+            summary,
+            fullErrorMessage: "Claude CLI returned rate_limit_error. This typically means your weekly/session usage cap has been reached. Usage caps reset on a schedule (check claude.ai/settings for your reset time).",
+            affectedFiles: [],
+            autoRetryAttempts: 0,
+            maxAutoRetries: 0,
+            dependentStories,
+            isEscalated: true,
+            isFixable: false,
+          },
+          `${expert}-story-${story.storyIndex}`
+        );
+
+        // Update expert state and mark dependent stories blocked
+        this.expertStates.set(expert, {
+          persona: expert,
+          status: "blocked",
+          currentStoryId: story.id,
+          currentStoryIndex: story.storyIndex,
+        });
+        this.failedStoryIndices.add(story.storyIndex);
+        for (const depIndex of dependentStories) {
+          this.blockedStoryIndices.add(depIndex);
+        }
+
+        // Reset expert to idle after delay
+        setTimeout(() => {
+          this.expertStates.set(expert, { persona: expert, status: "idle" });
+        }, 2000);
+
+        return;
       }
 
       // Unregister from mutex tracking now that execution is complete

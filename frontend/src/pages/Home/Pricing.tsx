@@ -1,4 +1,4 @@
-import { Check, Sparkles, Gift, Crown, Zap } from "lucide-react";
+import { Check, Sparkles, Crown, Zap } from "lucide-react";
 
 interface PricingTier {
   name: string;
@@ -46,7 +46,7 @@ const tiers: PricingTier[] = [
     highlight_line: "Up to 15 seats included",
     icon: <Sparkles className="w-5 h-5" />,
     highlighted: true,
-    badge: "Launch Price",
+    badge: "Coming Soon",
     features: [
       "Everything in Free, plus:",
       "Auto CI/CD deployments",
@@ -64,8 +64,8 @@ const tiers: PricingTier[] = [
       "90-day log retention",
       "Priority support (< 4hr)",
     ],
-    cta: "Start Free Trial",
-    disabled: false,
+    cta: "Coming Soon",
+    disabled: true,
   },
   {
     name: "Enterprise",
@@ -74,6 +74,7 @@ const tiers: PricingTier[] = [
     description: "For organizations with compliance and scale needs",
     highlight_line: "Custom configuration",
     icon: <Crown className="w-5 h-5" />,
+    badge: "Coming Soon",
     features: [
       "Everything in Pro, plus:",
       "Unlimited users & workers",
@@ -88,8 +89,8 @@ const tiers: PricingTier[] = [
       "Unlimited log retention",
       "Dedicated CSM",
     ],
-    cta: "Contact Sales",
-    disabled: false,
+    cta: "Coming Soon",
+    disabled: true,
   },
 ];
 
@@ -147,11 +148,6 @@ export function Pricing() {
                 </div>
 
                 <div className="flex items-baseline gap-1 mb-1">
-                  {tier.name === "Pro" && (
-                    <span className="text-2xl font-bold text-muted-foreground line-through mr-1">
-                      $29
-                    </span>
-                  )}
                   <span
                     className={`text-4xl font-bold ${
                       tier.highlighted ? "text-primary" : "text-foreground"
@@ -215,19 +211,19 @@ export function Pricing() {
         {/* What You Get */}
         <div className="mt-12 p-6 rounded-xl bg-muted/30 border border-border">
           <h3 className="text-lg font-semibold text-foreground mb-4 text-center">
-            How Pricing Works
+            How It Works
           </h3>
           <div className="grid md:grid-cols-3 gap-6 text-center">
             <div>
-              <p className="font-medium text-foreground mb-1">Free = PR Reviews + Claude</p>
+              <p className="font-medium text-foreground mb-1">Full Product, Free</p>
               <p className="text-sm text-muted-foreground">
-                Automated PR reviews on every pull request. Full product with Claude models on your hardware.
+                No trial limits. Automated PR reviews, GitHub Issues, internal board, and MCP servers — all included.
               </p>
             </div>
             <div>
-              <p className="font-medium text-foreground mb-1">Pro = Auto Deploy + Annealing</p>
+              <p className="font-medium text-foreground mb-1">Runs on Your Machine</p>
               <p className="text-sm text-muted-foreground">
-                Auto CI/CD deployments, self-healing agents, all AI providers, 5x parallel workers, cloud execution.
+                Workers execute locally using your Claude Max subscription. Your code never leaves your hardware.
               </p>
             </div>
             <div>
@@ -237,34 +233,6 @@ export function Pricing() {
               </p>
             </div>
           </div>
-        </div>
-
-        {/* Referral Program */}
-        <div className="mt-8 p-6 rounded-xl bg-primary/5 border border-primary/20">
-          <div className="flex items-center justify-center gap-2 mb-3">
-            <Gift className="w-5 h-5 text-primary" />
-            <h3 className="text-lg font-semibold text-foreground">
-              Referral Program
-            </h3>
-          </div>
-          <p className="text-center text-muted-foreground mb-4">
-            Share WorkerMill with your network and earn rewards.
-          </p>
-          <div className="grid md:grid-cols-2 gap-4 max-w-lg mx-auto">
-            <div className="text-center p-3 bg-card rounded-lg border border-border">
-              <p className="font-semibold text-foreground">You get</p>
-              <p className="text-primary font-bold text-lg">1 month free</p>
-              <p className="text-xs text-muted-foreground">per referred customer</p>
-            </div>
-            <div className="text-center p-3 bg-card rounded-lg border border-border">
-              <p className="font-semibold text-foreground">They get</p>
-              <p className="text-primary font-bold text-lg">1 month free</p>
-              <p className="text-xs text-muted-foreground">on Pro plan</p>
-            </div>
-          </div>
-          <p className="text-center text-xs text-muted-foreground mt-4">
-            Credit unlocks after referral completes first paid month.
-          </p>
         </div>
 
       </div>

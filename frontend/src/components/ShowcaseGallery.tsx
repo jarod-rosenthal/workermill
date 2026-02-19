@@ -104,11 +104,18 @@ const showcaseProjects: ShowcaseProject[] = [
   {
     id: "shipapi",
     name: "ShipAPI",
-    tagline: "Production REST API deployed to AWS via Terraform.",
-    stack: "FastAPI + SQLAlchemy + Terraform",
+    tagline: "Inventory management REST API with JWT auth, rate limiting, and Swagger UI.",
+    description:
+      "Async Python API with JWT authentication, RBAC, rate limiting, audit logging, product/category/warehouse CRUD, stock management, Alembic migrations, 344 tests, CI pipeline, and Swagger/ReDoc documentation. 10 epics, all deployed. Live on Railway.",
+    stack: "FastAPI + SQLAlchemy 2 + Pydantic V2 + Neon PostgreSQL",
+    storyCount: 10,
+    cost: "Claude Max",
+    duration: "~4 hrs",
+    linesOfCode: "15,000",
+    repoUrl: "https://github.com/workermill-examples/shipapi",
+    liveUrl: "https://shipapi.up.railway.app/docs",
     category: "api",
     icon: <Terminal className="w-4 h-4" />,
-    comingSoon: true,
   },
   {
     id: "pulseview",
@@ -164,9 +171,9 @@ export default function ShowcaseGallery() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            263K lines of production code across 4 projects, deployed to AWS
-            and Vercel. Every project built from tickets — planned, coded,
-            tested, reviewed, and deployed autonomously.
+            278K lines of production code across 5 projects, deployed to AWS,
+            Vercel, and Railway. Every project built from tickets — planned,
+            coded, tested, reviewed, and deployed autonomously.
           </p>
         </div>
 

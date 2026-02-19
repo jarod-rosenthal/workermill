@@ -72,34 +72,6 @@ function CalloutCard({
   );
 }
 
-function ScreenshotFrame({ src, alt }: { src: string; alt: string }) {
-  return (
-    <div className="relative w-full">
-      {/* Glow effect */}
-      <div className="absolute -inset-1 bg-gradient-to-r from-teal-500/20 via-cyan-500/10 to-teal-500/20 rounded-2xl blur-xl opacity-60" />
-
-      {/* Browser chrome */}
-      <div className="relative bg-slate-950 rounded-xl border border-white/10 overflow-hidden shadow-2xl">
-        {/* Title bar */}
-        <div className="flex items-center gap-2 px-4 py-3 bg-slate-900/80 border-b border-white/5">
-          <div className="flex gap-1.5">
-            <div className="w-3 h-3 rounded-full bg-red-500/80" />
-            <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
-            <div className="w-3 h-3 rounded-full bg-green-500/80" />
-          </div>
-          <div className="flex-1 ml-3">
-            <div className="bg-slate-800/80 rounded-md px-3 py-1 text-xs text-slate-400 max-w-xs mx-auto text-center">
-              workermill.com/dashboard
-            </div>
-          </div>
-        </div>
-
-        {/* Screenshot */}
-        <img src={src} alt={alt} className="w-full h-auto" loading="lazy" />
-      </div>
-    </div>
-  );
-}
 
 function VSCodeFrame({ src, alt }: { src: string; alt: string }) {
   return (
@@ -318,55 +290,38 @@ export default function AgentCollaboration() {
             </p>
           </div>
 
-          {/* Full screenshot + Callouts */}
-          <div className="relative max-w-6xl mx-auto">
-            <div className="flex flex-col xl:flex-row-reverse items-center gap-8 xl:gap-0">
-              <div className="relative flex-shrink-0 w-full xl:w-[75%]">
-                <ScreenshotFrame
-                  src="/images/tech-lead-review.png"
-                  alt="WorkerMill dashboard showing completed task with Tech Lead review approval and PR ready for merge"
-                />
-              </div>
+          {/* Callout cards */}
+          <div className="max-w-2xl mx-auto flex flex-col gap-6">
+            <CalloutCard
+              persona="Tech Lead"
+              personaColor="bg-violet-500"
+              icon={ShieldCheck}
+              message="Clean implementation. Test coverage is comprehensive. Tab titles are concise and consistent across all pages. Approving."
+              delay={400}
+              visible={section2.isVisible}
+            />
 
-              {/* Callout annotations (left side on desktop) */}
-              <div className="xl:absolute xl:left-0 xl:top-1/2 xl:-translate-y-1/2 xl:-translate-x-[10%] flex flex-col gap-4 xl:gap-6 z-10">
-                {/* Connector line (desktop only) */}
-                <div className="hidden xl:block absolute -right-12 top-0 bottom-0 w-px">
-                  <div className="h-full border-l-2 border-dashed border-teal-500/30" />
-                </div>
+            <CalloutCard
+              persona="Project Manager"
+              personaColor="bg-emerald-500"
+              icon={GitPullRequest}
+              message="PR created and ready for your review. All stories completed, tests passing."
+              delay={1200}
+              visible={section2.isVisible}
+            />
 
-                <CalloutCard
-                  persona="Tech Lead"
-                  personaColor="bg-violet-500"
-                  icon={ShieldCheck}
-                  message="Clean implementation. Test coverage is comprehensive. Tab titles are concise and consistent across all pages. Approving."
-                  delay={400}
-                  visible={section2.isVisible}
-                />
-
-                <CalloutCard
-                  persona="Project Manager"
-                  personaColor="bg-emerald-500"
-                  icon={GitPullRequest}
-                  message="PR created and ready for your review. All stories completed, tests passing."
-                  delay={1200}
-                  visible={section2.isVisible}
-                />
-
-                {/* "Complete" badge */}
-                <div
-                  className={`flex items-center gap-2 ml-4 transition-all duration-700 delay-[1800ms] ${
-                    section2.isVisible
-                      ? "opacity-100 translate-x-0"
-                      : "opacity-0 translate-x-4"
-                  }`}
-                >
-                  <CheckCircle className="w-4 h-4 text-emerald-400" />
-                  <span className="text-sm text-emerald-400 font-medium">
-                    Production-ready code, not a prototype
-                  </span>
-                </div>
-              </div>
+            {/* "Complete" badge */}
+            <div
+              className={`flex items-center justify-center gap-2 transition-all duration-700 delay-[1800ms] ${
+                section2.isVisible
+                  ? "opacity-100 translate-y-0"
+                  : "opacity-0 translate-y-4"
+              }`}
+            >
+              <CheckCircle className="w-4 h-4 text-emerald-400" />
+              <span className="text-sm text-emerald-400 font-medium">
+                Production-ready code, not a prototype
+              </span>
             </div>
           </div>
         </div>

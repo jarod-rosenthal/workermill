@@ -30,6 +30,7 @@ import {
   runCriticValidation,
   formatCriticFeedback,
   formatRefinementFeedback,
+  stripFalsePersonaRisks,
   getCriticConfig,
   AUTO_APPROVAL_THRESHOLD,
   type ExecutionPlan,
@@ -884,6 +885,17 @@ export async function planTask(
       providerApiKey,
       task.id,
     );
+
+    // Strip false-positive persona risks (critic may confuse PRD text with plan data)
+    if (criticResult) {
+      const { stripped, details: strippedDetails } = stripFalsePersonaRisks(criticResult, plan);
+      if (stripped > 0) {
+        for (const d of strippedDetails) {
+          console.log(`${ts()} ${taskLabel} ${chalk.dim(d)}`);
+        }
+        await postLog(task.id, `${PREFIX} Filtered ${stripped} false-positive persona risk(s) from critic output`);
+      }
+    }
 
     // Track best plan across iterations
     if (criticResult && criticResult.score > bestScore) {

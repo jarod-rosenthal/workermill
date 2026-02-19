@@ -11,6 +11,10 @@ import {
   FileText,
   Workflow,
   Calendar,
+  CheckCircle,
+  AlertTriangle,
+  TrendingUp,
+  GitPullRequest,
 } from "lucide-react";
 import BuiltByBadge from "./BuiltByBadge";
 
@@ -32,6 +36,51 @@ interface ShowcaseProject {
 
 const showcaseProjects: ShowcaseProject[] = [
   {
+    id: "calmill",
+    name: "CalMill",
+    tagline: "Open scheduling platform with Google Calendar sync.",
+    description:
+      "Full-stack scheduling platform with event types, timezone-aware booking, team round-robin scheduling, Google Calendar integration, email notifications, and public booking pages. 7 stories, 100% success rate. Deployed to Vercel.",
+    stack: "Next.js 16 + Prisma 7 + TailwindCSS 4 + Neon PostgreSQL",
+    storyCount: 7,
+    cost: "$301",
+    duration: "~7 hrs",
+    repoUrl: "https://github.com/workermill-examples/calmill",
+    liveUrl: "https://calmill.workermill.com",
+    category: "scheduling",
+    icon: <Calendar className="w-4 h-4" />,
+  },
+  {
+    id: "taskpulse",
+    name: "TaskPulse",
+    tagline: "Background task monitoring dashboard with scheduling.",
+    description:
+      "Full-stack task monitoring platform with cron scheduling, API key management, real-time run tracking, keyboard shortcuts, and global search. 5 stories, 100% success rate. Deployed to Vercel.",
+    stack: "Next.js 16 + Prisma 7 + TailwindCSS v4 + Neon PostgreSQL",
+    storyCount: 5,
+    cost: "$139",
+    duration: "~2 hrs",
+    repoUrl: "https://github.com/workermill-examples/taskpulse",
+    liveUrl: "https://taskpulse.workermill.com",
+    category: "monitoring",
+    icon: <BarChart3 className="w-4 h-4" />,
+  },
+  {
+    id: "teamboard",
+    name: "TeamBoard",
+    tagline: "Multi-tenant SaaS project management with Kanban boards.",
+    description:
+      "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time updates, workspace dashboards, and activity feeds. 5 stories, all approved. Deployed to Vercel.",
+    stack: "Next.js 15 + Prisma + TailwindCSS + Neon PostgreSQL",
+    storyCount: 5,
+    cost: "Claude Max",
+    duration: "~6 hrs",
+    repoUrl: "https://github.com/workermill-examples/teamboard",
+    liveUrl: "https://teamboard.workermill.com",
+    category: "saas",
+    icon: <Globe className="w-4 h-4" />,
+  },
+  {
     id: "oncallshift",
     name: "OnCallShift",
     tagline: "Production incident management platform — built entirely by WorkerMill.",
@@ -44,51 +93,6 @@ const showcaseProjects: ShowcaseProject[] = [
     liveUrl: "https://oncallshift.com",
     category: "incident-management",
     icon: <Zap className="w-4 h-4" />,
-  },
-  {
-    id: "teamboard",
-    name: "TeamBoard",
-    tagline: "Multi-tenant SaaS project management with Kanban boards.",
-    description:
-      "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time updates, workspace dashboards, and activity feeds. Deployed to Vercel.",
-    stack: "Next.js 15 + Prisma + TailwindCSS + Neon PostgreSQL",
-    storyCount: 44,
-    cost: "Claude Max",
-    duration: "~354 min",
-    repoUrl: "https://github.com/workermill-examples/teamboard",
-    liveUrl: "https://teamboard.workermill.com",
-    category: "saas",
-    icon: <Globe className="w-4 h-4" />,
-  },
-  {
-    id: "taskpulse",
-    name: "TaskPulse",
-    tagline: "Background task monitoring dashboard with scheduling.",
-    description:
-      "Full-stack task monitoring platform with cron scheduling, API key management, real-time run tracking, keyboard shortcuts, and global search. Deployed to Vercel.",
-    stack: "Next.js 16 + Prisma 7 + TailwindCSS v4 + Neon PostgreSQL",
-    storyCount: 36,
-    cost: "Claude Max",
-    duration: "~310 min",
-    repoUrl: "https://github.com/workermill-examples/taskpulse",
-    liveUrl: "https://taskpulse.workermill.com",
-    category: "monitoring",
-    icon: <BarChart3 className="w-4 h-4" />,
-  },
-  {
-    id: "calmill",
-    name: "CalMill",
-    tagline: "Open scheduling platform with Google Calendar sync.",
-    description:
-      "Full-stack scheduling platform with event types, timezone-aware booking, team round-robin scheduling, Google Calendar integration, email notifications, and public booking pages. Deployed to Vercel.",
-    stack: "Next.js 16 + Prisma 7 + TailwindCSS 4 + Neon PostgreSQL",
-    storyCount: 48,
-    cost: "Claude Max",
-    duration: "~434 min",
-    repoUrl: "https://github.com/workermill-examples/calmill",
-    liveUrl: "https://calmill.workermill.com",
-    category: "scheduling",
-    icon: <Calendar className="w-4 h-4" />,
   },
   {
     id: "shipapi",
@@ -145,7 +149,7 @@ export default function ShowcaseGallery() {
 
       <div className="relative max-w-6xl mx-auto px-6">
         {/* Section header */}
-        <div className="text-center mb-16">
+        <div className="text-center mb-12">
           <h2 className="text-3xl lg:text-4xl font-bold mb-4">
             <span className="text-foreground">Built with </span>
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
@@ -153,9 +157,44 @@ export default function ShowcaseGallery() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Real projects built from a description — repos, live demos, and
-            quality metrics.
+            Full-stack applications built from a description. Every story
+            produced a mergeable PR — 100% success rate across all showcase
+            builds.
           </p>
+        </div>
+
+        {/* Metrics banner */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-12">
+          <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
+            <div className="flex items-center justify-center gap-1.5 mb-1">
+              <TrendingUp className="w-4 h-4 text-emerald-400" />
+              <span className="text-2xl font-bold text-white">90%</span>
+            </div>
+            <p className="text-xs text-slate-400">
+              Task success rate (30 days)
+            </p>
+          </div>
+          <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
+            <div className="flex items-center justify-center gap-1.5 mb-1">
+              <CheckCircle className="w-4 h-4 text-emerald-400" />
+              <span className="text-2xl font-bold text-white">93%</span>
+            </div>
+            <p className="text-xs text-slate-400">First-attempt success</p>
+          </div>
+          <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
+            <div className="flex items-center justify-center gap-1.5 mb-1">
+              <GitPullRequest className="w-4 h-4 text-teal-400" />
+              <span className="text-2xl font-bold text-white">75</span>
+            </div>
+            <p className="text-xs text-slate-400">PRs shipped (30 days)</p>
+          </div>
+          <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
+            <div className="flex items-center justify-center gap-1.5 mb-1">
+              <Zap className="w-4 h-4 text-amber-400" />
+              <span className="text-2xl font-bold text-white">~55 min</span>
+            </div>
+            <p className="text-xs text-slate-400">Avg story completion</p>
+          </div>
         </div>
 
         {/* Project cards grid */}
@@ -230,10 +269,10 @@ export default function ShowcaseGallery() {
                     <div className="text-center">
                       <div className="flex items-center justify-center gap-1 text-sm font-semibold text-amber-400">
                         <Zap className="w-3.5 h-3.5" />
-                        Max
+                        {project.cost}
                       </div>
                       <div className="text-xs text-muted-foreground mt-0.5">
-                        Claude Max
+                        cost
                       </div>
                     </div>
                     <div className="text-center">
@@ -286,12 +325,46 @@ export default function ShowcaseGallery() {
         </div>
 
         {/* Bottom note */}
-        <div className="text-center mt-12">
+        <div className="text-center mt-12 mb-12">
           <p className="text-sm text-muted-foreground">
-            All projects built using{" "}
+            Costs shown are API usage at standard rates. Use{" "}
             <span className="text-amber-400 font-semibold">Claude Max</span>{" "}
-            subscription. No per-token API costs.
+            ($100/mo) for unlimited tasks at zero per-token cost.
           </p>
+        </div>
+
+        {/* Transparency callout */}
+        <div className="max-w-3xl mx-auto bg-slate-900/40 border border-white/5 rounded-2xl p-6 lg:p-8">
+          <div className="flex items-start gap-3 mb-4">
+            <AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5 shrink-0" />
+            <div>
+              <h3 className="text-sm font-semibold text-white mb-1">
+                Real metrics, not cherry-picked
+              </h3>
+              <p className="text-sm text-slate-400 leading-relaxed">
+                Autonomous coding is hard. Across 273 total tasks, 8 failed — a
+                planning agent that returned malformed JSON, a deployment
+                pipeline with a pre-existing infrastructure bug, a plan that sat
+                unapproved for 7 days, and a manager review that caught
+                inaccuracies the worker couldn&apos;t fix in its allowed
+                retries.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-4 border-t border-white/5">
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>Auto-retry on transient errors</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>Escalation to dashboard on blockers</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>Full logs and cost tracking on every task</span>
+            </div>
+          </div>
         </div>
       </div>
     </section>

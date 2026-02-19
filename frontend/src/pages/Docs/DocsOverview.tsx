@@ -55,7 +55,7 @@ export default function DocsOverview() {
   }, []);
 
   const stats = [
-    { label: "AI Experts", value: personaCount !== null ? String(personaCount) : "12+", icon: Cpu },
+    { label: "AI Experts", value: personaCount !== null ? String(personaCount) : "—", icon: Cpu },
     { label: "AI Providers", value: "4+", icon: Zap },
     { label: "Issue Trackers", value: "3+", icon: CheckCircle },
   ];

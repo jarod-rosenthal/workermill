@@ -342,11 +342,11 @@ export const PERSONA_CONFIG: Record<
     description: "API development, database design, server logic",
     skills: ["Node.js", "Express", "PostgreSQL", "REST APIs"],
   },
-  api_developer: {
-    emoji: "\u{1F50C}",
-    title: "API Developer",
-    description: "REST/GraphQL APIs, OpenAPI specs, SDK generation",
-    skills: ["OpenAPI", "GraphQL", "REST", "Postman"],
+  architect: {
+    emoji: "\u{1F3D7}\uFE0F",
+    title: "Architect",
+    description: "System decomposition, task planning, architecture design",
+    skills: ["System Design", "Decomposition", "Planning"],
   },
   devops_engineer: {
     emoji: "\u{1F527}",
@@ -366,35 +366,17 @@ export const PERSONA_CONFIG: Record<
     description: "Test writing, quality assurance, bug verification",
     skills: ["Jest", "Playwright", "Test Design", "Bug Triage"],
   },
-  database_administrator: {
-    emoji: "\u{1F5C4}\uFE0F",
-    title: "Database Administrator",
-    description: "Database optimization, migrations, data modeling",
-    skills: ["PostgreSQL", "MySQL", "Query Optimization", "Indexing"],
-  },
-  data_engineer: {
+  data_ml_engineer: {
     emoji: "\u{1F4CA}",
-    title: "Data Engineer",
-    description: "Data pipelines, ETL processes, analytics infrastructure",
-    skills: ["dbt", "Airflow", "Snowflake", "BigQuery"],
+    title: "Data & ML Engineer",
+    description: "Data pipelines, ETL, machine learning, MLOps",
+    skills: ["ETL", "dbt", "PyTorch", "MLOps"],
   },
-  ml_engineer: {
-    emoji: "\u{1F916}",
-    title: "ML Engineer",
-    description: "Machine learning models, training pipelines, AI integration",
-    skills: ["PyTorch", "MLflow", "SageMaker", "scikit-learn"],
-  },
-  mobile_developer_ios: {
-    emoji: "\u{1F34E}",
-    title: "iOS Developer",
-    description: "Swift/SwiftUI apps, iOS frameworks, App Store deployment",
-    skills: ["Swift", "SwiftUI", "Xcode", "Core Data"],
-  },
-  mobile_developer_android: {
+  mobile_developer: {
     emoji: "\u{1F4F1}",
-    title: "Android Developer",
-    description: "Kotlin/Jetpack apps, Android SDK, Play Store deployment",
-    skills: ["Kotlin", "Jetpack Compose", "Room", "Material Design"],
+    title: "Mobile Developer",
+    description: "iOS (Swift, SwiftUI) and Android (Kotlin, Jetpack Compose)",
+    skills: ["Swift", "Kotlin", "React Native"],
   },
   tech_lead: {
     emoji: "\u{1F3AF}",

@@ -43,15 +43,12 @@ export const THEME_CATEGORY_ORDER: Record<ThemeCategory, number> = {
  * Custom personas can also be used - see Persona model in database
  */
 export const SYSTEM_WORKER_PERSONAS = [
+  "architect",
   "tech_writer",
-  "database_administrator",
   "backend_developer",
-  "api_developer",
   "frontend_developer",
-  "mobile_developer_android",
-  "mobile_developer_ios",
-  "data_engineer",
-  "ml_engineer",
+  "mobile_developer",
+  "data_ml_engineer",
   "security_engineer",
   "devops_engineer",
   "qa_engineer",
@@ -76,8 +73,8 @@ export const COORDINATION_ONLY_PERSONAS = ["project_manager", "manager", "tech_w
  * tech_writer is excluded as they write documentation, not application code.
  */
 export const DEFAULT_PERSONAS_BY_CATEGORY: Record<ThemeCategory, WorkerPersona[]> = {
-  foundation: ["database_administrator", "backend_developer"],
-  core: ["backend_developer", "frontend_developer", "api_developer"],
+  foundation: ["backend_developer", "architect"],
+  core: ["backend_developer", "frontend_developer"],
   integration: ["backend_developer", "devops_engineer", "security_engineer"],
   testing: ["qa_engineer"],
   polish: ["backend_developer", "frontend_developer"],

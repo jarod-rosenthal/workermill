@@ -33,7 +33,6 @@ export const taskPulseEpics: TaskPulseEpic[] = [
     "personas": [
       "backend_developer",
       "frontend_developer",
-      "database_administrator",
       "security_engineer",
       "devops_engineer",
       "qa_engineer"
@@ -1082,7 +1081,7 @@ I have successfully implemented all the page stubs for the TaskPulse app shell:
 The implementation follows all the ticket requirements and constraints, providing a solid foundation for the TaskPulse app routing structure.
 **WorkerMill** — 2026-02-16 08:18 UTC
 
-**Database schema and seed — Prisma 7 with Neon adapter** — completed by database_administrator
+**Database schema and seed — Prisma 7 with Neon adapter** — completed by backend_developer
 
 Excellent! Everything is working perfectly.
 
@@ -1230,7 +1229,7 @@ The implementation follows all mandatory patterns from the ticket:
 All files are ready for the team to run \`npm install\` and begin development with a fully functional CI/CD pipeline.
 **WorkerMill** — 2026-02-16 08:53 UTC
 
-**Database schema and seed — Prisma 7 with Neon adapter** — completed by database_administrator
+**Database schema and seed — Prisma 7 with Neon adapter** — completed by backend_developer
 
 Excellent! The implementation is complete and addresses all the feedback items:
 
@@ -1308,7 +1307,7 @@ Perfect! The typecheck passes with no errors. Let me now post a decision about t
 The implementation covers all files in my target scope and provides a solid foundation for the auth flow and dark-themed UI system that other components can build upon.
 **WorkerMill** — 2026-02-16 09:15 UTC
 
-**API routes, shared components, and hooks** — completed by api_developer
+**API routes, shared components, and hooks** — completed by backend_developer
 
 This is the expected ESLint error mentioned in the sibling decisions by the backend_developer. There's a known compatibility issue with FlatCompat + Next.js 16.1.0 + ESLint 9. This is fine since the sibling developer noted this in their decision.
 
@@ -1361,7 +1360,7 @@ I cannot submit the review via GitHub since this appears to be my own PR. Let me
 \`\`\`
 **WorkerMill** — 2026-02-16 09:40 UTC
 
-**Database schema and seed — Prisma 7 with Neon adapter** — completed by database_administrator
+**Database schema and seed — Prisma 7 with Neon adapter** — completed by backend_developer
 
 Let me emit a learning about the Prisma 7 configuration discovery:
 
@@ -1493,7 +1492,7 @@ This is a blocking issue that prevents the project from building.
 \`\`\`
 **WorkerMill** — 2026-02-16 09:52 UTC
 
-**Database schema and seed — Prisma 7 with Neon adapter** — completed by database_administrator
+**Database schema and seed — Prisma 7 with Neon adapter** — completed by backend_developer
 
 Excellent! The migration file correctly contains:
 - **4 CREATE TYPE statements** for the enums
@@ -1615,8 +1614,7 @@ The code now builds correctly (except for missing environment variables which is
       "backend_developer",
       "frontend_developer",
       "security_engineer",
-      "qa_engineer",
-      "api_developer"
+      "qa_engineer"
     ],
     "description": `# TP-2: Core API & Task Engine
 
@@ -2029,7 +2027,7 @@ I created a comprehensive type system for API responses that includes:
 ✅ **src/types/index.ts** - Added comprehensive API response t
 **WorkerMill** — 2026-02-16 10:25 UTC
 
-**Project & member CRUD routes** — completed by api_developer
+**Project & member CRUD routes** — completed by backend_developer
 **WorkerMill** — 2026-02-16 10:28 UTC
 
 **DEC-001: Project & Member CRUD API Implementation**
@@ -2107,7 +2105,7 @@ I've successfully implemented the run simulation engine with the following key d
 The implementation has been tested and works correctly, generating realistic run traces with proper timing, logging, and status progression.
 **WorkerMill** — 2026-02-16 10:43 UTC
 
-**External trigger route with API key auth** — completed by api_developer
+**External trigger route with API key auth** — completed by backend_developer
 
 Now let me post a decision about my implementation:
 **WorkerMill** — 2026-02-16 10:50 UTC
@@ -2150,7 +2148,7 @@ I have implemented the POST /api/trigger endpoint with the following architectur
 The implementation follows the ticket requirements exactly, using the prefix-based API key lookup for efficiency and integrating seamlessly with the existing run simulation system.
 **WorkerMill** — 2026-02-16 10:53 UTC
 
-**Expanded seed data — full demo dataset** — completed by database_administrator
+**Expanded seed data — full demo dataset** — completed by backend_developer
 
 Perfect! I have successfully implemented the expanded seed data as specified in the ticket requirements. Let me summarize what I've accomplished:
 **WorkerMill** — 2026-02-16 10:57 UTC
@@ -2236,7 +2234,7 @@ I have successfully implemented the complete Task CRUD and run lifecycle routes 
 - Standard success responses: single items or paginated lists with cursor/ha
 **WorkerMill** — 2026-02-16 11:15 UTC
 
-**External trigger route with API key auth** — completed by api_developer
+**External trigger route with API key auth** — completed by backend_developer
 
 DEC-001: External API Trigger Implementation with Secure Key Lookup
 **WorkerMill** — 2026-02-16 11:18 UTC
@@ -2466,7 +2464,7 @@ I have successfully implemented the RBAC middleware foundation and updated the v
    - Already correctly uses shared \`emailSchema\` and \`passwordSchema\`
 **WorkerMill** — 2026-02-16 12:08 UTC
 
-**Project & member CRUD routes** — completed by api_developer
+**Project & member CRUD routes** — completed by backend_developer
 
 Excellent! No TypeScript errors in my target files. My Project & Member CRUD routes are correctly implemented and TypeScript compliant.
 
@@ -2546,7 +2544,7 @@ I have successfully implemented and fixed the run simulator engine as specified 
 - ✅ Proper enum value
 **WorkerMill** — 2026-02-16 12:17 UTC
 
-**External trigger route with API key auth** — completed by api_developer
+**External trigger route with API key auth** — completed by backend_developer
 
 Perfect! I have successfully implemented the external trigger route with API key authentication. Let me post a decision about my implementation:
 **WorkerMill** — 2026-02-16 12:23 UTC
@@ -2574,7 +2572,7 @@ The implementation follows the exact specification:
 The route now compiles successfully without TypeScript errors and maintains full type safety while properly handling the Prisma schema field names and relationships.
 **WorkerMill** — 2026-02-16 12:30 UTC
 
-**Expanded seed data — full demo dataset** — completed by database_administrator
+**Expanded seed data — full demo dataset** — completed by backend_developer
 
 ::learning::The Prisma 7 with Neon adapter requires JsonValue types from run-simulator to be cast as 'any' when used in nested create operations due to InputJsonValue type incompatibility - use targeted casting like 'metadata: field.metadata as any' to resolve compilation errors while maintaining type safety for other fields
 **WorkerMill** — 2026-02-16 12:33 UTC
@@ -3604,7 +3602,6 @@ It appears I cannot approve my own PR on GitHub. Let me output the review decisi
     "personas": [
       "backend_developer",
       "frontend_developer",
-      "api_developer",
       "qa_engineer"
     ],
     "description": `# TP-4: Scheduling, API Keys & Polish
@@ -3897,7 +3894,7 @@ curl -X POST https://taskpulse.workermill.com/api/trigger \\
 5-7 stories.`,
     "buildLog": `**WorkerMill** — 2026-02-16 14:00 UTC
 
-**API Key Routes** — completed by api_developer
+**API Key Routes** — completed by backend_developer
 
 Perfect! Let me post a decision about the API key implementation:
 **WorkerMill** — 2026-02-16 14:03 UTC
@@ -4250,7 +4247,7 @@ The implementation is feature-complete but has critical quality issues that must
 \`\`\`
 **WorkerMill** — 2026-02-16 15:47 UTC
 
-**API Key Routes** — completed by api_developer
+**API Key Routes** — completed by backend_developer
 
 DEC-001: **API Key Routes Implementation and Critical Bug Fix Completed**
 

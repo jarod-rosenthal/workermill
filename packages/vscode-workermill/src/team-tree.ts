@@ -295,9 +295,11 @@ function personaIcon(persona: string): string {
     devops_engineer: "$(gear)",
     security_engineer: "$(shield)",
     qa_engineer: "$(beaker)",
-    database_administrator: "$(database)",
     tech_writer: "$(book)",
     project_manager: "$(checklist)",
+    architect: "$(symbol-structure)",
+    data_ml_engineer: "$(graph)",
+    mobile_developer: "$(device-mobile)",
     planning_agent: "$(lightbulb)",
   };
   return map[persona] || "$(person)";

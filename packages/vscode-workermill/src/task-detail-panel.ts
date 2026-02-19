@@ -388,77 +388,6 @@ export class TaskDetailPanel {
   .talk-input:focus { border-color: var(--accent); }
   .talk-input::placeholder { color: var(--text-dim); }
 
-  /* Coordination feed */
-  .feed-section {
-    padding: 16px 24px;
-  }
-  .feed-section h2 {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-bright);
-    margin-bottom: 12px;
-  }
-  .feed-empty {
-    text-align: center;
-    padding: 24px;
-    color: var(--text-dim);
-    font-size: 12px;
-  }
-  .feed-item {
-    display: flex;
-    gap: 10px;
-    padding: 10px 12px;
-    margin-bottom: 6px;
-    background: var(--bg-secondary);
-    border-radius: 8px;
-    border-left: 3px solid var(--border);
-  }
-  .feed-item.question { border-left-color: var(--yellow); }
-  .feed-item.answer { border-left-color: var(--green); }
-  .feed-item.decision { border-left-color: var(--accent); }
-  .feed-item.blocker, .feed-item.blocker_detected { border-left-color: var(--red); }
-  .feed-item.blocker_resolved { border-left-color: var(--green); }
-  .feed-item.completion { border-left-color: var(--green); }
-  .feed-item.file_modified, .feed-item.file_created { border-left-color: var(--cyan); }
-  .feed-item.user_message { border-left-color: var(--purple); }
-  .feed-item.progress { border-left-color: var(--accent); }
-  .feed-item.warning { border-left-color: var(--orange); }
-  .feed-item.revision_requested { border-left-color: var(--orange); }
-  .feed-avatar {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background: var(--bg-tertiary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    flex-shrink: 0;
-  }
-  .feed-body { flex: 1; min-width: 0; }
-  .feed-persona {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--cyan);
-    margin-bottom: 2px;
-  }
-  .feed-persona .type-badge {
-    font-weight: 400;
-    font-size: 10px;
-    color: var(--text-dim);
-    margin-left: 6px;
-  }
-  .feed-content {
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--text);
-    word-wrap: break-word;
-  }
-  .feed-time {
-    font-size: 10px;
-    color: var(--text-dim);
-    margin-top: 3px;
-  }
 
   /* Finished banner */
   .finished-banner {
@@ -545,19 +474,10 @@ export class TaskDetailPanel {
 
 <div class="finished-banner" id="finishedBanner"></div>
 
-<div class="feed-section">
-  <h2>Activity Feed</h2>
-  <div id="feed">
-    <div class="feed-empty">Waiting for expert collaboration updates...</div>
-  </div>
-</div>
 
 <script>
 const vscode = acquireVsCodeApi();
-const feed = document.getElementById("feed");
 const talkInput = document.getElementById("talkInput");
-const seenFeedIds = new Set();
-let feedHasItems = false;
 let currentBlockerId = null;
 let taskStatus = "${task.status}";
 
@@ -570,12 +490,6 @@ function sendMessage() {
   if (!msg) return;
   vscode.postMessage({ type: "talk", message: msg });
   talkInput.value = "";
-  addFeedItem({
-    persona: "you",
-    messageType: "user_message",
-    content: msg,
-    createdAt: new Date().toISOString(),
-  });
 }
 
 function approvePlan() { vscode.postMessage({ type: "approve-plan" }); }
@@ -589,63 +503,8 @@ function blockerAction(action) {
   currentBlockerId = null;
 }
 
-const personaEmoji = {
-  frontend_developer: "\\u{1F3A8}",
-  backend_developer: "\\u{1F4BB}",
-  devops_engineer: "\\u{1F527}",
-  security_engineer: "\\u{1F512}",
-  qa_engineer: "\\u{1F9EA}",
-  database_administrator: "\\u{1F4BE}",
-  tech_writer: "\\u{1F4DD}",
-  project_manager: "\\u{1F4CB}",
-  api_developer: "\\u{1F50C}",
-  ml_engineer: "\\u{1F9E0}",
-  data_engineer: "\\u{1F4CA}",
-  mobile_developer_ios: "\\u{1F4F1}",
-  mobile_developer_android: "\\u{1F916}",
-  planning_agent: "\\u{1F4A1}",
-  tech_lead: "\\u{1F451}",
-  manager: "\\u{1F454}",
-  support_agent: "\\u{1F4AC}",
-  coordinator: "\\u{1F3AF}",
-  dashboard: "\\u{1F4CA}",
-  you: "\\u{1F464}",
-};
-function getEmoji(p) { return personaEmoji[p] || "\\u{1F916}"; }
-
-function formatTime(iso) {
-  try { return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
-  catch { return ""; }
-}
-
-function esc(s) {
-  return s ? s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
-}
-
-function addFeedItem(item) {
-  if (item.id && seenFeedIds.has(item.id)) return;
-  if (item.id) seenFeedIds.add(item.id);
-
-  if (!feedHasItems) {
-    feed.innerHTML = "";
-    feedHasItems = true;
-  }
-
-  const div = document.createElement("div");
-  div.className = "feed-item " + (item.messageType || "");
-  const typeLabel = (item.messageType || "").replace(/_/g, " ");
-  div.innerHTML =
-    '<div class="feed-avatar">' + getEmoji(item.persona) + "</div>" +
-    '<div class="feed-body">' +
-      '<div class="feed-persona">' + esc(item.persona || "system") +
-        '<span class="type-badge">' + typeLabel + "</span></div>" +
-      '<div class="feed-content">' + esc(item.content || "") + "</div>" +
-      '<div class="feed-time">' + formatTime(item.createdAt) + "</div>" +
-    "</div>";
-  feed.appendChild(div);
-  feed.scrollTop = feed.scrollHeight;
-
-  // Handle blockers
+function handleCoordinationItem(item) {
+  // Handle blockers (activity feed is in the sidebar)
   if (item.messageType === "blocker_detected" || item.messageType === "blocker") {
     currentBlockerId = item.id;
     document.getElementById("blockerSection").classList.add("visible");
@@ -684,7 +543,7 @@ window.addEventListener("message", (event) => {
 
   if (msg.type === "coordination") {
     const items = msg.data?.contexts || msg.data || [];
-    if (Array.isArray(items)) items.forEach(addFeedItem);
+    if (Array.isArray(items)) items.forEach(handleCoordinationItem);
   }
 
   if (msg.type === "taskDetail") {

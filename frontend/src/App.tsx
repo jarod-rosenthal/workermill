@@ -4,7 +4,6 @@ import { Login } from "./pages/Login";
 import { AuthCallback } from "./pages/AuthCallback";
 import { MicrosoftCallback } from "./pages/MicrosoftCallback";
 import Dashboard from "./pages/Dashboard";
-import { RoleBasedDashboard } from "./pages/Dashboard/index";
 import SetupWizard from "./pages/SetupWizard";
 import Profile from "./pages/Profile";
 import Settings from "./pages/settings";
@@ -284,14 +283,6 @@ function App() {
             element={
               <ProtectedRoute>
                 <CostIntelligence />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/views"
-            element={
-              <ProtectedRoute>
-                <RoleBasedDashboard />
               </ProtectedRoute>
             }
           />

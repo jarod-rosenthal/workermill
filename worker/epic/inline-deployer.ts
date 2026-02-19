@@ -933,6 +933,8 @@ Reply with "yes" or "approved" to proceed, or "no" to skip deployment.`;
    * Build Phase 1 assessment prompt.
    */
   private buildPhase1Prompt(prUrl: string, prNumber: number): string {
+    const targetRepo = process.env.TARGET_REPO || process.env.GITHUB_REPO || "";
+    const repoFlag = targetRepo ? ` -R ${targetRepo}` : "";
     return `***REMOVED*** Deployment Assessment Task
 
 ***REMOVED******REMOVED*** Context
@@ -950,7 +952,7 @@ The PR has been approved by the Tech Lead. Your job is to assess if the reposito
    - \`on: push:\` = auto-trigger (report TRIGGER_TYPE: auto)
    - \`on: workflow_dispatch:\` only = manual-trigger (report TRIGGER_TYPE: manual)
 3. If manual-trigger, identify available workflow inputs from the \`workflow_dispatch.inputs\` section
-4. Check which files changed in PR ***REMOVED***${prNumber} using \`gh pr view ${prNumber} --json files\`
+4. Check which files changed in PR ***REMOVED***${prNumber} using \`gh pr view ${prNumber}${repoFlag} --json files\`
 5. Determine which components are affected (mobile, frontend, backend, infra)
 6. Report your findings using the required markers
 
@@ -963,6 +965,8 @@ Begin the assessment now.`;
    * Build Phase 2 deployment prompt (for auto-triggered workflows).
    */
   private buildPhase2DeployAutoPrompt(prUrl: string, prNumber: number): string {
+    const targetRepo = process.env.TARGET_REPO || process.env.GITHUB_REPO || "";
+    const repoFlag = targetRepo ? ` -R ${targetRepo}` : "";
     return `***REMOVED*** Deployment Execution Task (Auto-Trigger Workflow)
 
 ***REMOVED******REMOVED*** Context
@@ -988,18 +992,18 @@ The repository has CI/CD workflows that auto-trigger on push to main.
 2. **Validate workflow secrets.** Check that all secrets referenced in workflow YAML actually exist:
    \`\`\`bash
    grep -roh 'secrets\\.[A-Z_]*' .github/workflows/ 2>/dev/null | sort -u
-   gh secret list 2>&1
+   gh secret list${repoFlag} 2>&1
    \`\`\`
    If any referenced secret is NOT in \`gh secret list\`, DO NOT merge — report FAILURE with the missing secrets.
 
 3. **Check PR CI status (if available):**
    \`\`\`bash
-   gh pr checks ${prNumber} 2>&1 || echo "NO_PR_CHECKS"
+   gh pr checks ${prNumber}${repoFlag} 2>&1 || echo "NO_PR_CHECKS"
    \`\`\`
-   If checks exist and are running, wait with \`gh pr checks ${prNumber} --watch\`.
+   If checks exist and are running, wait with \`gh pr checks ${prNumber}${repoFlag} --watch\`.
    If no PR checks exist, that's OK — your local validation in step 1 is the gate.
 
-4. Only after ALL validations pass and secrets are verified, merge: \`gh pr merge ${prNumber} --squash --delete-branch\`
+4. Only after ALL validations pass and secrets are verified, merge: \`gh pr merge ${prNumber}${repoFlag} --squash --delete-branch\`
 5. Wait for deployment workflow to start (sleep 10)
 6. Monitor the workflow run to completion
 7. Verify the workflow succeeded
@@ -1022,6 +1026,8 @@ Begin the deployment now.`;
   ): string {
     // Build the workflow run command with appropriate flags
     const componentFlags = this.buildWorkflowFlags(changedComponents, workflowInputs);
+    const targetRepo = process.env.TARGET_REPO || process.env.GITHUB_REPO || "";
+    const repoFlag = targetRepo ? ` -R ${targetRepo}` : "";
 
     return `***REMOVED*** Deployment Execution Task (Manual-Trigger Workflow)
 
@@ -1044,7 +1050,7 @@ ${JSON.stringify(workflowInputs, null, 2)}
 Based on the changed components (${changedComponents.join(", ")}), use:
 
 \`\`\`bash
-gh workflow run ${workflowFile} ${componentFlags}
+gh workflow run ${workflowFile}${repoFlag} ${componentFlags}
 \`\`\`
 
 ***REMOVED******REMOVED*** Instructions
@@ -1063,21 +1069,21 @@ gh workflow run ${workflowFile} ${componentFlags}
 2. **Validate workflow secrets.** Check that all secrets referenced in workflow YAML actually exist:
    \`\`\`bash
    grep -roh 'secrets\\.[A-Z_]*' .github/workflows/ 2>/dev/null | sort -u
-   gh secret list 2>&1
+   gh secret list${repoFlag} 2>&1
    \`\`\`
    If any referenced secret is NOT in \`gh secret list\`, DO NOT merge — report FAILURE with the missing secrets.
 
 3. **Check PR CI status (if available):**
    \`\`\`bash
-   gh pr checks ${prNumber} 2>&1 || echo "NO_PR_CHECKS"
+   gh pr checks ${prNumber}${repoFlag} 2>&1 || echo "NO_PR_CHECKS"
    \`\`\`
-   If checks exist and are running, wait with \`gh pr checks ${prNumber} --watch\`.
+   If checks exist and are running, wait with \`gh pr checks ${prNumber}${repoFlag} --watch\`.
    If no PR checks exist, that's OK — your local validation in step 1 is the gate.
 
-4. Only after ALL validations pass and secrets are verified, merge: \`gh pr merge ${prNumber} --squash --delete-branch\`
+4. Only after ALL validations pass and secrets are verified, merge: \`gh pr merge ${prNumber}${repoFlag} --squash --delete-branch\`
 5. Trigger the deployment workflow with the command above (adjust flags if needed based on actual workflow inputs)
 6. Wait for workflow to start (sleep 5)
-7. Monitor the workflow run to completion using \`gh run list --workflow=${workflowFile}\`
+7. Monitor the workflow run to completion using \`gh run list${repoFlag} --workflow=${workflowFile}\`
 8. Verify the workflow succeeded
 9. Report your decision
 
@@ -1134,6 +1140,8 @@ Begin the deployment now.`;
    * Build Phase 2 workflow creation prompt (after approval).
    */
   private buildPhase2CreatePrompt(prUrl: string, prNumber: number, detectedStack: string): string {
+    const targetRepo = process.env.TARGET_REPO || process.env.GITHUB_REPO || "";
+    const repoFlag = targetRepo ? ` -R ${targetRepo}` : "";
     return `***REMOVED*** Workflow Creation and Deployment Task
 
 ***REMOVED******REMOVED*** Context
@@ -1161,10 +1169,10 @@ You have been **APPROVED** to create GitHub Actions workflows for this repositor
 4. **Validate workflow secrets.** Check that all secrets referenced in workflow YAML (including the one you just created) actually exist:
    \`\`\`bash
    grep -roh 'secrets\\.[A-Z_]*' .github/workflows/ 2>/dev/null | sort -u
-   gh secret list 2>&1
+   gh secret list${repoFlag} 2>&1
    \`\`\`
    If any referenced secret is NOT in \`gh secret list\`, DO NOT merge — report FAILURE with the missing secrets.
-5. Only after all validations pass and secrets are verified, merge: \`gh pr merge ${prNumber} --squash --delete-branch\`
+5. Only after all validations pass and secrets are verified, merge: \`gh pr merge ${prNumber}${repoFlag} --squash --delete-branch\`
 6. Monitor the workflow run to completion
 7. Verify deployment succeeded
 8. Report your decision

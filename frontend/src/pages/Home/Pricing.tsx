@@ -24,10 +24,10 @@ const tiers: PricingTier[] = [
     icon: <Zap className="w-5 h-5" />,
     features: [
       "Unlimited tasks",
+      "Automated PR reviews on every pull request",
       "1 concurrent worker",
-      "3 expert personas per task",
-      "Default expert personas",
-      "GitHub + internal board",
+      "Up to 3 experts per task",
+      "GitHub Issues + internal board",
       "Anthropic Claude models",
       "Local + BYOK execution",
       "MCP servers",
@@ -49,14 +49,15 @@ const tiers: PricingTier[] = [
     badge: "Launch Price",
     features: [
       "Everything in Free, plus:",
+      "Auto CI/CD deployments",
+      "Auto-annealing agents",
       "All integrations (Jira, GitLab, Bitbucket, Linear)",
       "All AI providers (OpenAI, Google, Ollama)",
       "Codebase RAG",
-      "5 concurrent workers",
-      "Custom expert personas",
+      "5 concurrent tasks",
+      "Unlimited experts per task",
       "Up to 15 users",
-      "Cloud execution (ECS)",
-      "Warm container pool",
+      "Local or cloud execution",
       "Advanced analytics",
       "Memory & skills persistence",
       "Role-based access",
@@ -106,7 +107,7 @@ export function Pricing() {
           </p>
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-full">
             <Zap className="w-4 h-4 text-green-500" />
-            <span className="text-sm font-medium text-green-500">Free tier includes GitHub, internal board, and MCP servers</span>
+            <span className="text-sm font-medium text-green-500">Free tier includes automated PR reviews, GitHub, internal board, and MCP servers</span>
           </div>
         </div>
 
@@ -218,15 +219,15 @@ export function Pricing() {
           </h3>
           <div className="grid md:grid-cols-3 gap-6 text-center">
             <div>
-              <p className="font-medium text-foreground mb-1">Free = Anthropic Claude</p>
+              <p className="font-medium text-foreground mb-1">Free = PR Reviews + Claude</p>
               <p className="text-sm text-muted-foreground">
-                Full product with Claude models on your hardware. Unlimited tasks, all personas, GitHub + internal board.
+                Automated PR reviews on every pull request. Full product with Claude models on your hardware.
               </p>
             </div>
             <div>
-              <p className="font-medium text-foreground mb-1">Pro = All Providers + Scale</p>
+              <p className="font-medium text-foreground mb-1">Pro = Auto Deploy + Annealing</p>
               <p className="text-sm text-muted-foreground">
-                OpenAI, Google, Ollama + 5x parallel workers, cloud execution, 15 seats. Launch price: $14.50/mo.
+                Auto CI/CD deployments, self-healing agents, all AI providers, 5x parallel workers, cloud execution.
               </p>
             </div>
             <div>

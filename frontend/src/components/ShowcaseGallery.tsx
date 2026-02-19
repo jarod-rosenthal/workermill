@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   TrendingUp,
   GitPullRequest,
+  FileCode,
 } from "lucide-react";
 import BuiltByBadge from "./BuiltByBadge";
 
@@ -27,6 +28,7 @@ interface ShowcaseProject {
   storyCount?: number;
   cost?: string;
   duration?: string;
+  linesOfCode?: string;
   repoUrl?: string;
   liveUrl?: string;
   category: string;
@@ -45,6 +47,7 @@ const showcaseProjects: ShowcaseProject[] = [
     storyCount: 7,
     cost: "$301",
     duration: "~7 hrs",
+    linesOfCode: "29,000",
     repoUrl: "https://github.com/workermill-examples/calmill",
     liveUrl: "https://calmill.workermill.com",
     category: "scheduling",
@@ -60,6 +63,7 @@ const showcaseProjects: ShowcaseProject[] = [
     storyCount: 5,
     cost: "$139",
     duration: "~2 hrs",
+    linesOfCode: "11,700",
     repoUrl: "https://github.com/workermill-examples/taskpulse",
     liveUrl: "https://taskpulse.workermill.com",
     category: "monitoring",
@@ -75,6 +79,7 @@ const showcaseProjects: ShowcaseProject[] = [
     storyCount: 5,
     cost: "$175*",
     duration: "~6 hrs",
+    linesOfCode: "22,000",
     repoUrl: "https://github.com/workermill-examples/teamboard",
     liveUrl: "https://teamboard.workermill.com",
     category: "saas",
@@ -190,10 +195,10 @@ export default function ShowcaseGallery() {
           </div>
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
-              <Zap className="w-4 h-4 text-amber-400" />
-              <span className="text-2xl font-bold text-white">~55 min</span>
+              <FileCode className="w-4 h-4 text-amber-400" />
+              <span className="text-2xl font-bold text-white">~3,400</span>
             </div>
-            <p className="text-xs text-slate-400">Avg story completion</p>
+            <p className="text-xs text-slate-400">Reviewed lines/hr</p>
           </div>
         </div>
 
@@ -256,7 +261,7 @@ export default function ShowcaseGallery() {
                   </div>
 
                   {/* Stats */}
-                  <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-border/30">
+                  <div className="grid grid-cols-4 gap-3 mt-4 pt-4 border-t border-border/30">
                     <div className="text-center">
                       <div className="flex items-center justify-center gap-1 text-sm font-semibold text-foreground">
                         <Layers className="w-3.5 h-3.5 text-muted-foreground" />
@@ -266,15 +271,17 @@ export default function ShowcaseGallery() {
                         stories
                       </div>
                     </div>
-                    <div className="text-center">
-                      <div className="flex items-center justify-center gap-1 text-sm font-semibold text-amber-400">
-                        <Zap className="w-3.5 h-3.5" />
-                        {project.cost}
+                    {project.linesOfCode && (
+                      <div className="text-center">
+                        <div className="flex items-center justify-center gap-1 text-sm font-semibold text-emerald-400">
+                          <FileCode className="w-3.5 h-3.5" />
+                          {project.linesOfCode}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          lines
+                        </div>
                       </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        cost
-                      </div>
-                    </div>
+                    )}
                     <div className="text-center">
                       <div className="flex items-center justify-center gap-1 text-sm font-semibold text-foreground">
                         <Clock className="w-3.5 h-3.5 text-muted-foreground" />
@@ -282,6 +289,15 @@ export default function ShowcaseGallery() {
                       </div>
                       <div className="text-xs text-muted-foreground mt-0.5">
                         time
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="flex items-center justify-center gap-1 text-sm font-semibold text-amber-400">
+                        <Zap className="w-3.5 h-3.5" />
+                        {project.cost}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        cost
                       </div>
                     </div>
                   </div>

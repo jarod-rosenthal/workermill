@@ -55,6 +55,19 @@ export function Hero() {
               </a>
             </div>
 
+            {/* VS Code extension link */}
+            <a
+              href="https://marketplace.visualstudio.com/items?itemName=workermill.workermill"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-300 transition-colors"
+            >
+              <svg viewBox="0 0 24 24" className="w-4 h-4" fill="currentColor">
+                <path d="M17.583 2.603l-5.402 4.884L5.23 2 3 3.86v16.28L5.23 22l6.95-5.49 5.403 4.888L21 19.622V4.378l-3.417-1.775zM5.23 16.378V7.622L9.09 12 5.23 16.378zm7.393.554L8.91 13.59 12.623 12l-3.714-1.592 3.714-3.34v8.864z" />
+              </svg>
+              Install for VS Code
+            </a>
+
           </div>
 
           {/* Right content - Control Center */}

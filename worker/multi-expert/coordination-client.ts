@@ -31,7 +31,8 @@ export type ContextMessageType =
   | "story_ready"
   | "story_claimed"
   | "constraints"
-  | "consultation";
+  | "consultation"
+  | "revision_requested";
 
 /**
  * Context message from the coordination API.

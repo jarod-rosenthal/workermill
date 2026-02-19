@@ -405,11 +405,10 @@ export default function Dashboard() {
         // First message(s) for this task — auto-expand
         hasAutoExpandedCommsRef.current[taskId] = true;
 
-        // Make the terminal section visible (same logic as toggleTerminal)
+        // Make the terminal section visible — but NOT for terminal-status tasks
+        // (tasks in pr_approved/review_approved/etc. should stay collapsed)
         const task = data.activeTasks.find((t) => t.id === taskId);
-        if (task && TERMINAL_STATUSES.includes(task.status)) {
-          setShownTerminals((prev) => new Set([...prev, taskId]));
-        } else {
+        if (task && !TERMINAL_STATUSES.includes(task.status)) {
           setHiddenTerminals((prev) => {
             if (!prev.has(taskId)) return prev;
             const next = new Set(prev);
@@ -426,6 +425,24 @@ export default function Dashboard() {
       prevCommsCountsRef.current[taskId] = count;
     }
   }, [coordinationMessages, data?.activeTasks]);
+
+  // Auto-collapse terminals when tasks transition to terminal status
+  // Removes stale entries from shownTerminals so completed tasks stay collapsed
+  useEffect(() => {
+    if (!data?.activeTasks) return;
+    const terminalTaskIds = data.activeTasks
+      .filter((t) => TERMINAL_STATUSES.includes(t.status))
+      .map((t) => t.id);
+    if (terminalTaskIds.length === 0) return;
+
+    setShownTerminals((prev) => {
+      const toRemove = terminalTaskIds.filter((id) => prev.has(id));
+      if (toRemove.length === 0) return prev;
+      const next = new Set(prev);
+      for (const id of toRemove) next.delete(id);
+      return next;
+    });
+  }, [data?.activeTasks]);
 
   // Onboarding state
   const { shouldShowOnboarding, dismissOnboarding, resetOnboarding } = useOnboardingState();

@@ -245,7 +245,7 @@ export class Organization {
   @Column({ name: "task_cooldown_seconds", type: "int", default: 30 })
   taskCooldownSeconds: number;
 
-  @Column({ name: "default_worker_model", type: "varchar", length: 100, default: "claude-sonnet-4-5-20250929" })
+  @Column({ name: "default_worker_model", type: "varchar", length: 100, default: "claude-sonnet-4-6" })
   defaultWorkerModel: string;
 
   @Column({ name: "default_worker_persona", type: "varchar", length: 50, default: "backend_developer" })
@@ -354,7 +354,7 @@ export class Organization {
   @Column({ name: "planning_agent_provider", type: "varchar", length: 50, default: "anthropic" })
   planningAgentProvider: string; // Provider for planning/decomposition (anthropic, openai, google)
 
-  @Column({ name: "planning_agent_model", type: "varchar", length: 100, default: "claude-sonnet-4-5-20250929" })
+  @Column({ name: "planning_agent_model", type: "varchar", length: 100, default: "claude-sonnet-4-6" })
   planningAgentModel: string; // Model used for planning/decomposition (Project Manager)
 
   @Column({ name: "planning_mode", type: "varchar", length: 20, default: "strict" })

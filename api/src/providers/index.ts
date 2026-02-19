@@ -41,7 +41,7 @@ const providers: Record<string, ProviderConfig> = {
     id: "anthropic",
     name: "Anthropic (Claude)",
     pricingEngine: new AnthropicPricingEngine(),
-    defaultModel: "claude-sonnet-4-20250514",
+    defaultModel: "claude-sonnet-4-6",
     requiresApiKey: true,
     apiKeyEnvVar: "ANTHROPIC_API_KEY",
   },

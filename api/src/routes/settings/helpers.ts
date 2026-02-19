@@ -116,7 +116,8 @@ export const CURATED_MODELS: Record<string, DiscoveredModel[]> = {
     { id: "claude-opus-4-6", displayName: "Claude Opus 4.6", provider: "anthropic", tier: "premium", contextWindow: 200000, source: "curated" },
     { id: "claude-opus-4-5-20251101", displayName: "Claude Opus 4.5", provider: "anthropic", tier: "premium", contextWindow: 200000, source: "curated" },
     { id: "claude-sonnet-5-20260203", displayName: "Claude Sonnet 5", provider: "anthropic", tier: "standard", contextWindow: 1000000, source: "curated" },
-    { id: "claude-sonnet-4-5-20250929", displayName: "Claude Sonnet 4.5", provider: "anthropic", tier: "standard", contextWindow: 200000, source: "curated" },
+    { id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", provider: "anthropic", tier: "standard", contextWindow: 200000, source: "curated" },
+    { id: "claude-sonnet-4-5-20250929", displayName: "Claude Sonnet 4.5 (Legacy)", provider: "anthropic", tier: "standard", contextWindow: 200000, source: "curated" },
     { id: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5", provider: "anthropic", tier: "economy", contextWindow: 200000, source: "curated" },
     // Legacy models for backwards compatibility
     { id: "claude-3-5-haiku-20241022", displayName: "Claude 3.5 Haiku (Legacy)", provider: "anthropic", tier: "economy", contextWindow: 200000, source: "curated" },

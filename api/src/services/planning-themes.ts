@@ -24,9 +24,9 @@ import {
 } from "./planning-types.js";
 import { PRDAction } from "./planning-inventory.js";
 
-// Model for planning operations - Sonnet 4.5 for high-quality planning
-export const THEME_EXTRACTION_MODEL = "claude-sonnet-4-5-20250929";
-export const STORY_DECOMPOSITION_MODEL = "claude-sonnet-4-5-20250929";
+// Model for planning operations - Sonnet 4.6 for high-quality planning
+export const THEME_EXTRACTION_MODEL = "claude-sonnet-4-6";
+export const STORY_DECOMPOSITION_MODEL = "claude-sonnet-4-6";
 
 // ============================================================================
 // THEME EXTRACTION TOOL

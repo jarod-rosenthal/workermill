@@ -44,7 +44,7 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     supportsCaching: true,
   },
 
-  // Sonnet 5 (latest balanced tier) - pricing TBD, using Sonnet 4.5 rates
+  // Sonnet 5 (latest balanced tier) - pricing TBD, using Sonnet 4.6 rates
   "claude-sonnet-5-20260203": {
     id: "claude-sonnet-5-20260203",
     displayName: "Claude Sonnet 5",
@@ -57,7 +57,20 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     supportsStreaming: true,
     supportsCaching: true,
   },
-  // Sonnet 4.5 (balanced tier)
+  // Sonnet 4.6 (current balanced tier)
+  "claude-sonnet-4-6": {
+    id: "claude-sonnet-4-6",
+    displayName: "Claude Sonnet 4.6",
+    tier: "balanced",
+    inputRate: 0.003,
+    outputRate: 0.015,
+    cacheWriteRate: 0.00375, // 1.25x input
+    cacheReadRate: 0.0003, // 0.1x input
+    contextWindow: 200000,
+    supportsStreaming: true,
+    supportsCaching: true,
+  },
+  // Sonnet 4.5 (legacy)
   "claude-sonnet-4-5-20250929": {
     id: "claude-sonnet-4-5-20250929",
     displayName: "Claude Sonnet 4.5",
@@ -117,7 +130,7 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
  */
 const MODEL_ALIASES: Record<string, string> = {
   haiku: "claude-haiku-4-5-20251001",
-  sonnet: "claude-sonnet-5-20260203",
+  sonnet: "claude-sonnet-4-6",
   opus: "claude-opus-4-6",
 };
 
@@ -168,7 +181,7 @@ export class AnthropicPricingEngine implements ProviderPricingEngine {
       return ANTHROPIC_MODELS["claude-opus-4-6"];
     }
     if (modelLower.includes("sonnet")) {
-      return ANTHROPIC_MODELS["claude-sonnet-4-20250514"];
+      return ANTHROPIC_MODELS["claude-sonnet-4-6"];
     }
 
     return undefined;

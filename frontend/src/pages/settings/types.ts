@@ -244,6 +244,11 @@ export const MODEL_OPTIONS: Record<string, ModelOption[]> = {
       tier: "Balanced",
     },
     {
+      value: "claude-sonnet-4-6",
+      label: "Claude Sonnet 4.6",
+      tier: "Balanced",
+    },
+    {
       value: "claude-sonnet-4-5-20250929",
       label: "Claude Sonnet 4.5",
       tier: "Balanced",

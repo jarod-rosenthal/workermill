@@ -441,7 +441,7 @@ export class AgentClient extends EventEmitter {
         });
       });
       req.on("error", reject);
-      // PRD decomposition via Claude CLI can take 2+ minutes — use 5min timeout for POST
+      // PRD decomposition via Agent SDK can take 2+ minutes — use 5min timeout for POST
       req.setTimeout(300_000, () => { req.destroy(); reject(new Error("Timeout")); });
       req.write(body);
       req.end();

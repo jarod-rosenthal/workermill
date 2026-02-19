@@ -191,6 +191,16 @@
         }
       ]
     },
+    "configuration": {
+      "title": "WorkerMill",
+      "properties": {
+        "workermill.issueStatusFilter": {
+          "type": "string",
+          "default": "To Do",
+          "description": "Only show issues with this status in the Backlog. Leave empty to show all open issues."
+        }
+      }
+    },
     "viewsWelcome": [
       {
         "view": "workermill.teamPanel",

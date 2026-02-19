@@ -9,6 +9,7 @@ import Workers from "./Home/Workers";
 import Features from "./Home/Features";
 import ShowcaseGallery from "../components/ShowcaseGallery";
 import AgentCollaboration from "../components/AgentCollaboration";
+import TeamCoordination from "../components/TeamCoordination";
 import TrustCallout from "../components/TrustCallout";
 import ExecutionShowcase from "../components/ExecutionShowcase";
 import { Pricing } from "./Home/Pricing";
@@ -126,6 +127,9 @@ export default function LandingV0() {
 
           {/* Agent Collaboration Showcase */}
           <AgentCollaboration />
+
+          {/* Team Coordination & Custom Experts */}
+          <TeamCoordination />
 
           {/* How It Works Section */}
           <section>

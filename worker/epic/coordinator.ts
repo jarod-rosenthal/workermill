@@ -2365,6 +2365,11 @@ export class EpicCoordinator {
         if (reviewResult.decision === "approved") {
           console.log(`[Epic] Story ${storyIndex} approved (score: ${reviewResult.codeQualityScore}/10)`);
           this.postDashboardLog(`Story ${storyIndex} approved by Tech Lead (score: ${reviewResult.codeQualityScore}/10)`);
+          await this.coordination.postContext(
+            "decision",
+            `✅ Story ${storyIndex} approved (score: ${reviewResult.codeQualityScore}/10)`,
+            "tech_lead"
+          ).catch(() => {});
           this.reviewedStoryIndices.add(storyIndex);
         } else if (reviewResult.decision === "revision_needed") {
           const newCount = revisionCount + 1;
@@ -2875,6 +2880,11 @@ export class EpicCoordinator {
   ): Promise<"continue" | "done"> {
     console.log(`[Epic] Running inline Tech Lead review (attempt ${this.revisionCount + 1}/${this.maxRevisions})`);
     this.postDashboardLog("Starting Tech Lead review...");
+    await this.coordination.postContext(
+      "progress",
+      `Starting Tech Lead review (attempt ${this.revisionCount + 1}/${this.maxRevisions})`,
+      "tech_lead"
+    ).catch(() => {});
 
     // Ensure repo is on the PR's head branch so the tech lead reads correct files.
     // After single-story PR creation or WORKERMILL.md update, the repo may be on main.
@@ -2935,6 +2945,11 @@ export class EpicCoordinator {
         await this.ticketOps.postComment(
           `✅ PR approved by Tech Lead (score: ${reviewResult.codeQualityScore}/10)\n\n${reviewResult.feedback}`
         );
+        await this.coordination.postContext(
+          "decision",
+          `✅ PR approved (score: ${reviewResult.codeQualityScore}/10)\n\n${reviewResult.feedback}`,
+          "tech_lead"
+        ).catch(() => {});
 
         // If deployment enabled, trigger DevOps Engineer to merge and deploy
         if (this.config.deploymentEnabled) {
@@ -2998,6 +3013,11 @@ export class EpicCoordinator {
 
       case "rejected":
         console.log("[Epic] PR rejected by Tech Lead.");
+        await this.coordination.postContext(
+          "decision",
+          `❌ PR rejected by Tech Lead\n\n${reviewResult.feedback}`,
+          "tech_lead"
+        ).catch(() => {});
         await this.handleRejection(prUrl, summaryParts, reviewResult.feedback);
         return "done";
 
@@ -3477,6 +3497,11 @@ Begin your review now. Start by fetching the code changes.`;
     await this.ticketOps.postComment(
       `🔍 **Review-only run** — running Tech Lead review on PR ***REMOVED***${prNumber}.\n\nPR: ${prUrl}`
     );
+    await this.coordination.postContext(
+      "progress",
+      `Starting review-only Tech Lead review on PR ***REMOVED***${prNumber}`,
+      "tech_lead"
+    ).catch(() => {});
     await this.updateTaskStatus("running", `Reviewing PR ***REMOVED***${prNumber}`);
 
     // Checkout PR branch for review
@@ -3504,6 +3529,11 @@ Begin your review now. Start by fetching the code changes.`;
         await this.ticketOps.postComment(
           `✅ PR approved by Tech Lead (score: ${reviewResult.codeQualityScore}/10)\n\n${reviewResult.feedback}`
         );
+        await this.coordination.postContext(
+          "decision",
+          `✅ PR ***REMOVED***${prNumber} approved (score: ${reviewResult.codeQualityScore}/10)\n\n${reviewResult.feedback}`,
+          "tech_lead"
+        ).catch(() => {});
         // PRD auto-run: merge the PR so dependent stories don't stack up conflicts
         if (this.config.prdChildTask) {
           console.log(`[Epic] PRD child task — auto-merging PR ***REMOVED***${prNumber} after review-only approval`);
@@ -3524,6 +3554,11 @@ Begin your review now. Start by fetching the code changes.`;
         await this.ticketOps.postComment(
           `🔄 Review: Revision needed for PR ***REMOVED***${prNumber}\n\n${reviewResult.feedback}`
         );
+        await this.coordination.postContext(
+          "revision_requested",
+          `🔄 Revision needed for PR ***REMOVED***${prNumber}\n\n${reviewResult.feedback}`,
+          "tech_lead"
+        ).catch(() => {});
         // Inject feedback so planning agent uses it in the full coordination loop
         this.config.reviewFeedback = reviewResult.feedback;
         this.lastReviewFeedback = reviewResult.feedback;
@@ -3531,6 +3566,11 @@ Begin your review now. Start by fetching the code changes.`;
         return true; // Signal caller to fall through to full coordination loop
 
       case "rejected":
+        await this.coordination.postContext(
+          "decision",
+          `❌ PR ***REMOVED***${prNumber} rejected\n\n${reviewResult.feedback}`,
+          "tech_lead"
+        ).catch(() => {});
         await this.handleRejection(prUrl, ["Review-only run"], reviewResult.feedback);
         this.missionActive = false;
         return false;

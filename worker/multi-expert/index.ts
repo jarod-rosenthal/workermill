@@ -2809,6 +2809,11 @@ The repository is cloned at: **${this.repoPath}**
     }
 
     await this.postLog(`Starting inline Tech Lead review phase (attempt ${this.revisionCount + 1}/${this.maxRevisions})`);
+    await this.coordination.postContext(
+      "progress",
+      `Starting Tech Lead review (attempt ${this.revisionCount + 1}/${this.maxRevisions})`,
+      "tech_lead"
+    ).catch(() => {});
 
     // Get provider for tech_lead from Decision API
     const { provider, model } = await this.decisionClient.routeProvider({
@@ -2831,12 +2836,22 @@ The repository is cloned at: **${this.repoPath}**
     if (result.decision === "approved") {
       await this.postLog("PR approved by Tech Lead!");
       await this.jira.addComment(`✅ Tech Lead approved PR with score ${result.codeQualityScore}/10`);
+      await this.coordination.postContext(
+        "decision",
+        `✅ PR approved (score: ${result.codeQualityScore}/10)\n\n${result.feedback}`,
+        "tech_lead"
+      ).catch(() => {});
       return { decision: "approved", needsRevision: false };
     }
 
     if (result.decision === "rejected") {
       await this.postLog("PR rejected by Tech Lead - fundamental issues detected");
       await this.jira.addComment(`❌ Tech Lead rejected PR: ${result.feedback}`);
+      await this.coordination.postContext(
+        "decision",
+        `❌ PR rejected\n\n${result.feedback}`,
+        "tech_lead"
+      ).catch(() => {});
       return { decision: "rejected", needsRevision: false };
     }
 
@@ -2845,6 +2860,11 @@ The repository is cloned at: **${this.repoPath}**
     this.lastReviewFeedback = result.feedback;
     await this.postLog(`Revision ${this.revisionCount}/${this.maxRevisions} needed: ${result.feedback}`);
     await this.jira.addComment(`🔄 Revision ${this.revisionCount}/${this.maxRevisions} requested:\n\n${result.feedback}`);
+    await this.coordination.postContext(
+      "revision_requested",
+      `🔄 Revision ${this.revisionCount}/${this.maxRevisions} needed\n\n${result.feedback}`,
+      "tech_lead"
+    ).catch(() => {});
 
     if (this.revisionCount >= this.maxRevisions) {
       await this.postLog("Max revisions reached, escalating to human review");

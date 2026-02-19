@@ -28,6 +28,8 @@ const CYAN = "\x1b[96m";
 const WHITE = "\x1b[97m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
+// Muted orange — matches dashboard's text-orange-300/70 for recoverable errors
+const ORANGE = "\x1b[38;5;216m";
 
 // Persona → bright color mapping
 const PERSONA_COLORS: Record<string, string> = {
@@ -50,28 +52,81 @@ function extractPersona(line: string): { persona: string; prefixEnd: number } | 
   return null;
 }
 
-function colorize(line: string): string {
-  if (/error|Error|ERROR|FAIL|panic|fatal/i.test(line)) return RED + line + RESET;
-  if (/warn|Warning|WARNING/.test(line)) return YELLOW + line + RESET;
-  if (/✓|success|PASS|completed|approved|merged/i.test(line)) return GREEN + line + RESET;
-  if (/^(Cloning|Fetching|git |From |To |branch )/i.test(line)) return CYAN + line + RESET;
-  if (/::result::|::pr_url::|::learning::|::blocker::/.test(line)) return BOLD + MAGENTA + line + RESET;
+/**
+ * Determine the ANSI color for a log line using structured fields first,
+ * then content-based regex fallback.
+ *
+ * Color mapping matches the dashboard legend exactly:
+ *   Red       → Fatal errors (metadata.errorType === "fatal")
+ *   Orange    → Recoverable/unclassified errors (muted, like dashboard text-orange-300/70)
+ *   Yellow    → Warnings
+ *   Cyan      → Worker/System messages
+ *   Green     → Success
+ *   Purple    → Commands ($ prefix, npm, git)
+ *   Gray/White → Default
+ */
+interface LogMeta {
+  severity?: string;
+  logType?: string;
+  metadata?: { errorType?: "fatal" | "recoverable"; [key: string]: unknown };
+}
+
+function getLogColor(line: string, meta?: LogMeta): string {
+  const isFatalError = meta?.metadata?.errorType === "fatal";
+  const isError =
+    meta?.severity === "error" ||
+    meta?.logType === "error" ||
+    line.includes("[ERROR]") ||
+    line.includes("Error") ||
+    line.includes("error:");
+
+  if (isError && isFatalError) return RED;
+  if (isError) return ORANGE;
+
+  if (
+    meta?.severity === "warning" ||
+    meta?.logType === "warning" ||
+    line.includes("[WARN]") ||
+    line.includes("Warning")
+  )
+    return YELLOW;
+
+  if (line.includes("[worker]") || line.includes("Claude") || line.includes("Starting"))
+    return CYAN;
+
+  if (line.includes("[SUCCESS]") || line.includes("Completed") || line.includes("success"))
+    return GREEN;
+
+  if (line.startsWith("$") || line.includes("npm ") || line.includes("git "))
+    return MAGENTA;
+
+  if (/::result::|::pr_url::|::learning::|::blocker::/.test(line)) return MAGENTA;
 
   // Persona-prefixed lines get persona color
   const p = extractPersona(line);
+  if (p) return PERSONA_COLORS[p.persona] || WHITE;
+
+  // Dim internal/noise lines
+  if (/^\[(THINKING|WAITING|POLLING|HEARTBEAT|MUTEX)\b/i.test(line)) return DIM;
+
+  return WHITE;
+}
+
+function colorizeLine(line: string, meta?: LogMeta): string {
+  if (!line.trim()) return line;
+
+  const color = getLogColor(line, meta);
+
+  // Persona-prefixed lines: bold prefix + colored body
+  const p = extractPersona(line);
   if (p) {
-    const color = PERSONA_COLORS[p.persona];
+    const pColor = PERSONA_COLORS[p.persona] || color;
     const prefix = line.substring(0, p.prefixEnd);
     const body = line.substring(p.prefixEnd);
-    return BOLD + color + prefix + RESET + color + body + RESET;
+    return BOLD + pColor + prefix + RESET + pColor + body + RESET;
   }
 
-  // Only dim truly internal/noise lines
-  if (/^\[(THINKING|WAITING|POLLING|HEARTBEAT|MUTEX)\b/i.test(line)) return DIM + line + RESET;
-
-  // Default: bright white so text isn't washed out by the terminal's default foreground
-  if (line.trim()) return WHITE + line + RESET;
-  return line;
+  return color + line + RESET;
 }
 
 /** Strip markdown syntax for terminal readability */
@@ -194,9 +249,9 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
     this.writeEmitter.fire(text + "\r\n");
   }
 
-  private writeMultiline(text: string): void {
+  private writeMultiline(text: string, meta?: LogMeta): void {
     for (const line of text.split("\n")) {
-      this.writeLine(colorize(line));
+      this.writeLine(colorizeLine(line, meta));
     }
   }
 
@@ -220,6 +275,7 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
             stderr?: string;
             command?: string;
             exitCode?: number;
+            metadata?: { errorType?: "fatal" | "recoverable"; [key: string]: unknown };
           }>
         | undefined;
       if (!logs) return;
@@ -228,7 +284,8 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
         if (this.seenLogIds.has(log.id)) continue;
         this.seenLogIds.add(log.id);
 
-        // Colorize based on structured severity/type from the curated log
+        // Colorize using structured fields (severity, logType, metadata)
+        // to match the dashboard legend exactly
         if (log.message) {
           // Try collapsing large markdown blocks first
           const collapsed = collapseCommentBlock(log.message, log.type);
@@ -236,15 +293,12 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
             this.writeLine(collapsed);
           } else {
             const cleaned = stripMarkdown(log.message);
-            const color =
-              log.severity === "error" ? RED : log.severity === "warn" ? YELLOW : null;
-            if (color) {
-              for (const line of cleaned.split("\n")) {
-                this.writeLine(color + line + RESET);
-              }
-            } else {
-              this.writeMultiline(cleaned);
-            }
+            const meta: LogMeta = {
+              severity: log.severity,
+              logType: log.type,
+              metadata: log.metadata,
+            };
+            this.writeMultiline(cleaned, meta);
           }
         }
 

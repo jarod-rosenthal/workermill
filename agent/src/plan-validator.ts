@@ -709,4 +709,51 @@ export async function runCriticValidation(
   }
 }
 
+/**
+ * Strip false-positive persona risks from critic results.
+ *
+ * The critic receives the PRD (which may mention roles like "integration_specialist")
+ * along with the fixed plan (where those have been replaced with valid personas).
+ * The LLM sometimes confuses PRD text with plan data and reports phantom persona
+ * violations. This filter checks the actual plan personas and removes any risk that
+ * claims a story uses a persona that isn't actually in the plan.
+ */
+export function stripFalsePersonaRisks(
+  criticResult: CriticResult,
+  plan: ExecutionPlan,
+): { stripped: number; details: string[] } {
+  const actualPersonas = new Set(plan.stories.map((s) => s.persona));
+  const details: string[] = [];
+  let stripped = 0;
+
+  criticResult.risks = criticResult.risks.filter((risk) => {
+    // Match patterns like: "story-2 uses persona 'integration_specialist'"
+    const match = risk.match(/uses persona ['"]([^'"]+)['"]/i);
+    if (match) {
+      const mentionedPersona = match[1];
+      if (!actualPersonas.has(mentionedPersona)) {
+        // The critic claims a persona is used that isn't actually in the plan — false positive
+        details.push(`Stripped false-positive risk: "${risk}" (plan has no "${mentionedPersona}" persona)`);
+        stripped++;
+        return false;
+      }
+    }
+    return true;
+  });
+
+  // Also clean storyFeedback that references phantom personas
+  if (criticResult.storyFeedback) {
+    criticResult.storyFeedback = criticResult.storyFeedback.filter((fb) => {
+      const match = fb.feedback.match(/uses persona ['"]([^'"]+)['"]/i);
+      if (match && !actualPersonas.has(match[1])) {
+        stripped++;
+        return false;
+      }
+      return true;
+    });
+  }
+
+  return { stripped, details };
+}
+
 export { AUTO_APPROVAL_THRESHOLD };

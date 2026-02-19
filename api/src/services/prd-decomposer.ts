@@ -173,16 +173,15 @@ export async function decomposePrd(
   model: string,
   apiKey?: string,
 ): Promise<DecomposedPrd> {
-  const resolvedApiKey =
-    apiKey ||
-    process.env.ANTHROPIC_API_KEY ||
-    process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  // Prefer OAuth token (Claude Max) over API key — API keys may have no credits
+  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const resolvedApiKey = oauthToken || apiKey || process.env.ANTHROPIC_API_KEY;
   if (!resolvedApiKey) {
     throw new Error(
       "No Anthropic API key provided. Pass apiKey parameter or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN environment variable.",
     );
   }
-  const isOAuth = !apiKey && !process.env.ANTHROPIC_API_KEY && !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const isOAuth = !!oauthToken;
 
   const resolvedModel = model || DEFAULT_MODEL;
 

@@ -76,10 +76,15 @@ export default function Memory() {
     <div className="space-y-10">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-foreground mb-2">Memory System</h1>
+        <h1 className="text-3xl font-bold text-foreground mb-2 flex items-center gap-3">
+          Memory System
+          <span className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-400 font-normal">
+            Beta
+          </span>
+        </h1>
         <p className="text-muted-foreground">
           WorkerMill's AI memory system enables workers to learn from past experiences and apply
-          knowledge to future tasks. Access at <code className="bg-muted px-1.5 py-0.5 rounded">/memory</code>.
+          knowledge to future tasks. This feature is in active development.
         </p>
       </div>
 

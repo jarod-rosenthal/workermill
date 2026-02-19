@@ -2,7 +2,6 @@ import {
   Rocket,
   Settings,
   GitBranch,
-  CheckCircle,
   AlertCircle,
   ArrowRight,
   Copy,
@@ -34,7 +33,7 @@ const labels = [
   },
   {
     name: "openai",
-    description: "Use OpenAI models (GPT-5.1 Codex, GPT-4o)",
+    description: "Use OpenAI models (GPT-4o, o3-mini, o1)",
   },
   {
     name: "gemini",
@@ -235,18 +234,17 @@ export default function QuickStart() {
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-foreground text-lg">Go to the Build page</h3>
+                  <h3 className="font-semibold text-foreground text-lg">Create a task</h3>
                   <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">30 sec</span>
                 </div>
                 <p className="text-muted-foreground mb-4">
-                  Open <Link to="/build" className="text-primary hover:underline">workermill.com/build</Link> in your browser.
+                  Open <Link to="/dashboard" className="text-primary hover:underline">workermill.com/dashboard</Link> in your browser, or trigger a task from your issue tracker.
                 </p>
                 <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
-                  <li>Describe what you want to build</li>
-                  <li>Click <strong className="text-foreground">"See the Plan"</strong> (free preview)</li>
-                  <li>Review the stories, cost estimate, and tech stack</li>
-                  <li>Select <strong className="text-foreground">Local Mode</strong></li>
-                  <li>Click <strong className="text-foreground">"Build It"</strong></li>
+                  <li>Click <strong className="text-foreground">"Run Task"</strong> on the dashboard, or add the <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">workermill</code> label to a Jira/Linear/GitHub issue</li>
+                  <li>The Planning Agent decomposes your task into stories</li>
+                  <li>Workers execute stories in parallel</li>
+                  <li>A pull request is created when done</li>
                 </ol>
                 <div className="flex items-center gap-2 text-sm text-muted-foreground mt-4">
                   <Terminal className="w-4 h-4" />
@@ -330,11 +328,11 @@ export default function QuickStart() {
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-foreground text-lg">Go to /build</h3>
+                  <h3 className="font-semibold text-foreground text-lg">Create a task</h3>
                   <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">1 min</span>
                 </div>
                 <p className="text-muted-foreground">
-                  Open <Link to="/build" className="text-primary hover:underline">workermill.com/build</Link>, describe your project, review the plan, and click "Build It".
+                  Open <Link to="/dashboard" className="text-primary hover:underline">workermill.com/dashboard</Link> and click "Run Task", or add the <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">workermill</code> label to an issue in your tracker.
                 </p>
               </div>
             </div>
@@ -477,16 +475,16 @@ export default function QuickStart() {
         <h2 className="text-2xl font-semibold text-foreground">Next Steps</h2>
         <div className="grid md:grid-cols-2 gap-4">
           <Link
-            to="/build"
+            to="/docs/agent"
             className="bg-primary/10 border border-primary/30 rounded-xl p-5 hover:bg-primary/20 transition-colors group"
           >
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="font-semibold text-primary">
-                  Start Building
+                  Agent Setup
                 </h3>
                 <p className="text-sm text-primary/70">
-                  Describe your project and build it
+                  Install and configure the local agent
                 </p>
               </div>
               <ArrowRight className="w-5 h-5 text-primary" />

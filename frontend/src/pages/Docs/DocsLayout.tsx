@@ -28,8 +28,8 @@ import { useAuthStore } from "../../store/auth-store";
 const navItems = [
   { to: "/docs", label: "Overview", icon: BookOpen, end: true },
   { to: "/docs/quick-start", label: "Quick Start", icon: Rocket },
-  { to: "/docs/local-agent", label: "Local Agent", icon: Monitor },
-  { to: "/docs/remote-agent", label: "Remote Agent", icon: Radio },
+  { to: "/docs/agent", label: "Agent Setup", icon: Monitor },
+  { to: "/docs/vscode-extension", label: "VS Code Extension", icon: Radio },
   { to: "/docs/repositories", label: "Repositories", icon: FolderGit2 },
   { to: "/docs/codebase-indexing", label: "Codebase Indexing", icon: Search },
   { to: "/docs/task-lifecycle", label: "Task Lifecycle", icon: Workflow },
@@ -101,7 +101,7 @@ export default function DocsLayout() {
         <div className="p-4 border-t border-border">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <GitBranch className="w-3 h-3" />
-            <span>v1.0.0</span>
+            <span>v0.10.4</span>
           </div>
         </div>
       </aside>

@@ -1,7 +1,6 @@
 import {
   GitBranch,
   Ticket,
-  Webhook,
   ArrowRight,
   Check,
   GitPullRequest,
@@ -9,12 +8,11 @@ import {
   RefreshCw,
   Brain,
   Clock,
-  Mail,
   MessageCircle,
   Bell,
   Cloud,
-  Shield,
   Server,
+  Monitor,
 } from "lucide-react";
 
 export default function Integrations() {
@@ -24,7 +22,7 @@ export default function Integrations() {
       <div>
         <h1 className="text-3xl font-bold text-foreground mb-2">Integrations</h1>
         <p className="text-muted-foreground">
-          WorkerMill connects your issue trackers, SCM providers, AI models, cloud infrastructure,
+          WorkerMill connects your issue trackers, SCM providers, AI models,
           and notification systems into an automated development pipeline.
         </p>
       </div>
@@ -85,12 +83,9 @@ export default function Integrations() {
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
               { name: "Anthropic Claude", models: "Opus 4.6, Sonnet 5, Sonnet 4.5, Haiku 4.5", color: "text-orange-400", desc: "Best for complex coding tasks" },
-              { name: "OpenAI", models: "GPT-5.1 Codex, GPT-4o, o1", color: "text-green-400", desc: "Strong general purpose" },
+              { name: "OpenAI", models: "GPT-4o, o3-mini, o1", color: "text-green-400", desc: "Strong general purpose" },
               { name: "Google Gemini", models: "Gemini 3 Pro, Gemini 2.0 Flash", color: "text-blue-400", desc: "Fast and efficient" },
-              { name: "AWS Bedrock", models: "Claude, Titan, Llama", color: "text-yellow-400", desc: "Enterprise AWS integration" },
-              { name: "Azure AI Foundry", models: "OpenAI, Llama, Phi", color: "text-cyan-400", desc: "Enterprise Azure integration" },
               { name: "Ollama", models: "Llama, Qwen, DeepSeek", color: "text-purple-400", desc: "Self-hosted models" },
-              { name: "OpenRouter", models: "100+ models", color: "text-pink-400", desc: "Access any model" },
             ].map((provider) => (
               <div key={provider.name} className="bg-background rounded-lg p-4 border border-border">
                 <div className={`font-medium ${provider.color} mb-1`}>{provider.name}</div>
@@ -183,8 +178,10 @@ export default function Integrations() {
             <h3 className="text-lg font-semibold text-foreground">Linear</h3>
           </div>
           <p className="text-muted-foreground">
-            WorkerMill integrates with Linear using the same label-based workflow as Jira.
-            Add the <code className="text-primary">workermill</code> label to any Linear issue to trigger a worker.
+            WorkerMill integrates with Linear for status-change events.
+            Note: Linear's webhook API does not fire events when labels are added or removed,
+            so Linear tasks are typically created via the dashboard <strong className="text-foreground">Run Task</strong> button
+            rather than label-based triggers.
           </p>
 
           <div className="grid md:grid-cols-2 gap-6">
@@ -476,28 +473,66 @@ export default function Integrations() {
         </div>
       </section>
 
-      {/* Cloud Infrastructure */}
+      {/* Cloud Execution */}
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
           <Cloud className="w-5 h-5 text-cyan-500" />
-          Cloud Infrastructure
+          Cloud Execution
         </h2>
         <p className="text-muted-foreground">
-          WorkerMill can run AI workers on your own cloud infrastructure for enhanced security,
-          compliance, and cost control.
+          WorkerMill runs AI workers on AWS infrastructure. The recommended approach is the
+          <strong className="text-foreground"> Remote Agent</strong>, which runs on your machine and uses
+          the cloud dashboard for monitoring.
         </p>
 
-        <div className="grid md:grid-cols-3 gap-4">
-          {/* AWS */}
+        <div className="grid md:grid-cols-2 gap-4">
+          {/* Remote Agent (Recommended) */}
+          <div className="bg-card border-2 border-primary/50 rounded-xl p-5 relative">
+            <div className="absolute -top-3 left-4">
+              <span className="px-3 py-1 bg-primary text-primary-foreground text-xs font-semibold rounded-full">
+                Recommended
+              </span>
+            </div>
+            <div className="flex items-center gap-3 mb-4 mt-1">
+              <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
+                <Monitor className="w-5 h-5 text-green-500" />
+              </div>
+              <h3 className="font-semibold text-foreground">Remote Agent</h3>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              Workers run as native processes on your machine. Code never leaves your computer.
+              $0 execution cost with Claude Max subscription.
+            </p>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                No Docker or cloud setup required
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Cloud dashboard for monitoring
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                VS Code extension support
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Standalone binary (no Node.js needed)
+              </div>
+            </div>
+          </div>
+
+          {/* AWS Cloud */}
           <div className="bg-card border border-yellow-500/30 rounded-xl p-5">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-lg bg-yellow-500/20 flex items-center justify-center">
                 <Cloud className="w-5 h-5 text-yellow-500" />
               </div>
-              <h3 className="font-semibold text-foreground">AWS</h3>
+              <h3 className="font-semibold text-foreground">AWS ECS (Cloud Mode)</h3>
             </div>
             <p className="text-sm text-muted-foreground mb-4">
-              Run workers on AWS ECS Fargate with your own VPC and security controls.
+              Workers run on AWS ECS Fargate. Requires an AI provider API key (BYOK).
             </p>
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2 text-muted-foreground">
@@ -506,187 +541,17 @@ export default function Integrations() {
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Check className="w-4 h-4 text-green-500" />
-                IAM role assumption
+                Automatic scaling
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Check className="w-4 h-4 text-green-500" />
-                VPC integration
+                Worker checkpointing to S3
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Check className="w-4 h-4 text-green-500" />
-                CloudWatch logging
+                Real-time log streaming
               </div>
             </div>
-          </div>
-
-          {/* GCP */}
-          <div className="bg-card border border-blue-500/30 rounded-xl p-5">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                <Cloud className="w-5 h-5 text-blue-500" />
-              </div>
-              <h3 className="font-semibold text-foreground">Google Cloud</h3>
-            </div>
-            <p className="text-sm text-muted-foreground mb-4">
-              Run workers on Google Cloud Run with your own project and networking.
-            </p>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Check className="w-4 h-4 text-green-500" />
-                Cloud Run execution
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Check className="w-4 h-4 text-green-500" />
-                Service account auth
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Check className="w-4 h-4 text-green-500" />
-                VPC connector support
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Check className="w-4 h-4 text-green-500" />
-                Cloud Logging
-              </div>
-            </div>
-          </div>
-
-          {/* Azure */}
-          <div className="bg-card border border-cyan-500/30 rounded-xl p-5">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center">
-                <Cloud className="w-5 h-5 text-cyan-500" />
-              </div>
-              <h3 className="font-semibold text-foreground">Microsoft Azure</h3>
-            </div>
-            <p className="text-sm text-muted-foreground mb-4">
-              Run workers on Azure Container Instances within your subscription.
-            </p>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Check className="w-4 h-4 text-green-500" />
-                Container Instances
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Check className="w-4 h-4 text-green-500" />
-                Service principal auth
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Check className="w-4 h-4 text-green-500" />
-                VNet integration
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Check className="w-4 h-4 text-green-500" />
-                Azure Monitor
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Incident Management Integration */}
-      <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-          <Shield className="w-5 h-5 text-red-500" />
-          Incident Management
-        </h2>
-        <div className="bg-card border border-red-500/30 rounded-xl p-6 space-y-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center">
-              <Shield className="w-5 h-5 text-red-500" />
-            </div>
-            <h3 className="text-lg font-semibold text-foreground">Incident Response</h3>
-          </div>
-          <p className="text-muted-foreground">
-            Connect WorkerMill with your incident management platform for intelligent incident response. AI workers can
-            automatically investigate alerts, create fix PRs, and coordinate with on-call engineers.
-          </p>
-
-          <div className="grid md:grid-cols-2 gap-6">
-            <div>
-              <h4 className="text-sm font-medium text-foreground mb-3">Features</h4>
-              <ul className="space-y-2">
-                {[
-                  "Automatic incident task creation",
-                  "AI-powered root cause analysis",
-                  "Fix PR generation for known issues",
-                  "On-call engineer coordination",
-                ].map((item, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
-                    <Check className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div>
-              <h4 className="text-sm font-medium text-foreground mb-3">Setup</h4>
-              <ul className="space-y-2">
-                {[
-                  "Incident platform API key",
-                  "Service mapping configuration",
-                  "Runbook integration (optional)",
-                  "Escalation policy linking",
-                ].map((item, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
-                    <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Webhook Events */}
-      <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-          <Webhook className="w-5 h-5 text-purple-500" />
-          Outbound Webhooks
-        </h2>
-        <div className="bg-card border border-purple-500/30 rounded-xl p-6 space-y-4">
-          <p className="text-muted-foreground">
-            Receive real-time notifications about task status changes via webhooks to your own systems.
-          </p>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left py-3 text-foreground font-medium">Event</th>
-                  <th className="text-left py-3 text-foreground font-medium">Description</th>
-                  <th className="text-left py-3 text-foreground font-medium">Payload</th>
-                </tr>
-              </thead>
-              <tbody className="text-muted-foreground">
-                <tr className="border-b border-border">
-                  <td className="py-3"><code className="text-xs bg-muted px-2 py-0.5 rounded">task.created</code></td>
-                  <td className="py-3">New task queued</td>
-                  <td className="py-3">taskId, issueKey, summary</td>
-                </tr>
-                <tr className="border-b border-border">
-                  <td className="py-3"><code className="text-xs bg-muted px-2 py-0.5 rounded">task.claimed</code></td>
-                  <td className="py-3">Worker picked up the task</td>
-                  <td className="py-3">taskId, workerId, persona</td>
-                </tr>
-                <tr className="border-b border-border">
-                  <td className="py-3"><code className="text-xs bg-muted px-2 py-0.5 rounded">task.pr_created</code></td>
-                  <td className="py-3">Pull request was created</td>
-                  <td className="py-3">taskId, prUrl, branch</td>
-                </tr>
-                <tr className="border-b border-border">
-                  <td className="py-3"><code className="text-xs bg-muted px-2 py-0.5 rounded">task.completed</code></td>
-                  <td className="py-3">Task finished successfully</td>
-                  <td className="py-3">taskId, duration, cost, prUrl</td>
-                </tr>
-                <tr>
-                  <td className="py-3"><code className="text-xs bg-muted px-2 py-0.5 rounded">task.failed</code></td>
-                  <td className="py-3">Task encountered an error</td>
-                  <td className="py-3">taskId, error, retryCount</td>
-                </tr>
-              </tbody>
-            </table>
           </div>
         </div>
       </section>
@@ -702,7 +567,7 @@ export default function Integrations() {
             { name: "Asana", desc: "Enterprise project management", icon: Ticket, color: "text-orange-500" },
             { name: "ClickUp", desc: "All-in-one productivity", icon: Ticket, color: "text-pink-500" },
             { name: "Azure DevOps", desc: "Microsoft boards and repos", icon: Server, color: "text-blue-500" },
-            { name: "Email Digest", desc: "Daily/weekly summaries", icon: Mail, color: "text-cyan-500" },
+            { name: "PagerDuty", desc: "Incident response automation", icon: Bell, color: "text-green-500" },
           ].map((item) => (
             <div key={item.name} className="bg-card border border-border rounded-xl p-5 opacity-75">
               <div className="flex items-center gap-3 mb-3">

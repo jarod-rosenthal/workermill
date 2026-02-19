@@ -46,7 +46,7 @@ export interface PlanningAgentConfig {
 /** Default configuration (used when org settings not available) */
 const DEFAULT_CONFIG: PlanningAgentConfig = {
   provider: "anthropic",
-  model: "claude-sonnet-4-5-20250929",
+  model: "claude-sonnet-4-6",
   orgId: "", // Will use env vars if orgId not provided
 };
 

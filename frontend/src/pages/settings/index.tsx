@@ -107,7 +107,7 @@ export default function Settings() {
     maxReviewRevisions: 3,
     maxPerStoryRevisions: 2,
     planningAgentProvider: "anthropic",
-    planningAgentModel: "claude-sonnet-4-5-20250929",
+    planningAgentModel: "claude-sonnet-4-6",
     planningMode: "strict",
     storyCalibrationMultiplier: 0.4,
     costAlertThresholdUsd: null,

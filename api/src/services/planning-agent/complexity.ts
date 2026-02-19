@@ -279,7 +279,7 @@ export function selectModelForTask(
       // Org doesn't allow Opus, fall back to Sonnet if allowed
       if (org.allowSonnet) {
         return {
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-6",
           tier: "sonnet",
           reason: "User requested Opus but org disallows; falling back to Sonnet",
         };

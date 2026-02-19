@@ -492,7 +492,7 @@ router.post(
     if (labels.includes("opus")) {
       model = "claude-opus-4-6";
     } else if (labels.includes("sonnet")) {
-      model = "claude-sonnet-4-5-20250929";
+      model = "claude-sonnet-4-6";
     } else if (labels.includes("haiku")) {
       model = "claude-haiku-4-5-20251001";
     } else if (hasRouting && routing.model) {
@@ -892,7 +892,7 @@ router.post(
       if (labels.includes("opus")) {
         model = "claude-opus-4-6";
       } else if (labels.includes("sonnet")) {
-        model = "claude-sonnet-4-5-20250929";
+        model = "claude-sonnet-4-6";
       } else if (labels.includes("haiku")) {
         model = "claude-haiku-4-5-20251001";
       } else if (hasRouting && routing.model) {

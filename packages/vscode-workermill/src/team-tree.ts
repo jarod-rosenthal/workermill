@@ -26,6 +26,7 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
   private issues: IssueInfo[] = [];
   private connected = false;
   private issueLoadError: string | null = null;
+  agentConfigured = false;
 
   constructor(private client: AgentClient) {
     // Listen for task state changes
@@ -90,6 +91,9 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
 
   getChildren(element?: TreeItem): TreeItem[] {
     if (!this.connected) {
+      // If agent isn't configured, return empty so the viewsWelcome content shows
+      // (Sign up / Sign in / Manual setup buttons)
+      if (!this.agentConfigured) return [];
       return [new InfoTreeItem("Agent not connected", "Waiting for workermill-agent...", "$(plug)")];
     }
 

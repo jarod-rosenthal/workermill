@@ -736,6 +736,8 @@ export function activate(context: vscode.ExtensionContext): void {
       async () => {
         const success = await signUpWithGitHub(log);
         if (success) {
+          treeProvider.agentConfigured = true;
+          vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
           client.connect();
         }
       },
@@ -746,6 +748,8 @@ export function activate(context: vscode.ExtensionContext): void {
       async () => {
         const success = await signInWithGitHub(log);
         if (success) {
+          treeProvider.agentConfigured = true;
+          vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
           client.connect();
         }
       },
@@ -763,6 +767,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const configured = isAgentConfigured();
   log(`Agent binary: ${getAgentBinaryPath()}`);
   log(`Agent installed: ${installed}, configured: ${configured}`);
+  treeProvider.agentConfigured = configured;
   vscode.commands.executeCommand(
     "setContext",
     "workermill.agentConfigured",

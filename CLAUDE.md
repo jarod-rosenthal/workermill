@@ -120,6 +120,8 @@ The `worker/epic/*.ts` files are **compiled by `tsc`** during the Docker build. 
 
 ***REMOVED******REMOVED*** Quick Reference
 
+**Ports:** API: 3001, Frontend: 5173, Local DB: 5433
+
 | Task | Command |
 |------|---------|
 | Type check API | `cd api && npm run typecheck` |
@@ -134,7 +136,9 @@ The `worker/epic/*.ts` files are **compiled by `tsc`** during the Docker build. 
 | Build workermill-mcp | `cd packages/workermill-mcp && npm run build` |
 | Build oncallshift-mcp | `cd packages/oncallshift-mcp && npm run build` |
 | Lint API | `cd api && npm run lint` |
+| Fix lint (API) | `cd api && npm run lint -- --fix` |
 | Lint frontend | `cd frontend && npm run lint` |
+| Fix lint (frontend) | `cd frontend && npm run lint -- --fix` |
 | Run API tests (Vitest) | `cd api && npm run test` |
 | Run single API test | `cd api && npx vitest run src/routes/tasks.test.ts` |
 | Run API tests (watch) | `cd api && npm run test:watch` |

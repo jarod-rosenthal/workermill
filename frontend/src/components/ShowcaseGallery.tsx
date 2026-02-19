@@ -73,7 +73,7 @@ const showcaseProjects: ShowcaseProject[] = [
       "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time updates, workspace dashboards, and activity feeds. 5 stories, all approved. Deployed to Vercel.",
     stack: "Next.js 15 + Prisma + TailwindCSS + Neon PostgreSQL",
     storyCount: 5,
-    cost: "Claude Max",
+    cost: "$175*",
     duration: "~6 hrs",
     repoUrl: "https://github.com/workermill-examples/teamboard",
     liveUrl: "https://teamboard.workermill.com",
@@ -87,8 +87,8 @@ const showcaseProjects: ShowcaseProject[] = [
     description:
       "On-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens.",
     stack: "Express + TypeScript + React + React Native + Terraform",
-    storyCount: 153,
-    cost: "Claude Max",
+    storyCount: 13,
+    cost: "$455*",
     duration: "~18 hrs",
     liveUrl: "https://oncallshift.com",
     category: "incident-management",
@@ -327,7 +327,9 @@ export default function ShowcaseGallery() {
         {/* Bottom note */}
         <div className="text-center mt-12 mb-12">
           <p className="text-sm text-muted-foreground">
-            Costs shown are API usage at standard rates. Use{" "}
+            Costs shown are API usage at standard rates.{" "}
+            <span className="text-slate-500">*Estimated API-equivalent cost — built with Claude Max.</span>{" "}
+            Use{" "}
             <span className="text-amber-400 font-semibold">Claude Max</span>{" "}
             ($100/mo) for unlimited tasks at zero per-token cost.
           </p>

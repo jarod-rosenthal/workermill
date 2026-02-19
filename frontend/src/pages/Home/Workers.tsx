@@ -1,89 +1,65 @@
-import { Sparkles } from "lucide-react";
+import { Plus, Sparkles } from "lucide-react";
 
 const workerPersonas = [
   {
-    id: "frontend_developer",
-    emoji: "🎨",
-    title: "Frontend Developer",
-    description: "React components, UI/UX, styling, and accessibility",
+    id: "architect",
+    emoji: "🏗️",
+    title: "Architect",
+    description: "System decomposition, task planning, and technical design",
   },
   {
     id: "backend_developer",
     emoji: "💻",
     title: "Backend Developer",
-    description: "APIs, database design, server logic, and integrations",
+    description: "APIs, databases, GraphQL, OpenAPI, and query optimization",
   },
   {
-    id: "api_developer",
-    emoji: "🔌",
-    title: "API Developer",
-    description: "REST/GraphQL APIs, OpenAPI specs, and API integrations",
+    id: "frontend_developer",
+    emoji: "🎨",
+    title: "Frontend Developer",
+    description: "React, TypeScript, Tailwind, accessibility, and design systems",
+  },
+  {
+    id: "mobile_developer",
+    emoji: "📱",
+    title: "Mobile Developer",
+    description: "iOS (Swift, SwiftUI), Android (Kotlin, Compose), and React Native",
   },
   {
     id: "devops_engineer",
     emoji: "🔧",
     title: "DevOps Engineer",
-    description: "Infrastructure, CI/CD, Docker, and cloud deployments",
+    description: "Terraform, Docker, CI/CD, GitOps, and cloud infrastructure",
   },
   {
     id: "security_engineer",
-    emoji: "🔒",
+    emoji: "🛡️",
     title: "Security Engineer",
-    description: "Security audits, vulnerability fixes, and compliance",
+    description: "OWASP, threat modeling, supply chain security, and compliance",
   },
   {
     id: "qa_engineer",
     emoji: "🧪",
     title: "QA Engineer",
-    description: "Test writing, quality assurance, and bug verification",
+    description: "Test automation, contract testing, load testing, and accessibility",
   },
   {
-    id: "database_administrator",
-    emoji: "💾",
-    title: "Database Administrator",
-    description: "Database optimization, migrations, and data modeling",
-  },
-  {
-    id: "data_engineer",
+    id: "data_ml_engineer",
     emoji: "📊",
-    title: "Data Engineer",
-    description: "Data pipelines, ETL processes, and analytics infrastructure",
-  },
-  {
-    id: "ml_engineer",
-    emoji: "🤖",
-    title: "ML Engineer",
-    description: "Machine learning models, training pipelines, and AI integration",
-  },
-  {
-    id: "mobile_developer_ios",
-    emoji: "🍎",
-    title: "iOS Developer",
-    description: "Swift/SwiftUI apps, iOS frameworks, and App Store deployment",
-  },
-  {
-    id: "mobile_developer_android",
-    emoji: "🤖",
-    title: "Android Developer",
-    description: "Kotlin/Jetpack apps, Android SDK, and Play Store deployment",
-  },
-  {
-    id: "integration_specialist",
-    emoji: "🔗",
-    title: "Integration Specialist",
-    description: "API integrations, webhook setup, third-party service connectors, and data sync pipelines",
+    title: "Data & ML Engineer",
+    description: "ETL pipelines, model training, MLOps, and LLM applications",
   },
   {
     id: "tech_writer",
     emoji: "📝",
     title: "Technical Writer",
-    description: "Documentation, API docs, and developer guides",
+    description: "API documentation, developer guides, and technical diagrams",
   },
   {
     id: "project_manager",
     emoji: "📋",
     title: "Project Manager",
-    description: "Task breakdown, ticket creation, and status updates",
+    description: "Task breakdown, sprint planning, and release coordination",
   },
 ];
 
@@ -109,7 +85,9 @@ export default function Workers() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            A complete development team that coordinates like real experts. Create custom personas like <code className="text-primary">unity_game_dev</code> or <code className="text-primary">shopify_expert</code> for your stack.
+            12 expert personas out of the box — or create your own. Build a{" "}
+            <code className="text-primary">unity_game_dev</code>,{" "}
+            <code className="text-primary">shopify_expert</code>, or any specialist your stack needs with Persona Studio.
           </p>
         </div>
 
@@ -179,17 +157,42 @@ export default function Workers() {
               </div>
             </div>
           </div>
+
+          {/* Create Your Own - CTA card */}
+          <div className="relative group">
+            <div className="absolute inset-0 bg-gradient-to-r from-accent/20 to-primary/20 rounded-xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+            <div className="relative bg-card border-2 border-dashed border-muted-foreground/30 rounded-xl p-6 hover:border-primary/50 transition-all duration-300 flex flex-col items-center justify-center text-center h-full">
+              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
+                <Plus className="w-6 h-6 text-primary" />
+              </div>
+
+              <h3 className="font-semibold text-foreground mb-2">
+                Create Your Own
+              </h3>
+
+              <p className="text-sm text-muted-foreground leading-relaxed mb-3">
+                Build custom personas for your domain with Persona Studio
+              </p>
+
+              <div className="flex flex-wrap gap-1.5 justify-center">
+                <span className="px-2 py-0.5 bg-muted rounded text-xs text-muted-foreground">unity_game_dev</span>
+                <span className="px-2 py-0.5 bg-muted rounded text-xs text-muted-foreground">shopify_expert</span>
+                <span className="px-2 py-0.5 bg-muted rounded text-xs text-muted-foreground">rails_engineer</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Bottom note */}
         <div className="text-center space-y-2">
           <p className="text-sm text-muted-foreground">
             <span className="text-foreground font-medium">Any provider, every expert:</span>{" "}
-            Route each persona to different AI providers. Use your preferred models for each role - Anthropic, OpenAI, Google, Ollama, or OpenRouter.
+            Route each persona to different AI providers — Anthropic, OpenAI, Google, or Ollama.
           </p>
           <p className="text-sm text-muted-foreground">
-            <span className="text-foreground font-medium">Persona Studio:</span>{" "}
-            Create custom personas with your own directives, scripts, and domain knowledge.
+            <span className="text-foreground font-medium">Custom personas:</span>{" "}
+            Define your own directives, execution scripts, and domain knowledge. Your personas work alongside the built-in experts.
           </p>
         </div>
       </div>

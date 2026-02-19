@@ -24,7 +24,7 @@ import {
 import { teamBoardEpics } from "../data/teamboard-showcase-data";
 import { taskPulseEpics } from "../data/taskpulse-showcase-data";
 import { calMillEpics } from "../data/calmill-showcase-data";
-import { onCallShiftEpics } from "../data/oncallshift-showcase-data";
+
 
 interface QualityScores {
   lint: string;
@@ -65,13 +65,14 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     id: "oncallshift",
     name: "OnCallShift",
     tagline:
-      "Production incident management platform — built across 13 sequential epics by AI workers.",
+      "Production incident management platform — 177K lines across 3 repos, built entirely by WorkerMill.",
     description:
-      "Production incident management platform: on-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 68 database models, 40 API routes, 75 frontend pages, 31 mobile screens. 13 epics executed sequentially, each building on the last. Deployed to AWS at oncallshift.com.",
+      "Production incident management platform: on-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens across oncallshift-api, oncallshift-web, and oncallshift-mobile. Deployed to AWS at oncallshift.com. Built during early WorkerMill development — build logs predate the current showcase system.",
     stack: "Express + TypeScript + React + React Native + Terraform",
     storyCount: 153,
     cost: "Claude Max",
     duration: "~18 hrs",
+    linesOfCode: "177,000",
     liveUrl: "https://oncallshift.com",
     category: "incident-management",
     personasUsed: [
@@ -101,7 +102,7 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     storyCount: 44,
     cost: "Claude Max",
     duration: "~354 min",
-    linesOfCode: "22,000",
+    linesOfCode: "28,000",
     repoUrl: "https://github.com/workermill-examples/teamboard",
     liveUrl: "https://teamboard.workermill.com",
     category: "saas",
@@ -110,12 +111,12 @@ const showcaseData: Record<string, ShowcaseDetail> = {
       "frontend_developer",
       "qa_engineer",
       "devops_engineer",
-      "database_administrator",
+      "backend_developer",
     ],
     qualityScores: {
       lint: "0 errors",
       types: "0 errors (3342 → 0)",
-      tests: "279 unit + 56 E2E",
+      tests: "280 unit + 120 E2E",
       security: "0 critical",
     },
     stories: [],
@@ -132,7 +133,7 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     storyCount: 36,
     cost: "Claude Max",
     duration: "~310 min",
-    linesOfCode: "11,700",
+    linesOfCode: "17,000",
     repoUrl: "https://github.com/workermill-examples/taskpulse",
     liveUrl: "https://taskpulse.workermill.com",
     category: "monitoring",
@@ -141,14 +142,12 @@ const showcaseData: Record<string, ShowcaseDetail> = {
       "frontend_developer",
       "qa_engineer",
       "devops_engineer",
-      "database_administrator",
       "security_engineer",
-      "api_developer",
     ],
     qualityScores: {
       lint: "0 errors",
       types: "0 errors",
-      tests: "101 unit tests",
+      tests: "74 unit + 66 E2E",
       security: "0 critical",
     },
     stories: [],
@@ -160,12 +159,12 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     tagline:
       "Open scheduling platform — built across 8 sequential epics by AI workers.",
     description:
-      "Full-stack scheduling platform with event types, timezone-aware availability, public booking pages, team round-robin scheduling, Google Calendar integration, email notifications, and 202 unit tests. 8 epics executed sequentially, each building on the last. Deployed to Vercel at calmill.workermill.com.",
+      "Full-stack scheduling platform with event types, timezone-aware availability, public booking pages, team round-robin scheduling, Google Calendar integration, email notifications, and 499 tests (202 unit + 297 E2E). 8 epics executed sequentially, each building on the last. Deployed to Vercel at calmill.workermill.com.",
     stack: "Next.js 16 + Prisma 7 + TailwindCSS 4 + Neon PostgreSQL",
     storyCount: 48,
     cost: "Claude Max",
     duration: "~434 min",
-    linesOfCode: "29,000",
+    linesOfCode: "41,000",
     repoUrl: "https://github.com/workermill-examples/calmill",
     liveUrl: "https://calmill.workermill.com",
     category: "scheduling",
@@ -174,13 +173,12 @@ const showcaseData: Record<string, ShowcaseDetail> = {
       "frontend_developer",
       "qa_engineer",
       "devops_engineer",
-      "database_administrator",
       "security_engineer",
     ],
     qualityScores: {
       lint: "0 errors",
       types: "0 errors",
-      tests: "202 unit + E2E",
+      tests: "202 unit + 297 E2E",
       security: "0 critical",
     },
     stories: [],
@@ -195,7 +193,9 @@ const personaLabels: Record<string, { label: string; color: string }> = {
   security_engineer: { label: "Security", color: "text-red-400" },
   qa_engineer: { label: "QA", color: "text-green-400" },
   tech_writer: { label: "Docs", color: "text-cyan-400" },
-  database_administrator: { label: "DBA", color: "text-yellow-400" },
+  architect: { label: "Architect", color: "text-violet-400" },
+  data_ml_engineer: { label: "Data/ML", color: "text-teal-400" },
+  mobile_developer: { label: "Mobile", color: "text-green-400" },
 };
 
 function PersonaBadge({ persona }: { persona: string }) {
@@ -221,14 +221,12 @@ export default function ShowcaseViewer() {
   const isTeamBoard = projectId === "teamboard";
   const isTaskPulse = projectId === "taskpulse";
   const isCalMill = projectId === "calmill";
-  const isEpicBoard = isOnCallShift || isTeamBoard || isTaskPulse || isCalMill;
-  const epicBoardData = isOnCallShift
-    ? onCallShiftEpics
-    : isTeamBoard
-      ? teamBoardEpics
-      : isCalMill
-        ? calMillEpics
-        : taskPulseEpics;
+  const isEpicBoard = isTeamBoard || isTaskPulse || isCalMill;
+  const epicBoardData = isTeamBoard
+    ? teamBoardEpics
+    : isCalMill
+      ? calMillEpics
+      : taskPulseEpics;
   const [expandedEpic, setExpandedEpic] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Record<string, "spec" | "log">>(
     {},

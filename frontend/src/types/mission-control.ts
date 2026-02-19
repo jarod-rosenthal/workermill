@@ -2,6 +2,7 @@
 
 // Worker Personas
 export type WorkerPersona =
+  | 'architect'
   | 'frontend_developer'
   | 'backend_developer'
   | 'devops_engineer'
@@ -9,12 +10,8 @@ export type WorkerPersona =
   | 'qa_engineer'
   | 'tech_writer'
   | 'project_manager'
-  | 'data_engineer'
-  | 'ml_engineer'
-  | 'mobile_developer_ios'
-  | 'mobile_developer_android'
-  | 'api_developer'
-  | 'database_administrator'
+  | 'data_ml_engineer'
+  | 'mobile_developer'
   | 'manager';
 
 export interface PersonaConfig {
@@ -27,6 +24,14 @@ export interface PersonaConfig {
 }
 
 export const PERSONA_CONFIGS: Record<WorkerPersona, PersonaConfig> = {
+  architect: {
+    id: 'architect',
+    emoji: '🏗️',
+    label: 'Architect',
+    shortLabel: 'Architect',
+    skills: ['System Design', 'Decomposition', 'Planning', 'Architecture'],
+    riskLevel: 'medium',
+  },
   frontend_developer: {
     id: 'frontend_developer',
     emoji: '🎨',
@@ -53,7 +58,7 @@ export const PERSONA_CONFIGS: Record<WorkerPersona, PersonaConfig> = {
   },
   security_engineer: {
     id: 'security_engineer',
-    emoji: '🔒',
+    emoji: '🛡️',
     label: 'Security Engineer',
     shortLabel: 'Security',
     skills: ['OWASP', 'Penetration Testing', 'IAM', 'Encryption'],
@@ -83,53 +88,21 @@ export const PERSONA_CONFIGS: Record<WorkerPersona, PersonaConfig> = {
     skills: ['Jira', 'Project Planning', 'Stakeholder Management'],
     riskLevel: 'low',
   },
-  data_engineer: {
-    id: 'data_engineer',
+  data_ml_engineer: {
+    id: 'data_ml_engineer',
     emoji: '📊',
-    label: 'Data Engineer',
-    shortLabel: 'Data',
-    skills: ['ETL', 'dbt', 'Airflow', 'SQL', 'Data Pipelines'],
+    label: 'Data & ML Engineer',
+    shortLabel: 'Data/ML',
+    skills: ['ETL', 'dbt', 'PyTorch', 'MLOps', 'SQL'],
     riskLevel: 'medium',
   },
-  ml_engineer: {
-    id: 'ml_engineer',
-    emoji: '🤖',
-    label: 'ML Engineer',
-    shortLabel: 'ML',
-    skills: ['PyTorch', 'MLflow', 'Model Training', 'Feature Engineering'],
-    riskLevel: 'medium',
-  },
-  mobile_developer_ios: {
-    id: 'mobile_developer_ios',
+  mobile_developer: {
+    id: 'mobile_developer',
     emoji: '📱',
-    label: 'iOS Developer',
-    shortLabel: 'iOS',
-    skills: ['Swift', 'SwiftUI', 'UIKit', 'Core Data'],
-    riskLevel: 'low',
-  },
-  mobile_developer_android: {
-    id: 'mobile_developer_android',
-    emoji: '🤖',
-    label: 'Android Developer',
-    shortLabel: 'Android',
-    skills: ['Kotlin', 'Jetpack Compose', 'Android SDK'],
-    riskLevel: 'low',
-  },
-  api_developer: {
-    id: 'api_developer',
-    emoji: '🔌',
-    label: 'API Developer',
-    shortLabel: 'API',
-    skills: ['REST', 'GraphQL', 'OpenAPI', 'API Design'],
+    label: 'Mobile Developer',
+    shortLabel: 'Mobile',
+    skills: ['Swift', 'Kotlin', 'SwiftUI', 'Jetpack Compose', 'React Native'],
     riskLevel: 'medium',
-  },
-  database_administrator: {
-    id: 'database_administrator',
-    emoji: '💾',
-    label: 'Database Administrator',
-    shortLabel: 'DBA',
-    skills: ['PostgreSQL', 'MySQL', 'Query Optimization', 'Migrations'],
-    riskLevel: 'high',
   },
   manager: {
     id: 'manager',

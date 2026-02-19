@@ -797,17 +797,17 @@ ${
             `- \`${p.slug}\` — ${p.description || p.name}${p.specialties.length > 0 ? ` (${p.specialties.join(", ")})` : ""}`,
         )
         .join("\n")
-    : `- \`frontend_developer\` — React, CSS, UI components, browser APIs
-- \`backend_developer\` — Server-side logic, APIs, databases, business logic
-- \`api_developer\` — API design, REST/GraphQL endpoints, integrations
-- \`devops_engineer\` — CI/CD, Docker, infrastructure, deployment, migrations
-- \`security_engineer\` — Auth, encryption, vulnerability fixes, security audits
-- \`qa_engineer\` — Tests, test infrastructure, E2E, integration tests
-- \`database_administrator\` — Schema design, migrations, query optimization
-- \`data_engineer\` — Data pipelines, ETL, data processing
-- \`ml_engineer\` — Machine learning, model training, AI features
-- \`mobile_developer_ios\` — iOS/Swift development
-- \`mobile_developer_android\` — Android/Kotlin development`
+    : `- \`architect\` — System decomposition, task planning, architecture design
+- \`backend_developer\` — REST APIs, database, server-side logic, GraphQL, OpenAPI, query optimization
+- \`frontend_developer\` — React, TypeScript, Tailwind, UI components, accessibility
+- \`mobile_developer\` — iOS (Swift, SwiftUI), Android (Kotlin, Jetpack Compose), React Native
+- \`devops_engineer\` — Terraform, Docker, CI/CD, AWS, infrastructure
+- \`security_engineer\` — OWASP, vulnerability assessment, security auditing
+- \`qa_engineer\` — Test automation, Playwright, Jest, quality assurance
+- \`data_ml_engineer\` — ETL/ELT, data pipelines, ML model training, MLOps
+- \`tech_writer\` — Documentation, API docs, technical guides
+- \`tech_lead\` — Code review, architecture review, quality gate
+- \`project_manager\` — Task breakdown, planning, coordination`
 }
 
 Do NOT invent personas (e.g., "fullstack_developer" does not exist). For full-stack work, split into \`backend_developer\` and \`frontend_developer\` stories.
@@ -816,7 +816,7 @@ Do NOT invent personas (e.g., "fullstack_developer" does not exist). For full-st
 
 - **No circular dependencies.** If A depends on B, B must not depend on A (directly or transitively).
 - **No operational stories.** \`npm install\`, \`npx prisma generate\`, etc. are NOT stories — include them as pre-step instructions in the story that needs the output.
-- **Maximize parallelism via persona diversity.** Each unique persona runs as a separate parallel expert. Stories with the SAME persona execute SEQUENTIALLY. To maximize throughput, assign different personas to independent stories (e.g., \`backend_developer\` for API routes, \`frontend_developer\` for UI, \`database_administrator\` for schema). Maximum ${input.maxParallelExperts ?? 4} experts run in parallel.
+- **Maximize parallelism via persona diversity.** Each unique persona runs as a separate parallel expert. Stories with the SAME persona execute SEQUENTIALLY. To maximize throughput, assign different personas to independent stories (e.g., \`backend_developer\` for API routes, \`frontend_developer\` for UI, \`devops_engineer\` for infrastructure). Maximum ${input.maxParallelExperts ?? 4} experts run in parallel.
 - **targetFiles must be COMPLETE.** List EVERY file the story will create or modify — incomplete lists cause workers to skip files.
 - **No overlapping targetFiles.** Two stories MUST NOT list the same file in their targetFiles — they execute in parallel worktrees, so concurrent edits to the same file cause merge conflicts. If multiple stories need the same file, put ALL changes to that file in ONE foundational story and make the others depend on it.
 - **Story descriptions are scope labels, not specs.** Each expert reads the ORIGINAL TICKET as their spec. Descriptions say which area of the codebase the expert owns (e.g., "Database layer — migrations and entity definitions. Adds the new user_preferences table and TypeORM entity."). Do NOT rewrite acceptance criteria.

@@ -11,6 +11,7 @@ import { IsNull } from "typeorm";
 
 // System persona type (built-in personas)
 export type SystemPersona =
+  | "architect"
   | "frontend_developer"
   | "backend_developer"
   | "devops_engineer"
@@ -20,12 +21,8 @@ export type SystemPersona =
   | "project_manager"
   | "manager"
   | "tech_lead"
-  | "api_developer"
-  | "data_engineer"
-  | "database_administrator"
-  | "ml_engineer"
-  | "mobile_developer_ios"
-  | "mobile_developer_android";
+  | "data_ml_engineer"
+  | "mobile_developer";
 
 interface JiraIssue {
   summary?: string;
@@ -46,10 +43,12 @@ interface OrgInferenceRules {
  * Higher matches = stronger fit
  */
 const SYSTEM_PERSONA_KEYWORDS: Record<SystemPersona, RegExp> = {
+  architect:
+    /\b(architecture|system design|decompose|plan|technical design|tradeoff|rfc)\b/gi,
   frontend_developer:
     /\b(react|component|ui|ux|frontend|css|tailwind|mobile|react native|expo|vite|tailwindcss|button|form|modal|page|screen)\b/gi,
   backend_developer:
-    /\b(api|endpoint|typeorm|sql|backend|server|lambda|express|route|controller|database|migration|model)\b/gi,
+    /\b(api|endpoint|typeorm|sql|backend|server|lambda|express|route|controller|database|migration|model|rest api|graphql|openapi|swagger|sdk|api design|api contract|endpoint design|api versioning|dba|database admin|postgres|mysql|index|indexing|query optimization|replication|backup|recovery|schema)\b/gi,
   devops_engineer:
     /\b(terraform|infrastructure|cicd|deployment|docker|kubernetes|aws|cloudfront|s3|rds|cloudwatch|ecs|ecr|vpc|iam|github actions)\b/gi,
   security_engineer:
@@ -63,25 +62,18 @@ const SYSTEM_PERSONA_KEYWORDS: Record<SystemPersona, RegExp> = {
   manager:
     /\b(manage|management|manager|oversee|delegate|strategy|stakeholder|resource allocation)\b/gi,
   tech_lead:
-    /\b(review|architecture|code review|pr review|tech lead|lead|architect|design pattern|refactor|technical debt)\b/gi,
-  api_developer:
-    /\b(rest api|graphql|openapi|swagger|sdk|api design|api contract|endpoint design|api versioning)\b/gi,
-  data_engineer:
-    /\b(etl|pipeline|data pipeline|dbt|airflow|dagster|kafka|streaming|data warehouse|data lake|spark)\b/gi,
-  database_administrator:
-    /\b(dba|database admin|postgres|mysql|index|indexing|query optimization|replication|backup|recovery|schema)\b/gi,
-  ml_engineer:
-    /\b(machine learning|ml|tensorflow|pytorch|model|training|llm|ai model|mlops|feature engineering)\b/gi,
-  mobile_developer_ios:
-    /\b(ios|swift|swiftui|uikit|xcode|cocoapods|core data|apple|iphone|ipad)\b/gi,
-  mobile_developer_android:
-    /\b(android|kotlin|jetpack|compose|gradle|room|retrofit|hilt|dagger|google play)\b/gi,
+    /\b(review|code review|pr review|tech lead|lead|design pattern|refactor|technical debt)\b/gi,
+  data_ml_engineer:
+    /\b(etl|pipeline|data pipeline|dbt|airflow|dagster|kafka|streaming|data warehouse|data lake|spark|machine learning|ml|tensorflow|pytorch|model|training|llm|ai model|mlops|feature engineering)\b/gi,
+  mobile_developer:
+    /\b(ios|swift|swiftui|uikit|xcode|cocoapods|core data|apple|iphone|ipad|android|kotlin|jetpack|compose|gradle|room|retrofit|hilt|dagger|google play|react native|flutter)\b/gi,
 };
 
 /**
  * Default label shortcuts for system personas
  */
 const SYSTEM_LABEL_TO_PERSONA: Record<string, SystemPersona> = {
+  architect: "architect",
   backend: "backend_developer",
   frontend: "frontend_developer",
   devops: "devops_engineer",
@@ -96,21 +88,22 @@ const SYSTEM_LABEL_TO_PERSONA: Record<string, SystemPersona> = {
   manager: "manager",
   lead: "tech_lead",
   techlead: "tech_lead",
-  architect: "tech_lead",
-  api: "api_developer",
-  data: "data_engineer",
-  etl: "data_engineer",
-  dba: "database_administrator",
-  database: "database_administrator",
-  ml: "ml_engineer",
-  ai: "ml_engineer",
-  ios: "mobile_developer_ios",
-  android: "mobile_developer_android",
-  mobile_ios: "mobile_developer_ios",
-  mobile_android: "mobile_developer_android",
+  api: "backend_developer",
+  data: "data_ml_engineer",
+  etl: "data_ml_engineer",
+  dba: "backend_developer",
+  database: "backend_developer",
+  ml: "data_ml_engineer",
+  ai: "data_ml_engineer",
+  ios: "mobile_developer",
+  android: "mobile_developer",
+  mobile: "mobile_developer",
+  mobile_ios: "mobile_developer",
+  mobile_android: "mobile_developer",
 };
 
 export const SYSTEM_PERSONAS: SystemPersona[] = [
+  "architect",
   "frontend_developer",
   "backend_developer",
   "devops_engineer",
@@ -120,12 +113,8 @@ export const SYSTEM_PERSONAS: SystemPersona[] = [
   "project_manager",
   "manager",
   "tech_lead",
-  "api_developer",
-  "data_engineer",
-  "database_administrator",
-  "ml_engineer",
-  "mobile_developer_ios",
-  "mobile_developer_android",
+  "data_ml_engineer",
+  "mobile_developer",
 ];
 
 /**
@@ -643,6 +632,7 @@ export function getPersonaRationale(
  */
 export function getPersonaDisplayName(persona: string): string {
   const names: Record<string, string> = {
+    architect: "Architect",
     frontend_developer: "Frontend Developer",
     backend_developer: "Backend Developer",
     devops_engineer: "DevOps Engineer",
@@ -652,12 +642,8 @@ export function getPersonaDisplayName(persona: string): string {
     project_manager: "Project Manager",
     manager: "Manager",
     tech_lead: "Tech Lead",
-    api_developer: "API Developer",
-    data_engineer: "Data Engineer",
-    database_administrator: "Database Administrator",
-    ml_engineer: "ML Engineer",
-    mobile_developer_ios: "iOS Developer",
-    mobile_developer_android: "Android Developer",
+    data_ml_engineer: "Data & ML Engineer",
+    mobile_developer: "Mobile Developer",
   };
   // Return custom name or format slug
   return (
@@ -678,10 +664,12 @@ export function getPersonaDisplayName(persona: string): string {
  * The actual inference uses compiled RegExp objects internally
  */
 export const PERSONA_KEYWORDS: Record<string, string> = {
+  architect:
+    "architecture|system design|decompose|plan|technical design|tradeoff|rfc",
   frontend_developer:
     "react|component|ui|ux|frontend|css|tailwind|mobile|react native|expo|vite|tailwindcss|button|form|modal|page|screen",
   backend_developer:
-    "api|endpoint|typeorm|sql|backend|server|lambda|express|route|controller|database|migration|model",
+    "api|endpoint|typeorm|sql|backend|server|lambda|express|route|controller|database|migration|model|rest api|graphql|openapi|swagger|sdk|api design|api contract|endpoint design|api versioning|dba|database admin|postgres|mysql|index|indexing|query optimization|replication|backup|recovery|schema",
   devops_engineer:
     "terraform|infrastructure|cicd|deployment|docker|kubernetes|aws|cloudfront|s3|rds|cloudwatch|ecs|ecr|vpc|iam|github actions",
   security_engineer:
@@ -695,17 +683,9 @@ export const PERSONA_KEYWORDS: Record<string, string> = {
   manager:
     "manage|management|manager|oversee|delegate|strategy|stakeholder|resource allocation",
   tech_lead:
-    "review|architecture|code review|pr review|tech lead|lead|architect|design pattern|refactor|technical debt",
-  api_developer:
-    "rest api|graphql|openapi|swagger|sdk|api design|api contract|endpoint design|api versioning",
-  data_engineer:
-    "etl|pipeline|data pipeline|dbt|airflow|dagster|kafka|streaming|data warehouse|data lake|spark",
-  database_administrator:
-    "dba|database admin|postgres|mysql|index|indexing|query optimization|replication|backup|recovery|schema",
-  ml_engineer:
-    "machine learning|ml|tensorflow|pytorch|model|training|llm|ai model|mlops|feature engineering",
-  mobile_developer_ios:
-    "ios|swift|swiftui|uikit|xcode|cocoapods|core data|apple|iphone|ipad",
-  mobile_developer_android:
-    "android|kotlin|jetpack|compose|gradle|room|retrofit|hilt|dagger|google play",
+    "review|code review|pr review|tech lead|lead|design pattern|refactor|technical debt",
+  data_ml_engineer:
+    "etl|pipeline|data pipeline|dbt|airflow|dagster|kafka|streaming|data warehouse|data lake|spark|machine learning|ml|tensorflow|pytorch|model|training|llm|ai model|mlops|feature engineering",
+  mobile_developer:
+    "ios|swift|swiftui|uikit|xcode|cocoapods|core data|apple|iphone|ipad|android|kotlin|jetpack|compose|gradle|room|retrofit|hilt|dagger|google play|react native|flutter",
 };

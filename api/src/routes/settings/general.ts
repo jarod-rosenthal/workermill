@@ -450,22 +450,19 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     if (defaultWorkerPersona !== undefined) {
       const validPersonas = [
         "auto",
-        "frontend_developer",
+        "architect",
         "backend_developer",
+        "frontend_developer",
         "devops_engineer",
         "security_engineer",
         "qa_engineer",
         "tech_writer",
         "project_manager",
-        "api_developer",
-        "database_administrator",
-        "ml_engineer",
-        "data_engineer",
-        "mobile_developer_ios",
-        "mobile_developer_android",
         "tech_lead",
-        "support_agent",
+        "data_ml_engineer",
+        "mobile_developer",
         "manager",
+        "support_agent",
       ];
       if (!validPersonas.includes(defaultWorkerPersona)) {
         res.status(400).json({ error: "Invalid defaultWorkerPersona" });
@@ -500,13 +497,19 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       }
       const validProviders = ["anthropic", "openai", "google", "ollama", "openrouter", "groq", "deepseek", "mistral", "xai", "bedrock", "azure"];
       const validPersonas = [
-        "frontend_developer",
+        "architect",
         "backend_developer",
+        "frontend_developer",
         "devops_engineer",
         "security_engineer",
         "qa_engineer",
         "tech_writer",
         "project_manager",
+        "tech_lead",
+        "data_ml_engineer",
+        "mobile_developer",
+        "manager",
+        "support_agent",
       ];
       for (const [persona, config] of Object.entries(providerRouting)) {
         if (!validPersonas.includes(persona)) {

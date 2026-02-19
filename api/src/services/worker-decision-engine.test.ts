@@ -502,11 +502,11 @@ describe("routeQuestion", () => {
   it("routes by keyword matching (tier 2) - database", () => {
     const result = routeQuestion({
       question: "How should I handle this SQL migration?",
-      idleExperts: ["database_administrator", "backend_developer"],
-      allExperts: ["database_administrator", "backend_developer"],
+      idleExperts: ["backend_developer", "frontend_developer"],
+      allExperts: ["backend_developer", "frontend_developer"],
     });
 
-    expect(result.targetExpert).toBe("database_administrator");
+    expect(result.targetExpert).toBe("backend_developer");
     expect(result.routingTier).toBe(2);
   });
 
@@ -546,11 +546,11 @@ describe("routeQuestion", () => {
   it("routes by keyword matching (tier 2) - api", () => {
     const result = routeQuestion({
       question: "The REST endpoint is returning 500 errors",
-      idleExperts: ["api_developer", "backend_developer"],
-      allExperts: ["api_developer", "backend_developer"],
+      idleExperts: ["backend_developer", "frontend_developer"],
+      allExperts: ["backend_developer", "frontend_developer"],
     });
 
-    expect(result.targetExpert).toBe("api_developer");
+    expect(result.targetExpert).toBe("backend_developer");
     expect(result.routingTier).toBe(2);
   });
 
@@ -572,19 +572,19 @@ describe("routeQuestion", () => {
         "support_agent",
         "project_manager",
         "tech_writer",
-        "ml_engineer",
+        "data_ml_engineer",
         "backend_developer",
       ],
       allExperts: [
         "support_agent",
         "project_manager",
         "tech_writer",
-        "ml_engineer",
+        "data_ml_engineer",
         "backend_developer",
       ],
     });
 
-    expect(result.targetExpert).toBe("backend_developer");
+    expect(result.targetExpert).toBe("data_ml_engineer");
     expect(result.routingTier).toBe(3);
   });
 
@@ -744,7 +744,7 @@ describe("getWorkerConfig", () => {
   it("returns persona icons", async () => {
     const config = await getWorkerConfig();
     expect(config.personaIcons.frontend_developer).toBe("\uD83C\uDFA8");
-    expect(config.personaIcons.backend_developer).toBe("\u2699\uFE0F");
+    expect(config.personaIcons.backend_developer).toBe("\uD83D\uDCBB");
     expect(config.personaIcons.devops_engineer).toBe("\uD83D\uDD27");
     expect(config.personaIcons.security_engineer).toBe("\uD83D\uDD12");
     expect(config.personaIcons.qa_engineer).toBe("\uD83E\uDDEA");

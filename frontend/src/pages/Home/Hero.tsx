@@ -42,7 +42,7 @@ const terminalScripts = [
   ],
 ];
 
-const taskEmojis = ["🎨", "💻", "🔧", "🔒", "🧪", "📊"];
+const taskEmojis = ["🎨", "💻", "🔧", "🛡️", "🧪", "📊"];
 const taskColors = [
   "from-purple-500",
   "from-blue-500",

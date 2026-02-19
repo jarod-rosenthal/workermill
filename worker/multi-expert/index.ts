@@ -90,12 +90,9 @@ function getExpertConfigForPersona(persona: string): { systemPrompt: string } | 
     security_engineer: "You are an expert security engineer specializing in vulnerability assessment and secure coding practices.",
     qa_engineer: "You are an expert QA engineer specializing in testing strategies, test automation, and quality assurance.",
     tech_writer: "You are an expert technical writer specializing in documentation, API docs, and developer guides.",
-    api_developer: "You are an expert API developer specializing in REST, GraphQL, and API design patterns.",
-    database_administrator: "You are an expert database administrator specializing in SQL, database optimization, and data modeling.",
-    ml_engineer: "You are an expert machine learning engineer specializing in ML models, data pipelines, and AI systems.",
-    data_engineer: "You are an expert data engineer specializing in data pipelines, ETL processes, and data infrastructure.",
-    mobile_developer_ios: "You are an expert iOS developer specializing in Swift, UIKit, and iOS app development.",
-    mobile_developer_android: "You are an expert Android developer specializing in Kotlin, Jetpack, and Android app development.",
+    architect: "You are an Architect. You specialize in system decomposition, task planning, and architecture design.",
+    data_ml_engineer: "You are a Data & ML Engineer. You specialize in data pipelines, ETL, machine learning, and MLOps.",
+    mobile_developer: "You are a Mobile Developer. You specialize in iOS and Android native development.",
     tech_lead: "You are an expert tech lead specializing in code review, architecture decisions, and team coordination.",
   };
 
@@ -1681,13 +1678,15 @@ class MultiExpertCoordinator {
       writer: "tech_writer",
       pm: "project_manager",
       manager: "project_manager",
-      api: "api_developer",
-      database: "database_administrator",
-      dba: "database_administrator",
-      ml: "ml_engineer",
-      data: "data_engineer",
-      ios: "mobile_developer_ios",
-      android: "mobile_developer_android",
+      api: "backend_developer",
+      database: "backend_developer",
+      dba: "backend_developer",
+      ml: "data_ml_engineer",
+      data: "data_ml_engineer",
+      ios: "mobile_developer",
+      android: "mobile_developer",
+      architect: "architect",
+      mobile: "mobile_developer",
     };
 
     const normalized = raw.toLowerCase().replace(/_/g, "");
@@ -2641,7 +2640,7 @@ The repository is cloned at: **${this.repoPath}**
         await this.postLog(`Quality metrics posted: score=${this.qualityMetrics.qualityScore}/100`);
 
         // Evaluate quality gate via Decision API
-        const diffSummary = `score=${this.qualityMetrics.qualityScore}/100, typeErrors=${this.qualityMetrics.typeErrors}, lintErrors=${this.qualityMetrics.lintErrors}, testFailures=${this.qualityMetrics.testFailures}`;
+        const diffSummary = `score=${this.qualityMetrics.qualityScore}/100, typeErrors=${this.qualityMetrics.typeErrors}, lintErrors=${this.qualityMetrics.lintErrors}, testsFailed=${this.qualityMetrics.testsFailed}`;
         this.qualityGateResult = await this.decisionClient.evaluateQuality({
           diff: diffSummary,
           storyDescription: this.jiraRequirements || undefined,

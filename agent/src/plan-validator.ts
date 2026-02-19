@@ -297,6 +297,32 @@ export function resolveFileOverlaps(
 
 // ============================================================================
 // PLAN SERIALIZATION
+/**
+ * Fix invalid personas in a plan by replacing them with "backend_developer".
+ * Returns count and details of any corrections made.
+ */
+export function fixInvalidPersonas(
+  plan: ExecutionPlan,
+  validPersonas: string[],
+): { fixedCount: number; details: string[] } {
+  if (!plan.stories || validPersonas.length === 0) return { fixedCount: 0, details: [] };
+
+  const validSet = new Set(validPersonas);
+  const fallback = "backend_developer";
+  let fixedCount = 0;
+  const details: string[] = [];
+
+  for (const story of plan.stories) {
+    if (story.persona && !validSet.has(story.persona)) {
+      details.push(`${story.title}: "${story.persona}" → "${fallback}"`);
+      story.persona = fallback;
+      fixedCount++;
+    }
+  }
+
+  return { fixedCount, details };
+}
+
 // ============================================================================
 
 /**

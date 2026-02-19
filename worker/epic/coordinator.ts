@@ -2729,9 +2729,11 @@ export class EpicCoordinator {
           taskStatus = "escalated";
           jiraComment = `⚠️ **All ${completions.length} stories completed**, but Tech Lead review could not complete.\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Please review the PR manually.*`;
         } else if (this.config.reviewEnabled) {
-          // Review was approved by inline Tech Lead - PR ready for human merge (NOT deployed)
+          // Review was approved by inline Tech Lead
           taskStatus = "pr_approved";
-          jiraComment = `✅ **All ${completions.length} stories completed** and approved by Tech Lead.\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Ready for merge.*`;
+          jiraComment = this.config.prdChildTask
+            ? `✅ **All ${completions.length} stories completed**, approved by Tech Lead, and PR merged.\n\n${storyList}\n\n📝 **PR**: ${prUrl}`
+            : `✅ **All ${completions.length} stories completed** and approved by Tech Lead.\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Ready for merge.*`;
         } else {
           // No review label: PR created, waiting for human approval
           // Use review_requested so GitHub webhook approval triggers deployment
@@ -2912,6 +2914,19 @@ export class EpicCoordinator {
             // Stop mission so finishMission doesn't overwrite the status
             this.missionActive = false;
             return "done";
+          }
+        } else if (this.config.prdChildTask) {
+          // PRD auto-run: merge the PR so dependent stories don't stack up conflicts
+          console.log(`[Epic] PRD child task — auto-merging PR #${prNumber} after Tech Lead approval`);
+          await this.postLog(`Merging PR #${prNumber} (PRD auto-run)...`);
+          const merged = await this.gitOps.mergePR(prUrl, prNumber);
+          if (merged) {
+            console.log(`[Epic] PR #${prNumber} merged successfully`);
+            await this.postLog(`PR #${prNumber} merged successfully`);
+            await this.ticketOps.postComment(`🔀 PR #${prNumber} auto-merged (PRD workflow)`);
+          } else {
+            console.warn(`[Epic] PR #${prNumber} merge failed — manual merge required`);
+            await this.postLog(`⚠️ PR #${prNumber} auto-merge failed — manual merge required`);
           }
         }
         return "done";
@@ -3458,6 +3473,18 @@ Begin your review now. Start by fetching the code changes.`;
         await this.ticketOps.postComment(
           `✅ PR approved by Tech Lead (score: ${reviewResult.codeQualityScore}/10)\n\n${reviewResult.feedback}`
         );
+        // PRD auto-run: merge the PR so dependent stories don't stack up conflicts
+        if (this.config.prdChildTask) {
+          console.log(`[Epic] PRD child task — auto-merging PR #${prNumber} after review-only approval`);
+          await this.postLog(`Merging PR #${prNumber} (PRD auto-run)...`);
+          const merged = await this.gitOps.mergePR(prUrl, prNumber);
+          if (merged) {
+            await this.postLog(`PR #${prNumber} merged successfully`);
+            await this.ticketOps.postComment(`🔀 PR #${prNumber} auto-merged (PRD workflow)`);
+          } else {
+            await this.postLog(`⚠️ PR #${prNumber} auto-merge failed — manual merge required`);
+          }
+        }
         await this.updateTaskStatus("pr_approved", `PR #${prNumber} approved by Tech Lead`, undefined, prUrl);
         this.missionActive = false;
         return false;

@@ -41,14 +41,15 @@ router.use((req, res, next) => {
 function derivePrefix(name: string): string {
   const words = name
     .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .split(/[\s\-_]+/)
-    .filter(Boolean);
+    .split(/[\s\-\u2013\u2014_]+/)  // split on spaces, hyphens, en/em dashes, underscores
+    .filter((w) => /[A-Za-z0-9]/.test(w));  // drop non-alphanumeric tokens
 
   if (words.length >= 2) {
     return words
       .slice(0, 5)
       .map((w) => w[0])
       .join("")
+      .replace(/[^A-Z0-9]/gi, "")  // strip any remaining non-alphanumeric
       .toUpperCase();
   }
 
@@ -161,7 +162,7 @@ const DEFAULT_BOARD_COLUMNS = [
   { name: "In Progress", position: 1, color: "#f59e0b" },
   { name: "Review", position: 2, color: "#8b5cf6" },
   { name: "Approved", position: 3, color: "#3b82f6" },
-  { name: "Done", position: 4, color: "#10b981" },
+  { name: "Deployed", position: 4, color: "#10b981" },
 ];
 
 // =============================================================================

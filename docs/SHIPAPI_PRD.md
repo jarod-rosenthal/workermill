@@ -1,16 +1,17 @@
-# ShipAPI PRD — Full Build & Deployment Plan
+# ShipAPI PRD — Full Build Specification
 
 > **"ShipAPI — Built by WorkerMill"**
 >
-> Production-grade inventory management REST API with JWT auth, rate limiting, full-text search, audit logging, and auto-generated OpenAPI docs. Deployed to AWS via Terraform. Built entirely by autonomous AI workers.
+> Production-grade inventory management REST API with JWT auth, rate limiting, full-text search, audit logging, and auto-generated OpenAPI docs. Deployed to Railway (compute) + Neon (database). Built entirely by autonomous AI workers.
 
 ## Source of Truth
 
-- **Spec**: `docs/SHOWCASE_PROJECTS.md` → "Project 2: ShipAPI"
-- **Target repo**: `workermill-examples/shipapi` (GitHub)
+- **Spec**: This document
+- **Target repo**: `workermill-examples/shipapi` (GitHub, public)
 - **Live URL**: https://shipapi.workermill.com
-- **Deployment**: AWS ECS Fargate (API) + RDS PostgreSQL (database) + ALB (HTTPS)
-- **CI/CD**: GitHub Actions with `ubuntu-latest` runners
+- **Compute**: Railway (Hobby plan, Docker container)
+- **Database**: Neon PostgreSQL (free tier, serverless)
+- **CI/CD**: GitHub Actions → Railway CLI deploy
 
 ---
 
@@ -20,100 +21,125 @@
 |-------|-----------|-----------|
 | Framework | FastAPI | Automatic OpenAPI generation, async support, Pydantic validation |
 | ORM | SQLAlchemy 2.0 (async) | Mature, flexible, async support |
+| Async Driver | asyncpg | High-performance async PostgreSQL driver |
 | Migrations | Alembic | Standard SQLAlchemy migration tool |
-| Database | PostgreSQL 16 | Full-text search, JSON support, reliability |
+| Database | PostgreSQL 16 (Neon) | Serverless, full-text search, JSON support |
 | Validation | Pydantic V2 | Fast validation, OpenAPI schema generation |
+| Settings | pydantic-settings | Type-safe env var loading |
 | Auth | python-jose (JWT) + passlib (bcrypt) | Standard JWT implementation |
 | Rate Limiting | slowapi | FastAPI-native rate limiting |
-| Testing | pytest + httpx (async) | Async test client for FastAPI |
+| Testing | pytest + pytest-asyncio + httpx | Async test client for FastAPI |
 | Linting | Ruff | Fast Python linter + formatter |
 | Type Checking | mypy (strict) | Static type verification |
 | Package Manager | uv | Fast Python dependency management |
 | Container | Docker (multi-stage) | Slim production image |
-| IaC | Terraform | AWS resource provisioning |
+| Compute | Railway | Docker container hosting with auto-HTTPS |
 | CI/CD | GitHub Actions | Automated test + deploy pipeline |
-
----
-
-## Ticket Mapping
-
-Each ticket maps to a phase of the build. Tickets are **sequential** — each depends on the previous.
-
-| Ticket | Phase | Title | Personas |
-|--------|-------|-------|----------|
-| SHIP-1 | Phase 0 | Bootstrap repository, AWS infrastructure, and CI/CD | devops_engineer |
-| SHIP-2 | Phase 1 | Build the core API (auth, CRUD, search, audit) | backend_developer |
-| SHIP-3 | Phase 2 | Build rate limiting, error handling, and OpenAPI docs | backend_developer |
-| SHIP-4 | Phase 3 | Build seed data and integration tests | backend_developer, qa_engineer |
-| SHIP-5 | Phase 4 | Deploy to production and validate | devops_engineer |
-
-> **No frontend ticket.** ShipAPI is an API-only showcase. The interactive documentation (Swagger UI + ReDoc) serves as the "frontend".
 
 ---
 
 ## Pre-Provisioned Resources
 
-These resources are set up **before** any worker ticket starts. Workers do NOT create these — they use them.
+These resources are set up **before any worker starts**. Workers do NOT create accounts or sign up for services — they use what is already provisioned.
 
-### AWS Resources (provisioned via Terraform by human)
+### GitHub Repository
 
-| Resource | Status | Details |
-|----------|--------|---------|
-| AWS Account | ✅ | `AWS_ACCOUNT_ID` (us-east-1) |
-| Route53 Hosted Zone | ✅ | `workermill.com` (existing) |
-| ACM Certificate | ✅ | `*.workermill.com` (existing wildcard) |
-| ECR Repository | ⏳ Create during SHIP-1 | `workermill-examples/shipapi` |
-| GitHub Actions OIDC | ✅ | Existing IAM OIDC provider for GitHub |
-| IAM Deploy Role | ⏳ Create during SHIP-1 | `shipapi-github-deploy` |
-| S3 Terraform State | ⏳ Create during SHIP-1 | `shipapi-terraform-state-AWS_ACCOUNT_ID` |
+| Resource | Details |
+|----------|---------|
+| Repository | `workermill-examples/shipapi` (public, empty) |
+| Status | **Pre-created by human** |
+| Agent access | Push via GitHub PAT (already configured in WorkerMill org settings) |
 
-### GitHub Resources
+### Railway (Compute)
 
-| Resource | Status | Details |
-|----------|--------|---------|
-| Repository | ⏳ Create during SHIP-1 | `workermill-examples/shipapi` (public) |
-| GitHub Secrets | ⏳ Configure during SHIP-1 | `AWS_DEPLOY_ROLE_ARN`, `DATABASE_URL`, `JWT_SECRET_KEY` |
+| Resource | Details |
+|----------|---------|
+| Plan | Hobby ($5/month, includes $5 usage credit) |
+| Project | `astonishing-reflection` (ID: `d3e4fc24-8307-46c7-a4cc-750e83d886b3`) |
+| Service | `shipapi` (ID: `6b4eae14-7cb0-43f6-b269-b31697da23bc`) |
+| Environment | `production` (ID: `a008981e-5f0a-4237-890b-63e24cdf5c69`) |
+| Custom domain | `shipapi.workermill.com` → `sdzhxz4l.up.railway.app` |
+| Status | **All provisioned and ready** |
 
-### DNS
+**GitHub repo secrets (already set):**
 
-| Record | Type | Value |
-|--------|------|-------|
-| `shipapi.workermill.com` | A (alias) | → ALB DNS (created by Terraform) |
+| Secret | Value | Purpose |
+|--------|-------|---------|
+| `RAILWAY_TOKEN` | *(set)* | Project token for `railway up` deploys |
+| `RAILWAY_SVC_ID` | `6b4eae14-7cb0-43f6-b269-b31697da23bc` | Service ID for `--service` flag |
+
+**Railway environment variables (already set on the service):**
+
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `DATABASE_URL` | Neon pooled connection string (asyncpg, sslmode=require) | App database connection |
+| `DATABASE_URL_DIRECT` | Neon direct connection string (asyncpg, sslmode=require) | Alembic migrations |
+| `JWT_SECRET_KEY` | 64-char random hex string | JWT token signing |
+| `PORT` | `8000` | Railway injects PORT; set explicitly for consistency |
+
+> **CRITICAL**: Railway dynamically assigns a PORT. The app MUST read `PORT` from the environment and bind to it. The Dockerfile CMD uses `$PORT`. Railway also requires the app to bind to `0.0.0.0`, not `127.0.0.1`.
+
+### Neon (Database)
+
+| Resource | Details |
+|----------|---------|
+| Plan | Free tier (0.5 GB storage, 100 CU-hours/month) |
+| Endpoint | `ep-damp-shape-aiwgevtj` |
+| Region | `us-east-1` |
+| Database | `neondb` |
+| User | `neondb_owner` |
+| Status | **Provisioned and ready** |
+
+**Connection strings are already set as Railway environment variables.** Agents do NOT need to know the password — they read `DATABASE_URL` and `DATABASE_URL_DIRECT` from `os.environ` at runtime.
+
+**Connection string formats (for reference — actual values are in Railway env vars):**
+
+```
+# DATABASE_URL — Pooled connection (app runtime, uses PgBouncer):
+postgresql+asyncpg://neondb_owner:***@ep-damp-shape-aiwgevtj-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require
+
+# DATABASE_URL_DIRECT — Direct connection (Alembic migrations, persistent):
+postgresql+asyncpg://neondb_owner:***@ep-damp-shape-aiwgevtj.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require
+```
+
+Note: The pooled connection has `-pooler` in the hostname. The direct connection does not. The database name is `neondb` (Neon default), not `shipapi`.
+
+> **CRITICAL**: Neon requires `sslmode=require` on all connections. Connections without SSL will be rejected. The `+asyncpg` dialect prefix is required for SQLAlchemy async engine.
+
+### DNS (Custom Domain)
+
+| Record | Type | Value | Status |
+|--------|------|-------|--------|
+| `shipapi.workermill.com` | CNAME | `sdzhxz4l.up.railway.app` | **Created in Route53, propagating** |
+
+Railway automatically provisions a Let's Encrypt SSL certificate after the CNAME propagates (~minutes). No ACM certificate needed.
+
+### GitHub Repository Secrets
+
+Already configured in `workermill-examples/shipapi` repo settings:
+
+| Secret | Status | Purpose |
+|--------|--------|---------|
+| `RAILWAY_TOKEN` | **Set** | Railway project token for CLI deploys |
+| `RAILWAY_SVC_ID` | **Set** (`6b4eae14-7cb0-43f6-b269-b31697da23bc`) | Service ID for `--service` flag |
+
+> **NOTE**: `DATABASE_URL` and `JWT_SECRET_KEY` are NOT in GitHub secrets — they live in Railway's environment variables and are injected at container runtime. Only Railway deployment credentials go in GitHub secrets.
 
 ---
 
-## SHIP-1: Bootstrap Repository, AWS Infrastructure, and CI/CD
-
-**Personas:** devops_engineer
-**Estimated stories:** 8
-**Dependencies:** None (first ticket)
-
-### What This Ticket Delivers
-
-A fully scaffolded Python/FastAPI project with:
-1. Project structure with all dependencies
-2. AWS infrastructure provisioned via Terraform (VPC, ECS, RDS, ALB, ECR)
-3. Docker multi-stage build working
-4. GitHub Actions CI pipeline (lint, typecheck, test)
-5. GitHub Actions CD pipeline (build → push → terraform apply → smoke test)
-6. Health check endpoint responding locally
-7. First deploy to AWS with health check passing at `https://shipapi.workermill.com`
-
-### Phase 0.1 — Repository Scaffolding
-
-Create the `workermill-examples/shipapi` repository with this structure:
+## Project Structure
 
 ```
 shipapi/
 ├── src/
 │   ├── __init__.py
-│   ├── main.py                    # FastAPI app, CORS, exception handlers
+│   ├── main.py                    # FastAPI app, CORS, lifespan, exception handlers
 │   ├── config.py                  # Settings from env vars (pydantic-settings)
-│   ├── database.py                # SQLAlchemy async engine + session
+│   ├── database.py                # SQLAlchemy async engine + session factory
 │   ├── dependencies.py            # FastAPI dependency injection (get_db, get_current_user)
 │   ├── models/
 │   │   ├── __init__.py
-│   │   ├── base.py                # SQLAlchemy Base + common mixins
+│   │   ├── base.py                # SQLAlchemy DeclarativeBase + common mixins
 │   │   ├── user.py
 │   │   ├── category.py
 │   │   ├── product.py
@@ -133,8 +159,8 @@ shipapi/
 │   │   └── health.py
 │   ├── api/
 │   │   ├── __init__.py
-│   │   ├── router.py              # Main API router
-│   │   ├── auth.py                # POST register, login, refresh, GET me
+│   │   ├── router.py              # Main API router, mounts all sub-routers
+│   │   ├── auth.py                # POST register, login, refresh; GET me
 │   │   ├── categories.py          # CRUD
 │   │   ├── products.py            # CRUD + search
 │   │   ├── warehouses.py          # CRUD + stock
@@ -143,64 +169,60 @@ shipapi/
 │   │   └── health.py              # GET health check
 │   ├── services/
 │   │   ├── __init__.py
-│   │   ├── auth.py                # JWT creation, password hashing
+│   │   ├── auth.py                # JWT creation, password hashing, API key generation
 │   │   ├── audit.py               # Audit log recording
-│   │   └── stock.py               # Transfer logic (atomic)
+│   │   └── stock.py               # Transfer logic (atomic transaction)
 │   └── middleware/
 │       ├── __init__.py
 │       ├── rate_limit.py          # slowapi rate limiting
 │       └── error_handler.py       # Global exception handlers
 ├── alembic/
-│   ├── env.py
-│   ├── versions/                  # Migration files
-│   └── alembic.ini
+│   ├── env.py                     # Async migration runner, uses DATABASE_URL_DIRECT
+│   ├── script.mako                # Migration template
+│   └── versions/                  # Migration files (auto-generated)
+├── alembic.ini                    # Alembic config (sqlalchemy.url read from env)
 ├── tests/
 │   ├── __init__.py
-│   ├── conftest.py                # Fixtures (async client, test DB, auth headers)
+│   ├── conftest.py                # Fixtures: async client, test DB, auth headers
 │   ├── test_health.py
 │   ├── test_auth.py
 │   ├── test_categories.py
 │   ├── test_products.py
 │   ├── test_warehouses.py
 │   ├── test_stock.py
-│   └── test_audit.py
+│   ├── test_audit.py
+│   ├── test_rate_limit.py
+│   └── test_errors.py
 ├── seed/
-│   └── seed.py                    # Demo data seed script
-├── infrastructure/
-│   ├── main.tf                    # Provider config, backend (S3)
-│   ├── variables.tf               # Environment, region, app config
-│   ├── outputs.tf                 # API URL, DB endpoint, ALB DNS
-│   ├── vpc.tf                     # VPC, public/private subnets, NAT gateway
-│   ├── ecs.tf                     # ECS cluster, task definition, service
-│   ├── rds.tf                     # RDS PostgreSQL (private subnet)
-│   ├── alb.tf                     # ALB + HTTPS listener + target group
-│   ├── ecr.tf                     # ECR repository
-│   ├── secrets.tf                 # Secrets Manager (DB URL, JWT secret)
-│   ├── iam.tf                     # ECS task role, execution role, deploy role
-│   ├── security_groups.tf         # ALB SG, ECS SG, RDS SG
-│   ├── cloudwatch.tf              # Log group for ECS
-│   └── route53.tf                 # DNS record (shipapi.workermill.com)
+│   └── seed.py                    # Demo data seed script (idempotent)
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml                 # Lint, typecheck, test on push/PR
-│       └── deploy.yml             # Build, push, terraform apply, smoke test
+│       └── deploy.yml             # Build and deploy to Railway on merge to main
 ├── Dockerfile                     # Multi-stage (builder + slim runtime)
-├── docker-compose.yml             # Local dev (PostgreSQL + app)
+├── docker-compose.yml             # Local dev (PostgreSQL only)
+├── railway.toml                   # Railway deployment config
 ├── pyproject.toml                 # Project config (uv, ruff, mypy, pytest)
 ├── uv.lock                        # Locked dependencies
 ├── .python-version                # 3.13
 ├── .env.example                   # All required env vars documented
 ├── .gitignore
-├── CLAUDE.md                      # Worker instructions and conventions
-├── WORKERMILL.md                  # Build metadata (filled after completion)
+├── .dockerignore
+├── CLAUDE.md                      # Worker instructions for this repo
 └── README.md                      # Setup, architecture, API docs
 ```
 
-**pyproject.toml dependencies:**
+---
+
+## Configuration Files
+
+### pyproject.toml
+
 ```toml
 [project]
 name = "shipapi"
-version = "0.1.0"
+version = "1.0.0"
+description = "Production inventory management API — Built by WorkerMill"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115",
@@ -225,51 +247,101 @@ dev = [
     "mypy>=1.14",
     "coverage>=7.6",
 ]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src"]
+
+[tool.coverage.report]
+fail_under = 80
 ```
 
-**Acceptance criteria:**
-- Repository created on GitHub at `workermill-examples/shipapi`
-- `uv sync` installs all dependencies
-- `uv run uvicorn src.main:app --reload` starts FastAPI on port 8000
-- `uv run ruff check .` passes
-- `uv run mypy src --strict` passes (with initial stubs)
-- `.env.example` documents all required variables
-- `GET /api/v1/health` returns `{"status": "ok", "database": "connected"}`
-- CLAUDE.md written with local dev setup and conventions
-- README.md documents setup, architecture, and API endpoint summary
-
-### Phase 0.2 — Docker Build
-
-Multi-stage Dockerfile for production-slim images:
+### Dockerfile
 
 ```dockerfile
 # Stage 1: Build
 FROM python:3.13-slim AS builder
 WORKDIR /app
-RUN pip install uv
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Install dependencies
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-install-project
+
+# Copy application code
 COPY src/ src/
 COPY alembic/ alembic/
 COPY alembic.ini .
+COPY seed/ seed/
 
 # Stage 2: Runtime
 FROM python:3.13-slim
 WORKDIR /app
+
+# Copy virtual environment and application from builder
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/src src/
 COPY --from=builder /app/alembic alembic/
 COPY --from=builder /app/alembic.ini .
+COPY --from=builder /app/seed seed/
+
+# Use the virtual environment
 ENV PATH="/app/.venv/bin:$PATH"
+
+# Non-root user
+RUN addgroup --gid 1001 appgroup && adduser --disabled-password --uid 1001 --ingroup appgroup appuser
+USER appuser
+
 EXPOSE 8000
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# Railway sets PORT dynamically — read it at runtime
+CMD ["sh", "-c", "uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
 ```
 
-**docker-compose.yml for local dev:**
+> **CRITICAL**: The CMD uses `sh -c` to expand the `$PORT` variable at runtime. Railway injects `PORT` as an environment variable. The `${PORT:-8000}` fallback ensures local Docker runs default to 8000.
+
+### .dockerignore
+
+```dockerignore
+.git
+.github
+.venv
+__pycache__
+*.pyc
+.env
+.env.*
+!.env.example
+tests/
+*.md
+.ruff_cache
+.mypy_cache
+.pytest_cache
+docker-compose.yml
+```
+
+### docker-compose.yml (local development only)
+
 ```yaml
 services:
   db:
-    image: postgres:16
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: shipapi
       POSTGRES_PASSWORD: localdev
@@ -278,100 +350,832 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-
-  api:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      DATABASE_URL: postgresql+asyncpg://shipapi:localdev@db:5432/shipapi
-      JWT_SECRET_KEY: local-dev-secret-key-change-in-production
-    depends_on:
-      - db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shipapi"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pgdata:
 ```
 
-**Acceptance criteria:**
-- `docker compose up` starts PostgreSQL + API
-- `docker compose up api` builds the image successfully
-- Container size < 200MB
-- Health check responds at `http://localhost:8000/api/v1/health`
+> **NOTE**: `docker-compose.yml` is for local development only. It runs PostgreSQL locally so developers can work without a Neon connection. The API itself runs via `uv run uvicorn` locally, NOT inside Docker.
 
-### Phase 0.3 — Terraform Infrastructure
+### railway.toml
 
-All AWS resources in `infrastructure/`. Workers apply Terraform directly using the devops_engineer persona.
+```toml
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
-**VPC Layout:**
-- VPC: `10.0.0.0/16`
-- 2 public subnets: `10.0.1.0/24`, `10.0.2.0/24` (ALB)
-- 2 private subnets: `10.0.10.0/24`, `10.0.11.0/24` (ECS, RDS)
-- NAT Gateway in public subnet (ECS outbound internet)
-- Internet Gateway for ALB
+[deploy]
+healthcheckPath = "/api/v1/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+```
 
-**ECS Fargate:**
-- Cluster: `shipapi`
-- Service: `shipapi-api` (desired count: 1)
-- Task: 0.25 vCPU, 0.5 GB memory
-- Container: port 8000
-- Health check: `/api/v1/health`
-- CloudWatch log group: `/ecs/shipapi` (14-day retention)
+### .env.example
 
-**RDS PostgreSQL 16:**
-- Instance: `db.t4g.micro`, 20 GB gp3
-- Private subnet only, no public access
-- DB name: `shipapi`
-- Credentials in Secrets Manager: `shipapi/database-url`
-- Automated backups: 7 days
+```bash
+# Database — Neon PostgreSQL
+# Pooled connection (app runtime, uses PgBouncer):
+DATABASE_URL=postgresql+asyncpg://neondb_owner:YOUR_PASSWORD@ep-damp-shape-aiwgevtj-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require
+# Direct connection (Alembic migrations, persistent connection):
+DATABASE_URL_DIRECT=postgresql+asyncpg://neondb_owner:YOUR_PASSWORD@ep-damp-shape-aiwgevtj.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require
 
-**Application Load Balancer:**
-- Public subnets
-- HTTPS listener (443) using `*.workermill.com` ACM cert
-- HTTP listener (80) → redirect to HTTPS
-- Target group → ECS service (port 8000)
-- Health check: `/api/v1/health` (interval 30s, healthy threshold 2)
+# Auth
+JWT_SECRET_KEY=change-me-to-a-random-64-character-string
 
-**ECR Repository:**
-- `workermill-examples/shipapi`
-- Lifecycle policy: keep last 10 images
+# App
+PORT=8000
+```
 
-**Secrets Manager:**
-- `shipapi/database-url` — Full PostgreSQL connection string
-- `shipapi/jwt-secret-key` — JWT signing secret (generated, 64 chars)
+### .gitignore
 
-**IAM Roles:**
-- ECS task execution role (ECR pull + CloudWatch + Secrets Manager read)
-- ECS task role (minimal — no AWS SDK calls from app)
-- GitHub Actions deploy role (OIDC, scoped to ECR push + ECS deploy + Terraform state)
+```gitignore
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
 
-**Security Groups:**
-- ALB SG: inbound 443/80 from `0.0.0.0/0`, outbound to ECS SG
-- ECS SG: inbound 8000 from ALB SG only, outbound all (NAT for image pulls)
-- RDS SG: inbound 5432 from ECS SG only, no outbound
+# Environment / secrets
+.env
+.env.*
+!.env.example
 
-**Route53:**
-- A record (alias): `shipapi.workermill.com` → ALB DNS
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
-**Terraform State:**
-- S3 backend: `shipapi-terraform-state-AWS_ACCOUNT_ID` / `shipapi/terraform.tfstate`
-- DynamoDB lock table: `shipapi-terraform-lock`
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
 
-**Acceptance criteria:**
-- `terraform init` succeeds
-- `terraform plan` shows expected resources (~25-30)
-- `terraform apply` completes without errors
-- ALB health check passes (green target)
-- `https://shipapi.workermill.com/api/v1/health` returns 200
-- RDS is NOT publicly accessible
-- ECS service is running with 1 healthy task
+# Linting
+.ruff_cache/
+.mypy_cache/
 
-### Phase 0.4 — GitHub Actions CI/CD
+# OS
+.DS_Store
+Thumbs.db
+```
 
-**CI Pipeline** (`.github/workflows/ci.yml`):
+---
+
+## Application Configuration
+
+### src/config.py
+
+```python
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    # Database
+    database_url: str  # Pooled Neon connection (app runtime)
+    database_url_direct: str = ""  # Direct Neon connection (migrations)
+
+    # Auth
+    jwt_secret_key: str
+    jwt_access_token_expire_minutes: int = 30
+    jwt_refresh_token_expire_days: int = 7
+
+    # App
+    app_name: str = "ShipAPI"
+    app_version: str = "1.0.0"
+    debug: bool = False
+
+    model_config = {"env_file": ".env", "case_sensitive": False}
+
+settings = Settings()
+```
+
+### src/database.py
+
+```python
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from src.config import settings
+
+# Use pooled connection for app runtime
+engine = create_async_engine(
+    settings.database_url,
+    echo=settings.debug,
+    pool_pre_ping=True,  # Verify connection health (handles Neon scale-to-zero)
+    pool_size=5,
+    max_overflow=10,
+)
+
+async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+async def get_db() -> AsyncSession:
+    async with async_session() as session:
+        yield session
+```
+
+> **CRITICAL**: `pool_pre_ping=True` is required for Neon. Neon scales compute to zero after inactivity. Without `pool_pre_ping`, stale connections cause `ConnectionRefusedError`. This setting tests each connection before use.
+
+### src/main.py (lifespan pattern)
+
+```python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: verify database connection
+    yield
+    # Shutdown: dispose engine
+    await engine.dispose()
+
+app = FastAPI(
+    title="ShipAPI",
+    description="Production inventory management API — Built by WorkerMill",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_tags=[...],  # See OpenAPI section
+)
+```
+
+---
+
+## Database Schema
+
+### 7 Tables
+
+All tables use UUID primary keys and include `created_at` / `updated_at` timestamps.
+
+#### users
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | UUID | PK, default uuid4 |
+| email | VARCHAR(255) | UNIQUE, NOT NULL |
+| name | VARCHAR(100) | NOT NULL |
+| password_hash | VARCHAR(255) | NOT NULL |
+| role | VARCHAR(20) | NOT NULL, default "user" (values: "user", "admin") |
+| api_key_hash | VARCHAR(255) | UNIQUE, nullable |
+| api_key_prefix | VARCHAR(10) | nullable (stores "sk_xxxxx" prefix for identification) |
+| is_active | BOOLEAN | NOT NULL, default true |
+| created_at | TIMESTAMPTZ | NOT NULL, default now() |
+| updated_at | TIMESTAMPTZ | NOT NULL, default now(), on update now() |
+
+#### categories
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | UUID | PK, default uuid4 |
+| name | VARCHAR(100) | NOT NULL |
+| description | TEXT | nullable |
+| parent_id | UUID | FK → categories.id, nullable (self-referential for tree) |
+| created_at | TIMESTAMPTZ | NOT NULL, default now() |
+| updated_at | TIMESTAMPTZ | NOT NULL, default now() |
+
+#### products
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | UUID | PK, default uuid4 |
+| name | VARCHAR(200) | NOT NULL |
+| sku | VARCHAR(50) | UNIQUE, NOT NULL |
+| description | TEXT | nullable |
+| price | NUMERIC(10,2) | NOT NULL, CHECK (price >= 0) |
+| weight_kg | NUMERIC(8,3) | nullable |
+| category_id | UUID | FK → categories.id, NOT NULL |
+| is_active | BOOLEAN | NOT NULL, default true |
+| search_vector | TSVECTOR | Computed: `to_tsvector('english', name || ' ' || coalesce(description, ''))` |
+| created_at | TIMESTAMPTZ | NOT NULL, default now() |
+| updated_at | TIMESTAMPTZ | NOT NULL, default now() |
+
+**Index**: GIN index on `search_vector` for full-text search performance.
+
+#### warehouses
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | UUID | PK, default uuid4 |
+| name | VARCHAR(100) | NOT NULL |
+| location | VARCHAR(200) | NOT NULL |
+| capacity | INTEGER | NOT NULL, CHECK (capacity > 0) |
+| is_active | BOOLEAN | NOT NULL, default true |
+| created_at | TIMESTAMPTZ | NOT NULL, default now() |
+| updated_at | TIMESTAMPTZ | NOT NULL, default now() |
+
+#### stock_levels
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | UUID | PK, default uuid4 |
+| product_id | UUID | FK → products.id, NOT NULL |
+| warehouse_id | UUID | FK → warehouses.id, NOT NULL |
+| quantity | INTEGER | NOT NULL, default 0, CHECK (quantity >= 0) |
+| min_threshold | INTEGER | NOT NULL, default 10, CHECK (min_threshold >= 0) |
+| updated_at | TIMESTAMPTZ | NOT NULL, default now() |
+
+**Constraint**: UNIQUE(product_id, warehouse_id) — one stock level per product per warehouse.
+
+#### stock_transfers
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | UUID | PK, default uuid4 |
+| product_id | UUID | FK → products.id, NOT NULL |
+| from_warehouse_id | UUID | FK → warehouses.id, NOT NULL |
+| to_warehouse_id | UUID | FK → warehouses.id, NOT NULL |
+| quantity | INTEGER | NOT NULL, CHECK (quantity > 0) |
+| initiated_by | UUID | FK → users.id, NOT NULL |
+| notes | TEXT | nullable |
+| created_at | TIMESTAMPTZ | NOT NULL, default now() |
+
+**Constraint**: CHECK(from_warehouse_id != to_warehouse_id) — cannot transfer to same warehouse.
+
+#### audit_logs
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | UUID | PK, default uuid4 |
+| user_id | UUID | FK → users.id, NOT NULL |
+| action | VARCHAR(20) | NOT NULL (values: "create", "update", "delete", "transfer") |
+| resource_type | VARCHAR(50) | NOT NULL (values: "product", "category", "warehouse", "stock_level") |
+| resource_id | UUID | NOT NULL |
+| changes | JSONB | nullable (for updates: `{"field": {"old": x, "new": y}}`) |
+| ip_address | VARCHAR(45) | nullable |
+| created_at | TIMESTAMPTZ | NOT NULL, default now() |
+
+**Index**: Index on `(resource_type, created_at)` for filtered queries.
+
+### Alembic Configuration
+
+**alembic.ini** — set `sqlalchemy.url` to empty string; it's loaded from env at runtime:
+```ini
+[alembic]
+script_location = alembic
+sqlalchemy.url =
+```
+
+**alembic/env.py** — async migration runner:
+```python
+# Key points:
+# - Import ALL models from src.models so autogenerate detects them
+# - Read DATABASE_URL_DIRECT from env (NOT the pooled connection)
+# - Use async engine with asyncpg
+# - Pooled connections (PgBouncer) don't support DDL — use direct connection for migrations
+```
+
+The migration env.py MUST use `DATABASE_URL_DIRECT` (the non-pooled connection) because PgBouncer in transaction mode does not support DDL statements like `CREATE TABLE`.
+
+### Running Migrations
+
+**Locally:**
+```bash
+DATABASE_URL_DIRECT=postgresql+asyncpg://shipapi:localdev@localhost:5432/shipapi \
+  uv run alembic upgrade head
+```
+
+**On Railway (pre-deploy command in railway.toml):**
+
+Add a pre-deploy command that runs migrations before the app starts:
+```toml
+[deploy]
+preDeployCommand = "alembic upgrade head"
+```
+
+> **CRITICAL**: The `preDeployCommand` runs in the same container as the app, with all Railway environment variables available. It uses `DATABASE_URL_DIRECT` to run migrations over the direct (non-pooled) Neon connection. This runs BEFORE the healthcheck, so the database is ready when the app starts.
+
+---
+
+## API Endpoints
+
+All endpoints are prefixed with `/api/v1`.
+
+### Health Check
+
+| Endpoint | Method | Auth | Rate Limit | Description |
+|----------|--------|------|------------|-------------|
+| `/api/v1/health` | GET | None | None | Service health with DB status |
+
+**Response (200):**
+```json
+{
+  "status": "ok",
+  "database": "connected",
+  "version": "1.0.0",
+  "built_by": "WorkerMill"
+}
+```
+
+The health check MUST verify database connectivity by executing a simple query (`SELECT 1`). If the database is unreachable, return:
+```json
+{
+  "status": "degraded",
+  "database": "disconnected",
+  "version": "1.0.0",
+  "built_by": "WorkerMill"
+}
+```
+Still return HTTP 200 — Railway's healthcheck only checks status code. A non-200 would cause Railway to consider the deployment failed.
+
+### Authentication
+
+| Endpoint | Method | Auth | Rate Limit | Description |
+|----------|--------|------|------------|-------------|
+| `POST /api/v1/auth/register` | POST | None | 5/min per IP | Create user account |
+| `POST /api/v1/auth/login` | POST | None | 10/min per IP | Get access + refresh tokens |
+| `POST /api/v1/auth/refresh` | POST | Refresh token | 30/min per IP | Refresh access token |
+| `GET /api/v1/auth/me` | GET | JWT or API Key | 100/min | Current user profile |
+
+**POST /auth/register — Request:**
+```json
+{
+  "email": "user@example.com",
+  "password": "securepassword123",
+  "name": "Jane Smith"
+}
+```
+
+**POST /auth/register — Response (201):**
+```json
+{
+  "id": "uuid",
+  "email": "user@example.com",
+  "name": "Jane Smith",
+  "role": "user",
+  "api_key": "sk_abc123def456...",
+  "created_at": "2026-02-19T00:00:00Z"
+}
+```
+
+> **NOTE**: `api_key` is returned ONLY on registration. The raw key is never stored — only its SHA-256 hash. The user must save it immediately.
+
+**POST /auth/login — Request:**
+```json
+{
+  "email": "user@example.com",
+  "password": "securepassword123"
+}
+```
+
+**POST /auth/login — Response (200):**
+```json
+{
+  "access_token": "eyJ...",
+  "refresh_token": "eyJ...",
+  "token_type": "bearer",
+  "expires_in": 1800
+}
+```
+
+**JWT Implementation Details:**
+- Access token: 30-minute expiry, contains `sub` (user_id), `email`, `role`
+- Refresh token: 7-day expiry, single-use (rotated on refresh)
+- Password hashing: bcrypt with 12 rounds
+- API key: 64-char random string with `sk_` prefix, stored as SHA-256 hash
+- Algorithm: HS256
+
+**Auth dependency (dual auth):**
+```python
+# FastAPI dependency that extracts user from either:
+# 1. Authorization: Bearer <jwt_access_token>
+# 2. X-API-Key: sk_...
+# Returns User object or raises 401
+async def get_current_user(
+    authorization: str | None = Header(None),
+    x_api_key: str | None = Header(None),
+    db: AsyncSession = Depends(get_db),
+) -> User: ...
+```
+
+### Categories
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `GET /api/v1/categories` | GET | JWT/API Key | List all categories (flat with parent_id) |
+| `POST /api/v1/categories` | POST | Admin only | Create category |
+| `GET /api/v1/categories/{id}` | GET | JWT/API Key | Category detail with products |
+| `PUT /api/v1/categories/{id}` | PUT | Admin only | Update category |
+| `DELETE /api/v1/categories/{id}` | DELETE | Admin only | Delete category |
+
+- List returns flat array with `parent_id` field (client assembles tree)
+- Delete returns 400 if category has products (cascade protection)
+- Category detail includes paginated products list
+- All write operations create audit log entries
+
+### Products
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `GET /api/v1/products` | GET | JWT/API Key | List (paginated, filterable, searchable) |
+| `POST /api/v1/products` | POST | JWT/API Key | Create product |
+| `GET /api/v1/products/{id}` | GET | JWT/API Key | Product detail with stock levels |
+| `PUT /api/v1/products/{id}` | PUT | JWT/API Key | Update product |
+| `DELETE /api/v1/products/{id}` | DELETE | Admin only | Soft-delete (is_active = false) |
+
+**GET /products query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | int | 1 | Page number |
+| `per_page` | int | 20 | Items per page (max 100) |
+| `sort_by` | string | "created_at" | Sort field: name, price, created_at, sku |
+| `sort_order` | string | "desc" | Sort direction: asc, desc |
+| `search` | string | null | Full-text search on name + description |
+| `category_id` | UUID | null | Filter by category |
+| `min_price` | float | null | Minimum price filter |
+| `max_price` | float | null | Maximum price filter |
+| `is_active` | bool | null | Active/inactive filter |
+
+**Paginated response format (used by all list endpoints):**
+```json
+{
+  "data": [...],
+  "pagination": {
+    "page": 1,
+    "per_page": 20,
+    "total": 50,
+    "total_pages": 3
+  }
+}
+```
+
+**Full-text search implementation:**
+```sql
+-- PostgreSQL computed column on products table:
+-- search_vector = to_tsvector('english', name || ' ' || coalesce(description, ''))
+-- GIN index on search_vector
+-- Query: WHERE search_vector @@ plainto_tsquery('english', :search_term)
+-- Results ordered by ts_rank(search_vector, query) DESC when search is active
+```
+
+Filters can be combined: `?category_id=X&min_price=10&search=widget&sort_by=price&sort_order=asc`
+
+Product detail includes current stock levels per warehouse.
+
+Soft delete sets `is_active = false` — product still exists for FK references.
+
+### Warehouses
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `GET /api/v1/warehouses` | GET | JWT/API Key | List warehouses |
+| `POST /api/v1/warehouses` | POST | Admin only | Create warehouse |
+| `GET /api/v1/warehouses/{id}` | GET | JWT/API Key | Warehouse detail with stock summary |
+| `PUT /api/v1/warehouses/{id}` | PUT | JWT/API Key | Update warehouse |
+| `GET /api/v1/warehouses/{id}/stock` | GET | JWT/API Key | Paginated stock levels |
+
+Warehouse detail includes summary: total products stocked, total quantity, capacity utilization percentage.
+
+### Stock Management
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `PUT /api/v1/stock/{product_id}/{warehouse_id}` | PUT | JWT/API Key | Update stock level |
+| `POST /api/v1/stock/transfer` | POST | JWT/API Key | Transfer between warehouses |
+| `GET /api/v1/stock/alerts` | GET | JWT/API Key | Products below min threshold |
+
+**POST /stock/transfer — Request:**
+```json
+{
+  "product_id": "uuid",
+  "from_warehouse_id": "uuid",
+  "to_warehouse_id": "uuid",
+  "quantity": 50,
+  "notes": "Rebalancing East Coast inventory"
+}
+```
+
+**Transfer atomicity requirements:**
+1. Verify source has sufficient quantity
+2. Decrement source stock level
+3. Increment destination stock level (create stock_level record if doesn't exist)
+4. Record StockTransfer entry with `initiated_by` = current user
+5. ALL steps in a single database transaction
+6. Return 400 `INSUFFICIENT_STOCK` if source quantity < transfer quantity
+7. Return 400 if from_warehouse_id == to_warehouse_id
+
+**GET /stock/alerts — Response:**
+Returns products where any `stock_level.quantity < stock_level.min_threshold`. Response includes product info, warehouse info, current quantity, min threshold. Paginated. Sortable by severity (how far below threshold).
+
+### Audit Log
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `GET /api/v1/audit-log` | GET | Admin only | Query audit logs |
+
+**Query parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `page`, `per_page` | int | Pagination |
+| `start_date` | ISO 8601 | Filter: created_at >= start_date |
+| `end_date` | ISO 8601 | Filter: created_at <= end_date |
+| `action` | string | Filter by action (create, update, delete, transfer) |
+| `resource_type` | string | Filter by resource (product, category, warehouse, stock_level) |
+| `user_id` | UUID | Filter by user |
+
+**Audit recording service:**
+Called from every write endpoint. Records:
+- `user_id`: who performed the action
+- `action`: create | update | delete | transfer
+- `resource_type`: product | category | warehouse | stock_level
+- `resource_id`: UUID of affected resource
+- `changes`: JSON diff `{"field": {"old": x, "new": y}}` for updates
+- `ip_address`: from request (`request.client.host`)
+- `created_at`: timestamp
+
+---
+
+## Rate Limiting
+
+Configure `slowapi` with per-key limits:
+
+| Endpoint Group | Limit | Key Function |
+|---------------|-------|-------------|
+| `POST /auth/register` | 5/min | IP address |
+| `POST /auth/login` | 10/min | IP address |
+| `POST /auth/refresh` | 30/min | IP address |
+| All other authenticated endpoints | 100/min | API key or user_id from JWT |
+
+**Response headers on EVERY response:**
+```
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 97
+X-RateLimit-Reset: 1708300800
+```
+
+**When rate limit exceeded — Response (429):**
+```json
+{
+  "error": {
+    "code": "RATE_LIMITED",
+    "message": "Rate limit exceeded. Try again in 45 seconds.",
+    "details": []
+  }
+}
+```
+Include `Retry-After: 45` header.
+
+> **NOTE**: slowapi uses in-memory storage by default. This is acceptable for a single-instance showcase. Rate limit state resets on container restart.
+
+---
+
+## Error Handling
+
+All error responses MUST follow this standard format:
+
+```json
+{
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable message",
+    "details": []
+  }
+}
+```
+
+**Error codes and HTTP status mapping:**
+
+| Code | HTTP Status | When |
+|------|-------------|------|
+| `VALIDATION_ERROR` | 422 | Pydantic validation failure |
+| `NOT_FOUND` | 404 | Resource doesn't exist |
+| `ALREADY_EXISTS` | 409 | Duplicate unique field (email, SKU) |
+| `UNAUTHORIZED` | 401 | Missing or invalid auth |
+| `FORBIDDEN` | 403 | Insufficient permissions (non-admin) |
+| `RATE_LIMITED` | 429 | Rate limit exceeded |
+| `INSUFFICIENT_STOCK` | 400 | Transfer with insufficient quantity |
+| `INVALID_OPERATION` | 400 | Invalid operation (e.g., delete category with products) |
+| `INTERNAL_ERROR` | 500 | Unhandled exception |
+
+**Global exception handlers to register:**
+- `RequestValidationError` → 422 with field-level details
+- `HTTPException` → standard format with code mapping
+- `IntegrityError` (SQLAlchemy) → 409 `ALREADY_EXISTS`
+- `Exception` → 500 `INTERNAL_ERROR` (log full traceback, return generic message — NO stack trace in response)
+
+**Pydantic validation error detail format:**
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Request validation failed",
+    "details": [
+      {"field": "price", "message": "Input should be greater than or equal to 0"},
+      {"field": "email", "message": "value is not a valid email address"}
+    ]
+  }
+}
+```
+
+---
+
+## OpenAPI Documentation
+
+FastAPI auto-generates OpenAPI 3.1. Enhance for showcase quality:
+
+**Swagger UI**: `GET /docs`
+**ReDoc**: `GET /redoc`
+
+**FastAPI app configuration:**
+```python
+app = FastAPI(
+    title="ShipAPI",
+    description="Production inventory management API — Built by WorkerMill",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_tags=[
+        {"name": "Health", "description": "Service health check"},
+        {"name": "Auth", "description": "Authentication, registration, and API key management"},
+        {"name": "Categories", "description": "Product category management (tree structure)"},
+        {"name": "Products", "description": "Product CRUD with full-text search and filtering"},
+        {"name": "Warehouses", "description": "Warehouse management and stock overview"},
+        {"name": "Stock", "description": "Stock levels, atomic transfers, and low-stock alerts"},
+        {"name": "Audit", "description": "Audit log queries (admin only)"},
+    ],
+)
+```
+
+**Requirements:**
+- Every endpoint has request body examples and response examples
+- Error responses documented on every endpoint (401, 403, 404, 422, 429)
+- Security schemes (Bearer JWT + API Key) shown in Swagger UI "Authorize" button
+- Can authenticate in Swagger UI and make real API calls against the live deployment
+- Tag grouping matches the table above
+
+---
+
+## CORS and Middleware
+
+```python
+# CORS: Allow all origins for showcase (API is public)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+**Request ID middleware**: Generate `X-Request-Id` UUID header on every response.
+
+**Structured access logging**: Log each request as structured JSON:
+```json
+{"method": "GET", "path": "/api/v1/products", "status": 200, "duration_ms": 12, "request_id": "uuid"}
+```
+
+---
+
+## Seed Data
+
+`seed/seed.py` populates the database with demo data. The script MUST be idempotent — running it twice does not create duplicates (use check-before-insert pattern).
+
+### 1 Admin User
+
+| Field | Value |
+|-------|-------|
+| Email | `demo@workermill.com` |
+| Password | `demo1234` |
+| Name | `Demo Admin` |
+| Role | `admin` |
+| API Key | `sk_demo_shipapi_2026_showcase_key` |
+
+### 5 Top-Level Categories (with subcategories)
+
+1. **Electronics** → Smartphones, Laptops, Accessories
+2. **Clothing** → Men's, Women's, Kids'
+3. **Home & Garden** → Kitchen, Outdoor, Decor
+4. **Sports** → Running, Cycling, Swimming
+5. **Books** → Fiction, Technical, Business
+
+### 50 Products
+
+Distributed across categories with realistic:
+- Names (e.g., "Ultra HD 4K Monitor 32-inch", "Organic Cotton T-Shirt")
+- SKUs (e.g., `ELEC-MON-001`, `CLTH-TSH-012`)
+- Descriptions (2-3 sentences, meaningful for full-text search testing — include varied vocabulary so searching "monitor", "running shoes", "organic" all return relevant results)
+- Prices ($5.99 – $2,499.99)
+- Weights (0.1 – 25.0 kg)
+- Mix: 45 active (`is_active = true`), 5 inactive (`is_active = false`)
+
+### 3 Warehouses
+
+1. **East Coast Hub** — New York, NY (capacity: 10,000)
+2. **West Coast Hub** — Los Angeles, CA (capacity: 8,000)
+3. **Central Warehouse** — Chicago, IL (capacity: 12,000)
+
+### 150 Stock Levels
+
+Each product has stock in 1-3 warehouses:
+- ~10 products have at least one stock level below `min_threshold` (for alerts testing)
+- Quantities range from 0 to 500
+- Min thresholds range from 5 to 50
+
+### 20 Stock Transfers
+
+Recent transfer history (past 30 days), all initiated by demo admin user.
+
+### 50 Audit Log Entries
+
+Mix of create/update/delete/transfer operations from the past 30 days.
+
+### Running Seed
+
+**Locally:**
+```bash
+DATABASE_URL=postgresql+asyncpg://shipapi:localdev@localhost:5432/shipapi \
+  uv run python seed/seed.py
+```
+
+**On Railway:**
+```bash
+railway run python seed/seed.py
+```
+
+> The seed script uses the same SQLAlchemy async engine as the app. It imports models from `src.models` and creates records using the ORM.
+
+---
+
+## Testing
+
+### Test Configuration
+
+Tests run against a real PostgreSQL database (no mocks for database operations).
+
+**tests/conftest.py fixtures:**
+
+| Fixture | Scope | Purpose |
+|---------|-------|---------|
+| `test_db` | session | Creates test database, runs migrations, drops after |
+| `async_client` | function | `httpx.AsyncClient` against test FastAPI app |
+| `auth_headers` | function | JWT headers for a regular user |
+| `admin_headers` | function | JWT headers for an admin user |
+| `seeded_db` | session | Database populated with seed data |
+
+**In CI (GitHub Actions):** Tests run against a PostgreSQL 16 service container. Connection string: `postgresql+asyncpg://test:test@localhost:5432/shipapi_test`
+
+**Locally:** Tests run against the `docker-compose.yml` PostgreSQL instance.
+
+### Test Files and Coverage
+
+| File | What it tests |
+|------|--------------|
+| `test_health.py` | Health check returns DB status |
+| `test_auth.py` | Register, login, refresh, me, API key auth, duplicate email (409) |
+| `test_categories.py` | CRUD, admin restriction, cascade protection (can't delete with products) |
+| `test_products.py` | CRUD, search, filtering, pagination, sorting, combined filters |
+| `test_warehouses.py` | CRUD, stock summary, admin restriction on create |
+| `test_stock.py` | Update, transfer (atomic), insufficient stock (400), same-warehouse (400), alerts |
+| `test_audit.py` | Query with filters, admin-only (403 for non-admin) |
+| `test_rate_limit.py` | Rate limit enforcement, 429 response, Retry-After header |
+| `test_errors.py` | Error format consistency across all error types |
+
+### Key Test Scenarios
+
+1. **Auth lifecycle**: Register → login → access protected endpoint → refresh → access again
+2. **Product search**: Seed products → search "monitor" → verify results contain monitor products
+3. **Stock transfer atomicity**: Transfer → verify source decremented AND destination incremented → verify transfer record
+4. **Insufficient stock**: Attempt transfer exceeding available → verify 400 → verify no partial update
+5. **Audit trail**: Create product → update product → verify 2 audit entries with correct changes diff
+6. **Pagination**: Seed 50 products → request page 1 (20 items) → verify `total=50`, `total_pages=3`
+7. **Combined filters**: `?category_id=X&min_price=10&max_price=100&sort_by=price&sort_order=asc`
+8. **Rate limiting**: Send requests exceeding limit → verify 429 on excess request
+9. **Error format**: Verify all error responses match `{"error": {"code": ..., "message": ..., "details": ...}}`
+10. **Dual auth**: Same endpoint works with both JWT Bearer token and X-API-Key header
+
+### Running Tests
+
+```bash
+# All tests
+uv run pytest tests/ -v --cov=src --cov-report=term-missing
+
+# Single file
+uv run pytest tests/test_auth.py -v
+
+# With coverage threshold enforcement
+uv run pytest tests/ --cov=src --cov-fail-under=80
+```
+
+---
+
+## CI/CD Pipelines
+
+### CI Pipeline — `.github/workflows/ci.yml`
+
+Runs on every push and PR. Must pass before merge.
 
 ```yaml
 name: CI
+
 on:
   push:
     branches: [main]
@@ -382,6 +1186,7 @@ jobs:
   quality:
     name: Lint, Type Check & Test
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:16
@@ -389,964 +1194,257 @@ jobs:
           POSTGRES_USER: test
           POSTGRES_PASSWORD: test
           POSTGRES_DB: shipapi_test
-        ports: ['5432:5432']
+        ports:
+          - "5432:5432"
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: astral-sh/setup-uv@v5
         with:
           version: "latest"
-      - run: uv sync --frozen
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run mypy src --strict
-      - run: uv run pytest tests/ -v --cov=src --cov-report=term-missing
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run mypy src --strict
+
+      - name: Run tests
+        run: uv run pytest tests/ -v --cov=src --cov-report=term-missing --cov-fail-under=80
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/shipapi_test
-          JWT_SECRET_KEY: test-secret-key
-      - run: uv run pip-audit
+          DATABASE_URL_DIRECT: postgresql+asyncpg://test:test@localhost:5432/shipapi_test
+          JWT_SECRET_KEY: test-secret-key-for-ci-only
 ```
 
-**Deploy Pipeline** (`.github/workflows/deploy.yml`):
+### Deploy Pipeline — `.github/workflows/deploy.yml`
+
+Runs on merge to main. Deploys to Railway.
 
 ```yaml
 name: Deploy
+
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
 jobs:
   deploy:
-    name: Build, Push & Deploy
+    name: Deploy to Railway
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
+    container: ghcr.io/railwayapp/cli:latest
+
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: us-east-1
-
-      - uses: aws-actions/amazon-ecr-login@v2
-        id: ecr-login
-
-      - name: Build and push Docker image
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -t $ECR_REGISTRY/workermill-examples/shipapi:$IMAGE_TAG .
-          docker build -t $ECR_REGISTRY/workermill-examples/shipapi:latest .
-          docker push $ECR_REGISTRY/workermill-examples/shipapi:$IMAGE_TAG
-          docker push $ECR_REGISTRY/workermill-examples/shipapi:latest
-
-      - uses: hashicorp/setup-terraform@v3
-
-      - name: Terraform apply
-        working-directory: infrastructure
-        run: |
-          terraform init
-          terraform apply -auto-approve -var="image_tag=${{ github.sha }}"
-
-      - name: Run database migrations
-        run: |
-          # Run Alembic migrations via ECS run-task
-          aws ecs run-task \
-            --cluster shipapi \
-            --task-definition shipapi-migrate \
-            --network-configuration "awsvpcConfiguration={subnets=[$PRIVATE_SUBNETS],securityGroups=[$ECS_SG]}" \
-            --launch-type FARGATE \
-            --overrides '{"containerOverrides":[{"name":"api","command":["alembic","upgrade","head"]}]}'
+      - name: Deploy to Railway
+        run: railway up --service ${{ secrets.RAILWAY_SVC_ID }}
 
       - name: Wait for deployment
-        run: |
-          aws ecs wait services-stable --cluster shipapi --services shipapi-api
-          sleep 30
+        run: sleep 60
 
       - name: Smoke test
         run: |
-          # Health check
-          curl -f https://shipapi.workermill.com/api/v1/health
+          # Retry health check (Railway deploy takes 1-3 min)
+          for i in 1 2 3 4 5; do
+            curl -f https://shipapi.workermill.com/api/v1/health && break
+            echo "Attempt $i failed, retrying in 30s..."
+            sleep 30
+          done
 
           # OpenAPI docs accessible
           curl -f https://shipapi.workermill.com/docs
           curl -f https://shipapi.workermill.com/redoc
-
-          # Auth flow works
-          TOKEN=$(curl -s -X POST https://shipapi.workermill.com/api/v1/auth/login \
-            -H 'Content-Type: application/json' \
-            -d '{"email":"demo@workermill.com","password":"demo1234"}' | jq -r '.access_token')
-
-          # Authenticated API call
-          curl -f -H "Authorization: Bearer $TOKEN" \
-            https://shipapi.workermill.com/api/v1/products
 ```
 
-**GitHub Secrets (to be configured during SHIP-1):**
+> **NOTE**: Railway's `preDeployCommand` in `railway.toml` handles Alembic migrations automatically before the app starts. No separate migration step needed in the deploy workflow.
 
-| Secret | Purpose |
-|--------|---------|
-| `AWS_DEPLOY_ROLE_ARN` | IAM role ARN for GitHub Actions OIDC |
-
-> Other secrets (DATABASE_URL, JWT_SECRET_KEY) are stored in AWS Secrets Manager and injected via ECS task definition — they are NOT in GitHub Secrets.
-
-**Acceptance criteria:**
-- CI runs on push to main and PRs
-- CI passes: ruff check, ruff format, mypy strict, pytest, pip-audit
-- Deploy triggers on merge to main
-- Deploy builds Docker image and pushes to ECR
-- Terraform apply updates infrastructure
-- Migrations run via ECS run-task
-- Smoke test confirms health + docs + auth flow
-- Failed CI blocks PR merge
-
-### Phase 0.5 — Alembic Migration Setup
-
-Initialize Alembic with async SQLAlchemy support:
-
-```python
-# alembic/env.py — async migration runner
-# Uses asyncpg, reads DATABASE_URL from env
-# Imports all models from src.models for autogenerate
-```
-
-Create initial migration with all 7 tables:
-- `users`
-- `categories`
-- `products` (with full-text search vector + GIN index)
-- `warehouses`
-- `stock_levels` (unique constraint on product_id + warehouse_id)
-- `stock_transfers`
-- `audit_logs`
-
-**Acceptance criteria:**
-- `alembic upgrade head` creates all tables
-- `alembic downgrade base` drops all tables
-- Full-text search GIN index on `products.search_vector`
-- All foreign keys and constraints correct
-- Migration is idempotent (running twice doesn't error)
-
-### SHIP-1 Definition of Done
-
-- [ ] Repository `workermill-examples/shipapi` has full project structure
-- [ ] `uv sync` installs all dependencies
-- [ ] `docker compose up` starts PostgreSQL + API locally
-- [ ] `GET /api/v1/health` returns 200 locally with DB status
-- [ ] `uv run ruff check .` passes
-- [ ] `uv run ruff format --check .` passes
-- [ ] `uv run mypy src --strict` passes
-- [ ] Alembic migration creates all 7 tables
-- [ ] Terraform provisions: VPC, ECS, RDS, ALB, ECR, Secrets Manager, Route53
-- [ ] `https://shipapi.workermill.com/api/v1/health` returns 200
-- [ ] RDS is in private subnet, not publicly accessible
-- [ ] CI workflow runs on push/PR (lint, typecheck, test)
-- [ ] Deploy workflow builds → pushes → deploys → smoke tests
-- [ ] CLAUDE.md written with conventions and local dev setup
-- [ ] README.md documents architecture, setup, and API summary
+> **NOTE**: The smoke test may need retries because Railway deployments take 1-3 minutes. The `sleep 60` provides buffer. If more sophisticated retry logic is needed, use a loop with `curl --retry`.
 
 ---
 
-## SHIP-2: Build the Core API (Auth, CRUD, Search, Audit)
+## Quality Gates
 
-**Personas:** backend_developer
-**Estimated stories:** 12
-**Dependencies:** SHIP-1 complete
-
-### What This Ticket Delivers
-
-All core API routes functional: authentication, product/category/warehouse CRUD, stock management, full-text search, and audit logging. Every write operation creates an audit log entry.
-
-### Phase 1.1 — Authentication (JWT)
-
-Implement JWT-based auth with dual authentication (JWT tokens + API keys):
-
-**Endpoints:**
-| Endpoint | Method | Auth | Rate Limit |
-|----------|--------|------|------------|
-| `POST /api/v1/auth/register` | Create user account | Public | 5/min |
-| `POST /api/v1/auth/login` | Get access + refresh tokens | Public | 10/min |
-| `POST /api/v1/auth/refresh` | Refresh access token | Refresh token | 30/min |
-| `GET /api/v1/auth/me` | Current user profile | JWT or API Key | 100/min |
-
-**JWT Implementation:**
-- Access token: 30-minute expiry, contains `user_id`, `email`, `role`
-- Refresh token: 7-day expiry, single-use (rotated on refresh)
-- Password hashing: bcrypt with 12 rounds
-- API key: 64-char random string per user, `sk_` prefix, stored as SHA-256 hash
-
-**Auth dependency:**
-```python
-# FastAPI dependency that extracts user from either:
-# 1. Authorization: Bearer <jwt_access_token>
-# 2. X-API-Key: sk_...
-# Returns User object or raises 401
-async def get_current_user(
-    authorization: str = Header(None),
-    x_api_key: str = Header(None),
-    db: AsyncSession = Depends(get_db),
-) -> User: ...
-```
-
-**Admin check dependency:**
-```python
-async def require_admin(user: User = Depends(get_current_user)) -> User:
-    if user.role != "admin":
-        raise HTTPException(403, detail="Admin access required")
-    return user
-```
-
-**Acceptance criteria:**
-- Register creates user with hashed password and generated API key
-- Login returns `access_token` + `refresh_token` + `token_type` + `expires_in`
-- Refresh rotates tokens (old refresh token invalidated)
-- Protected endpoints return 401 without valid auth
-- Both JWT and API key auth work on protected endpoints
-- Duplicate email returns 409 with standard error format
-- Unit tests for all auth endpoints (success + error paths)
-
-### Phase 1.2 — Category CRUD
-
-**Endpoints:**
-| Endpoint | Method | Auth | Purpose |
-|----------|--------|------|---------|
-| `GET /api/v1/categories` | GET | JWT/API Key | List categories (tree structure) |
-| `POST /api/v1/categories` | POST | Admin | Create category |
-| `GET /api/v1/categories/{id}` | GET | JWT/API Key | Category detail with products |
-| `PUT /api/v1/categories/{id}` | PUT | Admin | Update category |
-| `DELETE /api/v1/categories/{id}` | DELETE | Admin | Delete category |
-
-**Category tree:** Categories support optional `parent_id` for nesting. List endpoint returns flat list with `parent_id` field (client assembles tree).
-
-**Acceptance criteria:**
-- CRUD operations work with proper validation
-- Create/update/delete restricted to admin role
-- Delete cascades check (can't delete category with products)
-- Category detail includes paginated products list
-- Audit log entry created for create/update/delete
-- Unit tests for all category endpoints
-
-### Phase 1.3 — Product CRUD + Full-Text Search
-
-**Endpoints:**
-| Endpoint | Method | Auth | Purpose |
-|----------|--------|------|---------|
-| `GET /api/v1/products` | GET | JWT/API Key | List (paginated, filterable, searchable) |
-| `POST /api/v1/products` | POST | JWT/API Key | Create product |
-| `GET /api/v1/products/{id}` | GET | JWT/API Key | Product detail with stock levels |
-| `PUT /api/v1/products/{id}` | PUT | JWT/API Key | Update product |
-| `DELETE /api/v1/products/{id}` | DELETE | Admin | Soft-delete (set `is_active = false`) |
-
-**Query parameters for GET /products:**
-- `page` (default: 1), `per_page` (default: 20, max: 100)
-- `sort_by` (name, price, created_at, sku), `sort_order` (asc, desc)
-- `search` — Full-text search on name + description using PostgreSQL `ts_vector`
-- `category_id` — Filter by category
-- `min_price`, `max_price` — Price range filter
-- `is_active` — Active/inactive filter
-
-**Full-text search implementation:**
-```python
-# PostgreSQL computed column on products table:
-# search_vector = to_tsvector('english', name || ' ' || coalesce(description, ''))
-# GIN index on search_vector
-# Query: WHERE search_vector @@ plainto_tsquery('english', :search_term)
-```
-
-**Acceptance criteria:**
-- CRUD operations with all product fields
-- Pagination with `page`, `per_page`, `total`, `total_pages` in response
-- Sorting by any allowed field
-- Full-text search returns relevant results (ranked by relevance)
-- Category filter, price range filter, active filter all work
-- Filters can be combined (e.g., `?category_id=X&min_price=10&search=widget`)
-- Product detail includes current stock levels per warehouse
-- Soft delete sets `is_active = false` (product still exists for references)
-- Audit log entry for create/update/delete
-- Unit tests for all product endpoints including search and filtering
-
-### Phase 1.4 — Warehouse CRUD
-
-**Endpoints:**
-| Endpoint | Method | Auth | Purpose |
-|----------|--------|------|---------|
-| `GET /api/v1/warehouses` | GET | JWT/API Key | List warehouses |
-| `POST /api/v1/warehouses` | POST | Admin | Create warehouse |
-| `GET /api/v1/warehouses/{id}` | GET | JWT/API Key | Warehouse detail |
-| `PUT /api/v1/warehouses/{id}` | PUT | JWT/API Key | Update warehouse |
-| `GET /api/v1/warehouses/{id}/stock` | GET | JWT/API Key | Stock levels for warehouse |
-
-**Warehouse detail** includes summary: total products stocked, total quantity, capacity utilization.
-
-**Acceptance criteria:**
-- CRUD operations with validation
-- Create restricted to admin
-- Warehouse detail includes stock summary
-- Stock endpoint returns paginated stock levels for the warehouse
-- Audit log for create/update
-- Unit tests for all warehouse endpoints
-
-### Phase 1.5 — Stock Management (Update, Transfer, Alerts)
-
-**Endpoints:**
-| Endpoint | Method | Auth | Purpose |
-|----------|--------|------|---------|
-| `PUT /api/v1/stock/{product_id}/{warehouse_id}` | PUT | JWT/API Key | Update stock level |
-| `POST /api/v1/stock/transfer` | POST | JWT/API Key | Transfer between warehouses |
-| `GET /api/v1/stock/alerts` | GET | JWT/API Key | Products below min threshold |
-
-**Stock transfer (most critical operation):**
-```python
-# POST /api/v1/stock/transfer
-# Body: { product_id, from_warehouse_id, to_warehouse_id, quantity }
-# Must:
-# 1. Verify source has sufficient quantity
-# 2. Decrement source stock level
-# 3. Increment destination stock level (create if doesn't exist)
-# 4. Record StockTransfer entry
-# 5. ALL in a single database transaction
-# 6. Return 400 if insufficient stock
-```
-
-**Stock alerts:**
-```python
-# GET /api/v1/stock/alerts
-# Returns products where any stock_level.quantity < stock_level.min_threshold
-# Response includes: product info, warehouse info, current quantity, min threshold
-# Paginated, sortable by severity (how far below threshold)
-```
-
-**Acceptance criteria:**
-- Stock update sets quantity and min_threshold
-- Transfer is atomic (both sides update or neither does)
-- Transfer fails with 400 if insufficient source stock
-- Transfer creates StockTransfer record with `initiated_by` (current user)
-- Alerts endpoint returns products below threshold across all warehouses
-- Audit log for stock update and transfer
-- Unit tests for transfer (success, insufficient stock, same warehouse error)
-
-### Phase 1.6 — Audit Log
-
-**Endpoints:**
-| Endpoint | Method | Auth | Purpose |
-|----------|--------|------|---------|
-| `GET /api/v1/audit-log` | GET | Admin | Query audit logs |
-
-**Query parameters:**
-- `page`, `per_page` — Pagination
-- `start_date`, `end_date` — Date range filter (ISO 8601)
-- `action` — Filter by action (create, update, delete, transfer)
-- `resource_type` — Filter by resource (product, category, warehouse, stock_level)
-- `user_id` — Filter by user
-
-**Audit recording service:**
-```python
-# Called from every write endpoint. Records:
-# - user_id: who performed the action
-# - action: create | update | delete | transfer
-# - resource_type: product | category | warehouse | stock_level
-# - resource_id: UUID of affected resource
-# - changes: JSON diff { field: { old: x, new: y } } for updates
-# - ip_address: from request
-# - created_at: timestamp
-```
-
-**Acceptance criteria:**
-- Every write operation (create, update, delete, transfer) creates audit entry
-- Audit log records `changes` JSON with old/new values for updates
-- Query supports date range, action, resource type, and user filters
-- Audit log is admin-only (403 for non-admin)
-- Audit entries include IP address from request
-- Unit tests for audit query with filters
-
-### SHIP-2 Definition of Done
-
-- [ ] Authentication: register, login, refresh, me — all working
-- [ ] JWT + API key dual auth on all protected endpoints
-- [ ] Category CRUD with admin restrictions
-- [ ] Product CRUD with pagination, sorting, filtering
-- [ ] Full-text search on products (name + description)
-- [ ] Warehouse CRUD with stock summary
-- [ ] Stock update, atomic transfer, and alerts endpoint
-- [ ] Audit log records every write operation with changes diff
-- [ ] Audit log query with date range, action, resource, user filters
-- [ ] `uv run ruff check .` passes
-- [ ] `uv run ruff format --check .` passes
-- [ ] `uv run mypy src --strict` passes
-- [ ] `uv run pytest tests/ -v` passes with >80% coverage on `src/api/`
-- [ ] All endpoints return standard error format on failure
+| Gate | Threshold | Command |
+|------|-----------|---------|
+| Lint | 0 errors | `uv run ruff check .` |
+| Format | Fully formatted | `uv run ruff format --check .` |
+| Types | 0 errors (strict mode) | `uv run mypy src --strict` |
+| Tests | 100% pass, >80% coverage | `uv run pytest --cov=src --cov-fail-under=80` |
+| Build | Successful Docker build | `docker build .` |
+| Health | Returns 200 | `curl -f https://shipapi.workermill.com/api/v1/health` |
+| Docs | Swagger + ReDoc accessible | `curl -f https://shipapi.workermill.com/docs` |
 
 ---
 
-## SHIP-3: Build Rate Limiting, Error Handling, and OpenAPI Docs
+## CLAUDE.md for Target Repo
 
-**Personas:** backend_developer
-**Estimated stories:** 6
-**Dependencies:** SHIP-2 complete
-
-### What This Ticket Delivers
-
-Production hardening: rate limiting per API key, consistent error responses, and fully documented OpenAPI 3.1 spec with interactive Swagger UI and ReDoc.
-
-### Phase 2.1 — Rate Limiting (slowapi)
-
-Configure `slowapi` with per-key rate limits:
-
-| Endpoint Group | Limit | Key |
-|---------------|-------|-----|
-| `POST /auth/register` | 5/min | IP address |
-| `POST /auth/login` | 10/min | IP address |
-| `POST /auth/refresh` | 30/min | IP address |
-| All other endpoints | 100/min | API key or user_id |
-
-**Implementation:**
-```python
-# slowapi limiter with Redis-free in-memory backend (fine for single-instance)
-# Key function extracts API key from header or user_id from JWT
-# Returns 429 with Retry-After header when exceeded
-# Rate limit headers on every response: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
-```
-
-**Acceptance criteria:**
-- Rate limits enforced per configuration
-- 429 response with `Retry-After` header when limit exceeded
-- Rate limit headers on all responses
-- Rate limit resets after window expires
-- Unit test: verify 429 after exceeding limit
-
-### Phase 2.2 — Consistent Error Handling
-
-Global exception handlers for consistent error format across all endpoints:
-
-**Standard error response:**
-```json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Request validation failed",
-    "details": [
-      { "field": "price", "message": "Must be greater than 0" }
-    ]
-  }
-}
-```
-
-**Error codes and HTTP status mapping:**
-| Code | HTTP Status | When |
-|------|-------------|------|
-| `VALIDATION_ERROR` | 422 | Pydantic validation failure |
-| `NOT_FOUND` | 404 | Resource doesn't exist |
-| `ALREADY_EXISTS` | 409 | Duplicate unique field |
-| `UNAUTHORIZED` | 401 | Missing or invalid auth |
-| `FORBIDDEN` | 403 | Insufficient permissions |
-| `RATE_LIMITED` | 429 | Rate limit exceeded |
-| `INSUFFICIENT_STOCK` | 400 | Transfer with insufficient quantity |
-| `INTERNAL_ERROR` | 500 | Unhandled exception |
-
-**Exception handlers:**
-```python
-# Register global handlers for:
-# - RequestValidationError → 422 with field-level details
-# - HTTPException → standard format with code mapping
-# - IntegrityError → 409 ALREADY_EXISTS
-# - Exception → 500 INTERNAL_ERROR (log full traceback, return generic message)
-```
-
-**Acceptance criteria:**
-- ALL error responses follow the standard format (no FastAPI default error JSON)
-- Pydantic validation errors include field names and messages
-- Database integrity errors (duplicate key) return 409
-- Unhandled exceptions return 500 with generic message (no stack trace in response)
-- Unit tests verify error format for each error type
-
-### Phase 2.3 — OpenAPI Documentation
-
-FastAPI auto-generates OpenAPI 3.1 spec. Enhance it for showcase quality:
-
-**Swagger UI:** `GET /docs` — Interactive API explorer
-**ReDoc:** `GET /redoc` — Clean API reference documentation
-
-**Enhancements over defaults:**
-- Custom title, description, version, contact info
-- Tag grouping (Auth, Categories, Products, Warehouses, Stock, Audit)
-- Request/response examples on every endpoint
-- Error response schemas documented on every endpoint
-- Security schemes documented (Bearer JWT + API Key)
-- Pagination response model with metadata
-
-```python
-app = FastAPI(
-    title="ShipAPI",
-    description="Production inventory management API — Built by WorkerMill",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_tags=[
-        {"name": "Auth", "description": "Authentication and API key management"},
-        {"name": "Categories", "description": "Product category management"},
-        {"name": "Products", "description": "Product CRUD with full-text search"},
-        {"name": "Warehouses", "description": "Warehouse management"},
-        {"name": "Stock", "description": "Stock levels, transfers, and alerts"},
-        {"name": "Audit", "description": "Audit log queries"},
-        {"name": "Health", "description": "Service health check"},
-    ],
-)
-```
-
-**Acceptance criteria:**
-- `GET /docs` shows Swagger UI with all endpoints grouped by tag
-- `GET /redoc` shows ReDoc documentation
-- Every endpoint has request body examples and response examples
-- Error responses documented on every endpoint (401, 403, 404, 422, 429)
-- Security schemes (JWT + API Key) shown in Swagger UI "Authorize" button
-- Can authenticate in Swagger UI and make real API calls
-- OpenAPI spec validates against `openapi-spec-validator`
-
-### Phase 2.4 — CORS and Production Middleware
-
-```python
-# CORS: Allow all origins for showcase (API is public)
-# Trusted host: shipapi.workermill.com
-# Request ID middleware: X-Request-Id header on every response
-# Access logging: structured JSON logs for each request
-```
-
-**Acceptance criteria:**
-- CORS headers present on all responses
-- X-Request-Id header on every response (UUID)
-- Structured JSON access logs (method, path, status, duration_ms, request_id)
-
-### SHIP-3 Definition of Done
-
-- [ ] Rate limiting enforced: 5/min register, 10/min login, 100/min authenticated
-- [ ] 429 responses include `Retry-After` header
-- [ ] Rate limit headers on all responses
-- [ ] All errors follow standard format: `{ error: { code, message, details } }`
-- [ ] Pydantic validation errors include field-level details
-- [ ] `GET /docs` shows Swagger UI with all endpoints, examples, and auth
-- [ ] `GET /redoc` shows ReDoc documentation
-- [ ] Every endpoint has documented request/response examples
-- [ ] CORS configured for public access
-- [ ] X-Request-Id on all responses
-- [ ] `uv run ruff check .` passes
-- [ ] `uv run mypy src --strict` passes
-- [ ] `uv run pytest tests/` passes with >80% coverage
-
----
-
-## SHIP-4: Build Seed Data and Integration Tests
-
-**Personas:** backend_developer, qa_engineer
-**Estimated stories:** 6
-**Dependencies:** SHIP-3 complete
-
-### What This Ticket Delivers
-
-Rich demo data that makes the API documentation meaningful, plus comprehensive integration tests that validate the full request lifecycle against a real database.
-
-### Phase 3.1 — Seed Data Script
-
-`seed/seed.py` populates the database with demo data:
-
-**1 admin user:**
-- Email: `demo@workermill.com`
-- Password: `demo1234`
-- Name: `Demo Admin`
-- Role: `admin`
-- API key: `sk_demo_shipapi_2026_showcase_key` (for easy testing)
-
-**5 categories:**
-1. Electronics (subcategories: Smartphones, Laptops, Accessories)
-2. Clothing (subcategories: Men's, Women's, Kids')
-3. Home & Garden (subcategories: Kitchen, Outdoor, Decor)
-4. Sports (subcategories: Running, Cycling, Swimming)
-5. Books (subcategories: Fiction, Technical, Business)
-
-**50 products:** Distributed across categories with realistic:
-- Names (e.g., "Ultra HD 4K Monitor 32-inch", "Organic Cotton T-Shirt")
-- SKUs (e.g., "ELEC-MON-001", "CLTH-TSH-012")
-- Descriptions (2-3 sentences, meaningful for full-text search testing)
-- Prices ($5.99 – $2,499.99)
-- Weights (0.1 – 25.0 kg)
-- Mix of `is_active = true` (45) and `is_active = false` (5)
-
-**3 warehouses:**
-1. "East Coast Hub" — New York, NY (capacity: 10,000)
-2. "West Coast Hub" — Los Angeles, CA (capacity: 8,000)
-3. "Central Warehouse" — Chicago, IL (capacity: 12,000)
-
-**150 stock levels:** Each product has stock in 1-3 warehouses:
-- ~10 products have at least one stock level below `min_threshold` (for alerts testing)
-- Quantities range from 0 to 500
-- Min thresholds range from 5 to 50
-
-**20 stock transfers:** Recent transfer history (past 30 days)
-
-**50 audit log entries:** Mix of create/update/delete/transfer operations
-
-**Seed must be idempotent:** Check-before-insert pattern. Running twice does not create duplicates.
-
-**Acceptance criteria:**
-- `uv run python seed/seed.py` populates all data
-- Running seed twice does not create duplicates
-- Demo user can authenticate with `demo@workermill.com` / `demo1234`
-- Demo user's API key works: `X-API-Key: sk_demo_shipapi_2026_showcase_key`
-- `GET /products?search=monitor` returns relevant results
-- `GET /stock/alerts` returns ~10 products below threshold
-- `GET /audit-log` returns 50 entries
-- All categories, products, warehouses, stock levels present
-
-### Phase 3.2 — Integration Tests
-
-Tests that run against a real PostgreSQL database (no mocks):
-
-```
-tests/
-├── conftest.py              # Shared fixtures
-│   ├── async_client          # httpx.AsyncClient against test app
-│   ├── test_db              # Fresh PostgreSQL per test session
-│   ├── auth_headers         # JWT headers for authenticated requests
-│   ├── admin_headers        # JWT headers for admin user
-│   └── seeded_db            # DB with seed data loaded
-├── test_health.py           # Health check returns DB status
-├── test_auth.py             # Register, login, refresh, me, API key
-├── test_categories.py       # CRUD, admin restriction, cascade check
-├── test_products.py         # CRUD, search, filtering, pagination, sorting
-├── test_warehouses.py       # CRUD, stock summary
-├── test_stock.py            # Update, transfer (atomic), alerts
-├── test_audit.py            # Query with filters, admin-only
-├── test_rate_limit.py       # Rate limit enforcement
-└── test_errors.py           # Error format consistency
-```
-
-**Key integration test scenarios:**
-
-1. **Auth lifecycle:** Register → login → access protected endpoint → refresh → access again
-2. **Product search:** Seed products → search for "monitor" → verify relevance ranking
-3. **Stock transfer atomicity:** Transfer → verify source decremented AND destination incremented → verify transfer record exists
-4. **Insufficient stock:** Attempt transfer exceeding available → verify 400 → verify no partial update
-5. **Audit trail:** Create product → update product → verify 2 audit entries with correct changes diff
-6. **Pagination:** Seed 50 products → request page 1 (20 items) → verify total=50, total_pages=3
-7. **Combined filters:** `?category_id=X&min_price=10&max_price=100&sort_by=price&sort_order=asc`
-8. **Rate limiting:** Send 101 requests → verify 429 on 101st
-9. **Error format:** Verify all error responses match `{ error: { code, message, details } }`
-
-**Acceptance criteria:**
-- All integration tests pass against real PostgreSQL
-- Tests run in CI (GitHub Actions service container)
-- Test database is isolated (doesn't affect production)
-- Stock transfer atomicity verified (concurrent test if possible)
-- Search relevance verified (exact match ranked higher)
-- >80% code coverage on `src/api/` and `src/services/`
-
-### Phase 3.3 — OpenAPI Spec Validation
-
-Validate the generated OpenAPI spec:
-
-```bash
-# Validate spec is valid OpenAPI 3.1
-uv run python -c "
-from src.main import app
-from openapi_spec_validator import validate
-validate(app.openapi())
-print('OpenAPI spec is valid')
-"
-```
-
-Add to CI pipeline as a quality gate.
-
-**Acceptance criteria:**
-- OpenAPI spec passes validation
-- CI fails if spec is invalid
-- All endpoints documented with examples
-
-### SHIP-4 Definition of Done
-
-- [ ] Seed script creates: 1 admin user, 5 categories, 50 products, 3 warehouses, 150 stock levels, 20 transfers, 50 audit entries
-- [ ] Seed is idempotent (safe to run multiple times)
-- [ ] Demo user authenticates with both password and API key
-- [ ] Integration tests pass for all endpoints
-- [ ] Stock transfer atomicity verified in tests
-- [ ] Full-text search returns relevant results in tests
-- [ ] Rate limiting verified in tests
-- [ ] Error format consistency verified in tests
-- [ ] OpenAPI spec validates
-- [ ] >80% code coverage
-- [ ] `uv run ruff check .` passes
-- [ ] `uv run mypy src --strict` passes
-- [ ] All tests pass in CI
-
----
-
-## SHIP-5: Deploy to Production and Validate
-
-**Personas:** devops_engineer
-**Estimated stories:** 5
-**Dependencies:** SHIP-2 complete minimum (SHIP-3 and SHIP-4 are nice-to-have)
-
-### What This Ticket Delivers
-
-Production deployment verified end-to-end. Live URL functional, seeded with demo data, and passing all smoke tests. Full CI/CD pipeline operational.
-
-### Phase 4.1 — Production Deployment Verification
-
-Verify the full deployment pipeline works:
-
-1. Push to main triggers deploy workflow
-2. Docker image builds and pushes to ECR
-3. Terraform apply updates ECS task definition
-4. ECS service deploys new task
-5. ALB health check passes
-6. `https://shipapi.workermill.com/api/v1/health` returns 200
-
-**Acceptance criteria:**
-- ECS service running with 1 healthy task
-- ALB target group shows healthy target
-- Health check returns `{"status": "ok", "database": "connected"}`
-- CloudWatch logs show application startup
-
-### Phase 4.2 — Database Migration & Seed
-
-Run against production RDS:
-
-1. Alembic migrations create all tables
-2. Seed script populates demo data
-3. Verify data via API endpoints
-
-```bash
-# Via ECS run-task (migrations)
-aws ecs run-task --cluster shipapi --task-definition shipapi-migrate ...
-
-# Via ECS run-task (seed)
-aws ecs run-task --cluster shipapi --task-definition shipapi-seed \
-  --overrides '{"containerOverrides":[{"name":"api","command":["python","seed/seed.py"]}]}'
-```
-
-**Acceptance criteria:**
-- All 7 tables created in production database
-- Seed data loaded (admin user, categories, products, warehouses, stock)
-- `demo@workermill.com` / `demo1234` can authenticate via API
-- API returns seeded data correctly
-
-### Phase 4.3 — Full Smoke Test Suite
-
-Run comprehensive smoke tests against production:
-
-```bash
-BASE_URL=https://shipapi.workermill.com
-
-# 1. Health check
-curl -f $BASE_URL/api/v1/health
-
-# 2. OpenAPI docs accessible
-curl -f $BASE_URL/docs
-curl -f $BASE_URL/redoc
-
-# 3. Register a new user
-curl -s -X POST $BASE_URL/api/v1/auth/register \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"smoke@test.dev","password":"smoketest123","name":"Smoke Test"}' \
-  | jq '.email'
-
-# 4. Login as demo user
-TOKEN=$(curl -s -X POST $BASE_URL/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"demo@workermill.com","password":"demo1234"}' \
-  | jq -r '.access_token')
-
-# 5. List categories (should return 5)
-curl -f -H "Authorization: Bearer $TOKEN" $BASE_URL/api/v1/categories | jq '.data | length'
-
-# 6. List products with pagination
-curl -f -H "Authorization: Bearer $TOKEN" "$BASE_URL/api/v1/products?page=1&per_page=10" \
-  | jq '.pagination.total'
-
-# 7. Full-text search
-curl -f -H "Authorization: Bearer $TOKEN" "$BASE_URL/api/v1/products?search=monitor" \
-  | jq '.data | length'
-
-# 8. List warehouses
-curl -f -H "Authorization: Bearer $TOKEN" $BASE_URL/api/v1/warehouses | jq '.data | length'
-
-# 9. Stock alerts
-curl -f -H "Authorization: Bearer $TOKEN" $BASE_URL/api/v1/stock/alerts | jq '.data | length'
-
-# 10. Audit log (admin only)
-curl -f -H "Authorization: Bearer $TOKEN" $BASE_URL/api/v1/audit-log | jq '.data | length'
-
-# 11. API key auth
-curl -f -H "X-API-Key: sk_demo_shipapi_2026_showcase_key" $BASE_URL/api/v1/products \
-  | jq '.pagination.total'
-
-# 12. Rate limit headers present
-curl -sI -H "Authorization: Bearer $TOKEN" $BASE_URL/api/v1/products \
-  | grep -i "x-ratelimit"
-```
-
-**Acceptance criteria:**
-- All 12 smoke test steps pass
-- Response times < 200ms p95 for list endpoints
-- No 5xx errors in CloudWatch logs
-
-### Phase 4.4 — CI/CD Pipeline Verification
-
-Verify the full pipeline works end-to-end:
-
-1. **CI gate:** Push branch → CI runs → lint, typecheck, test, pip-audit all pass
-2. **Deploy gate:** Merge to main → Docker build → ECR push → Terraform apply → ECS deploy → smoke test
-3. **Failure handling:** Intentionally break a test → CI blocks merge
-
-**Pipeline flow:**
-```
-Push to branch
-  → CI: ruff check → ruff format → mypy strict → pytest → pip-audit
-  → All pass → PR mergeable
-
-Merge to main
-  → Deploy: docker build → ECR push → terraform apply → ECS deploy → alembic migrate → smoke test
-  → Deployment live at shipapi.workermill.com
-```
-
-**Acceptance criteria:**
-- CI runs on every push and PR
-- Failed CI blocks PR merge
-- Merge to main triggers full deploy pipeline
-- Smoke tests pass post-deploy
-
-### Phase 4.5 — WORKERMILL.md Build Metadata
-
-Create `WORKERMILL.md` documenting the build:
+The agents MUST create a `CLAUDE.md` in the root of `workermill-examples/shipapi` with these conventions:
 
 ```markdown
-# Built by WorkerMill
+# CLAUDE.md
 
-## Build Summary
-- **Stories completed:** N
-- **Total iterations:** N (CI failures fixed)
-- **Build time:** N hours
-- **AI cost:** $N.NN
-- **Quality gates passed:** lint, typecheck, tests (>80% coverage), mypy strict, pip-audit, openapi validation
+## Quick Reference
 
-## Task Log
-Link to WorkerMill task log showing the entire build process.
+| Task | Command |
+|------|---------|
+| Install dependencies | `uv sync` |
+| Run API locally | `uv run uvicorn src.main:app --reload --port 8000` |
+| Start local PostgreSQL | `docker compose up -d db` |
+| Run migrations | `uv run alembic upgrade head` |
+| Create migration | `uv run alembic revision --autogenerate -m "description"` |
+| Run seed | `uv run python seed/seed.py` |
+| Run tests | `uv run pytest tests/ -v` |
+| Run tests (coverage) | `uv run pytest tests/ --cov=src --cov-report=term-missing` |
+| Lint | `uv run ruff check .` |
+| Format | `uv run ruff format .` |
+| Type check | `uv run mypy src --strict` |
 
-## Architecture
-[Auto-generated from actual implementation]
+## Local Development
+
+1. `docker compose up -d db` — Start PostgreSQL
+2. `cp .env.example .env` — Copy env template, fill in values
+3. `uv sync` — Install dependencies
+4. `uv run alembic upgrade head` — Run migrations
+5. `uv run python seed/seed.py` — Load demo data
+6. `uv run uvicorn src.main:app --reload --port 8000` — Start API
+
+## Environment Variables
+
+- `DATABASE_URL` — SQLAlchemy async connection string (pooled for app)
+- `DATABASE_URL_DIRECT` — Direct connection string (for Alembic migrations)
+- `JWT_SECRET_KEY` — Secret key for JWT signing (min 32 chars)
+- `PORT` — Server port (default 8000, Railway sets dynamically)
+
+## Conventions
+
+- All endpoints prefixed with `/api/v1`
+- UUID primary keys on all tables
+- Pydantic V2 schemas for all request/response models
+- Async SQLAlchemy throughout (no sync operations)
+- Every write operation creates an audit log entry
+- Standard error format: `{"error": {"code": "...", "message": "...", "details": [...]}}`
+- Paginated responses: `{"data": [...], "pagination": {"page", "per_page", "total", "total_pages"}}`
+
+## Deployment
+
+- **Platform**: Railway (Docker container)
+- **Database**: Neon PostgreSQL (serverless)
+- **Deploy**: Push to main → GitHub Actions → `railway up`
+- **Migrations**: Run automatically via `preDeployCommand` in `railway.toml`
+- **URL**: https://shipapi.workermill.com
 ```
 
-### SHIP-5 Definition of Done
+---
 
-- [ ] `https://shipapi.workermill.com/api/v1/health` returns 200
-- [ ] `GET /docs` shows Swagger UI with all endpoints documented
+## README.md
+
+The agents MUST create a `README.md` covering:
+
+1. **Title and tagline** — "ShipAPI — Production Inventory Management API"
+2. **"Built by WorkerMill" badge** — Link to workermill.com
+3. **Live demo links** — Swagger UI, ReDoc, health check URL
+4. **Demo credentials** — Email, password, API key for testing
+5. **Quick start** — Clone, docker compose up, uv sync, migrate, seed, run
+6. **API endpoint summary table** — All endpoints with method, auth, description
+7. **Architecture diagram** — Text-based: Railway → FastAPI → Neon PostgreSQL
+8. **Tech stack table** — Same as this PRD
+9. **Testing** — How to run tests locally
+10. **Deployment** — How Railway + Neon deployment works
+
+---
+
+## Acceptance Criteria (Final State)
+
+When all work is complete, the following MUST be true:
+
+### API Functionality
+- [ ] `GET /api/v1/health` returns 200 with database status
+- [ ] User registration, login, token refresh all work
+- [ ] JWT Bearer auth and X-API-Key auth both work on protected endpoints
+- [ ] Category CRUD with admin restrictions
+- [ ] Product CRUD with pagination, sorting, filtering
+- [ ] Full-text search on products returns relevant results ranked by relevance
+- [ ] Warehouse CRUD with stock summary
+- [ ] Stock update, atomic transfer, and alerts endpoint all work
+- [ ] Stock transfer is atomic (all-or-nothing in a single transaction)
+- [ ] Insufficient stock transfer returns 400 (no partial update)
+- [ ] Every write operation creates an audit log entry with changes diff
+- [ ] Audit log query supports date range, action, resource type, user filters
+- [ ] Audit log is admin-only (403 for non-admin)
+
+### Production Hardening
+- [ ] Rate limiting enforced: 5/min register, 10/min login, 100/min authenticated
+- [ ] 429 responses include `Retry-After` header
+- [ ] Rate limit headers (`X-RateLimit-*`) on all responses
+- [ ] All errors follow standard format: `{"error": {"code", "message", "details"}}`
+- [ ] Pydantic validation errors include field-level details
+- [ ] CORS configured for public access
+- [ ] X-Request-Id on all responses
+
+### Documentation
+- [ ] `GET /docs` shows Swagger UI with all endpoints grouped by tag
 - [ ] `GET /redoc` shows ReDoc documentation
-- [ ] Demo user can authenticate (password + API key)
-- [ ] Product listing: pagination, filtering, sorting, full-text search all work
-- [ ] Stock transfer works end-to-end
-- [ ] Stock alerts return products below threshold
-- [ ] Rate limiting returns 429 after 100 requests/minute
-- [ ] All write operations create audit log entries
-- [ ] Error responses follow standard format consistently
-- [ ] RDS is in private subnet, not publicly accessible
-- [ ] CI pipeline runs on push (lint, typecheck, test, pip-audit)
-- [ ] Deploy pipeline: build → push → terraform → deploy → smoke test
-- [ ] Response time < 200ms p95 for list endpoints
-- [ ] WORKERMILL.md documents build metadata
-- [ ] "Built by WorkerMill" in API description and health endpoint
+- [ ] Every endpoint has request/response examples
+- [ ] Error responses documented on every endpoint
+- [ ] Security schemes shown in Swagger UI "Authorize" button
+- [ ] CLAUDE.md documents local dev setup and conventions
+- [ ] README.md documents architecture, setup, API summary, demo credentials
 
----
+### Seed Data
+- [ ] Demo user authenticates with `demo@workermill.com` / `demo1234`
+- [ ] Demo user's API key works: `X-API-Key: sk_demo_shipapi_2026_showcase_key`
+- [ ] 5 categories with subcategories present
+- [ ] 50 products across categories
+- [ ] 3 warehouses with stock levels
+- [ ] `GET /products?search=monitor` returns relevant results
+- [ ] `GET /stock/alerts` returns ~10 products below threshold
+- [ ] Seed script is idempotent (safe to run multiple times)
 
-## Quality Gates (All Tickets)
+### Testing
+- [ ] `uv run pytest tests/ -v` — all tests pass
+- [ ] `uv run pytest tests/ --cov=src --cov-fail-under=80` — >80% coverage
+- [ ] Tests run against real PostgreSQL (not mocked)
+- [ ] Stock transfer atomicity verified in tests
+- [ ] Search relevance verified in tests
+- [ ] Rate limiting verified in tests
+- [ ] Error format consistency verified in tests
 
-| Gate | Threshold | Tool |
-|------|-----------|------|
-| Lint | 0 errors | `ruff check .` |
-| Format | Fully formatted | `ruff format --check .` |
-| Types | 0 errors (strict mode) | `mypy src --strict` |
-| Tests | 100% pass, >80% coverage | `pytest --cov=src` |
-| Security | 0 known vulnerabilities | `pip-audit` |
-| Build | Successful Docker build | `docker build .` |
-| OpenAPI | Valid spec, all endpoints documented | `openapi-spec-validator` |
-| Smoke test | Health + auth + query all pass | `curl` against live URL |
+### Quality
+- [ ] `uv run ruff check .` — 0 errors
+- [ ] `uv run ruff format --check .` — fully formatted
+- [ ] `uv run mypy src --strict` — 0 errors
+- [ ] Docker image builds successfully, size < 200MB
+- [ ] Container runs as non-root user
 
----
+### Deployment
+- [ ] Railway deployment succeeds via `railway up`
+- [ ] `preDeployCommand` runs Alembic migrations before app start
+- [ ] Railway healthcheck passes at `/api/v1/health`
+- [ ] `https://shipapi.workermill.com/api/v1/health` returns 200
+- [ ] CI workflow runs on push/PR (lint, typecheck, test)
+- [ ] Deploy workflow triggers on merge to main
+- [ ] Smoke tests pass post-deploy (health + docs + auth)
 
-## Execution Order
-
-```
-SHIP-1 ─── SHIP-2 ─── SHIP-3 ─── SHIP-4 ─── SHIP-5
-(infra      (core       (hardening  (seed &     (deploy &
- & repo)     API)        & docs)     tests)      validate)
-```
-
-- **All tickets are strictly sequential** (each depends on the previous)
-- **Minimum viable showcase:** SHIP-1 + SHIP-2 + SHIP-5 (skip SHIP-3 and SHIP-4 if needed)
-- **Full showcase:** All 5 tickets
-
----
-
-## Worker Execution Notes
-
-### Autonomous Execution Requirements
-
-Each ticket must be executable **without human input** after creation. Workers need:
-
-1. **Repository access:** GitHub PAT with `workermill-examples` org write access
-2. **AWS credentials:** OIDC-based role assumption (no long-lived keys)
-3. **Terraform state:** S3 backend with DynamoDB lock (created in SHIP-1)
-4. **CI/CD iteration loop:** Workers read CI failure logs, fix code, push again until green
-
-### CI/CD Iteration Pattern
-
-```
-Worker pushes code to branch
-  → GitHub Actions triggers CI
-  → If ANY step fails:
-      Worker reads failure output via GitHub Actions API
-      Worker fixes the root cause
-      Worker pushes again
-      Loop repeats
-  → When CI passes:
-      Merge to main
-      Deploy pipeline runs automatically
-      Smoke test validates deployment
-```
-
-### What Workers Can Do Autonomously
-
-| Action | Autonomous? | How |
-|--------|-------------|-----|
-| Create GitHub repo | ✅ | GitHub API via PAT |
-| Scaffold Python project | ✅ | Write files, install deps |
-| Write Terraform configs | ✅ | Create .tf files |
-| Run `terraform apply` | ✅ | devops_engineer persona has AWS CLI |
-| Build Docker images | ✅ | Kaniko (daemon-less, ECS-compatible) |
-| Push to ECR | ✅ | AWS CLI with task role credentials |
-| Deploy to ECS | ✅ | AWS CLI `update-service --force-new-deployment` |
-| Run Alembic migrations | ✅ | ECS run-task with command override |
-| Run seed script | ✅ | ECS run-task with command override |
-| Configure GitHub Secrets | ✅ | GitHub API via PAT |
-| Create GitHub Actions workflows | ✅ | Write .yml files to repo |
-| Read CI failure logs | ✅ | GitHub Actions API |
-| Set up branch protection | ✅ | GitHub API |
-| Create DNS records | ✅ | Terraform (Route53) |
-
-### Cross-Ticket Context
-
-Each ticket's CLAUDE.md is updated with conventions established in previous tickets. Workers read CLAUDE.md at the start of each ticket for context continuity.
-
-**CLAUDE.md accumulates:**
-- SHIP-1: Local dev setup, Docker commands, Terraform commands, project structure
-- SHIP-2: API patterns, auth flow, error handling conventions, test patterns
-- SHIP-3: Rate limiting config, OpenAPI documentation standards
-- SHIP-4: Seed data details, integration test patterns
-- SHIP-5: Deployment verification procedures
+### Cost
+- [ ] Railway: ~$5/month (Hobby plan)
+- [ ] Neon: $0/month (free tier, 0.5 GB storage sufficient for demo data)
+- [ ] Total: ~$5/month
 
 ---
 
@@ -1354,30 +1452,72 @@ Each ticket's CLAUDE.md is updated with conventions established in previous tick
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Terraform state conflicts | Deploy blocked | DynamoDB lock table prevents concurrent applies |
-| RDS provisioning time | 10-15 min delay | Worker waits; RDS is one-time setup |
-| NAT Gateway cost | ~$30/month | Acceptable for showcase; can switch to NAT instance if needed |
-| ECS Fargate cold start | First request slow (~5s) | Health check warms the container; ALB waits for healthy |
-| Docker build failures | Deploy blocked | Multi-stage build minimizes failure surface; pin all versions |
-| Alembic migration conflicts | Schema drift | Single migration in initial setup; subsequent changes are additive |
-| Rate limiting in-memory | Lost on restart | Acceptable for single-instance showcase; Redis option documented |
-| GitHub Actions OIDC setup | Deploy role creation | Use existing OIDC provider; scope role to this repo only |
-| Full-text search locale | Wrong results for non-English | Use `'english'` dictionary; document limitation |
-| Cross-ticket context loss | Worker deviates | CLAUDE.md updated every ticket; PRD is source of truth |
+| Neon free tier compute limit (100 CU-hours/month) | DB goes to sleep, cold start on first request | `pool_pre_ping=True` handles reconnection; health check returns 200 even if DB disconnected |
+| Neon 0.5 GB storage limit | Can't seed if data exceeds limit | 50 products + audit logs is well under 0.5 GB |
+| Railway Hobby plan: 2 custom domain limit | Can't add more subdomains | Only need 1 domain for this project |
+| slowapi in-memory rate limiting | State lost on container restart | Acceptable for single-instance showcase |
+| Railway cold start after inactivity | First request slow (~2-5s) | Health check warms container; Railway keeps containers alive on Hobby plan |
+| No Terraform state to manage | Less infrastructure-as-code showcase value | Trade-off is worth it — dramatically simpler, cheaper, faster to deploy |
+| GitHub Actions CI needs PostgreSQL service | Slower CI (container startup) | PostgreSQL service container starts in ~5s, negligible impact |
+| Neon connection pooling (PgBouncer) + DDL | Migrations fail over pooled connection | Use `DATABASE_URL_DIRECT` for Alembic, `DATABASE_URL` (pooled) for app |
 
 ---
 
-## Estimated Monthly Cost
+## Worker Execution Notes
 
-| Resource | Estimated Cost |
-|----------|---------------|
-| ECS Fargate (0.25 vCPU, 0.5 GB, 24/7) | ~$9 |
-| RDS db.t4g.micro (24/7) | ~$13 |
-| NAT Gateway (data processing) | ~$5 |
-| ALB (fixed + LCU) | ~$7 |
-| Route53 (hosted zone) | $0.50 |
-| ECR (storage) | ~$1 |
-| CloudWatch (logs) | ~$1 |
-| Secrets Manager (2 secrets) | ~$1 |
-| S3 (Terraform state) | < $0.01 |
-| **Total** | **~$37-38/month** |
+### What Workers CAN Do
+
+| Action | How |
+|--------|-----|
+| Push code to GitHub repo | GitHub PAT (already configured) |
+| Create GitHub Actions workflows | Write `.yml` files, push to repo |
+| Deploy to Railway | `railway up` via GitHub Actions with `RAILWAY_TOKEN` |
+| Run migrations on Railway | Automatic via `preDeployCommand` in `railway.toml` |
+| Run seed on Railway | `railway run python seed/seed.py` (if Railway CLI available) or as a one-time ECS-style run |
+| Read CI failure logs | GitHub Actions API |
+| Verify deployment | `curl` against live URL |
+
+### What Workers CANNOT Do (Already Done)
+
+All of these have been pre-provisioned. Workers should NOT attempt to create or modify these:
+
+| Action | Status |
+|--------|--------|
+| Create Railway account/project/service | **Done** — project `astonishing-reflection`, service `shipapi` |
+| Create Neon account/database | **Done** — endpoint `ep-damp-shape-aiwgevtj`, database `neondb` |
+| Create GitHub repo | **Done** — `workermill-examples/shipapi` |
+| Set Railway environment variables | **Done** — `DATABASE_URL`, `DATABASE_URL_DIRECT`, `JWT_SECRET_KEY`, `PORT` |
+| Set GitHub repo secrets | **Done** — `RAILWAY_TOKEN`, `RAILWAY_SVC_ID` |
+| Add DNS CNAME record | **Done** — `shipapi.workermill.com` → `sdzhxz4l.up.railway.app` |
+| Generate JWT secret key | **Done** — 64-char hex, set in Railway |
+
+### Seeding Production Data
+
+The seed script needs to run once against the Neon database after the first deployment. Options:
+
+1. **Via `preDeployCommand`** — Not ideal (runs on every deploy, must be idempotent)
+2. **Via Railway CLI** — `railway run python seed/seed.py` (runs one-off command in Railway environment)
+3. **Via GitHub Actions** — Add a manual workflow dispatch that runs the seed
+
+Recommended: Make the seed idempotent and run it via a one-time GitHub Actions workflow dispatch, or include it as part of the first deploy's `preDeployCommand` with a guard (e.g., check if admin user exists before seeding).
+
+### CI/CD Iteration Pattern
+
+```
+Worker pushes code to main branch
+  → GitHub Actions triggers CI (ci.yml)
+  → If ANY step fails (lint, typecheck, test):
+      Worker reads failure output via GitHub Actions API
+      Worker fixes the root cause
+      Worker pushes again
+      CI loop repeats
+  → When CI passes:
+      Deploy workflow (deploy.yml) triggers
+      railway up deploys to Railway
+      preDeployCommand runs migrations
+      Smoke test verifies health + docs
+  → If smoke test fails:
+      Worker reads failure, fixes, pushes again
+  → When smoke test passes:
+      Deployment complete
+```

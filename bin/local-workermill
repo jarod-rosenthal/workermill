@@ -66,6 +66,7 @@ ${CYAN}Start Options:${NC}
   --no-critic      Disable critic agent review
   --no-tech-lead   Disable tech lead review
   --local-auth     Skip Cognito, auto-login as local user (old behavior)
+  --mock-workers   Use fast mock workers instead of Claude CLI (for E2E tests)
 
 ${CYAN}Examples:${NC}
   ./bin/local-workermill start
@@ -443,6 +444,7 @@ cmd_start() {
   local enable_critic=true
   local enable_tech_lead=true
   local local_auth=false
+  local mock_workers=false
 
   # Parse options
   while [[ $# -gt 0 ]]; do
@@ -454,12 +456,14 @@ cmd_start() {
       --no-critic) enable_critic=false; shift ;;
       --no-tech-lead) enable_tech_lead=false; shift ;;
       --local-auth) local_auth=true; shift ;;
+      --mock-workers) mock_workers=true; shift ;;
       *) shift ;;
     esac
   done
 
   # Export for start_api() and start_frontend() to read
   export LOCAL_AUTH=$local_auth
+  export MOCK_WORKERS=$mock_workers
 
   # Export settings for child processes
   export MAX_LOCAL_WORKERS=$max_workers
@@ -502,6 +506,7 @@ cmd_start() {
   fi
   log ""
   log "  Auth:         $([ "$local_auth" = "true" ] && echo "local (auto-login)" || echo "Cognito")"
+  log "  Mock Workers: $mock_workers"
   log "  Workers:      $max_workers max concurrent"
   log "  Experts:      $max_experts per task"
   log "  Critic:       $enable_critic"

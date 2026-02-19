@@ -340,9 +340,10 @@ router.post(
       // 2. Decompose PRD via Anthropic API
       // ---------------------------------------------------------------
       const model = org.defaultWorkerModel || "claude-sonnet-4-20250514";
+      const orgCreds = await getOrgCredentials(org.id);
       let decomposed;
       try {
-        decomposed = await decomposePrd(prdContent, model);
+        decomposed = await decomposePrd(prdContent, model, orgCreds.anthropicApiKey || undefined);
       } catch (err) {
         logger.error("PRD decomposition failed", {
           orgId: org.id,

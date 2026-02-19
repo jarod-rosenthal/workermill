@@ -14,6 +14,7 @@ export class NotificationManager {
   constructor(private client: AgentClient) {
     client.on("task:completed", (info: { id: string }) => this.onTaskCompleted(info));
     client.on("task:failed", (info: { id: string }) => this.onTaskFailed(info));
+    client.on("task:rate_limited", (info: { id: string }) => this.onTaskRateLimited(info));
   }
 
   private async onTaskCompleted(info: { id: string }): Promise<void> {
@@ -46,6 +47,17 @@ export class NotificationManager {
         // Retry would need task recreation via cloud API
       });
     } catch { /* ignore */ }
+  }
+
+  private onTaskRateLimited(_info: { id: string }): void {
+    vscode.window.showWarningMessage(
+      "WorkerMill: Anthropic usage limit reached. Task paused — retry from the dashboard when your limit resets.",
+      "Open Dashboard",
+    ).then((action) => {
+      if (action === "Open Dashboard") {
+        vscode.env.openExternal(vscode.Uri.parse("https://workermill.com"));
+      }
+    });
   }
 
   dispose(): void {

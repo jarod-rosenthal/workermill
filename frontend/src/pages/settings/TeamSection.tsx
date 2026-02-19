@@ -67,7 +67,7 @@ export function TeamSection({
         {isFreePlan ? (
           <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 text-amber-400 text-sm font-medium rounded-lg border border-amber-500/30">
             <Crown className="w-4 h-4" />
-            Upgrade to Pro for up to 5 seats
+            Upgrade to Pro for up to 15 seats
           </div>
         ) : (
           <button

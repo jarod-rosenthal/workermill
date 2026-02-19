@@ -32,7 +32,7 @@ export default function PersonaStudio() {
           Overview
         </h2>
         <p>
-          WorkerMill includes 14+ specialized AI personas, and you can create your own, each with expertise in a specific development
+          WorkerMill includes 16 specialized AI personas, and you can create your own, each with expertise in a specific development
           domain. The Persona Studio lets you:
         </p>
         <ul>
@@ -264,25 +264,27 @@ export default function PersonaStudio() {
       <section className="mt-8">
         <h2>System Personas</h2>
         <p>
-          WorkerMill includes 14 built-in personas covering common development roles:
+          WorkerMill includes 16 built-in personas covering common development roles:
         </p>
 
         <div className="not-prose grid grid-cols-2 gap-3 mt-4">
           {[
-            { emoji: "🔧", name: "Backend Developer", slug: "backend_developer" },
+            { emoji: "💻", name: "Backend Developer", slug: "backend_developer" },
             { emoji: "🎨", name: "Frontend Developer", slug: "frontend_developer" },
-            { emoji: "📱", name: "Mobile Developer", slug: "mobile_developer" },
-            { emoji: "🔒", name: "Security Engineer", slug: "security_engineer" },
-            { emoji: "🔬", name: "QA Engineer", slug: "qa_engineer" },
+            { emoji: "🔌", name: "API Developer", slug: "api_developer" },
             { emoji: "🔧", name: "DevOps Engineer", slug: "devops_engineer" },
-            { emoji: "📊", name: "Data Engineer", slug: "data_engineer" },
-            { emoji: "🤖", name: "ML Engineer", slug: "ml_engineer" },
-            { emoji: "🏗️", name: "Architect", slug: "architect" },
+            { emoji: "🔒", name: "Security Engineer", slug: "security_engineer" },
+            { emoji: "🧪", name: "QA Engineer", slug: "qa_engineer" },
             { emoji: "📝", name: "Tech Writer", slug: "tech_writer" },
-            { emoji: "🎯", name: "Product Manager", slug: "product_manager" },
-            { emoji: "👔", name: "Project Manager", slug: "project_manager" },
-            { emoji: "📈", name: "Business Analyst", slug: "business_analyst" },
-            { emoji: "👑", name: "Tech Lead Reviewer", slug: "tech_lead" },
+            { emoji: "📋", name: "Project Manager", slug: "project_manager" },
+            { emoji: "💾", name: "Database Administrator", slug: "database_administrator" },
+            { emoji: "📊", name: "Data Engineer", slug: "data_engineer" },
+            { emoji: "🧠", name: "ML Engineer", slug: "ml_engineer" },
+            { emoji: "🍎", name: "iOS Developer", slug: "mobile_developer_ios" },
+            { emoji: "🤖", name: "Android Developer", slug: "mobile_developer_android" },
+            { emoji: "🎯", name: "Tech Lead", slug: "tech_lead" },
+            { emoji: "👔", name: "Manager", slug: "manager" },
+            { emoji: "🎧", name: "Support Agent", slug: "support_agent" },
           ].map((persona) => (
             <div
               key={persona.slug}

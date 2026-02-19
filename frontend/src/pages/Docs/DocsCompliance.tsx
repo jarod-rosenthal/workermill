@@ -87,22 +87,22 @@ const auditCategories = [
 const complianceFrameworks = [
   {
     name: "SOC 2 Type II",
-    status: "Ready",
-    statusColor: "text-green-500",
+    status: "Planned",
+    statusColor: "text-amber-500",
     description: "Service Organization Control 2 compliance for security, availability, and confidentiality.",
     controls: ["Access Controls", "Data Encryption", "Audit Logging", "Incident Response"],
   },
   {
     name: "GDPR",
-    status: "Compliant",
+    status: "By Design",
     statusColor: "text-green-500",
     description: "General Data Protection Regulation compliance for EU data subjects.",
     controls: ["Data Minimization", "Right to Erasure", "Data Portability", "Consent Management"],
   },
   {
     name: "HIPAA",
-    status: "Available",
-    statusColor: "text-blue-500",
+    status: "Planned",
+    statusColor: "text-amber-500",
     description: "Health Insurance Portability and Accountability Act compliance (Enterprise plan).",
     controls: ["PHI Protection", "Access Audit", "Encryption at Rest", "BAA Available"],
   },

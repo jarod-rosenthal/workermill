@@ -41,8 +41,8 @@ export default function Epics() {
       <div>
         <h1 className="text-3xl font-bold text-foreground mb-2">Epics & Stories</h1>
         <p className="text-muted-foreground">
-          Break down large features into manageable stories with the Epic Board.
-          Access at <code className="bg-muted px-1.5 py-0.5 rounded">/epics</code>.
+          Break down large features into manageable stories with the Board system.
+          Access at <code className="bg-muted px-1.5 py-0.5 rounded">/boards</code>.
         </p>
       </div>
 
@@ -90,7 +90,7 @@ export default function Epics() {
               <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold flex-shrink-0">1</div>
               <div>
                 <h4 className="font-medium text-foreground">Navigate to Epics</h4>
-                <p className="text-sm text-muted-foreground">Go to <code className="bg-muted px-1.5 py-0.5 rounded">/epics</code> from the sidebar</p>
+                <p className="text-sm text-muted-foreground">Go to <code className="bg-muted px-1.5 py-0.5 rounded">/boards</code> from the sidebar</p>
               </div>
             </li>
             <li className="flex gap-4">
@@ -280,7 +280,7 @@ export default function Epics() {
         </h2>
         <div className="bg-card border border-border rounded-xl p-6">
           <p className="text-muted-foreground mb-4">
-            Configure epic-wide settings at <code className="bg-muted px-1.5 py-0.5 rounded">/epics/:id/settings</code>:
+            Configure epic-wide settings at <code className="bg-muted px-1.5 py-0.5 rounded">/boards/:id/settings</code>:
           </p>
           <ul className="space-y-2 text-sm text-muted-foreground">
             <li><strong className="text-foreground">Target Repository</strong> - Which GitHub/GitLab repo to work on</li>

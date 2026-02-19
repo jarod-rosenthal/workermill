@@ -212,7 +212,7 @@ const providerModels = {
     name: "OpenAI",
     icon: "🔷",
     models: [
-      { id: "gpt-5.1-codex", name: "GPT-5.1 Codex", tier: "Powerful", input: "$2.50/M", output: "$10.00/M", context: "200K" },
+      { id: "o3-mini", name: "o3 Mini", tier: "Powerful", input: "$1.10/M", output: "$4.40/M", context: "200K" },
       { id: "gpt-4o", name: "GPT-4o", tier: "Balanced", input: "$2.50/M", output: "$10.00/M", context: "128K" },
       { id: "o1", name: "o1 (Reasoning)", tier: "Powerful", input: "$15.00/M", output: "$60.00/M", context: "200K" },
       { id: "o1-mini", name: "o1 Mini", tier: "Balanced", input: "$3.00/M", output: "$12.00/M", context: "128K" },

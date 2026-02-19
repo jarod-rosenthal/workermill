@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
   RefreshCw,
@@ -102,6 +102,30 @@ export default function Dashboard() {
 
   // Coordination store for blocker alerts
   const coordinationMessages = useCoordinationStore((s) => s.messages);
+
+  // Detect active rate limit blockers across all tasks
+  const rateLimitBlockers = useMemo(() => {
+    const blockers = coordinationMessages.filter(
+      (m: ContextMessage) =>
+        (m.messageType === "blocker_detected" ||
+          (m.messageType === "blocker" && m.metadata?.isEscalated === true)) &&
+        m.metadata?.errorCategory === "rate_limit",
+    );
+    const resolvedIds = new Set(
+      coordinationMessages
+        .filter(
+          (m: ContextMessage) =>
+            m.messageType === "blocker_resolved" ||
+            (m.messageType === "answer" && m.metadata?.blockerAction),
+        )
+        .map(
+          (m: ContextMessage) =>
+            (m.metadata?.blockerId as string) || m.id,
+        )
+        .filter(Boolean),
+    );
+    return blockers.filter((m: ContextMessage) => !resolvedIds.has(m.id));
+  }, [coordinationMessages]);
 
   // Persona metadata from API with fallback
   const personas = usePersonas();
@@ -2328,6 +2352,54 @@ export default function Dashboard() {
         {/* Main Content */}
         <main className="flex-1 overflow-auto p-6 space-y-6">
           <ErrorBoundaryWithRetry fallback={<DashboardErrorFallback />}>
+          {/* Rate limit banner — shown above task list when any task is rate-limited */}
+          {rateLimitBlockers.length > 0 && (
+            <div className="mb-4 bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+                <div>
+                  <span className="font-medium text-foreground">
+                    Anthropic usage limit reached
+                  </span>
+                  <span className="text-sm text-muted-foreground ml-2">
+                    {rateLimitBlockers.length} task
+                    {rateLimitBlockers.length > 1 ? "s" : ""} paused
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  for (const blocker of rateLimitBlockers) {
+                    try {
+                      await fetch(
+                        `${API_BASE}/api/coordination/blocker-response`,
+                        {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
+                          },
+                          body: JSON.stringify({
+                            parentTaskId: blocker.parentTaskId,
+                            blockerId: blocker.id,
+                            action: "retry",
+                          }),
+                        },
+                      );
+                    } catch {
+                      /* ignore individual failures */
+                    }
+                  }
+                  fetchData();
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/20 text-amber-500 hover:bg-amber-500/30 transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Retry All
+              </button>
+            </div>
+          )}
+
           {/* Active Workflows */}
           <div className="card-elevated border border-border/50 rounded-xl overflow-hidden" data-testid="task-list">
             <div className="p-4 border-b border-border/50 bg-gradient-to-r from-primary/10 to-transparent flex items-center justify-between">
@@ -2623,6 +2695,20 @@ export default function Dashboard() {
                           <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)} bg-current/10`} data-testid="task-status">
                             {task.status}
                           </span>
+                          {/* Rate limit badge — visible without expanding */}
+                          {coordinationMessages.some(
+                            (m: ContextMessage) =>
+                              m.parentTaskId === task.id &&
+                              (m.messageType === "blocker_detected" ||
+                                (m.messageType === "blocker" &&
+                                  m.metadata?.isEscalated === true)) &&
+                              m.metadata?.errorCategory === "rate_limit",
+                          ) && (
+                            <span className="text-xs px-2 py-0.5 rounded-full border bg-amber-500/20 text-amber-500 border-amber-500/30 flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3" />
+                              Usage Limit
+                            </span>
+                          )}
                           {/* Real-time Cost Badge with trend and ceiling warning */}
                           {task.estimatedCostUsd > 0 && (
                             <span

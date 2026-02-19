@@ -41,6 +41,7 @@ const COMMS_MESSAGE_TYPE_CONFIG: Record<
   blocker: { emoji: "\u{1F6AB}", color: "text-red-500" },
   blocker_detected: { emoji: "\u{1F6A8}", color: "text-red-500" },
   blocker_resolved: { emoji: "\u2705", color: "text-green-500" },
+  rate_limited: { emoji: "\u231B", color: "text-amber-500" },
   warning: { emoji: "\u26A0\uFE0F", color: "text-yellow-500" },
   progress: {
     emoji: "\u{1F4CA}",

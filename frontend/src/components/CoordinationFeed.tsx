@@ -111,6 +111,12 @@ const MESSAGE_TYPE_CONFIG: Record<
     color: "text-green-500",
     label: "Blocker Resolved",
   },
+  rate_limited: {
+    icon: AlertOctagon,
+    emoji: "⏳",
+    color: "text-amber-500",
+    label: "Rate Limited",
+  },
   warning: {
     icon: AlertTriangle,
     emoji: "⚠️",

@@ -1640,7 +1640,7 @@ export async function monitorExecutingTasks(): Promise<void> {
         }
 
         // Check if completing this card unblocks dependent cards on the same board
-        if (["completed", "deployed"].includes(newStatus)) {
+        if (["completed", "deployed", "pr_approved", "review_approved"].includes(newStatus)) {
           try {
             const kbCardRepo = AppDataSource.getRepository(KbCard);
             const kbCard = await kbCardRepo.findOne({
@@ -1895,11 +1895,11 @@ export async function syncKbCardColumn(
       targetColumnNames = ["Review"];
       break;
     case "pr_approved":
-      targetColumnNames = ["Approved", "PR Approved", "Done"];
+      targetColumnNames = ["Approved", "PR Approved"];
       break;
     case "completed":
     case "deployed":
-      targetColumnNames = ["Done", "Deployed"];
+      targetColumnNames = ["Deployed", "Done"];
       break;
     case "failed":
     case "escalated":

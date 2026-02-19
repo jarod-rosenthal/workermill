@@ -2674,4 +2674,174 @@ export class GitOps {
 
     return lines.join("\n") + "\n";
   }
+
+  /**
+   * Merge a PR via SCM API (squash merge, delete source branch).
+   * Used by PRD auto-run to merge approved PRs so dependent stories
+   * don't stack up with merge conflicts.
+   */
+  async mergePR(prUrl: string, prNumber: number): Promise<boolean> {
+    const scmProvider = this.config.scmProvider || "github";
+    const token = this.config.githubToken;
+    const targetRepo = this.config.targetRepo;
+
+    try {
+      switch (scmProvider) {
+        case "github": {
+          // GitHub: PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge
+          const [owner, repo] = targetRepo.split("/");
+          if (!owner || !repo) {
+            console.error(`[GitOps] Invalid targetRepo for GitHub merge: ${targetRepo}`);
+            return false;
+          }
+          return await this.mergeGitHubPR(owner, repo, prNumber, token);
+        }
+        case "bitbucket": {
+          // Bitbucket: POST /2.0/repositories/{workspace}/{repo_slug}/pullrequests/{id}/merge
+          const [workspace, repoSlug] = targetRepo.split("/");
+          if (!workspace || !repoSlug) {
+            console.error(`[GitOps] Invalid targetRepo for Bitbucket merge: ${targetRepo}`);
+            return false;
+          }
+          return await this.mergeBitbucketPR(workspace, repoSlug, prNumber, token);
+        }
+        case "gitlab": {
+          // GitLab: PUT /api/v4/projects/{id}/merge_requests/{iid}/merge
+          const encodedProject = encodeURIComponent(targetRepo);
+          const baseUrl = this.config.scmBaseUrl || "https://gitlab.com";
+          return await this.mergeGitLabMR(baseUrl, encodedProject, prNumber, token);
+        }
+        default:
+          console.error(`[GitOps] Unsupported SCM provider for merge: ${scmProvider}`);
+          return false;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[GitOps] PR merge failed: ${msg}`);
+      return false;
+    }
+  }
+
+  private mergeGitHubPR(owner: string, repo: string, prNumber: number, token: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const body = JSON.stringify({
+        merge_method: "squash",
+      });
+      const options: https.RequestOptions = {
+        hostname: "api.github.com",
+        path: `/repos/${owner}/${repo}/pulls/${prNumber}/merge`,
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "User-Agent": "WorkerMill-Epic-Agent",
+          Accept: "application/vnd.github+json",
+          "Content-Length": Buffer.byteLength(body),
+        },
+      };
+
+      const req = https.request(options, (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          if (res.statusCode === 200) {
+            console.log(`[GitOps] GitHub PR ***REMOVED***${prNumber} merged successfully`);
+            resolve(true);
+          } else {
+            console.error(`[GitOps] GitHub merge failed (${res.statusCode}): ${data.substring(0, 200)}`);
+            resolve(false);
+          }
+        });
+      });
+
+      req.on("error", (e) => {
+        console.error(`[GitOps] GitHub merge request error: ${e.message}`);
+        resolve(false);
+      });
+      req.write(body);
+      req.end();
+    });
+  }
+
+  private mergeBitbucketPR(workspace: string, repoSlug: string, prNumber: number, token: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const body = JSON.stringify({
+        merge_strategy: "squash",
+        close_source_branch: true,
+      });
+      const authHeader = getBitbucketAuthHeader(token);
+      const options: https.RequestOptions = {
+        hostname: "api.bitbucket.org",
+        path: `/2.0/repositories/${workspace}/${repoSlug}/pullrequests/${prNumber}/merge`,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+          "Content-Length": Buffer.byteLength(body),
+        },
+      };
+
+      const req = https.request(options, (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          if (res.statusCode === 200) {
+            console.log(`[GitOps] Bitbucket PR ***REMOVED***${prNumber} merged successfully`);
+            resolve(true);
+          } else {
+            console.error(`[GitOps] Bitbucket merge failed (${res.statusCode}): ${data.substring(0, 200)}`);
+            resolve(false);
+          }
+        });
+      });
+
+      req.on("error", (e) => {
+        console.error(`[GitOps] Bitbucket merge request error: ${e.message}`);
+        resolve(false);
+      });
+      req.write(body);
+      req.end();
+    });
+  }
+
+  private mergeGitLabMR(baseUrl: string, encodedProject: string, mrIid: number, token: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const body = JSON.stringify({
+        squash: true,
+        should_remove_source_branch: true,
+      });
+      const url = new URL(`${baseUrl}/api/v4/projects/${encodedProject}/merge_requests/${mrIid}/merge`);
+      const options: https.RequestOptions = {
+        hostname: url.hostname,
+        path: url.pathname,
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "PRIVATE-TOKEN": token,
+          "Content-Length": Buffer.byteLength(body),
+        },
+      };
+
+      const req = https.request(options, (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          if (res.statusCode === 200) {
+            console.log(`[GitOps] GitLab MR !${mrIid} merged successfully`);
+            resolve(true);
+          } else {
+            console.error(`[GitOps] GitLab merge failed (${res.statusCode}): ${data.substring(0, 200)}`);
+            resolve(false);
+          }
+        });
+      });
+
+      req.on("error", (e) => {
+        console.error(`[GitOps] GitLab merge request error: ${e.message}`);
+        resolve(false);
+      });
+      req.write(body);
+      req.end();
+    });
+  }
 }

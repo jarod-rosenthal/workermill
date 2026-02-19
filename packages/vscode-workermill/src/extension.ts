@@ -633,6 +633,9 @@ export function activate(context: vscode.ExtensionContext): void {
             `\x1b[1m\x1b[92m✓ Created board "${result.boardName}" with ${result.cardCount} cards\x1b[0m\r\n`,
           );
 
+          // Refresh sidebar so new board cards appear in Backlog
+          treeProvider.refresh();
+
           const action = await vscode.window.showInformationMessage(
             `WorkerMill: Created board "${result.boardName}" with ${result.cardCount} cards`,
             "Open in Dashboard",

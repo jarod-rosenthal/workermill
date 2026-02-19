@@ -204,7 +204,7 @@ export default function BoardView() {
   // and any dependency card's workerStatus is not in a terminal state
   const blockedCardIds = useMemo(() => {
     if (!currentBoard) return new Set<string>();
-    const terminalStatuses = new Set(["completed", "deployed"]);
+    const doneStatuses = new Set(["completed", "deployed", "pr_approved", "review_approved"]);
     // Build a map of cardId -> workerStatus for fast lookup
     const cardStatusMap = new Map<string, string | null>();
     for (const col of currentBoard.columns) {
@@ -218,7 +218,7 @@ export default function BoardView() {
         if (card.dependencies && card.dependencies.length > 0) {
           const anyIncomplete = card.dependencies.some((dep) => {
             const status = cardStatusMap.get(dep.cardId);
-            return !status || !terminalStatuses.has(status);
+            return !status || !doneStatuses.has(status);
           });
           if (anyIncomplete) {
             blocked.add(card.id);

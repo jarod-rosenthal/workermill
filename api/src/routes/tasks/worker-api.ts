@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { AppDataSource } from "../../db/connection.js";
-import { WorkerTask, WorkerTaskLog, WorkerContext } from "../../models/index.js";
+import { WorkerTask, WorkerTaskLog, WorkerContext, KbCard, Organization } from "../../models/index.js";
 import { authenticateRequest, authenticateApiKey } from "../../middleware/auth.js";
 import { getECSTaskRunner } from "../../services/ecs-task-runner.js";
 import { getCostTracker } from "../../services/cost-tracker.js";
@@ -251,6 +251,34 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
           taskId,
           error: syncError instanceof Error ? syncError.message : String(syncError),
         });
+      }
+    }
+
+    // PRD auto-run cascade: when a board card's work is done, trigger unblocked dependent cards
+    if (["completed", "deployed", "pr_approved", "review_approved"].includes(newStatus)) {
+      try {
+        const kbCardRepo = AppDataSource.getRepository(KbCard);
+        const kbCard = await kbCardRepo.findOne({
+          where: { workerTaskId: taskId },
+          relations: ["board"],
+        });
+        if (kbCard?.board) {
+          const orgRepo = AppDataSource.getRepository(Organization);
+          const org = await orgRepo.findOne({ where: { id: kbCard.board.orgId } });
+          if (org?.prdAutoRun) {
+            const { processUnblockedCards } = await import("../../services/board-execution.js");
+            const cascadeResult = await processUnblockedCards(kbCard.board.id, kbCard.board.orgId);
+            if (cascadeResult.triggered > 0) {
+              logger.info("PRD cascade triggered dependent cards", {
+                taskId,
+                boardId: kbCard.board.id,
+                triggered: cascadeResult.triggered,
+              });
+            }
+          }
+        }
+      } catch (cascadeErr) {
+        logger.error("PRD cascade check failed from worker-complete", { taskId, error: String(cascadeErr) });
       }
     }
 

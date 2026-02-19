@@ -52,7 +52,6 @@ import {
   directivesRouter,
   managementRouter,
   statusRouter,
-  testRouter,
   workerApiRouter,
   workerDecisionsRouter,
   buildRouter,
@@ -315,12 +314,6 @@ app.use("/api/tasks", workerLogLimiter, tasksRouter);
 
 // V2 Pipeline task routes (vertical slice sequential execution)
 app.use("/api/tasks-v2", workerLogLimiter, tasksV2Router);
-
-// Test routes (ONLY available in non-production environments)
-// These provide direct database manipulation for E2E test setup/teardown
-if (config.nodeEnv !== "production") {
-  app.use("/api/test", webhookLimiter, testRouter);
-}
 
 // Webhook routes with webhook rate limiting (100 req/min per IP)
 app.use("/api/webhooks", webhookLimiter, webhooksRouter);

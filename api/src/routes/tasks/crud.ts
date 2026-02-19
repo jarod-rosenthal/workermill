@@ -26,7 +26,8 @@ async function fetchBoardCard(
   orgId: string,
   issueKey: string,
 ): Promise<{ summary: string; description: string; labels: string[] } | null> {
-  const match = issueKey.match(/^([A-Za-z]+)-(\d+)$/);
+  // Match prefix-number where prefix may contain non-ASCII chars (e.g., em dashes from board names)
+  const match = issueKey.match(/^(.+)-(\d+)$/);
   if (!match) return null;
 
   const [, prefix, numStr] = match;
@@ -461,7 +462,7 @@ router.post(
     // Link to KbCard and move it on the board (same as board run endpoint)
     if (issueTrackerProvider === "internal" || (!issueData && issueTrackerProvider === "jira")) {
       // Try to find the matching KbCard
-      const keyMatch = jiraIssueKey.match(/^([A-Za-z]+)-(\d+)$/);
+      const keyMatch = jiraIssueKey.match(/^(.+)-(\d+)$/);
       if (keyMatch) {
         const cardRepo = AppDataSource.getRepository(KbCard);
         const card = await cardRepo.findOne({

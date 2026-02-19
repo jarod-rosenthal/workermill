@@ -3,15 +3,25 @@ name: E2E Tests
 on:
   workflow_dispatch:
     inputs:
-      base_url:
-        description: "Target URL"
-        default: "https://workermill.com"
-        type: string
+      target:
+        description: "Target environment"
+        type: choice
+        options:
+          - local
+          - production
+        default: local
 
 jobs:
   e2e:
     name: E2E Tests (Playwright)
     runs-on: [self-hosted, linux, x64, ecs]
+    timeout-minutes: 30
+
+    env:
+      E2E_TEST_USER_EMAIL: ${{ secrets.E2E_TEST_USER_EMAIL }}
+      E2E_TEST_USER_PASSWORD: ${{ secrets.E2E_TEST_USER_PASSWORD }}
+      CI: true
+
     steps:
       - uses: actions/checkout@v4
 
@@ -20,7 +30,7 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install dependencies
+      - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
 
@@ -28,27 +38,37 @@ jobs:
         working-directory: frontend
         run: npx playwright install chromium --with-deps
 
+      ***REMOVED*** Local: start full stack with mock workers
+      - name: Start local WorkerMill
+        if: inputs.target == 'local'
+        run: |
+          chmod +x bin/local-workermill
+          ./bin/local-workermill start --mock-workers --skip-fe
+          ***REMOVED*** Playwright starts its own frontend via webServer config
+
       - name: Run E2E tests
         working-directory: frontend
         run: npx playwright test
         env:
-          BASE_URL: ${{ inputs.base_url }}
-          E2E_TEST_USER_EMAIL: ${{ secrets.E2E_TEST_USER_EMAIL }}
-          E2E_TEST_USER_PASSWORD: ${{ secrets.E2E_TEST_USER_PASSWORD }}
-          E2E_API_KEY: ${{ secrets.E2E_API_KEY }}
+          BASE_URL: ${{ inputs.target == 'production' && 'https://workermill.com' || '' }}
 
-      - name: Upload test report
+      - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ inputs.target }}
           path: frontend/playwright-report/
           retention-days: 30
 
       - name: Upload test results
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-${{ inputs.target }}
           path: frontend/e2e/test-results/
-          retention-days: 30
+          retention-days: 7
+
+      ***REMOVED*** Local: tear down
+      - name: Stop local WorkerMill
+        if: always() && inputs.target == 'local'
+        run: ./bin/local-workermill stop || true

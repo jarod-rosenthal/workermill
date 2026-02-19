@@ -69,7 +69,7 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     description:
       "Production incident management platform: on-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens across oncallshift-api, oncallshift-web, and oncallshift-mobile. Deployed to AWS at oncallshift.com. Built during early WorkerMill development — build logs predate the current showcase system.",
     stack: "Express + TypeScript + React + React Native + Terraform",
-    storyCount: 153,
+    storyCount: 24,
     cost: "Claude Max",
     duration: "~18 hrs",
     linesOfCode: "177,000",

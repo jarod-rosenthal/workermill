@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useEffect } from "react";
 import { Home, Search, FolderOpen, Sparkles, Lock } from "lucide-react";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
@@ -57,6 +57,17 @@ export default function LandingV0() {
   // Refs for scroll targets
   const topRef = useRef<HTMLDivElement>(null);
   const showcaseRef = useRef<HTMLDivElement>(null);
+
+  // Handle hash-based scrolling when navigating from other routes (e.g. /showcase/:id → /#showcase)
+  useEffect(() => {
+    const hash = window.location.hash.replace("#", "");
+    if (hash) {
+      const el = document.getElementById(hash);
+      if (el) {
+        setTimeout(() => el.scrollIntoView({ behavior: "smooth" }), 100);
+      }
+    }
+  }, []);
 
   const handleSidebarNavigate = (target: string) => {
     const refMap: Record<string, React.RefObject<HTMLDivElement | null>> = {

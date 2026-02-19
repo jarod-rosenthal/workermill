@@ -250,7 +250,7 @@ function stripMarkdownFences(text: string): string {
  * Validate the parsed JSON conforms to the DecomposedPrd interface.
  * Throws descriptive errors on validation failure.
  */
-function validateDecomposedPrd(data: unknown): DecomposedPrd {
+export function validateDecomposedPrd(data: unknown): DecomposedPrd {
   if (typeof data !== "object" || data === null) {
     throw new Error(
       "PRD decomposition result is not an object",

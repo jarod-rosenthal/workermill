@@ -9,12 +9,13 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
+import { spawn } from "child_process";
 import { writeFileSync, unlinkSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { EventEmitter } from "events";
 import { AGENT_VERSION } from "./version.js";
-import type { AgentConfig } from "./config.js";
+import { findClaudePath, type AgentConfig } from "./config.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -382,18 +383,56 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // POST /api/prd/build — decompose PRD via cloud API
+  // POST /api/prd/build — decompose PRD locally via Claude CLI with SSE streaming
   if (req.method === "POST" && path === "/api/prd/build") {
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
-      const result = await cloudProxy("POST", "/api/prd/decompose", body);
-      return json(res, result, 201);
+      const prdContent = body.content;
+      if (!prdContent || typeof prdContent !== "string" || !prdContent.trim()) {
+        return json(res, { error: "content is required" }, 400);
+      }
+
+      // Switch to SSE mode for real-time progress
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+
+      const sendEvent = (type: string, data: unknown) => {
+        res.write(`data: ${JSON.stringify({ type, ...data as Record<string, unknown> })}\n\n`);
+      };
+
+      sendEvent("progress", { message: "Starting PRD decomposition via Claude CLI..." });
+
+      // Decompose PRD locally using Claude CLI with progress callbacks
+      const decomposed = await decomposePrdLocal(prdContent, (msg) => {
+        sendEvent("progress", { message: msg });
+      });
+
+      sendEvent("progress", { message: `Decomposed into ${decomposed.cards.length} cards. Creating board...` });
+
+      // Send pre-decomposed cards to cloud API to create the board
+      const result = await cloudProxy("POST", "/api/prd/decompose", {
+        ...body,
+        preDecomposed: decomposed,
+      });
+
+      sendEvent("done", { result });
+      res.end();
     } catch (err: unknown) {
-      const e = err as { status?: number; data?: unknown; message?: string };
-      const status = e.status || 500;
-      if (e.data) return json(res, e.data, status);
-      return json(res, { error: e.message || String(err) }, status);
+      // If headers already sent (SSE mode), send error event
+      if (res.headersSent) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.write(`data: ${JSON.stringify({ type: "error", error: msg })}\n\n`);
+        res.end();
+      } else {
+        const e = err as { status?: number; data?: unknown; message?: string };
+        const status = e.status || 500;
+        if (e.data) return json(res, e.data, status);
+        return json(res, { error: e.message || String(err) }, status);
+      }
     }
   }
 
@@ -530,6 +569,273 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   return notFound(res);
+}
+
+// ── PRD Decomposition via Claude CLI ──────────────────
+
+const PRD_SYSTEM_PROMPT = `You are a senior technical program manager who decomposes Product Requirements Documents (PRDs) into implementation cards for AI coding agents.
+
+Each card represents ONE cohesive epic — a vertical slice or architectural layer that a single AI worker can execute independently (given its dependencies are met).
+
+## Sizing Rules (CRITICAL)
+
+- Target 7-12 deliverables per card. This is the sweet spot for AI worker execution.
+- Cards with >15 deliverables MUST be split into smaller cards.
+- Cards with <4 deliverables MUST be merged with related work.
+- Card 1 is ALWAYS "Project Setup & Dev Environment" — repo scaffolding, tooling, CI skeleton, environment config.
+- The LAST card is ALWAYS "Production Deploy & Validation" — deployment pipeline, smoke tests, monitoring, go-live checklist.
+
+## Card Description Format (REQUIRED)
+
+Each card description MUST include ALL of the following sections:
+
+### Epic Overview
+A 2-3 sentence summary of what this card accomplishes and why it matters.
+
+### Scope Boundary
+- What prior cards created that this card builds on (reference by card index)
+- What this card must NOT touch (boundaries with other cards)
+
+### Prerequisites
+- List card indices that must complete before this card can start
+
+### Deliverables
+- Numbered list of concrete, testable outputs (files, endpoints, components, tests)
+- Each deliverable should be independently verifiable
+
+### Technical Specification
+- Key technical decisions, patterns, libraries, or APIs to use
+- Any constraints or non-functional requirements
+
+## Persona Assignment
+
+Assign exactly one persona per card from this list:
+- backend_developer — API endpoints, database, server logic
+- frontend_developer — UI components, pages, client-side logic
+- devops_engineer — Infrastructure, CI/CD, deployment, monitoring
+- security_engineer — Auth, encryption, vulnerability hardening
+- qa_engineer — Test suites, E2E tests, coverage
+- tech_writer — Documentation, guides, API docs
+- project_manager — Coordination, planning, process
+
+Choose the persona whose primary skillset best matches the card's dominant work.
+
+## Dependency Rules
+
+- dependencyIndices are 0-based array positions referring to other cards
+- No circular dependencies allowed — the dependency graph must be a DAG
+- Card 0 (Project Setup) has no dependencies (empty array)
+- The last card (Production Deploy) typically depends on all or most preceding cards
+
+## Priority Assignment
+
+- urgent: Blocking all other work (typically Card 0 — setup)
+- high: Core business logic, critical path items
+- medium: Important but not blocking — features, integrations
+- low: Nice-to-have, polish, documentation
+
+## Output Format
+
+Respond with ONLY a JSON object (no markdown fences, no explanation):
+
+{
+  "boardName": "Short descriptive board name derived from the PRD title",
+  "cards": [
+    {
+      "title": "Card title (concise, action-oriented)",
+      "description": "Full description with all required sections",
+      "persona": "one_of_the_valid_personas",
+      "priority": "urgent|high|medium|low",
+      "dependencyIndices": [0],
+      "labels": ["relevant", "tags"],
+      "estimatedSteps": 8
+    }
+  ]
+}
+
+estimatedSteps is the number of deliverables in the card (used for progress tracking).
+labels should include relevant technology or domain tags (e.g., "react", "api", "terraform", "auth").`;
+
+/**
+ * Decompose a PRD locally using Claude CLI.
+ * Claude CLI handles OAuth natively via ~/.claude/.credentials.json.
+ * Streams real-time text output via onProgress callback for terminal visibility.
+ */
+function decomposePrdLocal(
+  prdContent: string,
+  onProgress?: (message: string) => void,
+): Promise<{ boardName: string; cards: unknown[] }> {
+  const claudePath = findClaudePath();
+  if (!claudePath) {
+    return Promise.reject(new Error("Claude CLI not installed. Run: curl -fsSL https://claude.ai/install.sh | bash"));
+  }
+
+  const prompt = `${PRD_SYSTEM_PROMPT}\n\n---\n\nDecompose this PRD into implementation cards:\n\n${prdContent}`;
+
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+
+    // Clean env: remove CLAUDECODE to prevent "nested session" error
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
+    delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+
+    const proc = spawn(
+      claudePath,
+      ["--print", "--verbose", "--output-format", "stream-json"],
+      { stdio: ["pipe", "pipe", "pipe"], env: cleanEnv },
+    );
+
+    proc.stdin.write(prompt);
+    proc.stdin.end();
+
+    let resultText = "";
+    let stderrOutput = "";
+    let textStarted = false;
+
+    // Buffer text deltas and flush readable lines to the terminal
+    let lineBuffer = "";
+
+    function flushLine(line: string): void {
+      if (!line.trim()) return;
+      // Clean up JSON syntax noise for readability — show card structure
+      const trimmed = line.trim();
+      // Skip pure JSON syntax lines (braces, brackets)
+      if (/^[{}\[\],]+$/.test(trimmed)) return;
+      // Format key-value pairs nicely
+      const kvMatch = trimmed.match(/^"(\w+)":\s*(.+?)[\s,]*$/);
+      if (kvMatch) {
+        const [, key, val] = kvMatch;
+        // Highlight important fields
+        if (key === "title" || key === "boardName") {
+          onProgress?.(`📋 ${key}: ${val.replace(/^"|"$/g, "")}`);
+        } else if (key === "persona") {
+          onProgress?.(`👤 ${key}: ${val.replace(/^"|"$/g, "")}`);
+        } else if (key === "priority") {
+          onProgress?.(`⚡ ${key}: ${val.replace(/^"|"$/g, "")}`);
+        } else if (key === "description") {
+          // Truncate long descriptions
+          const desc = val.replace(/^"|"$/g, "");
+          const short = desc.length > 120 ? desc.substring(0, 120) + "..." : desc;
+          onProgress?.(`   ${key}: ${short}`);
+        } else if (key === "labels") {
+          onProgress?.(`🏷️  ${key}: ${val}`);
+        } else if (key === "dependencyIndices") {
+          onProgress?.(`🔗 deps: ${val}`);
+        }
+        return;
+      }
+      // Pass through anything else (shouldn't happen much with --print)
+      onProgress?.(trimmed.substring(0, 200));
+    }
+
+    function processTextDelta(text: string): void {
+      lineBuffer += text;
+      const lines = lineBuffer.split("\n");
+      // Keep last incomplete line in buffer
+      lineBuffer = lines.pop() || "";
+      for (const line of lines) {
+        flushLine(line);
+      }
+    }
+
+    // Heartbeat so user knows it's alive before first text arrives
+    const heartbeat = setInterval(() => {
+      if (!textStarted) {
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        onProgress?.(`⏳ Waiting for Claude to start generating... ${elapsed}s`);
+      }
+    }, 8_000);
+
+    proc.stdout.on("data", (chunk: Buffer) => {
+      const lines = chunk.toString().split("\n");
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+
+          // Collect assistant text from stream-json events
+          if (event.type === "assistant" && event.message?.content) {
+            for (const block of event.message.content) {
+              if (block.type === "text") {
+                if (!textStarted) {
+                  textStarted = true;
+                  clearInterval(heartbeat);
+                  const elapsed = Math.round((Date.now() - startTime) / 1000);
+                  onProgress?.(`✅ Claude started generating (${elapsed}s). Streaming output...`);
+                }
+                resultText += block.text;
+                processTextDelta(block.text);
+              }
+            }
+          }
+
+          // Real-time text deltas — this is where most output comes from
+          if (event.type === "content_block_delta" && event.delta?.text) {
+            if (!textStarted) {
+              textStarted = true;
+              clearInterval(heartbeat);
+              const elapsed = Math.round((Date.now() - startTime) / 1000);
+              onProgress?.(`✅ Claude started generating (${elapsed}s). Streaming output...`);
+            }
+            resultText += event.delta.text;
+            processTextDelta(event.delta.text);
+          }
+
+          // Final result message
+          if (event.type === "result" && event.result) {
+            resultText = event.result;
+          }
+        } catch {
+          // Not JSON — ignore
+        }
+      }
+    });
+
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderrOutput += chunk.toString();
+    });
+
+    proc.on("close", (code) => {
+      clearInterval(heartbeat);
+      // Flush remaining buffer
+      if (lineBuffer.trim()) flushLine(lineBuffer);
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+      if (code !== 0) {
+        onProgress?.(`❌ Claude CLI failed after ${elapsed}s`);
+        return reject(new Error(`Claude CLI exited with code ${code}: ${stderrOutput.slice(0, 500)}`));
+      }
+
+      if (!resultText.trim()) {
+        onProgress?.(`❌ Claude CLI returned empty output after ${elapsed}s`);
+        return reject(new Error("Claude CLI returned empty output"));
+      }
+
+      onProgress?.(`✅ Generation complete (${elapsed}s). Parsing JSON...`);
+
+      // Strip markdown fences if present
+      let jsonStr = resultText.trim();
+      const fenceMatch = jsonStr.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
+      if (fenceMatch) jsonStr = fenceMatch[1].trim();
+
+      try {
+        const parsed = JSON.parse(jsonStr);
+        if (!parsed.boardName || !Array.isArray(parsed.cards) || parsed.cards.length === 0) {
+          return reject(new Error("Claude CLI returned invalid PRD decomposition (missing boardName or cards)"));
+        }
+        onProgress?.(`📊 Parsed ${parsed.cards.length} cards for board "${parsed.boardName}"`);
+        resolve(parsed);
+      } catch (parseErr) {
+        return reject(new Error(`Failed to parse PRD decomposition JSON: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`));
+      }
+    });
+
+    proc.on("error", (err) => {
+      clearInterval(heartbeat);
+      reject(new Error(`Failed to spawn Claude CLI: ${err.message}`));
+    });
+  });
 }
 
 // ── Server Lifecycle ───────────────────────────────────

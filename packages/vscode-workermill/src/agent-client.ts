@@ -181,18 +181,93 @@ export class AgentClient extends EventEmitter {
     return this.get<unknown[]>(`/api/tasks/${taskId}/logs${qs}`);
   }
 
-  /** Build a board from a PRD document */
-  async buildFromPrd(payload: {
-    source: string;
-    content: string;
-    githubRepo?: string;
-    boardName?: string;
-  }): Promise<{ boardId: string; boardName: string; cardCount: number }> {
-    return this.post("/api/prd/build", payload) as Promise<{
-      boardId: string;
-      boardName: string;
-      cardCount: number;
-    }>;
+  /** Build a board from a PRD document — streams progress via SSE */
+  buildFromPrdStreaming(
+    payload: {
+      source: string;
+      content: string;
+      githubRepo?: string;
+      boardName?: string;
+    },
+    onProgress: (message: string) => void,
+  ): Promise<{ boardId: string; boardName: string; cardCount: number }> {
+    return new Promise((resolve, reject) => {
+      if (!this.port) return reject(new Error("Not connected"));
+      const body = JSON.stringify(payload);
+      const req = http.request(
+        {
+          hostname: "127.0.0.1",
+          port: this.port,
+          path: "/api/prd/build",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(body),
+            Accept: "text/event-stream",
+          },
+        },
+        (res) => {
+          let buffer = "";
+          res.on("data", (chunk) => {
+            buffer += chunk.toString();
+            // Parse SSE events from buffer
+            const parts = buffer.split("\n\n");
+            buffer = parts.pop() || "";
+            for (const part of parts) {
+              const dataLine = part
+                .split("\n")
+                .find((l) => l.startsWith("data: "));
+              if (!dataLine) continue;
+              try {
+                const event = JSON.parse(dataLine.slice(6));
+                if (event.type === "progress" && event.message) {
+                  onProgress(event.message);
+                } else if (event.type === "done" && event.result) {
+                  resolve(event.result);
+                } else if (event.type === "error") {
+                  reject(new Error(event.error || "PRD decomposition failed"));
+                }
+              } catch {
+                /* ignore unparseable events */
+              }
+            }
+          });
+          res.on("end", () => {
+            // Process remaining buffer
+            if (buffer.trim()) {
+              const dataLine = buffer
+                .split("\n")
+                .find((l) => l.startsWith("data: "));
+              if (dataLine) {
+                try {
+                  const event = JSON.parse(dataLine.slice(6));
+                  if (event.type === "done" && event.result) {
+                    resolve(event.result);
+                    return;
+                  } else if (event.type === "error") {
+                    reject(new Error(event.error || "PRD decomposition failed"));
+                    return;
+                  }
+                } catch {
+                  /* ignore */
+                }
+              }
+            }
+            // If we haven't resolved/rejected yet, stream ended unexpectedly
+            reject(new Error("PRD decomposition stream ended without result"));
+          });
+          res.on("error", reject);
+        },
+      );
+      req.on("error", reject);
+      // 5 minute timeout for full decomposition
+      req.setTimeout(300_000, () => {
+        req.destroy();
+        reject(new Error("PRD decomposition timed out (5 minutes)"));
+      });
+      req.write(body);
+      req.end();
+    });
   }
 
   /** Get code events (Write/Edit) for a task, supports incremental polling via since */
@@ -365,7 +440,8 @@ export class AgentClient extends EventEmitter {
         });
       });
       req.on("error", reject);
-      req.setTimeout(10_000, () => { req.destroy(); reject(new Error("Timeout")); });
+      // PRD decomposition via Claude CLI can take 2+ minutes — use 5min timeout for POST
+      req.setTimeout(300_000, () => { req.destroy(); reject(new Error("Timeout")); });
       req.write(body);
       req.end();
     });

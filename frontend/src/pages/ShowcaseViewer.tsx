@@ -20,10 +20,12 @@ import {
   FileCode,
   Rocket,
   Calendar,
+  Terminal,
 } from "lucide-react";
 import { teamBoardEpics } from "../data/teamboard-showcase-data";
 import { taskPulseEpics } from "../data/taskpulse-showcase-data";
 import { calMillEpics } from "../data/calmill-showcase-data";
+import { shipApiEpics } from "../data/shipapi-showcase-data";
 
 
 interface QualityScores {
@@ -184,6 +186,36 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     stories: [],
     icon: <Calendar className="w-5 h-5" />,
   },
+  shipapi: {
+    id: "shipapi",
+    name: "ShipAPI",
+    tagline:
+      "Inventory management REST API — built across 10 sequential epics by AI workers.",
+    description:
+      "Async Python REST API with JWT authentication, RBAC, rate limiting, audit logging, product/category/warehouse CRUD, stock management with atomic operations, Alembic migrations, 344 tests, GitHub Actions CI pipeline, and interactive Swagger/ReDoc documentation. 10 epics executed sequentially, each building on the last. Deployed to Railway at shipapi.up.railway.app.",
+    stack: "FastAPI + SQLAlchemy 2 + Pydantic V2 + Neon PostgreSQL",
+    storyCount: 49,
+    cost: "Claude Max",
+    duration: "~235 min",
+    linesOfCode: "15,000",
+    repoUrl: "https://github.com/workermill-examples/shipapi",
+    liveUrl: "https://shipapi.up.railway.app/docs",
+    category: "api",
+    personasUsed: [
+      "backend_developer",
+      "security_engineer",
+      "qa_engineer",
+      "devops_engineer",
+    ],
+    qualityScores: {
+      lint: "0 errors",
+      types: "0 errors (mypy strict)",
+      tests: "344 tests",
+      security: "0 critical",
+    },
+    stories: [],
+    icon: <Terminal className="w-5 h-5" />,
+  },
 };
 
 const personaLabels: Record<string, { label: string; color: string }> = {
@@ -221,12 +253,15 @@ export default function ShowcaseViewer() {
   const isTeamBoard = projectId === "teamboard";
   const isTaskPulse = projectId === "taskpulse";
   const isCalMill = projectId === "calmill";
-  const isEpicBoard = isTeamBoard || isTaskPulse || isCalMill;
+  const isShipApi = projectId === "shipapi";
+  const isEpicBoard = isTeamBoard || isTaskPulse || isCalMill || isShipApi;
   const epicBoardData = isTeamBoard
     ? teamBoardEpics
     : isCalMill
       ? calMillEpics
-      : taskPulseEpics;
+      : isShipApi
+        ? shipApiEpics
+        : taskPulseEpics;
   const [expandedEpic, setExpandedEpic] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Record<string, "spec" | "log">>(
     {},

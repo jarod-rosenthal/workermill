@@ -41,7 +41,6 @@ const QUESTION_INELIGIBLE_PERSONAS = new Set([
   "support_agent",
   "project_manager",
   "tech_writer",
-  "ml_engineer",
 ]);
 
 /**
@@ -2915,15 +2914,16 @@ export class EpicCoordinator {
             this.missionActive = false;
             return "done";
           }
-        } else if (this.config.prdChildTask) {
-          // PRD auto-run: merge the PR so dependent stories don't stack up conflicts
-          console.log(`[Epic] PRD child task — auto-merging PR ***REMOVED***${prNumber} after Tech Lead approval`);
-          await this.postLog(`Merging PR ***REMOVED***${prNumber} (PRD auto-run)...`);
+        } else {
+          // Default: merge the PR after Tech Lead approval
+          const mergeLabel = this.config.prdChildTask ? "PRD auto-run" : "Tech Lead approved";
+          console.log(`[Epic] ${mergeLabel} — auto-merging PR ***REMOVED***${prNumber}`);
+          await this.postLog(`Merging PR ***REMOVED***${prNumber} (${mergeLabel})...`);
           const merged = await this.gitOps.mergePR(prUrl, prNumber);
           if (merged) {
             console.log(`[Epic] PR ***REMOVED***${prNumber} merged successfully`);
             await this.postLog(`PR ***REMOVED***${prNumber} merged successfully`);
-            await this.ticketOps.postComment(`🔀 PR ***REMOVED***${prNumber} auto-merged (PRD workflow)`);
+            await this.ticketOps.postComment(`🔀 PR ***REMOVED***${prNumber} auto-merged (${mergeLabel})`);
           } else {
             console.warn(`[Epic] PR ***REMOVED***${prNumber} merge failed — manual merge required`);
             await this.postLog(`⚠️ PR ***REMOVED***${prNumber} auto-merge failed — manual merge required`);

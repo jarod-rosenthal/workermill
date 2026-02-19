@@ -157,10 +157,11 @@ export class AgentClient extends EventEmitter {
   }
 
   /** Search Jira issues */
-  async searchIssues(query?: string, project?: string): Promise<{ issues: IssueInfo[] }> {
+  async searchIssues(query?: string, project?: string, status?: string): Promise<{ issues: IssueInfo[] }> {
     const params: string[] = [];
     if (query) params.push(`q=${encodeURIComponent(query)}`);
     if (project) params.push(`project=${encodeURIComponent(project)}`);
+    if (status) params.push(`status=${encodeURIComponent(status)}`);
     const qs = params.length > 0 ? `?${params.join("&")}` : "";
     return this.get<{ issues: IssueInfo[] }>(`/api/issues${qs}`);
   }

@@ -64,12 +64,9 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
   async refreshIssues(): Promise<void> {
     if (!this.client.isConnected()) return;
     try {
-      const result = await this.client.searchIssues();
-      // Filter out completed issues client-side
-      const doneStatuses = new Set(["done", "closed", "resolved"]);
-      this.issues = (result.issues || []).filter(
-        (i) => !i.status || !doneStatuses.has(i.status.toLowerCase()),
-      );
+      const statusFilter = vscode.workspace.getConfiguration("workermill").get<string>("issueStatusFilter") || "";
+      const result = await this.client.searchIssues(undefined, undefined, statusFilter || undefined);
+      this.issues = result.issues || [];
       this.issueLoadError = null;
     } catch (err) {
       this.issueLoadError = err instanceof Error ? err.message : "Could not load issues";

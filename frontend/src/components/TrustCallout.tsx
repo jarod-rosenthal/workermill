@@ -56,7 +56,7 @@ export default function TrustCallout() {
               <ChevronDown
                 className={`w-4 h-4 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
               />
-              What we see in remote mode
+              What the cloud dashboard receives
             </button>
 
             <div

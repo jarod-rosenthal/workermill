@@ -16,6 +16,7 @@ import {
   Globe,
   HardDrive,
   Compass,
+  MessageCircle,
 } from "lucide-react";
 
 const personas = [
@@ -278,6 +279,24 @@ const personas = [
     ],
     model: "claude-opus-4-6",
   },
+  {
+    id: "support_agent",
+    emoji: "💬",
+    title: "Support Agent",
+    icon: MessageCircle,
+    color: "text-cyan-500",
+    bgColor: "bg-cyan-500/10",
+    borderColor: "border-cyan-500/30",
+    description: "Customer support agent for answering questions and triaging issues.",
+    skills: ["Troubleshooting", "Documentation", "Triage", "Customer Communication", "Issue Resolution"],
+    bestFor: [
+      "Customer issue triage",
+      "Support ticket resolution",
+      "Knowledge base creation",
+      "Incident response",
+    ],
+    model: "claude-sonnet-4-6",
+  },
 ];
 
 const managerPersona = {
@@ -367,7 +386,7 @@ export default function Personas() {
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
           <Users className="w-5 h-5 text-primary" />
-          Worker Personas (14 Types)
+          Worker Personas (16 Types)
         </h2>
         <div className="grid gap-4">
           {personas.map((persona) => (

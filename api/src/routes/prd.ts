@@ -343,19 +343,18 @@ router.post(
       }
 
       // ---------------------------------------------------------------
-      // 2. Decompose PRD via Anthropic API (or use pre-decomposed data from agent)
+      // 2. Decompose PRD via planning agent model (or use pre-decomposed data from agent)
       // ---------------------------------------------------------------
       const { preDecomposed } = req.body;
       let decomposed;
 
       if (preDecomposed && preDecomposed.boardName && Array.isArray(preDecomposed.cards)) {
-        // Agent already decomposed via Claude CLI — validate and sanitize the data
+        // Agent already decomposed locally — validate and sanitize the data
         logger.info("Using pre-decomposed PRD from agent", {
           boardName: preDecomposed.boardName,
           cardCount: preDecomposed.cards.length,
           orgId: org.id,
         });
-        // Run through the same validation/sanitization as the Anthropic path
         try {
           const { validateDecomposedPrd } = await import("../services/prd-decomposer.js");
           decomposed = validateDecomposedPrd(preDecomposed);
@@ -369,17 +368,68 @@ router.post(
           return;
         }
       } else {
-        const model = org.defaultWorkerModel || "claude-sonnet-4-20250514";
+        // Use the planning agent model/provider from org settings
+        const planProvider = org.planningAgentProvider || "anthropic";
+        const planModel = org.planningAgentModel || org.defaultWorkerModel || "claude-sonnet-4-20250514";
         const orgCreds = await getOrgCredentials(org.id);
+
+        logger.info("Decomposing PRD server-side", {
+          provider: planProvider,
+          model: planModel,
+          orgId: org.id,
+        });
+
         try {
-          decomposed = await decomposePrd(
-            prdContent,
-            model,
-            orgCreds.anthropicApiKey || undefined,
-          );
+          if (planProvider === "anthropic") {
+            // Anthropic — use existing Anthropic SDK decomposer
+            decomposed = await decomposePrd(
+              prdContent,
+              planModel,
+              orgCreds.anthropicApiKey || undefined,
+            );
+          } else {
+            // Non-Anthropic — use Vercel AI SDK via planning agent config
+            const { createModel } = await import("../services/planning-agent/config.js");
+            const { generateText } = await import("ai");
+            const { SYSTEM_PROMPT } = await import("../services/prd-decomposer.js");
+
+            const providerKey = planProvider === "openai" ? orgCreds.openaiApiKey
+              : planProvider === "google" ? orgCreds.googleApiKey
+              : "";
+
+            if (!providerKey && planProvider !== "ollama") {
+              res.status(400).json({
+                error: `No API key configured for ${planProvider}. Add one in Settings > Integrations.`,
+              });
+              return;
+            }
+
+            const model = createModel(
+              planProvider,
+              planModel,
+              providerKey || "",
+              org.ollamaBaseUrl || undefined,
+            );
+
+            const result = await generateText({
+              model,
+              system: SYSTEM_PROMPT,
+              prompt: `Decompose this PRD into implementation cards:\n\n${prdContent}`,
+              maxOutputTokens: 16384,
+            });
+
+            const { validateDecomposedPrd } = await import("../services/prd-decomposer.js");
+            // Strip markdown fences if present
+            let jsonText = result.text.trim();
+            const fence = jsonText.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
+            if (fence) jsonText = fence[1].trim();
+            decomposed = validateDecomposedPrd(JSON.parse(jsonText));
+          }
         } catch (err) {
           logger.error("PRD decomposition failed", {
             orgId: org.id,
+            provider: planProvider,
+            model: planModel,
             error: err instanceof Error ? err.message : String(err),
           });
           res.status(500).json({

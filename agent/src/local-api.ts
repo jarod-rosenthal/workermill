@@ -382,7 +382,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // POST /api/prd/build — decompose PRD locally via Claude CLI with SSE streaming
+  // POST /api/prd/build — decompose PRD locally with SSE streaming
   if (req.method === "POST" && path === "/api/prd/build") {
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
@@ -403,10 +403,24 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         res.write(`data: ${JSON.stringify({ type, ...data as Record<string, unknown> })}\n\n`);
       };
 
-      sendEvent("progress", { message: "Starting PRD decomposition via Claude CLI..." });
+      // Fetch planning agent config from the API (provider, model, API key)
+      let planningConfig: { provider: string; model: string; apiKey?: string } = {
+        provider: "anthropic",
+        model: "",
+      };
+      try {
+        const settings = await cloudProxy("GET", "/api/settings") as Record<string, unknown>;
+        if (settings?.planningAgentProvider) planningConfig.provider = settings.planningAgentProvider as string;
+        if (settings?.planningAgentModel) planningConfig.model = settings.planningAgentModel as string;
+        if (settings?.planningApiKey) planningConfig.apiKey = settings.planningApiKey as string;
+      } catch { /* fall back to defaults */ }
 
-      // Decompose PRD locally using Claude CLI with progress callbacks
-      const decomposed = await decomposePrdLocal(prdContent, (msg) => {
+      const providerLabel = planningConfig.provider.charAt(0).toUpperCase() + planningConfig.provider.slice(1);
+      const modelLabel = planningConfig.model || "default";
+      sendEvent("progress", { message: `Starting PRD decomposition via ${providerLabel} (${modelLabel})...` });
+
+      // Decompose PRD locally — routes to Claude Agent SDK (Anthropic) or Vercel AI SDK (others)
+      const decomposed = await decomposePrdLocal(prdContent, planningConfig, (msg) => {
         sendEvent("progress", { message: msg });
       });
 
@@ -658,162 +672,34 @@ estimatedSteps is the number of deliverables in the card (used for progress trac
 labels should include relevant technology or domain tags (e.g., "react", "api", "terraform", "auth").`;
 
 /**
- * Decompose a PRD using the Claude Agent SDK.
+ * Decompose a PRD using the configured planning agent model.
  *
- * Uses @anthropic-ai/claude-agent-sdk's query() function which:
- * - Handles OAuth automatically via ~/.claude/.credentials.json
- * - Streams messages as an async generator (no subprocess env var issues)
- * - Returns typed SDKMessage events for real-time progress
+ * Routes to the appropriate SDK based on provider:
+ * - Anthropic: Claude Agent SDK (query() async generator with OAuth)
+ * - OpenAI/Google/Ollama: Vercel AI SDK (generateTextWithTools())
  */
 async function decomposePrdLocal(
   prdContent: string,
+  planningConfig: { provider: string; model: string; apiKey?: string },
   onProgress?: (message: string) => void,
 ): Promise<{ boardName: string; cards: unknown[] }> {
-  // Dynamic import — the SDK is bundled by esbuild at build time
-  const { query } = await import("@anthropic-ai/claude-agent-sdk");
-
   const startTime = Date.now();
-  let resultText = "";
-  let textStarted = false;
+  let resultText: string;
 
-  // Buffer text deltas and flush readable lines to the terminal
-  let lineBuffer = "";
-
-  function flushLine(line: string): void {
-    if (!line.trim()) return;
-    const trimmed = line.trim();
-    if (/^[{}\[\],]+$/.test(trimmed)) return;
-    const kvMatch = trimmed.match(/^"(\w+)":\s*(.+?)[\s,]*$/);
-    if (kvMatch) {
-      const [, key, val] = kvMatch;
-      if (key === "title" || key === "boardName") {
-        onProgress?.(`📋 ${key}: ${val.replace(/^"|"$/g, "")}`);
-      } else if (key === "persona") {
-        onProgress?.(`👤 ${key}: ${val.replace(/^"|"$/g, "")}`);
-      } else if (key === "priority") {
-        onProgress?.(`⚡ ${key}: ${val.replace(/^"|"$/g, "")}`);
-      } else if (key === "description") {
-        const desc = val.replace(/^"|"$/g, "");
-        const short = desc.length > 120 ? desc.substring(0, 120) + "..." : desc;
-        onProgress?.(`   ${key}: ${short}`);
-      } else if (key === "labels") {
-        onProgress?.(`🏷️  ${key}: ${val}`);
-      } else if (key === "dependencyIndices") {
-        onProgress?.(`🔗 deps: ${val}`);
-      }
-      return;
-    }
-    onProgress?.(trimmed.substring(0, 200));
+  if (planningConfig.provider === "anthropic" || !planningConfig.provider) {
+    // Anthropic provider — use Claude Agent SDK with OAuth
+    resultText = await decomposePrdViaAgentSdk(prdContent, onProgress);
+  } else {
+    // Non-Anthropic provider — use Vercel AI SDK
+    const fullPrompt = `${PRD_SYSTEM_PROMPT}\n\n---\n\nDecompose this PRD into implementation cards:\n\n${prdContent}`;
+    resultText = await decomposePrdViaAiSdk(fullPrompt, planningConfig, onProgress);
   }
 
-  function processTextDelta(text: string): void {
-    lineBuffer += text;
-    const lines = lineBuffer.split("\n");
-    lineBuffer = lines.pop() || "";
-    for (const line of lines) {
-      flushLine(line);
-    }
-  }
-
-  // Heartbeat so user knows it's alive before first text arrives
-  const heartbeat = setInterval(() => {
-    if (!textStarted) {
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-      onProgress?.(`⏳ Waiting for Claude to start generating... ${elapsed}s`);
-    }
-  }, 8_000);
-
-  // Find the system-installed Claude CLI binary.
-  // When bundled into the standalone binary, the SDK's built-in cli.js is not available,
-  // so we must point to the system Claude CLI (installed via install.sh).
-  const claudePath = findClaudePath();
-  if (!claudePath) {
-    throw new Error("Claude CLI not found. Install it with: curl -fsSL https://claude.ai/install.sh | bash");
-  }
-  onProgress?.(`Using Claude CLI: ${claudePath}`);
-
-  // Clean env: remove CLAUDECODE to prevent nested-session detection
-  const cleanEnv: Record<string, string | undefined> = { ...process.env };
-  delete cleanEnv.CLAUDECODE;
-  delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
-
-  try {
-    const conversation = query({
-      prompt: `Decompose this PRD into implementation cards:\n\n${prdContent}`,
-      options: {
-        pathToClaudeCodeExecutable: claudePath,
-        env: cleanEnv,
-        systemPrompt: PRD_SYSTEM_PROMPT,
-        tools: [],                          // No tools needed — pure text generation
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-        maxTurns: 1,                        // Single turn — no back-and-forth
-        includePartialMessages: true,       // Stream text deltas
-        persistSession: false,              // Ephemeral — don't save session
-        stderr: (data: string) => {
-          onProgress?.(`[stderr] ${data.trim()}`);
-        },
-      },
-    });
-
-    for await (const message of conversation) {
-      // Stream text deltas for real-time terminal output
-      if (message.type === "stream_event" && message.event) {
-        const event = message.event;
-        if (event.type === "content_block_delta" && "delta" in event && event.delta && "text" in event.delta) {
-          if (!textStarted) {
-            textStarted = true;
-            clearInterval(heartbeat);
-            const elapsed = Math.round((Date.now() - startTime) / 1000);
-            onProgress?.(`✅ Claude started generating (${elapsed}s). Streaming output...`);
-          }
-          resultText += event.delta.text;
-          processTextDelta(event.delta.text);
-        }
-      }
-
-      // Full assistant message — extract text content
-      if (message.type === "assistant" && message.message?.content) {
-        for (const block of message.message.content) {
-          if ("text" in block && block.text) {
-            // If we didn't get streaming deltas, use the full text
-            if (!textStarted) {
-              textStarted = true;
-              clearInterval(heartbeat);
-              const elapsed = Math.round((Date.now() - startTime) / 1000);
-              onProgress?.(`✅ Claude responded (${elapsed}s).`);
-            }
-            if (!resultText) {
-              resultText = block.text;
-              processTextDelta(block.text);
-            }
-          }
-        }
-      }
-
-      // Result message — check for errors
-      if (message.type === "result") {
-        if (message.is_error) {
-          const errors = "errors" in message ? (message.errors as string[]).join("; ") : "Unknown error";
-          throw new Error(`Claude Agent SDK error: ${errors}`);
-        }
-        // Use result text if available (authoritative)
-        if ("result" in message && message.result) {
-          resultText = message.result as string;
-        }
-      }
-    }
-  } finally {
-    clearInterval(heartbeat);
-  }
-
-  // Flush remaining buffer
-  if (lineBuffer.trim()) flushLine(lineBuffer);
   const elapsed = Math.round((Date.now() - startTime) / 1000);
 
   if (!resultText.trim()) {
-    onProgress?.(`❌ Claude returned empty output after ${elapsed}s`);
-    throw new Error("Claude returned empty output");
+    onProgress?.(`❌ Empty output after ${elapsed}s`);
+    throw new Error("AI returned empty output");
   }
 
   onProgress?.(`✅ Generation complete (${elapsed}s). Parsing JSON...`);
@@ -825,10 +711,189 @@ async function decomposePrdLocal(
 
   const parsed = JSON.parse(jsonStr);
   if (!parsed.boardName || !Array.isArray(parsed.cards) || parsed.cards.length === 0) {
-    throw new Error("Claude returned invalid PRD decomposition (missing boardName or cards)");
+    throw new Error("Invalid PRD decomposition (missing boardName or cards)");
   }
   onProgress?.(`📊 Parsed ${parsed.cards.length} cards for board "${parsed.boardName}"`);
   return parsed;
+}
+
+// ── Anthropic path: Claude Agent SDK ──────────────────
+
+/**
+ * Decompose PRD via Claude Agent SDK (Anthropic provider).
+ * Uses OAuth from ~/.claude/.credentials.json.
+ */
+async function decomposePrdViaAgentSdk(
+  prdContent: string,
+  onProgress?: (message: string) => void,
+): Promise<string> {
+  const { query } = await import("@anthropic-ai/claude-agent-sdk");
+
+  const startTime = Date.now();
+  let resultText = "";
+  let textStarted = false;
+  let lineBuffer = "";
+
+  function processTextDelta(text: string): void {
+    lineBuffer += text;
+    const lines = lineBuffer.split("\n");
+    lineBuffer = lines.pop() || "";
+    for (const line of lines) {
+      flushJsonLine(line, onProgress);
+    }
+  }
+
+  const heartbeat = setInterval(() => {
+    if (!textStarted) {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      onProgress?.(`⏳ Waiting for response... ${elapsed}s`);
+    }
+  }, 8_000);
+
+  const claudePath = findClaudePath();
+  if (!claudePath) {
+    clearInterval(heartbeat);
+    throw new Error("Claude CLI not found. Install it with: curl -fsSL https://claude.ai/install.sh | bash");
+  }
+  onProgress?.(`Using Claude CLI: ${claudePath}`);
+
+  // Clean env to prevent nested-session detection
+  const cleanEnv: Record<string, string | undefined> = { ...process.env };
+  delete cleanEnv.CLAUDECODE;
+  delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+
+  try {
+    const conversation = query({
+      prompt: `Decompose this PRD into implementation cards:\n\n${prdContent}`,
+      options: {
+        pathToClaudeCodeExecutable: claudePath,
+        env: cleanEnv,
+        systemPrompt: PRD_SYSTEM_PROMPT,
+        tools: [],
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+        maxTurns: 1,
+        includePartialMessages: true,
+        persistSession: false,
+        stderr: (data: string) => {
+          onProgress?.(`[stderr] ${data.trim()}`);
+        },
+      },
+    });
+
+    for await (const message of conversation) {
+      if (message.type === "stream_event" && message.event) {
+        const event = message.event;
+        if (event.type === "content_block_delta" && "delta" in event && event.delta && "text" in event.delta) {
+          if (!textStarted) {
+            textStarted = true;
+            clearInterval(heartbeat);
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            onProgress?.(`✅ Streaming started (${elapsed}s)...`);
+          }
+          resultText += event.delta.text;
+          processTextDelta(event.delta.text);
+        }
+      }
+
+      if (message.type === "assistant" && message.message?.content) {
+        for (const block of message.message.content) {
+          if ("text" in block && block.text && !resultText) {
+            if (!textStarted) {
+              textStarted = true;
+              clearInterval(heartbeat);
+            }
+            resultText = block.text;
+            processTextDelta(block.text);
+          }
+        }
+      }
+
+      if (message.type === "result") {
+        if (message.is_error) {
+          const errors = "errors" in message ? (message.errors as string[]).join("; ") : "Unknown error";
+          throw new Error(`Claude Agent SDK error: ${errors}`);
+        }
+        if ("result" in message && message.result) {
+          resultText = message.result as string;
+        }
+      }
+    }
+  } finally {
+    clearInterval(heartbeat);
+  }
+
+  if (lineBuffer.trim()) flushJsonLine(lineBuffer, onProgress);
+  return resultText;
+}
+
+// ── Non-Anthropic path: Vercel AI SDK ──────────────────
+
+/**
+ * Decompose PRD via Vercel AI SDK (OpenAI, Google, Ollama providers).
+ * Uses the org's API key for the configured provider.
+ */
+async function decomposePrdViaAiSdk(
+  prompt: string,
+  config: { provider: string; model: string; apiKey?: string },
+  onProgress?: (message: string) => void,
+): Promise<string> {
+  const { generateTextWithTools } = await import("./ai-sdk-generate.js");
+
+  const startTime = Date.now();
+  onProgress?.(`Calling ${config.provider} (${config.model})...`);
+
+  const apiKey = config.apiKey || process.env[`${config.provider.toUpperCase()}_API_KEY`] || "";
+  if (!apiKey && config.provider !== "ollama") {
+    throw new Error(`No API key for ${config.provider}. Configure it in Settings > Integrations.`);
+  }
+
+  const result = await generateTextWithTools({
+    provider: config.provider as "anthropic" | "openai" | "google" | "ollama",
+    model: config.model,
+    apiKey,
+    prompt,
+    enableTools: false, // Pure text generation — no file tools needed
+    maxTokens: 16384,
+    temperature: 0.7,
+  });
+
+  const elapsed = Math.round((Date.now() - startTime) / 1000);
+  onProgress?.(`✅ ${config.provider} responded (${elapsed}s)`);
+
+  // Parse lines for progress display
+  for (const line of result.split("\n")) {
+    flushJsonLine(line, onProgress);
+  }
+
+  return result;
+}
+
+// ── Shared: JSON line parser for progress display ──────
+
+function flushJsonLine(line: string, onProgress?: (message: string) => void): void {
+  if (!line.trim()) return;
+  const trimmed = line.trim();
+  if (/^[{}\[\],]+$/.test(trimmed)) return;
+  const kvMatch = trimmed.match(/^"(\w+)":\s*(.+?)[\s,]*$/);
+  if (kvMatch) {
+    const [, key, val] = kvMatch;
+    if (key === "title" || key === "boardName") {
+      onProgress?.(`📋 ${key}: ${val.replace(/^"|"$/g, "")}`);
+    } else if (key === "persona") {
+      onProgress?.(`👤 ${key}: ${val.replace(/^"|"$/g, "")}`);
+    } else if (key === "priority") {
+      onProgress?.(`⚡ ${key}: ${val.replace(/^"|"$/g, "")}`);
+    } else if (key === "description") {
+      const desc = val.replace(/^"|"$/g, "");
+      const short = desc.length > 120 ? desc.substring(0, 120) + "..." : desc;
+      onProgress?.(`   ${key}: ${short}`);
+    } else if (key === "labels") {
+      onProgress?.(`🏷️  ${key}: ${val}`);
+    } else if (key === "dependencyIndices") {
+      onProgress?.(`🔗 deps: ${val}`);
+    }
+  }
 }
 
 // ── Server Lifecycle ───────────────────────────────────

@@ -181,9 +181,9 @@ export function AIWorkersSection({
             </div>
           </CollapsibleSection>
 
-          {/* Virtual Manager */}
+          {/* Tech Lead */}
           <CollapsibleSection
-            title="Virtual Manager"
+            title="Tech Lead"
             icon={<Users className="w-4 h-4" />}
             iconBgColor="bg-indigo-500/20"
             iconColor="text-indigo-500"
@@ -277,11 +277,11 @@ export function AIWorkersSection({
               </div>
 
               <div className="p-4 rounded-lg bg-indigo-500/5 border border-indigo-500/20">
-                <h4 className="text-sm font-medium text-indigo-400 mb-2">Virtual Manager (Tech Lead)</h4>
+                <h4 className="text-sm font-medium text-indigo-400 mb-2">Tech Lead</h4>
                 <p className="text-xs text-muted-foreground">
-                  The Virtual Manager (Tech Lead) reviews all PRs created by AI workers before they
-                  are merged. These provider and model settings control which AI performs code reviews.
-                  Use the <strong>review</strong> label on Jira tickets to require manager review.
+                  The Tech Lead reviews all PRs created by AI workers before they are merged.
+                  These provider and model settings control which AI performs code reviews.
+                  Use the <strong>review</strong> label on Jira tickets to require Tech Lead review.
                 </p>
               </div>
             </div>

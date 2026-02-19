@@ -1485,10 +1485,10 @@ export default function Analytics() {
         </div>
       )}
 
-      {/* Virtual Manager Review Metrics */}
+      {/* Tech Lead Review Metrics */}
       {reviewMetrics && reviewMetrics.summary.reviewedTasks > 0 && (
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8 border-l-4 border-emerald-500">
-          <h2 className="text-lg font-semibold mb-1">Virtual Manager Review Metrics</h2>
+          <h2 className="text-lg font-semibold mb-1">Tech Lead Review Metrics</h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
             AI code review value metrics - tasks with the <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">review</code> label enabled
           </p>

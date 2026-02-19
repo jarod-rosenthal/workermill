@@ -137,7 +137,7 @@ export default function Workers() {
             </div>
           ))}
 
-          {/* Virtual Manager - highlighted card */}
+          {/* Tech Lead - highlighted card */}
           <div className="relative group">
             {/* Glow effect */}
             <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-accent/20 rounded-xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />

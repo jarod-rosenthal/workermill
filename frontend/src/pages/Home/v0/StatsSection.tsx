@@ -5,9 +5,9 @@ const stats = [
     detail: "Across 6 repositories and 4 organizations",
   },
   {
-    value: "16",
-    label: "AI expert personas",
-    detail: "Frontend, backend, DevOps, QA, security, and more",
+    value: "4+",
+    label: "AI providers",
+    detail: "Anthropic, OpenAI, Google, and self-hosted via Ollama",
   },
   {
     value: "~55 min",

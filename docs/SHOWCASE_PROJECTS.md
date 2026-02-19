@@ -79,12 +79,12 @@ Workers have access to CI logs via GitHub Actions API. They read failure message
 | Project | App Hosting | Database | Other Services | Estimated Monthly Cost |
 |---------|------------|----------|----------------|----------------------|
 | TeamBoard | Vercel (free tier) | Neon PostgreSQL (free tier) | — | $0 |
-| ShipAPI | AWS ECS Fargate | AWS RDS (t4g.micro) | ALB, ECR | ~$35-45 |
+| ShipAPI | Railway (Hobby) | Neon PostgreSQL (free tier) | — | ~$5 |
 | PulseView | GCP Cloud Run | GCP Cloud SQL (db-f1-micro) | — | ~$15-25 |
 | DocForge | AWS ECS Fargate | AWS RDS (t4g.micro) | Meilisearch on ECS | ~$45-55 |
 | EnvGuard | AWS App Runner | AWS RDS (t4g.micro) | GitHub Releases (CLI) | ~$20-30 |
 | OrderFlow | AWS ECS Fargate (×4) | AWS RDS (t4g.micro) | SQS queues | ~$50-65 |
-| **Total** | | | | **~$165-220/month** |
+| **Total** | | | | **~$135-180/month** |
 
 All AWS/GCP resources are provisioned via Terraform. All container images are built in CI. No manual cloud console operations.
 

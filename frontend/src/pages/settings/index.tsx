@@ -77,16 +77,16 @@ const NAV_ITEMS: NavItem[] = [
   { id: "data", label: "Data & Display", icon: <Database className="w-5 h-5" /> },
 ];
 
-// External link items (not categories, but navigation links)
-const EXTERNAL_LINKS: ExternalLinkItem[] = [
-  { label: "Compliance Center", icon: <Shield className="w-5 h-5" />, href: "/compliance" },
-];
 
 export default function Settings() {
   const tokens = useAuthStore((state) => state.tokens);
   const organization = useAuthStore((state) => state.organization);
   const currentUser = useAuthStore((state) => state.user);
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>("general");
+
+  const externalLinks: ExternalLinkItem[] = organization?.plan === 'enterprise'
+    ? [{ label: "Compliance Center", icon: <Shield className="w-5 h-5" />, href: "/compliance" }]
+    : [];
 
   // Settings state
   const [settings, setSettings] = useState<Settings>({
@@ -2213,20 +2213,22 @@ export default function Settings() {
               )}
 
               {/* External Links */}
-              <div className="mt-6 pt-4 border-t border-border/30">
-                <p className="px-3 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">Enterprise</p>
-                {EXTERNAL_LINKS.map((link) => (
-                  <Link
-                    key={link.label}
-                    to={link.href}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                  >
-                    {link.icon}
-                    <span className="text-sm font-medium">{link.label}</span>
-                    <ChevronRight className="w-4 h-4 ml-auto" />
-                  </Link>
-                ))}
-              </div>
+              {externalLinks.length > 0 && (
+                <div className="mt-6 pt-4 border-t border-border/30">
+                  <p className="px-3 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">Enterprise</p>
+                  {externalLinks.map((link) => (
+                    <Link
+                      key={link.label}
+                      to={link.href}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                    >
+                      {link.icon}
+                      <span className="text-sm font-medium">{link.label}</span>
+                      <ChevronRight className="w-4 h-4 ml-auto" />
+                    </Link>
+                  ))}
+                </div>
+              )}
             </nav>
           </aside>
 

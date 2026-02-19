@@ -26,7 +26,7 @@ import {
 } from "./pipeline-v2-types.js";
 
 // Model to use for recovery decisions
-const RECOVERY_MODEL = "claude-sonnet-4-20250514";
+const RECOVERY_MODEL = "claude-sonnet-4-6";
 
 // Repository access helper
 const getTaskRepo = () => AppDataSource.getRepository(WorkerTask);

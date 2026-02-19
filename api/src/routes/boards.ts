@@ -206,7 +206,7 @@ export async function runCardAsWorkerTask(
   if (labelNames.includes("opus")) {
     workerModel = "claude-opus-4-6";
   } else if (labelNames.includes("sonnet")) {
-    workerModel = "claude-sonnet-4-5-20250929";
+    workerModel = "claude-sonnet-4-6";
   } else if (labelNames.includes("haiku")) {
     workerModel = "claude-haiku-4-5-20251001";
   } else {

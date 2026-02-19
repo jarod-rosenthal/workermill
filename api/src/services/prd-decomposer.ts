@@ -121,7 +121,7 @@ labels should include relevant technology or domain tags (e.g., "react", "api", 
 // MAIN FUNCTION
 // ============================================================================
 
-const DEFAULT_MODEL = "claude-sonnet-4-20250514";
+const DEFAULT_MODEL = "claude-sonnet-4-6";
 
 /**
  * Decompose a PRD into structured implementation cards using the Anthropic SDK.

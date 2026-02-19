@@ -582,7 +582,7 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
       planningDurationMs: durationMs,
       themeExtractionModel: THEME_EXTRACTION_MODEL,
       storyDecompositionModel: STORY_DECOMPOSITION_MODEL,
-      inventoryExtractionModel: "claude-sonnet-4-20250514",
+      inventoryExtractionModel: "claude-sonnet-4-6",
       dualScore: {
         scope: dualScore.scope,
         risk: dualScore.risk,

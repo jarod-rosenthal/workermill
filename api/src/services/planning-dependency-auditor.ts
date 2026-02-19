@@ -24,7 +24,7 @@ import { PRDInventory } from "./planning-inventory.js";
 // ============================================================================
 
 /** Model to use for dependency auditing (fast + accurate for structured analysis) */
-const AUDITOR_MODEL = "claude-sonnet-4-20250514";
+const AUDITOR_MODEL = "claude-sonnet-4-6";
 
 /** Maximum dependencies per story (prevents "depends on everything" graphs) */
 const MAX_DEPS_PER_STORY = 5;

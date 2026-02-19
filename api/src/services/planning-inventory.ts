@@ -382,7 +382,7 @@ export const MAX_TOTAL_BLOCKING_UNKNOWNS = 5;
 // ============================================================================
 
 // Use Sonnet for inventory extraction (Haiku is too weak for this task)
-const INVENTORY_MODEL = "claude-sonnet-4-20250514";
+const INVENTORY_MODEL = "claude-sonnet-4-6";
 
 /**
  * Tool definition for structured inventory extraction

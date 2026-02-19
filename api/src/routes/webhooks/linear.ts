@@ -297,7 +297,7 @@ router.post(
     if (labelNames.includes("opus")) {
       model = "claude-opus-4-6";
     } else if (labelNames.includes("sonnet")) {
-      model = "claude-sonnet-4-5-20250929";
+      model = "claude-sonnet-4-6";
     } else if (labelNames.includes("haiku")) {
       model = "claude-haiku-4-5-20251001";
     }

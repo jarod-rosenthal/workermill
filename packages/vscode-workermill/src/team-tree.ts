@@ -179,6 +179,11 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
       const i = element.issue;
       if (i.issueType) items.push(new InfoTreeItem(i.issueType, undefined, issueTypeIcon(i.issueType)));
       if (i.priority) items.push(new InfoTreeItem(i.priority, undefined, priorityIcon(i.priority)));
+      if (i.dependencyCount && i.dependencyCount > 0) {
+        const met = i.dependencyCount - (i.blockedByCount ?? 0);
+        const icon = (i.blockedByCount ?? 0) > 0 ? "$(lock)" : "$(unlock)";
+        items.push(new InfoTreeItem(`${met}/${i.dependencyCount} deps met`, undefined, icon));
+      }
       if (i.assignee) items.push(new InfoTreeItem(i.assignee.displayName, undefined, "$(person)"));
       if (i.project) items.push(new InfoTreeItem(i.project.name, undefined, "$(repo)"));
       if (i.labels.length > 0) items.push(new InfoTreeItem(i.labels.join(", "), undefined, "$(tag)"));
@@ -226,16 +231,36 @@ class TaskTreeItem extends vscode.TreeItem {
 
 class IssueTreeItem extends vscode.TreeItem {
   constructor(public readonly issue: IssueInfo) {
+    const isBlocked = (issue.blockedByCount ?? 0) > 0;
     const label = `${issue.key}: ${issue.summary}`;
     const truncated = label.length > 55 ? label.substring(0, 55) + "..." : label;
     super(truncated, vscode.TreeItemCollapsibleState.Collapsed);
 
     this.id = `issue-${issue.key}`;
-    this.description = issue.status || "";
-    this.tooltip = `${issue.key}: ${issue.summary}\nStatus: ${issue.status || "Unknown"}\nType: ${issue.issueType || "Unknown"}\nPriority: ${issue.priority || "None"}\nAssignee: ${issue.assignee?.displayName || "Unassigned"}`;
 
-    this.iconPath = new vscode.ThemeIcon("circle-outline", statusColor(issue.status));
-    this.contextValue = "issue";
+    // Show blocked status and dependency info in description
+    if (isBlocked) {
+      this.description = `$(lock) Blocked (${issue.blockedByCount}/${issue.dependencyCount} deps)`;
+    } else if (issue.dependencyCount && issue.dependencyCount > 0) {
+      this.description = `$(unlock) ${issue.status || ""}`;
+    } else {
+      this.description = issue.status || "";
+    }
+
+    const blockedLine = isBlocked
+      ? `\nBlocked: ${issue.blockedByCount} of ${issue.dependencyCount} dependencies unmet`
+      : issue.dependencyCount
+        ? `\nDependencies: all ${issue.dependencyCount} met`
+        : "";
+    this.tooltip = `${issue.key}: ${issue.summary}\nStatus: ${issue.status || "Unknown"}\nType: ${issue.issueType || "Unknown"}\nPriority: ${issue.priority || "None"}\nAssignee: ${issue.assignee?.displayName || "Unassigned"}${blockedLine}`;
+
+    if (isBlocked) {
+      this.iconPath = new vscode.ThemeIcon("lock", new vscode.ThemeColor("charts.orange"));
+      this.contextValue = "issue-blocked";
+    } else {
+      this.iconPath = new vscode.ThemeIcon("circle-outline", statusColor(issue.status));
+      this.contextValue = "issue";
+    }
 
     // Click issue → show details in feed panel
     this.command = {

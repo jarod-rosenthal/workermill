@@ -14,6 +14,7 @@ import { getOrgCredentials } from "../services/org-credentials.js";
 import { AppDataSource } from "../db/connection.js";
 import { KbCard } from "../models/KbCard.js";
 import { KbBoard } from "../models/KbBoard.js";
+import { KbCardDependency } from "../models/KbCardDependency.js";
 import { getLinearTeams } from "../utils/linear.js";
 import { logger } from "../utils/logger.js";
 
@@ -34,6 +35,10 @@ interface IssueInfo {
   priority: string | null;
   labels: string[];
   project: { key: string; name: string } | null;
+  /** Number of unmet dependencies (0 = unblocked). Only set for board cards. */
+  blockedByCount?: number;
+  /** Total dependency count. Only set for board cards. */
+  dependencyCount?: number;
 }
 
 interface IssueFilters {
@@ -61,6 +66,7 @@ async function searchBoardCards(
     .leftJoinAndSelect("card.assignee", "assignee")
     .leftJoinAndSelect("card.cardLabels", "cl")
     .leftJoinAndSelect("cl.label", "label")
+    .leftJoinAndSelect("card.workerTask", "wt")
     .where("board.orgId = :orgId", { orgId })
     .andWhere("LOWER(col.name) NOT IN (:...doneNames)", {
       doneNames: DONE_COLUMN_NAMES,
@@ -84,19 +90,50 @@ async function searchBoardCards(
 
   const cards = await qb.getMany();
 
-  return cards.map((card) => ({
-    key: card.cardNumber ? `${card.board.prefix}-${card.cardNumber}` : `${card.board.prefix}-${card.id.slice(0, 8)}`,
-    summary: card.title,
-    description: card.description,
-    status: card.column.name,
-    assignee: card.assignee
-      ? { displayName: card.assignee.fullName || card.assignee.email, accountId: card.assignee.id }
-      : null,
-    issueType: "Card",
-    priority: card.priority,
-    labels: (card.cardLabels || []).map((cl) => cl.label?.name).filter(Boolean) as string[],
-    project: { key: card.board.prefix, name: card.board.name },
-  }));
+  // Load dependencies with their target cards' worker tasks to compute blocked status
+  const cardIds = cards.map((c) => c.id);
+  const TERMINAL_STATUSES = ["completed", "deployed"];
+  let depsMap = new Map<string, { total: number; unmet: number }>();
+
+  if (cardIds.length > 0) {
+    const depRepo = AppDataSource.getRepository(KbCardDependency);
+    const deps = await depRepo
+      .createQueryBuilder("dep")
+      .leftJoinAndSelect("dep.dependsOnCard", "depCard")
+      .leftJoinAndSelect("depCard.workerTask", "depWt")
+      .where("dep.cardId IN (:...cardIds)", { cardIds })
+      .getMany();
+
+    // Group by cardId
+    for (const dep of deps) {
+      const entry = depsMap.get(dep.cardId) || { total: 0, unmet: 0 };
+      entry.total++;
+      const depStatus = dep.dependsOnCard?.workerTask?.status;
+      if (!depStatus || !TERMINAL_STATUSES.includes(depStatus)) {
+        entry.unmet++;
+      }
+      depsMap.set(dep.cardId, entry);
+    }
+  }
+
+  return cards.map((card) => {
+    const depInfo = depsMap.get(card.id);
+    return {
+      key: card.cardNumber ? `${card.board.prefix}-${card.cardNumber}` : `${card.board.prefix}-${card.id.slice(0, 8)}`,
+      summary: card.title,
+      description: card.description,
+      status: card.column.name,
+      assignee: card.assignee
+        ? { displayName: card.assignee.fullName || card.assignee.email, accountId: card.assignee.id }
+        : null,
+      issueType: "Card",
+      priority: card.priority,
+      labels: (card.cardLabels || []).map((cl) => cl.label?.name).filter(Boolean) as string[],
+      project: { key: card.board.prefix, name: card.board.name },
+      dependencyCount: depInfo?.total ?? 0,
+      blockedByCount: depInfo?.unmet ?? 0,
+    };
+  });
 }
 
 // ─── Jira fetcher ────────────────────────────────────────────────────────

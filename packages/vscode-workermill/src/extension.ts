@@ -166,7 +166,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // Run a Jira issue from the tree view (inline play button)
     vscode.commands.registerCommand(
       "workermill.runIssue",
-      async (issueItem?: { issue?: { key: string; summary: string } }) => {
+      async (issueItem?: { issue?: { key: string; summary: string; blockedByCount?: number } }) => {
         if (!client.isConnected()) {
           vscode.window.showErrorMessage(
             "WorkerMill agent is not running. Start with: workermill-agent start",
@@ -176,6 +176,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
         const issueKey = issueItem?.issue?.key;
         if (!issueKey) return;
+
+        if ((issueItem?.issue?.blockedByCount ?? 0) > 0) {
+          vscode.window.showWarningMessage(
+            `Cannot run "${issueKey}" — blocked by ${issueItem!.issue!.blockedByCount} unmet dependencies`,
+          );
+          return;
+        }
 
         const confirm = await vscode.window.showInformationMessage(
           `Run "${issueKey}: ${issueItem?.issue?.summary}" with WorkerMill?`,

@@ -10,7 +10,7 @@ const faqItems: FAQItem[] = [
   {
     question: "How does pricing work?",
     answer:
-      "WorkerMill offers three plans: Free, Pro, and Enterprise. The Free plan runs Anthropic Claude models locally on your hardware at no cost — unlimited tasks, all personas, all integrations. Pro ($29/month, launching at $14.50) unlocks all AI providers (OpenAI, Google, Ollama), 5x parallel workers, cloud execution, and team features. Enterprise offers unlimited everything with SSO, compliance, and dedicated support.",
+      "WorkerMill offers three plans: Free, Pro, and Enterprise. The Free plan runs Anthropic Claude models locally on your hardware at no cost — unlimited tasks, all personas, GitHub + internal board. Pro ($14.50/mo) adds all integrations (Jira, GitLab, Bitbucket, Linear), all AI providers (OpenAI, Google, Ollama), codebase RAG, 5x parallel workers, cloud execution, and up to 15 seats. Enterprise offers unlimited everything with SSO, compliance, and dedicated support.",
   },
   {
     question: "What is Epic Mode and why is it the default?",

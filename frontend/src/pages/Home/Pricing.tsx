@@ -27,7 +27,7 @@ const tiers: PricingTier[] = [
       "1 concurrent worker",
       "3 expert personas per task",
       "Unlimited specialized AI experts",
-      "All integrations (Jira, GitHub, GitLab, Bitbucket, Linear)",
+      "GitHub + internal board",
       "Anthropic Claude models",
       "Local + BYOK execution",
       "MCP servers",
@@ -49,6 +49,7 @@ const tiers: PricingTier[] = [
     badge: "Launch Price",
     features: [
       "Everything in Free, plus:",
+      "All integrations (Jira, GitLab, Bitbucket, Linear)",
       "All AI providers (OpenAI, Google, Ollama)",
       "Codebase RAG",
       "5 concurrent workers",
@@ -105,7 +106,7 @@ export function Pricing() {
           </p>
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-full">
             <Zap className="w-4 h-4 text-green-500" />
-            <span className="text-sm font-medium text-green-500">Free tier includes all integrations and MCP servers</span>
+            <span className="text-sm font-medium text-green-500">Free tier includes GitHub, internal board, and MCP servers</span>
           </div>
         </div>
 
@@ -219,7 +220,7 @@ export function Pricing() {
             <div>
               <p className="font-medium text-foreground mb-1">Free = Anthropic Claude</p>
               <p className="text-sm text-muted-foreground">
-                Full product with Claude models on your hardware. Unlimited tasks, all personas, all integrations.
+                Full product with Claude models on your hardware. Unlimited tasks, all personas, GitHub + internal board.
               </p>
             </div>
             <div>

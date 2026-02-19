@@ -1,0 +1,45 @@
+name: VS Code Extension Release
+
+on:
+  push:
+    tags:
+      - 'vscode-v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: cd packages/vscode-workermill && npm ci --ignore-scripts
+
+      - name: Build extension
+        run: cd packages/vscode-workermill && npm run build
+
+      - name: Package VSIX
+        run: cd packages/vscode-workermill && npx @vscode/vsce package --no-dependencies
+
+      - name: Publish to VS Code Marketplace
+        if: env.VSCE_PAT != ''
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: cd packages/vscode-workermill && npx @vscode/vsce publish --no-dependencies -p $VSCE_PAT
+
+      - name: Publish to Open VSX
+        if: env.OVSX_PAT != ''
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: cd packages/vscode-workermill && npx ovsx publish workermill-*.vsix -p $OVSX_PAT
+
+      - name: Upload VSIX to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packages/vscode-workermill/workermill-*.vsix
+          generate_release_notes: true

@@ -30,7 +30,6 @@ const tiers: PricingTier[] = [
       "All integrations (Jira, GitHub, GitLab, Bitbucket, Linear)",
       "Anthropic Claude models",
       "Local + BYOK execution",
-      "Codebase RAG",
       "MCP servers",
       "Basic analytics",
       "14-day log retention",
@@ -51,6 +50,7 @@ const tiers: PricingTier[] = [
     features: [
       "Everything in Free, plus:",
       "All AI providers (OpenAI, Google, Ollama)",
+      "Codebase RAG",
       "5 concurrent workers",
       "Unlimited expert personas",
       "Up to 5 users",
@@ -105,7 +105,7 @@ export function Pricing() {
           </p>
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-full">
             <Zap className="w-4 h-4 text-green-500" />
-            <span className="text-sm font-medium text-green-500">Free tier includes all integrations and codebase RAG</span>
+            <span className="text-sm font-medium text-green-500">Free tier includes all integrations and MCP servers</span>
           </div>
         </div>
 

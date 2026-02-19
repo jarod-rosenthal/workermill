@@ -585,22 +585,45 @@ export function activate(context: vscode.ExtensionContext): void {
 
         if (boardName === undefined) return; // cancelled
 
-        // Call the agent API with progress indicator
+        // Open a terminal to show real-time progress
+        const writeEmitter = new vscode.EventEmitter<string>();
+        const closeEmitter = new vscode.EventEmitter<void>();
+        const pty: vscode.Pseudoterminal = {
+          onDidWrite: writeEmitter.event,
+          onDidClose: closeEmitter.event,
+          open: () => {
+            writeEmitter.fire(
+              "\x1b[1m\x1b[94mWorkerMill PRD Decomposition\x1b[0m\r\n",
+            );
+            writeEmitter.fire(
+              "\x1b[2mDecomposing PRD via Claude CLI...\x1b[0m\r\n\r\n",
+            );
+          },
+          close: () => {},
+        };
+        const terminal = vscode.window.createTerminal({
+          name: "WM: PRD Decompose",
+          pty,
+          iconPath: new vscode.ThemeIcon("rocket"),
+        });
+        terminal.show();
+
         try {
-          const result = await vscode.window.withProgress(
+          const result = await client.buildFromPrdStreaming(
             {
-              location: vscode.ProgressLocation.Notification,
-              title: "WorkerMill: Decomposing PRD...",
-              cancellable: false,
+              source: "text",
+              content: fileContent,
+              githubRepo,
+              boardName: boardName || undefined,
             },
-            async () => {
-              return client.buildFromPrd({
-                source: "text",
-                content: fileContent,
-                githubRepo,
-                boardName: boardName || undefined,
-              });
+            (message) => {
+              writeEmitter.fire(`\x1b[96m>\x1b[0m ${message}\r\n`);
             },
+          );
+
+          writeEmitter.fire("\r\n");
+          writeEmitter.fire(
+            `\x1b[1m\x1b[92m✓ Created board "${result.boardName}" with ${result.cardCount} cards\x1b[0m\r\n`,
           );
 
           const action = await vscode.window.showInformationMessage(
@@ -616,8 +639,11 @@ export function activate(context: vscode.ExtensionContext): void {
             );
           }
         } catch (err) {
+          const msg =
+            err instanceof Error ? err.message : String(err);
+          writeEmitter.fire(`\r\n\x1b[1m\x1b[91m✗ ${msg}\x1b[0m\r\n`);
           vscode.window.showErrorMessage(
-            `Failed to build from PRD: ${err instanceof Error ? err.message : String(err)}`,
+            `Failed to build from PRD: ${msg}`,
           );
         }
       },

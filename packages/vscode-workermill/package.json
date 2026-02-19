@@ -182,6 +182,13 @@
           "when": "resourceExtname == .md",
           "group": "navigation"
         }
+      ],
+      "editor/title/context": [
+        {
+          "command": "workermill.buildFromPrd",
+          "when": "resourceExtname == .md",
+          "group": "workermill@1"
+        }
       ]
     },
     "viewsWelcome": [

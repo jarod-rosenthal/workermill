@@ -83,7 +83,7 @@ export default function QuickStart() {
           Get Started in 5 Minutes
         </h1>
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-          Two ways to build: run workers locally with Claude Max, or use the cloud.
+          Two ways to build: self-hosted with the WorkerMill agent, or cloud-hosted with your API key.
         </p>
       </div>
 
@@ -101,12 +101,12 @@ export default function QuickStart() {
               <Monitor className="w-5 h-5 text-green-500" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-foreground">Option A: Local Mode</h2>
+              <h2 className="text-lg font-semibold text-foreground">Option A: Self-Hosted Agent</h2>
               <p className="text-sm text-green-500 font-medium">$0 execution cost</p>
             </div>
           </div>
           <p className="text-sm text-muted-foreground mb-4">
-            Workers run on your machine using your Claude Max subscription. Code never leaves your computer.
+            Install the WorkerMill agent on your machine. Workers run locally using your Claude Max subscription — code never leaves your computer.
           </p>
           <div className="text-sm text-muted-foreground">
             <strong className="text-foreground">Requires:</strong> Claude Max subscription
@@ -137,7 +137,7 @@ export default function QuickStart() {
       <section className="space-y-6">
         <div className="flex items-center gap-3">
           <Monitor className="w-5 h-5 text-green-500" />
-          <h2 className="text-2xl font-semibold text-foreground">Option A: Local Mode</h2>
+          <h2 className="text-2xl font-semibold text-foreground">Option A: Self-Hosted Agent</h2>
         </div>
 
         <div className="space-y-4">
@@ -149,10 +149,10 @@ export default function QuickStart() {
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-foreground text-lg">Install the CLI</h3>
+                  <h3 className="font-semibold text-foreground text-lg">Install the agent</h3>
                   <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">1 min</span>
                 </div>
-                <p className="text-muted-foreground mb-4">Install the WorkerMill agent. No Node.js required.</p>
+                <p className="text-muted-foreground mb-4">Install the WorkerMill agent binary. No Docker or Node.js required.</p>
                 <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
                   <code className="text-foreground">curl -fsSL https://workermill.com/install.sh | bash</code>
                   <button
@@ -208,7 +208,7 @@ export default function QuickStart() {
                   <h3 className="font-semibold text-foreground text-lg">Start the worker</h3>
                   <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">30 sec</span>
                 </div>
-                <p className="text-muted-foreground mb-4">Start the local worker process. It will wait for tasks from workermill.com.</p>
+                <p className="text-muted-foreground mb-4">Start the agent. It connects to workermill.com and waits for tasks.</p>
                 <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
                   <code className="text-foreground">workermill-agent start</code>
                   <button
@@ -245,7 +245,7 @@ export default function QuickStart() {
                   <li>Describe what you want to build</li>
                   <li>Click <strong className="text-foreground">"See the Plan"</strong> (free preview)</li>
                   <li>Review the stories, cost estimate, and tech stack</li>
-                  <li>Select <strong className="text-foreground">Local Mode</strong></li>
+                  <li>Select <strong className="text-foreground">Self-Hosted</strong></li>
                   <li>Click <strong className="text-foreground">"Build It"</strong></li>
                 </ol>
                 <div className="flex items-center gap-2 text-sm text-muted-foreground mt-4">

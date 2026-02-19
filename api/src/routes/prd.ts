@@ -17,7 +17,7 @@ import {
   KbCardDependency,
   Organization,
 } from "../models/index.js";
-import { authenticateUser } from "../middleware/auth.js";
+import { authenticateUser, authenticateApiKey } from "../middleware/auth.js";
 import { body, validateRequest } from "../middleware/validation.js";
 import { decomposePrd } from "../services/prd-decomposer.js";
 import { getOrgCredentials } from "../services/org-credentials.js";
@@ -25,8 +25,14 @@ import { logger } from "../utils/logger.js";
 
 const router = Router();
 
-// All routes require authentication
-router.use(authenticateUser);
+// Accept either JWT (dashboard) or API key (agent) authentication
+router.use((req, res, next) => {
+  const apiKey = req.headers["x-api-key"];
+  if (apiKey) {
+    return authenticateApiKey(req, res, next);
+  }
+  return authenticateUser(req, res, next);
+});
 
 // =============================================================================
 // Helper: Derive board prefix from name (same logic as boards.ts)
@@ -231,7 +237,7 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const org = req.organization!;
-      const user = req.user!;
+      const user = req.user; // may be undefined when using API key auth (agent)
       const {
         source,
         content,
@@ -337,26 +343,50 @@ router.post(
       }
 
       // ---------------------------------------------------------------
-      // 2. Decompose PRD via Anthropic API
+      // 2. Decompose PRD via Anthropic API (or use pre-decomposed data from agent)
       // ---------------------------------------------------------------
-      const model = org.defaultWorkerModel || "claude-sonnet-4-20250514";
-      const orgCreds = await getOrgCredentials(org.id);
+      const { preDecomposed } = req.body;
       let decomposed;
-      try {
-        decomposed = await decomposePrd(
-          prdContent,
-          model,
-          orgCreds.anthropicApiKey || undefined,
-        );
-      } catch (err) {
-        logger.error("PRD decomposition failed", {
+
+      if (preDecomposed && preDecomposed.boardName && Array.isArray(preDecomposed.cards)) {
+        // Agent already decomposed via Claude CLI — validate and sanitize the data
+        logger.info("Using pre-decomposed PRD from agent", {
+          boardName: preDecomposed.boardName,
+          cardCount: preDecomposed.cards.length,
           orgId: org.id,
-          error: err instanceof Error ? err.message : String(err),
         });
-        res.status(500).json({
-          error: `PRD decomposition failed: ${err instanceof Error ? err.message : String(err)}`,
-        });
-        return;
+        // Run through the same validation/sanitization as the Anthropic path
+        try {
+          const { validateDecomposedPrd } = await import("../services/prd-decomposer.js");
+          decomposed = validateDecomposedPrd(preDecomposed);
+        } catch (valErr) {
+          logger.error("Pre-decomposed PRD validation failed", {
+            error: valErr instanceof Error ? valErr.message : String(valErr),
+          });
+          res.status(400).json({
+            error: `Invalid pre-decomposed PRD: ${valErr instanceof Error ? valErr.message : String(valErr)}`,
+          });
+          return;
+        }
+      } else {
+        const model = org.defaultWorkerModel || "claude-sonnet-4-20250514";
+        const orgCreds = await getOrgCredentials(org.id);
+        try {
+          decomposed = await decomposePrd(
+            prdContent,
+            model,
+            orgCreds.anthropicApiKey || undefined,
+          );
+        } catch (err) {
+          logger.error("PRD decomposition failed", {
+            orgId: org.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          res.status(500).json({
+            error: `PRD decomposition failed: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          return;
+        }
       }
 
       // ---------------------------------------------------------------
@@ -388,7 +418,7 @@ router.post(
           description: `Auto-generated from PRD decomposition`,
           position: (maxPos?.max ?? -1) + 1,
           prefix,
-          createdById: user.id,
+          createdById: user?.id || null,
         });
         await boardRepo.save(board);
 
@@ -543,7 +573,7 @@ router.post(
         boardName: result.board.name,
         cardCount: result.createdCards.length,
         orgId: org.id,
-        userId: user.id,
+        userId: user?.id || "agent",
       });
 
       res.status(201).json({

@@ -100,23 +100,23 @@ function SubscriptionVisual() {
         <div className="flex items-center justify-between p-3 rounded-lg bg-green-500/10 border border-green-500/20">
           <div>
             <div className="text-sm font-medium">Free</div>
-            <div className="text-xs text-muted-foreground">Local + Claude Max, 20 tasks/mo</div>
+            <div className="text-xs text-muted-foreground">Local + Claude Max, unlimited tasks</div>
           </div>
           <span className="text-lg font-bold text-green-500">$0</span>
         </div>
         <div className="flex items-center justify-between p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
           <div>
             <div className="text-sm font-medium">Pro</div>
-            <div className="text-xs text-muted-foreground">Unlimited, parallel execution</div>
+            <div className="text-xs text-muted-foreground">5 workers, cloud execution, 5 seats</div>
           </div>
-          <span className="text-lg font-bold text-blue-500">$49<span className="text-xs font-normal">/seat</span></span>
+          <span className="text-lg font-bold text-blue-500">$14.50<span className="text-xs font-normal">/mo</span></span>
         </div>
         <div className="flex items-center justify-between p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
           <div>
-            <div className="text-sm font-medium">Team</div>
-            <div className="text-xs text-muted-foreground">Roles, audit logs, shared memory</div>
+            <div className="text-sm font-medium">Enterprise</div>
+            <div className="text-xs text-muted-foreground">SSO, compliance, dedicated pool</div>
           </div>
-          <span className="text-lg font-bold text-purple-500">$149<span className="text-xs font-normal">/mo</span></span>
+          <span className="text-lg font-bold text-purple-500">Custom</span>
         </div>
       </div>
     </div>

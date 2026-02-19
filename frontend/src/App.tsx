@@ -51,8 +51,8 @@ import {
   Severity,
   Metrics,
   DocsCompliance,
-  AgentSetup,
-  VSCodeExtension,
+  LocalAgent,
+  RemoteAgent,
   Repositories as DocsRepositories,
   CodebaseIndexing,
 } from "./pages/Docs";
@@ -195,8 +195,8 @@ function App() {
           <Route path="/docs" element={<DocsLayout />}>
             <Route index element={<DocsOverview />} />
             <Route path="quick-start" element={<QuickStart />} />
-            <Route path="agent" element={<AgentSetup />} />
-            <Route path="vscode-extension" element={<VSCodeExtension />} />
+            <Route path="local-agent" element={<LocalAgent />} />
+            <Route path="remote-agent" element={<RemoteAgent />} />
             <Route path="repositories" element={<DocsRepositories />} />
             <Route path="codebase-indexing" element={<CodebaseIndexing />} />
             <Route path="task-lifecycle" element={<TaskLifecycle />} />

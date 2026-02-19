@@ -162,10 +162,11 @@ export function findClaudePath(): string | null {
   const isWin = process.platform === "win32";
   const which = isWin ? "where" : "which";
 
-  // Check PATH first
+  // Check PATH first — return absolute path for SDK compatibility
   try {
-    execSync(`${which} claude`, { stdio: "ignore", timeout: 10000 });
-    return "claude";
+    const resolved = execSync(`${which} claude`, { encoding: "utf-8", timeout: 10000 }).trim().split("\n")[0];
+    if (resolved && existsSync(resolved)) return resolved;
+    return "claude"; // fallback to bare name if resolution fails
   } catch { /* not in PATH */ }
 
   const candidates: string[] = [];

@@ -1,250 +1,79 @@
+import { useState, useEffect } from "react";
 import {
-  Palette,
-  Server,
-  Wrench,
-  Shield,
-  FlaskConical,
-  FileText,
-  ClipboardList,
   Briefcase,
   Code,
   Lock,
   Users,
-  Database,
-  Smartphone,
-  Compass,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 
-const personas = [
-  {
-    id: "frontend_developer",
-    emoji: "🎨",
-    title: "Frontend Developer",
-    icon: Palette,
-    color: "text-pink-500",
-    bgColor: "bg-pink-500/10",
-    borderColor: "border-pink-500/30",
-    description: "Specializes in UI/UX implementation, React components, and styling.",
-    skills: ["React", "TypeScript", "Tailwind CSS", "Accessibility", "Responsive Design"],
-    bestFor: [
-      "Building new UI components",
-      "Styling and layout changes",
-      "Fixing CSS/styling issues",
-      "Adding new pages or views",
-      "Accessibility improvements",
-    ],
-    model: "claude-sonnet-4-6",
-  },
-  {
-    id: "backend_developer",
-    emoji: "💻",
-    title: "Backend Developer",
-    icon: Server,
-    color: "text-blue-500",
-    bgColor: "bg-blue-500/10",
-    borderColor: "border-blue-500/30",
-    description: "Expert in API development, database design, and server-side logic.",
-    skills: ["Node.js", "Express", "PostgreSQL", "REST APIs", "TypeORM"],
-    bestFor: [
-      "Creating new API endpoints",
-      "Database schema changes",
-      "Business logic implementation",
-      "Data validation",
-      "Performance optimization",
-    ],
-    model: "claude-sonnet-4-6",
-  },
-  {
-    id: "devops_engineer",
-    emoji: "🔧",
-    title: "DevOps Engineer",
-    icon: Wrench,
-    color: "text-orange-500",
-    bgColor: "bg-orange-500/10",
-    borderColor: "border-orange-500/30",
-    description: "Handles infrastructure, CI/CD pipelines, and deployment automation.",
-    skills: ["Terraform", "AWS", "Docker", "GitHub Actions", "Kubernetes"],
-    bestFor: [
-      "Infrastructure changes",
-      "CI/CD pipeline updates",
-      "Container configuration",
-      "Cloud resource management",
-      "Deployment scripts",
-    ],
-    model: "claude-sonnet-4-6",
-  },
-  {
-    id: "security_engineer",
-    emoji: "🛡️",
-    title: "Security Engineer",
-    icon: Shield,
-    color: "text-red-500",
-    bgColor: "bg-red-500/10",
-    borderColor: "border-red-500/30",
-    description: "Focuses on security audits, vulnerability fixes, and compliance.",
-    skills: ["OWASP Top 10", "Penetration Testing", "IAM", "Encryption", "Audit Logging"],
-    bestFor: [
-      "Security vulnerability fixes",
-      "Authentication/authorization",
-      "Input validation hardening",
-      "Secrets management",
-      "Security audit remediation",
-    ],
-    model: "claude-opus-4-6",
-  },
-  {
-    id: "qa_engineer",
-    emoji: "🧪",
-    title: "QA Engineer",
-    icon: FlaskConical,
-    color: "text-green-500",
-    bgColor: "bg-green-500/10",
-    borderColor: "border-green-500/30",
-    description: "Specializes in test writing, quality assurance, and bug verification.",
-    skills: ["Jest", "Playwright", "Test Design", "Bug Triage", "E2E Testing"],
-    bestFor: [
-      "Writing unit tests",
-      "E2E test automation",
-      "Test coverage improvements",
-      "Bug reproduction scripts",
-      "Test fixture creation",
-    ],
-    model: "claude-sonnet-4-6",
-  },
-  {
-    id: "tech_writer",
-    emoji: "📝",
-    title: "Technical Writer",
-    icon: FileText,
-    color: "text-cyan-500",
-    bgColor: "bg-cyan-500/10",
-    borderColor: "border-cyan-500/30",
-    description: "Creates documentation, API docs, and user guides.",
-    skills: ["Markdown", "API Documentation", "User Guides", "README files", "Code Comments"],
-    bestFor: [
-      "README updates",
-      "API documentation",
-      "Code comments and JSDoc",
-      "User guides",
-      "Architecture documentation",
-    ],
-    model: "claude-sonnet-4-6",
-  },
-  {
-    id: "project_manager",
-    emoji: "📋",
-    title: "Project Manager",
-    icon: ClipboardList,
-    color: "text-purple-500",
-    bgColor: "bg-purple-500/10",
-    borderColor: "border-purple-500/30",
-    description: "Handles task planning, coordination, and status updates.",
-    skills: ["Jira", "Project Planning", "Stakeholder Management", "Reporting"],
-    bestFor: [
-      "Ticket triage and refinement",
-      "Status report generation",
-      "Dependency analysis",
-      "Sprint planning support",
-      "Documentation review",
-    ],
-    model: "claude-sonnet-4-6",
-  },
-  {
-    id: "architect",
-    emoji: "🏗️",
-    title: "Architect",
-    icon: Compass,
-    color: "text-violet-500",
-    bgColor: "bg-violet-500/10",
-    borderColor: "border-violet-500/30",
-    description: "Specializes in system decomposition, task planning, and architecture design.",
-    skills: ["System Design", "Decomposition", "Planning", "Architecture"],
-    bestFor: [
-      "System architecture design",
-      "Task decomposition and planning",
-      "Technical design documents",
-      "Cross-service integration patterns",
-    ],
-    model: "claude-sonnet-4-6",
-  },
-  {
-    id: "data_ml_engineer",
-    emoji: "📊",
-    title: "Data & ML Engineer",
-    icon: Database,
-    color: "text-teal-500",
-    bgColor: "bg-teal-500/10",
-    borderColor: "border-teal-500/30",
-    description: "Specializes in data pipelines, ETL, machine learning, and MLOps.",
-    skills: ["ETL", "dbt", "PyTorch", "MLOps", "SQL"],
-    bestFor: [
-      "Building ETL/ELT pipelines",
-      "Model training and deployment",
-      "Data warehouse design",
-      "MLOps infrastructure",
-    ],
-    model: "claude-sonnet-4-6",
-  },
-  {
-    id: "mobile_developer",
-    emoji: "📱",
-    title: "Mobile Developer",
-    icon: Smartphone,
-    color: "text-green-500",
-    bgColor: "bg-green-500/10",
-    borderColor: "border-green-500/30",
-    description: "Expert in iOS and Android native and cross-platform development.",
-    skills: ["Swift", "Kotlin", "SwiftUI", "Jetpack Compose", "React Native"],
-    bestFor: [
-      "iOS and Android app development",
-      "Cross-platform mobile apps",
-      "Mobile UI components",
-      "App Store and Play Store submission",
-    ],
-    model: "claude-sonnet-4-6",
-  },
-  {
-    id: "tech_lead",
-    emoji: "🎯",
-    title: "Tech Lead",
-    icon: Compass,
-    color: "text-rose-500",
-    bgColor: "bg-rose-500/10",
-    borderColor: "border-rose-500/30",
-    description: "Guides architecture decisions, code reviews, and technical strategy.",
-    skills: ["System Design", "Code Review", "Technical Strategy", "Mentorship", "Architecture"],
-    bestFor: [
-      "Architecture decisions",
-      "Technical design reviews",
-      "Code quality standards",
-      "Technical debt assessment",
-    ],
-    model: "claude-opus-4-6",
-  },
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
+interface PublicPersona {
+  slug: string;
+  name: string;
+  emoji: string | null;
+  color: string | null;
+  shortLabel: string | null;
+  description: string | null;
+  skills: string[] | null;
+  riskLevel: string;
+}
+
+// Tech Lead Reviewer responsibilities (workflow-specific, not persona metadata)
+const REVIEWER_RESPONSIBILITIES = [
+  "Review code changes for quality and correctness",
+  "Ensure changes match ticket requirements",
+  "Check for security issues and best practices",
+  "Approve, reject, or request revisions",
+  "Provide actionable feedback to workers",
 ];
 
-const managerPersona = {
-  id: "tech_lead_reviewer",
-  emoji: "👔",
-  title: "Tech Lead Reviewer",
-  icon: Briefcase,
-  color: "text-indigo-500",
-  bgColor: "bg-indigo-500/10",
-  borderColor: "border-indigo-500/30",
-  description:
-    "Reviews all PRs created by workers, provides feedback, and approves or requests revisions.",
-  skills: ["Code Review", "Quality Assurance", "Feedback", "Approval Workflow"],
-  responsibilities: [
-    "Review code changes for quality and correctness",
-    "Ensure changes match ticket requirements",
-    "Check for security issues and best practices",
-    "Approve, reject, or request revisions",
-    "Provide actionable feedback to workers",
-  ],
-};
-
-
 export default function Personas() {
+  const [personas, setPersonas] = useState<PublicPersona[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchPersonas() {
+      try {
+        const response = await fetch(`${API_BASE}/api/personas/public`);
+        if (!response.ok) throw new Error("Failed to fetch personas");
+        const data = await response.json();
+        setPersonas(data.personas);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load personas");
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchPersonas();
+  }, []);
+
+  // Separate the manager (Tech Lead Reviewer) from worker personas
+  const managerPersona = personas.find((p) => p.slug === "manager");
+  const workerPersonas = personas.filter(
+    (p) => p.slug !== "manager" && p.slug !== "__common__"
+  );
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 p-4 bg-destructive/10 border border-destructive/30 rounded-lg text-destructive">
+        <AlertCircle className="h-5 w-5 shrink-0" />
+        <span>{error}</span>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-10">
       {/* Header */}
@@ -257,84 +86,115 @@ export default function Personas() {
       </div>
 
       {/* Tech Lead Reviewer */}
-      <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-          <Briefcase className="w-5 h-5 text-indigo-500" />
-          Tech Lead Reviewer
-        </h2>
-        <div className={`bg-card border ${managerPersona.borderColor} rounded-xl p-6`}>
-          <div className="flex items-start gap-4">
-            <div className={`p-3 rounded-lg ${managerPersona.bgColor}`}>
-              <span className="text-3xl">{managerPersona.emoji}</span>
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-3 mb-2">
-                <h3 className="text-lg font-semibold text-foreground">{managerPersona.title}</h3>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${managerPersona.bgColor} ${managerPersona.color}`}>
-                  Always Active
-                </span>
+      {managerPersona && (
+        <section className="space-y-4">
+          <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+            <Briefcase className="w-5 h-5 text-indigo-500" />
+            Tech Lead Reviewer
+          </h2>
+          <div
+            className="bg-card border rounded-xl p-6"
+            style={{ borderColor: `${managerPersona.color || "#6366F1"}40` }}
+          >
+            <div className="flex items-start gap-4">
+              <div
+                className="p-3 rounded-lg"
+                style={{ backgroundColor: `${managerPersona.color || "#6366F1"}18` }}
+              >
+                <span className="text-3xl">{managerPersona.emoji || "👔"}</span>
               </div>
-              <p className="text-muted-foreground mb-4">{managerPersona.description}</p>
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <h4 className="text-sm font-medium text-foreground mb-2">Skills</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {managerPersona.skills.map((skill) => (
-                      <span
-                        key={skill}
-                        className="text-xs px-2 py-1 rounded bg-muted text-muted-foreground"
-                      >
-                        {skill}
-                      </span>
-                    ))}
-                  </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-3 mb-2">
+                  <h3 className="text-lg font-semibold text-foreground">Tech Lead Reviewer</h3>
+                  <span
+                    className="text-xs px-2 py-0.5 rounded-full"
+                    style={{
+                      backgroundColor: `${managerPersona.color || "#6366F1"}18`,
+                      color: managerPersona.color || "#6366F1",
+                    }}
+                  >
+                    Always Active
+                  </span>
                 </div>
-                <div>
-                  <h4 className="text-sm font-medium text-foreground mb-2">Responsibilities</h4>
-                  <ul className="space-y-1">
-                    {managerPersona.responsibilities.map((resp, i) => (
-                      <li key={i} className="text-xs text-muted-foreground flex items-center gap-2">
-                        <div className="w-1 h-1 rounded-full bg-indigo-500" />
-                        {resp}
-                      </li>
-                    ))}
-                  </ul>
+                <p className="text-muted-foreground mb-4">
+                  {managerPersona.description || "Reviews all PRs created by workers, provides feedback, and approves or requests revisions."}
+                </p>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <h4 className="text-sm font-medium text-foreground mb-2">Skills</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {(managerPersona.skills || []).map((skill) => (
+                        <span
+                          key={skill}
+                          className="text-xs px-2 py-1 rounded bg-muted text-muted-foreground"
+                        >
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-medium text-foreground mb-2">Responsibilities</h4>
+                    <ul className="space-y-1">
+                      {REVIEWER_RESPONSIBILITIES.map((resp, i) => (
+                        <li key={i} className="text-xs text-muted-foreground flex items-center gap-2">
+                          <div
+                            className="w-1 h-1 rounded-full"
+                            style={{ backgroundColor: managerPersona.color || "#6366F1" }}
+                          />
+                          {resp}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Worker Personas */}
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
           <Users className="w-5 h-5 text-primary" />
-          Worker Personas (11 Types)
+          Worker Personas ({workerPersonas.length} Types)
         </h2>
         <div className="grid gap-4">
-          {personas.map((persona) => (
+          {workerPersonas.map((persona) => (
             <div
-              key={persona.id}
-              className={`bg-card border ${persona.borderColor} rounded-xl p-5`}
+              key={persona.slug}
+              className="bg-card border rounded-xl p-5"
+              style={{ borderColor: `${persona.color || "#3B82F6"}40` }}
             >
               <div className="flex items-start gap-4">
-                <div className={`p-3 rounded-lg ${persona.bgColor}`}>
-                  <span className="text-2xl">{persona.emoji}</span>
+                <div
+                  className="p-3 rounded-lg"
+                  style={{ backgroundColor: `${persona.color || "#3B82F6"}18` }}
+                >
+                  <span className="text-2xl">{persona.emoji || "🤖"}</span>
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-1">
-                    <h3 className="font-semibold text-foreground">{persona.title}</h3>
+                    <h3 className="font-semibold text-foreground">{persona.name}</h3>
                     <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                      {persona.id}
+                      {persona.slug}
                     </span>
-                    <span className="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary">
-                      {persona.model}
+                    <span
+                      className="text-xs px-2 py-0.5 rounded"
+                      style={{
+                        backgroundColor: `${persona.color || "#3B82F6"}18`,
+                        color: persona.color || "#3B82F6",
+                      }}
+                    >
+                      {persona.riskLevel} risk
                     </span>
                   </div>
-                  <p className="text-sm text-muted-foreground mb-3">{persona.description}</p>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    {persona.description || "AI worker persona"}
+                  </p>
 
-                  <div className="grid md:grid-cols-2 gap-4">
+                  {persona.skills && persona.skills.length > 0 && (
                     <div>
                       <h4 className="text-xs font-medium text-foreground mb-2 uppercase tracking-wide">
                         Skills
@@ -350,20 +210,7 @@ export default function Personas() {
                         ))}
                       </div>
                     </div>
-                    <div>
-                      <h4 className="text-xs font-medium text-foreground mb-2 uppercase tracking-wide">
-                        Best For
-                      </h4>
-                      <ul className="space-y-1">
-                        {persona.bestFor.slice(0, 3).map((item, i) => (
-                          <li key={i} className="text-xs text-muted-foreground flex items-center gap-2">
-                            <div className={`w-1 h-1 rounded-full ${persona.bgColor.replace("/10", "")}`} />
-                            {item}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -447,7 +294,6 @@ export default function Personas() {
           </div>
         </div>
       </section>
-
     </div>
   );
 }

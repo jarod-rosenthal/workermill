@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import {
   Cpu,
   Zap,
@@ -6,6 +7,8 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 const features = [
   {
@@ -34,13 +37,29 @@ const features = [
   },
 ];
 
-const stats = [
-  { label: "AI Experts", value: "12", icon: Cpu },
-  { label: "AI Providers", value: "4+", icon: Zap },
-  { label: "Issue Trackers", value: "3+", icon: CheckCircle },
-];
-
 export default function DocsOverview() {
+  const [personaCount, setPersonaCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    async function fetchCount() {
+      try {
+        const response = await fetch(`${API_BASE}/api/personas/public`);
+        if (!response.ok) throw new Error("Failed to fetch");
+        const data = await response.json();
+        setPersonaCount(data.personas.length);
+      } catch {
+        // Fallback handled in render
+      }
+    }
+    fetchCount();
+  }, []);
+
+  const stats = [
+    { label: "AI Experts", value: personaCount !== null ? String(personaCount) : "12+", icon: Cpu },
+    { label: "AI Providers", value: "4+", icon: Zap },
+    { label: "Issue Trackers", value: "3+", icon: CheckCircle },
+  ];
+
   return (
     <div className="space-y-12">
       {/* Hero */}

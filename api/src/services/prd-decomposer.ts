@@ -173,12 +173,16 @@ export async function decomposePrd(
   model: string,
   apiKey?: string,
 ): Promise<DecomposedPrd> {
-  const resolvedApiKey = apiKey || process.env.ANTHROPIC_API_KEY;
+  const resolvedApiKey =
+    apiKey ||
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.CLAUDE_CODE_OAUTH_TOKEN;
   if (!resolvedApiKey) {
     throw new Error(
-      "No Anthropic API key provided. Pass apiKey parameter or set ANTHROPIC_API_KEY environment variable.",
+      "No Anthropic API key provided. Pass apiKey parameter or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN environment variable.",
     );
   }
+  const isOAuth = !apiKey && !process.env.ANTHROPIC_API_KEY && !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
 
   const resolvedModel = model || DEFAULT_MODEL;
 
@@ -207,7 +211,9 @@ export async function decomposePrd(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": resolvedApiKey,
+        ...(isOAuth
+          ? { Authorization: `Bearer ${resolvedApiKey}` }
+          : { "x-api-key": resolvedApiKey }),
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(requestBody),

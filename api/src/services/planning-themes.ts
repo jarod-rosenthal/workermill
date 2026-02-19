@@ -1349,7 +1349,7 @@ export function createDefaultFoundationStory(): PlannedStoryV2 {
   return {
     index: 0,
     title: "Set up database schema and data models",
-    persona: "database_administrator",
+    persona: "backend_developer",
     scope: "Create database migrations and TypeORM entities for the core data models",
     acceptanceCriteria: [
       "Database migration created with proper schema definitions",
@@ -1375,7 +1375,7 @@ export function createDefaultFoundationTheme(): PlanningTheme {
     name: "Database & Data Models",
     category: "foundation",
     description: "Set up database schema, migrations, and core data models",
-    suggestedPersonas: ["database_administrator"],
+    suggestedPersonas: ["backend_developer"],
     estimatedStoryCount: 1,
     dependencies: [],
   };

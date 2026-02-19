@@ -38,36 +38,36 @@ interface ShowcaseProject {
 
 const showcaseProjects: ShowcaseProject[] = [
   {
+    id: "oncallshift",
+    name: "OnCallShift",
+    tagline:
+      "Production incident management across 3 repos — API, web, and mobile — built entirely by WorkerMill.",
+    description:
+      "177K lines across 3 repositories. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens, Terraform infrastructure. 13 epics executed sequentially across oncallshift-api, oncallshift-web, and oncallshift-mobile. Deployed to AWS at oncallshift.com.",
+    stack: "Express + TypeScript + React + React Native + Terraform",
+    storyCount: 13,
+    cost: "Claude Max",
+    duration: "~18 hrs",
+    linesOfCode: "177,000",
+    liveUrl: "https://oncallshift.com",
+    category: "incident-management",
+    icon: <Zap className="w-4 h-4" />,
+  },
+  {
     id: "calmill",
     name: "CalMill",
     tagline: "Open scheduling platform with Google Calendar sync.",
     description:
-      "Full-stack scheduling platform with event types, timezone-aware booking, team round-robin scheduling, Google Calendar integration, email notifications, and public booking pages. 7 stories, 100% success rate. Deployed to Vercel.",
+      "Full-stack scheduling platform with event types, timezone-aware booking, team round-robin scheduling, Google Calendar integration, email notifications, and public booking pages. 8 epics, 100% success rate. Deployed to Vercel.",
     stack: "Next.js 16 + Prisma 7 + TailwindCSS 4 + Neon PostgreSQL",
-    storyCount: 7,
-    cost: "$301",
+    storyCount: 8,
+    cost: "Claude Max",
     duration: "~7 hrs",
-    linesOfCode: "29,000",
+    linesOfCode: "41,000",
     repoUrl: "https://github.com/workermill-examples/calmill",
     liveUrl: "https://calmill.workermill.com",
     category: "scheduling",
     icon: <Calendar className="w-4 h-4" />,
-  },
-  {
-    id: "taskpulse",
-    name: "TaskPulse",
-    tagline: "Background task monitoring dashboard with scheduling.",
-    description:
-      "Full-stack task monitoring platform with cron scheduling, API key management, real-time run tracking, keyboard shortcuts, and global search. 5 stories, 100% success rate. Deployed to Vercel.",
-    stack: "Next.js 16 + Prisma 7 + TailwindCSS v4 + Neon PostgreSQL",
-    storyCount: 5,
-    cost: "$139",
-    duration: "~2 hrs",
-    linesOfCode: "11,700",
-    repoUrl: "https://github.com/workermill-examples/taskpulse",
-    liveUrl: "https://taskpulse.workermill.com",
-    category: "monitoring",
-    icon: <BarChart3 className="w-4 h-4" />,
   },
   {
     id: "teamboard",
@@ -77,27 +77,29 @@ const showcaseProjects: ShowcaseProject[] = [
       "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time updates, workspace dashboards, and activity feeds. 5 stories, all approved. Deployed to Vercel.",
     stack: "Next.js 15 + Prisma + TailwindCSS + Neon PostgreSQL",
     storyCount: 5,
-    cost: "$175*",
+    cost: "Claude Max",
     duration: "~6 hrs",
-    linesOfCode: "22,000",
+    linesOfCode: "28,000",
     repoUrl: "https://github.com/workermill-examples/teamboard",
     liveUrl: "https://teamboard.workermill.com",
     category: "saas",
     icon: <Globe className="w-4 h-4" />,
   },
   {
-    id: "oncallshift",
-    name: "OnCallShift",
-    tagline: "Production incident management platform — built entirely by WorkerMill.",
+    id: "taskpulse",
+    name: "TaskPulse",
+    tagline: "Background task monitoring dashboard with scheduling.",
     description:
-      "On-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens.",
-    stack: "Express + TypeScript + React + React Native + Terraform",
-    storyCount: 13,
-    cost: "$455*",
-    duration: "~18 hrs",
-    liveUrl: "https://oncallshift.com",
-    category: "incident-management",
-    icon: <Zap className="w-4 h-4" />,
+      "Full-stack task monitoring platform with cron scheduling, API key management, real-time run tracking, keyboard shortcuts, and global search. 5 stories, 100% success rate. Deployed to Vercel.",
+    stack: "Next.js 16 + Prisma 7 + TailwindCSS v4 + Neon PostgreSQL",
+    storyCount: 5,
+    cost: "Claude Max",
+    duration: "~5 hrs",
+    linesOfCode: "17,000",
+    repoUrl: "https://github.com/workermill-examples/taskpulse",
+    liveUrl: "https://taskpulse.workermill.com",
+    category: "monitoring",
+    icon: <BarChart3 className="w-4 h-4" />,
   },
   {
     id: "shipapi",
@@ -162,9 +164,9 @@ export default function ShowcaseGallery() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Full-stack applications built from a description. Every build
-            produced a mergeable PR. 29 of 30 epics completed autonomously —
-            1 escalated for human review.
+            263K lines of production code across 4 projects, deployed to AWS
+            and Vercel. Every project built from tickets — planned, coded,
+            tested, reviewed, and deployed autonomously.
           </p>
         </div>
 
@@ -196,7 +198,7 @@ export default function ShowcaseGallery() {
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <FileCode className="w-4 h-4 text-amber-400" />
-              <span className="text-2xl font-bold text-white">~3,400</span>
+              <span className="text-2xl font-bold text-white">~4,700</span>
             </div>
             <p className="text-xs text-slate-400">Reviewed lines/hr</p>
           </div>
@@ -343,11 +345,10 @@ export default function ShowcaseGallery() {
         {/* Bottom note */}
         <div className="text-center mt-12 mb-12">
           <p className="text-sm text-muted-foreground">
-            Costs shown are API usage at standard rates.{" "}
-            <span className="text-slate-500">*Estimated API-equivalent cost — built with Claude Max.</span>{" "}
-            Use{" "}
+            All showcase projects built with{" "}
             <span className="text-amber-400 font-semibold">Claude Max</span>{" "}
-            ($100/mo) for unlimited tasks at zero per-token cost.
+            ($100/mo) — unlimited tasks at zero per-token cost. Bring your own
+            API key on any plan for pay-as-you-go pricing.
           </p>
         </div>
 

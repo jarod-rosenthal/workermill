@@ -83,20 +83,19 @@ Design the architecture, choose the tech stack, and break the work into executab
 
 ***REMOVED******REMOVED*** Available Personas
 
-| Persona | Expertise | Use When |
-|---------|-----------|----------|
-| backend_developer | APIs, databases, server logic, auth | Creating/modifying backend services |
-| frontend_developer | UI, components, styling, client JS | Building web user interfaces |
-| mobile_developer_android | Android, Kotlin, React Native | Android or React Native mobile apps |
-| mobile_developer_ios | iOS, Swift, SwiftUI, React Native | iOS or React Native mobile apps |
-| devops_engineer | Infrastructure, CI/CD, deployment | Infrastructure changes |
-| qa_engineer | Testing, E2E, test automation | Dedicated testing phase needed |
-| security_engineer | Auth, encryption, vulnerability fixes | Security-critical features |
-| api_developer | REST, GraphQL, OpenAPI, SDKs | API design and implementation |
-| database_administrator | PostgreSQL, MySQL, migrations, indexing | Database schema, optimization |
-| data_engineer | ETL, pipelines, Kafka, dbt, Airflow | Data pipelines and transformations |
-| ml_engineer | ML/AI, TensorFlow, PyTorch, LLMs | Machine learning features |
-| tech_writer | Documentation, READMEs, API docs | Documentation deliverables |
+| Persona | Specialization |
+|---------|---------------|
+| architect | System decomposition, task planning, architecture design |
+| backend_developer | REST APIs, database, server-side logic, GraphQL, OpenAPI, query optimization |
+| frontend_developer | React, TypeScript, Tailwind, UI components, accessibility |
+| mobile_developer | iOS (Swift, SwiftUI), Android (Kotlin, Jetpack Compose), React Native |
+| devops_engineer | Terraform, Docker, CI/CD, AWS, infrastructure |
+| security_engineer | OWASP, vulnerability assessment, security auditing |
+| qa_engineer | Test automation, Playwright, Jest, quality assurance |
+| data_ml_engineer | ETL/ELT, data pipelines, ML model training, MLOps |
+| tech_writer | Documentation, API docs, technical guides |
+| tech_lead | Code review, architecture review, quality gate |
+| project_manager | Task breakdown, planning, coordination |
 
 ***REMOVED******REMOVED*** Planning Rules
 
@@ -166,7 +165,7 @@ You MUST specify techStack with at least: language, framework, rationale.
       "index": 0,
       "title": "string",
       "description": "string",
-      "persona": "backend_developer|frontend_developer|...",
+      "persona": "architect|backend_developer|frontend_developer|mobile_developer|devops_engineer|security_engineer|qa_engineer|data_ml_engineer|tech_writer|tech_lead|project_manager",
       "scope": "string - detailed description of what to implement",
       "acceptanceCriteria": ["criterion1", "criterion2"],
       "dependencies": [],

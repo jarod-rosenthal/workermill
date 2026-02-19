@@ -489,23 +489,38 @@ function validateTestingDependencies(
  * Handles LLM-invented personas that don't exist in the system.
  */
 const PERSONA_REMAP: Record<string, string> = {
+  // Generic / fullstack -> backend
   fullstack_developer: "backend_developer",
   full_stack_developer: "backend_developer",
   fullstack: "backend_developer",
   developer: "backend_developer",
   engineer: "backend_developer",
   software_engineer: "backend_developer",
+  // Frontend aliases
   web_developer: "frontend_developer",
   ui_developer: "frontend_developer",
   ux_developer: "frontend_developer",
-  mobile_developer: "mobile_developer_ios",
+  // Mobile consolidation
+  mobile_developer: "mobile_developer",
+  mobile_developer_ios: "mobile_developer",
+  mobile_developer_android: "mobile_developer",
+  // DevOps aliases
   sre: "devops_engineer",
   platform_engineer: "devops_engineer",
   infra_engineer: "devops_engineer",
   infrastructure_engineer: "devops_engineer",
+  // QA aliases
   tester: "qa_engineer",
   test_engineer: "qa_engineer",
-  dba: "database_administrator",
+  // Absorbed personas -> new homes
+  api_developer: "backend_developer",
+  database_administrator: "backend_developer",
+  dba: "backend_developer",
+  data_engineer: "data_ml_engineer",
+  ml_engineer: "data_ml_engineer",
+  // New personas (self-remap for completeness)
+  architect: "architect",
+  data_ml_engineer: "data_ml_engineer",
 };
 
 function validatePersonas(

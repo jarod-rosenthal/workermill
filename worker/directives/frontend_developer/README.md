@@ -165,6 +165,111 @@ describe("Button", () => {
 });
 ```
 
+***REMOVED******REMOVED*** Error Boundaries
+
+Wrap sections of the UI to prevent a single component crash from taking down the entire page:
+
+```tsx
+import { Component, type ErrorInfo, type ReactNode } from "react";
+
+interface Props {
+  fallback?: ReactNode;
+  children: ReactNode;
+}
+
+interface State {
+  hasError: boolean;
+}
+
+class ErrorBoundary extends Component<Props, State> {
+  state: State = { hasError: false };
+
+  static getDerivedStateFromError(): State {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("ErrorBoundary caught:", error, info.componentStack);
+    // Report to error tracking service (Sentry, etc.)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback ?? <div className="p-4 text-red-600">Something went wrong.</div>;
+    }
+    return this.props.children;
+  }
+}
+
+// Usage: wrap route-level or section-level components
+<ErrorBoundary fallback={<ErrorPage />}>
+  <Dashboard />
+</ErrorBoundary>
+```
+
+Place error boundaries at route level and around independently-loadable sections. Never wrap the entire app in a single boundary — granular boundaries give better UX.
+
+---
+
+***REMOVED******REMOVED*** Web Vitals
+
+Monitor and optimize Core Web Vitals:
+
+| Metric | Target | What It Measures |
+|--------|--------|-----------------|
+| **LCP** (Largest Contentful Paint) | < 2.5s | Loading performance |
+| **FID** (First Input Delay) | < 100ms | Interactivity |
+| **CLS** (Cumulative Layout Shift) | < 0.1 | Visual stability |
+
+**LCP optimization:**
+- Preload critical resources (`<link rel="preload">`)
+- Use `fetchpriority="high"` on hero images
+- Server-side render or statically generate above-the-fold content
+
+**CLS optimization:**
+- Set explicit `width`/`height` on images and videos
+- Reserve space for dynamic content with skeleton loaders
+- Avoid inserting content above existing content after load
+
+**FID optimization:**
+- Break long tasks into smaller chunks (`requestIdleCallback`, `scheduler.yield()`)
+- Lazy-load non-critical JavaScript
+- Minimize main-thread work during page load
+
+```typescript
+import { onLCP, onFID, onCLS } from "web-vitals";
+
+onLCP(console.log);
+onFID(console.log);
+onCLS(console.log);
+```
+
+---
+
+***REMOVED******REMOVED*** Design System Awareness
+
+When working within an existing design system or component library:
+
+- **Use design tokens** — reference color, spacing, and typography tokens instead of raw values
+- **Follow component API conventions** — match existing prop naming patterns (`variant`, `size`, `disabled`)
+- **Compose, don't duplicate** — build new components by composing existing primitives
+- **Document deviations** — if you must deviate from the design system, add a comment explaining why
+
+```tsx
+// Good — uses design tokens and existing components
+<Button variant="primary" size="md">Save</Button>
+
+// Bad — hardcoded styles that bypass the design system
+<button style={{ backgroundColor: "***REMOVED***3b82f6", padding: "8px 16px" }}>Save</button>
+```
+
+When no design system exists, establish consistent patterns early:
+- Define a color palette and spacing scale in Tailwind config or CSS variables
+- Create base components (Button, Input, Card, Modal) before building features
+- Keep component APIs minimal — add props only when needed
+
+---
+
 ***REMOVED******REMOVED*** Deployment Checklist
 
 Before pushing:

@@ -208,6 +208,140 @@ When reviewing code, verify:
 - [ ] Logging of security events (auth failures, permission denials)
 - [ ] Dependencies have no known critical vulnerabilities
 
+***REMOVED******REMOVED*** Threat Modeling
+
+***REMOVED******REMOVED******REMOVED*** STRIDE Methodology
+
+Analyze threats across six categories:
+
+| Category | Threat | Example | Mitigation |
+|----------|--------|---------|------------|
+| **S**poofing | Identity impersonation | Forged JWT tokens | Token validation, MFA |
+| **T**ampering | Data modification | Modified request bodies | Input validation, HMAC signatures |
+| **R**epudiation | Denying actions | User claims they didn't delete data | Audit logging, non-repudiation |
+| **I**nformation Disclosure | Data leaks | Stack traces in API responses | Error sanitization, encryption |
+| **D**enial of Service | Availability attacks | Rate limit bypass | Rate limiting, WAF, auto-scaling |
+| **E**levation of Privilege | Unauthorized access | IDOR vulnerability | Authorization checks on every request |
+
+**When to create a threat model:**
+- New service or API endpoint
+- Changes to authentication/authorization flow
+- New data storage or transmission of sensitive data
+- Third-party integrations
+
+---
+
+***REMOVED******REMOVED*** Supply Chain Security
+
+***REMOVED******REMOVED******REMOVED*** SBOM (Software Bill of Materials)
+
+Generate and maintain an SBOM for every deployed artifact:
+
+```bash
+***REMOVED*** Generate SBOM with Syft
+syft dir:. -o spdx-json > sbom.spdx.json
+
+***REMOVED*** Scan SBOM for vulnerabilities
+grype sbom:sbom.spdx.json
+```
+
+***REMOVED******REMOVED******REMOVED*** Dependency Pinning
+
+- **Always commit lockfiles** (`package-lock.json`, `yarn.lock`, `Gemfile.lock`)
+- Pin exact versions in production dependencies — avoid `^` or `~` for critical packages
+- Use `npm audit` or `snyk` in CI to block merges with known critical vulnerabilities
+- Review new dependencies before adding (maintainer reputation, download count, last publish date)
+
+***REMOVED******REMOVED******REMOVED*** Sigstore / Artifact Signing
+
+Sign container images and artifacts to verify provenance:
+
+```bash
+***REMOVED*** Sign with cosign (Sigstore)
+cosign sign --key cosign.key $IMAGE_DIGEST
+
+***REMOVED*** Verify before deployment
+cosign verify --key cosign.pub $IMAGE_DIGEST
+```
+
+---
+
+***REMOVED******REMOVED*** Container Security
+
+***REMOVED******REMOVED******REMOVED*** Image Scanning
+
+Scan images in CI before pushing to registry:
+
+```yaml
+***REMOVED*** GitHub Actions example
+- name: Scan image with Trivy
+  uses: aquasecurity/trivy-action@master
+  with:
+    image-ref: ${{ env.IMAGE }}
+    severity: "CRITICAL,HIGH"
+    exit-code: 1  ***REMOVED*** Fail the build on critical/high vulnerabilities
+```
+
+***REMOVED******REMOVED******REMOVED*** Minimal Base Images
+
+| Base Image | Size | Use Case |
+|-----------|------|----------|
+| `scratch` | 0 MB | Static Go/Rust binaries |
+| `alpine` | 5 MB | Most applications |
+| `distroless` | 20 MB | When you need glibc but not a shell |
+| `ubuntu` | 77 MB | Only when you need specific system packages |
+
+***REMOVED******REMOVED******REMOVED*** Rootless Containers
+
+```dockerfile
+***REMOVED*** Always run as non-root in production
+RUN addgroup -g 1001 appgroup && adduser -S appuser -u 1001 -G appgroup
+USER appuser
+
+***REMOVED*** Drop all capabilities
+***REMOVED*** In Kubernetes: securityContext.runAsNonRoot: true
+***REMOVED*** In Docker: --cap-drop=ALL
+```
+
+---
+
+***REMOVED******REMOVED*** API Security
+
+***REMOVED******REMOVED******REMOVED*** OAuth2 / OIDC Patterns
+
+- Validate JWT tokens on every request — check `iss`, `aud`, `exp`, `nbf`
+- Use asymmetric signing (RS256/ES256) — never share the signing key with services that only verify
+- Rotate signing keys periodically and support multiple active keys via JWKS
+- Store refresh tokens securely (HTTP-only cookies, encrypted at rest)
+
+```typescript
+import jwt from "jsonwebtoken";
+import jwksClient from "jwks-rsa";
+
+const client = jwksClient({ jwksUri: `${ISSUER}/.well-known/jwks.json` });
+
+async function verifyToken(token: string): Promise<JWTPayload> {
+  const decoded = jwt.decode(token, { complete: true });
+  if (!decoded) throw new AuthError("Invalid token");
+
+  const key = await client.getSigningKey(decoded.header.kid);
+  return jwt.verify(token, key.getPublicKey(), {
+    issuer: ISSUER,
+    audience: AUDIENCE,
+    algorithms: ["RS256"],
+  }) as JWTPayload;
+}
+```
+
+***REMOVED******REMOVED******REMOVED*** JWT Best Practices
+
+- Keep token payloads small — don't embed large permission sets
+- Use short-lived access tokens (5-15 min) with refresh token rotation
+- Never store JWTs in `localStorage` for sensitive applications — use HTTP-only cookies
+- Include `jti` (JWT ID) claim for token revocation support
+
+---
+
 ***REMOVED******REMOVED*** Security Audit Report Format
 
 ```markdown

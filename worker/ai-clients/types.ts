@@ -9,18 +9,15 @@ export type AIProvider = "anthropic" | "openai" | "google" | "gemini" | "ollama"
 
 // Expert persona types (from worker/epic/types.ts)
 export type ExpertPersona =
+  | "architect"
   | "frontend_developer"
   | "backend_developer"
   | "security_engineer"
   | "qa_engineer"
   | "devops_engineer"
   | "tech_writer"
-  | "api_developer"
-  | "data_engineer"
-  | "database_administrator"
-  | "ml_engineer"
-  | "mobile_developer_android"
-  | "mobile_developer_ios"
+  | "data_ml_engineer"
+  | "mobile_developer"
   | "tech_lead"
   | "manager";
 

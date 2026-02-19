@@ -100,14 +100,11 @@ const PERSONA_LABELS: Record<string, string> = {
   devops_engineer: "DevOps Engineer",
   qa_engineer: "QA Engineer",
   security_engineer: "Security Engineer",
-  api_developer: "API Developer",
-  database_administrator: "Database Admin",
-  data_engineer: "Data Engineer",
-  ml_engineer: "ML Engineer",
+  architect: "Architect",
+  data_ml_engineer: "Data & ML Engineer",
+  mobile_developer: "Mobile Developer",
   tech_writer: "Tech Writer",
   tech_lead: "Tech Lead",
-  mobile_developer_android: "Android Developer",
-  mobile_developer_ios: "iOS Developer",
 };
 
 const COMPLEXITY_COLORS: Record<string, string> = {

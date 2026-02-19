@@ -43,6 +43,7 @@ export interface SubtaskResult {
 
 // System personas (built-in). Custom org personas can also be used.
 export type SystemPersona =
+  | "architect"
   | "frontend_developer"
   | "backend_developer"
   | "devops_engineer"
@@ -51,12 +52,8 @@ export type SystemPersona =
   | "tech_writer"
   | "project_manager"
   | "tech_lead"
-  | "api_developer"
-  | "data_engineer"
-  | "database_administrator"
-  | "ml_engineer"
-  | "mobile_developer_ios"
-  | "mobile_developer_android";
+  | "data_ml_engineer"
+  | "mobile_developer";
 
 // WorkerPersona is now a string to support custom org-specific personas
 // Use SystemPersona type when you need to reference built-in personas specifically

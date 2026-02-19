@@ -321,7 +321,7 @@ const restApi: CachedPlanData = {
         index: 2,
         title: "Posts CRUD with pagination",
         description: "Full CRUD for posts with cursor pagination and filtering",
-        persona: "api_developer",
+        persona: "backend_developer",
         scope:
           "Implement GET /posts (list with pagination/filter), POST /posts, GET /posts/{id}, PUT /posts/{id}, DELETE /posts/{id}. All scoped to authenticated user",
         acceptanceCriteria: [
@@ -360,7 +360,7 @@ const restApi: CachedPlanData = {
         index: 4,
         title: "OpenAPI documentation and health check",
         description: "Enhanced API docs with examples and health endpoint",
-        persona: "api_developer",
+        persona: "backend_developer",
         scope:
           "Configure FastAPI OpenAPI metadata (title, description, version, contact), add request/response examples to all schemas, create GET /health endpoint, add API versioning prefix /v1",
         acceptanceCriteria: [
@@ -422,7 +422,7 @@ const restApi: CachedPlanData = {
     "Selecting tech stack: FastAPI + SQLAlchemy + PostgreSQL + pytest",
     "Rationale: FastAPI auto-generates OpenAPI docs from type annotations",
     "Designing models: User, Post with status enum",
-    "Mapping personas: backend_developer, api_developer, qa_engineer",
+    "Mapping personas: backend_developer, qa_engineer",
     "Decomposing into stories...",
     "Story 0: Project setup and database models (2pt)",
     "Story 1: JWT authentication endpoints (3pt)",
@@ -436,7 +436,7 @@ const restApi: CachedPlanData = {
   ],
   summary: {
     storyCount: 6,
-    personas: ["backend_developer", "api_developer", "qa_engineer"],
+    personas: ["backend_developer", "qa_engineer"],
     techStackList: ["python", "fastapi", "postgresql", "pytest"],
     reasoning:
       "A production REST API needs a solid foundation layer (project setup, models, auth) before building feature endpoints. FastAPI is ideal here — it auto-generates OpenAPI docs from type annotations.",

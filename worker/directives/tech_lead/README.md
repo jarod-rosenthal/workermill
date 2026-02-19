@@ -170,6 +170,78 @@ The tech_lead persona uses Virtual Manager settings from the organization config
 
 These settings control which AI performs code reviews when the `review` label is added to Jira tickets.
 
+***REMOVED******REMOVED*** Architecture Decision Records (ADRs)
+
+Document significant technical decisions so future developers understand the *why*:
+
+***REMOVED******REMOVED******REMOVED*** ADR Template
+
+```markdown
+***REMOVED*** ADR-NNN: [Title]
+
+**Status:** Proposed | Accepted | Deprecated | Superseded by ADR-XXX
+**Date:** YYYY-MM-DD
+**Deciders:** [Who was involved]
+
+***REMOVED******REMOVED*** Context
+
+What is the technical or business situation that requires a decision?
+
+***REMOVED******REMOVED*** Decision
+
+What is the change that we're making?
+
+***REMOVED******REMOVED*** Consequences
+
+***REMOVED******REMOVED******REMOVED*** Positive
+- [Benefits of this approach]
+
+***REMOVED******REMOVED******REMOVED*** Negative
+- [Tradeoffs and risks]
+
+***REMOVED******REMOVED******REMOVED*** Neutral
+- [Other notable effects]
+```
+
+**When to create an ADR:**
+- Choosing between architecturally significant alternatives (database, framework, protocol)
+- Introducing a new pattern or convention to the codebase
+- Deprecating an existing approach in favor of a new one
+- Any decision that future developers will ask "why did we do this?"
+
+Store ADRs in the repository (`docs/adr/` or `docs/decisions/`) so they travel with the code.
+
+---
+
+***REMOVED******REMOVED*** Tech Debt Quantification
+
+***REMOVED******REMOVED******REMOVED*** Categorization
+
+| Type | Description | Example |
+|------|------------|---------|
+| **Deliberate** | Known tradeoff made for speed | "Ship with hardcoded config, parameterize later" |
+| **Accidental** | Discovered after the fact | N+1 query found during load testing |
+| **Bit rot** | Accumulated over time | Outdated dependencies, deprecated API usage |
+| **Architectural** | Structural limitations | Monolith that needs to be split |
+
+***REMOVED******REMOVED******REMOVED*** Impact Scoring
+
+Rate each debt item on two axes:
+
+- **Effort to fix:** Low (< 1 day), Medium (1-3 days), High (> 3 days)
+- **Cost of not fixing:** Low (minor inconvenience), Medium (slows development), High (blocks features or causes incidents)
+
+Prioritize by the **cost-of-not-fixing / effort-to-fix** ratio. High cost, low effort items should be fixed immediately. Low cost, high effort items go to the backlog.
+
+***REMOVED******REMOVED******REMOVED*** Tracking Tech Debt
+
+- Create dedicated tickets tagged with `tech-debt`
+- Include the impact score and affected areas
+- Review tech debt backlog during sprint planning — allocate 10-20% of capacity
+- Track trends — is tech debt growing or shrinking over time?
+
+---
+
 ***REMOVED******REMOVED*** Self-Annealing Notes
 
 *This section is updated by AI Workers with learned improvements*

@@ -412,6 +412,131 @@ Before every deployment:
 - [ ] Docker images use non-root user and multi-stage build
 - [ ] `.dockerignore` exists alongside `Dockerfile`
 
+***REMOVED******REMOVED*** GitOps
+
+***REMOVED******REMOVED******REMOVED*** Declarative Infrastructure with ArgoCD / Flux
+
+GitOps treats Git as the single source of truth for infrastructure and application state:
+
+```yaml
+***REMOVED*** ArgoCD Application manifest
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/org/k8s-manifests.git
+    targetRevision: main
+    path: environments/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: my-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+```
+
+**GitOps principles:**
+- All changes go through Git (PRs, reviews, audit trail)
+- Cluster state is automatically reconciled to match Git
+- No manual `kubectl apply` in production — use the pipeline
+- Separate app code repos from deployment manifest repos
+
+---
+
+***REMOVED******REMOVED*** Observability Stack
+
+***REMOVED******REMOVED******REMOVED*** Prometheus + Grafana + OpenTelemetry
+
+**Prometheus** — metrics collection and alerting:
+
+```yaml
+***REMOVED*** prometheus.yml
+scrape_configs:
+  - job_name: "api"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:3000"]
+```
+
+**Application instrumentation (OpenTelemetry):**
+
+```typescript
+import { MeterProvider } from "@opentelemetry/sdk-metrics";
+import { PrometheusExporter } from "@opentelemetry/exporter-prometheus";
+
+const exporter = new PrometheusExporter({ port: 9464 });
+const meter = new MeterProvider({ readers: [exporter] }).getMeter("api");
+
+const requestCounter = meter.createCounter("http_requests_total", {
+  description: "Total HTTP requests",
+});
+
+const requestDuration = meter.createHistogram("http_request_duration_seconds", {
+  description: "HTTP request duration",
+});
+
+// Middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    requestCounter.add(1, { method: req.method, status: res.statusCode, path: req.route?.path });
+    requestDuration.record((Date.now() - start) / 1000, { method: req.method });
+  });
+  next();
+});
+```
+
+**Key metrics to expose:**
+- Request rate, error rate, duration (RED method)
+- Queue depth, processing time (for async workers)
+- Resource utilization (CPU, memory, connections)
+
+---
+
+***REMOVED******REMOVED*** SRE Practices
+
+***REMOVED******REMOVED******REMOVED*** SLO / SLI Definition
+
+| Concept | Definition | Example |
+|---------|-----------|---------|
+| **SLI** (Service Level Indicator) | Measurable metric | Request latency p99 |
+| **SLO** (Service Level Objective) | Target for the SLI | p99 latency < 500ms |
+| **Error Budget** | Allowed downtime/errors | 0.1% error rate = 43 min/month |
+
+**Define SLOs for every user-facing service:**
+- Availability: 99.9% uptime (8.7 hours downtime/year)
+- Latency: p50 < 100ms, p99 < 500ms
+- Error rate: < 0.1% of requests return 5xx
+
+***REMOVED******REMOVED******REMOVED*** Error Budgets
+
+When the error budget is spent:
+1. **Freeze new feature deployments** until reliability improves
+2. Focus engineering effort on reliability fixes
+3. Conduct postmortems for incidents that consumed budget
+
+When error budget is healthy:
+1. Deploy with confidence
+2. Run chaos engineering experiments
+3. Ship riskier features
+
+***REMOVED******REMOVED******REMOVED*** Toil Reduction
+
+Identify and automate repetitive operational tasks:
+- Manual deployments → CI/CD pipelines
+- Manual scaling → autoscaling policies
+- Manual incident response → runbooks and automated remediation
+- Manual certificate rotation → cert-manager or ACM
+
+---
+
 ***REMOVED******REMOVED*** Disaster Recovery
 
 - **Always enable `deletion_protection`** on databases and critical resources

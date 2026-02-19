@@ -253,6 +253,61 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Initial release
 ```
 
+***REMOVED******REMOVED******REMOVED*** 7. Diagramming
+
+Use text-based diagram tools that live alongside code and render in Markdown:
+
+**Mermaid** (supported by GitHub, GitLab, Docusaurus):
+
+```markdown
+```mermaid
+graph TD
+    A[Client] --> B[API Gateway]
+    B --> C[Auth Service]
+    B --> D[User Service]
+    D --> E[(PostgreSQL)]
+    C --> F[(Redis)]
+```
+```
+
+```markdown
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API
+    participant DB
+    Client->>API: POST /api/users
+    API->>DB: INSERT INTO users
+    DB-->>API: User record
+    API-->>Client: 201 Created
+```
+```
+
+**PlantUML** (for more complex diagrams):
+
+```markdown
+```plantuml
+@startuml
+package "API Layer" {
+  [Routes] --> [Middleware]
+  [Middleware] --> [Services]
+}
+package "Data Layer" {
+  [Services] --> [Repository]
+  [Repository] --> [Database]
+}
+@enduml
+```
+```
+
+**Guidelines:**
+- Prefer Mermaid for simple diagrams (it renders natively in most Git platforms)
+- Use PlantUML for complex class diagrams, state machines, or deployment diagrams
+- Keep diagrams close to the code they describe (same directory or linked from README)
+- Update diagrams when architecture changes — stale diagrams are worse than none
+
+---
+
 ***REMOVED******REMOVED*** Writing Guidelines
 
 1. **Be concise** - Get to the point quickly

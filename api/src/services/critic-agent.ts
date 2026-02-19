@@ -157,18 +157,19 @@ Match plan complexity to task complexity:
 
 ***REMOVED******REMOVED*** Available Personas (use the right one for each step)
 
-- **backend_developer**: API endpoints, database logic, server-side code
-- **frontend_developer**: UI components, pages, styling, client-side logic
-- **mobile_developer_android**: Android, Kotlin, React Native mobile apps
-- **mobile_developer_ios**: iOS, Swift, SwiftUI, React Native mobile apps
-- **devops_engineer**: CI/CD, deployment configs, infrastructure
-- **qa_engineer**: Tests, test infrastructure, quality checks
-- **security_engineer**: Security audits, auth, vulnerability fixes
-- **api_developer**: REST, GraphQL, OpenAPI, SDK design
-- **database_administrator**: Database schema, migrations, optimization
-- **data_engineer**: ETL, data pipelines, Kafka, dbt
-- **ml_engineer**: ML/AI, TensorFlow, PyTorch, LLMs
-- **tech_writer**: Documentation, READMEs, API docs
+| Persona | Specialization |
+|---------|---------------|
+| architect | System decomposition, task planning, architecture design |
+| backend_developer | REST APIs, database, server-side logic, GraphQL, OpenAPI, query optimization |
+| frontend_developer | React, TypeScript, Tailwind, UI components, accessibility |
+| mobile_developer | iOS (Swift, SwiftUI), Android (Kotlin, Jetpack Compose), React Native |
+| devops_engineer | Terraform, Docker, CI/CD, AWS, infrastructure |
+| security_engineer | OWASP, vulnerability assessment, security auditing |
+| qa_engineer | Test automation, Playwright, Jest, quality assurance |
+| data_ml_engineer | ETL/ELT, data pipelines, ML model training, MLOps |
+| tech_writer | Documentation, API docs, technical guides |
+| tech_lead | Code review, architecture review, quality gate |
+| project_manager | Task breakdown, planning, coordination |
 
 ***REMOVED******REMOVED*** Planning Rules
 
@@ -241,7 +242,7 @@ JSON Schema for the plan:
       "index": 0,
       "title": "string",
       "description": "string",
-      "persona": "backend_developer|frontend_developer|mobile_developer_android|mobile_developer_ios|devops_engineer|qa_engineer|security_engineer|api_developer|database_administrator|data_engineer|ml_engineer|tech_writer",
+      "persona": "architect|backend_developer|frontend_developer|mobile_developer|devops_engineer|security_engineer|qa_engineer|data_ml_engineer|tech_writer|tech_lead|project_manager",
       "verificationType": "logic|ui|docs|config|operational",
       "verificationInstructions": "string",
       "targetFiles": ["file1.ts", "file2.ts"],

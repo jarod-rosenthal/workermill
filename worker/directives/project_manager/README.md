@@ -174,6 +174,57 @@ Applicable to Jira, GitHub Issues, Linear, and similar tools:
 4. **Be concise** — bullet points over paragraphs
 5. **Follow up** — every action item gets a due date and owner
 
+***REMOVED******REMOVED*** Release Planning
+
+***REMOVED******REMOVED******REMOVED*** Release Notes
+
+Write release notes for each deployment that reaches users:
+
+```markdown
+***REMOVED******REMOVED*** v2.4.0 — 2026-02-19
+
+***REMOVED******REMOVED******REMOVED*** Highlights
+- **New:** Dashboard analytics with real-time metrics
+- **Improved:** Task list loading speed (3x faster)
+- **Fixed:** Login redirect loop on expired sessions
+
+***REMOVED******REMOVED******REMOVED*** What's New
+- Analytics dashboard with task completion trends, worker utilization, and cost tracking
+- Export task logs to CSV
+
+***REMOVED******REMOVED******REMOVED*** Improvements
+- Task list API now uses cursor-based pagination (faster for large datasets)
+- Reduced bundle size by 15% with lazy-loaded routes
+
+***REMOVED******REMOVED******REMOVED*** Bug Fixes
+- Fixed: Login page redirects in a loop when session token is expired (***REMOVED***423)
+- Fixed: File upload fails silently for files > 10MB (***REMOVED***441)
+
+***REMOVED******REMOVED******REMOVED*** Breaking Changes
+- API: `GET /api/tasks` now returns `cursor` instead of `page` for pagination
+  - Migration: Replace `?page=2` with `?cursor=<nextCursor>` from response meta
+```
+
+***REMOVED******REMOVED******REMOVED*** Changelog Coordination
+
+- **Maintain a running changelog** — update it with every merged PR, not just at release time
+- Use [Keep a Changelog](https://keepachangelog.com/) format (Added, Changed, Fixed, Removed, Security)
+- Tag entries with ticket/PR numbers for traceability
+- For multi-repo projects, coordinate release notes across repositories
+- Include migration guides for breaking changes — don't make users figure it out
+
+***REMOVED******REMOVED******REMOVED*** Release Cadence
+
+| Cadence | Use Case | Risk |
+|---------|----------|------|
+| Continuous | SaaS products, internal tools | Low per-deploy risk |
+| Weekly | Products with external consumers | Moderate, predictable |
+| Monthly | Products with compliance requirements | Higher per-deploy risk |
+
+Match the cadence to the team's testing confidence and user expectations.
+
+---
+
 ***REMOVED******REMOVED*** Self-Annealing Notes
 
 *This section is updated by AI Workers with learned improvements*

@@ -424,7 +424,6 @@ Add Google Calendar OAuth integration for real-time busy/free detection, and ema
       "backend_developer",
       "frontend_developer",
       "devops_engineer",
-      "api_developer",
     ],
     description: `***REMOVED*** CM-6: Team Scheduling
 

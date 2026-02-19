@@ -346,19 +346,16 @@ const CATEGORY_INFO: Record<
 // ─── Persona & Provider Icons ────────────────────────────────────────────────
 
 const PERSONA_ICONS: Record<string, string> = {
+  architect: "\uD83C\uDFD7\uFE0F",         // 🏗️
   frontend_developer: "\uD83C\uDFA8",      // 🎨
   backend_developer: "\uD83D\uDCBB",       // 💻 (was ⚙️ — narrow in terminals)
   devops_engineer: "\uD83D\uDD27",         // 🔧
-  security_engineer: "\uD83D\uDD12",       // 🔒
+  security_engineer: "\uD83D\uDEE1\uFE0F", // 🛡️
   qa_engineer: "\uD83E\uDDEA",             // 🧪
   tech_writer: "\uD83D\uDCDD",             // 📝
   project_manager: "\uD83D\uDCCB",         // 📋
-  api_developer: "\uD83D\uDD0C",           // 🔌
-  database_administrator: "\uD83D\uDCBE",  // 💾 (was 🗄️ — FE0F renders inconsistently)
-  ml_engineer: "\uD83E\uDDE0",             // 🧠
-  data_engineer: "\uD83D\uDCCA",           // 📊
-  mobile_developer_ios: "\uD83D\uDCF1",    // 📱
-  mobile_developer_android: "\uD83E\uDD16", // 🤖
+  data_ml_engineer: "\uD83D\uDCCA",        // 📊
+  mobile_developer: "\uD83D\uDCF1",        // 📱
   tech_lead: "\uD83D\uDC51",               // 👑 (was 👨‍💼 — ZWJ renders inconsistently)
   planning_agent: "\uD83D\uDCA1",          // 💡 (was 🗺️ — FE0F renders inconsistently)
   manager: "\uD83D\uDC54",                 // 👔
@@ -393,7 +390,6 @@ const QUESTION_INELIGIBLE_PERSONAS = new Set([
   "support_agent",
   "project_manager",
   "tech_writer",
-  "ml_engineer",
 ]);
 
 // ─── Keyword-to-Specialty Mapping (for question routing) ─────────────────────
@@ -409,7 +405,7 @@ const KEYWORD_SPECIALTY: { keywords: RegExp; persona: string }[] = [
   },
   {
     keywords: /\b(?:database|sql|migration|postgres|mysql|mongo|redis)\b/i,
-    persona: "database_administrator",
+    persona: "backend_developer",
   },
   {
     keywords:
@@ -423,7 +419,17 @@ const KEYWORD_SPECIALTY: { keywords: RegExp; persona: string }[] = [
   {
     keywords:
       /\b(?:api|endpoint|rest|graphql|route|middleware|express|fastify)\b/i,
-    persona: "api_developer",
+    persona: "backend_developer",
+  },
+  {
+    keywords:
+      /\b(?:ml|machine.learning|tensorflow|pytorch|model.training|mlops|etl|data.pipeline)\b/i,
+    persona: "data_ml_engineer",
+  },
+  {
+    keywords:
+      /\b(?:ios|android|swift|kotlin|react.native|mobile)\b/i,
+    persona: "mobile_developer",
   },
 ];
 

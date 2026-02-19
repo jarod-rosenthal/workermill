@@ -35,7 +35,7 @@ const features = [
 ];
 
 const stats = [
-  { label: "AI Experts", value: "16", icon: Cpu },
+  { label: "AI Experts", value: "12", icon: Cpu },
   { label: "AI Providers", value: "4+", icon: Zap },
   { label: "Issue Trackers", value: "3+", icon: CheckCircle },
 ];

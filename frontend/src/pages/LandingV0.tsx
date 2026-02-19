@@ -11,6 +11,7 @@ import Features from "./Home/Features";
 import ShowcaseGallery from "../components/ShowcaseGallery";
 import CompetitiveComparison from "../components/CompetitiveComparison";
 import AgentCollaboration from "../components/AgentCollaboration";
+import TrustCallout from "../components/TrustCallout";
 import { Pricing } from "./Home/Pricing";
 import BuildTerminal, { type PlanPreview } from "../components/BuildTerminal";
 
@@ -220,6 +221,9 @@ export default function LandingV0() {
 
           {/* Competitive Comparison */}
           <CompetitiveComparison />
+
+          {/* Trust & Security Callout */}
+          <TrustCallout />
 
           {/* Pricing Section */}
           <section id="pricing">

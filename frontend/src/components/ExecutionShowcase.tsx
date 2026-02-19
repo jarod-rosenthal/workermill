@@ -786,7 +786,7 @@ export default function ExecutionShowcase() {
   const currentFrame = frames[frameIndex];
 
   return (
-    <section className="py-20 relative">
+    <section id="how-it-works" className="py-20 relative">
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-950/5 to-transparent" />
 
       <div className="relative container mx-auto px-6 lg:px-8">

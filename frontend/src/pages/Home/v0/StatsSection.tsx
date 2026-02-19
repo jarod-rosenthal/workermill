@@ -5,7 +5,7 @@ const stats = [
     detail: "Across 6 repositories and 4 organizations",
   },
   {
-    value: "14",
+    value: "16",
     label: "AI expert personas",
     detail: "Frontend, backend, DevOps, QA, security, and more",
   },

@@ -2213,6 +2213,7 @@ export default function Dashboard() {
                     >
                       <DollarSign className="w-4 h-4 text-emerald-500" />
                       Cost Intelligence
+                      <span className="text-[10px] font-medium bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full ml-auto">Beta</span>
                     </Link>
                     <Link
                       to="/memory"
@@ -2221,6 +2222,7 @@ export default function Dashboard() {
                     >
                       <Brain className="w-4 h-4 text-purple-500" />
                       Memory Management
+                      <span className="text-[10px] font-medium bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full ml-auto">Beta</span>
                     </Link>
                     <Link
                       to="/skills"
@@ -2229,6 +2231,7 @@ export default function Dashboard() {
                     >
                       <BookOpen className="w-4 h-4 text-blue-500" />
                       Skill Library
+                      <span className="text-[10px] font-medium bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full ml-auto">Beta</span>
                     </Link>
                     <Link
                       to="/directive-effectiveness"
@@ -2237,6 +2240,7 @@ export default function Dashboard() {
                     >
                       <Target className="w-4 h-4 text-rose-500" />
                       Directive Analytics
+                      <span className="text-[10px] font-medium bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full ml-auto">Beta</span>
                     </Link>
                   </div>
                 </div>

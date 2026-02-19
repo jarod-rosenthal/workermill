@@ -33,6 +33,7 @@ import {
   type OrgCredentials,
 } from "./org-credentials.js";
 import { localEpicSpawner } from "./local-epic-spawner.js";
+import { spawnMockWorker } from "./mock-worker.js";
 import { incrementTaskUsage } from "./billing.js";
 import {
   notifyTaskFailed,
@@ -185,6 +186,46 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
         "status_change",
         "Starting local Epic Coordinator (local execution mode)",
       );
+
+      // MOCK WORKER MODE: Use lightweight mock instead of Docker container
+      if (process.env.MOCK_WORKERS === "true") {
+        logger.info("[MockWorker] Mock worker mode active, skipping Docker spawn", {
+          taskId: task.id,
+          jiraKey: task.jiraIssueKey,
+        });
+
+        // Update task status to executing — atomic update (same pattern as real workers)
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({ status: "executing", startedAt: new Date() } as Record<string, unknown>)
+          .where("id = :id", { id: task.id })
+          .execute();
+
+        // Resolve API key from org
+        const orgRepo = AppDataSource.getRepository(Organization);
+        const org = await orgRepo.findOne({ where: { id: task.orgId } });
+        const apiKey = org?.apiKey || process.env.ORG_API_KEY || "local-dev";
+        const port = process.env.PORT || 3001;
+        const apiBaseUrl = `http://localhost:${port}`;
+
+        // Fire-and-forget — mock worker runs asynchronously
+        spawnMockWorker({
+          taskId: task.id,
+          apiBaseUrl,
+          apiKey,
+          jiraIssueKey: task.jiraIssueKey || "E2E-1",
+          summary: task.summary || "Mock task",
+        }).catch((error) => {
+          logger.error("[MockWorker] Mock worker failed", {
+            taskId: task.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+        state.tasksProcessed++;
+        return; // Skip Docker container spawn
+      }
 
       // Update task status to executing — atomic update
       await taskRepo

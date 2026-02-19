@@ -39,12 +39,6 @@ export const taskPulseEpics: TaskPulseEpic[] = [
     ],
     "description": `# TP-1: Project Setup & Dev Environment
 
-> **TaskPulse Showcase** | Built autonomously by [WorkerMill](https://workermill.com)
-> Target repo: [\`workermill-examples/taskpulse\`](https://github.com/workermill-examples/taskpulse)
-> Architecture: [README.md](./README.md)
-
----
-
 ## What This Ticket Delivers
 
 A fully scaffolded Next.js 16 project with:
@@ -476,12 +470,12 @@ src/generated/
 
 **\`.env.example\`:**
 \`\`\`
-DATABASE_URL=postgresql://user:pass@host:5432/dbname
-DIRECT_DATABASE_URL=postgresql://user:pass@host:5432/dbname
-NEXTAUTH_SECRET=your-secret-here
+DATABASE_URL=****
+DIRECT_DATABASE_URL=****
+NEXTAUTH_SECRET=****
 NEXTAUTH_URL=http://localhost:3000
 AUTH_TRUST_HOST=true
-SEED_TOKEN=your-seed-token
+SEED_TOKEN=****
 \`\`\`
 
 **After completing, run:** \`npm run typecheck\` — must pass with 0 errors.
@@ -524,7 +518,7 @@ const adapter = new PrismaNeon({
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  const passwordHash = await bcrypt.hash("demo1234", 12);
+  const passwordHash = await bcrypt.hash("****", 12);
 
   await prisma.user.upsert({
     where: { email: "demo@workermill.com" },
@@ -673,7 +667,7 @@ Use in layout:
 **Landing page (\`src/app/page.tsx\`):**
 - Dark background with gradient accent
 - Hero: "Background Tasks, Monitored." + subtitle about real-time observability
-- "Try the Demo" button → calls \`signIn("credentials", { email: "demo@workermill.com", password: "demo1234", callbackUrl: "/projects" })\`
+- "Try the Demo" button → calls \`signIn("credentials", { email: "demo@workermill.com", password: "****", callbackUrl: "/projects" })\`
 - Feature highlights: Task Registry, Real-time Traces, Log Streaming, Scheduling
 - Footer: "Built by WorkerMill"
 
@@ -1618,12 +1612,6 @@ The code now builds correctly (except for missing environment variables which is
     ],
     "description": `# TP-2: Core API & Task Engine
 
-> **TaskPulse Showcase** | Built autonomously by [WorkerMill](https://workermill.com)
-> Target repo: [\`workermill-examples/taskpulse\`](https://github.com/workermill-examples/taskpulse)
-> Architecture: [README.md](./README.md)
-
----
-
 ## What This Ticket Delivers
 
 Complete backend API for TaskPulse — auth middleware, RBAC, full CRUD for projects/tasks/runs/members, run simulation engine, SSE streaming, comprehensive seed data, and unit tests.
@@ -1894,7 +1882,7 @@ Returns JSON with:
 - \`src/app/api/seed/route.ts\` — MODIFY (call expanded seed)
 
 **Full seed data (see README.md for details):**
-1. Demo user (\`demo@workermill.com\` / \`demo1234\`) — upsert
+1. Demo user (\`demo@workermill.com\` / \`****\`) — upsert
 2. "Acme Backend Services" project (slug: \`acme-backend\`) — demo user as OWNER
 3. 5 TaskDefinitions with stepTemplates
 4. 50 Runs spread over 7 days (35 COMPLETED, 8 FAILED, 4 EXECUTING, 3 QUEUED)
@@ -2705,12 +2693,6 @@ The implementation is solid and production-ready. All previous blocking issues h
       "qa_engineer"
     ],
     "description": `# TP-3: Dashboard UI
-
-> **TaskPulse Showcase** | Built autonomously by [WorkerMill](https://workermill.com)
-> Target repo: [\`workermill-examples/taskpulse\`](https://github.com/workermill-examples/taskpulse)
-> Architecture: [README.md](./README.md)
-
----
 
 ## What This Ticket Delivers
 
@@ -3606,12 +3588,6 @@ It appears I cannot approve my own PR on GitHub. Let me output the review decisi
     ],
     "description": `# TP-4: Scheduling, API Keys & Polish
 
-> **TaskPulse Showcase** | Built autonomously by [WorkerMill](https://workermill.com)
-> Target repo: [\`workermill-examples/taskpulse\`](https://github.com/workermill-examples/taskpulse)
-> Architecture: [README.md](./README.md)
-
----
-
 ## What This Ticket Delivers
 
 Schedule management UI, API key management UI, global search, keyboard shortcuts, responsive polish, and comprehensive unit tests. This epic adds the power-user features that make TaskPulse feel like a production developer tool.
@@ -4394,12 +4370,6 @@ PR: https://github.com/workermill-examples/taskpulse/pull/4
       "devops_engineer"
     ],
     "description": `# TP-5: Production Deploy & Validation
-
-> **TaskPulse Showcase** | Built autonomously by [WorkerMill](https://workermill.com)
-> Target repo: [\`workermill-examples/taskpulse\`](https://github.com/workermill-examples/taskpulse)
-> Architecture: [README.md](./README.md)
-
----
 
 ## What This Ticket Delivers
 

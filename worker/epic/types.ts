@@ -87,7 +87,8 @@ export type ContextMessageType =
   | "revision_requested"  // Tech Lead requested revision with feedback
   | "user_message"       // User message from dashboard (Talk to Worker)
   | "worker_ack"         // Worker acknowledgment of user message
-  | "expert_response";   // Expert mid-execution message to user (via .workermill-response.md)
+  | "expert_response"    // Expert mid-execution message to user (via .workermill-response.md)
+  | "rate_limited";      // Provider rate/usage limit reached
 
 /**
  * Question from the coordination feed that needs answering.

@@ -54,13 +54,14 @@ export const agentEvents = new EventEmitter();
 agentEvents.setMaxListeners(100);
 
 // Event types:
-//   "task:started"   { id, summary, persona, model, repo }
-//   "task:completed" { id, exitCode }
-//   "task:failed"    { id, exitCode, error }
-//   "task:log"       { id, line, severity }
-//   "task:planning"  { id, summary }
-//   "task:plan_done" { id, success }
-//   "state:changed"  {} (generic — triggers full state refresh for clients)
+//   "task:started"       { id, summary, persona, model, repo }
+//   "task:completed"     { id, exitCode }
+//   "task:failed"        { id, exitCode, error }
+//   "task:rate_limited"  { id }
+//   "task:log"           { id, line, severity }
+//   "task:planning"      { id, summary }
+//   "task:plan_done"     { id, success }
+//   "state:changed"      {} (generic — triggers full state refresh for clients)
 
 // ── State Registry ─────────────────────────────────────
 
@@ -156,6 +157,7 @@ function broadcastSSE(channel: string, event: string, data: unknown): void {
 agentEvents.on("task:started", (info) => broadcastSSE("tasks", "task:started", info));
 agentEvents.on("task:completed", (info) => broadcastSSE("tasks", "task:completed", info));
 agentEvents.on("task:failed", (info) => broadcastSSE("tasks", "task:failed", info));
+agentEvents.on("task:rate_limited", (info) => broadcastSSE("tasks", "task:rate_limited", info));
 agentEvents.on("task:planning", (info) => broadcastSSE("tasks", "task:planning", info));
 agentEvents.on("task:plan_done", (info) => broadcastSSE("tasks", "task:plan_done", info));
 agentEvents.on("task:log", (info) => broadcastSSE(`logs:${info.id}`, "log", info));

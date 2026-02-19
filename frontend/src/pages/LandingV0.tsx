@@ -9,7 +9,6 @@ import HowItWorks from "./Home/HowItWorks";
 import Workers from "./Home/Workers";
 import Features from "./Home/Features";
 import ShowcaseGallery from "../components/ShowcaseGallery";
-import CompetitiveComparison from "../components/CompetitiveComparison";
 import AgentCollaboration from "../components/AgentCollaboration";
 import TrustCallout from "../components/TrustCallout";
 import { Pricing } from "./Home/Pricing";
@@ -218,9 +217,6 @@ export default function LandingV0() {
           <section>
             <Features />
           </section>
-
-          {/* Competitive Comparison */}
-          <CompetitiveComparison />
 
           {/* Trust & Security Callout */}
           <TrustCallout />

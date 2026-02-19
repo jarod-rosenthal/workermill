@@ -1296,7 +1296,8 @@ export class GitOps {
     title: string,
     body: string
   ): Promise<string> {
-    return 'gh pr create --base ' + this.mainBranch + ' --head ' + branchName + ' --title "' + title + '" --body "' + body.replace(/"/g, '\\"') + '"';
+    const repoFlag = this.config.targetRepo ? ' -R ' + this.config.targetRepo : '';
+    return 'gh pr create' + repoFlag + ' --base ' + this.mainBranch + ' --head ' + branchName + ' --title "' + title + '" --body "' + body.replace(/"/g, '\\"') + '"';
   }
 
   /**

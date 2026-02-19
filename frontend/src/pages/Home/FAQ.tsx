@@ -38,9 +38,9 @@ const faqItems: FAQItem[] = [
       "The Free plan uses Anthropic Claude models (Opus, Sonnet, Haiku) — the best coding models available. Pro and Enterprise unlock all major providers: OpenAI (GPT-4o, o1), Google Gemini, and self-hosted Ollama. Choose the model that fits your needs — from high-capability frontier models for complex tasks to faster, cost-effective options for routine work. Use Jira labels like 'haiku', 'sonnet', or 'opus' to select specific models.",
   },
   {
-    question: "What is the AI Support Agent?",
+    question: "Can I create custom personas?",
     answer:
-      "The AI Support Agent automatically responds to support tickets using AI. When a customer submits a ticket, the agent analyzes the question, checks its confidence level, and either responds automatically or escalates to a human. You can configure which ticket categories are eligible for auto-response and set confidence thresholds. Available on all plans.",
+      "Yes — Pro and Enterprise plans include Persona Studio, where you can create custom expert personas with your own directives, scripts, and domain knowledge. Define personas like 'unity_game_dev' or 'shopify_expert' tailored to your stack. Free plan includes all default personas.",
   },
   {
     question: "What are the 'improve' and 'critic' labels?",

@@ -113,6 +113,7 @@ function App() {
   const setUser = useAuthStore((state) => state.setUser);
   const setOrganization = useAuthStore((state) => state.setOrganization);
   const setNeedsSetup = useAuthStore((state) => state.setNeedsSetup);
+  const organization = useAuthStore((state) => state.organization);
 
   useEffect(() => {
     initializeAuth();
@@ -353,15 +354,17 @@ function App() {
               </ProtectedRoute>
             }
           />
-          {/* Compliance Center */}
-          <Route
-            path="/compliance"
-            element={
-              <ProtectedRoute>
-                <Compliance />
-              </ProtectedRoute>
-            }
-          />
+          {/* Compliance Center — enterprise plan only */}
+          {organization?.plan === 'enterprise' && (
+            <Route
+              path="/compliance"
+              element={
+                <ProtectedRoute>
+                  <Compliance />
+                </ProtectedRoute>
+              }
+            />
+          )}
           {/* Memory & Learning */}
           <Route
             path="/skills"

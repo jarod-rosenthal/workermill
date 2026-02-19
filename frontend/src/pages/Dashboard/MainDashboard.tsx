@@ -150,11 +150,9 @@ export default function Dashboard() {
   const [parsedErrors, setParsedErrors] = useState<Record<string, ParsedError[]>>({});
   // Persisted errors from database (survives client re-init)
   const [persistedErrors, setPersistedErrors] = useState<Record<string, ParsedError[]>>({});
-  // Track which error panels are expanded (auto-expands when errors detected)
+  // Track which comms panels are expanded
   const [errorPanelExpanded, setErrorPanelExpanded] = useState<Record<string, boolean>>({});
-  // Track active tab in the side panel per task: "errors" or "comms"
-  const [panelActiveTab, setPanelActiveTab] = useState<Record<string, "errors" | "comms">>({});
-  // Track unread comms message count per task (shown as badge on Comms tab)
+  // Track unread comms message count per task (shown as badge on Comms panel)
   const [unreadCommsCount, setUnreadCommsCount] = useState<Record<string, number>>({});
   // Track whether comms panel has already auto-expanded per task (only expand once)
   const hasAutoExpandedCommsRef = useRef<Record<string, boolean>>({});
@@ -417,9 +415,8 @@ export default function Dashboard() {
           });
         }
 
-        // Expand the side panel and switch to comms tab
+        // Expand the side panel
         setErrorPanelExpanded((prev) => ({ ...prev, [taskId]: true }));
-        setPanelActiveTab((prev) => ({ ...prev, [taskId]: "comms" }));
       }
 
       prevCommsCountsRef.current[taskId] = count;
@@ -3253,27 +3250,18 @@ export default function Dashboard() {
                             )}
                           </div>
 
-                          {/* Side Panel - Tabbed: Errors & Communications */}
+                          {/* Side Panel - Communications Feed */}
                           <div className={`border rounded-lg overflow-hidden bg-card transition-all ${errorPanelExpanded[task.id] ? "w-[30%]" : "w-12"}`}>
                             {/* Panel header - clickable to toggle when collapsed */}
                             {!errorPanelExpanded[task.id] ? (
                               <div
-                                className={`flex flex-col items-center gap-1 w-full py-2 cursor-pointer hover:bg-muted/70 transition-colors ${
-                                  parsedErrors[task.id]?.some(e => e.category === "Task Failed") ? "bg-red-500/10" :
-                                  parsedErrors[task.id]?.length > 0 ? "bg-yellow-500/10" : "bg-muted/50"
-                                }`}
-                                onClick={() => setErrorPanelExpanded(prev => ({ ...prev, [task.id]: true }))}
+                                className="flex flex-col items-center gap-1 w-full py-2 cursor-pointer hover:bg-muted/70 transition-colors bg-muted/50"
+                                onClick={() => {
+                                  setErrorPanelExpanded(prev => ({ ...prev, [task.id]: true }));
+                                  setUnreadCommsCount(prev => ({ ...prev, [task.id]: 0 }));
+                                }}
                               >
-                                <AlertCircle className={`w-4 h-4 ${
-                                  parsedErrors[task.id]?.some(e => e.category === "Task Failed") ? "text-red-400" :
-                                  parsedErrors[task.id]?.length > 0 ? "text-yellow-400" : "text-muted-foreground"
-                                }`} />
-                                {parsedErrors[task.id]?.length > 0 && (
-                                  <span className={`text-xs font-bold ${
-                                    parsedErrors[task.id]?.some(e => e.category === "Task Failed") ? "text-red-400" : "text-yellow-400"
-                                  }`}>{parsedErrors[task.id].length}</span>
-                                )}
-                                <MessageSquare className={`w-4 h-4 mt-1 ${unreadCommsCount[task.id] > 0 ? "text-cyan-400 animate-pulse" : "text-primary"}`} />
+                                <MessageSquare className={`w-4 h-4 ${unreadCommsCount[task.id] > 0 ? "text-cyan-400 animate-pulse" : "text-primary"}`} />
                                 {unreadCommsCount[task.id] > 0 && (
                                   <span className="text-[10px] font-bold text-cyan-400">{unreadCommsCount[task.id]}</span>
                                 )}
@@ -3281,43 +3269,9 @@ export default function Dashboard() {
                               </div>
                             ) : (
                               <>
-                                {/* Tabs Header */}
+                                {/* Header */}
                                 <div className="flex items-center border-b bg-muted/30">
-                                  <button
-                                    onClick={() => setPanelActiveTab(prev => ({ ...prev, [task.id]: "errors" }))}
-                                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
-                                      (panelActiveTab[task.id] || "errors") === "errors"
-                                        ? "bg-background border-b-2 border-primary text-foreground"
-                                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                                    }`}
-                                  >
-                                    <AlertCircle className={`w-3.5 h-3.5 ${
-                                      parsedErrors[task.id]?.some(e => e.category === "Task Failed") ? "text-red-400" :
-                                      parsedErrors[task.id]?.length > 0 ? "text-yellow-400" : ""
-                                    }`} />
-                                    Warnings
-                                    {parsedErrors[task.id]?.length > 0 && (
-                                      <span className={`px-1.5 py-0.5 text-[10px] rounded-full ${
-                                        parsedErrors[task.id]?.some(e => e.category === "Task Failed")
-                                          ? "bg-red-500/20 text-red-400"
-                                          : "bg-yellow-500/20 text-yellow-400"
-                                      }`}>
-                                        {parsedErrors[task.id].length}
-                                      </span>
-                                    )}
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setPanelActiveTab(prev => ({ ...prev, [task.id]: "comms" }));
-                                      // Clear unread count when viewing comms
-                                      setUnreadCommsCount(prev => ({ ...prev, [task.id]: 0 }));
-                                    }}
-                                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
-                                      panelActiveTab[task.id] === "comms"
-                                        ? "bg-background border-b-2 border-primary text-foreground"
-                                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                                    }`}
-                                  >
+                                  <div className="flex-1 flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-foreground">
                                     <MessageSquare className={`w-3.5 h-3.5 ${unreadCommsCount[task.id] > 0 ? "text-cyan-400 animate-pulse" : ""}`} />
                                     Comms
                                     {unreadCommsCount[task.id] > 0 && (
@@ -3325,7 +3279,7 @@ export default function Dashboard() {
                                         {unreadCommsCount[task.id]}
                                       </span>
                                     )}
-                                  </button>
+                                  </div>
                                   <button
                                     onClick={() => setErrorPanelExpanded(prev => ({ ...prev, [task.id]: false }))}
                                     className="px-2 py-2 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
@@ -3335,90 +3289,15 @@ export default function Dashboard() {
                                   </button>
                                 </div>
 
-                                {/* Tab Content - Both tabs always mounted to keep SSE alive */}
-                                {/* Errors Tab Content */}
-                                <div className={`h-96 overflow-y-auto ${(panelActiveTab[task.id] || "errors") === "errors" ? "" : "hidden"}`}>
-                                  {parsedErrors[task.id]?.length > 0 ? (
-                                    parsedErrors[task.id].map((err, idx) => (
-                                      <div
-                                        key={idx}
-                                        className={`px-3 py-2 border-b border-border/50 hover:bg-muted/30 group ${
-                                          err.logIndex >= 0 ? "cursor-pointer" : ""
-                                        } ${err.category === "Task Failed" ? "bg-red-500/10" : ""}`}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          if (err.logIndex >= 0) {
-                                            const terminalEl = terminalRefs.current[task.id];
-                                            if (terminalEl) {
-                                              const logLine = terminalEl.querySelector(`[data-log-index="${err.logIndex}"]`);
-                                              if (logLine) {
-                                                logLine.scrollIntoView({ behavior: "smooth", block: "center" });
-                                                logLine.classList.add("bg-yellow-500/20");
-                                                setTimeout(() => logLine.classList.remove("bg-yellow-500/20"), 2000);
-                                              }
-                                            }
-                                          }
-                                        }}
-                                      >
-                                        <div className="flex items-start gap-2">
-                                          <span className={`mt-0.5 ${err.type === "error" ? "text-red-400" : "text-yellow-400"}`}>
-                                            {err.category === "Task Failed" ? "🚨" : err.type === "error" ? "⛔" : "⚠️"}
-                                          </span>
-                                          <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 text-xs">
-                                              <span className="text-muted-foreground">
-                                                {new Date(err.timestamp).toLocaleTimeString()}
-                                              </span>
-                                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                                                err.category === "Task Failed" ? "bg-red-600/30 text-red-300 font-bold" :
-                                                err.category === "TypeScript" ? "bg-blue-500/20 text-blue-400" :
-                                                err.category === "Git" ? "bg-orange-500/20 text-orange-400" :
-                                                err.category === "npm" ? "bg-amber-500/20 text-amber-400" :
-                                                err.category === "Test" ? "bg-purple-500/20 text-purple-400" :
-                                                err.category === "ESLint" ? "bg-indigo-500/20 text-indigo-400" :
-                                                err.category === "Network" ? "bg-cyan-500/20 text-cyan-400" :
-                                                "bg-yellow-500/20 text-yellow-400"
-                                              }`}>
-                                                {err.category}
-                                              </span>
-                                            </div>
-                                            <p className={`mt-1 text-foreground break-words whitespace-pre-wrap ${
-                                              err.category === "Task Failed" ? "text-sm font-medium" : "text-xs"
-                                            }`}>
-                                              {err.message}
-                                            </p>
-                                            {err.file && (
-                                              <p className="text-[10px] text-muted-foreground mt-1 font-mono truncate">
-                                                {err.file}{err.line ? `:${err.line}` : ""}
-                                              </p>
-                                            )}
-                                          </div>
-                                          {err.logIndex >= 0 && (
-                                            <span className="text-muted-foreground group-hover:text-foreground transition-colors">
-                                              →
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    ))
-                                  ) : (
-                                    <div className="p-4 text-center text-muted-foreground text-xs">
-                                      <CheckCircle className="w-8 h-8 mx-auto mb-2 text-green-500/50" />
-                                      <p>No warnings detected</p>
-                                    </div>
-                                  )}
-                                </div>
+                                {/* Communications Feed */}
+                                <EmbeddedCommunicationsFeed
+                                  taskId={task.id}
+                                  isTerminal={TERMINAL_STATUSES.includes(task.status)}
+                                  isChildTask={!!task.parentTaskId}
+                                  onAnswerQuestion={handleAnswerQuestion}
+                                />
                               </>
                             )}
-                            {/* Communications Feed - Always mounted to keep SSE alive regardless of panel state */}
-                            <div className={`${errorPanelExpanded[task.id] && panelActiveTab[task.id] === "comms" ? "" : "hidden"}`}>
-                              <EmbeddedCommunicationsFeed
-                                taskId={task.id}
-                                isTerminal={TERMINAL_STATUSES.includes(task.status)}
-                                isChildTask={!!task.parentTaskId}
-                                onAnswerQuestion={handleAnswerQuestion}
-                              />
-                            </div>
                           </div>
                         </div>
                       )}

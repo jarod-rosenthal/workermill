@@ -1,9 +1,25 @@
 const stats = [
-  { value: "105", label: "Stories shipped in a single epic build" },
-  { value: "11", label: "Specialized AI personas across the SDLC" },
-  { value: "18hrs", label: "From spec to production-ready code" },
-  { value: "24/7", label: "Executes your backlog while you sleep" },
-]
+  {
+    value: "273",
+    label: "Tasks completed",
+    detail: "Across 6 repositories and 4 organizations",
+  },
+  {
+    value: "14",
+    label: "AI expert personas",
+    detail: "Frontend, backend, DevOps, QA, security, and more",
+  },
+  {
+    value: "~55 min",
+    label: "Average story time",
+    detail: "From task claim to mergeable PR",
+  },
+  {
+    value: "24/7",
+    label: "Async execution",
+    detail: "Ships your backlog while you sleep",
+  },
+];
 
 export function StatsSection() {
   return (
@@ -15,13 +31,16 @@ export function StatsSection() {
               <div className="text-3xl lg:text-4xl font-bold tracking-tight text-white mb-2">
                 {stat.value}
               </div>
-              <p className="text-sm text-slate-500 leading-relaxed">
+              <p className="text-sm font-medium text-slate-300 mb-1">
                 {stat.label}
+              </p>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                {stat.detail}
               </p>
             </div>
           ))}
         </div>
       </div>
     </section>
-  )
+  );
 }

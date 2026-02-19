@@ -88,7 +88,7 @@ const troubleshootingItems = [
   },
 ];
 
-export default function LocalAgent() {
+export default function AgentSetup() {
   const [copied, setCopied] = useState<string | null>(null);
 
   const copyToClipboard = (text: string, field: string) => {
@@ -103,14 +103,14 @@ export default function LocalAgent() {
       <div className="text-center space-y-4">
         <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-500/10 text-green-500 text-sm font-medium mb-4">
           <Monitor className="w-4 h-4" />
-          Local Agent
+          WorkerMill Agent
         </div>
         <h1 className="text-4xl font-bold text-foreground">
           Run Workers on Your Machine
         </h1>
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-          Execute AI coding tasks locally using your Claude Max subscription
-          while monitoring everything from the cloud dashboard.
+          A standalone binary that executes AI coding tasks on your machine
+          using your Claude Max subscription. No Docker or Node.js required.
         </p>
       </div>
 
@@ -133,7 +133,7 @@ export default function LocalAgent() {
           <h3 className="font-semibold text-foreground">Cloud Dashboard</h3>
           <p className="text-sm text-muted-foreground">
             Real-time log streaming, task status, and coordination all visible
-            at workermill.com — same experience as cloud mode.
+            at workermill.com. Also available in VS Code via the companion extension.
           </p>
         </div>
         <div className="bg-card border border-border rounded-xl p-5 space-y-2">
@@ -212,7 +212,7 @@ export default function LocalAgent() {
                   Network
                 </td>
                 <td className="px-5 py-3 text-sm text-muted-foreground" colSpan={2}>
-                  Stable internet connection (for API communication and image pulls)
+                  Stable internet connection (for API communication and repo cloning)
                 </td>
               </tr>
             </tbody>
@@ -441,7 +441,7 @@ export default function LocalAgent() {
                 </div>
                 <div className="mt-3 bg-muted/30 rounded-lg p-4 font-mono text-xs space-y-1.5">
                   <div className="text-cyan-400 font-bold">
-                    &nbsp; WorkerMill Remote Agent
+                    &nbsp; WorkerMill Agent
                   </div>
                   <div className="text-muted-foreground">
                     &nbsp; ─────────────────────────────────────
@@ -904,14 +904,16 @@ export default function LocalAgent() {
         <h2 className="text-2xl font-semibold text-foreground">Next Steps</h2>
         <div className="grid md:grid-cols-2 gap-4">
           <Link
-            to="/docs/quick-start"
+            to="/docs/vscode-extension"
             className="bg-primary/10 border border-primary/30 rounded-xl p-5 hover:bg-primary/20 transition-colors group"
           >
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="font-semibold text-primary">Quick Start</h3>
+                <h3 className="font-semibold text-primary">
+                  VS Code Extension
+                </h3>
                 <p className="text-sm text-primary/70">
-                  Create your first task in 5 minutes
+                  Monitor tasks, view logs, and manage work from your IDE
                 </p>
               </div>
               <ArrowRight className="w-5 h-5 text-primary" />

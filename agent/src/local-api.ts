@@ -9,7 +9,6 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
-import { spawn } from "child_process";
 import { writeFileSync, unlinkSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -427,6 +426,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         const msg = err instanceof Error ? err.message : String(err);
         res.write(`data: ${JSON.stringify({ type: "error", error: msg })}\n\n`);
         res.end();
+        return;
       } else {
         const e = err as { status?: number; data?: unknown; message?: string };
         const status = e.status || 500;
@@ -434,6 +434,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         return json(res, { error: e.message || String(err) }, status);
       }
     }
+    return; // Response already ended in try or catch
   }
 
   // POST /api/tasks/:id/talk — send message to worker
@@ -571,7 +572,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   return notFound(res);
 }
 
-// ── PRD Decomposition via Claude CLI ──────────────────
+// ── PRD Decomposition via Claude Agent SDK ────────────
 
 const PRD_SYSTEM_PROMPT = `You are a senior technical program manager who decomposes Product Requirements Documents (PRDs) into implementation cards for AI coding agents.
 
@@ -657,185 +658,177 @@ estimatedSteps is the number of deliverables in the card (used for progress trac
 labels should include relevant technology or domain tags (e.g., "react", "api", "terraform", "auth").`;
 
 /**
- * Decompose a PRD locally using Claude CLI.
- * Claude CLI handles OAuth natively via ~/.claude/.credentials.json.
- * Streams real-time text output via onProgress callback for terminal visibility.
+ * Decompose a PRD using the Claude Agent SDK.
+ *
+ * Uses @anthropic-ai/claude-agent-sdk's query() function which:
+ * - Handles OAuth automatically via ~/.claude/.credentials.json
+ * - Streams messages as an async generator (no subprocess env var issues)
+ * - Returns typed SDKMessage events for real-time progress
  */
-function decomposePrdLocal(
+async function decomposePrdLocal(
   prdContent: string,
   onProgress?: (message: string) => void,
 ): Promise<{ boardName: string; cards: unknown[] }> {
-  const claudePath = findClaudePath();
-  if (!claudePath) {
-    return Promise.reject(new Error("Claude CLI not installed. Run: curl -fsSL https://claude.ai/install.sh | bash"));
+  // Dynamic import — the SDK is bundled by esbuild at build time
+  const { query } = await import("@anthropic-ai/claude-agent-sdk");
+
+  const startTime = Date.now();
+  let resultText = "";
+  let textStarted = false;
+
+  // Buffer text deltas and flush readable lines to the terminal
+  let lineBuffer = "";
+
+  function flushLine(line: string): void {
+    if (!line.trim()) return;
+    const trimmed = line.trim();
+    if (/^[{}\[\],]+$/.test(trimmed)) return;
+    const kvMatch = trimmed.match(/^"(\w+)":\s*(.+?)[\s,]*$/);
+    if (kvMatch) {
+      const [, key, val] = kvMatch;
+      if (key === "title" || key === "boardName") {
+        onProgress?.(`📋 ${key}: ${val.replace(/^"|"$/g, "")}`);
+      } else if (key === "persona") {
+        onProgress?.(`👤 ${key}: ${val.replace(/^"|"$/g, "")}`);
+      } else if (key === "priority") {
+        onProgress?.(`⚡ ${key}: ${val.replace(/^"|"$/g, "")}`);
+      } else if (key === "description") {
+        const desc = val.replace(/^"|"$/g, "");
+        const short = desc.length > 120 ? desc.substring(0, 120) + "..." : desc;
+        onProgress?.(`   ${key}: ${short}`);
+      } else if (key === "labels") {
+        onProgress?.(`🏷️  ${key}: ${val}`);
+      } else if (key === "dependencyIndices") {
+        onProgress?.(`🔗 deps: ${val}`);
+      }
+      return;
+    }
+    onProgress?.(trimmed.substring(0, 200));
   }
 
-  const prompt = `${PRD_SYSTEM_PROMPT}\n\n---\n\nDecompose this PRD into implementation cards:\n\n${prdContent}`;
-
-  return new Promise((resolve, reject) => {
-    const startTime = Date.now();
-
-    // Clean env: remove CLAUDECODE to prevent "nested session" error
-    const cleanEnv = { ...process.env };
-    delete cleanEnv.CLAUDECODE;
-    delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
-
-    const proc = spawn(
-      claudePath,
-      ["--print", "--verbose", "--output-format", "stream-json"],
-      { stdio: ["pipe", "pipe", "pipe"], env: cleanEnv },
-    );
-
-    proc.stdin.write(prompt);
-    proc.stdin.end();
-
-    let resultText = "";
-    let stderrOutput = "";
-    let textStarted = false;
-
-    // Buffer text deltas and flush readable lines to the terminal
-    let lineBuffer = "";
-
-    function flushLine(line: string): void {
-      if (!line.trim()) return;
-      // Clean up JSON syntax noise for readability — show card structure
-      const trimmed = line.trim();
-      // Skip pure JSON syntax lines (braces, brackets)
-      if (/^[{}\[\],]+$/.test(trimmed)) return;
-      // Format key-value pairs nicely
-      const kvMatch = trimmed.match(/^"(\w+)":\s*(.+?)[\s,]*$/);
-      if (kvMatch) {
-        const [, key, val] = kvMatch;
-        // Highlight important fields
-        if (key === "title" || key === "boardName") {
-          onProgress?.(`📋 ${key}: ${val.replace(/^"|"$/g, "")}`);
-        } else if (key === "persona") {
-          onProgress?.(`👤 ${key}: ${val.replace(/^"|"$/g, "")}`);
-        } else if (key === "priority") {
-          onProgress?.(`⚡ ${key}: ${val.replace(/^"|"$/g, "")}`);
-        } else if (key === "description") {
-          // Truncate long descriptions
-          const desc = val.replace(/^"|"$/g, "");
-          const short = desc.length > 120 ? desc.substring(0, 120) + "..." : desc;
-          onProgress?.(`   ${key}: ${short}`);
-        } else if (key === "labels") {
-          onProgress?.(`🏷️  ${key}: ${val}`);
-        } else if (key === "dependencyIndices") {
-          onProgress?.(`🔗 deps: ${val}`);
-        }
-        return;
-      }
-      // Pass through anything else (shouldn't happen much with --print)
-      onProgress?.(trimmed.substring(0, 200));
+  function processTextDelta(text: string): void {
+    lineBuffer += text;
+    const lines = lineBuffer.split("\n");
+    lineBuffer = lines.pop() || "";
+    for (const line of lines) {
+      flushLine(line);
     }
+  }
 
-    function processTextDelta(text: string): void {
-      lineBuffer += text;
-      const lines = lineBuffer.split("\n");
-      // Keep last incomplete line in buffer
-      lineBuffer = lines.pop() || "";
-      for (const line of lines) {
-        flushLine(line);
-      }
+  // Heartbeat so user knows it's alive before first text arrives
+  const heartbeat = setInterval(() => {
+    if (!textStarted) {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      onProgress?.(`⏳ Waiting for Claude to start generating... ${elapsed}s`);
     }
+  }, 8_000);
 
-    // Heartbeat so user knows it's alive before first text arrives
-    const heartbeat = setInterval(() => {
-      if (!textStarted) {
-        const elapsed = Math.round((Date.now() - startTime) / 1000);
-        onProgress?.(`⏳ Waiting for Claude to start generating... ${elapsed}s`);
-      }
-    }, 8_000);
+  // Find the system-installed Claude CLI binary.
+  // When bundled into the standalone binary, the SDK's built-in cli.js is not available,
+  // so we must point to the system Claude CLI (installed via install.sh).
+  const claudePath = findClaudePath();
+  if (!claudePath) {
+    throw new Error("Claude CLI not found. Install it with: curl -fsSL https://claude.ai/install.sh | bash");
+  }
+  onProgress?.(`Using Claude CLI: ${claudePath}`);
 
-    proc.stdout.on("data", (chunk: Buffer) => {
-      const lines = chunk.toString().split("\n");
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const event = JSON.parse(line);
+  // Clean env: remove CLAUDECODE to prevent nested-session detection
+  const cleanEnv: Record<string, string | undefined> = { ...process.env };
+  delete cleanEnv.CLAUDECODE;
+  delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
-          // Collect assistant text from stream-json events
-          if (event.type === "assistant" && event.message?.content) {
-            for (const block of event.message.content) {
-              if (block.type === "text") {
-                if (!textStarted) {
-                  textStarted = true;
-                  clearInterval(heartbeat);
-                  const elapsed = Math.round((Date.now() - startTime) / 1000);
-                  onProgress?.(`✅ Claude started generating (${elapsed}s). Streaming output...`);
-                }
-                resultText += block.text;
-                processTextDelta(block.text);
-              }
-            }
+  try {
+    const conversation = query({
+      prompt: `Decompose this PRD into implementation cards:\n\n${prdContent}`,
+      options: {
+        pathToClaudeCodeExecutable: claudePath,
+        env: cleanEnv,
+        systemPrompt: PRD_SYSTEM_PROMPT,
+        tools: [],                          // No tools needed — pure text generation
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+        maxTurns: 1,                        // Single turn — no back-and-forth
+        includePartialMessages: true,       // Stream text deltas
+        persistSession: false,              // Ephemeral — don't save session
+        stderr: (data: string) => {
+          onProgress?.(`[stderr] ${data.trim()}`);
+        },
+      },
+    });
+
+    for await (const message of conversation) {
+      // Stream text deltas for real-time terminal output
+      if (message.type === "stream_event" && message.event) {
+        const event = message.event;
+        if (event.type === "content_block_delta" && "delta" in event && event.delta && "text" in event.delta) {
+          if (!textStarted) {
+            textStarted = true;
+            clearInterval(heartbeat);
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            onProgress?.(`✅ Claude started generating (${elapsed}s). Streaming output...`);
           }
+          resultText += event.delta.text;
+          processTextDelta(event.delta.text);
+        }
+      }
 
-          // Real-time text deltas — this is where most output comes from
-          if (event.type === "content_block_delta" && event.delta?.text) {
+      // Full assistant message — extract text content
+      if (message.type === "assistant" && message.message?.content) {
+        for (const block of message.message.content) {
+          if ("text" in block && block.text) {
+            // If we didn't get streaming deltas, use the full text
             if (!textStarted) {
               textStarted = true;
               clearInterval(heartbeat);
               const elapsed = Math.round((Date.now() - startTime) / 1000);
-              onProgress?.(`✅ Claude started generating (${elapsed}s). Streaming output...`);
+              onProgress?.(`✅ Claude responded (${elapsed}s).`);
             }
-            resultText += event.delta.text;
-            processTextDelta(event.delta.text);
+            if (!resultText) {
+              resultText = block.text;
+              processTextDelta(block.text);
+            }
           }
-
-          // Final result message
-          if (event.type === "result" && event.result) {
-            resultText = event.result;
-          }
-        } catch {
-          // Not JSON — ignore
         }
       }
-    });
 
-    proc.stderr.on("data", (chunk: Buffer) => {
-      stderrOutput += chunk.toString();
-    });
-
-    proc.on("close", (code) => {
-      clearInterval(heartbeat);
-      // Flush remaining buffer
-      if (lineBuffer.trim()) flushLine(lineBuffer);
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-
-      if (code !== 0) {
-        onProgress?.(`❌ Claude CLI failed after ${elapsed}s`);
-        return reject(new Error(`Claude CLI exited with code ${code}: ${stderrOutput.slice(0, 500)}`));
-      }
-
-      if (!resultText.trim()) {
-        onProgress?.(`❌ Claude CLI returned empty output after ${elapsed}s`);
-        return reject(new Error("Claude CLI returned empty output"));
-      }
-
-      onProgress?.(`✅ Generation complete (${elapsed}s). Parsing JSON...`);
-
-      // Strip markdown fences if present
-      let jsonStr = resultText.trim();
-      const fenceMatch = jsonStr.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
-      if (fenceMatch) jsonStr = fenceMatch[1].trim();
-
-      try {
-        const parsed = JSON.parse(jsonStr);
-        if (!parsed.boardName || !Array.isArray(parsed.cards) || parsed.cards.length === 0) {
-          return reject(new Error("Claude CLI returned invalid PRD decomposition (missing boardName or cards)"));
+      // Result message — check for errors
+      if (message.type === "result") {
+        if (message.is_error) {
+          const errors = "errors" in message ? (message.errors as string[]).join("; ") : "Unknown error";
+          throw new Error(`Claude Agent SDK error: ${errors}`);
         }
-        onProgress?.(`📊 Parsed ${parsed.cards.length} cards for board "${parsed.boardName}"`);
-        resolve(parsed);
-      } catch (parseErr) {
-        return reject(new Error(`Failed to parse PRD decomposition JSON: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`));
+        // Use result text if available (authoritative)
+        if ("result" in message && message.result) {
+          resultText = message.result as string;
+        }
       }
-    });
+    }
+  } finally {
+    clearInterval(heartbeat);
+  }
 
-    proc.on("error", (err) => {
-      clearInterval(heartbeat);
-      reject(new Error(`Failed to spawn Claude CLI: ${err.message}`));
-    });
-  });
+  // Flush remaining buffer
+  if (lineBuffer.trim()) flushLine(lineBuffer);
+  const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+  if (!resultText.trim()) {
+    onProgress?.(`❌ Claude returned empty output after ${elapsed}s`);
+    throw new Error("Claude returned empty output");
+  }
+
+  onProgress?.(`✅ Generation complete (${elapsed}s). Parsing JSON...`);
+
+  // Strip markdown fences if present
+  let jsonStr = resultText.trim();
+  const fenceMatch = jsonStr.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
+  if (fenceMatch) jsonStr = fenceMatch[1].trim();
+
+  const parsed = JSON.parse(jsonStr);
+  if (!parsed.boardName || !Array.isArray(parsed.cards) || parsed.cards.length === 0) {
+    throw new Error("Claude returned invalid PRD decomposition (missing boardName or cards)");
+  }
+  onProgress?.(`📊 Parsed ${parsed.cards.length} cards for board "${parsed.boardName}"`);
+  return parsed;
 }
 
 // ── Server Lifecycle ───────────────────────────────────

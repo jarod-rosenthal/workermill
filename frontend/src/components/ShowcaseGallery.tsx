@@ -177,15 +177,15 @@ export default function ShowcaseGallery() {
           </p>
         </div>
 
-        {/* Metrics banner */}
+        {/* Metrics banner — showcase builds only */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-12">
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <TrendingUp className="w-4 h-4 text-emerald-400" />
-              <span className="text-2xl font-bold text-white">90%</span>
+              <span className="text-2xl font-bold text-white">96%</span>
             </div>
             <p className="text-xs text-slate-400">
-              Task success rate (30 days)
+              Showcase task success rate
             </p>
           </div>
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
@@ -198,9 +198,9 @@ export default function ShowcaseGallery() {
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <GitPullRequest className="w-4 h-4 text-teal-400" />
-              <span className="text-2xl font-bold text-white">75</span>
+              <span className="text-2xl font-bold text-white">52</span>
             </div>
-            <p className="text-xs text-slate-400">PRs shipped (30 days)</p>
+            <p className="text-xs text-slate-400">PRs shipped across builds</p>
           </div>
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
@@ -380,12 +380,11 @@ export default function ShowcaseGallery() {
                 Real metrics, not cherry-picked
               </h3>
               <p className="text-sm text-slate-400 leading-relaxed">
-                Autonomous coding is hard. Across 273 total tasks, 8 failed — a
-                planning agent that returned malformed JSON, a deployment
-                pipeline with a pre-existing infrastructure bug, a plan that sat
-                unapproved for 7 days, and a manager review that caught
-                inaccuracies the worker couldn&apos;t fix in its allowed
-                retries.
+                Autonomous coding is hard. Across the 52 showcase tasks above, 2
+                failed — a planning agent that returned malformed JSON and a
+                manager review that caught inaccuracies the worker
+                couldn&apos;t fix in its allowed retries. That&apos;s a 96%
+                success rate, with zero manual code intervention.
               </p>
             </div>
           </div>

@@ -1647,12 +1647,25 @@ export async function monitorExecutingTasks(): Promise<void> {
               where: { workerTaskId: task.id },
               relations: ["board"],
             });
-            if (kbCard?.board) {
+            if (!kbCard) {
+              logger.debug("PRD cascade (monitor): no KbCard linked to task", { taskId: task.id });
+            } else if (!kbCard.board) {
+              logger.warn("PRD cascade (monitor): KbCard has no board", { taskId: task.id, cardId: kbCard.id });
+            } else {
               const orgRepo = AppDataSource.getRepository(Organization);
               const org = await orgRepo.findOne({ where: { id: kbCard.board.orgId } });
-              if (org?.prdAutoRun) {
+              if (!org?.prdAutoRun) {
+                logger.debug("PRD cascade (monitor): prdAutoRun disabled", { taskId: task.id, orgId: kbCard.board.orgId });
+              } else {
                 const { processUnblockedCards } = await import("./board-execution.js");
-                await processUnblockedCards(kbCard.board.id, kbCard.board.orgId);
+                const cascadeResult = await processUnblockedCards(kbCard.board.id, kbCard.board.orgId);
+                logger.info("PRD cascade (monitor) result", {
+                  taskId: task.id,
+                  boardId: kbCard.board.id,
+                  triggered: cascadeResult.triggered,
+                  stillBlocked: cascadeResult.stillBlocked,
+                  alreadyComplete: cascadeResult.alreadyComplete,
+                });
               }
             }
           } catch (cascadeErr) {

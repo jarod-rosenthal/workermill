@@ -3249,15 +3249,15 @@ ${qualityBelowThreshold ? '**⚠️ QUALITY SCORE BELOW 70% - Revision required 
     let reviewSubmitInstructions: string;
 
     if (isGitHub) {
-      // GitHub: Use gh CLI
+      // GitHub: Use gh CLI with explicit -R flag (git remote URL has embedded credentials that confuse gh)
       diffInstructions = `1. **First, list the changed files to understand the scope**:
    \`\`\`bash
-   gh pr diff ${prNumber} --name-only
+   gh pr diff ${prNumber} -R ${targetRepo} --name-only
    \`\`\`
 
    Then review the diff (for small PRs) or read specific files (for large PRs):
    \`\`\`bash
-   gh pr diff ${prNumber}  # Full diff - use for small PRs (<10 files)
+   gh pr diff ${prNumber} -R ${targetRepo}  # Full diff - use for small PRs (<10 files)
    \`\`\`
    For large PRs with many files, read individual files directly instead of loading the full diff.`;
 
@@ -3265,12 +3265,12 @@ ${qualityBelowThreshold ? '**⚠️ QUALITY SCORE BELOW 70% - Revision required 
 
    **If APPROVE:**
    \`\`\`bash
-   gh pr review ${prNumber} --approve --body "Your approval message"
+   gh pr review ${prNumber} -R ${targetRepo} --approve --body "Your approval message"
    \`\`\`
 
    **If REVISION_NEEDED or REJECT:**
    \`\`\`bash
-   gh pr review ${prNumber} --request-changes --body "Your detailed feedback"
+   gh pr review ${prNumber} -R ${targetRepo} --request-changes --body "Your detailed feedback"
    \`\`\`
 
 5.`;

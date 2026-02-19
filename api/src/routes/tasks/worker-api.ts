@@ -262,19 +262,25 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
           where: { workerTaskId: taskId },
           relations: ["board"],
         });
-        if (kbCard?.board) {
+        if (!kbCard) {
+          logger.debug("PRD cascade: no KbCard linked to task", { taskId });
+        } else if (!kbCard.board) {
+          logger.warn("PRD cascade: KbCard has no board", { taskId, cardId: kbCard.id });
+        } else {
           const orgRepo = AppDataSource.getRepository(Organization);
           const org = await orgRepo.findOne({ where: { id: kbCard.board.orgId } });
-          if (org?.prdAutoRun) {
+          if (!org?.prdAutoRun) {
+            logger.debug("PRD cascade: prdAutoRun disabled for org", { taskId, orgId: kbCard.board.orgId });
+          } else {
             const { processUnblockedCards } = await import("../../services/board-execution.js");
             const cascadeResult = await processUnblockedCards(kbCard.board.id, kbCard.board.orgId);
-            if (cascadeResult.triggered > 0) {
-              logger.info("PRD cascade triggered dependent cards", {
-                taskId,
-                boardId: kbCard.board.id,
-                triggered: cascadeResult.triggered,
-              });
-            }
+            logger.info("PRD cascade result", {
+              taskId,
+              boardId: kbCard.board.id,
+              triggered: cascadeResult.triggered,
+              stillBlocked: cascadeResult.stillBlocked,
+              alreadyComplete: cascadeResult.alreadyComplete,
+            });
           }
         }
       } catch (cascadeErr) {

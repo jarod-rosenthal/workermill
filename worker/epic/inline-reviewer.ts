@@ -286,7 +286,14 @@ export class InlineReviewer {
         process.env.GH_TOKEN = this.config.githubReviewerToken;
         await this.postLog("Using separate reviewer token for PR approval", "system");
       } else {
-        await this.postLog("WARNING: No GITHUB_REVIEWER_TOKEN set - PR approval may fail due to self-approval restriction", "system");
+        // Fall back to the available token so gh CLI can at least read the PR diff
+        const fallbackToken = this.config.githubToken || process.env.SCM_TOKEN || process.env.GITHUB_TOKEN || "";
+        if (fallbackToken) {
+          process.env.GH_TOKEN = fallbackToken;
+          await this.postLog("No GITHUB_REVIEWER_TOKEN set - using main token (PR approval may fail due to self-approval restriction)", "system");
+        } else {
+          await this.postLog("WARNING: No GitHub token available - gh CLI commands will fail", "system");
+        }
       }
 
       // Create tech_lead expert config for the reviewer
@@ -487,15 +494,15 @@ ${this.config.jiraRequirements}
     let reviewSubmitInstructions: string;
 
     if (isGitHub) {
-      // GitHub: Use gh CLI
+      // GitHub: Use gh CLI with explicit -R flag (git remote URL has embedded credentials that confuse gh)
       diffInstructions = `1. **First, list the changed files to understand the scope**:
    \`\`\`bash
-   gh pr diff ${prNumber} --name-only
+   gh pr diff ${prNumber} -R ${targetRepo} --name-only
    \`\`\`
 
    Then review the diff (for small PRs) or read specific files (for large PRs):
    \`\`\`bash
-   gh pr diff ${prNumber}  # Full diff - use for small PRs (<10 files)
+   gh pr diff ${prNumber} -R ${targetRepo}  # Full diff - use for small PRs (<10 files)
    \`\`\`
    For large PRs with many files, read individual files directly instead of loading the full diff.`;
 
@@ -503,12 +510,12 @@ ${this.config.jiraRequirements}
 
    **If APPROVE:**
    \`\`\`bash
-   gh pr review ${prNumber} --approve --body "Your approval message"
+   gh pr review ${prNumber} -R ${targetRepo} --approve --body "Your approval message"
    \`\`\`
 
    **If REVISION_NEEDED or REJECT:**
    \`\`\`bash
-   gh pr review ${prNumber} --request-changes --body "Your detailed feedback"
+   gh pr review ${prNumber} -R ${targetRepo} --request-changes --body "Your detailed feedback"
    \`\`\`
 
 5.`;

@@ -20,7 +20,17 @@ export async function processUnblockedCards(
     order: { position: "ASC" },
   });
 
-  if (cards.length === 0) return { triggered: 0, stillBlocked: 0, alreadyComplete: 0 };
+  if (cards.length === 0) {
+    logger.debug("processUnblockedCards: no cards on board", { boardId });
+    return { triggered: 0, stillBlocked: 0, alreadyComplete: 0 };
+  }
+
+  logger.debug("processUnblockedCards: evaluating cards", {
+    boardId,
+    totalCards: cards.length,
+    cardsWithTask: cards.filter((c) => c.workerTask).length,
+    cardsWithoutTask: cards.filter((c) => !c.workerTask).length,
+  });
 
   // Load all dependencies for cards on this board
   const allDeps = await depRepo
@@ -67,6 +77,19 @@ export async function processUnblockedCards(
     });
 
     if (!allDepsMet) {
+      const unmetDeps = depCardIds.filter((depId) => {
+        const depCard = cardMap.get(depId);
+        return !depCard?.workerTask || !DONE_STATUSES.includes(depCard.workerTask.status);
+      });
+      logger.debug("processUnblockedCards: card still blocked", {
+        cardId: card.id,
+        cardTitle: card.title,
+        unmetDeps: unmetDeps.map((depId) => ({
+          depCardId: depId,
+          depCardTitle: cardMap.get(depId)?.title,
+          taskStatus: cardMap.get(depId)?.workerTask?.status ?? "no task",
+        })),
+      });
       stillBlocked++;
       continue;
     }

@@ -95,6 +95,10 @@ export default function LandingV0() {
                   Local-first — your code executes on your machine, not ours.
                 </span>
               </div>
+              {/* Platform compatibility */}
+              <p className="mt-3 text-center text-sm text-slate-500">
+                Runs on macOS, Linux, and Windows
+              </p>
             </div>
           </section>
 

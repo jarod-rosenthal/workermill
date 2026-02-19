@@ -50,6 +50,7 @@ interface ShowcaseDetail {
   storyCount: number;
   cost: string;
   duration: string;
+  linesOfCode?: string;
   repoUrl?: string;
   liveUrl?: string;
   category: string;
@@ -100,6 +101,7 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     storyCount: 44,
     cost: "Claude Max",
     duration: "~354 min",
+    linesOfCode: "22,000",
     repoUrl: "https://github.com/workermill-examples/teamboard",
     liveUrl: "https://teamboard.workermill.com",
     category: "saas",
@@ -130,6 +132,7 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     storyCount: 36,
     cost: "Claude Max",
     duration: "~310 min",
+    linesOfCode: "11,700",
     repoUrl: "https://github.com/workermill-examples/taskpulse",
     liveUrl: "https://taskpulse.workermill.com",
     category: "monitoring",
@@ -162,6 +165,7 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     storyCount: 48,
     cost: "Claude Max",
     duration: "~434 min",
+    linesOfCode: "29,000",
     repoUrl: "https://github.com/workermill-examples/calmill",
     liveUrl: "https://calmill.workermill.com",
     category: "scheduling",
@@ -314,17 +318,15 @@ export default function ShowcaseViewer() {
         <div
           className={`grid grid-cols-2 gap-4 mb-12 ${isEpicBoard ? "md:grid-cols-5" : "md:grid-cols-4"}`}
         >
-          {isEpicBoard && (
+          {(isEpicBoard || project.linesOfCode) && (
             <div className="card-elevated border border-border/50 rounded-xl p-5">
               <div className="flex items-center gap-2 text-2xl font-bold text-foreground">
                 <FileCode className="w-5 h-5 text-muted-foreground" />
-                {isOnCallShift
-                  ? "177K"
-                  : isCalMill
-                    ? "22K"
-                    : isTaskPulse
-                      ? "18K"
-                      : "29K"}
+                {project.linesOfCode
+                  ? project.linesOfCode
+                  : isOnCallShift
+                    ? "177K"
+                    : "N/A"}
               </div>
               <div className="text-sm text-muted-foreground mt-1">
                 lines of code

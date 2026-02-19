@@ -22,6 +22,7 @@ export type ContextMessageType =
   | "blocker"
   | "blocker_detected"   // Escalated blocker requiring human intervention
   | "blocker_resolved"   // User resolved a blocker (retry/skip/abort)
+  | "rate_limited"       // Anthropic usage cap reached — stop retrying
   | "warning"
   | "progress"
   | "story_ready"

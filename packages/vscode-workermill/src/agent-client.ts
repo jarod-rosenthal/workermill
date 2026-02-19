@@ -49,6 +49,10 @@ export interface IssueInfo {
   priority: string | null;
   labels: string[];
   project: { key: string; name: string } | null;
+  /** Number of unmet dependencies (0 = unblocked). Only set for board cards. */
+  blockedByCount?: number;
+  /** Total dependency count. Only set for board cards. */
+  dependencyCount?: number;
 }
 
 export interface CodeEventRecord {

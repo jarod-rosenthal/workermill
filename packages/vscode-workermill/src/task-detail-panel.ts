@@ -57,41 +57,7 @@ export class TaskDetailPanel {
 
     // Handle messages from the webview
     this.panel.webview.onDidReceiveMessage(async (msg) => {
-      if (msg.type === "talk" && msg.message) {
-        try {
-          await this.client.talkToWorker(this.taskId, msg.message);
-        } catch (err) {
-          vscode.window.showErrorMessage(
-            `Failed to send: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      } else if (msg.type === "approve-plan") {
-        try {
-          await this.client.approvePlan(this.taskId);
-          vscode.window.showInformationMessage("Plan approved.");
-        } catch (err) {
-          vscode.window.showErrorMessage(
-            `Failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      } else if (msg.type === "reject-plan") {
-        const feedback = await vscode.window.showInputBox({
-          prompt: "Feedback for the planner",
-          placeHolder: "What should be changed?",
-        });
-        if (feedback) {
-          try {
-            await this.client.rejectPlan(this.taskId, feedback);
-            vscode.window.showInformationMessage(
-              "Plan rejected with feedback.",
-            );
-          } catch (err) {
-            vscode.window.showErrorMessage(
-              `Failed: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-        }
-      } else if (msg.type === "cancel-task") {
+      if (msg.type === "cancel-task") {
         const confirm = await vscode.window.showWarningMessage(
           "Cancel this task?",
           { modal: true },
@@ -366,27 +332,52 @@ export class TaskDetailPanel {
   }
   .action-btn.success:hover { background: rgba(78,201,176,0.15); }
 
-  /* Talk input */
-  .talk-section {
-    padding: 12px 24px;
+  /* Task details section */
+  .detail-section {
+    padding: 16px 24px;
     border-bottom: 1px solid var(--border);
-    display: flex;
-    gap: 8px;
-    align-items: center;
   }
-  .talk-input {
-    flex: 1;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text);
-    padding: 8px 12px;
+  .detail-section h2 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 10px;
+  }
+  .detail-description {
     font-size: 12px;
-    outline: none;
-    font-family: inherit;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 10px;
   }
-  .talk-input:focus { border-color: var(--accent); }
-  .talk-input::placeholder { color: var(--text-dim); }
+  .detail-links {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .detail-link {
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .detail-link-label {
+    color: var(--text-dim);
+    min-width: 60px;
+  }
+  .detail-link-value {
+    color: var(--accent);
+    text-decoration: none;
+    word-break: break-all;
+  }
+  .detail-link-value.plain {
+    color: var(--text);
+    font-family: monospace;
+    font-size: 11px;
+  }
 
 
   /* Finished banner */
@@ -463,13 +454,25 @@ export class TaskDetailPanel {
 
 <div class="actions-bar" id="actionsBar">
   <button class="action-btn danger" onclick="cancelTask()">Cancel Task</button>
-  <button class="action-btn success" id="approveBtn" style="display:none" onclick="approvePlan()">Approve Plan</button>
-  <button class="action-btn" id="rejectBtn" style="display:none" onclick="rejectPlan()">Reject Plan</button>
 </div>
 
-<div class="talk-section" id="talkSection">
-  <input class="talk-input" id="talkInput" type="text" placeholder="Send a message to the worker..." />
-  <button class="action-btn primary" onclick="sendMessage()">Send</button>
+<div class="detail-section" id="detailSection">
+  <h2>Task Details</h2>
+  <div class="detail-description" id="taskDescription">—</div>
+  <div class="detail-links">
+    <div class="detail-link" id="ticketRow" style="display:none">
+      <span class="detail-link-label">Ticket</span>
+      <a class="detail-link-value" id="ticketLink" href="***REMOVED***"></a>
+    </div>
+    <div class="detail-link" id="branchRow" style="display:none">
+      <span class="detail-link-label">Branch</span>
+      <span class="detail-link-value plain" id="branchName"></span>
+    </div>
+    <div class="detail-link" id="prRow" style="display:none">
+      <span class="detail-link-label">PR</span>
+      <a class="detail-link-value" id="prLink" href="***REMOVED***"></a>
+    </div>
+  </div>
 </div>
 
 <div class="finished-banner" id="finishedBanner"></div>
@@ -477,23 +480,9 @@ export class TaskDetailPanel {
 
 <script>
 const vscode = acquireVsCodeApi();
-const talkInput = document.getElementById("talkInput");
 let currentBlockerId = null;
 let taskStatus = "${task.status}";
 
-talkInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && talkInput.value.trim()) sendMessage();
-});
-
-function sendMessage() {
-  const msg = talkInput.value.trim();
-  if (!msg) return;
-  vscode.postMessage({ type: "talk", message: msg });
-  talkInput.value = "";
-}
-
-function approvePlan() { vscode.postMessage({ type: "approve-plan" }); }
-function rejectPlan() { vscode.postMessage({ type: "reject-plan" }); }
 function cancelTask() { vscode.postMessage({ type: "cancel-task" }); }
 
 function blockerAction(action) {
@@ -524,16 +513,11 @@ function updateStatus(status) {
   badge.textContent = status;
   badge.className = "badge badge-status " + status;
 
-  // Show/hide plan buttons
-  document.getElementById("approveBtn").style.display = status === "planning" ? "" : "none";
-  document.getElementById("rejectBtn").style.display = status === "planning" ? "" : "none";
-
   // Show finished banner
   if (status === "completed" || status === "failed") {
     const banner = document.getElementById("finishedBanner");
     banner.className = "finished-banner visible " + status;
     banner.textContent = status === "completed" ? "\\u2705 Task completed successfully" : "\\u274C Task failed";
-    document.getElementById("talkSection").style.display = "none";
     document.getElementById("actionsBar").style.display = "none";
   }
 }
@@ -580,14 +564,30 @@ window.addEventListener("message", (event) => {
       const mins = Math.round((end - start) / 60000);
       document.getElementById("durationValue").textContent = mins < 60 ? mins + " min" : Math.floor(mins / 60) + "h " + (mins % 60) + "m";
     }
+
+    // Task details (description, ticket, branch, PR)
+    if (d.description) {
+      document.getElementById("taskDescription").textContent = d.description;
+    }
+    if (d.ticketUrl) {
+      document.getElementById("ticketRow").style.display = "";
+      const ticketLink = document.getElementById("ticketLink");
+      ticketLink.textContent = d.ticketKey || d.ticketUrl;
+      ticketLink.setAttribute("href", d.ticketUrl);
+    }
+    if (d.branchName) {
+      document.getElementById("branchRow").style.display = "";
+      document.getElementById("branchName").textContent = d.branchName;
+    }
+    if (d.prUrl) {
+      document.getElementById("prRow").style.display = "";
+      const prLink = document.getElementById("prLink");
+      const prNum = d.prUrl.match(/\\/pull\\/(\\d+)/);
+      prLink.textContent = prNum ? "PR ***REMOVED***" + prNum[1] : d.prUrl;
+      prLink.setAttribute("href", d.prUrl);
+    }
   }
 });
-
-// Initialize plan buttons visibility
-if ("${task.status}" === "planning") {
-  document.getElementById("approveBtn").style.display = "";
-  document.getElementById("rejectBtn").style.display = "";
-}
 </script>
 </body></html>`;
   }

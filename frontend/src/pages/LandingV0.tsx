@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRef } from "react";
 import { Home, Search, FolderOpen, Sparkles, Lock } from "lucide-react";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
@@ -13,27 +12,6 @@ import AgentCollaboration from "../components/AgentCollaboration";
 import TrustCallout from "../components/TrustCallout";
 import ExecutionShowcase from "../components/ExecutionShowcase";
 import { Pricing } from "./Home/Pricing";
-import BuildTerminal, { type PlanPreview } from "../components/BuildTerminal";
-
-const API_BASE = import.meta.env.VITE_API_URL || "";
-
-interface StarterProjectOption {
-  id: string;
-  title: string;
-  description: string;
-  stackTemplate: string;
-  complexity: string;
-  estimatedStories: number;
-  tags: string[];
-  cachedPlan?: PlanPreview | null;
-}
-
-interface StackTemplateOption {
-  id: string;
-  name: string;
-  description: string;
-  language: string;
-}
 
 // ─── Sidebar ────────────────────────────────────────────────────────────────
 
@@ -42,8 +20,6 @@ function Sidebar({
 }: {
   onNavigate: (target: string) => void;
 }) {
-  const navigate = useNavigate();
-
   const items = [
     { icon: Home, label: "Home", action: () => onNavigate("top") },
     { icon: Search, label: "Search", action: () => onNavigate("showcase") },
@@ -78,39 +54,9 @@ function Sidebar({
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function LandingV0() {
-  const [stackTemplates, setStackTemplates] = useState<StackTemplateOption[]>(
-    [],
-  );
-  const [starterProjects, setStarterProjects] = useState<
-    StarterProjectOption[]
-  >([]);
-  const [selectedStarter, setSelectedStarter] =
-    useState<StarterProjectOption | null>(null);
   // Refs for scroll targets
   const topRef = useRef<HTMLDivElement>(null);
   const showcaseRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    async function loadTemplates() {
-      try {
-        const res = await fetch(`${API_BASE}/api/build/templates`);
-        if (res.ok) {
-          const data = await res.json();
-          setStackTemplates(data.stackTemplates || []);
-          setStarterProjects(data.starterProjects || []);
-        }
-      } catch {
-        // Templates are optional
-      }
-    }
-    loadTemplates();
-  }, []);
-
-  const handleStarterSelect = (project: StarterProjectOption) => {
-    setSelectedStarter(project);
-    // Scroll to terminal so the user sees the plan replay
-    topRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
 
   const handleSidebarNavigate = (target: string) => {
     const refMap: Record<string, React.RefObject<HTMLDivElement | null>> = {
@@ -120,14 +66,9 @@ export default function LandingV0() {
     refMap[target]?.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // Show all starters (drop cli-tool, the smallest example)
-  const allStarters = starterProjects.filter((p) => p.id !== "cli-tool");
-  const displayStarters = allStarters.slice(0, 5);
-
   return (
     <main className="min-h-screen relative overflow-hidden">
       <ImmersiveBackground />
-
 
       <div className="relative z-10">
         <Header />
@@ -154,46 +95,6 @@ export default function LandingV0() {
                   Local-first — your code executes on your machine, not ours.
                 </span>
               </div>
-            </div>
-          </section>
-
-          {/* Build terminal — centered hero */}
-          <section className="relative pb-12">
-            <div className="container mx-auto px-6 lg:px-8 max-w-4xl">
-              <BuildTerminal
-                stackTemplates={stackTemplates}
-                initialTitle={selectedStarter?.title ?? ""}
-                initialDescription={selectedStarter?.description ?? ""}
-                initialStack={selectedStarter?.stackTemplate ?? ""}
-                cachedPlan={selectedStarter?.cachedPlan ?? null}
-              />
-
-              {/* Starter template pills */}
-              {displayStarters.length > 0 && (
-                <div className="mt-6 text-center">
-                  <p className="text-sm text-slate-500 mb-3">
-                    Or start with a template:
-                  </p>
-                  <div className="flex gap-3 flex-wrap justify-center">
-                    {displayStarters.map((project) => (
-                      <button
-                        key={project.id}
-                        onClick={() => handleStarterSelect(project)}
-                        className={`px-4 py-2 rounded-full text-sm transition-all ${
-                          selectedStarter?.id === project.id
-                            ? "bg-neutral-800 text-teal-300"
-                            : "bg-neutral-900 text-slate-400 hover:bg-neutral-800 hover:text-slate-300"
-                        }`}
-                      >
-                        {project.title}
-                        <span className="ml-1.5 text-xs text-slate-500">
-                          {project.estimatedStories} stories
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           </section>
 

@@ -91,6 +91,7 @@ export function BlockerAlert({
       auth: { label: "Authentication", color: "text-purple-500" },
       network: { label: "Network", color: "text-gray-500" },
       resource: { label: "Resource", color: "text-red-600" },
+      rate_limit: { label: "Usage Limit", color: "text-amber-500" },
       unknown: { label: "Unknown", color: "text-gray-400" },
     };
     return categories[category] || categories.unknown;
@@ -98,20 +99,21 @@ export function BlockerAlert({
 
   const categoryInfo = formatErrorCategory(blocker.errorCategory);
   const timeSinceCreated = getTimeSince(blocker.createdAt);
+  const isRateLimit = blocker.errorCategory === "rate_limit";
 
   return (
-    <div className="bg-red-500/10 border border-red-500/30 rounded-lg overflow-hidden" data-testid="blocker-alert">
+    <div className={`${isRateLimit ? "bg-amber-500/10 border border-amber-500/30" : "bg-red-500/10 border border-red-500/30"} rounded-lg overflow-hidden`} data-testid="blocker-alert">
       {/* Header */}
       <div
-        className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-red-500/5"
+        className={`flex items-center justify-between px-4 py-3 cursor-pointer ${isRateLimit ? "hover:bg-amber-500/5" : "hover:bg-red-500/5"}`}
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-3">
-          <AlertTriangle className="w-5 h-5 text-red-500" />
+          <AlertTriangle className={`w-5 h-5 ${isRateLimit ? "text-amber-500" : "text-red-500"}`} />
           <div>
             <div className="flex items-center gap-2">
               <span className="font-medium text-foreground">
-                Story {blocker.storyIndex} Blocked
+                {isRateLimit ? "Usage Limit Reached" : `Story ${blocker.storyIndex} Blocked`}
               </span>
               <span
                 className={`text-xs px-2 py-0.5 rounded-full bg-opacity-20 ${categoryInfo.color}`}

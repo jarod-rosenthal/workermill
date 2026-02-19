@@ -68,10 +68,10 @@ const workerPersonas = [
     description: "Kotlin/Jetpack apps, Android SDK, and Play Store deployment",
   },
   {
-    id: "planning_agent",
-    emoji: "🧠",
-    title: "Planning Agent",
-    description: "Decomposes tasks into stories, coordinates experts, and orchestrates execution",
+    id: "integration_specialist",
+    emoji: "🔗",
+    title: "Integration Specialist",
+    description: "API integrations, webhook setup, third-party service connectors, and data sync pipelines",
   },
   {
     id: "tech_writer",
@@ -103,9 +103,9 @@ export default function Workers() {
         {/* Section header */}
         <div className="text-center mb-16">
           <h2 className="text-3xl lg:text-4xl font-bold mb-4">
-            <span className="text-foreground">Unlimited specialized </span>
+            <span className="text-foreground">A full engineering team, </span>
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              AI experts
+              built in
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">

@@ -1173,7 +1173,7 @@ export default function Dashboard() {
 
     // Start streaming for active tasks (skip terminal states — no new logs expected)
     // For retried tasks, seed cursor to skip old logs (history available via All Tasks)
-    const terminalStatuses = ["failed", "completed", "deployed", "cancelled"];
+    const terminalStatuses = ["failed", "completed", "deployed", "cancelled", "pr_approved", "review_approved", "review_requested", "blocked", "escalated"];
     activeTaskIds.forEach((taskId) => {
       const task = data.activeTasks.find((t) => t.id === taskId);
       if (task && terminalStatuses.includes(task.status)) return;

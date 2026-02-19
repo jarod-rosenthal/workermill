@@ -25,6 +25,7 @@ import {
   applyFileCap,
   applyStoryCap,
   resolveFileOverlaps,
+  fixInvalidPersonas,
   serializePlan,
   runCriticValidation,
   formatCriticFeedback,
@@ -629,10 +630,34 @@ export async function planTask(
   await postLog(task.id, `${PREFIX} Fetching planning prompt from cloud API...`);
 
   // 1. Fetch the assembled planning prompt from the cloud API
-  const promptResponse = await api.get("/api/agent/planning-prompt", {
-    params: { taskId: task.id },
-  });
-  const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories, maxTargetFiles: apiMaxTargetFiles, planningMode: apiPlanningMode } = promptResponse.data;
+  let promptResponse;
+  try {
+    promptResponse = await api.get("/api/agent/planning-prompt", {
+      params: { taskId: task.id },
+    });
+  } catch (fetchErr: unknown) {
+    const axiosErr = fetchErr as { response?: { status?: number; data?: { error?: string; detail?: string } } };
+    if (axiosErr.response?.status === 422) {
+      // Task has no requirements — escalate instead of failing
+      const reason = axiosErr.response.data?.error || "Task has no requirements";
+      const detail = axiosErr.response.data?.detail || "";
+      const msg = `${PREFIX} ${reason}${detail ? ` — ${detail}` : ""}`;
+      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
+      await postLog(task.id, msg);
+      try {
+        await api.post("/api/agent/plan-failed", {
+          taskId: task.id,
+          agentId: config.agentId,
+          reason,
+          status: "escalated",
+        });
+      } catch { /* best effort */ }
+      return false;
+    }
+    throw fetchErr;
+  }
+  const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories, maxTargetFiles: apiMaxTargetFiles, planningMode: apiPlanningMode, validPersonas: apiValidPersonas } = promptResponse.data;
+  const validPersonas: string[] = Array.isArray(apiValidPersonas) ? apiValidPersonas : [];
   const isSimplifiedMode = apiPlanningMode === "simplified";
   if (isSimplifiedMode) {
     console.log(`${ts()} ${taskLabel} Planning mode: ${chalk.yellow("simplified")} (single pass + refinement)`);
@@ -830,6 +855,17 @@ export async function planTask(
       }
     }
 
+    // 2c4. Fix invalid personas (replace with backend_developer)
+    const { fixedCount: personaFixCount, details: personaFixDetails } = fixInvalidPersonas(plan, validPersonas);
+    if (personaFixCount > 0) {
+      const msg = `${PREFIX} Persona fix: ${personaFixCount} invalid persona(s) replaced with "backend_developer"`;
+      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
+      await postLog(task.id, msg);
+      for (const detail of personaFixDetails) {
+        console.log(`${ts()} ${taskLabel}   ${chalk.dim(detail)}`);
+      }
+    }
+
     console.log(`${ts()} ${taskLabel} Plan: ${chalk.bold(plan.stories.length)} stories (max ${maxStories})`);
     await postLog(
       task.id,
@@ -945,6 +981,7 @@ export async function planTask(
           applyFileCap(refinedPlan);
           applyStoryCap(refinedPlan, maxStories);
           resolveFileOverlaps(refinedPlan);
+          fixInvalidPersonas(refinedPlan, validPersonas);
 
           finalPlan = refinedPlan;
           const refElapsed = Math.round((Date.now() - startTime) / 1000);

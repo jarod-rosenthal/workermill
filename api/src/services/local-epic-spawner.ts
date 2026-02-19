@@ -742,6 +742,7 @@ class LocalEpicSpawner {
       MAX_PER_STORY_REVISIONS: String(task.organization?.maxPerStoryRevisions ?? process.env.MAX_PER_STORY_REVISIONS ?? 2),
       REVIEW_ENABLED: task.organization?.autoReviewEnabled !== false ? "true" : "false",
       DEPLOYMENT_ENABLED: task.deploymentEnabled || task.parentTaskId ? "true" : "false",
+      PRD_CHILD_TASK: task.parentTaskId ? "true" : "false",
 
       // Worker model
       WORKER_MODEL: task.workerModel || process.env.WORKER_MODEL || task.organization?.defaultWorkerModel || "",

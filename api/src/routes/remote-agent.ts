@@ -670,7 +670,7 @@ router.post(
 router.post(
   "/plan-failed",
   asyncHandler(async (req: Request, res: Response) => {
-    const { taskId, agentId, reason, criticHistory } = req.body;
+    const { taskId, agentId, reason, criticHistory, status: requestedStatus } = req.body;
     const org = req.organization!;
 
     if (!taskId) {
@@ -678,14 +678,17 @@ router.post(
       return;
     }
 
+    // Allow "escalated" status for tasks that need human clarification (e.g., empty requirements)
+    const targetStatus = requestedStatus === "escalated" ? "escalated" : "failed";
+
     const taskRepo = AppDataSource.getRepository(WorkerTask);
 
-    // Atomic transition: planning → failed (only if still in planning)
+    // Atomic transition: planning → failed/escalated (only if still in planning)
     const result = await taskRepo
       .createQueryBuilder()
       .update(WorkerTask)
       .set({
-        status: "failed" as WorkerTask["status"],
+        status: targetStatus as WorkerTask["status"],
         errorMessage: reason || "Planning failed: critic rejected after max iterations",
       })
       .where(
@@ -709,9 +712,10 @@ router.post(
       agentId,
       orgId: org.id,
       reason,
+      status: targetStatus,
     });
 
-    res.json({ ok: true, status: "failed" });
+    res.json({ ok: true, status: targetStatus });
   }),
 );
 
@@ -1002,6 +1006,16 @@ router.get(
       return;
     }
 
+    // Reject tasks with empty or trivially short descriptions — planner cannot produce a meaningful plan
+    const descriptionText = (task.description || "").trim();
+    if (descriptionText.length < 20) {
+      res.status(422).json({
+        error: "Task has no requirements. Add a description with acceptance criteria before running.",
+        detail: `Description is ${descriptionText.length === 0 ? "empty" : `only ${descriptionText.length} characters`}. The planner needs a meaningful description to create an execution plan.`,
+      });
+      return;
+    }
+
     // Build planning input from task
     const jiraFields = (task.jiraFields ?? {}) as Record<string, unknown>;
     const isBuildPageTask = jiraFields.buildPage === true;
@@ -1057,6 +1071,7 @@ router.get(
       maxStories,
       maxTargetFiles: computeMaxTargetFiles((task.description || "").length),
       planningMode: org.planningMode || "strict",
+      validPersonas: availablePersonas.map((p: { slug: string }) => p.slug),
     });
   }),
 );
@@ -1187,6 +1202,13 @@ router.get(
   "/critic-prompt",
   asyncHandler(async (req: Request, res: Response) => {
     const maxTargetFiles = parseInt(req.query.maxTargetFiles as string, 10) || 5;
+    const org = req.organization!;
+
+    // Fetch available personas so the critic knows which are valid
+    const experts = await getExpertRegistry(org.id);
+    const validPersonaSlugs = experts
+      .filter((e: any) => !e.reviewOnly)
+      .map((e: any) => e.slug);
 
     const CRITIC_PROMPT = `You are a Senior Architect reviewing an execution plan. Your job is to ensure the plan is appropriately sized for the task.
 
@@ -1220,6 +1242,7 @@ Review this execution plan against the PRD:
 7. **Serialization Bottleneck** - If more than half the stories depend on a single story that targets >${maxTargetFiles} files, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
 8. **Requirement Rewriting** - If any story description contains implementation details, acceptance criteria, or rewritten requirements from the PRD, deduct 15 points per offending story. Story descriptions must be 2-3 line scope labels (e.g., "Database layer — migrations and entity definitions.\\nAdds the new table and TypeORM entity."). The original ticket is the spec.
 9. **Incomplete targetFiles** - If a story's description implies files that are NOT listed in its targetFiles, deduct 5 points per story with missing files. targetFiles must be complete.
+10. **Invalid Persona** - Each story's persona MUST be one of: ${validPersonaSlugs.map((s: string) => `\`${s}\``).join(", ")}. Any other persona value is invalid — deduct 20 points per story with an invalid persona.
 
 ## Scoring Guide
 

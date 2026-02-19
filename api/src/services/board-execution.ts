@@ -3,7 +3,8 @@ import { KbCard } from "../models/KbCard.js";
 import { KbCardDependency } from "../models/KbCardDependency.js";
 import { logger } from "../utils/logger.js";
 
-const TERMINAL_STATUSES = ["completed", "deployed"];
+// Statuses that count as "done" for dependency resolution — work is complete and validated
+const DONE_STATUSES = ["completed", "deployed", "pr_approved", "review_approved"];
 
 export async function processUnblockedCards(
   boardId: string,
@@ -51,7 +52,7 @@ export async function processUnblockedCards(
     // Skip cards that already have a worker task
     if (card.workerTask) {
       const status = card.workerTask.status;
-      if (TERMINAL_STATUSES.includes(status)) {
+      if (DONE_STATUSES.includes(status)) {
         alreadyComplete++;
       }
       // Any existing task (running, failed, etc.) — skip
@@ -62,7 +63,7 @@ export async function processUnblockedCards(
     const depCardIds = depsMap.get(card.id) || [];
     const allDepsMet = depCardIds.every((depId) => {
       const depCard = cardMap.get(depId);
-      return depCard?.workerTask && TERMINAL_STATUSES.includes(depCard.workerTask.status);
+      return depCard?.workerTask && DONE_STATUSES.includes(depCard.workerTask.status);
     });
 
     if (!allDepsMet) {

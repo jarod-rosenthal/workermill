@@ -51,7 +51,7 @@ interface IssueFilters {
 
 // ─── Internal boards fetcher ─────────────────────────────────────────────
 
-const DONE_COLUMN_NAMES = ["done", "closed", "archived", "completed"];
+const DONE_COLUMN_NAMES = ["done", "closed", "archived", "completed", "deployed"];
 
 async function searchBoardCards(
   orgId: string,
@@ -92,7 +92,8 @@ async function searchBoardCards(
 
   // Load dependencies with their target cards' worker tasks to compute blocked status
   const cardIds = cards.map((c) => c.id);
-  const TERMINAL_STATUSES = ["completed", "deployed"];
+  // Statuses that count as "done" for dependency resolution
+  const DONE_STATUSES = ["completed", "deployed", "pr_approved", "review_approved"];
   let depsMap = new Map<string, { total: number; unmet: number }>();
 
   if (cardIds.length > 0) {
@@ -109,7 +110,7 @@ async function searchBoardCards(
       const entry = depsMap.get(dep.cardId) || { total: 0, unmet: 0 };
       entry.total++;
       const depStatus = dep.dependsOnCard?.workerTask?.status;
-      if (!depStatus || !TERMINAL_STATUSES.includes(depStatus)) {
+      if (!depStatus || !DONE_STATUSES.includes(depStatus)) {
         entry.unmet++;
       }
       depsMap.set(dep.cardId, entry);

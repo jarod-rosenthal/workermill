@@ -336,6 +336,7 @@ function loadConfig(repoDir: string, mainBranch: string): EpicConfig {
       (process.env.TICKET_SYSTEM as "jira" | "linear" | "github" | "internal") || "jira",
     reviewEnabled: process.env.REVIEW_ENABLED === "true",
     deploymentEnabled: process.env.DEPLOYMENT_ENABLED === "true",
+    prdChildTask: process.env.PRD_CHILD_TASK === "true",
     improvementEnabled: process.env.IMPROVEMENT_ENABLED === "true",
     reviewFeedback: process.env.REVIEW_FEEDBACK || undefined,
     qualityGateBypass: process.env.QUALITY_GATE_BYPASS === "true",

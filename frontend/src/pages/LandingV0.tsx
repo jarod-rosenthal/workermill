@@ -113,7 +113,7 @@ export default function LandingV0() {
           <AgentCollaboration />
 
           {/* How It Works Section */}
-          <section id="how-it-works">
+          <section>
             <HowItWorks />
             <Workers />
           </section>

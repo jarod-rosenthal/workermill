@@ -397,6 +397,12 @@ export async function spawnWorker(
     for (const line of lines) {
       console.log(`${ts()} ${taskLabel} ${chalk.red(redactSecrets(line))}`);
       agentEvents.emit("task:log", { id: task.id, line: redactSecrets(line), severity: "error" });
+
+      // Detect rate limiting from Claude CLI stderr
+      if (/rate.limit|429|too many requests|over_quota|overloaded|capacity/i.test(line)) {
+        console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Rate limit detected`);
+        agentEvents.emit("task:rate_limited", { id: task.id });
+      }
     }
   });
 

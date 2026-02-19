@@ -105,8 +105,12 @@ export async function listPersonas(orgId: string | null): Promise<Persona[]> {
     order: { priority: "ASC", name: "ASC" },
   });
 
-  // Filter out the __common__ pseudo-persona (used internally for shared directives)
-  const filteredPersonas = personas.filter((p) => p.slug !== "__common__");
+  // Filter out internal/deprecated personas:
+  // - __common__ pseudo-persona (used internally for shared directives)
+  // - Disabled system personas (deprecated by consolidation migration, users can't re-enable them)
+  const filteredPersonas = personas.filter(
+    (p) => p.slug !== "__common__" && !(p.orgId === null && p.isSystem && !p.enabled)
+  );
 
   // If org has customized versions of system personas, hide the system originals
   // This way users only see their customized version, not both

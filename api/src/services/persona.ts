@@ -89,6 +89,42 @@ export interface PersonaBundle {
 // ============================================================================
 
 /**
+ * Get enabled system personas for public display (docs pages, landing page).
+ * No auth required. Returns only safe-to-display metadata.
+ */
+export async function listPublicPersonas(): Promise<
+  Array<{
+    slug: string;
+    name: string;
+    emoji: string | null;
+    color: string | null;
+    shortLabel: string | null;
+    description: string | null;
+    skills: string[] | null;
+    riskLevel: string;
+  }>
+> {
+  const personaRepo = AppDataSource.getRepository(Persona);
+  const personas = await personaRepo.find({
+    where: { orgId: IsNull(), enabled: true, isSystem: true },
+    order: { priority: "ASC", name: "ASC" },
+  });
+
+  return personas
+    .filter((p) => p.slug !== "__common__")
+    .map((p) => ({
+      slug: p.slug,
+      name: p.name,
+      emoji: p.emoji,
+      color: p.color,
+      shortLabel: p.shortLabel,
+      description: p.description,
+      skills: p.skills,
+      riskLevel: p.riskLevel,
+    }));
+}
+
+/**
  * Get all personas (system + org-specific)
  * Excludes the __common__ pseudo-persona used internally for shared directives
  * Hides system personas when the org has a customized version with the same slug

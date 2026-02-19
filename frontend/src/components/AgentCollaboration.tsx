@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef } from "react";
 import {
   MessageSquare,
-  Sparkles,
-  Brain,
-  Zap,
   ShieldCheck,
   CheckCircle,
   GitPullRequest,
-  ZoomIn,
+  MonitorPlay,
+  Plug,
+  MousePointerClick,
+  Eye,
+  FolderOpen,
+  Brain,
+  Zap,
 } from "lucide-react";
 
 function CalloutCard({
@@ -98,6 +101,42 @@ function ScreenshotFrame({ src, alt }: { src: string; alt: string }) {
   );
 }
 
+function VSCodeFrame({ src, alt }: { src: string; alt: string }) {
+  return (
+    <div className="relative w-full">
+      {/* Glow effect — blue-purple for VS Code */}
+      <div className="absolute -inset-1 bg-gradient-to-r from-blue-500/20 via-violet-500/10 to-blue-500/20 rounded-2xl blur-xl opacity-60" />
+
+      {/* VS Code chrome */}
+      <div className="relative bg-[#1e1e1e] rounded-xl border border-white/10 overflow-hidden shadow-2xl">
+        {/* Title bar */}
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-[#323233] border-b border-white/5">
+          <div className="flex gap-1.5">
+            <div className="w-3 h-3 rounded-full bg-red-500/80" />
+            <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
+            <div className="w-3 h-3 rounded-full bg-green-500/80" />
+          </div>
+          <div className="flex-1 ml-3 flex items-center justify-center gap-2">
+            <svg
+              className="w-4 h-4 text-blue-400"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+            >
+              <path d="M17.583 2.603L12.2 7.28l-4.041-3.06L2 7.38v9.24l6.16 3.16 4.04-3.06 5.382 4.677L24 18.24V5.76l-6.417-3.157zM8.16 15.38L4.4 13.2V10.8l3.76-2.18v6.76zm9.44-.54l-3.76 2.18V7.18l3.76-2.18v9.84z" />
+            </svg>
+            <span className="text-xs text-slate-400">
+              WorkerMill — Visual Studio Code
+            </span>
+          </div>
+        </div>
+
+        {/* Screenshot */}
+        <img src={src} alt={alt} className="w-full h-auto" loading="lazy" />
+      </div>
+    </div>
+  );
+}
+
 function useScrollVisible(threshold = 0.1) {
   const [isVisible, setIsVisible] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -122,136 +161,127 @@ function useScrollVisible(threshold = 0.1) {
 export default function AgentCollaboration() {
   const section1 = useScrollVisible();
   const section2 = useScrollVisible();
-  const [zoomVisible, setZoomVisible] = useState(false);
-
-  useEffect(() => {
-    if (!section1.isVisible) return;
-    const timer = setTimeout(() => setZoomVisible(true), 400);
-    return () => clearTimeout(timer);
-  }, [section1.isVisible]);
 
   return (
     <>
-      {/* ── Part 1: Agent Collaboration ──────────────────────────────────── */}
+      {/* ── Part 1: IDE-First Workflow ──────────────────────────────────── */}
       <section ref={section1.ref} className="py-24 relative overflow-hidden">
         {/* Background gradient */}
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-teal-950/10 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-950/10 to-transparent" />
 
         <div className="relative container mx-auto px-6 lg:px-8">
           {/* Section header */}
           <div className="max-w-3xl mx-auto text-center mb-16">
-            <p className="text-sm font-medium text-teal-400 mb-3 tracking-wide">
-              REAL-TIME COLLABORATION
+            <p className="text-sm font-medium text-blue-400 mb-3 tracking-wide">
+              STAY IN YOUR EDITOR
             </p>
             <h2 className="text-3xl lg:text-4xl font-bold tracking-tight text-white mb-4 text-balance">
-              Your AI team doesn&apos;t just work in parallel
-              <span className="hidden sm:inline"> &mdash; </span>
-              <br className="sm:hidden" />
-              <span className="bg-gradient-to-r from-teal-400 to-cyan-400 bg-clip-text text-transparent">
-                they communicate
+              Pick an issue. Click Run.{" "}
+              <span className="bg-gradient-to-r from-blue-400 to-teal-400 bg-clip-text text-transparent">
+                Keep coding.
               </span>
             </h2>
             <p className="text-lg text-slate-400 leading-relaxed">
-              When a QA engineer has a question, it asks the frontend developer
-              directly. Experts share context, resolve ambiguity, and coordinate
-              autonomously &mdash; no human in the loop.
+              The VS Code extension is the fastest path from backlog to PR.
+              Browse issues, kick off workers, and watch progress &mdash; all
+              without leaving your editor.
             </p>
           </div>
 
-          {/* Full screenshot */}
-          <div className="max-w-5xl mx-auto mb-12">
-            <ScreenshotFrame
-              src="/images/agent-collaboration.png"
-              alt="WorkerMill dashboard showing QA Engineer and Frontend Developer collaborating in real-time on a task"
+          {/* VS Code screenshot */}
+          <div className="max-w-5xl mx-auto mb-14">
+            <VSCodeFrame
+              src="/images/vscode-extension.png"
+              alt="WorkerMill VS Code extension showing task sidebar, story progress, and live terminal logs inside the IDE"
             />
           </div>
 
-          {/* Zoomed screenshot + Callouts side by side */}
-          <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-8 items-start">
-            {/* Real cropped screenshot of the coordination panel */}
-            <div
-              className={`transition-all duration-700 ${
-                zoomVisible
-                  ? "opacity-100 translate-y-0"
-                  : "opacity-0 translate-y-6"
-              }`}
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <ZoomIn className="w-4 h-4 text-teal-400" />
-                <span className="text-sm font-medium text-teal-400">
-                  Coordination panel &mdash; agents communicate in real-time
-                </span>
-              </div>
-              <div className="relative rounded-xl border border-teal-500/30 overflow-hidden shadow-2xl">
-                <div className="absolute -inset-px bg-gradient-to-r from-teal-500/10 via-transparent to-teal-500/10 rounded-xl pointer-events-none z-10" />
-                <img
-                  src="/images/collaboration-zoom.png"
-                  alt="Zoomed view of coordination panel showing QA Engineer asking a question and Backend Developer answering"
-                  className="w-full h-auto"
-                  loading="lazy"
-                />
-              </div>
-            </div>
-
-            {/* Callout annotations */}
-            <div className="flex flex-col gap-5">
-              <CalloutCard
-                persona="QA Engineer"
-                personaColor="bg-amber-500"
-                message="What title format convention is usePageTitle hook using? I need to write E2E assertions that match the exact format."
-                delay={600}
-                visible={section1.isVisible}
-              />
-
-              <CalloutCard
-                persona="Backend Developer"
-                personaColor="bg-cyan-500"
-                message="Let me look up the actual implementation to give you the exact format. The title is static, set in..."
-                delay={1400}
-                visible={section1.isVisible}
-              />
-
-              {/* "Autonomous" badge */}
+          {/* Golden path steps */}
+          <div className="max-w-4xl mx-auto grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {[
+              {
+                step: "1",
+                icon: Plug,
+                title: "Install & connect",
+                description:
+                  "One extension install, point it at your agent. Done in 30 seconds.",
+              },
+              {
+                step: "2",
+                icon: FolderOpen,
+                title: "Browse your backlog",
+                description:
+                  "Issues from Jira, GitHub, or Linear appear in the sidebar tree.",
+              },
+              {
+                step: "3",
+                icon: MousePointerClick,
+                title: "Click Run",
+                description:
+                  "Select an issue and hit Run. Workers plan, code, and test autonomously.",
+              },
+              {
+                step: "4",
+                icon: Eye,
+                title: "Watch it build",
+                description:
+                  "Live terminal logs, story progress, and activity feed — right in VS Code.",
+              },
+            ].map((item) => (
               <div
-                className={`flex items-center gap-2 ml-4 transition-all duration-700 delay-[2000ms] ${
+                key={item.step}
+                className={`relative bg-slate-900/60 backdrop-blur-sm border border-white/5 rounded-xl p-5 transition-all duration-700 ${
                   section1.isVisible
-                    ? "opacity-100 translate-x-0"
-                    : "opacity-0 translate-x-4"
+                    ? "opacity-100 translate-y-0"
+                    : "opacity-0 translate-y-6"
                 }`}
+                style={{
+                  transitionDelay: `${parseInt(item.step) * 200}ms`,
+                }}
               >
-                <Sparkles className="w-4 h-4 text-teal-400" />
-                <span className="text-sm text-teal-400 font-medium">
-                  Fully autonomous &mdash; no human prompted this
-                </span>
+                {/* Step number */}
+                <div className="absolute -top-3 -left-2 w-7 h-7 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center">
+                  <span className="text-xs font-bold text-blue-400">
+                    {item.step}
+                  </span>
+                </div>
+
+                <item.icon className="w-5 h-5 text-blue-400 mb-3" />
+                <p className="text-sm font-medium text-white mb-1">
+                  {item.title}
+                </p>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  {item.description}
+                </p>
               </div>
-            </div>
+            ))}
           </div>
 
           {/* Feature pills */}
-          <div className="mt-16 flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-8">
+          <div className="mt-14 flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-8">
             {[
               {
-                icon: MessageSquare,
-                title: "Autonomous coordination",
-                description: "Agents talk to each other, no human needed",
+                icon: MonitorPlay,
+                title: "No context switching",
+                description: "Everything happens inside VS Code",
               },
               {
                 icon: Brain,
-                title: "Context-aware",
-                description: "Each expert sees the full project context",
+                title: "Full observability",
+                description:
+                  "Terminal logs, story progress, activity feed — live",
               },
               {
                 icon: Zap,
-                title: "Zero prompt engineering",
-                description:
-                  "Just label a ticket, agents figure out the rest",
+                title: "Zero configuration",
+                description: "Install the extension. That's the setup.",
               },
             ].map((pill) => (
               <div
                 key={pill.title}
                 className="flex items-center gap-3 bg-slate-900/60 backdrop-blur-sm border border-white/5 rounded-xl px-5 py-3"
               >
-                <pill.icon className="w-5 h-5 text-teal-400 flex-shrink-0" />
+                <pill.icon className="w-5 h-5 text-blue-400 flex-shrink-0" />
                 <div>
                   <p className="text-sm font-medium text-white">
                     {pill.title}

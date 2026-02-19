@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Home, Search, FolderOpen, Sparkles } from "lucide-react";
+import { Home, Search, FolderOpen, Sparkles, Lock } from "lucide-react";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
 import { StatsSection } from "./Home/v0/StatsSection";
@@ -146,6 +146,13 @@ export default function LandingV0() {
                 WorkerMill is an autonomous AI engineering team. Features, tech debt, rewrites,
                 greenfield — it executes your tickets end-to-end — coded, tested, reviewed, and validated through your pipeline.
               </p>
+              {/* Trust badge */}
+              <div className="mt-4 flex justify-center">
+                <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium bg-teal-500/10 text-teal-400 border border-teal-500/20 tracking-wide backdrop-blur-sm">
+                  <Lock className="w-3 h-3" />
+                  Local-first — your code executes on your machine, not ours.
+                </span>
+              </div>
             </div>
           </section>
 

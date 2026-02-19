@@ -16,11 +16,15 @@ export default function DirectiveEffectiveness() {
       <h1 className="flex items-center gap-3">
         <Target className="w-8 h-8 text-primary" />
         Directive Effectiveness
+        <span className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-400 font-normal">
+          Beta
+        </span>
       </h1>
 
       <p className="lead text-muted-foreground">
         Track and optimize the performance of worker directives. Monitor success rates,
-        identify underperforming directives, and run A/B experiments to improve outcomes.
+        identify underperforming directives, and run experiments to improve outcomes.
+        This feature is in active development.
       </p>
 
       {/* Overview */}
@@ -53,23 +57,23 @@ export default function DirectiveEffectiveness() {
         <div className="not-prose grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
           <div className="bg-card border border-border rounded-xl p-4">
             <div className="text-sm text-muted-foreground mb-2">Total Directives</div>
-            <div className="text-2xl font-bold text-foreground">24</div>
-            <div className="text-xs text-muted-foreground mt-1">Active directives</div>
+            <div className="text-2xl font-bold text-foreground">&mdash;</div>
+            <div className="text-xs text-muted-foreground mt-1">Per organization</div>
           </div>
           <div className="bg-card border border-border rounded-xl p-4">
             <div className="text-sm text-muted-foreground mb-2">Avg Success Rate</div>
-            <div className="text-2xl font-bold text-green-400">78.5%</div>
-            <div className="text-xs text-muted-foreground mt-1">Across all directives</div>
+            <div className="text-2xl font-bold text-green-400">&mdash;</div>
+            <div className="text-xs text-muted-foreground mt-1">Tracked per directive</div>
           </div>
           <div className="bg-card border border-border rounded-xl p-4">
             <div className="text-sm text-muted-foreground mb-2">Running Experiments</div>
-            <div className="text-2xl font-bold text-foreground">2</div>
+            <div className="text-2xl font-bold text-foreground">&mdash;</div>
             <div className="text-xs text-muted-foreground mt-1">A/B tests in progress</div>
           </div>
           <div className="bg-card border border-border rounded-xl p-4">
             <div className="text-sm text-muted-foreground mb-2">Health Alerts</div>
-            <div className="text-2xl font-bold text-yellow-400">3</div>
-            <div className="text-xs text-muted-foreground mt-1">1 critical</div>
+            <div className="text-2xl font-bold text-yellow-400">&mdash;</div>
+            <div className="text-xs text-muted-foreground mt-1">Actionable alerts</div>
           </div>
         </div>
       </section>

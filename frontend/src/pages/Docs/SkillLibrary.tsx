@@ -19,12 +19,15 @@ export default function SkillLibrary() {
       <h1 className="flex items-center gap-3">
         <BookOpen className="w-8 h-8 text-primary" />
         Skill Library
+        <span className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-400 font-normal">
+          Beta
+        </span>
       </h1>
 
       <p className="lead text-muted-foreground">
         The Skill Library stores reusable procedures learned from successful task completions.
         When workers encounter similar problems, they can retrieve proven solutions instead of
-        starting from scratch.
+        starting from scratch. This feature is in active development.
       </p>
 
       {/* Overview */}
@@ -90,28 +93,32 @@ export default function SkillLibrary() {
               <BookOpen className="w-4 h-4" />
               Total Skills
             </div>
-            <div className="text-2xl font-bold text-foreground">42</div>
+            <div className="text-2xl font-bold text-foreground">&mdash;</div>
+            <div className="text-xs text-muted-foreground mt-1">Grows with usage</div>
           </div>
           <div className="bg-card border border-border rounded-xl p-4">
             <div className="flex items-center gap-2 text-muted-foreground text-sm mb-2">
               <Zap className="w-4 h-4" />
               Total Retrievals
             </div>
-            <div className="text-2xl font-bold text-foreground">156</div>
+            <div className="text-2xl font-bold text-foreground">&mdash;</div>
+            <div className="text-xs text-muted-foreground mt-1">Per organization</div>
           </div>
           <div className="bg-card border border-border rounded-xl p-4">
             <div className="flex items-center gap-2 text-muted-foreground text-sm mb-2">
               <TrendingUp className="w-4 h-4" />
               Avg Success Rate
             </div>
-            <div className="text-2xl font-bold text-green-400">87%</div>
+            <div className="text-2xl font-bold text-green-400">&mdash;</div>
+            <div className="text-xs text-muted-foreground mt-1">Tracked per skill</div>
           </div>
           <div className="bg-card border border-border rounded-xl p-4">
             <div className="flex items-center gap-2 text-muted-foreground text-sm mb-2">
               <Sparkles className="w-4 h-4" />
               Created (24h)
             </div>
-            <div className="text-2xl font-bold text-foreground">3</div>
+            <div className="text-2xl font-bold text-foreground">&mdash;</div>
+            <div className="text-xs text-muted-foreground mt-1">Real-time count</div>
           </div>
         </div>
 
@@ -301,7 +308,7 @@ export default function SkillLibrary() {
           <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Clock className="w-3 h-3" />
-              Dec 15, 2024
+              Feb 10, 2026
             </span>
             <span className="flex items-center gap-1">
               <Zap className="w-3 h-3" />

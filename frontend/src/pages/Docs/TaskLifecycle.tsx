@@ -359,7 +359,7 @@ const labelReference = [
   { labels: ["workermill", "review"], workflow: "Auto Review", description: "Tech Lead Reviewer AI reviews PR before deploy" },
   { labels: ["workermill", "critic"], workflow: "Critic Validation", description: "Planner-Critic validates plan before execution" },
   { labels: ["workermill", "improve"], workflow: "Self-Improve", description: "Worker analyzes and learns from task" },
-  { labels: ["workermill", "standard"], workflow: "Single Worker", description: "Single worker, no decomposition" },
+  { labels: ["workermill", "sdk"], workflow: "Standard SDK Mode", description: "Single worker, no story decomposition" },
   { labels: ["workermill", "haiku"], workflow: "Model Override", description: "Use efficient model (optimized for speed)" },
   { labels: ["workermill", "sonnet"], workflow: "Model Override", description: "Use balanced model (speed + capability)" },
   { labels: ["workermill", "opus"], workflow: "Model Override", description: "Use flagship model (most capable)" },
@@ -371,7 +371,7 @@ const labelReference = [
 // AI Provider labels
 const providerLabels = [
   { label: "anthropic", provider: "Anthropic", description: "Claude models (default)", icon: "🤖" },
-  { label: "openai", provider: "OpenAI", description: "GPT-5.1 Codex, GPT-4o, o1", icon: "🔷" },
+  { label: "openai", provider: "OpenAI", description: "GPT-4o, o3-mini, o1", icon: "🔷" },
   { label: "gemini", provider: "Google", description: "Gemini 3 Pro, Gemini 2.0 Flash", icon: "🔵" },
   { label: "ollama", provider: "Ollama", description: "Local models (Qwen, DeepSeek, Llama)", icon: "🏠" },
 ];

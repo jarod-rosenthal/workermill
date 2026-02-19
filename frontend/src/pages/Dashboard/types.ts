@@ -420,7 +420,7 @@ export const PERSONA_CONFIG: Record<
   },
   manager: {
     emoji: "\u{1F454}",
-    title: "Virtual Manager",
+    title: "Tech Lead",
     description:
       "Reviews PRs from workers, provides feedback, approves or requests revisions",
     skills: [

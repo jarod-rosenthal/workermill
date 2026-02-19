@@ -5,7 +5,7 @@ import { RemoteAgent } from "../../models/RemoteAgent.js";
 import { requireAdmin } from "../../middleware/auth.js";
 import { body, validateRequest } from "../../middleware/validation.js";
 import { logger } from "../../utils/logger.js";
-import { invalidateOrgCredentialsCache } from "../../services/org-credentials.js";
+import { invalidateOrgCredentialsCache, getOrgCredentials } from "../../services/org-credentials.js";
 import {
   getAvailableModels,
   isValidModelId,
@@ -30,6 +30,17 @@ router.get("/", async (req: Request, res: Response) => {
     const hasRemoteAgent = agents.length > 0;
     const remoteAgentOnline = !!onlineAgent;
     const remoteAgentHostname = onlineAgent?.hostname || agents[0]?.hostname || null;
+
+    // Resolve the API key for the configured planning provider (for agent PRD decomposition)
+    let planningApiKey: string | undefined;
+    const planProvider = org.planningAgentProvider || "anthropic";
+    if (planProvider !== "anthropic") { // Anthropic uses OAuth, doesn't need API key
+      try {
+        const orgCreds = await getOrgCredentials(org.id);
+        if (planProvider === "openai") planningApiKey = orgCreds.openaiApiKey;
+        else if (planProvider === "google") planningApiKey = orgCreds.googleApiKey;
+      } catch { /* credentials not configured */ }
+    }
 
     res.json({
       // Organization Identity
@@ -79,7 +90,7 @@ router.get("/", async (req: Request, res: Response) => {
       intermediateTaskDisplayMinutes: org.intermediateTaskDisplayMinutes,
       dryRunVisibilityMinutes: org.dryRunVisibilityMinutes,
 
-      // Virtual Manager Settings
+      // Tech Lead Settings
       managerProvider: org.managerProvider || "openai",
       managerModelId: org.managerModelId || "",
       maxReviewRevisions: org.maxReviewRevisions ?? 3,
@@ -90,6 +101,7 @@ router.get("/", async (req: Request, res: Response) => {
       planningAgentModel: org.planningAgentModel || "",
       planningMode: org.planningMode || "strict",
       storyCalibrationMultiplier: org.storyCalibrationMultiplier ?? 0.4,
+      planningApiKey: planningApiKey || undefined,
 
       // Email Settings
       emailFromAddress: org.emailFromAddress,
@@ -212,7 +224,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       useRalphExecution,
       ralphMaxStories,
 
-      // Virtual Manager Settings
+      // Tech Lead Settings
       managerProvider,
       managerModelId,
       maxReviewRevisions,

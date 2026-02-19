@@ -2478,11 +2478,11 @@ export default function Dashboard() {
                                 )}
                               </>
                             ) : task.status === "manager_review" && task.managerEcsTaskId ? (
-                              /* Show Virtual Manager when manager_review is active */
+                              /* Show Tech Lead when manager_review is active */
                               <>
                                 <span className="text-4xl">👔</span>
                                 <span className="text-xl font-medium text-foreground">
-                                  Virtual Manager
+                                  Tech Lead
                                 </span>
                                 <span className="text-muted-foreground text-sm">
                                   (reviewing {getPersonaInfo(task.workerPersona).title}'s PR)

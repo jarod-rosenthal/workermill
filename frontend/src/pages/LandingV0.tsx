@@ -11,6 +11,7 @@ import Features from "./Home/Features";
 import ShowcaseGallery from "../components/ShowcaseGallery";
 import AgentCollaboration from "../components/AgentCollaboration";
 import TrustCallout from "../components/TrustCallout";
+import ExecutionShowcase from "../components/ExecutionShowcase";
 import { Pricing } from "./Home/Pricing";
 import BuildTerminal, { type PlanPreview } from "../components/BuildTerminal";
 
@@ -195,6 +196,9 @@ export default function LandingV0() {
               )}
             </div>
           </section>
+
+          {/* Execution lifecycle animation */}
+          <ExecutionShowcase />
 
           {/* Showcase Section */}
           <div id="showcase" ref={showcaseRef}>

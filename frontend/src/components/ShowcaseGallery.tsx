@@ -157,9 +157,9 @@ export default function ShowcaseGallery() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Full-stack applications built from a description. Every story
-            produced a mergeable PR — 100% success rate across all showcase
-            builds.
+            Full-stack applications built from a description. Every build
+            produced a mergeable PR. 29 of 30 epics completed autonomously —
+            1 escalated for human review.
           </p>
         </div>
 

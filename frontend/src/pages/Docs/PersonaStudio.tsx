@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import {
   Users,
   Settings,
@@ -10,9 +11,42 @@ import {
   AlertCircle,
   Trash2,
   Save,
+  Loader2,
 } from "lucide-react";
 
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
+interface PublicPersona {
+  slug: string;
+  name: string;
+  emoji: string | null;
+  color: string | null;
+  shortLabel: string | null;
+  description: string | null;
+  skills: string[] | null;
+  riskLevel: string;
+}
+
 export default function PersonaStudio() {
+  const [personas, setPersonas] = useState<PublicPersona[]>([]);
+  const [personasLoading, setPersonasLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchPersonas() {
+      try {
+        const response = await fetch(`${API_BASE}/api/personas/public`);
+        if (!response.ok) throw new Error("Failed to fetch");
+        const data = await response.json();
+        setPersonas(data.personas);
+      } catch {
+        // Silently fail — static content still renders
+      } finally {
+        setPersonasLoading(false);
+      }
+    }
+    fetchPersonas();
+  }, []);
+
   return (
     <div className="prose prose-invert max-w-none">
       <h1 className="flex items-center gap-3">
@@ -32,7 +66,7 @@ export default function PersonaStudio() {
           Overview
         </h2>
         <p>
-          WorkerMill includes 12 specialized AI personas out of the box, and you can create your own. Each persona has expertise in a specific development
+          WorkerMill includes {personas.length || "multiple"} specialized AI personas out of the box, and you can create your own. Each persona has expertise in a specific development
           domain. The Persona Studio lets you:
         </p>
         <ul>
@@ -264,35 +298,28 @@ export default function PersonaStudio() {
       <section className="mt-8">
         <h2>System Personas</h2>
         <p>
-          WorkerMill includes 12 built-in personas covering common development roles:
+          WorkerMill includes {personas.length || "multiple"} built-in personas covering common development roles:
         </p>
 
         <div className="not-prose grid grid-cols-2 gap-3 mt-4">
-          {[
-            { emoji: "🏗️", name: "Architect", slug: "architect" },
-            { emoji: "💻", name: "Backend Developer", slug: "backend_developer" },
-            { emoji: "🎨", name: "Frontend Developer", slug: "frontend_developer" },
-            { emoji: "📱", name: "Mobile Developer", slug: "mobile_developer" },
-            { emoji: "🔧", name: "DevOps Engineer", slug: "devops_engineer" },
-            { emoji: "🛡️", name: "Security Engineer", slug: "security_engineer" },
-            { emoji: "🧪", name: "QA Engineer", slug: "qa_engineer" },
-            { emoji: "📊", name: "Data & ML Engineer", slug: "data_ml_engineer" },
-            { emoji: "📝", name: "Tech Writer", slug: "tech_writer" },
-            { emoji: "📋", name: "Project Manager", slug: "project_manager" },
-            { emoji: "🎯", name: "Tech Lead", slug: "tech_lead" },
-            { emoji: "🎯", name: "Tech Lead Reviewer", slug: "tech_lead_reviewer" },
-          ].map((persona) => (
-            <div
-              key={persona.slug}
-              className="flex items-center gap-3 p-3 bg-card border border-border rounded-lg"
-            >
-              <span className="text-xl">{persona.emoji}</span>
-              <div>
-                <div className="font-medium text-foreground text-sm">{persona.name}</div>
-                <div className="text-xs text-muted-foreground font-mono">{persona.slug}</div>
-              </div>
+          {personasLoading ? (
+            <div className="col-span-2 flex justify-center py-4">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
-          ))}
+          ) : (
+            personas.map((persona) => (
+              <div
+                key={persona.slug}
+                className="flex items-center gap-3 p-3 bg-card border border-border rounded-lg"
+              >
+                <span className="text-xl">{persona.emoji || "🤖"}</span>
+                <div>
+                  <div className="font-medium text-foreground text-sm">{persona.name}</div>
+                  <div className="text-xs text-muted-foreground font-mono">{persona.slug}</div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </section>
 

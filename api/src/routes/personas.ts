@@ -140,6 +140,25 @@ router.get("/templates", authenticateUser, async (_req: Request, res: Response) 
 });
 
 // ============================================================================
+// Public Route (no auth — used by docs pages)
+// ============================================================================
+
+/**
+ * GET /api/personas/public
+ * List enabled system personas for public display (docs, landing page).
+ * No authentication required. Returns only safe-to-display metadata.
+ */
+router.get("/public", async (_req: Request, res: Response) => {
+  try {
+    const personas = await personaService.listPublicPersonas();
+    res.json({ personas });
+  } catch (error) {
+    logger.error("Error listing public personas", { error });
+    res.status(500).json({ error: "Failed to list personas" });
+  }
+});
+
+// ============================================================================
 // Persona CRUD Routes
 // ============================================================================
 

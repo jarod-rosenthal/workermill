@@ -92,7 +92,7 @@ router.get("/", async (req: Request, res: Response) => {
       dryRunVisibilityMinutes: org.dryRunVisibilityMinutes,
 
       // Tech Lead Settings
-      managerProvider: org.managerProvider || "openai",
+      managerProvider: org.managerProvider || "anthropic",
       managerModelId: org.managerModelId || "",
       maxReviewRevisions: org.maxReviewRevisions ?? 3,
       maxPerStoryRevisions: org.maxPerStoryRevisions ?? 2,
@@ -122,7 +122,7 @@ router.get("/", async (req: Request, res: Response) => {
       autoDeployEnabled: org.autoDeployEnabled ?? false,
       autoImproveEnabled: org.autoImproveEnabled ?? false,
       autoSkillExtraction: org.autoSkillExtraction ?? true,
-      prdAutoRun: org.prdAutoRun ?? false,
+      prdAutoRun: org.prdAutoRun ?? true,
 
       // Remote Agent Mode
       remoteAgentOnly: org.remoteAgentOnly ?? false,
@@ -315,8 +315,13 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     // Validate and update Data Management settings
     if (logRetentionDays !== undefined) {
       const days = parseInt(logRetentionDays, 10);
-      if (isNaN(days) || (days !== -1 && (days < 1 || days > 365))) {
-        res.status(400).json({ error: "logRetentionDays must be between 1 and 365 (or -1 for unlimited)" });
+      if (isNaN(days) || (days !== -1 && (days < 1 || days > 90))) {
+        res.status(400).json({ error: "logRetentionDays must be between 1 and 90 (or -1 for unlimited)" });
+        return;
+      }
+      // Free tier: max 7 days
+      if (org.plan === "free" && days > 7) {
+        res.status(403).json({ error: "Free plan log retention is limited to 7 days. Upgrade to Pro for up to 90 days." });
         return;
       }
       org.logRetentionDays = days;
@@ -324,8 +329,13 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     if (taskRetentionDays !== undefined) {
       const days = parseInt(taskRetentionDays, 10);
-      if (isNaN(days) || (days !== -1 && (days < 1 || days > 730))) {
-        res.status(400).json({ error: "taskRetentionDays must be between 1 and 730 (or -1 for unlimited)" });
+      if (isNaN(days) || (days !== -1 && (days < 1 || days > 90))) {
+        res.status(400).json({ error: "taskRetentionDays must be between 1 and 90 (or -1 for unlimited)" });
+        return;
+      }
+      // Free tier: max 7 days
+      if (org.plan === "free" && days > 7) {
+        res.status(403).json({ error: "Free plan task retention is limited to 7 days. Upgrade to Pro for up to 90 days." });
         return;
       }
       org.taskRetentionDays = days;
@@ -406,8 +416,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     if (defaultMaxRetries !== undefined) {
       const retries = parseInt(defaultMaxRetries, 10);
-      if (isNaN(retries) || retries < 0 || retries > 10) {
-        res.status(400).json({ error: "defaultMaxRetries must be between 0 and 10" });
+      if (isNaN(retries) || retries < 0 || retries > 5) {
+        res.status(400).json({ error: "defaultMaxRetries must be between 0 and 5" });
         return;
       }
       org.defaultMaxRetries = retries;
@@ -589,6 +599,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         res.status(400).json({ error: "Invalid managerProvider. Must be one of: anthropic, openai, google, ollama, openrouter, groq, deepseek, mistral, xai, bedrock, azure" });
         return;
       }
+      if (org.plan === "free" && managerProvider !== "anthropic") {
+        res.status(403).json({ error: "Free plan Tech Lead is restricted to Anthropic. Upgrade to Pro for all providers." });
+        return;
+      }
       org.managerProvider = managerProvider;
     }
 
@@ -643,6 +657,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         res.status(400).json({ error: "Invalid planningAgentProvider. Must be one of: anthropic, openai, google, ollama, openrouter, groq, deepseek, mistral, xai, bedrock, azure" });
         return;
       }
+      if (org.plan === "free" && planningAgentProvider !== "anthropic") {
+        res.status(403).json({ error: "Free plan Planning Agent is restricted to Anthropic. Upgrade to Pro for all providers." });
+        return;
+      }
       org.planningAgentProvider = planningAgentProvider;
     }
 
@@ -675,6 +693,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       const validModes = ["strict", "simplified"];
       if (!validModes.includes(planningMode)) {
         res.status(400).json({ error: "planningMode must be 'strict' or 'simplified'" });
+        return;
+      }
+      if (org.plan === "free" && planningMode === "strict") {
+        res.status(403).json({ error: "Free plan only supports Simplified planning mode. Upgrade to Pro for Strict mode." });
         return;
       }
       org.planningMode = planningMode;
@@ -875,6 +897,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     }
 
     if (autoSkillExtraction !== undefined) {
+      if (org.plan === "free" && Boolean(autoSkillExtraction)) {
+        res.status(403).json({ error: "Memory & Learning requires Pro plan or higher." });
+        return;
+      }
       org.autoSkillExtraction = Boolean(autoSkillExtraction);
     }
 
@@ -892,6 +918,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     // Validate and update Quality Gate Settings
     if (qualityGateEnabled !== undefined) {
+      if (org.plan === "free" && Boolean(qualityGateEnabled)) {
+        res.status(403).json({ error: "Quality Gates require Pro plan or higher." });
+        return;
+      }
       org.qualityGateEnabled = Boolean(qualityGateEnabled);
     }
 
@@ -1180,7 +1210,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         autoDeployEnabled: org.autoDeployEnabled,
         autoImproveEnabled: org.autoImproveEnabled,
         autoSkillExtraction: org.autoSkillExtraction,
-        prdAutoRun: org.prdAutoRun ?? false,
+        prdAutoRun: org.prdAutoRun ?? true,
         remoteAgentOnly: org.remoteAgentOnly,
         qualityGateEnabled: org.qualityGateEnabled,
         minQualityScore: org.minQualityScore,

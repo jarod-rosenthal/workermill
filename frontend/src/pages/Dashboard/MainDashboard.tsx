@@ -99,6 +99,8 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const logout = useAuthStore((state) => state.logout);
   const _user = useAuthStore((state) => state.user);
+  const organization = useAuthStore((state) => state.organization);
+  const isFreePlan = !organization?.plan || organization.plan === "free";
 
   // Coordination store for blocker alerts
   const coordinationMessages = useCoordinationStore((s) => s.messages);
@@ -2231,55 +2233,108 @@ export default function Dashboard() {
               >
                 <Zap className="w-4 h-4 text-green-500" />
                 <span className="text-sm font-medium">Insights</span>
+                {isFreePlan && <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full">PRO</span>}
                 <ChevronDown className={`w-3 h-3 transition-transform ${isEfficiencyDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
               {isEfficiencyDropdownOpen && (
                 <div className="absolute right-0 top-full mt-2 w-48 rounded-xl bg-card border border-border shadow-xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                   <div className="py-1">
-                    <Link
-                      to="/analytics"
-                      onClick={() => setIsEfficiencyDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <BarChart3 className="w-4 h-4 text-green-500" />
-                      Analytics
-                    </Link>
-                    <Link
-                      to="/cost-intelligence"
-                      onClick={() => setIsEfficiencyDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <DollarSign className="w-4 h-4 text-emerald-500" />
-                      Cost Intelligence
-                      <span className="text-[10px] font-medium bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full ml-auto">Beta</span>
-                    </Link>
-                    <Link
-                      to="/memory"
-                      onClick={() => setIsEfficiencyDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <Brain className="w-4 h-4 text-purple-500" />
-                      Memory Management
-                      <span className="text-[10px] font-medium bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full ml-auto">Beta</span>
-                    </Link>
-                    <Link
-                      to="/skills"
-                      onClick={() => setIsEfficiencyDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <BookOpen className="w-4 h-4 text-blue-500" />
-                      Skill Library
-                      <span className="text-[10px] font-medium bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full ml-auto">Beta</span>
-                    </Link>
-                    <Link
-                      to="/directive-effectiveness"
-                      onClick={() => setIsEfficiencyDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <Target className="w-4 h-4 text-rose-500" />
-                      Directive Analytics
-                      <span className="text-[10px] font-medium bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full ml-auto">Beta</span>
-                    </Link>
+                    {isFreePlan ? (
+                      <>
+                        <Link
+                          to="/pricing"
+                          onClick={() => setIsEfficiencyDropdownOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+                        >
+                          <BarChart3 className="w-4 h-4 text-green-500/50" />
+                          Analytics
+                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">PRO</span>
+                        </Link>
+                        <Link
+                          to="/pricing"
+                          onClick={() => setIsEfficiencyDropdownOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+                        >
+                          <DollarSign className="w-4 h-4 text-emerald-500/50" />
+                          Cost Intelligence
+                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">PRO</span>
+                        </Link>
+                        <Link
+                          to="/pricing"
+                          onClick={() => setIsEfficiencyDropdownOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+                        >
+                          <Brain className="w-4 h-4 text-purple-500/50" />
+                          Memory Management
+                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">PRO</span>
+                        </Link>
+                        <Link
+                          to="/pricing"
+                          onClick={() => setIsEfficiencyDropdownOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+                        >
+                          <BookOpen className="w-4 h-4 text-blue-500/50" />
+                          Skill Library
+                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">PRO</span>
+                        </Link>
+                        <Link
+                          to="/pricing"
+                          onClick={() => setIsEfficiencyDropdownOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+                        >
+                          <Target className="w-4 h-4 text-rose-500/50" />
+                          Directive Analytics
+                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">PRO</span>
+                        </Link>
+                      </>
+                    ) : (
+                      <>
+                        <Link
+                          to="/analytics"
+                          onClick={() => setIsEfficiencyDropdownOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                        >
+                          <BarChart3 className="w-4 h-4 text-green-500" />
+                          Analytics
+                        </Link>
+                        <Link
+                          to="/cost-intelligence"
+                          onClick={() => setIsEfficiencyDropdownOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                        >
+                          <DollarSign className="w-4 h-4 text-emerald-500" />
+                          Cost Intelligence
+                          <span className="text-[10px] font-medium bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full ml-auto">Beta</span>
+                        </Link>
+                        <Link
+                          to="/memory"
+                          onClick={() => setIsEfficiencyDropdownOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                        >
+                          <Brain className="w-4 h-4 text-purple-500" />
+                          Memory Management
+                          <span className="text-[10px] font-medium bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full ml-auto">Beta</span>
+                        </Link>
+                        <Link
+                          to="/skills"
+                          onClick={() => setIsEfficiencyDropdownOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                        >
+                          <BookOpen className="w-4 h-4 text-blue-500" />
+                          Skill Library
+                          <span className="text-[10px] font-medium bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full ml-auto">Beta</span>
+                        </Link>
+                        <Link
+                          to="/directive-effectiveness"
+                          onClick={() => setIsEfficiencyDropdownOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                        >
+                          <Target className="w-4 h-4 text-rose-500" />
+                          Directive Analytics
+                          <span className="text-[10px] font-medium bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full ml-auto">Beta</span>
+                        </Link>
+                      </>
+                    )}
                   </div>
                 </div>
               )}

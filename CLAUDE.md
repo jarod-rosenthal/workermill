@@ -166,8 +166,11 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 | **Start remote agent** | `workermill-agent start` |
 | **Install remote agent** | `curl -fsSL https://workermill.com/install.sh \| bash` |
 | **Build agent binary** | `cd agent && npm run build && bun build --compile dist/entry.js --outfile dist/bin/workermill-agent` |
+| **Build agent (shortcut)** | `cd agent && npm run build:binary` |
 | **Release agent binary** | Bump version → `git tag agent-v<version>` → `git push --tags` |
 | **Publish agent to npm** | `cd agent && npm run build && npm publish --access public` (fallback) |
+| Type check worker | `cd worker && npm run typecheck` |
+| Build worker code | `cd worker && npm run build` |
 | Build VS Code extension | `cd packages/vscode-workermill && npm run build` |
 | Watch VS Code extension | `cd packages/vscode-workermill && npm run watch` |
 | Package VS Code extension | `cd packages/vscode-workermill && npm run package` |
@@ -552,27 +555,45 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 | `WorkerCheckIn` | Worker heartbeat and health tracking |
 | `CoordinationFeedItem` | Expert collaboration messages |
 | `RemoteAgent` | Remote agent registration and heartbeat tracking |
+| `Persona`, `PersonaDirective` | Worker personas and their role-specific directives |
+| `ProceduralMemory`, `EpisodicMemory`, `SemanticMemory` | Worker memory systems (skills, experiences, concepts) |
+| `CodebaseIndex`, `CodebaseIndexStatus` | RAG codebase indexing state and vectors |
 | `KbBoard`, `KbColumn`, `KbCard` | Kanban board system (Trello-like boards visible on dashboard) |
-| `KbComment`, `KbChecklist`, `KbActivity` | Board card details — comments, checklists, activity log |
+| `KbComment`, `KbChecklist`, `KbActivity`, `KbLabel` | Board card details — comments, checklists, activity log, labels |
 | `ShowcaseProject` | Public showcase projects on landing page |
+| `SupportTicket`, `SupportTicketMessage` | In-app support system |
+| `Referral` | User referral tracking |
+| `CreditTransaction` | Usage credit tracking and billing |
 
 ***REMOVED******REMOVED******REMOVED*** Key API Routes (`api/src/routes/`)
 
 | Route | Purpose |
 |-------|---------|
+| `auth.ts` | Authentication — Cognito, GitHub/Google/Microsoft OAuth, SSO config |
 | `webhooks.ts` | Jira, GitHub, GitLab, BitBucket, Linear receivers |
 | `control-center.ts` | Task management and log streaming SSE |
-| `tasks.ts` | Worker log ingestion |
+| `tasks.ts`, `tasks-v2.ts` | Worker log ingestion, V2 task operations |
 | `orchestrator.ts` | Poll loop, system control (start/stop/status) |
 | `settings.ts` | Organization settings CRUD |
+| `organizations.ts` | Org management (create, list, switch) |
 | `billing.ts` | Stripe billing (Free/Pro/Enterprise plans) |
-| `coordination.ts` | Multi-worker file locking |
+| `coordination.ts` | Multi-worker file locking and task communication |
 | `issues.ts` | Jira issue search and project listing (used by VS Code extension) |
 | `boards.ts` | Kanban boards CRUD — cards, columns, labels, checklists |
 | `remote-agent.ts` | Remote agent registration, heartbeat, task claim/result |
 | `worker-decisions.ts` | Worker decision engine API (error classification, quality gates) |
+| `personas.ts` | Persona CRUD and directive management |
+| `directives.ts` | Worker directive experiments and templates |
+| `memory.ts` | Procedural/episodic/semantic memory endpoints |
+| `codebase.ts` | RAG codebase search, indexing, symbol lookup |
+| `manager.ts` | Manager workflow — review/approval of worker output |
 | `prd.ts` | PRD decomposition into board cards |
+| `support.ts` | In-app support ticket system |
+| `compliance.ts` | Compliance and audit endpoints |
 | `showcase.ts` | Public showcase projects |
+| `referrals.ts` | User referral program |
+| `profile.ts` | User profile management |
+| `email.ts` | Email sending and inbound mapping |
 
 ***REMOVED******REMOVED******REMOVED*** Task Flow (Three Execution Paths)
 

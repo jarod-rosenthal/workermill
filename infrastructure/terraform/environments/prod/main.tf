@@ -64,6 +64,15 @@ data "aws_secretsmanager_secret" "microsoft_client_secret" {
   name = "workermill/dev/microsoft-client-secret"
 }
 
+# GitHub SSO secrets for GitHub OAuth web login
+data "aws_secretsmanager_secret" "github_client_id" {
+  name = "workermill/dev/github-client-id"
+}
+
+data "aws_secretsmanager_secret" "github_client_secret" {
+  name = "workermill/dev/github-client-secret"
+}
+
 # Admin notification secrets for platform owner alerts
 data "aws_secretsmanager_secret" "admin_phone_number" {
   name = "workermill/dev/admin-phone-number"
@@ -238,6 +247,10 @@ module "ecs_service" {
   # Microsoft SSO secrets
   microsoft_client_id_secret_arn     = data.aws_secretsmanager_secret.microsoft_client_id.arn
   microsoft_client_secret_secret_arn = data.aws_secretsmanager_secret.microsoft_client_secret.arn
+
+  # GitHub SSO secrets
+  github_client_id_secret_arn     = data.aws_secretsmanager_secret.github_client_id.arn
+  github_client_secret_secret_arn = data.aws_secretsmanager_secret.github_client_secret.arn
 
   # Admin notification secrets
   admin_phone_number_secret_arn = data.aws_secretsmanager_secret.admin_phone_number.arn

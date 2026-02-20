@@ -178,6 +178,19 @@ variable "microsoft_client_secret_secret_arn" {
   default     = ""
 }
 
+# GitHub SSO Secrets
+variable "github_client_id_secret_arn" {
+  description = "ARN of GITHUB_CLIENT_ID secret for GitHub OAuth SSO"
+  type        = string
+  default     = ""
+}
+
+variable "github_client_secret_secret_arn" {
+  description = "ARN of GITHUB_CLIENT_SECRET secret for GitHub OAuth SSO"
+  type        = string
+  default     = ""
+}
+
 # Admin Notification Secrets
 variable "admin_phone_number_secret_arn" {
   description = "ARN of ADMIN_PHONE_NUMBER secret for SMS notifications"

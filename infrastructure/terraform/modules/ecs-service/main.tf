@@ -177,6 +177,9 @@ resource "aws_ecs_task_definition" "api" {
       # Microsoft SSO secrets (optional)
       var.microsoft_client_id_secret_arn != "" ? [{ name = "MICROSOFT_CLIENT_ID", valueFrom = var.microsoft_client_id_secret_arn }] : [],
       var.microsoft_client_secret_secret_arn != "" ? [{ name = "MICROSOFT_CLIENT_SECRET", valueFrom = var.microsoft_client_secret_secret_arn }] : [],
+      # GitHub SSO secrets (optional)
+      var.github_client_id_secret_arn != "" ? [{ name = "GITHUB_CLIENT_ID", valueFrom = var.github_client_id_secret_arn }] : [],
+      var.github_client_secret_secret_arn != "" ? [{ name = "GITHUB_CLIENT_SECRET", valueFrom = var.github_client_secret_secret_arn }] : [],
       # Admin notification secrets (optional)
       var.admin_phone_number_secret_arn != "" ? [{ name = "ADMIN_PHONE_NUMBER", valueFrom = var.admin_phone_number_secret_arn }] : [],
       var.admin_email_secret_arn != "" ? [{ name = "ADMIN_EMAIL", valueFrom = var.admin_email_secret_arn }] : [],

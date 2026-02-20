@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import {
   CheckCircle,
+  ExternalLink,
   Loader2,
   Server,
   Copy,
@@ -148,6 +150,91 @@ function ApiKeySection({ apiKeyPrefix }: { apiKeyPrefix?: string | null }) {
   );
 }
 
+function InstallInstructions() {
+  const [platform, setPlatform] = useState<"unix" | "windows">("unix");
+
+  const commands = {
+    unix: [
+      { step: "1", label: "Install", cmd: "curl -fsSL https://workermill.com/install.sh | bash" },
+      { step: "2", label: "Setup", cmd: "workermill-agent setup" },
+      { step: "3", label: "Start", cmd: "workermill-agent start" },
+    ],
+    windows: [
+      { step: "1", label: "Install", cmd: "irm https://workermill.com/install.ps1 | iex" },
+      { step: "2", label: "Setup", cmd: "workermill-agent setup" },
+      { step: "3", label: "Start", cmd: "workermill-agent start" },
+    ],
+  };
+
+  return (
+    <div className="border border-border/50 rounded-xl p-6 bg-card">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+            <Server className="w-5 h-5 text-cyan-500" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-foreground">Install the Remote Agent</h3>
+            <p className="text-sm text-muted-foreground">Three commands to get running</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
+          <button
+            onClick={() => setPlatform("unix")}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${platform === "unix" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Mac / Linux
+          </button>
+          <button
+            onClick={() => setPlatform("windows")}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${platform === "windows" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Windows
+          </button>
+        </div>
+      </div>
+      <div className="space-y-3">
+        {commands[platform].map((item) => (
+          <div key={item.step} className="flex items-center gap-3">
+            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-cyan-500/20 text-cyan-500 text-xs font-bold flex items-center justify-center">
+              {item.step}
+            </span>
+            <div className="flex-1 flex items-center gap-2 bg-muted/30 rounded-lg px-4 py-2.5 font-mono text-sm">
+              <span className="text-muted-foreground">{item.label}:</span>
+              <code className="text-foreground flex-1 break-all">{item.cmd}</code>
+              <button
+                onClick={() => navigator.clipboard.writeText(item.cmd)}
+                className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+                title="Copy to clipboard"
+              >
+                <Copy className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          Or install the{" "}
+          <a href="https://marketplace.visualstudio.com/items?itemName=workermill.workermill" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+            VS Code extension
+          </a>
+          {" "}&mdash; it handles install, setup, and agent startup automatically.
+        </p>
+        <a
+          href="https://workermill.com/docs/quick-start"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 text-xs text-primary hover:underline flex-shrink-0"
+        >
+          <ExternalLink className="w-3 h-3" />
+          Full install guide
+        </a>
+      </div>
+    </div>
+  );
+}
+
 export function RemoteAgentSection({
   remoteAgents,
   remoteAgentsLoading,
@@ -165,44 +252,7 @@ export function RemoteAgentSection({
       <ApiKeySection apiKeyPrefix={apiKeyPrefix} />
 
       {/* Install Instructions */}
-      <div className="border border-border/50 rounded-xl p-6 bg-card">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center">
-            <Server className="w-5 h-5 text-cyan-500" />
-          </div>
-          <div>
-            <h3 className="font-semibold text-foreground">Quick Start</h3>
-            <p className="text-sm text-muted-foreground">Three commands to get running</p>
-          </div>
-        </div>
-        <div className="space-y-3">
-          {[
-            { step: "1", label: "Install", cmd: "curl -fsSL https://workermill.com/install.sh | bash" },
-            { step: "2", label: "Setup", cmd: "workermill-agent setup" },
-            { step: "3", label: "Start", cmd: "workermill-agent start" },
-          ].map((item) => (
-            <div key={item.step} className="flex items-center gap-3">
-              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-cyan-500/20 text-cyan-500 text-xs font-bold flex items-center justify-center">
-                {item.step}
-              </span>
-              <div className="flex-1 flex items-center gap-2 bg-muted/30 rounded-lg px-4 py-2.5 font-mono text-sm">
-                <span className="text-muted-foreground">{item.label}:</span>
-                <code className="text-foreground flex-1">{item.cmd}</code>
-                <button
-                  onClick={() => navigator.clipboard.writeText(item.cmd)}
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                  title="Copy to clipboard"
-                >
-                  <Copy className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-        <p className="mt-4 text-xs text-muted-foreground">
-          Or install the VS Code extension — it handles install, setup, and agent startup automatically.
-        </p>
-      </div>
+      <InstallInstructions />
 
       {/* Prerequisites */}
       <div className="border border-border/50 rounded-xl p-6 bg-card">

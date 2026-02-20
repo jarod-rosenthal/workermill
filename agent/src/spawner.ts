@@ -8,11 +8,12 @@
  */
 
 import chalk from "chalk";
-import { spawn, type ChildProcess } from "child_process";
+import { spawn, execSync, type ChildProcess } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import type { AgentConfig } from "./config.js";
+import { activeProcesses, type ActiveProcess } from "./active-processes.js";
 import { agentEvents } from "./local-api.js";
 import { fileURLToPath } from "url";
 
@@ -67,19 +68,8 @@ function redactSecrets(text: string): string {
   return result;
 }
 
-interface ActiveProcess {
-  taskId: string;
-  process: ChildProcess;
-  startedAt: Date;
-  status: "running" | "completed" | "failed";
-  /** True if we saw a ::result:: marker in stdout */
-  resultEmitted: boolean;
-  /** Temp working directory for this task */
-  workDir: string;
-}
-
-// Track active worker processes
-const activeProcesses = new Map<string, ActiveProcess>();
+// Re-export from shared module (used by docker-spawner.ts and local-api.ts)
+export { activeProcesses, type ActiveProcess } from "./active-processes.js";
 
 /**
  * Check if Claude OAuth credentials exist on this machine.
@@ -182,7 +172,8 @@ function hasSelfReviewLabel(task: SpawnableTask): boolean {
 }
 
 /**
- * Spawn a native Node.js worker process for a task.
+ * Spawn a worker process for a task.
+ * Routes to Docker sandbox when config.sandbox === "docker", otherwise native process.
  */
 export async function spawnWorker(
   task: SpawnableTask,
@@ -190,6 +181,12 @@ export async function spawnWorker(
   orgConfig: Record<string, unknown>,
   credentials?: ClaimCredentials,
 ): Promise<void> {
+  // Route to Docker sandbox if enabled
+  if (config.sandbox === "docker") {
+    const { spawnDockerWorker } = await import("./docker-spawner.js");
+    return spawnDockerWorker(task, config, orgConfig, credentials);
+  }
+
   const taskLabel = chalk.cyan(task.id.slice(0, 8));
 
   if (activeProcesses.has(task.id)) {
@@ -485,22 +482,31 @@ export function getActiveTaskIds(): string[] {
 
 /**
  * Stop a specific task's worker by task ID.
+ * Tries native process kill first, then Docker stop as fallback.
  */
 export function stopTask(taskId: string): void {
   const active = activeProcesses.get(taskId);
-  if (!active || active.status !== "running") return;
+  if (active && active.status === "running") {
+    const taskLabel = chalk.cyan(taskId.slice(0, 8));
+    console.log(`${ts()} ${taskLabel} ${chalk.red("■")} Stopping worker (cancelled by dashboard)`);
+    try {
+      active.process.kill("SIGTERM");
+      active.status = "completed";
+    } catch { /* may have already exited */ }
+    activeProcesses.delete(taskId);
+    return;
+  }
 
-  const taskLabel = chalk.cyan(taskId.slice(0, 8));
-  console.log(`${ts()} ${taskLabel} ${chalk.red("■")} Stopping worker (cancelled by dashboard)`);
+  // Fallback: try stopping a Docker container (may exist if sandbox mode)
   try {
-    active.process.kill("SIGTERM");
-    active.status = "completed";
-  } catch { /* may have already exited */ }
-  activeProcesses.delete(taskId);
+    execSync(`docker stop wm-${taskId.slice(0, 12)}`, { stdio: "ignore", timeout: 15_000 });
+  } catch {
+    // Container doesn't exist or Docker not available
+  }
 }
 
 /**
- * Stop all running workers.
+ * Stop all running workers (native processes + Docker containers).
  */
 export async function stopAll(): Promise<void> {
   console.log(`${ts()} ${chalk.dim(`Stopping ${activeProcesses.size} workers...`)}`);
@@ -513,6 +519,14 @@ export async function stopAll(): Promise<void> {
     }
   }
   activeProcesses.clear();
+
+  // Also stop any Docker sandbox containers
+  try {
+    const { stopAllDocker } = await import("./docker-spawner.js");
+    stopAllDocker();
+  } catch {
+    // docker-spawner not available — no Docker containers to stop
+  }
 }
 
 /** Manager task returned by the poll endpoint */

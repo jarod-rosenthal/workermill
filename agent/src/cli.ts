@@ -55,7 +55,7 @@ program
 
 program
   .command("pull")
-  .description("(Deprecated) Docker is no longer used — workers run as native processes")
+  .description("Pull/update the Docker sandbox image")
   .action(pullCommand);
 
 program

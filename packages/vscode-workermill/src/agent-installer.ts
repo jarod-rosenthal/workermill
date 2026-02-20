@@ -1,7 +1,10 @@
 /**
- * Agent Installer — download and install the WorkerMill agent binary from GitHub Releases.
+ * Agent Installer — download and install the WorkerMill agent binary from CDN.
  *
- * Paths match install.sh (Linux/macOS) and install.ps1 (Windows):
+ * CDN: https://workermill.com/agent/latest/{binary}
+ * Version manifest: https://workermill.com/agent/latest.json
+ *
+ * Install paths match install.sh (Linux/macOS) and install.ps1 (Windows):
  *   Linux/macOS: ~/.workermill/bin/workermill-agent
  *   Windows:     %LOCALAPPDATA%\workermill\bin\workermill-agent.exe
  */

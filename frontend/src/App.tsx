@@ -54,6 +54,7 @@ import {
   VSCodeExtension,
   Repositories as DocsRepositories,
   CodebaseIndexing,
+  CredentialRotation,
 } from "./pages/Docs";
 import { Terms, Privacy, Security } from "./pages/legal";
 import { BlogList, BlogPost } from "./pages/Blog";
@@ -210,6 +211,7 @@ function App() {
             />
             <Route path="repositories" element={<DocsRepositories />} />
             <Route path="codebase-indexing" element={<CodebaseIndexing />} />
+            <Route path="credential-rotation" element={<CredentialRotation />} />
             <Route path="task-lifecycle" element={<TaskLifecycle />} />
             <Route path="epics" element={<DocsEpics />} />
             <Route path="advanced-features" element={<AdvancedFeatures />} />

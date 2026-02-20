@@ -6,9 +6,7 @@ import { Header } from "./Home/v0/Header";
 import { StatsSection } from "./Home/v0/StatsSection";
 import { FeaturesGrid } from "./Home/v0/FeaturesGrid";
 import Workers from "./Home/Workers";
-import Features from "./Home/Features";
 import ShowcaseGallery from "../components/ShowcaseGallery";
-import TeamCoordination from "../components/TeamCoordination";
 import TrustCallout from "../components/TrustCallout";
 import ExecutionShowcase from "../components/ExecutionShowcase";
 import { Pricing } from "./Home/Pricing";
@@ -303,17 +301,9 @@ export default function LandingV0() {
           <StatsSection />
           <FeaturesGrid />
 
-          {/* Team Coordination & Custom Experts */}
-          <TeamCoordination />
-
           {/* Workers Section */}
           <section>
             <Workers />
-          </section>
-
-          {/* Features Section */}
-          <section>
-            <Features />
           </section>
 
           {/* Trust & Security Callout */}

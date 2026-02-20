@@ -119,6 +119,8 @@ export class SettingsPanel {
         await this.saveJira(config, msg);
       } else if (msg.type === "test-jira") {
         await this.testJira(config);
+      } else if (msg.type === "save-tracker") {
+        await this.saveTracker(config, msg.tracker);
       } else if (msg.type === "open-dashboard") {
         vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/dashboard`));
       } else if (msg.type === "open-web-settings") {
@@ -175,6 +177,27 @@ export class SettingsPanel {
       }
     } catch (err) {
       this.postMessage({ type: "save-error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async saveTracker(
+    config: { apiUrl: string; apiKey: string },
+    tracker: string,
+  ): Promise<void> {
+    try {
+      const { status } = await httpsRequest<{ error?: string }>(
+        "PUT",
+        `${config.apiUrl}/api/settings`,
+        config.apiKey,
+        { issueTrackerProvider: tracker },
+      );
+      if (status >= 200 && status < 300) {
+        this.postMessage({ type: "tracker-saved", tracker });
+      } else {
+        this.postMessage({ type: "error", message: `Failed to save tracker (HTTP ${status})` });
+      }
+    } catch (err) {
+      this.postMessage({ type: "error", message: `Could not save tracker: ${err instanceof Error ? err.message : String(err)}` });
     }
   }
 
@@ -332,10 +355,12 @@ export class SettingsPanel {
       <h2>Issue Tracker</h2>
       <div class="radio-group">
         <label><input type="radio" name="tracker" value="jira" /> Jira</label>
-        <label><input type="radio" name="tracker" value="github" /> GitHub Issues</label>
+        <label><input type="radio" name="tracker" value="github-issues" /> GitHub Issues</label>
         <label><input type="radio" name="tracker" value="linear" /> Linear</label>
-        <label><input type="radio" name="tracker" value="boards" /> Internal Boards</label>
+        <label><input type="radio" name="tracker" value="internal" /> Internal Boards</label>
       </div>
+
+      <div id="tracker-status" class="status"></div>
 
       <!-- Jira fields -->
       <div id="jira-fields" class="hidden">
@@ -401,7 +426,7 @@ export class SettingsPanel {
   </div>
 
   <div class="footer">
-    WorkerMill v0.1.6 &mdash; <a href="https://workermill.com/docs">Documentation</a>
+    WorkerMill v0.1.7 &mdash; <a href="https://workermill.com/docs">Documentation</a>
   </div>
 
   <script>
@@ -416,14 +441,19 @@ export class SettingsPanel {
     const linearFields = document.getElementById("linear-fields");
     const boardsFields = document.getElementById("boards-fields");
     const jiraStatus = document.getElementById("jira-status");
+    const trackerStatus = document.getElementById("tracker-status");
 
-    // Radio toggle
+    // Radio toggle — skip save during initial load
+    let initialLoad = true;
     radios.forEach(r => r.addEventListener("change", () => {
       const val = document.querySelector('input[name="tracker"]:checked').value;
       jiraFields.classList.toggle("hidden", val !== "jira");
-      githubFields.classList.toggle("hidden", val !== "github");
+      githubFields.classList.toggle("hidden", val !== "github-issues");
       linearFields.classList.toggle("hidden", val !== "linear");
-      boardsFields.classList.toggle("hidden", val !== "boards");
+      boardsFields.classList.toggle("hidden", val !== "internal");
+      if (!initialLoad) {
+        vscode.postMessage({ type: "save-tracker", tracker: val });
+      }
     }));
 
     // Buttons
@@ -482,6 +512,8 @@ export class SettingsPanel {
           trackerRadio.dispatchEvent(new Event("change", { bubbles: true }));
         }
 
+        initialLoad = false;
+
         // Fill Jira fields if configured
         if (d.jira) {
           if (d.jira.baseUrl) document.getElementById("jira-url").value = d.jira.baseUrl;
@@ -495,6 +527,11 @@ export class SettingsPanel {
         document.getElementById("scm-github-badge").innerHTML = badge(d.github?.configured);
         document.getElementById("scm-bitbucket-badge").innerHTML = badge(d.bitbucket?.configured);
         document.getElementById("scm-gitlab-badge").innerHTML = badge(d.gitlab?.configured);
+      }
+
+      if (msg.type === "tracker-saved") {
+        showStatus(trackerStatus, "success", "Issue tracker updated");
+        setTimeout(() => trackerStatus.classList.remove("visible"), 3000);
       }
 
       if (msg.type === "error") {

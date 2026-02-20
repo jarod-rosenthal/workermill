@@ -14,7 +14,6 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as https from "https";
-import * as crypto from "crypto";
 import { spawn, execFileSync } from "child_process";
 
 const CDN_BASE = "https://workermill.com/agent/latest";
@@ -497,6 +496,35 @@ export async function stopAgentProcess(): Promise<boolean> {
 
   cleanAgentState();
   return true;
+}
+
+/**
+ * Wait for the agent to start and be ready (port file written).
+ * Returns the port number if ready, 0 if timeout.
+ */
+export async function waitForAgentReady(
+  log?: (msg: string) => void,
+  timeoutMs = 15_000,
+): Promise<number> {
+  const portFile = path.join(os.homedir(), ".workermill", "agent.port");
+  const pollMs = 500;
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const port = parseInt(fs.readFileSync(portFile, "utf-8").trim(), 10);
+      if (port > 0) {
+        log?.(`Agent ready on port ${port}`);
+        return port;
+      }
+    } catch {
+      /* port file not written yet */
+    }
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+
+  log?.("Agent did not become ready within timeout");
+  return 0;
 }
 
 /** Check if the agent config file exists (setup has been completed). */

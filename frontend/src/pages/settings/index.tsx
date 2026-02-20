@@ -359,7 +359,7 @@ export default function Settings() {
   const [userEmailPreferences, setUserEmailPreferences] = useState<EmailPreferences>({
     taskCompleted: true,
     taskFailed: true,
-    costAlerts: true,
+    costAlerts: false,
     prCreated: false,
     frequency: "immediate",
   });
@@ -614,7 +614,7 @@ export default function Settings() {
       const emailPrefs: EmailPreferences = data.preferences?.email || {
         taskCompleted: true,
         taskFailed: true,
-        costAlerts: true,
+        costAlerts: false,
         prCreated: false,
         frequency: "immediate",
       };

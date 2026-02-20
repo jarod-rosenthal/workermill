@@ -5,11 +5,9 @@ import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
 import { StatsSection } from "./Home/v0/StatsSection";
 import { FeaturesGrid } from "./Home/v0/FeaturesGrid";
-import HowItWorks from "./Home/HowItWorks";
 import Workers from "./Home/Workers";
 import Features from "./Home/Features";
 import ShowcaseGallery from "../components/ShowcaseGallery";
-import AgentCollaboration from "../components/AgentCollaboration";
 import TeamCoordination from "../components/TeamCoordination";
 import TrustCallout from "../components/TrustCallout";
 import ExecutionShowcase from "../components/ExecutionShowcase";
@@ -179,16 +177,16 @@ function InstallSection() {
 
         {/* Platform note */}
         <p className="mt-6 text-center text-sm text-slate-500">
-          Runs on macOS, Linux, and Windows &mdash; requires a{" "}
+          Runs on macOS, Linux, and Windows &mdash; Free tier requires an{" "}
           <a
-            href="https://claude.ai/download"
+            href="https://www.anthropic.com"
             target="_blank"
             rel="noopener noreferrer"
             className="text-slate-400 hover:text-white transition-colors underline underline-offset-2"
           >
-            Claude Max
+            Anthropic
           </a>{" "}
-          subscription
+          account
         </p>
       </div>
     </section>
@@ -305,15 +303,11 @@ export default function LandingV0() {
           <StatsSection />
           <FeaturesGrid />
 
-          {/* Agent Collaboration Showcase */}
-          <AgentCollaboration />
-
           {/* Team Coordination & Custom Experts */}
           <TeamCoordination />
 
-          {/* How It Works Section */}
+          {/* Workers Section */}
           <section>
-            <HowItWorks />
             <Workers />
           </section>
 

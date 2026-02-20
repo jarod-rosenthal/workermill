@@ -29,7 +29,7 @@ const newProjectSteps = [
     title: "Choose How",
     description: "Free local mode or paid cloud execution",
     details: [
-      "Free: Your machine + Claude Max ($0)",
+      "Free: Your machine + your Anthropic account ($0)",
       "Pro: 5 concurrent workers + cloud",
       "BYOK or cloud — zero AI markup",
     ],

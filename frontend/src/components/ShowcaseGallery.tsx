@@ -46,7 +46,7 @@ const showcaseProjects: ShowcaseProject[] = [
       "177K lines across 3 repositories. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens, Terraform infrastructure. 24 epics executed sequentially across oncallshift-api, oncallshift-web, and oncallshift-mobile. Deployed to AWS at oncallshift.com.",
     stack: "Express + TypeScript + React + React Native + Terraform",
     storyCount: 24,
-    cost: "Claude Max",
+    cost: "$1,206",
     duration: "~18 hrs",
     linesOfCode: "177,000",
     liveUrl: "https://oncallshift.com",
@@ -61,7 +61,7 @@ const showcaseProjects: ShowcaseProject[] = [
       "Full-stack scheduling platform with event types, timezone-aware booking, team round-robin scheduling, Google Calendar integration, email notifications, and public booking pages. 8 epics, 100% success rate. Deployed to Vercel.",
     stack: "Next.js 16 + Prisma 7 + TailwindCSS 4 + Neon PostgreSQL",
     storyCount: 8,
-    cost: "Claude Max",
+    cost: "$301",
     duration: "~7 hrs",
     linesOfCode: "41,000",
     repoUrl: "https://github.com/workermill-examples/calmill",
@@ -77,7 +77,7 @@ const showcaseProjects: ShowcaseProject[] = [
       "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time updates, workspace dashboards, and activity feeds. 5 stories, all approved. Deployed to Vercel.",
     stack: "Next.js 15 + Prisma + TailwindCSS + Neon PostgreSQL",
     storyCount: 5,
-    cost: "Claude Max",
+    cost: "$175",
     duration: "~6 hrs",
     linesOfCode: "28,000",
     repoUrl: "https://github.com/workermill-examples/teamboard",
@@ -93,7 +93,7 @@ const showcaseProjects: ShowcaseProject[] = [
       "Full-stack task monitoring platform with cron scheduling, API key management, real-time run tracking, keyboard shortcuts, and global search. 5 stories, 100% success rate. Deployed to Vercel.",
     stack: "Next.js 16 + Prisma 7 + TailwindCSS v4 + Neon PostgreSQL",
     storyCount: 5,
-    cost: "Claude Max",
+    cost: "$139",
     duration: "~5 hrs",
     linesOfCode: "17,000",
     repoUrl: "https://github.com/workermill-examples/taskpulse",
@@ -109,7 +109,7 @@ const showcaseProjects: ShowcaseProject[] = [
       "Async Python API with JWT authentication, RBAC, rate limiting, audit logging, product/category/warehouse CRUD, stock management, Alembic migrations, 344 tests, CI pipeline, and Swagger/ReDoc documentation. 10 epics, all deployed. Live on Railway.",
     stack: "FastAPI + SQLAlchemy 2 + Pydantic V2 + Neon PostgreSQL",
     storyCount: 10,
-    cost: "Claude Max",
+    cost: "$98",
     duration: "~4 hrs",
     linesOfCode: "15,000",
     repoUrl: "https://github.com/workermill-examples/shipapi",
@@ -300,7 +300,7 @@ export default function ShowcaseGallery() {
                           </div>
                         </div>
                         <div className="text-center">
-                          <div className="flex items-center justify-center gap-1 text-sm font-semibold text-amber-400">
+                          <div className="flex items-center justify-center gap-1 text-sm font-semibold text-emerald-400">
                             <Zap className="w-3.5 h-3.5" />
                             {project.cost}
                           </div>
@@ -364,10 +364,9 @@ export default function ShowcaseGallery() {
         {/* Bottom note */}
         <div className="text-center mt-12 mb-12">
           <p className="text-sm text-muted-foreground">
-            All showcase projects built with{" "}
-            <span className="text-amber-400 font-semibold">Claude Max</span>{" "}
-            ($100/mo) — unlimited tasks at zero per-token cost. Bring your own
-            API key on any plan for pay-as-you-go pricing.
+            Every showcase project powered by{" "}
+            <span className="text-emerald-400 font-semibold">Anthropic</span>.
+            Bring your own Anthropic account — WorkerMill handles the rest.
           </p>
         </div>
 

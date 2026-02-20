@@ -17,7 +17,6 @@ import {
   Users,
   AlertTriangle,
   UserPlus,
-  Mail,
   Trash2,
   Send,
   X,
@@ -29,7 +28,6 @@ import {
   ChevronRight,
   Bell,
   Shield,
-  Zap,
   Github,
   Router,
 } from "lucide-react";
@@ -117,7 +115,7 @@ export default function Settings() {
     perTaskCostCeilingUsd: null,
     scmProvider: "github",
     scmBaseUrl: null,
-    issueTrackerProvider: "jira",
+    issueTrackerProvider: "internal",
     completedTaskDisplayMinutes: 10,
     intermediateTaskDisplayMinutes: 60,
     dryRunVisibilityMinutes: 1,
@@ -465,7 +463,7 @@ export default function Settings() {
         },
         scmProvider: data.scmProvider || "github",
         scmBaseUrl: data.scmBaseUrl ?? null,
-        issueTrackerProvider: data.issueTrackerProvider || "jira",
+        issueTrackerProvider: data.issueTrackerProvider || "internal",
         autoReviewEnabled: data.autoReviewEnabled ?? false,
         autoDeployEnabled: data.autoDeployEnabled ?? false,
         autoSkillExtraction: isOrgFree ? false : (data.autoSkillExtraction ?? true),
@@ -1939,12 +1937,6 @@ export default function Settings() {
   const isCurrentUserAdmin = currentUser?.role === "admin" || currentUser?.role === "owner";
 
   // Helpers
-  const formatCooldownDisplay = (seconds: number): string => {
-    if (seconds < 60) return `${seconds} seconds`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes`;
-    return `${Math.floor(seconds / 3600)} hours`;
-  };
-
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   };
@@ -1961,18 +1953,18 @@ export default function Settings() {
   // Get summaries for collapsed sections
   const getWorkersSummary = () => {
     const provider = PROVIDER_OPTIONS.find((p) => p.value === settings.primaryProvider)?.label.split(" ")[0] || "Anthropic";
-    const model = currentModels.find((m) => m.value === settings.defaultWorkerModel)?.label || "Haiku";
+    const model = currentModels.find((m) => m.value === settings.defaultWorkerModel)?.label || "Sonnet 4.6";
     return `${provider} ${model}`;
   };
 
   const getExecutionSummary = () => {
-    return `${settings.maxConcurrentWorkers} workers, ${settings.maxParallelExperts} experts, ${formatCooldownDisplay(settings.taskCooldownSeconds)} cooldown`;
+    return `${settings.maxConcurrentWorkers} container${settings.maxConcurrentWorkers !== 1 ? "s" : ""}, ${settings.maxParallelExperts} experts`;
   };
 
   const getManagerSummary = () => {
-    const provider = PROVIDER_OPTIONS.find((p) => p.value === settings.managerProvider)?.label.split(" ")[0] || "OpenAI";
+    const provider = PROVIDER_OPTIONS.find((p) => p.value === settings.managerProvider)?.label.split(" ")[0] || "Anthropic";
     const models = MODEL_OPTIONS[settings.managerProvider] || MODEL_OPTIONS.anthropic;
-    const model = models.find((m) => m.value === settings.managerModelId)?.label || "GPT-5.1";
+    const model = models.find((m) => m.value === settings.managerModelId)?.label || "Opus 4.6";
     return `${provider} ${model}`;
   };
 

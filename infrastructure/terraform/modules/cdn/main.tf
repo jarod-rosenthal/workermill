@@ -89,6 +89,11 @@ function handler(event) {
     return request;
   }
 
+  // Don't rewrite agent binary/installer paths (served directly from S3)
+  if (uri.startsWith('/agent/')) {
+    return request;
+  }
+
   // Don't rewrite paths with file extensions (static assets)
   if (uri.match(/\.[a-zA-Z0-9]+$/)) {
     return request;

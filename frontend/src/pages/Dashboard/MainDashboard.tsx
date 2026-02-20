@@ -55,6 +55,7 @@ import {
   LayoutGrid,
   FileCode,
   ArrowRight,
+  Crown,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../../components/RalphProgress";
 import type { PlanningProgressData } from "../../components/PlanningProgress";
@@ -243,7 +244,7 @@ export default function Dashboard() {
 
   // Action buttons state
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
-  const [taskSource, setTaskSource] = useState<"external" | "internal">("external");
+  const [taskSource, setTaskSource] = useState<"external" | "internal">(isFreePlan ? "internal" : "external");
   const [createTaskForm, setCreateTaskForm] = useState({
     jiraIssueKey: "",
     workerPersona: "", // Empty = auto/dynamic routing (Epic/Multi-Provider modes)
@@ -2199,10 +2200,13 @@ export default function Dashboard() {
               <span className="text-sm font-semibold text-red-500">{data?.stats.periodFailed || 0}</span>
               <span className="text-xs text-muted-foreground">Failed</span>
             </div>
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/20">
+            <div
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/20"
+              title="Estimated API token cost — actual billing depends on your authentication method (e.g., Claude Max subscription has no per-token charges)"
+            >
               <DollarSign className="w-4 h-4 text-accent" />
-              <span className="text-sm font-semibold text-accent">${formatCost(data?.stats.cumulativeCost)}</span>
-              <span className="text-xs text-muted-foreground">Cost</span>
+              <span className="text-sm font-semibold text-accent">~${formatCost(data?.stats.cumulativeCost)}</span>
+              <span className="text-xs text-muted-foreground">Est.</span>
             </div>
           </div>
 
@@ -2470,29 +2474,33 @@ export default function Dashboard() {
               <div className="flex items-center gap-2">
                 {/* Local Mode Toggle - auto-detects remote agent, shows connection status */}
                 {(() => {
-                  const isEffectivelyLocal = remoteAgentOnly || (hasRemoteAgent && remoteAgentOnline);
-                  const connectionLost = hasRemoteAgent && !remoteAgentOnline && !remoteAgentOnly;
-                  const label = connectionLost
-                    ? "Local (Disconnected)"
-                    : isEffectivelyLocal
-                      ? "Local ON"
-                      : "Local OFF";
+                  const isEffectivelyLocal = isFreePlan || remoteAgentOnly || (hasRemoteAgent && remoteAgentOnline);
+                  const connectionLost = !isFreePlan && hasRemoteAgent && !remoteAgentOnline && !remoteAgentOnly;
+                  const label = isFreePlan
+                    ? "Local ON"
+                    : connectionLost
+                      ? "Local (Disconnected)"
+                      : isEffectivelyLocal
+                        ? "Local ON"
+                        : "Local OFF";
                   const colorClass = connectionLost
                     ? "bg-red-500/20 text-red-400 border border-red-500/50"
                     : isEffectivelyLocal
                       ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/50"
                       : "bg-muted/50 text-muted-foreground border border-border hover:border-cyan-500/30";
-                  const title = connectionLost
-                    ? `Remote agent ${remoteAgentHostname || "unknown"} is offline — last heartbeat stale`
-                    : isEffectivelyLocal
-                      ? `Local mode: tasks run on remote agent${remoteAgentHostname ? ` (${remoteAgentHostname})` : ""}`
-                      : "No remote agent connected — tasks run on cloud ECS";
+                  const title = isFreePlan
+                    ? "Local mode — tasks run on your remote agent"
+                    : connectionLost
+                      ? `Remote agent ${remoteAgentHostname || "unknown"} is offline — last heartbeat stale`
+                      : isEffectivelyLocal
+                        ? `Local mode: tasks run on remote agent${remoteAgentHostname ? ` (${remoteAgentHostname})` : ""}`
+                        : "No remote agent connected — tasks run on cloud ECS";
 
                   return (
                     <button
-                      onClick={toggleLocalMode}
-                      disabled={autoToggleLoading === "localMode"}
-                      className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${colorClass} ${autoToggleLoading === "localMode" ? "opacity-50 cursor-not-allowed" : ""}`}
+                      onClick={isFreePlan ? undefined : toggleLocalMode}
+                      disabled={isFreePlan || autoToggleLoading === "localMode"}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${colorClass} ${isFreePlan || autoToggleLoading === "localMode" ? "opacity-50 cursor-not-allowed" : ""}`}
                       title={title}
                     >
                       {autoToggleLoading === "localMode" ? (
@@ -2509,69 +2517,81 @@ export default function Dashboard() {
 
                 {/* PR-Review Toggle */}
                 <button
-                  onClick={toggleAutoReview}
-                  disabled={autoToggleLoading === "review"}
+                  onClick={isFreePlan ? undefined : toggleAutoReview}
+                  disabled={isFreePlan || autoToggleLoading === "review"}
                   className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                    autoReviewEnabled
+                    isFreePlan || autoReviewEnabled
                       ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/50"
                       : "bg-muted/50 text-muted-foreground border border-border hover:border-indigo-500/30"
-                  } ${autoToggleLoading === "review" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  title={autoReviewEnabled ? "AI PR review enabled for all tasks" : "Click to enable AI PR review"}
+                  } ${isFreePlan || autoToggleLoading === "review" ? "opacity-50 cursor-not-allowed" : ""}`}
+                  title={isFreePlan ? "PR-Review is always enabled on Free plan" : autoReviewEnabled ? "AI PR review enabled for all tasks" : "Click to enable AI PR review"}
                 >
                   {autoToggleLoading === "review" ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   ) : (
                     <Eye className="w-3.5 h-3.5" />
                   )}
-                  PR-Review {autoReviewEnabled ? "ON" : "OFF"}
+                  PR-Review {isFreePlan ? "ON" : autoReviewEnabled ? "ON" : "OFF"}
                 </button>
 
                 {/* Auto-Deploy Toggle */}
                 <button
-                  onClick={toggleAutoDeploy}
-                  disabled={autoToggleLoading === "deploy"}
+                  onClick={isFreePlan ? undefined : toggleAutoDeploy}
+                  disabled={isFreePlan || autoToggleLoading === "deploy"}
                   className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                    autoDeployEnabled
-                      ? "bg-green-500/20 text-green-400 border border-green-500/50"
-                      : "bg-muted/50 text-muted-foreground border border-border hover:border-green-500/30"
+                    isFreePlan
+                      ? "bg-muted/50 text-muted-foreground border border-border cursor-not-allowed"
+                      : autoDeployEnabled
+                        ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                        : "bg-muted/50 text-muted-foreground border border-border hover:border-green-500/30"
                   } ${autoToggleLoading === "deploy" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  title={autoDeployEnabled ? "Auto-deploy enabled for all tasks" : "Click to enable auto-deploy"}
+                  title={isFreePlan ? "Auto-deploy requires Pro plan" : autoDeployEnabled ? "Auto-deploy enabled for all tasks" : "Click to enable auto-deploy"}
                 >
                   {autoToggleLoading === "deploy" ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   ) : (
                     <Rocket className="w-3.5 h-3.5" />
                   )}
-                  Deploy {autoDeployEnabled ? "ON" : "OFF"}
+                  Deploy {isFreePlan ? "OFF" : autoDeployEnabled ? "ON" : "OFF"}
+                  {isFreePlan && <Crown className="w-3 h-3 text-amber-400" />}
                 </button>
 
                 {/* Anneal Toggle */}
                 <button
-                  onClick={toggleAutoImprove}
-                  disabled={autoToggleLoading === "improve"}
+                  onClick={isFreePlan ? undefined : toggleAutoImprove}
+                  disabled={isFreePlan || autoToggleLoading === "improve"}
                   className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                    autoImproveEnabled
-                      ? "bg-amber-500/20 text-amber-400 border border-amber-500/50"
-                      : "bg-muted/50 text-muted-foreground border border-border hover:border-amber-500/30"
+                    isFreePlan
+                      ? "bg-muted/50 text-muted-foreground border border-border cursor-not-allowed"
+                      : autoImproveEnabled
+                        ? "bg-amber-500/20 text-amber-400 border border-amber-500/50"
+                        : "bg-muted/50 text-muted-foreground border border-border hover:border-amber-500/30"
                   } ${autoToggleLoading === "improve" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  title={autoImproveEnabled ? "Anneal enabled - iteratively refines and improves WorkerMill" : "Click to enable annealing"}
+                  title={isFreePlan ? "Anneal requires Pro plan" : autoImproveEnabled ? "Anneal enabled - iteratively refines and improves WorkerMill" : "Click to enable annealing"}
                 >
                   {autoToggleLoading === "improve" ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   ) : (
                     <Sparkles className="w-3.5 h-3.5" />
                   )}
-                  Anneal {autoImproveEnabled ? "ON" : "OFF"}
+                  Anneal {isFreePlan ? "OFF" : autoImproveEnabled ? "ON" : "OFF"}
+                  {isFreePlan && <Crown className="w-3 h-3 text-amber-400" />}
                 </button>
 
                 {/* Search Button */}
                 <button
-                  onClick={() => setIsLogSearchOpen(true)}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-background hover:bg-muted/50 border border-border/50 rounded-lg text-muted-foreground hover:text-foreground transition-colors text-sm"
-                  title="Search all task logs"
+                  onClick={isFreePlan ? undefined : () => setIsLogSearchOpen(true)}
+                  disabled={isFreePlan}
+                  className={`flex items-center gap-2 px-3 py-1.5 bg-background border border-border/50 rounded-lg text-sm transition-colors ${
+                    isFreePlan
+                      ? "text-muted-foreground/50 cursor-not-allowed"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  }`}
+                  title={isFreePlan ? "Search requires Pro plan" : "Search all task logs"}
                 >
                   <Search className="w-4 h-4" />
                   <span>Search tasks and logs...</span>
+                  {isFreePlan && <Crown className="w-3 h-3 text-amber-400" />}
                 </button>
               </div>
             </div>
@@ -2776,8 +2796,8 @@ export default function Dashboard() {
                               }`}
                               title={
                                 task.costCeilingPercent
-                                  ? `${task.costCeilingPercent.toFixed(0)}% of cost ceiling`
-                                  : "Estimated cost"
+                                  ? `~${task.costCeilingPercent.toFixed(0)}% of cost ceiling (estimated API token equivalent)`
+                                  : "Estimated API token equivalent — not actual billing"
                               }
                             >
                               {task.costCeilingPercent && task.costCeilingPercent >= 80 ? (
@@ -3476,7 +3496,7 @@ export default function Dashboard() {
                   <th className="text-left p-3">Model</th>
                   <th className="text-left p-3">Links</th>
                   <th className="text-left p-3">Retries</th>
-                  <th className="text-left p-3">Cost</th>
+                  <th className="text-left p-3" title="Estimated API token equivalent — actual cost depends on your auth method">Est. Cost</th>
                   <th className="text-left p-3">Quality</th>
                   <th className="text-left p-3">Actions</th>
                 </tr>
@@ -3645,8 +3665,8 @@ export default function Dashboard() {
                           {task.retryCount ?? 0}/3
                         </td>
                         {/* Cost */}
-                        <td className="p-3 text-sm font-medium">
-                          {`$${formatCost(task.costUsd)}`}
+                        <td className="p-3 text-sm font-medium" title="Estimated API token equivalent">
+                          {`~$${formatCost(task.costUsd)}`}
                         </td>
                         {/* Quality */}
                         <td className="p-3 text-sm">
@@ -3930,13 +3950,16 @@ export default function Dashboard() {
                           </span>
                         </div>
                         <div className="text-center py-2">
-                          <span className="text-muted-foreground text-sm">Estimated Cost:</span>
+                          <span className="text-muted-foreground text-sm">Estimated Token Cost:</span>
                           <div className="font-bold text-xl text-green-400">
-                            ${costEstimate.costRange.min.toFixed(2)} - ${costEstimate.costRange.max.toFixed(2)}
+                            ~${costEstimate.costRange.min.toFixed(2)} - ${costEstimate.costRange.max.toFixed(2)}
                           </div>
                         </div>
                         <p className="text-xs text-muted-foreground mt-1 text-center">
                           {costEstimate.tierDescription}
+                        </p>
+                        <p className="text-xs text-muted-foreground/70 mt-2 text-center italic">
+                          Based on API token pricing. If using Claude Max or a subscription plan, your actual cost may differ.
                         </p>
                       </div>
                     )}

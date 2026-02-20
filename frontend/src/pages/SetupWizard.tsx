@@ -203,10 +203,17 @@ function IssueTrackerStep({ onNext, onBack }: StepProps) {
 
   return (
     <div className="space-y-6">
+      {/* Internal board notice */}
+      <div className="p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+        <p className="text-sm text-foreground">
+          WorkerMill includes a built-in board for tracking tasks. You can skip this step and use the internal board, or connect an external tracker below.
+        </p>
+      </div>
+
       {/* Provider Selection */}
       <div className="space-y-3">
         <label className="text-sm font-medium text-muted-foreground">
-          Issue Tracker
+          External Issue Tracker (Optional)
         </label>
         <div className="grid grid-cols-2 gap-3">
           <button
@@ -370,7 +377,7 @@ function IssueTrackerStep({ onNext, onBack }: StepProps) {
         </Button>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleSkip} disabled={loading}>
-            Skip for now
+            Use Internal Board
           </Button>
           {!testSuccess ? (
             <Button
@@ -998,7 +1005,7 @@ const steps = [
   {
     id: "issue-tracker",
     title: "Issue Tracker",
-    description: "Connect Jira or Linear",
+    description: "Optional — connect Jira or Linear",
     icon: Ticket,
   },
   {

@@ -112,70 +112,110 @@ export function AIWorkersSection({
             defaultOpen={false}
           >
             <div className="space-y-6">
-              {/* Provider Selection */}
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-3">
-                  Primary Provider
-                  {isFreePlan && <span className="ml-2 text-xs text-amber-400">(Anthropic only on Free)</span>}
-                </label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {PROVIDER_OPTIONS.map((provider) => (
-                    <button
-                      key={provider.value}
-                      onClick={() => {
-                        if (isFreePlan && provider.value !== "anthropic") return;
-                        updateSetting("primaryProvider", provider.value);
-                        const newProviderModels = MODEL_OPTIONS[provider.value];
-                        if (newProviderModels && !newProviderModels.find((m) => m.value === settings.defaultWorkerModel)) {
-                          updateSetting("defaultWorkerModel", newProviderModels[0].value);
-                        }
-                      }}
-                      disabled={isFreePlan && provider.value !== "anthropic"}
-                      className={`p-3 rounded-lg border-2 transition-all ${
-                        settings.primaryProvider === provider.value
-                          ? "border-primary bg-primary/10"
-                          : isFreePlan && provider.value !== "anthropic"
-                            ? "border-border bg-background/50 opacity-40 cursor-not-allowed"
-                            : "border-border bg-background/50 hover:border-primary/50"
-                      }`}
-                    >
-                      <div className="text-2xl mb-1">{provider.icon}</div>
-                      <div className="text-xs font-medium">{provider.label}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {isFreePlan ? (
+                <>
+                  {/* Free tier: Anthropic only, no provider picker */}
+                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary/5 border border-primary/20">
+                    <span className="text-2xl">🤖</span>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Provider: Anthropic</p>
+                      <p className="text-xs text-muted-foreground">Free plan uses Anthropic models. <Link to="/pricing" className="text-primary hover:underline">Upgrade to Pro</Link> for more providers.</p>
+                    </div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="block text-sm font-medium text-muted-foreground mb-2">Default Model</label>
+                      <select
+                        value={settings.defaultWorkerModel}
+                        onChange={(e) => updateSetting("defaultWorkerModel", e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
+                      >
+                        {(MODEL_OPTIONS.anthropic || []).map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label} ({option.tier})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-muted-foreground mb-2">Default Persona</label>
+                      <select
+                        value={settings.defaultWorkerPersona}
+                        onChange={(e) => updateSetting("defaultWorkerPersona", e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
+                      >
+                        {PERSONA_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Pro/Enterprise: full provider picker */}
+                  <div>
+                    <label className="block text-sm font-medium text-muted-foreground mb-3">
+                      Primary Provider
+                    </label>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {PROVIDER_OPTIONS.map((provider) => (
+                        <button
+                          key={provider.value}
+                          onClick={() => {
+                            updateSetting("primaryProvider", provider.value);
+                            const newProviderModels = MODEL_OPTIONS[provider.value];
+                            if (newProviderModels && !newProviderModels.find((m) => m.value === settings.defaultWorkerModel)) {
+                              updateSetting("defaultWorkerModel", newProviderModels[0].value);
+                            }
+                          }}
+                          className={`p-3 rounded-lg border-2 transition-all ${
+                            settings.primaryProvider === provider.value
+                              ? "border-primary bg-primary/10"
+                              : "border-border bg-background/50 hover:border-primary/50"
+                          }`}
+                        >
+                          <div className="text-2xl mb-1">{provider.icon}</div>
+                          <div className="text-xs font-medium">{provider.label}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">Default Model</label>
-                  <select
-                    value={settings.defaultWorkerModel}
-                    onChange={(e) => updateSetting("defaultWorkerModel", e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
-                  >
-                    {currentModels.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label} ({option.tier})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">Default Persona</label>
-                  <select
-                    value={settings.defaultWorkerPersona}
-                    onChange={(e) => updateSetting("defaultWorkerPersona", e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
-                  >
-                    {PERSONA_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="block text-sm font-medium text-muted-foreground mb-2">Default Model</label>
+                      <select
+                        value={settings.defaultWorkerModel}
+                        onChange={(e) => updateSetting("defaultWorkerModel", e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
+                      >
+                        {currentModels.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label} ({option.tier})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-muted-foreground mb-2">Default Persona</label>
+                      <select
+                        value={settings.defaultWorkerPersona}
+                        onChange={(e) => updateSetting("defaultWorkerPersona", e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
+                      >
+                        {PERSONA_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </CollapsibleSection>
 
@@ -188,54 +228,74 @@ export function AIWorkersSection({
             summary={getManagerSummary()}
           >
             <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">
-                    Provider
-                    {isFreePlan && <span className="ml-2 text-xs text-amber-400">(Anthropic only on Free)</span>}
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {PROVIDER_OPTIONS.map((provider) => (
-                      <button
-                        key={provider.value}
-                        onClick={() => {
-                          if (isFreePlan && provider.value !== "anthropic") return;
-                          updateSetting("managerProvider", provider.value);
-                          const newProviderModels = MODEL_OPTIONS[provider.value];
-                          if (newProviderModels && !newProviderModels.find((m) => m.value === settings.managerModelId)) {
-                            updateSetting("managerModelId", newProviderModels[0].value);
-                          }
-                        }}
-                        disabled={isFreePlan && provider.value !== "anthropic"}
-                        className={`p-3 rounded-lg border-2 transition-all ${
-                          settings.managerProvider === provider.value
-                            ? "border-indigo-500 bg-indigo-500/10"
-                            : isFreePlan && provider.value !== "anthropic"
-                              ? "border-border bg-background/50 opacity-40 cursor-not-allowed"
+              {isFreePlan ? (
+                <>
+                  {/* Free tier: Anthropic only */}
+                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-indigo-500/5 border border-indigo-500/20">
+                    <span className="text-2xl">🤖</span>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Provider: Anthropic</p>
+                      <p className="text-xs text-muted-foreground">Free plan uses Anthropic models. <Link to="/pricing" className="text-primary hover:underline">Upgrade to Pro</Link> for more providers.</p>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
+                    <select
+                      value={settings.managerModelId}
+                      onChange={(e) => updateSetting("managerModelId", e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-indigo-500/50 focus:outline-none transition-all"
+                    >
+                      {(MODEL_OPTIONS.anthropic || []).map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label} ({option.tier})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-muted-foreground mb-2">Provider</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {PROVIDER_OPTIONS.map((provider) => (
+                        <button
+                          key={provider.value}
+                          onClick={() => {
+                            updateSetting("managerProvider", provider.value);
+                            const newProviderModels = MODEL_OPTIONS[provider.value];
+                            if (newProviderModels && !newProviderModels.find((m) => m.value === settings.managerModelId)) {
+                              updateSetting("managerModelId", newProviderModels[0].value);
+                            }
+                          }}
+                          className={`p-3 rounded-lg border-2 transition-all ${
+                            settings.managerProvider === provider.value
+                              ? "border-indigo-500 bg-indigo-500/10"
                               : "border-border hover:border-indigo-500/50"
-                        }`}
-                      >
-                        <div className="text-lg">{provider.icon}</div>
-                        <div className="text-xs font-medium mt-1">{provider.label.split(" ")[0]}</div>
-                      </button>
-                    ))}
+                          }`}
+                        >
+                          <div className="text-lg">{provider.icon}</div>
+                          <div className="text-xs font-medium mt-1">{provider.label.split(" ")[0]}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
+                    <select
+                      value={settings.managerModelId}
+                      onChange={(e) => updateSetting("managerModelId", e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-indigo-500/50 focus:outline-none transition-all"
+                    >
+                      {(MODEL_OPTIONS[settings.managerProvider] || MODEL_OPTIONS.anthropic).map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label} ({option.tier})
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
-                  <select
-                    value={settings.managerModelId}
-                    onChange={(e) => updateSetting("managerModelId", e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-indigo-500/50 focus:outline-none transition-all"
-                  >
-                    {(MODEL_OPTIONS[settings.managerProvider] || MODEL_OPTIONS.anthropic).map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label} ({option.tier})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+              )}
               {/* Max Review Revisions (Circuit Breaker) */}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-2">
@@ -304,90 +364,114 @@ export function AIWorkersSection({
               {/* Planning Mode Toggle */}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-3">Planning Mode</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => { if (!isFreePlan) updateSetting("planningMode", "strict"); }}
-                    disabled={isFreePlan}
-                    className={`p-3 rounded-lg border-2 transition-all text-left ${
-                      settings.planningMode !== "simplified"
-                        ? "border-purple-500 bg-purple-500/10"
-                        : isFreePlan
-                          ? "border-border bg-background/50 opacity-40 cursor-not-allowed"
-                          : "border-border bg-background/50 hover:border-purple-500/50"
-                    }`}
-                  >
-                    <div className="text-sm font-medium text-foreground flex items-center gap-2">
-                      Strict
-                      {isFreePlan && <ProBadge />}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Full planner-critic loop — plan must score 85+ to proceed (up to 3 attempts)
-                    </p>
-                  </button>
-                  <button
-                    onClick={() => updateSetting("planningMode", "simplified")}
-                    className={`p-3 rounded-lg border-2 transition-all text-left ${
-                      settings.planningMode === "simplified"
-                        ? "border-purple-500 bg-purple-500/10"
-                        : "border-border bg-background/50 hover:border-purple-500/50"
-                    }`}
-                  >
+                {isFreePlan ? (
+                  <div className="p-3 rounded-lg border-2 border-purple-500 bg-purple-500/10 text-left">
                     <div className="text-sm font-medium text-foreground">Simplified</div>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Single planning pass — critic feedback is incorporated but never blocks
+                      Single planning pass — critic feedback is incorporated but never blocks.{" "}
+                      <Link to="/pricing" className="text-primary hover:underline">Upgrade to Pro</Link> for Strict mode.
                     </p>
-                  </button>
-                </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => updateSetting("planningMode", "strict")}
+                      className={`p-3 rounded-lg border-2 transition-all text-left ${
+                        settings.planningMode !== "simplified"
+                          ? "border-purple-500 bg-purple-500/10"
+                          : "border-border bg-background/50 hover:border-purple-500/50"
+                      }`}
+                    >
+                      <div className="text-sm font-medium text-foreground">Strict</div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Full planner-critic loop — plan must score 85+ to proceed (up to 3 attempts)
+                      </p>
+                    </button>
+                    <button
+                      onClick={() => updateSetting("planningMode", "simplified")}
+                      className={`p-3 rounded-lg border-2 transition-all text-left ${
+                        settings.planningMode === "simplified"
+                          ? "border-purple-500 bg-purple-500/10"
+                          : "border-border bg-background/50 hover:border-purple-500/50"
+                      }`}
+                    >
+                      <div className="text-sm font-medium text-foreground">Simplified</div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Single planning pass — critic feedback is incorporated but never blocks
+                      </p>
+                    </button>
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">
-                    Provider
-                    {isFreePlan && <span className="ml-2 text-xs text-amber-400">(Anthropic only on Free)</span>}
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {PROVIDER_OPTIONS.map((provider) => (
-                      <button
-                        key={provider.value}
-                        onClick={() => {
-                          if (isFreePlan && provider.value !== "anthropic") return;
-                          updateSetting("planningAgentProvider", provider.value);
-                          const newProviderModels = MODEL_OPTIONS[provider.value];
-                          if (newProviderModels && !newProviderModels.find((m) => m.value === settings.planningAgentModel)) {
-                            updateSetting("planningAgentModel", newProviderModels[0].value);
-                          }
-                        }}
-                        disabled={isFreePlan && provider.value !== "anthropic"}
-                        className={`p-3 rounded-lg border-2 transition-all ${
-                          settings.planningAgentProvider === provider.value
-                            ? "border-purple-500 bg-purple-500/10"
-                            : isFreePlan && provider.value !== "anthropic"
-                              ? "border-border bg-background/50 opacity-40 cursor-not-allowed"
+              {isFreePlan ? (
+                <>
+                  {/* Free tier: Anthropic only */}
+                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-purple-500/5 border border-purple-500/20">
+                    <span className="text-2xl">🤖</span>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Provider: Anthropic</p>
+                      <p className="text-xs text-muted-foreground">Free plan uses Anthropic models. <Link to="/pricing" className="text-primary hover:underline">Upgrade to Pro</Link> for more providers.</p>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
+                    <select
+                      value={settings.planningAgentModel}
+                      onChange={(e) => updateSetting("planningAgentModel", e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none transition-all"
+                    >
+                      {(MODEL_OPTIONS.anthropic || []).map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label} ({option.tier})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-muted-foreground mb-2">Provider</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {PROVIDER_OPTIONS.map((provider) => (
+                        <button
+                          key={provider.value}
+                          onClick={() => {
+                            updateSetting("planningAgentProvider", provider.value);
+                            const newProviderModels = MODEL_OPTIONS[provider.value];
+                            if (newProviderModels && !newProviderModels.find((m) => m.value === settings.planningAgentModel)) {
+                              updateSetting("planningAgentModel", newProviderModels[0].value);
+                            }
+                          }}
+                          className={`p-3 rounded-lg border-2 transition-all ${
+                            settings.planningAgentProvider === provider.value
+                              ? "border-purple-500 bg-purple-500/10"
                               : "border-border hover:border-purple-500/50"
-                        }`}
-                      >
-                        <div className="text-lg">{provider.icon}</div>
-                        <div className="text-xs font-medium mt-1">{provider.label.split(" ")[0]}</div>
-                      </button>
-                    ))}
+                          }`}
+                        >
+                          <div className="text-lg">{provider.icon}</div>
+                          <div className="text-xs font-medium mt-1">{provider.label.split(" ")[0]}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
+                    <select
+                      value={settings.planningAgentModel}
+                      onChange={(e) => updateSetting("planningAgentModel", e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none transition-all"
+                    >
+                      {(MODEL_OPTIONS[settings.planningAgentProvider] || MODEL_OPTIONS.anthropic).map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label} ({option.tier})
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
-                  <select
-                    value={settings.planningAgentModel}
-                    onChange={(e) => updateSetting("planningAgentModel", e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none transition-all"
-                  >
-                    {(MODEL_OPTIONS[settings.planningAgentProvider] || MODEL_OPTIONS.anthropic).map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label} ({option.tier})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-2">
                   Story Calibration Multiplier

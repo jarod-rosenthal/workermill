@@ -28,6 +28,7 @@ import {
   installAgent,
   startAgentProcess,
   stopAgentProcess,
+  waitForAgentReady,
 } from "./agent-installer";
 import { signUpWithGitHub, signInWithGitHub, enterApiKey } from "./github-onboard";
 
@@ -783,8 +784,20 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       if (!client.isConnected()) {
         startAgentProcess(log);
-        client.connect();
-        vscode.window.showInformationMessage("WorkerMill agent starting...");
+        const port = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "Connecting to WorkerMill agent...",
+          },
+          () => waitForAgentReady(log),
+        );
+        if (port) {
+          client.connect();
+        } else {
+          vscode.window.showWarningMessage(
+            "Agent didn't start. Check Output > WorkerMill for details.",
+          );
+        }
       }
     }),
 

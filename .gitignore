@@ -64,3 +64,13 @@ data/dumps/
 .terraform.lock.hcl
 __pycache__/
 .aider*
+
+# VSIX build artifacts
+*.vsix
+
+# Playwright MCP
+.playwright-mcp/
+
+# Misc artifacts
+*.png
+swebench_predictions.jsonl

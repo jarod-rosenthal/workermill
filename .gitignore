@@ -46,6 +46,8 @@ tfplan
 *.tfplan
 crash.log
 crash.*.log
+infrastructure/terraform/modules/cognito-presignup/lambda/layer/
+infrastructure/terraform/modules/cognito-presignup/lambda/*.zip
 
 # Docker
 .docker/

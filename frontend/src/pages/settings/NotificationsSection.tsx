@@ -138,7 +138,7 @@ export function NotificationsSection({
                     </div>
                     <input
                       type="checkbox"
-                      checked={userEmailPreferences.costAlerts ?? true}
+                      checked={userEmailPreferences.costAlerts ?? false}
                       onChange={(e) => updateUserEmailPref("costAlerts", e.target.checked)}
                       className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
                     />
@@ -297,7 +297,7 @@ export function NotificationsSection({
                       </div>
                       <input
                         type="checkbox"
-                        checked={settings.defaultEmailPreferences.costAlerts ?? true}
+                        checked={settings.defaultEmailPreferences.costAlerts ?? false}
                         onChange={(e) => updateSetting("defaultEmailPreferences", {
                           ...settings.defaultEmailPreferences,
                           costAlerts: e.target.checked,

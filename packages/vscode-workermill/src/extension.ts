@@ -779,11 +779,8 @@ export function activate(context: vscode.ExtensionContext): void {
   log(`Agent binary: ${getAgentBinaryPath()}`);
   log(`Agent installed: ${installed}, configured: ${configured}`);
   treeProvider.agentConfigured = configured;
-  vscode.commands.executeCommand(
-    "setContext",
-    "workermill.agentConfigured",
-    configured,
-  );
+  vscode.commands.executeCommand("setContext", "workermill.agentConfigured", configured);
+  vscode.commands.executeCommand("setContext", "workermill.agentConnected", false);
 
   // Auto-start agent if installed and configured, otherwise let welcome view guide user
   if (installed && configured) {
@@ -799,10 +796,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
   client.on("connected", (status) => {
     log(`Connected to agent ${status.agentId} (v${status.version})`);
+    vscode.commands.executeCommand("setContext", "workermill.agentConnected", true);
   });
 
   client.on("disconnected", () => {
     log("Agent disconnected — will retry in 5s");
+    vscode.commands.executeCommand("setContext", "workermill.agentConnected", false);
   });
 }
 

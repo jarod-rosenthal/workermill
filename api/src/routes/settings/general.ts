@@ -314,58 +314,56 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     // Validate and update Data Management settings
     if (logRetentionDays !== undefined) {
-      const days = parseInt(logRetentionDays, 10);
+      let days = parseInt(logRetentionDays, 10);
       if (isNaN(days) || (days !== -1 && (days < 1 || days > 90))) {
         res.status(400).json({ error: "logRetentionDays must be between 1 and 90 (or -1 for unlimited)" });
         return;
       }
-      // Free tier: max 7 days
+      // Free tier: silently clamp to 7 days (existing DB values may exceed limit)
       if (org.plan === "free" && days > 7) {
-        res.status(403).json({ error: "Free plan log retention is limited to 7 days. Upgrade to Pro for up to 90 days." });
-        return;
+        days = 7;
       }
       org.logRetentionDays = days;
     }
 
     if (taskRetentionDays !== undefined) {
-      const days = parseInt(taskRetentionDays, 10);
+      let days = parseInt(taskRetentionDays, 10);
       if (isNaN(days) || (days !== -1 && (days < 1 || days > 90))) {
         res.status(400).json({ error: "taskRetentionDays must be between 1 and 90 (or -1 for unlimited)" });
         return;
       }
-      // Free tier: max 7 days
+      // Free tier: silently clamp to 7 days (existing DB values may exceed limit)
       if (org.plan === "free" && days > 7) {
-        res.status(403).json({ error: "Free plan task retention is limited to 7 days. Upgrade to Pro for up to 90 days." });
-        return;
+        days = 7;
       }
       org.taskRetentionDays = days;
     }
 
     // Validate and update Worker Settings
     if (maxConcurrentWorkers !== undefined) {
-      const max = parseInt(maxConcurrentWorkers, 10);
+      let max = parseInt(maxConcurrentWorkers, 10);
       if (isNaN(max) || max < 1 || max > 14) {
         res.status(400).json({ error: "maxConcurrentWorkers must be between 1 and 14" });
         return;
       }
       const planLimit = PLAN_MAX_WORKERS[org.plan as OrganizationPlan] ?? 1;
+      // Silently clamp to plan limit (existing DB values may exceed limit)
       if (planLimit !== -1 && max > planLimit) {
-        res.status(403).json({ error: `Your ${org.plan} plan allows up to ${planLimit} concurrent worker(s). Upgrade to Pro for more.` });
-        return;
+        max = planLimit;
       }
       org.maxConcurrentWorkers = max;
     }
 
     if (maxParallelExperts !== undefined) {
-      const max = parseInt(maxParallelExperts, 10);
+      let max = parseInt(maxParallelExperts, 10);
       if (isNaN(max) || max < 1 || max > 14) {
         res.status(400).json({ error: "maxParallelExperts must be between 1 and 14" });
         return;
       }
       const planLimit = PLAN_MAX_EXPERTS[org.plan as OrganizationPlan] ?? 3;
+      // Silently clamp to plan limit (existing DB values may exceed limit)
       if (planLimit !== -1 && max > planLimit) {
-        res.status(403).json({ error: `Your ${org.plan} plan allows up to ${planLimit} expert persona(s) per task. Upgrade to Pro for unlimited.` });
-        return;
+        max = planLimit;
       }
       org.maxParallelExperts = max;
     }

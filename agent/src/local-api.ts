@@ -35,6 +35,7 @@ export interface AgentState {
   agentId: string;
   apiUrl: string;
   uptime: number;
+  sandbox: "none" | "docker";
   tasks: LocalTaskInfo[];
 }
 
@@ -244,6 +245,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       agentId: agentConfig?.agentId || "unknown",
       apiUrl: agentConfig?.apiUrl || "unknown",
       uptime: Math.round((Date.now() - startTime) / 1000),
+      sandbox: agentConfig?.sandbox || "none",
       tasks: Array.from(localTasks.values()),
     };
     return json(res, state);

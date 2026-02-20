@@ -22,6 +22,8 @@ export interface AgentConfig {
   bitbucketToken: string;
   gitlabToken: string;
   githubReviewerToken: string;
+  sandbox: "none" | "docker";
+  dockerImage: string;
 }
 
 export interface FileConfig {
@@ -37,6 +39,8 @@ export interface FileConfig {
     gitlab: string;
     githubReviewer?: string;
   };
+  sandbox?: "docker";
+  dockerImage?: string;
   setupCompletedAt: string;
 }
 
@@ -102,6 +106,8 @@ export function loadConfigFromFile(): AgentConfig {
     bitbucketToken: fc.tokens?.bitbucket || "",
     gitlabToken: fc.tokens?.gitlab || "",
     githubReviewerToken: fc.tokens?.githubReviewer || "",
+    sandbox: fc.sandbox || "none",
+    dockerImage: fc.dockerImage || "ghcr.io/workermill/worker",
   };
 }
 
@@ -141,6 +147,7 @@ export function loadConfig(): AgentConfig {
     process.exit(1);
   }
 
+  const sandboxEnv = process.env.WORKERMILL_SANDBOX;
   return {
     apiUrl: apiUrl.replace(/\/$/, ""), // Strip trailing slash
     apiKey,
@@ -152,6 +159,8 @@ export function loadConfig(): AgentConfig {
     bitbucketToken: process.env.BITBUCKET_TOKEN || "",
     gitlabToken: process.env.GITLAB_TOKEN || "",
     githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN || "",
+    sandbox: sandboxEnv === "docker" ? "docker" : "none",
+    dockerImage: process.env.WORKERMILL_DOCKER_IMAGE || "ghcr.io/workermill/worker",
   };
 }
 
@@ -300,4 +309,16 @@ export function getSystemInfo(): {
     nodeVersion: process.version,
     claudeVersion,
   };
+}
+
+/**
+ * Check if Docker is available and running.
+ */
+export function checkDockerAvailable(): boolean {
+  try {
+    execSync("docker version", { stdio: "ignore", timeout: 10000 });
+    return true;
+  } catch {
+    return false;
+  }
 }

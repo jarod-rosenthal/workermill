@@ -15,6 +15,7 @@ import { AGENT_VERSION } from "../version.js";
 import {
   loadConfigFromFile,
   checkPrerequisites,
+  checkDockerAvailable,
   getPidFile,
   getLogFile,
   getConfigFile,
@@ -52,6 +53,24 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
   if (softFailing.length > 0) {
     for (const p of softFailing) {
       console.log(chalk.yellow(`  ⚠ ${p.name}: ${p.detail} (required for Anthropic provider)`));
+    }
+  }
+
+  // Docker sandbox pre-flight check
+  if (config.sandbox === "docker") {
+    if (!checkDockerAvailable()) {
+      console.log(chalk.red("Docker sandbox is enabled but Docker is not running."));
+      console.log("Start Docker and try again, or remove sandbox from config.");
+      process.exit(1);
+    }
+
+    // Pre-pull image at startup
+    try {
+      const { ensureImage } = await import("../docker-spawner.js");
+      await ensureImage(config);
+    } catch (err) {
+      console.log(chalk.yellow(`  ⚠ Docker image pull failed: ${err instanceof Error ? err.message : String(err)}`));
+      console.log(chalk.yellow("    Workers will attempt to pull on first task."));
     }
   }
 

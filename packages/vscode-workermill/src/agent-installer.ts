@@ -56,10 +56,12 @@ export function findClaudeCli(): string | null {
       path.join(process.env.LOCALAPPDATA || "", "Programs", "ClaudeCode", "claude.exe"),
       path.join(os.homedir(), "AppData", "Local", "Programs", "ClaudeCode", "claude.exe"),
       path.join(os.homedir(), ".local", "bin", "claude.exe"),
+      path.join(os.homedir(), ".claude", "bin", "claude.exe"),
     );
   } else {
     candidates.push(
       path.join(os.homedir(), ".local", "bin", "claude"),
+      path.join(os.homedir(), ".claude", "bin", "claude"),
       "/opt/homebrew/bin/claude",
       "/usr/local/bin/claude",
     );
@@ -74,8 +76,9 @@ export function findClaudeCli(): string | null {
 
 /**
  * Prompt the user to install Claude Code CLI if missing.
- * Offers to run the one-liner installer directly in a VS Code terminal.
- * Returns true if Claude was already installed or the user chose to install.
+ * Runs the installer in a VS Code terminal, then polls for the binary
+ * so we can confirm success and continue the setup flow.
+ * Returns true if Claude was already installed or was successfully installed.
  */
 export async function promptInstallClaudeCli(
   log?: (msg: string) => void,
@@ -106,11 +109,50 @@ export async function promptInstallClaudeCli(
 
   log?.(`Running: ${installCmd}`);
 
-  vscode.window.showInformationMessage(
-    "Installing Claude Code — once complete, run `claude` in a terminal to sign in.",
+  // Poll for the binary to appear (installer writes to known paths)
+  const found = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Waiting for Claude Code install to complete...",
+      cancellable: true,
+    },
+    async (_progress, token) => {
+      const maxWaitMs = 120_000; // 2 minutes
+      const pollMs = 3_000;
+      const start = Date.now();
+
+      while (Date.now() - start < maxWaitMs) {
+        if (token.isCancellationRequested) return false;
+        await new Promise((r) => setTimeout(r, pollMs));
+        if (findClaudeCli()) return true;
+      }
+      return false;
+    },
   );
 
-  return true;
+  if (found) {
+    log?.(`Claude Code CLI detected at: ${findClaudeCli()}`);
+    vscode.window.showInformationMessage(
+      "Claude Code installed successfully! Your WorkerMill setup is complete.",
+    );
+    return true;
+  }
+
+  // Install may have succeeded but binary is in a path we don't check,
+  // or the extension host needs a reload to pick up PATH changes
+  log?.("Claude Code CLI not detected after install — may need VS Code reload");
+  const reload = await vscode.window.showWarningMessage(
+    "Claude Code install finished but wasn't detected. You may need to reload VS Code for PATH changes to take effect.",
+    "Reload Window",
+    "Continue Anyway",
+  );
+
+  if (reload === "Reload Window") {
+    vscode.commands.executeCommand("workbench.action.reloadWindow");
+    return false; // won't reach here after reload
+  }
+
+  return true; // user chose to continue
 }
 
 /** Canonical install location used by install.sh / install.ps1 and the installer. */

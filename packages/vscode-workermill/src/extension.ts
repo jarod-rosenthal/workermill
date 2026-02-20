@@ -28,7 +28,6 @@ import {
   installAgent,
   startAgentProcess,
   stopAgentProcess,
-  promptInstallClaudeCli,
 } from "./agent-installer";
 import { signUpWithGitHub, signInWithGitHub, enterApiKey } from "./github-onboard";
 
@@ -775,12 +774,18 @@ export function activate(context: vscode.ExtensionContext): void {
         const installed = await installAgent();
         if (!installed) return;
       }
+      if (!isAgentConfigured()) {
+        // Agent binary exists but no config — guide to sign in
+        vscode.window.showInformationMessage(
+          "Agent installed but not configured. Sign in to get started.",
+        );
+        return;
+      }
       if (!client.isConnected()) {
         startAgentProcess(log);
         client.connect();
+        vscode.window.showInformationMessage("WorkerMill agent starting...");
       }
-      // Check for Claude Code CLI — required for task execution
-      await promptInstallClaudeCli(log);
     }),
 
     vscode.commands.registerCommand("workermill.openDashboard", () => {

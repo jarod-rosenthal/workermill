@@ -14,12 +14,7 @@ import * as https from "https";
 import * as crypto from "crypto";
 import { spawn, execFileSync } from "child_process";
 
-const GITHUB_REPO = "workermill/workermill";
-
-interface GHRelease {
-  tag_name: string;
-  assets: Array<{ name: string; browser_download_url: string }>;
-}
+const CDN_BASE = "https://workermill.com/agent/latest";
 
 /** Canonical install location used by install.sh / install.ps1 and the installer. */
 function getCanonicalInstallPath(): string {
@@ -177,7 +172,7 @@ function httpsDownload(
 }
 
 /**
- * Download and install the latest agent binary from GitHub Releases.
+ * Download and install the latest agent binary from the CDN.
  * Shows a VS Code progress notification with cancel support.
  */
 export async function installAgent(): Promise<boolean> {
@@ -189,27 +184,13 @@ export async function installAgent(): Promise<boolean> {
     },
     async (progress, token) => {
       try {
-        progress.report({ message: "Finding latest release..." });
+        progress.report({ message: "Checking latest version..." });
 
-        // Find latest agent release
-        const releases = await httpsGetJson<GHRelease[]>(
-          `https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=10`,
+        const manifest = await httpsGetJson<{ version: string }>(
+          "https://workermill.com/agent/latest.json",
         );
-        const release = releases.find((r) => r.tag_name.startsWith("agent-v"));
-        if (!release) {
-          vscode.window.showErrorMessage("No agent release found on GitHub.");
-          return false;
-        }
-
-        // Find matching binary asset
+        const version = manifest.version;
         const binaryName = getBinaryName();
-        const asset = release.assets.find((a) => a.name === binaryName);
-        if (!asset) {
-          vscode.window.showErrorMessage(
-            `No binary for your platform (${binaryName}) in ${release.tag_name}.`,
-          );
-          return false;
-        }
 
         if (token.isCancellationRequested) return false;
 
@@ -218,12 +199,10 @@ export async function installAgent(): Promise<boolean> {
         const installDir = path.dirname(binaryPath);
         fs.mkdirSync(installDir, { recursive: true });
 
-        // Download
-        const version = release.tag_name.replace(/^agent-v/, "");
         progress.report({ message: `Downloading v${version}...` });
 
         await httpsDownload(
-          asset.browser_download_url,
+          `${CDN_BASE}/${binaryName}`,
           binaryPath,
           (percent) => {
             progress.report({ message: `Downloading v${version}... ${percent}%` });

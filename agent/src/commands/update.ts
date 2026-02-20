@@ -16,7 +16,7 @@ export async function updateCommand(): Promise<void> {
     console.log(chalk.green("  Update complete. If the agent is running, restart it to use the new version."));
   } else {
     console.log();
-    console.error(chalk.red("  Update failed. Try downloading the latest release from https://github.com/workermill/workermill/releases"));
+    console.error(chalk.red("  Update failed. Try reinstalling: curl -fsSL https://workermill.com/install.sh | bash"));
     process.exitCode = 1;
   }
 }

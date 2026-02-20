@@ -3,7 +3,7 @@
 ***REMOVED*** Usage: curl -fsSL https://workermill.com/install.sh | bash
 set -e
 
-REPO="workermill/workermill"
+CDN_BASE="https://workermill.com/agent/latest"
 INSTALL_DIR="$HOME/.workermill/bin"
 
 ***REMOVED*** Detect platform
@@ -26,21 +26,9 @@ BINARY_NAME="workermill-agent-${PLATFORM}-${ARCH}"
 
 echo "Installing WorkerMill Agent (${PLATFORM}-${ARCH})..."
 
-***REMOVED*** Get latest release URL
-RELEASE_URL=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-  | grep "browser_download_url.*${BINARY_NAME}\"" \
-  | head -1 \
-  | cut -d '"' -f 4)
-
-if [ -z "$RELEASE_URL" ]; then
-  echo "Error: Could not find binary for ${BINARY_NAME}"
-  echo "Check https://github.com/${REPO}/releases for available binaries."
-  exit 1
-fi
-
 ***REMOVED*** Download
 mkdir -p "$INSTALL_DIR"
-curl -fsSL "$RELEASE_URL" -o "$INSTALL_DIR/workermill-agent"
+curl -fsSL "${CDN_BASE}/${BINARY_NAME}" -o "$INSTALL_DIR/workermill-agent"
 chmod +x "$INSTALL_DIR/workermill-agent"
 
 ***REMOVED*** Add to PATH

@@ -40,6 +40,32 @@ jobs:
           bun build --compile --target=bun-windows-x64 dist/entry.js --outfile dist/bin/workermill-agent-win-x64.exe
           ls -lh dist/bin/
 
+      - name: Write version manifest
+        run: |
+          VERSION="${GITHUB_REF_NAME***REMOVED***agent-v}"
+          echo "{\"version\":\"${VERSION}\",\"tag\":\"${GITHUB_REF_NAME}\"}" > agent/dist/bin/latest.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Upload to S3 CDN
+        run: |
+          aws s3 cp agent/dist/bin/workermill-agent-linux-x64 s3://workermill-dev-frontend-AWS_ACCOUNT_ID/agent/latest/workermill-agent-linux-x64 --content-type application/octet-stream
+          aws s3 cp agent/dist/bin/workermill-agent-darwin-x64 s3://workermill-dev-frontend-AWS_ACCOUNT_ID/agent/latest/workermill-agent-darwin-x64 --content-type application/octet-stream
+          aws s3 cp agent/dist/bin/workermill-agent-darwin-arm64 s3://workermill-dev-frontend-AWS_ACCOUNT_ID/agent/latest/workermill-agent-darwin-arm64 --content-type application/octet-stream
+          aws s3 cp agent/dist/bin/workermill-agent-win-x64.exe s3://workermill-dev-frontend-AWS_ACCOUNT_ID/agent/latest/workermill-agent-win-x64.exe --content-type application/octet-stream
+          aws s3 cp agent/dist/bin/latest.json s3://workermill-dev-frontend-AWS_ACCOUNT_ID/agent/latest.json --content-type application/json
+          aws s3 cp agent/install.sh s3://workermill-dev-frontend-AWS_ACCOUNT_ID/install.sh --content-type text/plain
+          aws s3 cp agent/install.ps1 s3://workermill-dev-frontend-AWS_ACCOUNT_ID/install.ps1 --content-type text/plain
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation --distribution-id CLOUDFRONT_DIST_ID --paths "/agent/*" "/install.sh" "/install.ps1"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

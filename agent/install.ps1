@@ -2,25 +2,16 @@
 ***REMOVED*** Usage: irm https://workermill.com/install.ps1 | iex
 $ErrorActionPreference = "Stop"
 
-$repo = "workermill/workermill"
+$cdnBase = "https://workermill.com/agent/latest"
 $binaryName = "workermill-agent-win-x64.exe"
 $installDir = "$env:LOCALAPPDATA\workermill\bin"
 
 Write-Host "Installing WorkerMill Agent (windows-x64)..." -ForegroundColor Cyan
 
-***REMOVED*** Get latest release
-$release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
-$asset = $release.assets | Where-Object { $_.name -eq $binaryName } | Select-Object -First 1
-
-if (-not $asset) {
-    Write-Host "Error: Could not find $binaryName in latest release." -ForegroundColor Red
-    exit 1
-}
-
 ***REMOVED*** Download
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 $outPath = Join-Path $installDir "workermill-agent.exe"
-Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $outPath
+Invoke-WebRequest -Uri "$cdnBase/$binaryName" -OutFile $outPath
 
 ***REMOVED*** Add to PATH
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")

@@ -35,8 +35,9 @@ const tiers: PricingTier[] = [
       "7-day log retention",
       "Community support",
     ],
-    cta: "Get Started Free",
-    disabled: false,
+    cta: "Coming Soon",
+    disabled: true,
+    badge: "Coming Soon",
   },
   {
     name: "Pro",

@@ -418,12 +418,19 @@ export default function Settings() {
       });
       if (!response.ok) throw new Error("Failed to load settings");
       const data = await response.json();
+      // Clamp values to plan limits (existing DB values may exceed current plan)
+      const orgPlan = organization?.plan || "free";
+      const isOrgFree = orgPlan === "free";
+      const logRetMax = isOrgFree ? 7 : 90;
+      const taskRetMax = isOrgFree ? 7 : 90;
+      const workersMax = isOrgFree ? 1 : 14;
+      const expertsMax = isOrgFree ? 3 : 14;
       const loadedSettings: Settings = {
-        logRetentionDays: data.logRetentionDays ?? 7,
-        taskRetentionDays: data.taskRetentionDays ?? 7,
-        maxConcurrentWorkers: data.maxConcurrentWorkers ?? 1,
-        maxParallelExperts: data.maxParallelExperts ?? 3,
-        defaultMaxRetries: data.defaultMaxRetries ?? 3,
+        logRetentionDays: Math.min(data.logRetentionDays ?? 7, logRetMax),
+        taskRetentionDays: Math.min(data.taskRetentionDays ?? 7, taskRetMax),
+        maxConcurrentWorkers: Math.min(data.maxConcurrentWorkers ?? 1, workersMax),
+        maxParallelExperts: Math.min(data.maxParallelExperts ?? 3, expertsMax),
+        defaultMaxRetries: Math.min(data.defaultMaxRetries ?? 3, 5),
         taskCooldownSeconds: data.taskCooldownSeconds ?? 0,
         defaultWorkerModel: data.defaultWorkerModel || "claude-sonnet-4-6",
         defaultWorkerPersona: data.defaultWorkerPersona || "backend_developer",
@@ -431,13 +438,13 @@ export default function Settings() {
         providerRouting: data.providerRouting ?? {},
         ollamaBaseUrl: data.ollamaBaseUrl ?? null,
         ollamaContextWindow: data.ollamaContextWindow ?? 65536,
-        managerProvider: data.managerProvider || "anthropic",
+        managerProvider: isOrgFree ? "anthropic" : (data.managerProvider || "anthropic"),
         managerModelId: data.managerModelId || "claude-opus-4-6",
         maxReviewRevisions: data.maxReviewRevisions ?? 3,
         maxPerStoryRevisions: data.maxPerStoryRevisions ?? 2,
-        planningAgentProvider: data.planningAgentProvider || "anthropic",
+        planningAgentProvider: isOrgFree ? "anthropic" : (data.planningAgentProvider || "anthropic"),
         planningAgentModel: data.planningAgentModel || "claude-opus-4-6",
-        planningMode: data.planningMode || "simplified",
+        planningMode: isOrgFree ? "simplified" : (data.planningMode || "simplified"),
         storyCalibrationMultiplier: data.storyCalibrationMultiplier ?? 0.4,
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
         dailyBudgetLimitUsd: data.dailyBudgetLimitUsd ?? null,
@@ -461,15 +468,15 @@ export default function Settings() {
         issueTrackerProvider: data.issueTrackerProvider || "jira",
         autoReviewEnabled: data.autoReviewEnabled ?? false,
         autoDeployEnabled: data.autoDeployEnabled ?? false,
-        autoSkillExtraction: data.autoSkillExtraction ?? true,
-        prdAutoRun: data.prdAutoRun ?? true,
+        autoSkillExtraction: isOrgFree ? false : (data.autoSkillExtraction ?? true),
+        prdAutoRun: isOrgFree ? true : (data.prdAutoRun ?? true),
         remoteAgentOnly: data.remoteAgentOnly ?? false,
         warmPoolSize: data.warmPoolSize ?? 0,
         warmPoolHoursStart: data.warmPoolHoursStart ?? 9,
         warmPoolHoursEnd: data.warmPoolHoursEnd ?? 18,
         warmPoolTimezone: data.warmPoolTimezone || "America/New_York",
         // Quality Gate settings
-        qualityGateEnabled: data.qualityGateEnabled ?? false,
+        qualityGateEnabled: isOrgFree ? false : (data.qualityGateEnabled ?? false),
         minQualityScore: data.minQualityScore ?? null,
         minTestCoveragePercent: data.minTestCoveragePercent ?? null,
         maxSecurityHighVulns: data.maxSecurityHighVulns ?? null,
@@ -840,20 +847,26 @@ export default function Settings() {
   // Validation
   const validateSettings = (): boolean => {
     const errors: ValidationErrors = {};
-    if (settings.logRetentionDays !== -1 && (settings.logRetentionDays < 1 || settings.logRetentionDays > 365)) {
-      errors.logRetentionDays = "Must be between 1 and 365 days (or -1 for unlimited)";
+    const valPlan = organization?.plan || "free";
+    const valFree = valPlan === "free";
+    const valLogMax = valFree ? 7 : 90;
+    const valTaskMax = valFree ? 7 : 90;
+    const valWorkersMax = valFree ? 1 : 14;
+    const valExpertsMax = valFree ? 3 : 14;
+    if (settings.logRetentionDays !== -1 && (settings.logRetentionDays < 1 || settings.logRetentionDays > valLogMax)) {
+      errors.logRetentionDays = `Must be between 1 and ${valLogMax} days`;
     }
-    if (settings.taskRetentionDays !== -1 && (settings.taskRetentionDays < 1 || settings.taskRetentionDays > 730)) {
-      errors.taskRetentionDays = "Must be between 1 and 730 days (or -1 for unlimited)";
+    if (settings.taskRetentionDays !== -1 && (settings.taskRetentionDays < 1 || settings.taskRetentionDays > valTaskMax)) {
+      errors.taskRetentionDays = `Must be between 1 and ${valTaskMax} days`;
     }
-    if (settings.maxConcurrentWorkers < 1 || settings.maxConcurrentWorkers > 14) {
-      errors.maxConcurrentWorkers = "Must be between 1 and 14 workers";
+    if (settings.maxConcurrentWorkers < 1 || settings.maxConcurrentWorkers > valWorkersMax) {
+      errors.maxConcurrentWorkers = `Must be between 1 and ${valWorkersMax}`;
     }
-    if (settings.maxParallelExperts < 1 || settings.maxParallelExperts > 14) {
-      errors.maxParallelExperts = "Must be between 1 and 14 experts";
+    if (settings.maxParallelExperts < 1 || settings.maxParallelExperts > valExpertsMax) {
+      errors.maxParallelExperts = `Must be between 1 and ${valExpertsMax}`;
     }
-    if (settings.defaultMaxRetries < 0 || settings.defaultMaxRetries > 10) {
-      errors.defaultMaxRetries = "Must be between 0 and 10 retries";
+    if (settings.defaultMaxRetries < 0 || settings.defaultMaxRetries > 5) {
+      errors.defaultMaxRetries = "Must be between 0 and 5 retries";
     }
     if (settings.taskCooldownSeconds < 0 || settings.taskCooldownSeconds > 86400) {
       errors.taskCooldownSeconds = "Must be between 0 and 86400 seconds";

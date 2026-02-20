@@ -28,6 +28,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - If the database appears empty or broken, **STOP and ask the user** before taking any action
 - The local Docker PostgreSQL (`workermill-local-db` on port 5433) may contain data that does NOT exist anywhere else — treat it as production-critical
 
+### DO NOT Directly INSERT into the Database to Create Board Cards
+
+**NEVER use raw SQL INSERT to create `kb_cards` rows.** The API assigns `card_number` auto-incrementing per board — raw INSERTs skip this and produce cards with no number.
+
+- **ALWAYS** use the boards API: `POST /api/boards/:boardId/cards`
+- If authentication is required, obtain a valid JWT token first (e.g., via Cognito or a test login endpoint)
+- If the API is not accessible, **ask the user** rather than bypassing it with raw SQL
+
 ### DO NOT Relax Security
 
 **NEVER, under ANY circumstances, relax, bypass, or weaken security checks:**

@@ -34,7 +34,7 @@
     "inquirer": "^9.2.0",
     "ora": "^8.0.0",
     "simple-git": "^3.20.0",
-    "zod": "^3.23.0"
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/inquirer": "^9.0.9",

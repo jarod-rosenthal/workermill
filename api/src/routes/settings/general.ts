@@ -46,6 +46,7 @@ router.get("/", async (req: Request, res: Response) => {
       // Organization Identity
       slug: org.slug,
       name: org.name,
+      apiKeyPrefix: org.apiKeyPrefix || null,
 
       // Data Management
       logRetentionDays: org.logRetentionDays,

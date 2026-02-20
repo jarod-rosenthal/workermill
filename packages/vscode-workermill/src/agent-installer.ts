@@ -387,28 +387,31 @@ export function isAgentConfigured(): boolean {
   return fs.existsSync(configPath);
 }
 
-/** Write agent config file for GitHub onboarding flow. */
+/** Write agent config file. SCM tokens come from the API at runtime, not from the extension. */
 export function writeAgentConfig(opts: {
   apiUrl: string;
   apiKey: string;
-  githubToken: string;
 }): void {
   const wmDir = path.join(os.homedir(), ".workermill");
   fs.mkdirSync(wmDir, { recursive: true });
   const configPath = path.join(wmDir, "config.json");
+
+  // Preserve existing config if present (don't clobber agent name, tokens, etc.)
+  let existing: Record<string, unknown> = {};
+  try {
+    existing = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  } catch {
+    /* no existing config */
+  }
+
   const config = {
+    ...existing,
     apiUrl: opts.apiUrl,
     apiKey: opts.apiKey,
-    agentId: crypto.randomUUID(),
-    maxWorkers: 1,
-    pollIntervalMs: 5000,
-    heartbeatIntervalMs: 30000,
-    tokens: {
-      github: opts.githubToken,
-      githubReviewer: opts.githubToken,
-      bitbucket: "",
-      gitlab: "",
-    },
+    agentId: (existing.agentId as string) || `agent-${os.hostname()}`,
+    maxWorkers: (existing.maxWorkers as number) || 1,
+    pollIntervalMs: (existing.pollIntervalMs as number) || 5000,
+    heartbeatIntervalMs: (existing.heartbeatIntervalMs as number) || 30000,
     setupCompletedAt: new Date().toISOString(),
   };
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), {

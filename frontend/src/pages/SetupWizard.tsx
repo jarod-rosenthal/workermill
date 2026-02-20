@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   CheckCircle,
   Settings,
@@ -401,7 +401,11 @@ function IssueTrackerStep({ onNext, onBack }: StepProps) {
 // Step 3: SCM Integration (GitHub or Bitbucket)
 type SCMProvider = "github" | "bitbucket";
 
-function SCMStep({ onNext, onBack }: StepProps) {
+interface SCMStepProps extends StepProps {
+  ssoProvider?: string;
+}
+
+function SCMStep({ onNext, onBack, ssoProvider }: SCMStepProps) {
   const [provider, setProvider] = useState<SCMProvider>("github");
 
   // GitHub fields
@@ -426,8 +430,8 @@ function SCMStep({ onNext, onBack }: StepProps) {
     try {
       const token = localStorage.getItem("accessToken");
       const endpoint = provider === "github"
-        ? `${API_BASE}/api/integrations/github/test`
-        : `${API_BASE}/api/integrations/bitbucket/test`;
+        ? `${API_BASE}/api/settings/integrations/github/test`
+        : `${API_BASE}/api/settings/integrations/bitbucket/test`;
 
       const body = provider === "github"
         ? { token: githubToken, defaultRepo: githubDefaultRepo }
@@ -463,15 +467,15 @@ function SCMStep({ onNext, onBack }: StepProps) {
     try {
       const token = localStorage.getItem("accessToken");
       const endpoint = provider === "github"
-        ? `${API_BASE}/api/integrations/github`
-        : `${API_BASE}/api/integrations/bitbucket`;
+        ? `${API_BASE}/api/settings/integrations/github`
+        : `${API_BASE}/api/settings/integrations/bitbucket`;
 
       const body = provider === "github"
-        ? { token: githubToken, defaultRepo: githubDefaultRepo }
+        ? (ssoProvider === "github" ? { defaultRepo: githubDefaultRepo } : { token: githubToken, defaultRepo: githubDefaultRepo })
         : { username: bitbucketUsername, appPassword: bitbucketAppPassword, workspace: bitbucketWorkspace, defaultRepo: bitbucketDefaultRepo };
 
       const response = await fetch(endpoint, {
-        method: "POST",
+        method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -498,7 +502,7 @@ function SCMStep({ onNext, onBack }: StepProps) {
   };
 
   const isFormValid = provider === "github"
-    ? githubToken && githubDefaultRepo
+    ? (ssoProvider === "github" ? !!githubDefaultRepo : githubToken && githubDefaultRepo)
     : bitbucketUsername && bitbucketAppPassword && bitbucketWorkspace;
 
   return (
@@ -551,28 +555,35 @@ function SCMStep({ onNext, onBack }: StepProps) {
       {/* GitHub Fields */}
       {provider === "github" && (
         <div className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-muted-foreground">
-              GitHub Personal Access Token
-            </label>
-            <Input
-              type="password"
-              value={githubToken}
-              onChange={(e) => setGithubToken(e.target.value)}
-              placeholder="ghp_xxxxxxxxxxxx"
-            />
-            <p className="text-xs text-muted-foreground">
-              Create a token with <code className="text-primary">repo</code> scope at{" "}
-              <a
-                href="https://github.com/settings/tokens/new"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline inline-flex items-center gap-1"
-              >
-                GitHub Settings <ExternalLink className="w-3 h-3" />
-              </a>
-            </p>
-          </div>
+          {ssoProvider === "github" ? (
+            <div className="p-3 text-sm text-green-500 bg-green-500/10 rounded-md border border-green-500/20 flex items-center gap-2">
+              <CheckCircle className="w-4 h-4" />
+              Connected via GitHub SSO
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">
+                GitHub Personal Access Token
+              </label>
+              <Input
+                type="password"
+                value={githubToken}
+                onChange={(e) => setGithubToken(e.target.value)}
+                placeholder="ghp_xxxxxxxxxxxx"
+              />
+              <p className="text-xs text-muted-foreground">
+                Create a token with <code className="text-primary">repo</code> scope at{" "}
+                <a
+                  href="https://github.com/settings/tokens/new"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline inline-flex items-center gap-1"
+                >
+                  GitHub Settings <ExternalLink className="w-3 h-3" />
+                </a>
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-muted-foreground">
@@ -674,7 +685,16 @@ function SCMStep({ onNext, onBack }: StepProps) {
           <Button variant="outline" onClick={handleSkip} disabled={loading}>
             Skip for now
           </Button>
-          {!testSuccess ? (
+          {ssoProvider === "github" && provider === "github" ? (
+            <Button onClick={handleSave} disabled={loading || !isFormValid}>
+              {loading ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <ArrowRight className="w-4 h-4 mr-2" />
+              )}
+              Save & Continue
+            </Button>
+          ) : !testSuccess ? (
             <Button
               onClick={handleTest}
               disabled={loading || !isFormValid}
@@ -996,7 +1016,9 @@ const steps = [
 ];
 
 export default function SetupWizard() {
-  const [currentStep, setCurrentStep] = useState(0);
+  const [searchParams] = useSearchParams();
+  const ssoProvider = searchParams.get("sso") || undefined;
+  const [currentStep, setCurrentStep] = useState(ssoProvider ? 2 : 0);
 
   const goNext = () => {
     if (currentStep < steps.length - 1) {
@@ -1017,7 +1039,7 @@ export default function SetupWizard() {
       case 1:
         return <IssueTrackerStep onNext={goNext} onBack={goBack} />;
       case 2:
-        return <SCMStep onNext={goNext} onBack={goBack} />;
+        return <SCMStep onNext={goNext} onBack={goBack} ssoProvider={ssoProvider} />;
       case 3:
         return <AIProviderStep onBack={goBack} />;
       default:

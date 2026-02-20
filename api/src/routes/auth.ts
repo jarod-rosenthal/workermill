@@ -1961,10 +1961,7 @@ router.post(
 
           // Store GitHub token in Secrets Manager
           const secretPrefix = `workermill/${config.environment}`;
-          await Promise.all([
-            saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via web SSO)"),
-            saveOrgSecret(org.id, "github-reviewer-token", githubToken, secretPrefix, "GitHub reviewer token (via web SSO)"),
-          ]);
+          await saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via web SSO)");
 
           notifyNewSignup({ email: primaryEmail, fullName: name, organizationName: org.name }).catch(() => {});
           sendWelcomeEmail(user, org, false).catch(() => {});
@@ -1986,10 +1983,7 @@ router.post(
           // Update GitHub token in Secrets Manager (refresh on each login)
           if (org) {
             const secretPrefix = `workermill/${config.environment}`;
-            await Promise.all([
-              saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via web SSO signin)"),
-              saveOrgSecret(org.id, "github-reviewer-token", githubToken, secretPrefix, "GitHub reviewer token (via web SSO signin)"),
-            ]);
+            await saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via web SSO signin)");
           }
         }
 
@@ -2160,10 +2154,7 @@ router.post(
 
       // Store GitHub token in Secrets Manager
       const secretPrefix = `workermill/${config.environment}`;
-      await Promise.all([
-        saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via extension onboarding)"),
-        saveOrgSecret(org.id, "github-reviewer-token", githubToken, secretPrefix, "GitHub reviewer token (via extension onboarding)"),
-      ]);
+      await saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via extension onboarding)");
 
       // Fire notifications (non-blocking)
       notifyNewSignup({ email: primaryEmail, fullName: name, organizationName: org.name }).catch(() => {});
@@ -2255,10 +2246,7 @@ router.post(
 
       // Update GitHub tokens in Secrets Manager
       const secretPrefix = `workermill/${config.environment}`;
-      await Promise.all([
-        saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via extension signin)"),
-        saveOrgSecret(org.id, "github-reviewer-token", githubToken, secretPrefix, "GitHub reviewer token (via extension signin)"),
-      ]);
+      await saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via extension signin)");
 
       logger.info("GitHub signin completed", { userId: user.id, orgId: org.id, email: primaryEmail });
 

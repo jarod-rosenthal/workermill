@@ -20,6 +20,7 @@ import {
   saveConfigToFile,
   getConfigFile,
   findClaudePath,
+  checkDockerAvailable,
   type FileConfig,
 } from "../config.js";
 
@@ -343,6 +344,29 @@ export async function setupCommand(): Promise<void> {
     },
   ]);
 
+  // ── Optional: Docker sandbox mode ──────────────────────────────────────────
+  let sandboxMode: "docker" | undefined;
+
+  const { enableSandbox } = await inquirer.prompt([
+    {
+      type: "confirm",
+      name: "enableSandbox",
+      message: "Enable Docker sandbox mode? (runs workers in containers for isolation)",
+      default: false,
+    },
+  ]);
+
+  if (enableSandbox) {
+    if (checkDockerAvailable()) {
+      sandboxMode = "docker";
+      console.log(chalk.green("  ✓") + " Docker sandbox enabled — workers will run in containers");
+    } else {
+      console.log(chalk.yellow("  ⚠") + " Docker is not available. Sandbox mode disabled.");
+      console.log(chalk.dim("    Install Docker and re-run setup to enable sandbox mode."));
+    }
+  }
+  console.log();
+
   // ── Step 7: Save config ────────────────────────────────────────────────────
   const fileConfig: FileConfig = {
     apiUrl: apiUrl.replace(/\/$/, ""),
@@ -352,6 +376,7 @@ export async function setupCommand(): Promise<void> {
     pollIntervalMs: 5000,
     heartbeatIntervalMs: 30000,
     tokens: { github: "", bitbucket: "", gitlab: "", githubReviewer: githubReviewerToken || "" }, // SCM tokens come from org Settings
+    sandbox: sandboxMode,
     setupCompletedAt: new Date().toISOString(),
   };
 

@@ -45,6 +45,9 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
     console.log(`  ${chalk.dim("Workers:")}   ${chalk.yellow(String(config.maxWorkers))} parallel`);
     console.log(`  ${chalk.dim("SCM:")}       ${configResponse.data.scmProvider}`);
     console.log(`  ${chalk.dim("Model:")}     ${chalk.yellow(configResponse.data.defaultWorkerModel)}`);
+    if (config.sandbox === "docker") {
+      console.log(`  ${chalk.dim("Sandbox:")}   ${chalk.blue("Docker")} (${config.dockerImage})`);
+    }
     console.log();
   } catch (error: unknown) {
     const err = error as { response?: { status?: number }; message?: string };

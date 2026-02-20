@@ -223,7 +223,7 @@ export function Pricing() {
             <div>
               <p className="font-medium text-foreground mb-1">Runs on Your Machine</p>
               <p className="text-sm text-muted-foreground">
-                Workers execute locally using your Claude Max subscription. Your code never leaves your hardware.
+                Workers execute locally using your Anthropic account. Your code never leaves your hardware.
               </p>
             </div>
             <div>

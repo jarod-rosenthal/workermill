@@ -20,7 +20,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: cd agent && npm ci
+        run: |
+          cd agent && npm ci
+          cd ../worker && npm ci --ignore-scripts
+
+      - name: Compile worker dependencies
+        run: cd worker/epic && npx tsc
 
       - name: Build bundles
         run: cd agent && npm run build

@@ -18,6 +18,7 @@ import {
   installAgent,
   startAgentProcess,
   writeAgentConfig,
+  promptInstallClaudeCli,
 } from "./agent-installer";
 
 const API_BASE = "https://workermill.com";
@@ -130,12 +131,16 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
   log("Writing agent config...");
   writeAgentConfig({ apiUrl: API_BASE, apiKey });
 
+  // Set context key immediately so welcome view switches from "Create Account" to "Connect"
+  // even if the install step below fails
+  vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
+
   if (!isAgentInstalled()) {
     log("Agent not installed — downloading...");
     const installed = await installAgent();
     if (!installed) {
       vscode.window.showWarningMessage(
-        "Account connected but agent binary install failed. Run 'WorkerMill: Install Agent' to retry.",
+        "Account connected but agent binary install failed. Run 'WorkerMill: Connect' to retry.",
       );
       return false;
     }
@@ -143,7 +148,10 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
 
   log("Starting agent...");
   startAgentProcess(log);
-  vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
+
+  // Check if Claude Code CLI is installed — required for AI worker execution
+  await promptInstallClaudeCli(log);
+
   return true;
 }
 

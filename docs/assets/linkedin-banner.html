@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorkerMill LinkedIn Banner</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1e293b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+  }
+
+  .banner {
+    width: 1128px;
+    height: 191px;
+    background: #0f172a;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 64px;
+  }
+
+  /* Subtle dot grid pattern */
+  .banner::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle at 1px 1px, rgba(148, 163, 184, 0.08) 1px, transparent 0);
+    background-size: 24px 24px;
+    z-index: 0;
+  }
+
+  /* Bottom teal accent line */
+  .banner::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, #2dd4bf, #06b6d4, #2dd4bf, transparent);
+    z-index: 2;
+  }
+
+  /* Subtle radial glow */
+  .glow {
+    position: absolute;
+    width: 400px;
+    height: 400px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(45, 212, 191, 0.06) 0%, transparent 70%);
+    top: -200px;
+    left: 100px;
+    z-index: 0;
+  }
+
+  .glow-right {
+    left: auto;
+    right: 50px;
+    top: -150px;
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(circle, rgba(6, 182, 212, 0.04) 0%, transparent 70%);
+  }
+
+  .left {
+    position: relative;
+    z-index: 1;
+  }
+
+  .tagline {
+    font-size: 28px;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    margin-bottom: 8px;
+  }
+
+  .tagline .accent {
+    background: linear-gradient(135deg, #2dd4bf, #06b6d4);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    font-size: 15px;
+    color: #94a3b8;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+  }
+
+  .trust-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: rgba(45, 212, 191, 0.08);
+    border: 1px solid rgba(45, 212, 191, 0.15);
+    font-size: 11px;
+    font-weight: 500;
+    color: #2dd4bf;
+    letter-spacing: 0.03em;
+  }
+
+  .trust-badge svg {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+  }
+
+  .right {
+    position: relative;
+    z-index: 1;
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+  }
+
+  .url {
+    font-size: 20px;
+    font-weight: 600;
+    color: #e2e8f0;
+    letter-spacing: -0.01em;
+  }
+
+  .url .domain {
+    color: #2dd4bf;
+  }
+
+  .cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 20px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #2dd4bf, #06b6d4);
+    color: #0f172a;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .cta svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* Stacked layers icon (matching your logo) */
+  .icon-stack {
+    position: absolute;
+    right: 280px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 1;
+    opacity: 0.06;
+  }
+
+  .icon-stack svg {
+    width: 160px;
+    height: 160px;
+  }
+
+  /* Guide text below banner */
+  .guide {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #64748b;
+    font-size: 12px;
+    text-align: center;
+    font-family: monospace;
+  }
+</style>
+</head>
+<body>
+
+<div class="banner">
+  <!-- Background effects -->
+  <div class="glow"></div>
+  <div class="glow glow-right"></div>
+
+  <!-- Watermark icon -->
+  <div class="icon-stack">
+    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M50 20L85 40L50 60L15 40L50 20Z" stroke="#2dd4bf" stroke-width="1.5" fill="rgba(45,212,191,0.1)"/>
+      <path d="M15 55L50 75L85 55" stroke="#2dd4bf" stroke-width="1.5" fill="none"/>
+      <path d="M15 70L50 90L85 70" stroke="#2dd4bf" stroke-width="1.5" fill="none"/>
+    </svg>
+  </div>
+
+  <!-- Left content -->
+  <div class="left">
+    <div class="tagline">
+      Your backlog, <span class="accent">shipped overnight.</span>
+    </div>
+    <div class="subtitle">
+      Autonomous AI engineering team &mdash; not a copilot.
+    </div>
+    <div class="trust-badge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        <path d="M9 12l2 2 4-4"/>
+      </svg>
+      Local-first &mdash; your code never leaves your machine
+    </div>
+  </div>
+
+  <!-- Right content -->
+  <div class="right">
+    <div class="url">
+      <span class="domain">workermill</span>.com
+    </div>
+    <div class="cta">
+      Get Started Free
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12h14M12 5l7 7-7 7"/>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<div class="guide">
+  1128 &times; 191px &mdash; Screenshot this banner for LinkedIn<br>
+  Tip: Use browser DevTools to set viewport to exactly 1128px wide, or use a screenshot tool with custom dimensions
+</div>
+
+</body>
+</html>

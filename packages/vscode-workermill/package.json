@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "workermill",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -140,8 +140,12 @@
         "icon": "$(link-external)"
       },
       {
+        "command": "workermill.connectAgent",
+        "title": "WorkerMill: Connect Agent"
+      },
+      {
         "command": "workermill.openSettings",
-        "title": "WorkerMill: Open Settings",
+        "title": "WorkerMill: Settings",
         "icon": "$(gear)"
       }
     ],
@@ -220,12 +224,12 @@
     "viewsWelcome": [
       {
         "view": "workermill.teamPanel",
-        "contents": "Assign Jira or GitHub issues to AI workers that plan, code, and open PRs — right from your editor.\n\n[Create Account](command:workermill.signUpWithGitHub)\n\n[I have an API key](command:workermill.manualSetup)\n\nAlready have an account? [Sign in](command:workermill.signInWithGitHub)",
+        "contents": "WorkerMill assigns Jira and GitHub issues to AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Get Started with GitHub](command:workermill.signUpWithGitHub)\n\nAlready have an account? [Sign in](command:workermill.signInWithGitHub) · [Use API key](command:workermill.manualSetup)",
         "when": "!workermill.agentConfigured"
       },
       {
         "view": "workermill.teamPanel",
-        "contents": "WorkerMill agent is not running.\n\n[Start Agent](command:workermill.startAgent)\n\n[Install / Update Agent](command:workermill.installAgent)\n\nWrong account? [Reconfigure](command:workermill.signInWithGitHub) · [Open Dashboard](command:workermill.openDashboard)",
+        "contents": "WorkerMill agent is not connected.\n\n[Connect](command:workermill.connectAgent)\n\n[Reconfigure](command:workermill.signInWithGitHub) · [Open Dashboard](command:workermill.openDashboard)",
         "when": "workermill.agentConfigured && !workermill.agentConnected"
       }
     ]

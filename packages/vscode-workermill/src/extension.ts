@@ -20,6 +20,7 @@ import { NotificationManager } from "./notifications";
 import { LogTerminalManager } from "./log-terminal";
 import { LiveDiffPanel } from "./live-diff-panel";
 import { TaskDetailPanel } from "./task-detail-panel";
+import { SettingsPanel } from "./settings-panel";
 import {
   isAgentInstalled,
   isAgentConfigured,
@@ -27,6 +28,7 @@ import {
   installAgent,
   startAgentProcess,
   stopAgentProcess,
+  promptInstallClaudeCli,
 } from "./agent-installer";
 import { signUpWithGitHub, signInWithGitHub, enterApiKey } from "./github-onboard";
 
@@ -666,6 +668,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const configPath = path.join(os.homedir(), ".workermill", "config.json");
         if (fs.existsSync(configPath)) {
           startAgentProcess();
+          client.connect();
           vscode.window.showInformationMessage("Agent starting...");
         } else {
           const terminal = vscode.window.createTerminal("WorkerMill Setup");
@@ -700,6 +703,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       startAgentProcess();
+      client.connect();
       vscode.window.showInformationMessage("WorkerMill agent starting...");
     }),
 
@@ -764,12 +768,27 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
+    // Single "Connect" action: install-if-needed → start-if-not-running → connect
+    vscode.commands.registerCommand("workermill.connectAgent", async () => {
+      if (!isAgentInstalled()) {
+        log("Installing agent...");
+        const installed = await installAgent();
+        if (!installed) return;
+      }
+      if (!client.isConnected()) {
+        startAgentProcess(log);
+        client.connect();
+      }
+      // Check for Claude Code CLI — required for task execution
+      await promptInstallClaudeCli(log);
+    }),
+
     vscode.commands.registerCommand("workermill.openDashboard", () => {
       vscode.env.openExternal(vscode.Uri.parse("https://workermill.com/dashboard"));
     }),
 
     vscode.commands.registerCommand("workermill.openSettings", () => {
-      vscode.env.openExternal(vscode.Uri.parse("https://workermill.com/settings"));
+      SettingsPanel.createOrShow(context.extensionUri);
     }),
   );
 
@@ -785,6 +804,14 @@ export function activate(context: vscode.ExtensionContext): void {
   // Auto-start agent if installed and configured, otherwise let welcome view guide user
   if (installed && configured) {
     startAgentProcess(log);
+  } else if (configured && !installed) {
+    log("Agent configured but not installed — auto-installing...");
+    installAgent().then((success) => {
+      if (success) {
+        startAgentProcess(log);
+        client.connect();
+      }
+    });
   } else if (!configured) {
     log("Agent not configured — showing welcome view");
     // Reveal the sidebar so the welcome view (with Sign Up / Sign In buttons) is visible
@@ -808,6 +835,7 @@ export function activate(context: vscode.ExtensionContext): void {
 export function deactivate(): void {
   LiveDiffPanel.disposeAll();
   TaskDetailPanel.disposeAll();
+  SettingsPanel.dispose();
   if (logManager) logManager.dispose();
   if (statusBar) statusBar.dispose();
   if (notifications) notifications.dispose();

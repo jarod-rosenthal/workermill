@@ -19,6 +19,100 @@ import { spawn, execFileSync } from "child_process";
 
 const CDN_BASE = "https://workermill.com/agent/latest";
 
+/**
+ * Check if Claude Code CLI is installed. Mirrors the agent's findClaudePath() logic.
+ * Returns the path if found, null if not.
+ */
+export function findClaudeCli(): string | null {
+  const isWin = process.platform === "win32";
+  const name = isWin ? "claude.exe" : "claude";
+
+  // Check PATH first
+  try {
+    const cmd = isWin ? "where.exe" : "which";
+    const result = execFileSync(cmd, [name], { encoding: "utf-8", timeout: 5000 }).trim();
+    const firstMatch = result.split("\n")[0];
+    if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
+  } catch { /* not on PATH */ }
+
+  // Check via login shell (nvm, brew, etc.)
+  if (!isWin) {
+    try {
+      const shell = process.env.SHELL || "/bin/bash";
+      const result = execFileSync(shell, ["-l", "-c", `which ${name}`], {
+        encoding: "utf-8",
+        timeout: 5000,
+      }).trim();
+      const firstMatch = result.split("\n")[0];
+      if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
+    } catch { /* not found */ }
+  }
+
+  // Check known install locations
+  const candidates: string[] = [];
+  if (isWin) {
+    candidates.push(
+      path.join(process.env.ProgramFiles || "C:\\Program Files", "ClaudeCode", "claude.exe"),
+      path.join(process.env.LOCALAPPDATA || "", "Programs", "ClaudeCode", "claude.exe"),
+      path.join(os.homedir(), "AppData", "Local", "Programs", "ClaudeCode", "claude.exe"),
+      path.join(os.homedir(), ".local", "bin", "claude.exe"),
+    );
+  } else {
+    candidates.push(
+      path.join(os.homedir(), ".local", "bin", "claude"),
+      "/opt/homebrew/bin/claude",
+      "/usr/local/bin/claude",
+    );
+  }
+
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+
+  return null;
+}
+
+/**
+ * Prompt the user to install Claude Code CLI if missing.
+ * Offers to run the one-liner installer directly in a VS Code terminal.
+ * Returns true if Claude was already installed or the user chose to install.
+ */
+export async function promptInstallClaudeCli(
+  log?: (msg: string) => void,
+): Promise<boolean> {
+  if (findClaudeCli()) return true;
+
+  log?.("Claude Code CLI not found — prompting user to install");
+
+  const isWin = process.platform === "win32";
+  const action = await vscode.window.showWarningMessage(
+    "Claude Code CLI is required for AI workers to run tasks. Install it now?",
+    "Install Claude Code",
+    "Skip for Now",
+  );
+
+  if (action !== "Install Claude Code") return false;
+
+  const installCmd = isWin
+    ? "winget install Anthropic.ClaudeCode"
+    : "curl -fsSL https://claude.ai/install.sh | bash";
+
+  const terminal = vscode.window.createTerminal({
+    name: "Install Claude Code",
+    iconPath: new vscode.ThemeIcon("cloud-download"),
+  });
+  terminal.show();
+  terminal.sendText(installCmd);
+
+  log?.(`Running: ${installCmd}`);
+
+  vscode.window.showInformationMessage(
+    "Installing Claude Code — once complete, run `claude` in a terminal to sign in.",
+  );
+
+  return true;
+}
+
 /** Canonical install location used by install.sh / install.ps1 and the installer. */
 function getCanonicalInstallPath(): string {
   if (process.platform === "win32") {

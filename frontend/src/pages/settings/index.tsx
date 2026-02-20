@@ -90,25 +90,25 @@ export default function Settings() {
 
   // Settings state
   const [settings, setSettings] = useState<Settings>({
-    logRetentionDays: 30,
-    taskRetentionDays: 90,
-    maxConcurrentWorkers: 3,
-    maxParallelExperts: 4,
+    logRetentionDays: 7,
+    taskRetentionDays: 7,
+    maxConcurrentWorkers: 1,
+    maxParallelExperts: 3,
     defaultMaxRetries: 3,
-    taskCooldownSeconds: 60,
-    defaultWorkerModel: "claude-haiku-4-5-20251001",
-    defaultWorkerPersona: "auto",
+    taskCooldownSeconds: 0,
+    defaultWorkerModel: "claude-sonnet-4-6",
+    defaultWorkerPersona: "backend_developer",
     primaryProvider: "anthropic",
     providerRouting: {},
     ollamaBaseUrl: null,
     ollamaContextWindow: 65536,
-    managerProvider: "openai",
-    managerModelId: "gpt-5.1-codex",
+    managerProvider: "anthropic",
+    managerModelId: "claude-opus-4-6",
     maxReviewRevisions: 3,
     maxPerStoryRevisions: 2,
     planningAgentProvider: "anthropic",
-    planningAgentModel: "claude-sonnet-4-6",
-    planningMode: "strict",
+    planningAgentModel: "claude-opus-4-6",
+    planningMode: "simplified",
     storyCalibrationMultiplier: 0.4,
     costAlertThresholdUsd: null,
     dailyBudgetLimitUsd: null,
@@ -126,14 +126,14 @@ export default function Settings() {
     defaultEmailPreferences: {
       taskCompleted: true,
       taskFailed: true,
-      costAlerts: true,
+      costAlerts: false,
       prCreated: false,
       frequency: "immediate",
     },
     autoReviewEnabled: false,
     autoDeployEnabled: false,
     autoSkillExtraction: true,
-    prdAutoRun: false,
+    prdAutoRun: true,
     remoteAgentOnly: false,
     warmPoolSize: 0,
     warmPoolHoursStart: 9,
@@ -419,25 +419,25 @@ export default function Settings() {
       if (!response.ok) throw new Error("Failed to load settings");
       const data = await response.json();
       const loadedSettings: Settings = {
-        logRetentionDays: data.logRetentionDays ?? 30,
-        taskRetentionDays: data.taskRetentionDays ?? 90,
-        maxConcurrentWorkers: data.maxConcurrentWorkers ?? 3,
-        maxParallelExperts: data.maxParallelExperts ?? 4,
+        logRetentionDays: data.logRetentionDays ?? 7,
+        taskRetentionDays: data.taskRetentionDays ?? 7,
+        maxConcurrentWorkers: data.maxConcurrentWorkers ?? 1,
+        maxParallelExperts: data.maxParallelExperts ?? 3,
         defaultMaxRetries: data.defaultMaxRetries ?? 3,
-        taskCooldownSeconds: data.taskCooldownSeconds ?? 60,
-        defaultWorkerModel: data.defaultWorkerModel || "claude-haiku-4-5-20251001",
+        taskCooldownSeconds: data.taskCooldownSeconds ?? 0,
+        defaultWorkerModel: data.defaultWorkerModel || "claude-sonnet-4-6",
         defaultWorkerPersona: data.defaultWorkerPersona || "backend_developer",
         primaryProvider: data.primaryProvider || "anthropic",
         providerRouting: data.providerRouting ?? {},
         ollamaBaseUrl: data.ollamaBaseUrl ?? null,
         ollamaContextWindow: data.ollamaContextWindow ?? 65536,
-        managerProvider: data.managerProvider || "openai",
-        managerModelId: data.managerModelId || "gpt-5.1-codex",
+        managerProvider: data.managerProvider || "anthropic",
+        managerModelId: data.managerModelId || "claude-opus-4-6",
         maxReviewRevisions: data.maxReviewRevisions ?? 3,
         maxPerStoryRevisions: data.maxPerStoryRevisions ?? 2,
         planningAgentProvider: data.planningAgentProvider || "anthropic",
-        planningAgentModel: data.planningAgentModel || "claude-sonnet-4-5-20250929",
-        planningMode: data.planningMode || "strict",
+        planningAgentModel: data.planningAgentModel || "claude-opus-4-6",
+        planningMode: data.planningMode || "simplified",
         storyCalibrationMultiplier: data.storyCalibrationMultiplier ?? 0.4,
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
         dailyBudgetLimitUsd: data.dailyBudgetLimitUsd ?? null,
@@ -452,7 +452,7 @@ export default function Settings() {
         defaultEmailPreferences: data.defaultEmailPreferences ?? {
           taskCompleted: true,
           taskFailed: true,
-          costAlerts: true,
+          costAlerts: false,
           prCreated: false,
           frequency: "immediate",
         },
@@ -462,7 +462,7 @@ export default function Settings() {
         autoReviewEnabled: data.autoReviewEnabled ?? false,
         autoDeployEnabled: data.autoDeployEnabled ?? false,
         autoSkillExtraction: data.autoSkillExtraction ?? true,
-        prdAutoRun: data.prdAutoRun ?? false,
+        prdAutoRun: data.prdAutoRun ?? true,
         remoteAgentOnly: data.remoteAgentOnly ?? false,
         warmPoolSize: data.warmPoolSize ?? 0,
         warmPoolHoursStart: data.warmPoolHoursStart ?? 9,
@@ -2026,7 +2026,6 @@ export default function Settings() {
             getManagerSummary={getManagerSummary}
             getExecutionSummary={getExecutionSummary}
             getRoutingSummary={getRoutingSummary}
-            formatCooldownDisplay={formatCooldownDisplay}
             orgPlan={organization?.plan}
           />
         );
@@ -2150,6 +2149,7 @@ export default function Settings() {
             updateSetting={updateSetting}
             settingsLoading={settingsLoading}
             validationErrors={validationErrors}
+            orgPlan={organization?.plan}
           />
         );
       default:

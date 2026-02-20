@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "workermill",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -222,6 +222,11 @@
         "view": "workermill.teamPanel",
         "contents": "Assign Jira or GitHub issues to AI workers that plan, code, and open PRs — right from your editor.\n\n[Create Account](command:workermill.signUpWithGitHub)\n\n[I have an API key](command:workermill.manualSetup)\n\nAlready have an account? [Sign in](command:workermill.signInWithGitHub)",
         "when": "!workermill.agentConfigured"
+      },
+      {
+        "view": "workermill.teamPanel",
+        "contents": "WorkerMill agent is not running.\n\n[Start Agent](command:workermill.startAgent)\n\n[Install / Update Agent](command:workermill.installAgent)\n\nWrong account? [Reconfigure](command:workermill.signInWithGitHub) · [Open Dashboard](command:workermill.openDashboard)",
+        "when": "workermill.agentConfigured && !workermill.agentConnected"
       }
     ]
   },

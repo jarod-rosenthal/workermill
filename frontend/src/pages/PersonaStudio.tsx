@@ -55,8 +55,10 @@ type TabType = "personas" | "inference";
 
 export default function PersonaStudio() {
   const tokens = useAuthStore((state) => state.tokens);
+  const organization = useAuthStore((state) => state.organization);
   const isInitialized = useAuthStore((state) => state.isInitialized);
   const initialize = useAuthStore((state) => state.initialize);
+  const isFreePlan = !organization?.plan || organization.plan === "free";
   const navigate = useNavigate();
 
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -431,14 +433,26 @@ export default function PersonaStudio() {
             </div>
 
             {activeTab === "personas" && (
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-                data-testid="create-persona-btn"
-              >
-                <Plus className="h-4 w-4" />
-                New Persona
-              </button>
+              isFreePlan ? (
+                <Link
+                  to="/pricing"
+                  className="flex items-center gap-2 px-4 py-2 bg-muted text-muted-foreground rounded-lg hover:bg-muted/80 transition-colors cursor-pointer"
+                  data-testid="create-persona-btn"
+                >
+                  <Plus className="h-4 w-4" />
+                  New Persona
+                  <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full">PRO</span>
+                </Link>
+              ) : (
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                  data-testid="create-persona-btn"
+                >
+                  <Plus className="h-4 w-4" />
+                  New Persona
+                </button>
+              )
             )}
           </div>
 

@@ -1,4 +1,5 @@
 import { Crown, Lock } from "lucide-react";
+import { Link } from "react-router-dom";
 import type { Settings, ValidationErrors } from "./types";
 
 interface QualitySectionProps {
@@ -6,6 +7,31 @@ interface QualitySectionProps {
   updateSetting: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
   validationErrors: ValidationErrors;
   orgPlan?: string;
+}
+
+function ProBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 rounded-full border border-amber-500/30">
+      <Crown className="w-3 h-3" />
+      Pro
+    </span>
+  );
+}
+
+function LockedOverlay() {
+  return (
+    <Link
+      to="/pricing"
+      className="absolute inset-0 bg-card/60 backdrop-blur-[1px] rounded-xl flex items-center justify-center z-10 group cursor-pointer"
+    >
+      <div className="flex flex-col items-center gap-1.5">
+        <Lock className="w-5 h-5 text-muted-foreground/60 group-hover:text-amber-400 transition-colors" />
+        <span className="text-xs text-muted-foreground/80 font-medium group-hover:text-amber-400 transition-colors">
+          Upgrade to Pro
+        </span>
+      </div>
+    </Link>
+  );
 }
 
 export function QualitySection({
@@ -17,14 +43,20 @@ export function QualitySection({
   const isFreePlan = !orgPlan || orgPlan === "free";
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-foreground mb-1">Quality Gates</h2>
-        <p className="text-sm text-muted-foreground">
-          Configure quality thresholds to enforce standards before PRs are created
-        </p>
+      <div className="flex items-center gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground mb-1 flex items-center gap-2">
+            Quality Gates {isFreePlan && <ProBadge />}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Configure quality thresholds to enforce standards before PRs are created
+          </p>
+        </div>
       </div>
 
       {/* Master Toggle */}
+      <div className="relative">
+        {isFreePlan && <LockedOverlay />}
       <div className="bg-card rounded-lg border border-border p-6">
         <div className="flex items-center justify-between">
           <div>
@@ -33,16 +65,18 @@ export function QualitySection({
               Block PR creation when quality thresholds are not met
             </p>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
+          <label className={`relative inline-flex items-center ${isFreePlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
             <input
               type="checkbox"
               checked={settings.qualityGateEnabled}
-              onChange={(e) => updateSetting("qualityGateEnabled", e.target.checked)}
+              onChange={(e) => { if (!isFreePlan) updateSetting("qualityGateEnabled", e.target.checked); }}
+              disabled={isFreePlan}
               className="sr-only peer"
             />
             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
           </label>
         </div>
+      </div>
       </div>
 
       {/* Quality Thresholds */}

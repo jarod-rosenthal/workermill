@@ -12,6 +12,7 @@ interface DataSectionProps {
   updateSetting: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
   settingsLoading: boolean;
   validationErrors: ValidationErrors;
+  orgPlan?: string;
 }
 
 export function DataSection({
@@ -19,7 +20,11 @@ export function DataSection({
   updateSetting,
   settingsLoading,
   validationErrors,
+  orgPlan,
 }: DataSectionProps) {
+  const isFreePlan = !orgPlan || orgPlan === "free";
+  const logRetentionMax = isFreePlan ? 7 : 90;
+  const taskRetentionMax = isFreePlan ? 7 : 90;
   return (
     <div className="space-y-6">
       <div>
@@ -52,8 +57,8 @@ export function DataSection({
                   <input
                     type="range"
                     min="1"
-                    max="365"
-                    value={settings.logRetentionDays}
+                    max={logRetentionMax}
+                    value={Math.min(settings.logRetentionDays, logRetentionMax)}
                     onChange={(e) => updateSetting("logRetentionDays", parseInt(e.target.value))}
                     className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-blue-500"
                   />
@@ -61,9 +66,9 @@ export function DataSection({
                     <input
                       type="number"
                       min="1"
-                      max="365"
+                      max={logRetentionMax}
                       value={settings.logRetentionDays}
-                      onChange={(e) => updateSetting("logRetentionDays", parseInt(e.target.value) || 1)}
+                      onChange={(e) => updateSetting("logRetentionDays", Math.min(parseInt(e.target.value) || 1, logRetentionMax))}
                       className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
                     />
                   </div>
@@ -72,7 +77,10 @@ export function DataSection({
                 {validationErrors.logRetentionDays && (
                   <p className="text-xs text-red-500 mt-1">{validationErrors.logRetentionDays}</p>
                 )}
-                <p className="text-xs text-muted-foreground mt-1">Worker logs older than this are deleted (1-365)</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Worker logs older than this are deleted (1-{logRetentionMax})
+                  {isFreePlan && <span className="text-amber-400 ml-1">(max 7 days on Free)</span>}
+                </p>
               </div>
 
               {/* Task Retention */}
@@ -84,8 +92,8 @@ export function DataSection({
                   <input
                     type="range"
                     min="1"
-                    max="730"
-                    value={settings.taskRetentionDays}
+                    max={taskRetentionMax}
+                    value={Math.min(settings.taskRetentionDays, taskRetentionMax)}
                     onChange={(e) => updateSetting("taskRetentionDays", parseInt(e.target.value))}
                     className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-blue-500"
                   />
@@ -93,9 +101,9 @@ export function DataSection({
                     <input
                       type="number"
                       min="1"
-                      max="730"
+                      max={taskRetentionMax}
                       value={settings.taskRetentionDays}
-                      onChange={(e) => updateSetting("taskRetentionDays", parseInt(e.target.value) || 1)}
+                      onChange={(e) => updateSetting("taskRetentionDays", Math.min(parseInt(e.target.value) || 1, taskRetentionMax))}
                       className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
                     />
                   </div>
@@ -104,7 +112,10 @@ export function DataSection({
                 {validationErrors.taskRetentionDays && (
                   <p className="text-xs text-red-500 mt-1">{validationErrors.taskRetentionDays}</p>
                 )}
-                <p className="text-xs text-muted-foreground mt-1">Task records older than this are archived (1-730)</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Task records older than this are archived (1-{taskRetentionMax})
+                  {isFreePlan && <span className="text-amber-400 ml-1">(max 7 days on Free)</span>}
+                </p>
               </div>
             </div>
           </CollapsibleSection>

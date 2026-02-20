@@ -52,7 +52,7 @@ export const PLAN_MAX_EXPERTS: Record<OrganizationPlan, number> = {
 
 // Log retention in days (-1 = unlimited)
 export const PLAN_LOG_RETENTION: Record<OrganizationPlan, number> = {
-  free: 14,
+  free: 7,
   pro: 90,
   enterprise: -1,
 };
@@ -70,6 +70,7 @@ export const PLAN_FEATURES: Record<OrganizationPlan, {
   dedicatedWorkerPool: boolean;
   dataResidency: boolean;
   multiProvider: boolean;
+  qualityGates: boolean;
 }> = {
   free: {
     cloudExecution: false,
@@ -83,6 +84,7 @@ export const PLAN_FEATURES: Record<OrganizationPlan, {
     dedicatedWorkerPool: false,
     dataResidency: false,
     multiProvider: false,
+    qualityGates: false,
   },
   pro: {
     cloudExecution: true,
@@ -96,6 +98,7 @@ export const PLAN_FEATURES: Record<OrganizationPlan, {
     dedicatedWorkerPool: false,
     dataResidency: false,
     multiProvider: true,
+    qualityGates: true,
   },
   enterprise: {
     cloudExecution: true,
@@ -109,6 +112,7 @@ export const PLAN_FEATURES: Record<OrganizationPlan, {
     dedicatedWorkerPool: true,
     dataResidency: true,
     multiProvider: true,
+    qualityGates: true,
   },
 };
 
@@ -203,10 +207,10 @@ export class Organization {
   @Column({ name: "manager_enabled", type: "boolean", default: true })
   managerEnabled: boolean;
 
-  @Column({ name: "manager_model_id", type: "varchar", length: 100, default: "gpt-5.1-codex" })
+  @Column({ name: "manager_model_id", type: "varchar", length: 100, default: "claude-opus-4-6" })
   managerModelId: string;
 
-  @Column({ name: "manager_provider", type: "varchar", length: 50, default: "openai" })
+  @Column({ name: "manager_provider", type: "varchar", length: 50, default: "anthropic" })
   managerProvider: string;
 
   @Column({ name: "max_review_revisions", type: "int", default: 3 })
@@ -226,10 +230,10 @@ export class Organization {
   costResetAt: Date | null;
 
   // Data Management Settings (defaults match free tier limits)
-  @Column({ name: "log_retention_days", type: "int", default: 14 })
+  @Column({ name: "log_retention_days", type: "int", default: 7 })
   logRetentionDays: number;
 
-  @Column({ name: "task_retention_days", type: "int", default: 90 })
+  @Column({ name: "task_retention_days", type: "int", default: 7 })
   taskRetentionDays: number;
 
   // Worker Settings (defaults match free tier limits)
@@ -242,7 +246,7 @@ export class Organization {
   @Column({ name: "default_max_retries", type: "int", default: 3 })
   defaultMaxRetries: number;
 
-  @Column({ name: "task_cooldown_seconds", type: "int", default: 30 })
+  @Column({ name: "task_cooldown_seconds", type: "int", default: 0 })
   taskCooldownSeconds: number;
 
   @Column({ name: "default_worker_model", type: "varchar", length: 100, default: "claude-sonnet-4-6" })
@@ -354,7 +358,7 @@ export class Organization {
   @Column({ name: "planning_agent_provider", type: "varchar", length: 50, default: "anthropic" })
   planningAgentProvider: string; // Provider for planning/decomposition (anthropic, openai, google)
 
-  @Column({ name: "planning_agent_model", type: "varchar", length: 100, default: "claude-sonnet-4-6" })
+  @Column({ name: "planning_agent_model", type: "varchar", length: 100, default: "claude-opus-4-6" })
   planningAgentModel: string; // Model used for planning/decomposition (Project Manager)
 
   @Column({ name: "planning_mode", type: "varchar", length: 20, default: "strict" })
@@ -396,13 +400,13 @@ export class Organization {
   @Column({ name: "remote_agent_only", type: "boolean", default: false })
   remoteAgentOnly: boolean; // When true, cloud ECS will never pick up tasks — only remote agents
 
-  @Column({ name: "prd_auto_run", type: "boolean", default: false })
+  @Column({ name: "prd_auto_run", type: "boolean", default: true })
   prdAutoRun: boolean;
 
   @Column({
     name: "default_email_preferences",
     type: "jsonb",
-    default: { taskCompleted: true, taskFailed: true, costAlerts: true, prCreated: false, frequency: "immediate" },
+    default: { taskCompleted: true, taskFailed: true, costAlerts: false, prCreated: false, frequency: "immediate" },
   })
   defaultEmailPreferences: {
     taskCompleted?: boolean;

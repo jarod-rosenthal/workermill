@@ -30,7 +30,6 @@ interface AIWorkersSectionProps {
   getManagerSummary: () => string;
   getExecutionSummary: () => string;
   getRoutingSummary: () => string;
-  formatCooldownDisplay: (seconds: number) => string;
   orgPlan?: string;
 }
 
@@ -69,7 +68,6 @@ export function AIWorkersSection({
   getManagerSummary,
   getExecutionSummary,
   getRoutingSummary,
-  formatCooldownDisplay,
   orgPlan,
 }: AIWorkersSectionProps) {
   const isFreePlan = !orgPlan || orgPlan === "free";
@@ -104,9 +102,9 @@ export function AIWorkersSection({
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Default Configuration */}
+          {/* Expert Workers */}
           <CollapsibleSection
-            title="Default Configuration"
+            title="Expert Workers"
             icon={<Cpu className="w-4 h-4" />}
             iconBgColor="bg-cyan-500/20"
             iconColor="text-cyan-500"
@@ -192,22 +190,29 @@ export function AIWorkersSection({
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">Provider</label>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">
+                    Provider
+                    {isFreePlan && <span className="ml-2 text-xs text-amber-400">(Anthropic only on Free)</span>}
+                  </label>
                   <div className="grid grid-cols-2 gap-2">
                     {PROVIDER_OPTIONS.map((provider) => (
                       <button
                         key={provider.value}
                         onClick={() => {
+                          if (isFreePlan && provider.value !== "anthropic") return;
                           updateSetting("managerProvider", provider.value);
                           const newProviderModels = MODEL_OPTIONS[provider.value];
                           if (newProviderModels && !newProviderModels.find((m) => m.value === settings.managerModelId)) {
                             updateSetting("managerModelId", newProviderModels[0].value);
                           }
                         }}
+                        disabled={isFreePlan && provider.value !== "anthropic"}
                         className={`p-3 rounded-lg border-2 transition-all ${
                           settings.managerProvider === provider.value
                             ? "border-indigo-500 bg-indigo-500/10"
-                            : "border-border hover:border-indigo-500/50"
+                            : isFreePlan && provider.value !== "anthropic"
+                              ? "border-border bg-background/50 opacity-40 cursor-not-allowed"
+                              : "border-border hover:border-indigo-500/50"
                         }`}
                       >
                         <div className="text-lg">{provider.icon}</div>
@@ -301,14 +306,20 @@ export function AIWorkersSection({
                 <label className="block text-sm font-medium text-muted-foreground mb-3">Planning Mode</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
-                    onClick={() => updateSetting("planningMode", "strict")}
+                    onClick={() => { if (!isFreePlan) updateSetting("planningMode", "strict"); }}
+                    disabled={isFreePlan}
                     className={`p-3 rounded-lg border-2 transition-all text-left ${
                       settings.planningMode !== "simplified"
                         ? "border-purple-500 bg-purple-500/10"
-                        : "border-border bg-background/50 hover:border-purple-500/50"
+                        : isFreePlan
+                          ? "border-border bg-background/50 opacity-40 cursor-not-allowed"
+                          : "border-border bg-background/50 hover:border-purple-500/50"
                     }`}
                   >
-                    <div className="text-sm font-medium text-foreground">Strict</div>
+                    <div className="text-sm font-medium text-foreground flex items-center gap-2">
+                      Strict
+                      {isFreePlan && <ProBadge />}
+                    </div>
                     <p className="text-xs text-muted-foreground mt-1">
                       Full planner-critic loop — plan must score 85+ to proceed (up to 3 attempts)
                     </p>
@@ -331,22 +342,29 @@ export function AIWorkersSection({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">Provider</label>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">
+                    Provider
+                    {isFreePlan && <span className="ml-2 text-xs text-amber-400">(Anthropic only on Free)</span>}
+                  </label>
                   <div className="grid grid-cols-2 gap-2">
                     {PROVIDER_OPTIONS.map((provider) => (
                       <button
                         key={provider.value}
                         onClick={() => {
+                          if (isFreePlan && provider.value !== "anthropic") return;
                           updateSetting("planningAgentProvider", provider.value);
                           const newProviderModels = MODEL_OPTIONS[provider.value];
                           if (newProviderModels && !newProviderModels.find((m) => m.value === settings.planningAgentModel)) {
                             updateSetting("planningAgentModel", newProviderModels[0].value);
                           }
                         }}
+                        disabled={isFreePlan && provider.value !== "anthropic"}
                         className={`p-3 rounded-lg border-2 transition-all ${
                           settings.planningAgentProvider === provider.value
                             ? "border-purple-500 bg-purple-500/10"
-                            : "border-border hover:border-purple-500/50"
+                            : isFreePlan && provider.value !== "anthropic"
+                              ? "border-border bg-background/50 opacity-40 cursor-not-allowed"
+                              : "border-border hover:border-purple-500/50"
                         }`}
                       >
                         <div className="text-lg">{provider.icon}</div>
@@ -420,33 +438,39 @@ export function AIWorkersSection({
             summary={getExecutionSummary()}
           >
             <div className="space-y-6">
-              {/* Max Concurrent Workers */}
+              {/* Max Concurrent Containers */}
               <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">Max Concurrent Workers</label>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="range"
-                    min="1"
-                    max="14"
-                    value={settings.maxConcurrentWorkers}
-                    onChange={(e) => updateSetting("maxConcurrentWorkers", parseInt(e.target.value))}
-                    className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-accent"
-                  />
-                  <div className="w-20">
+                <label className="block text-sm font-medium text-muted-foreground mb-2">Max Concurrent Containers</label>
+                {isFreePlan ? (
+                  <div className="px-4 py-3 rounded-lg bg-background/50 border border-border text-muted-foreground text-sm">
+                    1 <span className="text-xs text-amber-400 ml-2">(Free tier limit)</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-4">
                     <input
-                      type="number"
+                      type="range"
                       min="1"
                       max="14"
                       value={settings.maxConcurrentWorkers}
-                      onChange={(e) => updateSetting("maxConcurrentWorkers", parseInt(e.target.value) || 1)}
-                      className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
+                      onChange={(e) => updateSetting("maxConcurrentWorkers", parseInt(e.target.value))}
+                      className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-accent"
                     />
+                    <div className="w-20">
+                      <input
+                        type="number"
+                        min="1"
+                        max="14"
+                        value={settings.maxConcurrentWorkers}
+                        onChange={(e) => updateSetting("maxConcurrentWorkers", parseInt(e.target.value) || 1)}
+                        className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
                 {validationErrors.maxConcurrentWorkers && (
                   <p className="text-xs text-red-500 mt-1">{validationErrors.maxConcurrentWorkers}</p>
                 )}
-                <p className="text-xs text-muted-foreground mt-1">Maximum worker containers running simultaneously (1-14)</p>
+                {!isFreePlan && <p className="text-xs text-muted-foreground mt-1">Maximum worker containers running simultaneously (1-14)</p>}
               </div>
 
               {/* Max Parallel Experts */}
@@ -456,7 +480,7 @@ export function AIWorkersSection({
                   <input
                     type="range"
                     min="1"
-                    max="14"
+                    max={isFreePlan ? 3 : 14}
                     value={settings.maxParallelExperts}
                     onChange={(e) => updateSetting("maxParallelExperts", parseInt(e.target.value))}
                     className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-accent"
@@ -465,9 +489,9 @@ export function AIWorkersSection({
                     <input
                       type="number"
                       min="1"
-                      max="14"
+                      max={isFreePlan ? 3 : 14}
                       value={settings.maxParallelExperts}
-                      onChange={(e) => updateSetting("maxParallelExperts", parseInt(e.target.value) || 4)}
+                      onChange={(e) => updateSetting("maxParallelExperts", parseInt(e.target.value) || 3)}
                       className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
                     />
                   </div>
@@ -475,36 +499,9 @@ export function AIWorkersSection({
                 {validationErrors.maxParallelExperts && (
                   <p className="text-xs text-red-500 mt-1">{validationErrors.maxParallelExperts}</p>
                 )}
-                <p className="text-xs text-muted-foreground mt-1">Maximum expert subagents running in parallel per task (1-14)</p>
-              </div>
-
-              {/* Task Cooldown */}
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">Task Cooldown Period</label>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="range"
-                    min="0"
-                    max="3600"
-                    step="60"
-                    value={Math.min(settings.taskCooldownSeconds, 3600)}
-                    onChange={(e) => updateSetting("taskCooldownSeconds", parseInt(e.target.value))}
-                    className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-accent"
-                  />
-                  <div className="w-24">
-                    <input
-                      type="number"
-                      min="0"
-                      max="86400"
-                      value={settings.taskCooldownSeconds}
-                      onChange={(e) => updateSetting("taskCooldownSeconds", parseInt(e.target.value) || 0)}
-                      className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
-                    />
-                  </div>
-                  <span className="text-sm text-muted-foreground w-12">sec</span>
-                </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Wait time between task completions: {formatCooldownDisplay(settings.taskCooldownSeconds)}
+                  Maximum expert subagents running in parallel per task (1-{isFreePlan ? 3 : 14})
+                  {isFreePlan && <span className="text-amber-400 ml-1">(max 3 on Free)</span>}
                 </p>
               </div>
 
@@ -515,7 +512,7 @@ export function AIWorkersSection({
                   <input
                     type="range"
                     min="0"
-                    max="10"
+                    max="5"
                     value={settings.defaultMaxRetries}
                     onChange={(e) => updateSetting("defaultMaxRetries", parseInt(e.target.value))}
                     className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-accent"
@@ -524,7 +521,7 @@ export function AIWorkersSection({
                     <input
                       type="number"
                       min="0"
-                      max="10"
+                      max="5"
                       value={settings.defaultMaxRetries}
                       onChange={(e) => updateSetting("defaultMaxRetries", parseInt(e.target.value) || 0)}
                       className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
@@ -534,7 +531,7 @@ export function AIWorkersSection({
                 {validationErrors.defaultMaxRetries && (
                   <p className="text-xs text-red-500 mt-1">{validationErrors.defaultMaxRetries}</p>
                 )}
-                <p className="text-xs text-muted-foreground mt-1">Automatic retries for failed tasks (0-10)</p>
+                <p className="text-xs text-muted-foreground mt-1">Automatic retries for failed tasks (0-5)</p>
               </div>
 
               {/* PRD Auto-Run */}
@@ -799,8 +796,10 @@ export function AIWorkersSection({
           </div>
 
           {/* Memory & Learning Section */}
+          <div className="relative">
+            {isFreePlan && <LockedOverlay />}
           <CollapsibleSection
-            title="Memory & Learning"
+            title={<>Memory & Learning {isFreePlan && <ProBadge />}</>}
             icon={<Brain className="w-4 h-4" />}
             iconBgColor="bg-violet-500/20"
             iconColor="text-violet-500"
@@ -1017,6 +1016,7 @@ export function AIWorkersSection({
               </div>
             </div>
           </CollapsibleSection>
+          </div>
         </div>
       )}
     </div>

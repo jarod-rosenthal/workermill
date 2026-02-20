@@ -19,9 +19,9 @@ const valueProps = [
     icon: Wallet,
     title: "Free to start. No credit card.",
     description:
-      "Already paying for Claude Max? WorkerMill turns it into an AI engineering team at $0 cost. Start free with local execution, upgrade for parallel experts and team features.",
+      "Already have an Anthropic account? WorkerMill turns it into an AI engineering team at $0 cost. Start free with local execution, upgrade for parallel experts and team features.",
     bullets: [
-      "Free tier: Local execution + Claude Max = $0",
+      "Free tier: Local execution + your Anthropic account = $0",
       "Tech lead review included on every plan",
       "Upgrade for parallel execution and cloud",
       "BYOK: Bring your own API key, zero markup",
@@ -100,7 +100,7 @@ function SubscriptionVisual() {
         <div className="flex items-center justify-between p-3 rounded-lg bg-green-500/10 border border-green-500/20">
           <div>
             <div className="text-sm font-medium">Free</div>
-            <div className="text-xs text-muted-foreground">Local + Claude Max, unlimited tasks</div>
+            <div className="text-xs text-muted-foreground">Local + your Anthropic account, unlimited tasks</div>
           </div>
           <span className="text-lg font-bold text-green-500">$0</span>
         </div>

@@ -30,7 +30,7 @@ export function Hero() {
 
             {/* Description */}
             <p className="text-lg text-slate-400 max-w-xl leading-relaxed">
-              Describe what you want to build. Our AI engineering team builds it with tests, CI/CD, and documentation. Run locally with Claude Max, or let us handle it.
+              Describe what you want to build. Our AI engineering team builds it with tests, CI/CD, and documentation. Run locally with your Anthropic account, or let us handle it.
             </p>
 
             {/* CTAs */}

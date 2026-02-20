@@ -35,8 +35,10 @@ export default function Workers() {
   }, []);
 
   // Separate the manager (Tech Lead Reviewer) from worker personas
+  // Hide support_agent (internal) and tech_lead (duplicate of manager Key Differentiator card)
+  const hiddenSlugs = ["manager", "support_agent", "tech_lead"];
   const managerPersona = personas.find((p) => p.slug === "manager");
-  const workerPersonas = personas.filter((p) => p.slug !== "manager");
+  const workerPersonas = personas.filter((p) => !hiddenSlugs.includes(p.slug));
 
   return (
     <section className="py-24 relative">

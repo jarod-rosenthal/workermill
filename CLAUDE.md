@@ -359,7 +359,51 @@ Key difference: `API_BASE_URL` points to `https://workermill.com` instead of `lo
 
 ***REMOVED******REMOVED******REMOVED*** VS Code Extension (IDE Companion)
 
-The VS Code extension (`packages/vscode-workermill/`) connects to the remote agent's local API via `~/.workermill/agent.port` (HTTP + SSE). Provides sidebar tree (Active/Backlog/Recent), activity feed, and pseudoterminal log tabs. Build: `cd packages/vscode-workermill && npm run build`.
+The VS Code extension (`packages/vscode-workermill/`) connects to the remote agent's local API via `~/.workermill/agent.port` (HTTP + SSE). Provides sidebar tree (Active/Backlog/Recent), activity feed, and pseudoterminal log tabs.
+
+**Architecture:**
+- `src/extension.ts` — activation, command registration, context key setup
+- `src/team-tree.ts` — TreeDataProvider for sidebar (tasks, issues, onboarding)
+- `src/agent-client.ts` — HTTP + SSE client to agent local API
+- `src/agent-installer.ts` — binary download, start/stop, config check
+- `src/github-onboard.ts` — onboarding flow (GitHub sign up/in, API key entry)
+- `src/feed-view.ts` — activity webview, `src/status-bar.ts`, `src/notifications.ts`
+- `src/log-terminal.ts` — pseudoterminal log tabs
+- `src/live-diff-panel.ts` — live code changes panel
+- `src/task-detail-panel.ts` — task detail webview
+
+**Onboarding flow (fresh install, no `~/.workermill/config.json`):**
+1. User installs `.vsix`, opens WorkerMill sidebar
+2. Tree shows onboarding items: Create Account / I have an API key / Sign In
+3. "Create Account" → VS Code GitHub auth → `POST /api/auth/github-onboard` → creates account + org + returns API key
+4. "Sign In" → VS Code GitHub auth → `POST /api/auth/github-signin` → returns API key for existing account
+5. "I have an API key" → manual input
+6. All paths → `writeAgentConfig()` → install binary → start agent → connect
+
+**CRITICAL — Welcome view / onboarding bugs:**
+- **DO NOT use VS Code `viewsWelcome`** for onboarding. It is unreliable — `when` clause context keys have timing issues and the welcome content fails to render on fresh installs on real machines. This was tried multiple times and failed every time.
+- **Use tree items instead.** When `!this.connected`, the tree's `getChildren()` must return clickable tree items (with `command` property) as the onboarding/reconnection UI. This is the ONLY reliable approach.
+- `isAgentConfigured()` checks `~/.workermill/config.json` exists with valid `apiKey` + `apiUrl` fields
+- Context keys: `workermill.agentConfigured` (config exists), `workermill.agentConnected` (SSE connected)
+
+**Build & release:**
+```bash
+cd packages/vscode-workermill
+npm run build      ***REMOVED*** esbuild → dist/extension.js
+npm run typecheck   ***REMOVED*** tsc --noEmit
+npm run package     ***REMOVED*** → workermill-{version}.vsix
+```
+- **ALWAYS bump version** in package.json before packaging — VS Code caches extensions by version
+- Version is embedded at compile time — old version = old code even if you rebuild
+- The `.vsix` file must be transferred to and installed on the target machine: `code --install-extension workermill-{version}.vsix`
+- **Testing is done on a SEPARATE machine** — not the dev machine. Do not assume `~/.workermill/` exists on the test machine.
+
+**Web login (SSO providers):**
+- Google (via Cognito), Microsoft (direct OAuth), GitHub (direct OAuth) — all three available on workermill.com login/signup
+- GitHub OAuth: `GITHUB_CLIENT_ID` + `GITHUB_CLIENT_SECRET` env vars in ECS task definition (via Secrets Manager + Terraform)
+- GitHub callback: `POST /api/auth/github/callback` — exchanges code, creates Cognito user, stores GitHub PAT
+- SSO config: `GET /api/auth/sso-config` returns enabled providers
+- VS Code extension onboard endpoints: `POST /api/auth/github-onboard` (sign up), `POST /api/auth/github-signin` (sign in)
 
 ***REMOVED******REMOVED******REMOVED*** Local Architecture
 
@@ -467,6 +511,10 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 | `WorkerFileLock` | Multi-worker file locking |
 | `WorkerCheckIn` | Worker heartbeat and health tracking |
 | `CoordinationFeedItem` | Expert collaboration messages |
+| `RemoteAgent` | Remote agent registration and heartbeat tracking |
+| `KbBoard`, `KbColumn`, `KbCard` | Kanban board system (Trello-like boards visible on dashboard) |
+| `KbComment`, `KbChecklist`, `KbActivity` | Board card details — comments, checklists, activity log |
+| `ShowcaseProject` | Public showcase projects on landing page |
 
 ***REMOVED******REMOVED******REMOVED*** Key API Routes (`api/src/routes/`)
 
@@ -480,6 +528,11 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 | `billing.ts` | Stripe billing (Free/Pro/Enterprise plans) |
 | `coordination.ts` | Multi-worker file locking |
 | `issues.ts` | Jira issue search and project listing (used by VS Code extension) |
+| `boards.ts` | Kanban boards CRUD — cards, columns, labels, checklists |
+| `remote-agent.ts` | Remote agent registration, heartbeat, task claim/result |
+| `worker-decisions.ts` | Worker decision engine API (error classification, quality gates) |
+| `prd.ts` | PRD decomposition into board cards |
+| `showcase.ts` | Public showcase projects |
 
 ***REMOVED******REMOVED******REMOVED*** Task Flow
 
@@ -677,9 +730,15 @@ E2E tests run on ephemeral ECS Fargate Spot runners. Location: `frontend/e2e/`. 
 
 Location: `api/src/__tests__/integration/`. Each test runs in a transaction that rolls back after completion. Triggered via GitHub Actions (manual checkbox).
 
-***REMOVED******REMOVED******REMOVED*** CI/CD Workflow
+***REMOVED******REMOVED******REMOVED*** CI/CD Workflows
 
-The CI/CD pipeline is **manual-only** (workflow_dispatch). No automatic triggers on push/PR.
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `ci-cd.yml` | Manual (workflow_dispatch) | Main pipeline — lint, test, deploy |
+| `agent-release.yml` | `agent-v*` tags | Build 4 platform agent binaries (linux/mac/win × arm64/x64) |
+| `vscode-release.yml` | `vscode-v*` tags | Package and release VS Code extension |
+
+No automatic triggers on push/PR.
 
 ---
 

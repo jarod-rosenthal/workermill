@@ -786,28 +786,10 @@ export default function ExecutionShowcase() {
   const currentFrame = frames[frameIndex];
 
   return (
-    <section id="how-it-works" className="py-20 relative">
+    <section id="how-it-works" className="pb-20 relative">
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-950/5 to-transparent" />
 
       <div className="relative container mx-auto px-6 lg:px-8">
-        {/* Header */}
-        <div className="max-w-3xl mx-auto text-center mb-12">
-          <p className="text-sm font-medium text-blue-400 mb-3 tracking-wide">
-            FROM PRD TO PR
-          </p>
-          <h2 className="text-3xl lg:text-4xl font-bold tracking-tight text-white mb-4 text-balance">
-            One document in.{" "}
-            <span className="bg-gradient-to-r from-blue-400 to-teal-400 bg-clip-text text-transparent">
-              Production code out.
-            </span>
-          </h2>
-          <p className="text-lg text-slate-400 leading-relaxed">
-            Drop a PRD, walk away. WorkerMill decomposes it into epics,
-            sequences the work, and executes each one &mdash; planned, coded,
-            tested, and reviewed.
-          </p>
-        </div>
-
         {/* Showcase frame */}
         <div className="max-w-6xl mx-auto">
           <div className="relative">

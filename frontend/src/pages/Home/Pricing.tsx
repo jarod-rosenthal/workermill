@@ -1,4 +1,4 @@
-import { Check, Sparkles, Crown, Zap } from "lucide-react";
+import { Check, Sparkles, Crown, Zap, Flame } from "lucide-react";
 
 interface PricingTier {
   name: string;
@@ -23,10 +23,10 @@ const tiers: PricingTier[] = [
     highlight_line: "Full product, your hardware",
     icon: <Zap className="w-5 h-5" />,
     features: [
-      "Unlimited tasks",
-      "Automated PR reviews on every pull request",
+      "30 tasks per month",
       "1 concurrent worker",
       "Up to 3 experts per task",
+      "Automated PR reviews",
       "GitHub Issues + internal board",
       "Anthropic Claude models",
       "Local + BYOK execution",
@@ -49,19 +49,45 @@ const tiers: PricingTier[] = [
     highlighted: true,
     badge: "Coming Soon",
     features: [
-      "Everything in Free, plus:",
-      "Auto CI/CD deployments",
-      "Auto-annealing agents",
+      "150 tasks per month",
+      "5 concurrent tasks",
+      "Up to 5 experts per task",
+      "Up to 15 users",
       "All integrations (Jira, GitLab, Bitbucket, Linear)",
       "All AI providers (OpenAI, Google, Ollama)",
-      "Codebase RAG",
-      "5 concurrent tasks",
-      "Unlimited experts per task",
-      "Up to 15 users",
       "Local or cloud execution",
+      "Automated PR reviews",
+      "MCP servers",
       "Advanced analytics",
-      "Memory & skills persistence",
       "Role-based access",
+      "30-day log retention",
+      "Email support (< 24hr)",
+    ],
+    cta: "Coming Soon",
+    disabled: true,
+  },
+  {
+    name: "Max",
+    price: "$29.50",
+    period: "/mo",
+    description: "For power users and teams who need the full platform",
+    highlight_line: "Up to 25 seats included",
+    icon: <Flame className="w-5 h-5" />,
+    badge: "Coming Soon",
+    features: [
+      "300 tasks per month",
+      "10 concurrent tasks",
+      "Up to 10 experts per task",
+      "Up to 25 users",
+      "All integrations & AI providers",
+      "Local or cloud execution",
+      "Auto-annealing agents",
+      "Auto CI/CD deployments",
+      "Codebase RAG",
+      "Memory & skills persistence",
+      "Automated PR reviews",
+      "MCP servers",
+      "Advanced analytics + RBAC",
       "90-day log retention",
       "Priority support (< 4hr)",
     ],
@@ -77,17 +103,18 @@ const tiers: PricingTier[] = [
     icon: <Crown className="w-5 h-5" />,
     badge: "Coming Soon",
     features: [
-      "Everything in Pro, plus:",
-      "Unlimited users & workers",
+      "Custom task & worker limits",
+      "Custom user seats",
+      "Everything in Max, plus:",
       "Self-hosted option",
       "SSO / SAML",
-      "Dedicated Worker Pool",
-      "IP Allowlisting",
-      "Data Residency Controls",
+      "Dedicated worker pool",
+      "IP allowlisting",
+      "Data residency controls",
       "AWS Bedrock / Azure AI Foundry",
       "Compliance Center & SOC 2",
       "99.9% SLA",
-      "Unlimited log retention",
+      "Custom log retention",
       "Dedicated CSM",
     ],
     cta: "Coming Soon",
@@ -98,7 +125,7 @@ const tiers: PricingTier[] = [
 export function Pricing() {
   return (
     <section id="pricing" className="py-20 px-6 bg-card/50">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="text-center mb-12">
           <h2 className="text-3xl font-bold text-foreground mb-4">
             Start Free, Scale When Ready
@@ -113,7 +140,7 @@ export function Pricing() {
           </div>
         </div>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           {tiers.map((tier, index) => (
             <div
               key={index}

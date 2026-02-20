@@ -3,9 +3,6 @@ import { Home, Search, FolderOpen, Sparkles, Lock, Copy, CheckCircle, Terminal, 
 import { Link } from "react-router-dom";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
-import { StatsSection } from "./Home/v0/StatsSection";
-import { FeaturesGrid } from "./Home/v0/FeaturesGrid";
-import Workers from "./Home/Workers";
 import ShowcaseGallery from "../components/ShowcaseGallery";
 import TrustCallout from "../components/TrustCallout";
 import ExecutionShowcase from "../components/ExecutionShowcase";
@@ -274,8 +271,8 @@ export default function LandingV0() {
                 </span>
               </h1>
               <p className="mt-6 text-xl text-slate-400 max-w-3xl mx-auto text-center leading-relaxed">
-                WorkerMill is an autonomous AI engineering team. Features, tech debt, rewrites,
-                greenfield — it executes your tickets end-to-end — coded, tested, reviewed, and validated through your pipeline.
+                Not an assistant that suggests — an engineering team that executes.
+                From a single bug fix to a full product build.
               </p>
               {/* Trust badge */}
               <div className="mt-4 flex justify-center">
@@ -287,27 +284,19 @@ export default function LandingV0() {
             </div>
           </section>
 
-          {/* Install Section */}
-          <InstallSection />
-
-          {/* Execution lifecycle animation */}
+          {/* Execution lifecycle animation — show the product immediately */}
           <ExecutionShowcase />
 
-          {/* Showcase Section */}
+          {/* Proof — live projects with real metrics */}
           <div id="showcase" ref={showcaseRef}>
             <ShowcaseGallery />
           </div>
 
-          <StatsSection />
-          <FeaturesGrid />
-
-          {/* Workers Section */}
-          <section>
-            <Workers />
-          </section>
-
-          {/* Trust & Security Callout */}
+          {/* Trust & Security */}
           <TrustCallout />
+
+          {/* Now they're convinced — show how to get started */}
+          <InstallSection />
 
           {/* Pricing Section */}
           <section id="pricing">

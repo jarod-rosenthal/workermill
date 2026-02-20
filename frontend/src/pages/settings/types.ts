@@ -38,6 +38,7 @@ export interface EmailPreferences {
 }
 
 export interface Settings {
+  apiKeyPrefix?: string | null;
   logRetentionDays: number;
   taskRetentionDays: number;
   maxConcurrentWorkers: number;

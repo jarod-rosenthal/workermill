@@ -28,7 +28,7 @@ import {
   startAgentProcess,
   stopAgentProcess,
 } from "./agent-installer";
-import { signUpWithGitHub, signInWithGitHub } from "./github-onboard";
+import { signUpWithGitHub, signInWithGitHub, enterApiKey } from "./github-onboard";
 
 let client: AgentClient;
 let statusBar: StatusBar;
@@ -755,10 +755,21 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
 
-    vscode.commands.registerCommand("workermill.manualSetup", () => {
-      const terminal = vscode.window.createTerminal("WorkerMill Setup");
-      terminal.show();
-      terminal.sendText("workermill-agent setup");
+    vscode.commands.registerCommand("workermill.manualSetup", async () => {
+      const success = await enterApiKey(log);
+      if (success) {
+        treeProvider.agentConfigured = true;
+        vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
+        client.connect();
+      }
+    }),
+
+    vscode.commands.registerCommand("workermill.openDashboard", () => {
+      vscode.env.openExternal(vscode.Uri.parse("https://workermill.com/dashboard"));
+    }),
+
+    vscode.commands.registerCommand("workermill.openSettings", () => {
+      vscode.env.openExternal(vscode.Uri.parse("https://workermill.com/settings"));
     }),
   );
 
@@ -774,25 +785,13 @@ export function activate(context: vscode.ExtensionContext): void {
     configured,
   );
 
-  // Auto-start agent if installed and configured, otherwise prompt setup
+  // Auto-start agent if installed and configured, otherwise let welcome view guide user
   if (installed && configured) {
     startAgentProcess(log);
   } else if (!configured) {
-    log("Agent not configured — prompting user");
-    // Show a prominent setup prompt on first install
-    vscode.window
-      .showInformationMessage(
-        "Welcome to WorkerMill! Connect your GitHub account to start running AI workers.",
-        "Sign up with GitHub",
-        "Sign in",
-      )
-      .then((choice) => {
-        if (choice === "Sign up with GitHub") {
-          vscode.commands.executeCommand("workermill.signUpWithGitHub");
-        } else if (choice === "Sign in") {
-          vscode.commands.executeCommand("workermill.signInWithGitHub");
-        }
-      });
+    log("Agent not configured — showing welcome view");
+    // Reveal the sidebar so the welcome view (with Sign Up / Sign In buttons) is visible
+    vscode.commands.executeCommand("workermill.teamPanel.focus");
   }
 
   // Connect to agent (reconnect loop handles timing if agent isn't ready yet)

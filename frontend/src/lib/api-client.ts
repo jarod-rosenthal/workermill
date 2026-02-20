@@ -208,6 +208,45 @@ export const authAPI = {
     };
   },
 
+  // GitHub SSO (direct OAuth, not via Cognito)
+  getGitHubAuthUrl: async (inviteToken?: string) => {
+    const params = inviteToken ? { inviteToken } : {};
+    const response = await apiClient.get("/auth/github/authorize", { params });
+    return response.data as {
+      authorizeUrl: string;
+      state: string;
+      redirectUri: string;
+    };
+  },
+
+  githubCallback: async (data: { code: string; redirectUri: string; state?: string }) => {
+    const response = await apiClient.post("/auth/github/callback", data);
+    return response.data as {
+      tokens: {
+        accessToken: string;
+        refreshToken: string;
+        idToken: string;
+        expiresIn: number;
+      };
+      user: {
+        id: string;
+        email: string;
+        fullName: string;
+        role: string;
+        status: string;
+      };
+      organization: {
+        id: string;
+        name: string;
+        plan: string;
+      } | null;
+      isNewUser: boolean;
+      isNewOrg: boolean;
+      inviteToken?: string;
+      pendingInvite?: boolean;
+    };
+  },
+
   microsoftCallback: async (data: { code: string; redirectUri: string; state?: string }) => {
     const response = await apiClient.post("/auth/microsoft/callback", data);
     return response.data as {

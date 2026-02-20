@@ -1052,6 +1052,12 @@ router.get("/sso-config", async (_req: Request, res: Response) => {
       enabledProviders.push({ name: "Microsoft", displayName: "Microsoft" });
     }
 
+    // Also add GitHub if direct OAuth is configured
+    const hasGitHubDirect = process.env.GITHUB_CLIENT_ID && !enabledProviders.some(p => p.name === "GitHub");
+    if (hasGitHubDirect) {
+      enabledProviders.push({ name: "GitHub", displayName: "GitHub" });
+    }
+
     // Build Cognito hosted UI base URL
     // Custom domains (auth.workermill.com) contain dots, prefix domains don't
     const cognitoDomain = config.cognito.domain;
@@ -1729,6 +1735,310 @@ async function getCognitoTokensForUser(
     throw error;
   }
 }
+
+// =============================================================================
+// GitHub OAuth SSO (Web Login — Direct OAuth, not via Cognito)
+// =============================================================================
+
+// Store PKCE state for GitHub OAuth (in-memory, short-lived)
+const githubOAuthStates = new Map<string, { expiresAt: number; inviteToken?: string }>();
+
+// Clean up expired states periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [state, data] of githubOAuthStates.entries()) {
+    if (data.expiresAt < now) {
+      githubOAuthStates.delete(state);
+    }
+  }
+}, 60000);
+
+/**
+ * GET /api/auth/github/config
+ * Returns GitHub OAuth configuration for frontend
+ */
+router.get("/github/config", (_req: Request, res: Response) => {
+  const clientId = process.env.GITHUB_CLIENT_ID;
+
+  if (!clientId) {
+    return res.json({ enabled: false });
+  }
+
+  res.json({ enabled: true, clientId });
+});
+
+/**
+ * GET /api/auth/github/authorize
+ * Generates GitHub OAuth URL with state parameter
+ */
+router.get("/github/authorize", (req: Request, res: Response) => {
+  const clientId = process.env.GITHUB_CLIENT_ID;
+  const inviteToken = req.query.inviteToken as string | undefined;
+
+  if (!clientId) {
+    return res.status(503).json({ error: "GitHub SSO not configured" });
+  }
+
+  const state = randomBytes(32).toString("hex");
+  githubOAuthStates.set(state, {
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    inviteToken,
+  });
+
+  const origin = req.headers.origin || config.apiBaseUrl.replace("/api", "");
+  const redirectUri = `${origin}/auth/github/callback`;
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    scope: "read:user user:email repo",
+    state,
+  });
+
+  const authorizeUrl = `https://github.com/login/oauth/authorize?${params.toString()}`;
+
+  res.json({ authorizeUrl, state, redirectUri });
+});
+
+/**
+ * POST /api/auth/github/callback
+ * Handles GitHub OAuth callback — exchanges code for tokens, creates/finds user
+ */
+router.post(
+  "/github/callback",
+  [
+    body("code").isString().notEmpty().withMessage("Authorization code is required"),
+    body("redirectUri").isString().notEmpty().withMessage("Redirect URI is required"),
+    body("state").optional().isString(),
+  ],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ error: "Validation failed", details: errors.array() });
+      }
+
+      const { code, redirectUri, state } = req.body;
+      const clientId = process.env.GITHUB_CLIENT_ID;
+      const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        return res.status(503).json({ error: "GitHub SSO not configured" });
+      }
+
+      // Verify state
+      let inviteToken: string | undefined;
+      if (state) {
+        const stateData = githubOAuthStates.get(state);
+        if (!stateData) {
+          return res.status(400).json({ error: "Invalid or expired state parameter" });
+        }
+        if (stateData.expiresAt < Date.now()) {
+          githubOAuthStates.delete(state);
+          return res.status(400).json({ error: "State parameter expired" });
+        }
+        inviteToken = stateData.inviteToken;
+        githubOAuthStates.delete(state);
+      }
+
+      // Exchange code for access token
+      const tokenResponse = await axios.post(
+        "https://github.com/login/oauth/access_token",
+        { client_id: clientId, client_secret: clientSecret, code, redirect_uri: redirectUri },
+        { headers: { Accept: "application/json" } },
+      );
+
+      const githubToken = tokenResponse.data.access_token;
+      if (!githubToken) {
+        return res.status(400).json({ error: "Failed to get access token from GitHub" });
+      }
+
+      // Get user info and email from GitHub
+      let githubUser: { login: string; name: string | null; id: number };
+      let primaryEmail: string;
+      try {
+        const [userResponse, emailsResponse] = await Promise.all([
+          axios.get("https://api.github.com/user", {
+            headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json" },
+          }),
+          axios.get("https://api.github.com/user/emails", {
+            headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json" },
+          }),
+        ]);
+
+        githubUser = userResponse.data;
+        const emails = emailsResponse.data as Array<{ email: string; primary: boolean; verified: boolean }>;
+        const primary = emails.find((e) => e.primary && e.verified);
+        if (!primary) {
+          return res.status(400).json({ error: "No verified primary email found on GitHub account" });
+        }
+        primaryEmail = primary.email;
+      } catch (err: any) {
+        logger.warn("GitHub token validation failed", { error: err.message });
+        return res.status(401).json({ error: "Invalid GitHub token" });
+      }
+
+      const name = githubUser.name || githubUser.login;
+      const userRepo = AppDataSource.getRepository(User);
+      const orgRepo = AppDataSource.getRepository(Organization);
+      const inviteRepo = AppDataSource.getRepository(OrgInvite);
+      const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+
+      // Check for pending invite
+      const pendingInvite = await inviteRepo.findOne({
+        where: { email: primaryEmail.toLowerCase(), accepted: false },
+      });
+      const hasValidInvite = pendingInvite && !pendingInvite.isExpired();
+
+      let user = await userRepo.findOne({ where: { email: primaryEmail } });
+      let org: Organization | null = null;
+      let isNewUser = false;
+      let isNewOrg = false;
+
+      if (!user) {
+        // New user — create Cognito account + org
+        isNewUser = true;
+
+        const tempPassword = randomBytes(32).toString("base64") + "!A1";
+        const cognitoId = await createCognitoUserForMicrosoft(primaryEmail, name, tempPassword);
+
+        if (hasValidInvite) {
+          // User has invite — create without org, they'll accept invite after
+          user = userRepo.create({
+            cognitoId,
+            email: primaryEmail.toLowerCase(),
+            fullName: name,
+            role: "member",
+            status: "active",
+            orgId: null,
+          });
+          await userRepo.save(user);
+
+          logger.info("GitHub SSO: Created new user (pending invite)", { userId: user.id, email: primaryEmail });
+        } else {
+          // No invite — create org linked to GitHub
+          isNewOrg = true;
+          const login = githubUser.login;
+          const baseSlug = login.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+          let slug = baseSlug;
+          let slugSuffix = 0;
+          while (await orgRepo.findOne({ where: { slug } })) {
+            slugSuffix++;
+            slug = `${baseSlug}-${slugSuffix}`;
+          }
+
+          const rawKey = `org_${randomUUID().replace(/-/g, "")}`;
+          org = orgRepo.create({
+            name: `${login}'s org`,
+            slug,
+            plan: "free",
+            taskQuota: 0,
+            scmProvider: "github",
+            apiKeyHash: await bcrypt.hash(rawKey, 10),
+            apiKeyPrefix: rawKey.substring(0, 12),
+          });
+          await orgRepo.save(org);
+
+          user = userRepo.create({
+            cognitoId,
+            email: primaryEmail.toLowerCase(),
+            fullName: name,
+            role: "admin",
+            status: "active",
+            orgId: null,
+            tosAcceptedAt: new Date(),
+            tosVersion: TOS_VERSION,
+          });
+          await userRepo.save(user);
+
+          const membership = userOrgRepo.create({
+            userId: user.id,
+            orgId: org.id,
+            role: "admin",
+            isDefault: true,
+          });
+          await userOrgRepo.save(membership);
+
+          // Store GitHub token in Secrets Manager
+          const secretPrefix = `workermill/${config.environment}`;
+          await Promise.all([
+            saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via web SSO)"),
+            saveOrgSecret(org.id, "github-reviewer-token", githubToken, secretPrefix, "GitHub reviewer token (via web SSO)"),
+          ]);
+
+          notifyNewSignup({ email: primaryEmail, fullName: name, organizationName: org.name }).catch(() => {});
+          sendWelcomeEmail(user, org, false).catch(() => {});
+
+          logger.info("GitHub SSO: Created new user + org", { userId: user.id, orgId: org.id, email: primaryEmail });
+        }
+      } else {
+        // Existing user — find their org
+        const defaultMembership = await userOrgRepo.findOne({
+          where: { userId: user.id, isDefault: true },
+        }) || await userOrgRepo.findOne({
+          where: { userId: user.id },
+          order: { joinedAt: "ASC" },
+        });
+
+        if (defaultMembership) {
+          org = await orgRepo.findOne({ where: { id: defaultMembership.orgId } }) || null;
+
+          // Update GitHub token in Secrets Manager (refresh on each login)
+          if (org) {
+            const secretPrefix = `workermill/${config.environment}`;
+            await Promise.all([
+              saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via web SSO signin)"),
+              saveOrgSecret(org.id, "github-reviewer-token", githubToken, secretPrefix, "GitHub reviewer token (via web SSO signin)"),
+            ]);
+          }
+        }
+
+        logger.info("GitHub SSO: Existing user login", { userId: user.id, email: primaryEmail });
+      }
+
+      // Get Cognito tokens for web auth
+      const tokens = await getCognitoTokensForUser(user.cognitoId, user.email);
+
+      // Get user role
+      const membership = await userOrgRepo.findOne({
+        where: { userId: user.id, isDefault: true },
+      }) || await userOrgRepo.findOne({
+        where: { userId: user.id },
+        order: { joinedAt: "ASC" },
+      });
+      const userRole = membership?.role || "member";
+
+      res.json({
+        tokens: {
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          idToken: tokens.idToken,
+          expiresIn: tokens.expiresIn,
+        },
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          role: userRole,
+          status: user.status,
+        },
+        organization: org ? { id: org.id, name: org.name, plan: org.plan } : null,
+        isNewUser,
+        isNewOrg,
+        pendingInvite: hasValidInvite,
+        inviteToken: hasValidInvite ? inviteToken : undefined,
+      });
+    } catch (error: any) {
+      logger.error("GitHub SSO callback error", { error: error.message, response: error.response?.data });
+
+      if (error.response?.status === 400) {
+        return res.status(400).json({ error: "Invalid authorization code or it has expired" });
+      }
+
+      res.status(500).json({ error: "GitHub SSO authentication failed" });
+    }
+  },
+);
 
 // =============================================================================
 // GitHub Onboarding (VS Code Extension)

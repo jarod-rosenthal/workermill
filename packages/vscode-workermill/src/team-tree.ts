@@ -146,7 +146,7 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
           items.push(new InfoTreeItem("Backlog", "All issues are being worked on", "$(list-unordered)"));
         }
       } else {
-        items.push(new InfoTreeItem("Backlog", "No issues found", "$(list-unordered)"));
+        items.push(new InfoTreeItem("Backlog", "Connect a repo in Settings to see issues", "$(list-unordered)"));
       }
 
       // Recent

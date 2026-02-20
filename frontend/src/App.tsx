@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { Login } from "./pages/Login";
 import { AuthCallback } from "./pages/AuthCallback";
 import { MicrosoftCallback } from "./pages/MicrosoftCallback";
+import { GitHubCallback } from "./pages/GitHubCallback";
 import Dashboard from "./pages/Dashboard";
 import SetupWizard from "./pages/SetupWizard";
 import Profile from "./pages/Profile";
@@ -178,6 +179,7 @@ function App() {
           <Route path="/auth/callback" element={<AuthCallback />} />
           {/* Microsoft OAuth callback - separate from Cognito */}
           <Route path="/auth/microsoft/callback" element={<MicrosoftCallback />} />
+          <Route path="/auth/github/callback" element={<GitHubCallback />} />
 
           {/* Public invite acceptance */}
           <Route path="/invites/:token" element={<AcceptInvite />} />

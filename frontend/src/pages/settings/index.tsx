@@ -2097,6 +2097,7 @@ export default function Settings() {
             remoteAgents={remoteAgents}
             remoteAgentsLoading={remoteAgentsLoading}
             orgPlan={organization?.plan}
+            apiKeyPrefix={settings?.apiKeyPrefix}
           />
         );
       case "billing":

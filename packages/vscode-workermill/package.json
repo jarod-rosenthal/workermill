@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "workermill",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -133,19 +133,34 @@
         "command": "workermill.buildFromPrd",
         "title": "WorkerMill: Build from PRD",
         "icon": "$(rocket)"
+      },
+      {
+        "command": "workermill.openDashboard",
+        "title": "WorkerMill: Open Dashboard",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "workermill.openSettings",
+        "title": "WorkerMill: Open Settings",
+        "icon": "$(gear)"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "workermill.searchIssues",
-          "when": "view == workermill.teamPanel",
-          "group": "navigation"
+          "when": "view == workermill.teamPanel && workermill.agentConfigured",
+          "group": "navigation@1"
         },
         {
           "command": "workermill.refreshTasks",
-          "when": "view == workermill.teamPanel",
-          "group": "navigation"
+          "when": "view == workermill.teamPanel && workermill.agentConfigured",
+          "group": "navigation@2"
+        },
+        {
+          "command": "workermill.openSettings",
+          "when": "view == workermill.teamPanel && workermill.agentConfigured",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -205,7 +220,7 @@
     "viewsWelcome": [
       {
         "view": "workermill.teamPanel",
-        "contents": "Welcome to WorkerMill!\n\nConnect your GitHub account to start running AI workers on your repos.\n\n[Sign up with GitHub](command:workermill.signUpWithGitHub)\n\nAlready have an account?\n[Sign in with GitHub](command:workermill.signInWithGitHub)\n\n[Manual setup (API key)](command:workermill.manualSetup)",
+        "contents": "Assign Jira or GitHub issues to AI workers that plan, code, and open PRs — right from your editor.\n\n[Create Account](command:workermill.signUpWithGitHub)\n\n[I have an API key](command:workermill.manualSetup)\n\nAlready have an account? [Sign in](command:workermill.signInWithGitHub)",
         "when": "!workermill.agentConfigured"
       }
     ]

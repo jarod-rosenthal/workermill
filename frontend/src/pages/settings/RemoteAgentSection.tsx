@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   CheckCircle,
   Crown,
@@ -7,7 +8,13 @@ import {
   Copy,
   Zap,
   Brain,
+  Key,
+  RefreshCw,
+  Eye,
+  EyeOff,
 } from "lucide-react";
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 interface RemoteAgent {
   agentId: string;
@@ -24,12 +31,130 @@ interface RemoteAgentSectionProps {
   remoteAgents: RemoteAgent[];
   remoteAgentsLoading: boolean;
   orgPlan?: string;
+  apiKeyPrefix?: string | null;
+}
+
+function ApiKeySection({ apiKeyPrefix }: { apiKeyPrefix?: string | null }) {
+  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [revealed, setRevealed] = useState(false);
+
+  const generateKey = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(
+        `${API_BASE}/api/organizations/current/rotate-api-key`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to generate API key");
+      }
+
+      const data = await response.json();
+      setApiKey(data.apiKey);
+      setRevealed(true);
+    } catch {
+      // error handled silently
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copyKey = () => {
+    if (!apiKey) return;
+    navigator.clipboard.writeText(apiKey);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="border border-primary/30 rounded-xl p-6 bg-primary/5">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
+          <Key className="w-5 h-5 text-primary" />
+        </div>
+        <div>
+          <h3 className="font-semibold text-foreground">API Key</h3>
+          <p className="text-sm text-muted-foreground">
+            Required for the VS Code extension and CLI agent
+          </p>
+        </div>
+      </div>
+
+      {apiKey ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 bg-background/80 rounded-lg px-4 py-3 font-mono text-sm border border-border/50">
+            <code className="text-foreground flex-1 select-all">
+              {revealed ? apiKey : apiKey.substring(0, 12) + "..." + "x".repeat(20)}
+            </code>
+            <button
+              onClick={() => setRevealed(!revealed)}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              title={revealed ? "Hide" : "Reveal"}
+            >
+              {revealed ? (
+                <EyeOff className="w-4 h-4" />
+              ) : (
+                <Eye className="w-4 h-4" />
+              )}
+            </button>
+            <button
+              onClick={copyKey}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              title="Copy to clipboard"
+            >
+              {copied ? (
+                <CheckCircle className="w-4 h-4 text-green-500" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </button>
+          </div>
+          <p className="text-xs text-amber-400">
+            Save this key now — it won't be shown again. If you lose it, generate a new one.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {apiKeyPrefix && (
+            <p className="text-sm text-muted-foreground">
+              Current key: <code className="text-foreground">{apiKeyPrefix}...</code>
+            </p>
+          )}
+          <button
+            onClick={generateKey}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            {loading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4" />
+            )}
+            {apiKeyPrefix ? "Generate New API Key" : "Generate API Key"}
+          </button>
+          {apiKeyPrefix && (
+            <p className="text-xs text-muted-foreground">
+              This will invalidate the current key. Any connected agents will need to be reconfigured.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function RemoteAgentSection({
   remoteAgents,
   remoteAgentsLoading,
   orgPlan,
+  apiKeyPrefix,
 }: RemoteAgentSectionProps) {
   const isFreePlan = !orgPlan || orgPlan === "free";
 
@@ -57,6 +182,9 @@ export function RemoteAgentSection({
         <h2 className="text-xl font-semibold text-foreground mb-1">Remote Agent</h2>
         <p className="text-sm text-muted-foreground">Run AI workers on your own machine with your Claude Max subscription</p>
       </div>
+
+      {/* API Key — first thing users need */}
+      <ApiKeySection apiKeyPrefix={apiKeyPrefix} />
 
       {/* Install Instructions */}
       <div className="border border-border/50 rounded-xl p-6 bg-card">
@@ -94,7 +222,7 @@ export function RemoteAgentSection({
           ))}
         </div>
         <p className="mt-4 text-xs text-muted-foreground">
-          The setup wizard will prompt for your API key (available in Integrations &gt; API Keys) and validate all prerequisites.
+          Or install the VS Code extension — it handles install, setup, and agent startup automatically.
         </p>
       </div>
 
@@ -111,11 +239,9 @@ export function RemoteAgentSection({
         </div>
         <div className="space-y-2">
           {[
-            { name: "Docker", detail: "Container runtime for worker isolation" },
-            { name: "Claude CLI", detail: "npm install -g @anthropic-ai/claude-code" },
+            { name: "Claude CLI", detail: "Installed automatically by the VS Code extension or install.sh" },
             { name: "Claude Max subscription", detail: "Authenticated via 'claude auth login'" },
-            { name: "Node.js >= 20", detail: "Runtime for the agent process" },
-            { name: "SCM token", detail: "GitHub, GitLab, or Bitbucket access token for cloning repos" },
+            { name: "SCM token", detail: "Configure in Settings > Integrations" },
           ].map((item) => (
             <div key={item.name} className="flex items-start gap-3 py-1.5">
               <CheckCircle className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />

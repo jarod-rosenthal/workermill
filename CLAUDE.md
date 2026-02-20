@@ -106,14 +106,20 @@ When fixing orchestrator bugs:
 
 **Always bump `agent/package.json` version before releasing.** The version is embedded at compile time via esbuild `define`. To release: bump version → `git tag agent-v<version>` → `git push --tags` → GitHub Actions builds binaries. npm publish is still supported as a fallback: `cd agent && npm run build && npm publish --access public`.
 
-### Rebuild Worker Image After worker/ Changes
+### Rebuild After worker/ Changes
 
-The `worker/epic/*.ts` files are **compiled by `tsc`** during the Docker build. The container runs `node dist/index.js` (compiled TypeScript). Three legacy `.js` files (`agent-sdk.js`, `inline-reviewer.js`, `types.js`) exist in the directory but are **dead code** — not used at runtime. Worker containers do NOT auto-reload.
+Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND the agent binary. Changes to worker code require rebuilding the right artifact depending on which execution path you use.
+
+| Execution path | Where worker code lives | How to rebuild |
+|----------------|------------------------|----------------|
+| **Remote agent** (production) | Bundled into agent binary at build time (esbuild) | Release new agent binary: bump version → `git tag agent-v<version>` → push |
+| **Local WorkerMill Docker** | Docker image compiled by `tsc` | `./bin/local-workermill build-worker` |
+| **Cloud ECS** | ECR Docker image | `./deploy.sh --worker` |
 
 | What you want to change | Where to edit | Then what |
 |--------------------------|---------------|-----------|
-| Container runtime code (agent behavior) | `worker/epic/*.ts` | `./bin/local-workermill build-worker` |
-| Container env vars (tokens, settings) | `api/src/services/local-epic-spawner.ts` (`buildEnvArgs`) | Restart API |
+| Worker runtime code | `worker/epic/*.ts` | Rebuild agent binary AND/OR Docker image (see above) |
+| Container env vars (local mode) | `api/src/services/local-epic-spawner.ts` (`buildEnvArgs`) | Restart API |
 | API-side orchestration | `api/src/services/orchestrator.ts` and modules | Restart API |
 
 ---
@@ -249,9 +255,11 @@ Once tunnel is running, connect via `psql -h localhost -p 5432 -U workermill -d 
 
 ---
 
-## Local WorkerMill Mode
+## Local WorkerMill Mode (Docker — Dashboard Only, No VS Code Extension)
 
-Run WorkerMill entirely locally with workers as Claude Code processes (instead of ECS containers). Uses Claude Max subscription OAuth token for authentication.
+Run WorkerMill entirely locally with workers as Docker containers. Uses Claude Max subscription OAuth token for authentication. Tasks are managed via the web dashboard at `localhost:5173` — **the VS Code extension does NOT connect to local WorkerMill** (it requires the remote agent).
+
+**To use VS Code with local development**, run the remote agent pointed at `http://localhost:3001` instead — see "Remote Agent Mode" above.
 
 ### Prerequisites
 
@@ -341,31 +349,61 @@ lsof -ti :5173 -ti :5174 2>/dev/null | xargs -r kill -9
 - NEVER restart the API while a worker container is running a task (it will lose its connection and die)
 - After restart, verify frontend is on port 5173: `cat .local-workermill/frontend.log`
 
-### Remote Agent Mode
+### Remote Agent Mode (PRIMARY — Used by VS Code Extension)
 
-Run workers locally while using the **cloud** dashboard (workermill.com). No Node.js required.
+The remote agent is the **primary execution path** for both cloud and local development. The VS Code extension ONLY works through the remote agent — it cannot talk to the local WorkerMill API directly.
 
+**How it works:**
+1. Agent binary runs on the user's machine as a background process
+2. Agent exposes a local HTTP API on a random port, writes port to `~/.workermill/agent.port`
+3. VS Code extension discovers the agent via the port file, connects via HTTP + SSE
+4. Agent polls the cloud API (or local API) for tasks, runs planning, spawns workers as native processes
+5. Workers are self-invocations of the same binary with `__WORKERMILL_MODE=worker`
+
+**Install (CDN — no GitHub auth needed, repo is private):**
 ```bash
-# Install (one-liner, no prerequisites beyond Claude CLI)
 curl -fsSL https://workermill.com/install.sh | bash   # Mac/Linux
 irm https://workermill.com/install.ps1 | iex           # Windows (PowerShell)
-
-# Setup and start
-workermill-agent setup
-workermill-agent start
 ```
 
-Key difference: `API_BASE_URL` points to `https://workermill.com` instead of `localhost`. The agent is a standalone binary — workers spawn as self-invocations of the same binary with `__WORKERMILL_MODE` env var.
+**Setup and start:**
+```bash
+workermill-agent setup    # prompts for API URL + API key (or use GitHub SSO via VS Code)
+workermill-agent start    # starts polling, exposes local API for VS Code
+workermill-agent update   # self-updates from CDN
+```
+
+**Config:** `~/.workermill/config.json` — contains `apiUrl` (cloud or localhost) and `apiKey`.
+
+**CDN distribution:** Agent binaries are hosted on S3/CloudFront at `https://workermill.com/agent/latest/`:
+- `workermill-agent-linux-x64`, `workermill-agent-darwin-arm64`, `workermill-agent-darwin-x64`, `workermill-agent-win-x64.exe`
+- Version manifest: `https://workermill.com/agent/latest.json` (e.g. `{"version":"0.10.8","tag":"agent-v0.10.8"}`)
+- CI workflow (`agent-release.yml`) builds binaries on `agent-v*` tags, uploads to S3, invalidates CloudFront
+
+**Using with local WorkerMill (development):**
+```bash
+# Terminal 1: Start local API + DB
+./bin/local-workermill start
+
+# Terminal 2: Run agent pointed at local API
+workermill-agent setup   # API URL: http://localhost:3001, API key from local org settings
+workermill-agent start
+```
+When pointed at localhost, the agent claims tasks from the local API. **The local orchestrator's claim loop will race with the agent** — you may need to stop the orchestrator (`GET /api/orchestrator/stop`) or set `EXECUTION_MODE=remote` to let the agent handle all claims.
+
+**CRITICAL:** Planning (story decomposition + critic validation) runs ONLY in the remote agent (`agent/src/planner.ts`). Local WorkerMill Docker mode skips planning entirely. If you want planning during local development, use the remote agent pointed at localhost:3001.
 
 ### VS Code Extension (IDE Companion)
 
 The VS Code extension (`packages/vscode-workermill/`) connects to the remote agent's local API via `~/.workermill/agent.port` (HTTP + SSE). Provides sidebar tree (Active/Backlog/Recent), activity feed, and pseudoterminal log tabs.
 
+**CRITICAL: The extension REQUIRES the remote agent.** It cannot connect to the local WorkerMill API directly. All task operations go: VS Code → Agent Local API → Cloud/Local API.
+
 **Architecture:**
 - `src/extension.ts` — activation, command registration, context key setup
 - `src/team-tree.ts` — TreeDataProvider for sidebar (tasks, issues, onboarding)
 - `src/agent-client.ts` — HTTP + SSE client to agent local API
-- `src/agent-installer.ts` — binary download, start/stop, config check
+- `src/agent-installer.ts` — binary download from CDN, start/stop, config check
 - `src/github-onboard.ts` — onboarding flow (GitHub sign up/in, API key entry)
 - `src/feed-view.ts` — activity webview, `src/status-bar.ts`, `src/notifications.ts`
 - `src/log-terminal.ts` — pseudoterminal log tabs
@@ -373,18 +411,18 @@ The VS Code extension (`packages/vscode-workermill/`) connects to the remote age
 - `src/task-detail-panel.ts` — task detail webview
 
 **Onboarding flow (fresh install, no `~/.workermill/config.json`):**
-1. User installs `.vsix`, opens WorkerMill sidebar
-2. Tree shows onboarding items: Create Account / I have an API key / Sign In
-3. "Create Account" → VS Code GitHub auth → `POST /api/auth/github-onboard` → creates account + org + returns API key
-4. "Sign In" → VS Code GitHub auth → `POST /api/auth/github-signin` → returns API key for existing account
-5. "I have an API key" → manual input
-6. All paths → `writeAgentConfig()` → install binary → start agent → connect
+1. User installs extension from Marketplace (or `.vsix`), opens WorkerMill sidebar
+2. `viewsWelcome` shows: "Create Account" / "I have an API key" / "Sign In"
+3. "Create Account" → VS Code built-in GitHub auth → `POST /api/auth/github-onboard` → creates account + org + returns API key
+4. "Sign In" → VS Code built-in GitHub auth → `POST /api/auth/github-signin` → returns API key for existing account
+5. "I have an API key" → manual input → `GET /api/agent/config` to validate
+6. All paths → `writeAgentConfig()` → download agent binary from CDN → start agent → connect
 
-**CRITICAL — Welcome view / onboarding bugs:**
-- **DO NOT use VS Code `viewsWelcome`** for onboarding. It is unreliable — `when` clause context keys have timing issues and the welcome content fails to render on fresh installs on real machines. This was tried multiple times and failed every time.
-- **Use tree items instead.** When `!this.connected`, the tree's `getChildren()` must return clickable tree items (with `command` property) as the onboarding/reconnection UI. This is the ONLY reliable approach.
-- `isAgentConfigured()` checks `~/.workermill/config.json` exists with valid `apiKey` + `apiUrl` fields
-- Context keys: `workermill.agentConfigured` (config exists), `workermill.agentConnected` (SSE connected)
+**Welcome view implementation:**
+- Uses VS Code `viewsWelcome` in `package.json` with two entries: unconfigured (sign up/in) and configured-but-disconnected (start/install agent)
+- `when` clauses use context keys: `workermill.agentConfigured` and `workermill.agentConnected`
+- `getChildren()` in `team-tree.ts` returns `[]` (empty array) when `!this.connected` — this triggers viewsWelcome
+- `isAgentConfigured()` checks `~/.workermill/config.json` exists (Windows: `%USERPROFILE%\.workermill\config.json`)
 
 **Build & release:**
 ```bash
@@ -394,8 +432,8 @@ npm run typecheck   # tsc --noEmit
 npm run package     # → workermill-{version}.vsix
 ```
 - **ALWAYS bump version** in package.json before packaging — VS Code caches extensions by version
-- Version is embedded at compile time — old version = old code even if you rebuild
-- The `.vsix` file must be transferred to and installed on the target machine: `code --install-extension workermill-{version}.vsix`
+- Marketplace publish: `git tag vscode-v{version}` → push to `jarod-rosenthal/workermill` → CI publishes to Marketplace
+- Manual install: `code --install-extension workermill-{version}.vsix`
 - **Testing is done on a SEPARATE machine** — not the dev machine. Do not assume `~/.workermill/` exists on the test machine.
 
 **Web login (SSO providers):**
@@ -417,14 +455,16 @@ API (`tsx watch`) and Frontend (Vite) auto-reload. PostgreSQL and Worker run as 
 
 ### Worker Image Registry
 
-Worker images are private ECR only — used by **cloud ECS tasks** and **local WorkerMill Docker mode**.
+Worker Docker images are used ONLY by **cloud ECS tasks** and **local WorkerMill Docker mode**. The **remote agent does NOT use Docker** — worker code is bundled into the agent binary at build time.
 
 | Registry | URL | Consumer |
 |----------|-----|----------|
 | **Private ECR** | `AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest` | Cloud ECS tasks |
+| **Local image** | `workermill-worker:local` | Local WorkerMill Docker mode |
 
 - `--worker` pushes to private ECR and updates the ECS task definition
-- **Remote agent** does NOT use Docker — workers run as native processes via the agent binary. Worker code is bundled into the agent at build time. To update remote agent workers, release a new agent binary.
+- To update **remote agent** workers: release a new agent binary (the worker code is compiled into it)
+- To update **local WorkerMill** workers: `./bin/local-workermill build-worker`
 
 ### Database Migrations
 
@@ -534,13 +574,53 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 | `prd.ts` | PRD decomposition into board cards |
 | `showcase.ts` | Public showcase projects |
 
-### Task Flow
+### Task Flow (Three Execution Paths)
 
+**Path 1 — Remote Agent (production + VS Code):**
 ```
-Jira webhook ─────────────────┐
-VS Code extension (Run Issue) ─┤→ API receives task → Queue → Claim task → Spawn worker → Monitor → Parse output markers (::result::, ::pr_url::) → Update status
-Dashboard (Run Task) ──────────┘
+Jira/GitHub webhook ──────┐
+VS Code (Run Issue) ──────┤→ Cloud API creates task (status: planning)
+Dashboard (Run Task) ─────┘       ↓
+                           Remote agent polls /api/agent/poll
+                                  ↓
+                           Agent claims task → runs planner (Claude CLI)
+                                  ↓
+                           Critic validates plan (score >= 85/100, max 3 iterations)
+                                  ↓
+                           Agent posts plan → API sets status: queued
+                                  ↓
+                           Agent claims queued task → spawns native worker process
+                           (__WORKERMILL_MODE=worker, self-invocation of agent binary)
+                                  ↓
+                           Worker runs Epic Coordinator → experts in parallel
+                                  ↓
+                           Worker posts ::result:: marker → API updates status
 ```
+
+**Path 2 — Local WorkerMill Docker (development, NO planning):**
+```
+Dashboard (localhost:5173) → Local API creates task (status: queued, skips planning)
+                                  ↓
+                           Local orchestrator polls DB → claims task
+                                  ↓
+                           local-epic-spawner.ts → Docker container
+                           (workermill-worker:local image)
+                                  ↓
+                           Container runs Epic Coordinator → experts
+                                  ↓
+                           Worker posts ::result:: → API updates status
+```
+
+**Path 3 — Cloud ECS (legacy, requires remote agent for planning):**
+```
+Task created (status: planning) → Remote agent plans → status: queued
+                                  ↓
+                           Cloud orchestrator claims → ECS Fargate task
+                                  ↓
+                           Container runs Epic Coordinator
+```
+
+**CRITICAL:** VS Code extension ONLY works with Path 1 (remote agent). It does NOT connect to the local API directly. If you want VS Code + local dev, run the remote agent pointed at `http://localhost:3001`.
 
 ### Worker System
 
@@ -570,22 +650,25 @@ React 19 + Vite + TailwindCSS + Zustand. Routing via React Router v7 (`App.tsx`)
 
 ## Execution Modes
 
-Both modes run in a **single container** with parallel expert execution. The mode determines which AI SDK drives the experts.
+There are three ways tasks are executed, depending on where the worker runs:
 
-| Condition | Mode |
-|-----------|------|
-| `workerProvider` = "anthropic" | **Epic** (Claude CLI experts) |
-| Other provider or `providerRouting` configured | **Multi-Provider** (Vercel AI SDK experts) |
+| Environment | Worker runs as | Planning | Docker needed? |
+|-------------|---------------|----------|----------------|
+| **Remote Agent** (production) | Native process (self-invocation of agent binary) | Yes (agent planner) | **No** |
+| **Local WorkerMill** (development) | Docker container (`workermill-worker:local`) | No (skipped) | **Yes** |
+| **Cloud ECS** (legacy) | ECS Fargate task | Yes (agent planner, separate step) | Yes (ECR image) |
 
-### Epic
+### Epic Mode (Anthropic provider)
 
-Planning Agent decomposes task → Single container runs Epic Coordinator → Claude CLI expert subprocesses work in parallel via git worktrees → Coordination feed for collaboration → Consolidated PR.
+Planning Agent decomposes task → Epic Coordinator runs → Claude CLI expert subprocesses work in parallel via git worktrees → Coordination feed for collaboration → Consolidated PR.
 
-**Components:** `worker/epic/coordinator.ts`, `executor.ts`, `experts.ts`, `coordination-client.ts` (compiled by `tsc` during Docker build)
+**Components:** `worker/epic/coordinator.ts`, `executor.ts`, `experts.ts`, `coordination-client.ts`
+- In remote agent: compiled into the agent binary at build time (esbuild bundles from TS source)
+- In Docker/ECS: compiled by `tsc` during Docker build
 
-### Multi-Provider
+### Multi-Provider Mode (non-Anthropic)
 
-Planning Agent decomposes task → Single container runs Multi-Expert Coordinator → Vercel AI SDK expert calls work in parallel, each persona routed to configured provider → Coordination feed → Consolidated PR.
+Planning Agent decomposes task → Multi-Expert Coordinator → Vercel AI SDK expert calls work in parallel, each persona routed to configured provider → Coordination feed → Consolidated PR.
 
 **Components:** `worker/multi-expert/index.ts`, `coordination-client.ts`, `worker/agents/ai-sdk-executor.js`
 
@@ -629,9 +712,12 @@ await repo.update({ id, status: "queued" }, { status: "running" });
 
 ### Agent Pitfalls
 
-- **Editing `agent/src/` locally does NOTHING to running agents** — release a new binary (see Critical Rules)
+- **Editing `agent/src/` locally does NOTHING to remote agents** — release a new binary. For local development: `cd agent && npm run build && npm link` then restart the agent.
 - **Polyglot binary:** Single binary serves CLI/worker/manager via `__WORKERMILL_MODE` env var
-- **Three spawners:** `agent/src/spawner.ts` (remote), `api/src/services/local-epic-spawner.ts` (local), ECS (cloud) — always ask which environment before changes
+- **Remote agent does NOT use Docker** — workers are native process self-invocations of the agent binary
+- **Three spawners:** `agent/src/spawner.ts` (remote agent), `api/src/services/local-epic-spawner.ts` (local Docker), ECS (cloud) — always ask which environment before changes
+- **VS Code extension REQUIRES the remote agent** — it cannot connect to the local WorkerMill API directly
+- **Planning runs ONLY in the remote agent** — local WorkerMill Docker mode and cloud ECS skip planning
 - **`dotenv/config` type error is intentional** — optional dependency, do not "fix" by removing or adding to deps
 
 ### Orchestrator Module Architecture
@@ -732,13 +818,23 @@ Location: `api/src/__tests__/integration/`. Each test runs in a transaction that
 
 ### CI/CD Workflows
 
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `ci-cd.yml` | Manual (workflow_dispatch) | Main pipeline — lint, test, deploy |
-| `agent-release.yml` | `agent-v*` tags | Build 4 platform agent binaries (linux/mac/win × arm64/x64) |
-| `vscode-release.yml` | `vscode-v*` tags | Package and release VS Code extension |
+| Workflow | Trigger | Repo | Purpose |
+|----------|---------|------|---------|
+| `ci-cd.yml` | Manual (workflow_dispatch) | both | Main pipeline — lint, test, deploy |
+| `agent-release.yml` | `agent-v*` tags | `workermill/workermill` | Build 4 platform binaries → upload to S3 CDN + GitHub Release |
+| `vscode-release.yml` | `vscode-v*` tags | `jarod-rosenthal/workermill` | Package → publish to VS Code Marketplace |
 
 No automatic triggers on push/PR.
+
+### GitHub Repositories
+
+| Repo | Purpose | Secrets |
+|------|---------|---------|
+| `jarod-rosenthal/workermill` | Development (public) | `VSCE_PAT` (Marketplace publish) |
+| `workermill/workermill` | Production (private) | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (S3 CDN upload) |
+
+Both repos share the same code. Push to both: `git push origin main && git push upstream main`.
+Git remote `origin` = `jarod-rosenthal/workermill`, `upstream` = `workermill/workermill`.
 
 ---
 

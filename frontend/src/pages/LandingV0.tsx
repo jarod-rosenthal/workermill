@@ -1,5 +1,6 @@
-import { useRef, useEffect } from "react";
-import { Home, Search, FolderOpen, Sparkles, Lock } from "lucide-react";
+import { useRef, useEffect, useState } from "react";
+import { Home, Search, FolderOpen, Sparkles, Lock, Copy, CheckCircle, Terminal, Monitor, ArrowRight } from "lucide-react";
+import { Link } from "react-router-dom";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
 import { StatsSection } from "./Home/v0/StatsSection";
@@ -13,6 +14,186 @@ import TeamCoordination from "../components/TeamCoordination";
 import TrustCallout from "../components/TrustCallout";
 import ExecutionShowcase from "../components/ExecutionShowcase";
 import { Pricing } from "./Home/Pricing";
+
+// ─── Install Section ─────────────────────────────────────────────────────────
+
+function InstallSection() {
+  const [copied, setCopied] = useState<string | null>(null);
+  const [platform, setPlatform] = useState<"unix" | "windows">("unix");
+
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(field);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const installCommands = {
+    unix: "curl -fsSL https://workermill.com/install.sh | bash",
+    windows: "irm https://workermill.com/install.ps1 | iex",
+  };
+
+  return (
+    <section className="relative pb-20 pt-4">
+      <div className="container mx-auto px-6 lg:px-8 max-w-4xl">
+        {/* Two cards side by side */}
+        <div className="grid md:grid-cols-2 gap-6">
+
+          {/* Agent Install */}
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-sm p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-teal-500/10 flex items-center justify-center">
+                <Terminal className="w-5 h-5 text-teal-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-white">Install the Agent</h3>
+                <p className="text-xs text-slate-500">No Docker or Node.js required</p>
+              </div>
+            </div>
+
+            {/* Platform toggle */}
+            <div className="flex gap-1 bg-white/5 rounded-lg p-1">
+              <button
+                onClick={() => setPlatform("unix")}
+                className={`flex-1 text-xs font-medium py-1.5 rounded-md transition-colors ${
+                  platform === "unix"
+                    ? "bg-white/10 text-white"
+                    : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                macOS / Linux
+              </button>
+              <button
+                onClick={() => setPlatform("windows")}
+                className={`flex-1 text-xs font-medium py-1.5 rounded-md transition-colors ${
+                  platform === "windows"
+                    ? "bg-white/10 text-white"
+                    : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                Windows
+              </button>
+            </div>
+
+            {/* Command */}
+            <div className="bg-black/40 rounded-lg p-3.5 font-mono text-sm flex items-center justify-between gap-3 border border-white/5">
+              <code className="text-teal-300 text-xs sm:text-sm truncate">
+                {installCommands[platform]}
+              </code>
+              <button
+                onClick={() => copyToClipboard(installCommands[platform], "agent-install")}
+                className="text-slate-500 hover:text-white transition-colors flex-shrink-0"
+              >
+                {copied === "agent-install" ? (
+                  <CheckCircle className="w-4 h-4 text-teal-400" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+
+            <div className="text-xs text-slate-500 space-y-1.5">
+              <p>Then run the setup wizard:</p>
+              <div className="bg-black/40 rounded-lg p-3 font-mono flex items-center justify-between gap-3 border border-white/5">
+                <code className="text-slate-300">workermill-agent setup</code>
+                <button
+                  onClick={() => copyToClipboard("workermill-agent setup", "agent-setup")}
+                  className="text-slate-500 hover:text-white transition-colors flex-shrink-0"
+                >
+                  {copied === "agent-setup" ? (
+                    <CheckCircle className="w-3.5 h-3.5 text-teal-400" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <Link
+              to="/docs/agent"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-teal-400 hover:text-teal-300 transition-colors"
+            >
+              Full agent setup guide
+              <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
+
+          {/* VS Code Extension */}
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-sm p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                <Monitor className="w-5 h-5 text-blue-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-white">VS Code Extension</h3>
+                <p className="text-xs text-slate-500">Monitor and control from your editor</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-400">
+              Search the Extensions panel for <span className="text-white font-medium">WorkerMill</span> and
+              click Install. Or run from the command palette:
+            </p>
+
+            {/* Install command */}
+            <div className="bg-black/40 rounded-lg p-3.5 font-mono text-sm flex items-center justify-between gap-3 border border-white/5">
+              <code className="text-blue-300 text-xs sm:text-sm">
+                ext install workermill.workermill
+              </code>
+              <button
+                onClick={() => copyToClipboard("ext install workermill.workermill", "vscode-install")}
+                className="text-slate-500 hover:text-white transition-colors flex-shrink-0"
+              >
+                {copied === "vscode-install" ? (
+                  <CheckCircle className="w-4 h-4 text-blue-400" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+
+            {/* What you get */}
+            <ul className="text-xs text-slate-500 space-y-1.5">
+              <li className="flex items-start gap-2">
+                <CheckCircle className="w-3.5 h-3.5 text-blue-400/60 mt-0.5 flex-shrink-0" />
+                <span>Live task sidebar with active, backlog, and recent</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="w-3.5 h-3.5 text-blue-400/60 mt-0.5 flex-shrink-0" />
+                <span>Real-time log streaming in terminal tabs</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="w-3.5 h-3.5 text-blue-400/60 mt-0.5 flex-shrink-0" />
+                <span>Run Jira issues, approve plans, respond to blockers</span>
+              </li>
+            </ul>
+
+            <Link
+              to="/docs/vscode-extension"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              Extension documentation
+              <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
+        </div>
+
+        {/* Platform note */}
+        <p className="mt-6 text-center text-sm text-slate-500">
+          Runs on macOS, Linux, and Windows &mdash; requires a{" "}
+          <a
+            href="https://claude.ai/download"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-slate-400 hover:text-white transition-colors underline underline-offset-2"
+          >
+            Claude Max
+          </a>{" "}
+          subscription
+        </p>
+      </div>
+    </section>
+  );
+}
 
 // ─── Sidebar ────────────────────────────────────────────────────────────────
 
@@ -107,12 +288,11 @@ export default function LandingV0() {
                   Local-first — your code executes on your machine, not ours.
                 </span>
               </div>
-              {/* Platform compatibility */}
-              <p className="mt-3 text-center text-sm text-slate-500">
-                Runs on macOS, Linux, and Windows
-              </p>
             </div>
           </section>
+
+          {/* Install Section */}
+          <InstallSection />
 
           {/* Execution lifecycle animation */}
           <ExecutionShowcase />

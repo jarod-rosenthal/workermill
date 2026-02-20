@@ -774,13 +774,25 @@ export function activate(context: vscode.ExtensionContext): void {
     configured,
   );
 
-  // Auto-start agent if installed and configured, otherwise let welcome view guide user
+  // Auto-start agent if installed and configured, otherwise prompt setup
   if (installed && configured) {
     startAgentProcess(log);
   } else if (!configured) {
-    log("Agent not configured — welcome view will guide the user");
-  } else if (installed && !configured) {
-    log("Agent installed but not configured — welcome view will guide the user");
+    log("Agent not configured — prompting user");
+    // Show a prominent setup prompt on first install
+    vscode.window
+      .showInformationMessage(
+        "Welcome to WorkerMill! Connect your GitHub account to start running AI workers.",
+        "Sign up with GitHub",
+        "Sign in",
+      )
+      .then((choice) => {
+        if (choice === "Sign up with GitHub") {
+          vscode.commands.executeCommand("workermill.signUpWithGitHub");
+        } else if (choice === "Sign in") {
+          vscode.commands.executeCommand("workermill.signInWithGitHub");
+        }
+      });
   }
 
   // Connect to agent (reconnect loop handles timing if agent isn't ready yet)

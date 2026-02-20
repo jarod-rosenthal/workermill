@@ -81,6 +81,8 @@ export function GitHubCallback() {
 
         if (!response.organization || response.pendingInvite) {
           navigate("/onboarding");
+        } else if (response.isNewOrg) {
+          navigate("/onboarding?sso=github");
         } else {
           navigate("/dashboard");
         }

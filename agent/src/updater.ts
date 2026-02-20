@@ -5,12 +5,7 @@ import { join } from "path";
 import chalk from "chalk";
 import { AGENT_VERSION } from "./version.js";
 
-const GITHUB_REPO = "workermill/workermill";
-
-interface GHRelease {
-  tag_name: string;
-  assets: Array<{ name: string; browser_download_url: string }>;
-}
+const CDN_BASE = "https://workermill.com/agent/latest";
 
 function getBinaryName(): string {
   const os = platform();
@@ -46,20 +41,17 @@ export async function selfUpdate(): Promise<boolean> {
       }
     }
 
-    // Compiled binary: download from GitHub Releases
+    // Compiled binary: download from CDN
     console.log(chalk.cyan("  Checking for updates..."));
 
-    const resp = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
-      { headers: { Accept: "application/vnd.github.v3+json" } },
-    );
+    const resp = await fetch("https://workermill.com/agent/latest.json");
     if (!resp.ok) {
-      console.error(chalk.red(`  Failed to check releases: ${resp.status}`));
+      console.error(chalk.red(`  Failed to check for updates: ${resp.status}`));
       return false;
     }
 
-    const release = (await resp.json()) as GHRelease;
-    const latestVersion = release.tag_name.replace(/^agent-v/, "");
+    const manifest = (await resp.json()) as { version: string };
+    const latestVersion = manifest.version;
 
     if (latestVersion === AGENT_VERSION) {
       console.log(chalk.green(`  Already on latest version (${AGENT_VERSION})`));
@@ -69,15 +61,10 @@ export async function selfUpdate(): Promise<boolean> {
     console.log(chalk.cyan(`  Updating ${AGENT_VERSION} → ${latestVersion}...`));
 
     const binaryName = getBinaryName();
-    const asset = release.assets.find((a) => a.name === binaryName);
-    if (!asset) {
-      console.error(chalk.red(`  No binary found for ${binaryName} in release ${release.tag_name}`));
-      return false;
-    }
 
     // Download to temp file
     const tmpFile = join(tmpdir(), `workermill-agent-update-${Date.now()}`);
-    const dlResp = await fetch(asset.browser_download_url);
+    const dlResp = await fetch(`${CDN_BASE}/${binaryName}`);
     if (!dlResp.ok || !dlResp.body) {
       console.error(chalk.red(`  Download failed: ${dlResp.status}`));
       return false;
@@ -120,7 +107,7 @@ export async function selfUpdate(): Promise<boolean> {
         execSync(`copy /Y "${tmpFile}" "${selfPath}"`, { stdio: "ignore" });
       } catch {
         console.error(chalk.red("  Could not replace binary. Download manually from:"));
-        console.error(chalk.cyan(`  https://github.com/${GITHUB_REPO}/releases/latest`));
+        console.error(chalk.cyan("  https://workermill.com/docs/agent"));
         return false;
       }
     }

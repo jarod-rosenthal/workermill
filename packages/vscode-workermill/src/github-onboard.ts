@@ -18,6 +18,7 @@ import {
   installAgent,
   startAgentProcess,
   writeAgentConfig,
+  waitForAgentReady,
   promptInstallClaudeCli,
 } from "./agent-installer";
 
@@ -149,8 +150,25 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
   log("Starting agent...");
   startAgentProcess(log);
 
+  // Wait for agent to be ready (port file written) with progress indicator
+  const port = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Starting WorkerMill agent...",
+    },
+    () => waitForAgentReady(log),
+  );
+
+  if (!port) {
+    vscode.window.showWarningMessage(
+      "Agent started but didn't become ready. Run 'WorkerMill: Connect' to retry.",
+    );
+    return false;
+  }
+
   // Check if Claude Code CLI is installed — required for AI worker execution
-  await promptInstallClaudeCli(log);
+  // Fire-and-forget: don't block the connection flow waiting for Claude install
+  promptInstallClaudeCli(log);
 
   return true;
 }
@@ -200,15 +218,17 @@ export async function signUpWithGitHub(
     const success = await finishSetup(data.apiKey, log);
     if (!success) return false;
 
-    // Guide to next step — SCM token is already saved server-side by github-onboard,
-    // but user may need to configure issue tracker
-    const action = await vscode.window.showInformationMessage(
-      `Welcome to WorkerMill, ${data.name || session.account.label}! Your GitHub token has been configured automatically.`,
-      "Open Dashboard",
-    );
-    if (action === "Open Dashboard") {
-      vscode.env.openExternal(vscode.Uri.parse(`${API_BASE}/dashboard`));
-    }
+    // Fire-and-forget — don't block client.connect() in extension.ts
+    vscode.window
+      .showInformationMessage(
+        `Welcome to WorkerMill, ${data.name || session.account.label}! Your GitHub token has been configured automatically.`,
+        "Open Dashboard",
+      )
+      .then((action) => {
+        if (action === "Open Dashboard") {
+          vscode.env.openExternal(vscode.Uri.parse(`${API_BASE}/dashboard`));
+        }
+      });
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -259,13 +279,17 @@ export async function signInWithGitHub(
     const success = await finishSetup(data.apiKey, log);
     if (!success) return false;
 
-    const action = await vscode.window.showInformationMessage(
-      `Welcome back, ${data.name || session.account.label}! Agent is connecting...`,
-      "Open Dashboard",
-    );
-    if (action === "Open Dashboard") {
-      vscode.env.openExternal(vscode.Uri.parse(`${API_BASE}/dashboard`));
-    }
+    // Fire-and-forget — don't block client.connect() in extension.ts
+    vscode.window
+      .showInformationMessage(
+        `Welcome back, ${data.name || session.account.label}! Agent is connecting...`,
+        "Open Dashboard",
+      )
+      .then((action) => {
+        if (action === "Open Dashboard") {
+          vscode.env.openExternal(vscode.Uri.parse(`${API_BASE}/dashboard`));
+        }
+      });
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -327,14 +351,17 @@ export async function enterApiKey(
   const success = await finishSetup(apiKey.trim(), log);
   if (!success) return false;
 
-  // Guide to next step — they need SCM tokens configured on the web
-  const action = await vscode.window.showInformationMessage(
-    "Agent connected! Make sure your GitHub token is configured in Settings > Integrations.",
-    "Open Settings",
-  );
-  if (action === "Open Settings") {
-    vscode.env.openExternal(vscode.Uri.parse(`${API_BASE}/settings`));
-  }
+  // Fire-and-forget — don't block client.connect() in extension.ts
+  vscode.window
+    .showInformationMessage(
+      "Agent connected! Make sure your GitHub token is configured in Settings > Integrations.",
+      "Open Settings",
+    )
+    .then((action) => {
+      if (action === "Open Settings") {
+        vscode.env.openExternal(vscode.Uri.parse(`${API_BASE}/settings`));
+      }
+    });
 
   return true;
 }

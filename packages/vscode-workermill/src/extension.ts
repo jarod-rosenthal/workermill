@@ -659,7 +659,7 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
 
-    // Install/update agent binary from GitHub Releases
+    // Install/update agent binary from CDN
     vscode.commands.registerCommand("workermill.installAgent", async () => {
       const success = await installAgent();
       if (success && !client.isConnected()) {

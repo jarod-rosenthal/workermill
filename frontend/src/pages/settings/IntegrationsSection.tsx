@@ -329,7 +329,8 @@ export function IntegrationsSection({
         </div>
 
         {/* Linear Card */}
-        <div className={`border rounded-xl p-6 bg-card transition-colors ${settings?.issueTrackerProvider === "linear" ? "border-indigo-500 ring-1 ring-indigo-500/30" : "border-border/50 hover:border-indigo-500/50"}`}>
+        <div className={`relative border rounded-xl p-6 bg-card transition-colors ${isFreePlan ? "opacity-60" : ""} ${settings?.issueTrackerProvider === "linear" ? "border-indigo-500 ring-1 ring-indigo-500/30" : "border-border/50 hover:border-indigo-500/50"}`}>
+          {isFreePlan && <LockedOverlay />}
           <div className="flex items-center gap-3 mb-4">
             <div className="w-12 h-12 rounded-lg bg-indigo-500/10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" className="w-7 h-7 text-indigo-500" fill="currentColor">
@@ -339,6 +340,7 @@ export function IntegrationsSection({
             <div className="flex-1">
               <div className="flex items-center gap-2">
                 <h3 className="font-semibold text-foreground">Linear</h3>
+                {isFreePlan && <ProBadge />}
                 {settings?.issueTrackerProvider === "linear" && (
                   <span className="px-2 py-0.5 text-xs font-medium bg-indigo-500/10 text-indigo-500 rounded-full">
                     Default

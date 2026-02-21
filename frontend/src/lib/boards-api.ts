@@ -43,6 +43,7 @@ export interface Card {
   labels: Label[];
   checklistItems: ChecklistItem[];
   commentCount: number;
+  githubRepo: string | null;
   workerTaskId: string | null;
   workerStatus: string | null;
   dependencies?: { cardId: string; title: string }[];
@@ -135,6 +136,7 @@ export interface CreateCardData {
   priority?: "urgent" | "high" | "medium" | "low";
   dueDate?: string;
   coverColor?: string;
+  githubRepo?: string;
 }
 
 export interface UpdateCardData {
@@ -144,6 +146,7 @@ export interface UpdateCardData {
   dueDate?: string | null;
   coverColor?: string | null;
   assigneeId?: string | null;
+  githubRepo?: string | null;
 }
 
 export interface MoveCardData {

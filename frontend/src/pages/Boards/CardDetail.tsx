@@ -17,6 +17,7 @@ import {
   Send,
   Play,
   Zap,
+  GitBranch,
 } from "lucide-react";
 import type {
   Card,
@@ -171,6 +172,10 @@ export default function CardDetail({
   // Assignee
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
   const [showAssigneePicker, setShowAssigneePicker] = useState(false);
+
+  // Repository
+  const [repoValue, setRepoValue] = useState(card.githubRepo ?? "");
+  const [isEditingRepo, setIsEditingRepo] = useState(false);
 
   // AI Worker
   const [runLoading, setRunLoading] = useState(false);
@@ -343,6 +348,14 @@ export default function CardDetail({
       setChecklist((prev) => prev.filter((i) => i.id !== itemId));
     } catch {
       // Ignore
+    }
+  };
+
+  const handleRepoSave = async () => {
+    setIsEditingRepo(false);
+    const trimmed = repoValue.trim();
+    if (trimmed !== (card.githubRepo ?? "")) {
+      await onUpdate({ githubRepo: trimmed || null });
     }
   };
 
@@ -1016,6 +1029,42 @@ export default function CardDetail({
                       <p className="px-3 py-2 text-sm text-muted-foreground/50">No members found</p>
                     )}
                   </div>
+                )}
+              </div>
+
+              {/* Repository */}
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">
+                  <GitBranch className="w-3.5 h-3.5 inline mr-1" />
+                  Repository
+                </label>
+                {isEditingRepo ? (
+                  <input
+                    value={repoValue}
+                    onChange={(e) => setRepoValue(e.target.value)}
+                    onBlur={handleRepoSave}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleRepoSave();
+                      if (e.key === "Escape") {
+                        setRepoValue(card.githubRepo ?? "");
+                        setIsEditingRepo(false);
+                      }
+                    }}
+                    placeholder="owner/repo"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-primary bg-background focus:outline-none focus:ring-1 focus:ring-primary/50 font-mono"
+                    autoFocus
+                  />
+                ) : (
+                  <button
+                    onClick={() => setIsEditingRepo(true)}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors text-sm text-left"
+                  >
+                    {card.githubRepo ? (
+                      <span className="font-mono text-xs truncate">{card.githubRepo}</span>
+                    ) : (
+                      <span className="text-muted-foreground/50">Org default</span>
+                    )}
+                  </button>
                 )}
               </div>
 

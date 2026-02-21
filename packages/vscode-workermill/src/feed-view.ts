@@ -157,21 +157,6 @@ function getFeedHtml(task: TaskInfo): string {
   .header .meta { display: flex; gap: 6px; margin-top: 3px; flex-wrap: wrap; }
   .badge { font-size: 10px; background: var(--bg-tertiary); padding: 1px 6px; border-radius: 3px; color: var(--cyan); }
 
-  /* Task Details (collapsible) */
-  .task-details { border-bottom: 1px solid var(--border); flex-shrink: 0; }
-  .task-details-toggle { display: flex; align-items: center; gap: 4px; padding: 6px 10px; cursor: pointer; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); background: none; border: none; width: 100%; text-align: left; }
-  .task-details-toggle:hover { color: var(--text); }
-  .task-details-toggle .arrow { transition: transform 0.2s; font-size: 8px; }
-  .task-details-toggle .arrow.open { transform: rotate(90deg); }
-  .task-details-body { padding: 0 10px 8px; display: none; }
-  .task-details-body.open { display: block; }
-  .task-description { font-size: 11px; line-height: 1.5; color: var(--text); white-space: pre-wrap; word-break: break-word; padding: 6px 8px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; max-height: 200px; overflow-y: auto; }
-  .task-description:empty { display: none; }
-  .detail-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 10px; }
-  .detail-label { color: var(--text-dim); }
-  .detail-value { color: var(--text-bright); text-align: right; font-family: monospace; font-size: 10px; }
-  .detail-links { margin-top: 4px; }
-
   /* Story Progress */
   .story-bar { padding: 6px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; display: none; }
   .story-bar.visible { display: block; }
@@ -233,37 +218,6 @@ function getFeedHtml(task: TaskInfo): string {
   </div>
 </div>
 
-<div class="task-details">
-  <button class="task-details-toggle" onclick="toggleDetails()">
-    <span class="arrow open" id="detailsArrow">&***REMOVED***9654;</span> Task Details
-  </button>
-  <div class="task-details-body open" id="detailsBody">
-    <div class="task-description" id="taskDescription"></div>
-    <div class="detail-links" id="detailLinks">
-      <div class="detail-row" id="ticketRow" style="display:none">
-        <span class="detail-label">Ticket</span>
-        <span class="detail-value" id="ticketValue"></span>
-      </div>
-      <div class="detail-row" id="repoRow" style="display:none">
-        <span class="detail-label">Repo</span>
-        <span class="detail-value" id="repoValue"></span>
-      </div>
-      <div class="detail-row" id="branchRow" style="display:none">
-        <span class="detail-label">Branch</span>
-        <span class="detail-value" id="branchValue"></span>
-      </div>
-      <div class="detail-row" id="prRow" style="display:none">
-        <span class="detail-label">PR</span>
-        <span class="detail-value" id="prValue" style="color: var(--accent);"></span>
-      </div>
-      <div class="detail-row" id="costRow" style="display:none">
-        <span class="detail-label">Cost</span>
-        <span class="detail-value" id="costValue" style="color: var(--green);"></span>
-      </div>
-    </div>
-  </div>
-</div>
-
 <div class="story-bar" id="storyBar">
   <div class="label"><span id="storyLabel">Stories: 0/0</span> <span id="epicProgress" style="float:right; color: var(--green);"></span></div>
   <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
@@ -294,13 +248,6 @@ const seenFeedIds = new Set();
 let currentBlockerId = null;
 
 talkInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && talkInput.value.trim()) sendMessage(); });
-
-function toggleDetails() {
-  const body = document.getElementById('detailsBody');
-  const arrow = document.getElementById('detailsArrow');
-  body.classList.toggle('open');
-  arrow.classList.toggle('open');
-}
 
 function sendMessage() {
   const msg = talkInput.value.trim();
@@ -386,34 +333,6 @@ window.addEventListener('message', (event) => {
         'Stories: ' + d.storiesCompleted + '/' + d.storiesTotal + (d.storiesFailed > 0 ? ' (' + d.storiesFailed + ' failed)' : '');
       document.getElementById('epicProgress').textContent = d.epicProgress + '%';
       document.getElementById('progressFill').style.width = d.epicProgress + '%';
-    }
-    // Populate task details section
-    const descEl = document.getElementById('taskDescription');
-    if (d.description && descEl.textContent !== d.description) {
-      descEl.textContent = d.description;
-    } else if (!d.description && d.summary && !descEl.textContent) {
-      descEl.textContent = d.summary;
-    }
-    if (d.jiraIssueKey) {
-      document.getElementById('ticketRow').style.display = '';
-      document.getElementById('ticketValue').textContent = d.jiraIssueKey;
-    }
-    if (d.githubRepo) {
-      document.getElementById('repoRow').style.display = '';
-      document.getElementById('repoValue').textContent = d.githubRepo;
-    }
-    if (d.githubBranch) {
-      document.getElementById('branchRow').style.display = '';
-      document.getElementById('branchValue').textContent = d.githubBranch;
-    }
-    if (d.githubPrUrl) {
-      document.getElementById('prRow').style.display = '';
-      var prNum = d.githubPrUrl.match(/\\/pull\\/(\\d+)/);
-      document.getElementById('prValue').textContent = prNum ? 'PR ***REMOVED***' + prNum[1] : d.githubPrUrl;
-    }
-    if (d.cost != null) {
-      document.getElementById('costRow').style.display = '';
-      document.getElementById('costValue').textContent = typeof d.cost === 'number' ? '$' + d.cost.toFixed(2) : String(d.cost);
     }
   }
 });

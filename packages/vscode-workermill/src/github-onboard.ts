@@ -207,6 +207,29 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
       startAgentProcess(log);
       await waitForAgentReady(log);
     }
+  } else if (isDockerInstalled() && ramGB >= 8) {
+    // Docker installed but not running — prompt to start it
+    const action = await vscode.window.showWarningMessage(
+      "Docker Desktop is installed but not running. Start it to enable sandbox mode — " +
+        "WorkerMill will use it automatically.",
+      "Open Docker Desktop",
+      "Continue Without Docker",
+    );
+    if (action === "Open Docker Desktop") {
+      try {
+        if (process.platform === "darwin") {
+          execFileSync("open", ["-a", "Docker"], { timeout: 5000, stdio: "ignore" });
+        } else {
+          // Windows and WSL — try to launch Docker Desktop
+          execFileSync("cmd.exe", ["/c", "start", "", "Docker Desktop"], { timeout: 5000, stdio: "ignore" });
+        }
+      } catch {
+        // If launch fails, open the download page as fallback
+        vscode.env.openExternal(
+          vscode.Uri.parse("https://www.docker.com/products/docker-desktop/"),
+        );
+      }
+    }
   } else {
     // No Docker or insufficient RAM — warn the user
     const action = await vscode.window.showWarningMessage(
@@ -228,6 +251,15 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
 function checkDockerAvailable(): boolean {
   try {
     execFileSync("docker", ["version"], { timeout: 5000, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isDockerInstalled(): boolean {
+  try {
+    execFileSync("docker", ["--version"], { timeout: 5000, stdio: "ignore" });
     return true;
   } catch {
     return false;

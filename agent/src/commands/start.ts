@@ -16,6 +16,7 @@ import {
   loadConfigFromFile,
   checkPrerequisites,
   checkDockerAvailable,
+  isDockerInstalled,
   getPidFile,
   getLogFile,
   getConfigFile,
@@ -59,8 +60,13 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
   // Docker sandbox pre-flight check
   if (config.sandbox === "docker") {
     if (!checkDockerAvailable()) {
-      console.log(chalk.red("Docker sandbox is enabled but Docker is not running."));
-      console.log("Start Docker and try again, or remove sandbox from config.");
+      if (isDockerInstalled()) {
+        console.log(chalk.red("Docker sandbox is enabled but Docker Desktop is not running."));
+        console.log("Please start Docker Desktop and try again.");
+      } else {
+        console.log(chalk.red("Docker sandbox is enabled but Docker is not installed."));
+        console.log(`Install Docker Desktop: ${chalk.cyan("https://www.docker.com/products/docker-desktop/")}`);
+      }
       process.exit(1);
     }
 

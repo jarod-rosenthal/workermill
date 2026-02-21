@@ -1197,6 +1197,10 @@ router.post(
               // Link existing user to Cognito
               user.cognitoId = cognitoId;
               user.status = "active";
+              if (user.tosVersion !== TOS_VERSION) {
+                user.tosAcceptedAt = new Date();
+                user.tosVersion = TOS_VERSION;
+              }
               await userRepo.save(user);
               logger.info("Linked SSO user to existing account", { email: userEmail, cognitoId });
             } else {
@@ -1594,6 +1598,15 @@ router.post(
           logger.info("Microsoft SSO: Created new user", { userId: user.id, email, role, orgId: org!.id });
         }
       } else {
+        // Existing user — auto-accept TOS on SSO login
+        if (user.tosVersion !== TOS_VERSION) {
+          await userRepo.update(
+            { id: user.id },
+            { tosAcceptedAt: new Date(), tosVersion: TOS_VERSION },
+          );
+          user.tosVersion = TOS_VERSION;
+        }
+
         // Existing user - check their org memberships
         const userOrgRepo = AppDataSource.getRepository(UserOrganization);
         const userMemberships = await userOrgRepo.find({ where: { userId: user.id } });
@@ -2043,6 +2056,15 @@ router.post(
           }
         }
 
+        // Auto-accept TOS on SSO login (user already accepted via GitHub OAuth consent)
+        if (user.tosVersion !== TOS_VERSION) {
+          await userRepo.update(
+            { id: user.id },
+            { tosAcceptedAt: new Date(), tosVersion: TOS_VERSION },
+          );
+          user.tosVersion = TOS_VERSION;
+        }
+
         logger.info("GitHub SSO: Existing user login", { userId: user.id, email: primaryEmail });
       }
 
@@ -2312,6 +2334,14 @@ router.post(
       // Update GitHub tokens in Secrets Manager
       const secretPrefix = `workermill/${config.environment}`;
       await saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via extension signin)");
+
+      // Auto-accept TOS on SSO login
+      if (user.tosVersion !== TOS_VERSION) {
+        await userRepo.update(
+          { id: user.id },
+          { tosAcceptedAt: new Date(), tosVersion: TOS_VERSION },
+        );
+      }
 
       logger.info("GitHub signin completed", { userId: user.id, orgId: org.id, email: primaryEmail });
 

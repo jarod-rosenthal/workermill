@@ -87,6 +87,7 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     const child = spawn(process.execPath, ["start"], {
       detached: true,
       stdio: ["ignore", logFd, logFd],
+      windowsHide: true,
     });
 
     if (child.pid) {

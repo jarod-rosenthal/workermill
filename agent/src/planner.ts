@@ -254,6 +254,7 @@ function runClaudeCli(
         cwd,
         env,
         stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
       },
     );
 

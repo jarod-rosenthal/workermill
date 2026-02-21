@@ -18,6 +18,7 @@ import {
   Organization,
 } from "../models/index.js";
 import { authenticateUser, authenticateApiKey } from "../middleware/auth.js";
+import { requireCurrentTos } from "../middleware/tos.js";
 import { body, validateRequest } from "../middleware/validation.js";
 import { decomposePrd } from "../services/prd-decomposer.js";
 import { getOrgCredentials } from "../services/org-credentials.js";
@@ -33,6 +34,7 @@ router.use((req, res, next) => {
   }
   return authenticateUser(req, res, next);
 });
+router.use(requireCurrentTos);
 
 // =============================================================================
 // Helper: Derive board prefix from name (same logic as boards.ts)

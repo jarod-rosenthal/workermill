@@ -645,17 +645,21 @@ export function startAgentProcess(log?: (msg: string) => void): void {
     const env = { ...process.env };
     const extraDirs: string[] = [];
 
-    // Add Git's directory if we can find it
+    // Add Git's directory if we can find it, and pass the full path
+    // as WORKERMILL_GIT_PATH so the agent doesn't need to re-discover it
     const gitPath = findGit();
     if (gitPath) {
       extraDirs.push(path.dirname(gitPath));
+      env.WORKERMILL_GIT_PATH = gitPath;
       log?.(`Found Git at: ${gitPath}`);
     }
 
-    // Add Claude CLI's directory if we can find it
+    // Add Claude CLI's directory if we can find it, and pass the full path
+    // as CLAUDE_CLI_PATH so the agent doesn't need to re-discover it
     const claudePath = findClaudeCli();
     if (claudePath) {
       extraDirs.push(path.dirname(claudePath));
+      env.CLAUDE_CLI_PATH = claudePath;
       log?.(`Found Claude CLI at: ${claudePath}`);
     }
 

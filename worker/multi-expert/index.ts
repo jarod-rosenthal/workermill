@@ -27,6 +27,8 @@ import {
 import type { EvaluateQualityResponse } from "../epic/dist/decision-client.js";
 import { createAIClient, type AIClient, type AIClientConfig } from "../epic/dist/ai-client-types.js";
 import { DecisionClient, createDecisionClient, type WorkerConfigResponse } from "../epic/dist/decision-client.js";
+// GitOps for worktree-based parallel execution (shared with Epic mode)
+import { GitOps, type StoryBranchResult } from "../epic/git-ops.js";
 
 /**
  * Provider routing configuration.
@@ -59,6 +61,8 @@ interface MultiExpertConfig {
   skipManagerReview?: boolean;
   /** If true, use unified AIClient interface instead of direct executor spawning */
   useUnifiedClient?: boolean;
+  /** Override repo path (set by remote-bootstrap when repo is already cloned) */
+  repoPath?: string;
 }
 
 /**
@@ -108,7 +112,6 @@ function loadConfig(): MultiExpertConfig {
     "PARENT_TASK_ID",
     "API_BASE_URL",
     "ORG_API_KEY",
-    "ANTHROPIC_API_KEY",
     "GITHUB_TOKEN",
     "TARGET_REPO",
   ];
@@ -223,12 +226,12 @@ interface PriorWorkContext {
   }>;
 }
 
-class MultiExpertCoordinator {
+export class MultiExpertCoordinator {
   private config: MultiExpertConfig;
   private api: AxiosInstance;
   private coordination: CoordinationClient;
   private jira: JiraClient;
-  private repoPath: string = "/workspace/repo";
+  private repoPath: string;
   private running: boolean = false;
   // Track completed stories locally during this run (don't rely on old context messages)
   private completedStoryIndices: Set<number> = new Set();
@@ -277,9 +280,22 @@ class MultiExpertCoordinator {
   // Persona/provider icons loaded from Decision API
   private personaIcons: Record<string, string> = {};
   private providerIcons: Record<string, string> = {};
+  // GitOps for worktree-based parallel execution (initialized in start() when in remote mode)
+  private gitOps: GitOps | null = null;
+  // Expert state tracking for parallel execution (mirrors Epic coordinator pattern)
+  private expertStates: Map<string, { persona: string; status: "idle" | "working" | "completed" | "blocked"; currentStoryIndex?: number }> = new Map();
+  // Max parallel experts (from env or default)
+  private maxParallelExperts: number = parseInt(process.env.MAX_PARALLEL_EXPERTS || "4", 10);
+  // Track active worktrees for cleanup
+  private activeWorktrees: Map<number, string> = new Map();
+  // Track story branch names for consolidated PR
+  private storyBranchNames: Map<number, string> = new Map();
+  // Track failed story indices
+  private failedStoryIndices: Set<number> = new Set();
 
   constructor(config: MultiExpertConfig) {
     this.config = config;
+    this.repoPath = config.repoPath || process.env.REPO_PATH || "/workspace/repo";
     this.api = axios.create({
       baseURL: config.apiBaseUrl,
       headers: {
@@ -326,6 +342,20 @@ class MultiExpertCoordinator {
     if (this.config.googleApiKey) providers.push("google");
     if (this.config.ollamaHost) providers.push("ollama");
     return providers;
+  }
+
+  /**
+   * Get executor spawn configuration for ai-sdk-executor subprocess.
+   * Binary mode: re-invoke self with __WORKERMILL_MODE=ai-sdk-executor
+   * Docker mode: use node directly with /app/agents/ai-sdk-executor.js
+   */
+  private getExecutorSpawnConfig(): { command: string; args: string[]; cwd: string } {
+    if (process.env.__WORKERMILL_MODE) {
+      // Binary mode — re-invoke the compiled binary
+      return { command: process.execPath, args: [], cwd: process.cwd() };
+    }
+    // Docker mode — use node directly (existing behavior)
+    return { command: "node", args: ["/app/agents/ai-sdk-executor.js"], cwd: "/app" };
   }
 
   /**
@@ -647,7 +677,7 @@ class MultiExpertCoordinator {
    * We track per-story tokens using MAX (latest cumulative value), then SUM across stories.
    * Returns true if tokens were extracted.
    */
-  private parseTokenMarkers(line: string): boolean {
+  private parseTokenMarkers(line: string, storyIndex: number): boolean {
     let foundTokens = false;
 
     // Parse input tokens marker: ::input_tokens::123
@@ -656,12 +686,11 @@ class MultiExpertCoordinator {
       const tokens = parseInt(inputMatch[1], 10);
       foundTokens = true;
 
-      // Get or initialize current story's token usage
-      const storyIdx = this.currentStoryIndex;
-      if (!this.storyTokenUsage.has(storyIdx)) {
-        this.storyTokenUsage.set(storyIdx, { inputTokens: 0, outputTokens: 0 });
+      // Get or initialize this story's token usage
+      if (!this.storyTokenUsage.has(storyIndex)) {
+        this.storyTokenUsage.set(storyIndex, { inputTokens: 0, outputTokens: 0 });
       }
-      const storyTokens = this.storyTokenUsage.get(storyIdx)!;
+      const storyTokens = this.storyTokenUsage.get(storyIndex)!;
 
       // Use MAX for cumulative updates (streaming emits total, not delta)
       const previousInput = storyTokens.inputTokens;
@@ -680,12 +709,11 @@ class MultiExpertCoordinator {
       const tokens = parseInt(outputMatch[1], 10);
       foundTokens = true;
 
-      // Get or initialize current story's token usage
-      const storyIdx = this.currentStoryIndex;
-      if (!this.storyTokenUsage.has(storyIdx)) {
-        this.storyTokenUsage.set(storyIdx, { inputTokens: 0, outputTokens: 0 });
+      // Get or initialize this story's token usage
+      if (!this.storyTokenUsage.has(storyIndex)) {
+        this.storyTokenUsage.set(storyIndex, { inputTokens: 0, outputTokens: 0 });
       }
-      const storyTokens = this.storyTokenUsage.get(storyIdx)!;
+      const storyTokens = this.storyTokenUsage.get(storyIndex)!;
 
       // Use MAX for cumulative updates (streaming emits total, not delta)
       const previousOutput = storyTokens.outputTokens;
@@ -1002,6 +1030,14 @@ class MultiExpertCoordinator {
       return;
     }
 
+    // In parallel mode (GitOps available), delegate to GitOps consolidated PR
+    // which merges all story branches into one PR
+    if (this.gitOps) {
+      await this.createConsolidatedPRWithGitOps();
+      return;
+    }
+
+    // Sequential mode (Docker) — existing single-branch PR creation
     // Use ai/ prefix for branch naming (consistent with detectAndCheckoutExistingBranch)
     const branchName = this.priorWorkContext?.branchName || `ai/${this.config.jiraIssueKey.toLowerCase()}`;
 
@@ -1178,6 +1214,71 @@ class MultiExpertCoordinator {
       const error = err instanceof Error ? err.message : String(err);
       await this.postLog(`Failed to create PR: ${error}`);
       console.error("[Multi-Provider] PR creation error:", error);
+    }
+  }
+
+  /**
+   * Create a consolidated PR using GitOps (parallel mode).
+   * Delegates to GitOps.createConsolidatedPR() which merges all story branches.
+   */
+  private async createConsolidatedPRWithGitOps(): Promise<void> {
+    if (!this.gitOps || !this.config.jiraIssueKey) return;
+
+    try {
+      // Build story completions for PR body
+      const storyCompletions = [...this.completedStoryIndices].map((idx) => {
+        const branchName = this.storyBranchNames.get(idx);
+        return {
+          storyIndex: idx,
+          title: branchName || `Story ${idx}`,
+          filesModified: [] as string[],
+        };
+      });
+
+      const epicTitle = this.taskSummary || "Multi-Provider Implementation";
+
+      const prUrl = await this.gitOps.createConsolidatedPR(
+        this.config.jiraIssueKey,
+        epicTitle,
+        storyCompletions,
+        this.qualityMetrics ? {
+          qualityScore: this.qualityMetrics.qualityScore,
+          qualityGrade: this.qualityMetrics.qualityScore >= 90 ? 'A' :
+                        this.qualityMetrics.qualityScore >= 80 ? 'B' :
+                        this.qualityMetrics.qualityScore >= 70 ? 'C' :
+                        this.qualityMetrics.qualityScore >= 60 ? 'D' : 'F',
+          lintErrors: this.qualityMetrics.lintErrors,
+          lintWarnings: this.qualityMetrics.lintWarnings,
+          typeErrors: this.qualityMetrics.typeErrors,
+          testsPassed: this.qualityMetrics.testsPassed,
+          testsFailed: this.qualityMetrics.testsFailed,
+          securityHigh: this.qualityMetrics.securityHigh,
+          securityMedium: this.qualityMetrics.securityMedium,
+          securityLow: this.qualityMetrics.securityLow,
+        } : undefined
+      );
+
+      if (prUrl) {
+        this.currentPrUrl = prUrl;
+        // Extract PR number from URL
+        const prNumberMatch = prUrl.match(/\/pull\/(\d+)/) || prUrl.match(/\/pull-requests\/(\d+)/);
+        if (prNumberMatch) {
+          this.currentPrNumber = parseInt(prNumberMatch[1], 10);
+        }
+        await this.postLog(`Consolidated PR created: ${prUrl}`);
+        console.log(`::pr_url::${prUrl}`);
+        await this.postLog(`::pr_url::${prUrl}`);
+        if (this.currentPrNumber) {
+          console.log(`::pr_number::${this.currentPrNumber}`);
+          await this.postLog(`::pr_number::${this.currentPrNumber}`);
+        }
+      } else {
+        await this.postLog("Failed to create consolidated PR (no URL returned)");
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      await this.postLog(`Failed to create consolidated PR: ${error}`);
+      console.error("[Multi-Provider] Consolidated PR creation error:", error);
     }
   }
 
@@ -1787,7 +1888,10 @@ class MultiExpertCoordinator {
   /**
    * Build enriched prompt with sibling context, expert roster, Q&A, consultations, directive, and user feedback.
    */
-  private async buildPrompt(story: Story, allStories?: Story[], userFeedback?: string, directiveContent?: string | null): Promise<string> {
+  private async buildPrompt(story: Story, allStories?: Story[], userFeedback?: string, directiveContent?: string | null, repoPathOverride?: string): Promise<string> {
+    // Use override for parallel worktree execution (avoids race on this.repoPath)
+    const promptRepoPath = repoPathOverride || this.repoPath;
+
     // Get constraints
     const constraints = await this.coordination.getConstraints();
     const constraintsText = constraints
@@ -1927,13 +2031,13 @@ You are part of a team of experts working on stories sequentially. **Ask questio
 **DO NOT use curl or direct API calls to post coordination messages.** Just include these markers in your regular output — the system detects and routes them automatically.
 
 ### Repository & Working Directory
-The repository is cloned at: **${this.repoPath}**
+The repository is cloned at: **${promptRepoPath}**
 
 **IMPORTANT: Always use absolute paths from the repository root.**
-- Use absolute paths like \`${this.repoPath}/src/file.ts\` for read_file/write_file
+- Use absolute paths like \`${promptRepoPath}/src/file.ts\` for read_file/write_file
 - Avoid \`cd\` commands - they can cause you to lose track of the working directory
-- If you must use \`cd\`, always return with \`cd ${this.repoPath}\` afterward
-- For bash commands, prefix with the full path: \`ls ${this.repoPath}/src\`
+- If you must use \`cd\`, always return with \`cd ${promptRepoPath}\` afterward
+- For bash commands, prefix with the full path: \`ls ${promptRepoPath}/src\`
 
 **START NOW: First, explore the codebase structure with glob and read_file, then implement your changes.**`;
   }
@@ -2080,7 +2184,10 @@ The repository is cloned at: **${this.repoPath}**
    * @param allStories - All stories for building the expert roster
    * @param userFeedback - Optional feedback from user via Talk to Worker
    */
-  private async executeStory(story: Story, allStories?: Story[], userFeedback?: string): Promise<{ success: boolean; error?: string }> {
+  private async executeStory(story: Story, allStories?: Story[], userFeedback?: string, workingDir?: string): Promise<{ success: boolean; error?: string }> {
+    // Effective repo path — workingDir override for parallel worktree execution
+    const effectiveRepoPath = workingDir || this.repoPath;
+
     // Get provider routing for this persona from Decision API
     const routing = await this.decisionClient.routeProvider({
       persona: story.persona,
@@ -2092,9 +2199,6 @@ The repository is cloned at: **${this.repoPath}**
     const model = routing.model;
     const prefix = this.getLogPrefix(story.persona, provider);
     const startTime = Date.now();
-
-    // Set current story index for token tracking (streaming mode emits cumulative tokens per-story)
-    this.currentStoryIndex = story.storyIndex;
 
     await this.postLogWithProvider(`Starting Story ${story.storyIndex}: ${story.title}`, story.persona, provider);
     await this.postLogWithProvider(`Target repo: ${this.config.targetRepo}`, story.persona, provider);
@@ -2114,11 +2218,11 @@ The repository is cloned at: **${this.repoPath}**
     const directiveContent = await this.loadDirective(story.persona);
 
     // Build enriched prompt with sibling context, expert roster, directive, and user feedback
-    const prompt = await this.buildPrompt(story, allStories, userFeedback, directiveContent);
+    const prompt = await this.buildPrompt(story, allStories, userFeedback, directiveContent, effectiveRepoPath);
 
     // Use unified AIClient if enabled
     if (this.config.useUnifiedClient) {
-      return this.executeStoryWithClient(story, prompt, provider, model);
+      return this.executeStoryWithClient(story, prompt, provider, model, effectiveRepoPath);
     }
 
     // Legacy path: spawn ai-sdk-executor.js directly
@@ -2131,7 +2235,7 @@ The repository is cloned at: **${this.repoPath}**
       // AGENT_WORKING_DIR tells the executor where to run file operations
       const env: Record<string, string> = {
         ...process.env as Record<string, string>,
-        AGENT_WORKING_DIR: this.repoPath,
+        AGENT_WORKING_DIR: effectiveRepoPath,
         AGENT_MAX_STEPS: "100",
         AGENT_VERBOSE: "false",  // Cleaner output
         AGENT_STREAMING: "true", // Enable streaming for real-time cost tracking
@@ -2163,19 +2267,25 @@ The repository is cloned at: **${this.repoPath}**
         env.OLLAMA_HOST = this.config.ollamaHost || "http://localhost:11434";
       }
 
+      // Build spawn command: binary mode (re-invoke self) vs Docker mode (node directly)
+      const { command: spawnCmd, args: spawnArgs, cwd: spawnCwd } = this.getExecutorSpawnConfig();
       const args = [
-        "/app/agents/ai-sdk-executor.js",
+        ...spawnArgs,
         "--provider", provider,
         "--model", model,
         "--persona", story.persona,
         "--prompt-file", promptFile,
       ];
 
-      // Run from /app so node can find AI SDK in /app/node_modules
-      // The AGENT_WORKING_DIR env var tells the executor where to run file operations
-      const child = spawn("node", args, {
-        cwd: "/app",
-        env,
+      // Docker: runs from /app so node can find AI SDK in /app/node_modules
+      // Binary: AGENT_WORKING_DIR env var tells the executor where to run file operations
+      const child = spawn(spawnCmd, args, {
+        cwd: spawnCwd,
+        env: {
+          ...env,
+          // In binary mode, set the mode so entry.ts routes to ai-sdk-executor
+          ...(process.env.__WORKERMILL_MODE ? { __WORKERMILL_MODE: "ai-sdk-executor" } : {}),
+        },
         stdio: ["pipe", "pipe", "pipe"],
       });
 
@@ -2188,7 +2298,7 @@ The repository is cloned at: **${this.repoPath}**
             this.postRawLog(line).catch(() => {});
 
             // Parse token markers from executor output for cost reporting
-            const hadTokens = this.parseTokenMarkers(line);
+            const hadTokens = this.parseTokenMarkers(line, story.storyIndex);
 
             // Parse PR markers for inline review
             this.parsePrMarkers(line);
@@ -2296,7 +2406,8 @@ The repository is cloned at: **${this.repoPath}**
     story: Story,
     prompt: string,
     provider: string,
-    model: string
+    model: string,
+    workingDir?: string
   ): Promise<{ success: boolean; error?: string }> {
     const client = this.getAIClient(provider);
     const expertConfig = getExpertConfigForPersona(story.persona);
@@ -2307,7 +2418,7 @@ The repository is cloned at: **${this.repoPath}**
         systemPrompt: expertConfig?.systemPrompt || `You are a ${story.persona} working on a software project.`,
         persona: story.persona as import("../epic/dist/types.js").ExpertPersona,
         model,
-        workingDir: this.repoPath,
+        workingDir: workingDir || this.repoPath,
         storyId: story.id,
         parentTaskId: this.config.parentTaskId,
         env: {
@@ -2395,6 +2506,91 @@ The repository is cloned at: **${this.repoPath}**
   /**
    * Mark a story as completed by posting a completion context message.
    */
+  /**
+   * Execute a story in parallel using an isolated git worktree.
+   * Fire-and-forget — mirrors Epic's executeStoryAsync() pattern.
+   */
+  private executeStoryParallel(story: Story, allStories: Story[], userFeedback?: string): void {
+    (async () => {
+      try {
+        if (!this.gitOps) {
+          throw new Error("GitOps not initialized for parallel execution");
+        }
+
+        // 1. Create isolated worktree for this story (same as Epic)
+        const branch = await this.gitOps.createStoryBranch(
+          story.storyIndex, story.title, this.config.jiraIssueKey
+        );
+        this.activeWorktrees.set(story.storyIndex, branch.worktreePath);
+        this.storyBranchNames.set(story.storyIndex, branch.branchName);
+
+        await this.postLog(`Created worktree for Story ${story.storyIndex}: ${branch.worktreePath}`, story.persona);
+
+        // 2. Execute story with worktree path
+        const result = await this.executeStoryInWorktree(story, branch.worktreePath, allStories, userFeedback);
+
+        // 3. Handle completion
+        await this.completeStory(story.id, story.storyIndex, story.persona, result.success, result.error);
+        this.completedStoryIndices.add(story.storyIndex);
+
+        if (result.success) {
+          await this.postLog(`Story ${story.storyIndex} completed!`, story.persona);
+        } else {
+          this.failedStoryIndices.add(story.storyIndex);
+          await this.postLog(`Story ${story.storyIndex} failed: ${result.error}`, story.persona);
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        await this.completeStory(story.id, story.storyIndex, story.persona, false, errorMsg);
+        this.failedStoryIndices.add(story.storyIndex);
+        await this.postLog(`Story ${story.storyIndex} error: ${errorMsg}`, story.persona);
+      } finally {
+        // Reset expert to idle after delay (same as Epic lines 2036-2045)
+        setTimeout(() => {
+          this.expertStates.set(story.persona, { persona: story.persona, status: "idle" });
+        }, 2000);
+      }
+    })();
+  }
+
+  /**
+   * Execute a story in an isolated worktree directory.
+   * Wraps the existing executeStory() with worktree path override.
+   */
+  private async executeStoryInWorktree(
+    story: Story,
+    worktreePath: string,
+    allStories: Story[],
+    userFeedback?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    // Pass worktreePath as workingDir override — no shared state mutation (race-safe)
+    const result = await this.executeStory(story, allStories, userFeedback, worktreePath);
+
+    // After execution, push the worktree branch (same as Epic)
+    if (result.success && this.gitOps) {
+      const branchName = this.storyBranchNames.get(story.storyIndex);
+      if (branchName) {
+        try {
+          // Commit any uncommitted work in the worktree
+          const { execSync } = await import("child_process");
+          const status = execSync("git status --porcelain", { cwd: worktreePath, encoding: "utf-8" });
+          if (status.trim()) {
+            execSync("git add -A", { cwd: worktreePath, stdio: "pipe" });
+            execSync(`git commit -m "feat: Story ${story.storyIndex} - ${story.title}" --allow-empty`, { cwd: worktreePath, stdio: "pipe" });
+          }
+
+          // Push the story branch
+          await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
+          await this.postLog(`Pushed branch ${branchName}`, story.persona);
+        } catch (pushErr) {
+          console.error(`[Multi-Provider] Failed to push branch for story ${story.storyIndex}:`, pushErr);
+        }
+      }
+    }
+
+    return result;
+  }
+
   private async completeStory(storyId: string, storyIndex: number, persona: string, success: boolean, error?: string): Promise<void> {
     try {
       const content = success
@@ -2437,14 +2633,35 @@ The repository is cloned at: **${this.repoPath}**
     // Transition Jira ticket to In Progress
     await this.jira.transitionTo("In Progress");
 
-    // Clone the repository
-    await this.cloneRepo();
-    await this.postLog("Repository cloned successfully");
+    // Clone the repository (skip if already cloned by remote-bootstrap)
+    if (this.config.repoPath) {
+      await this.postLog(`Using pre-cloned repository at ${this.repoPath}`);
+    } else {
+      await this.cloneRepo();
+      await this.postLog("Repository cloned successfully");
+    }
 
     // Load worker config from Decision API (icons, defaults)
     const workerConfig = await this.decisionClient.getWorkerConfig();
     this.personaIcons = workerConfig.personaIcons;
     this.providerIcons = workerConfig.providerIcons;
+
+    // Initialize GitOps for parallel worktree-based execution (remote mode only)
+    // In Docker mode, repoPath is the default "/workspace/repo" — GitOps not needed
+    const isRemoteMode = !!this.config.repoPath;
+    if (isRemoteMode) {
+      const workDir = this.repoPath.replace(/\/repo$/, "") || process.env.HOME || "/tmp";
+      this.gitOps = new GitOps({
+        targetRepo: this.config.targetRepo,
+        githubToken: this.config.githubToken,
+        workDir,
+        scmProvider: (process.env.SCM_PROVIDER as "github" | "gitlab" | "bitbucket") || "github",
+        scmBaseUrl: process.env.SCM_BASE_URL,
+        bitbucketUsername: process.env.BITBUCKET_USERNAME,
+        skipClone: true, // repo already cloned by remote-bootstrap
+      }, (msg) => this.postLog(msg));
+      console.log("[Multi-Provider] GitOps initialized for parallel execution");
+    }
 
     // Detect and checkout existing branch for retry scenarios
     const hasExistingBranch = await this.detectAndCheckoutExistingBranch();
@@ -2471,6 +2688,15 @@ The repository is cloned at: **${this.repoPath}**
     // Fetch all stories once for roster building (before filtering)
     const allStoriesForRoster = await this.fetchAllStories();
 
+    // Initialize expert states from unique personas (for parallel mode)
+    if (this.gitOps) {
+      const uniquePersonas = new Set(allStoriesForRoster.map((s) => s.persona));
+      for (const persona of uniquePersonas) {
+        this.expertStates.set(persona, { persona, status: "idle" });
+      }
+      console.log(`[Multi-Provider] Parallel mode: ${uniquePersonas.size} expert(s), max ${this.maxParallelExperts} parallel`);
+    }
+
     while (this.running) {
       // Check for dashboard commands (pause/resume/message)
       await this.pollForCommands();
@@ -2479,6 +2705,14 @@ The repository is cloned at: **${this.repoPath}**
       const stories = await this.fetchStories();
 
       if (stories.length === 0) {
+        // In parallel mode, wait for in-flight stories to complete
+        if (this.gitOps) {
+          const hasRunningExperts = [...this.expertStates.values()].some((s) => s.status === "working");
+          if (hasRunningExperts) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            continue;
+          }
+        }
         await this.postLog("No more stories to execute");
         break;
       }
@@ -2499,6 +2733,14 @@ The repository is cloned at: **${this.repoPath}**
       });
 
       if (readyStories.length === 0) {
+        // In parallel mode, check if experts are still working
+        if (this.gitOps) {
+          const hasRunningExperts = [...this.expertStates.values()].some((s) => s.status === "working");
+          if (hasRunningExperts) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            continue;
+          }
+        }
         noProgressIterations++;
         if (noProgressIterations >= MAX_NO_PROGRESS_ITERATIONS) {
           await this.postLog(`No progress for ${MAX_NO_PROGRESS_ITERATIONS} iterations - possible circular dependency or all stories blocked`);
@@ -2512,82 +2754,124 @@ The repository is cloned at: **${this.repoPath}**
       // Reset no-progress counter since we have work to do
       noProgressIterations = 0;
 
-      // Process one story at a time
-      for (const story of readyStories) {
-        if (!this.running) break;
+      if (this.gitOps) {
+        // === PARALLEL MODE (remote agent with GitOps) ===
+        for (const story of readyStories) {
+          if (!this.running) break;
 
-        // Try to claim the story
-        const claimed = await this.claimStory(story.id, story.persona);
-        if (!claimed) {
-          continue;
+          // Check if we've hit the parallel limit
+          const workingCount = [...this.expertStates.values()].filter((e) => e.status === "working").length;
+          if (workingCount >= this.maxParallelExperts) break;
+
+          // Check if this persona's expert slot is available
+          const expert = this.expertStates.get(story.persona);
+          if (expert && expert.status !== "idle") continue;
+
+          // Try to claim the story
+          const claimed = await this.claimStory(story.id, story.persona);
+          if (!claimed) continue;
+
+          // Update expert state to working
+          this.expertStates.set(story.persona, {
+            persona: story.persona,
+            status: "working",
+            currentStoryIndex: story.storyIndex,
+          });
+
+          // Get any pending user feedback
+          const userFeedback = this.getUserFeedback();
+          if (userFeedback) {
+            console.log(`[Multi-Provider] Passing user feedback to ${story.persona}: "${userFeedback.substring(0, 50)}..."`);
+          }
+
+          // Fire-and-forget: execute story in isolated worktree (same as Epic line 1818)
+          this.executeStoryParallel(story, allStoriesForRoster, userFeedback || undefined);
         }
 
-        // Get any pending user feedback (from Talk to Worker)
-        const userFeedback = this.getUserFeedback();
-        if (userFeedback) {
-          console.log(`[Multi-Provider] Passing user feedback to ${story.persona}: "${userFeedback.substring(0, 50)}..."`);
-        }
+        // Tally completions from parallel execution
+        completedStories = this.completedStoryIndices.size;
+        failedStories = this.failedStoryIndices.size;
 
-        // Execute the story (pass all stories for roster display and user feedback)
-        const result = await this.executeStory(story, allStoriesForRoster, userFeedback || undefined);
+        // Small delay between poll iterations
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      } else {
+        // === SEQUENTIAL MODE (Docker, existing behavior) ===
+        for (const story of readyStories) {
+          if (!this.running) break;
 
-        // Phase 5: Poll for answers to blocking consultations
-        if (this.pendingBlockingConsultations.size > 0) {
-          await this.postLog(
-            `⏳ Waiting for ${this.pendingBlockingConsultations.size} blocking consultation answer(s)...`,
-            story.persona
-          );
+          // Try to claim the story
+          const claimed = await this.claimStory(story.id, story.persona);
+          if (!claimed) {
+            continue;
+          }
 
-          const questionIds = [...this.pendingBlockingConsultations.values()].map((c) => c.id);
-          const answers = await this.coordination.pollForAnswers(
-            questionIds,
-            120000, // 2 minute timeout
-            5000    // Poll every 5 seconds
-          );
+          // Get any pending user feedback (from Talk to Worker)
+          const userFeedback = this.getUserFeedback();
+          if (userFeedback) {
+            console.log(`[Multi-Provider] Passing user feedback to ${story.persona}: "${userFeedback.substring(0, 50)}..."`);
+          }
 
-          // Log received answers
-          for (const [qId, answer] of answers) {
-            const consultation = [...this.pendingBlockingConsultations.values()].find((c) => c.id === qId);
-            if (consultation) {
+          // Execute the story (pass all stories for roster display and user feedback)
+          const result = await this.executeStory(story, allStoriesForRoster, userFeedback || undefined);
+
+          // Phase 5: Poll for answers to blocking consultations
+          if (this.pendingBlockingConsultations.size > 0) {
+            await this.postLog(
+              `⏳ Waiting for ${this.pendingBlockingConsultations.size} blocking consultation answer(s)...`,
+              story.persona
+            );
+
+            const questionIds = [...this.pendingBlockingConsultations.values()].map((c) => c.id);
+            const answers = await this.coordination.pollForAnswers(
+              questionIds,
+              120000, // 2 minute timeout
+              5000    // Poll every 5 seconds
+            );
+
+            // Log received answers
+            for (const [qId, answer] of answers) {
+              const consultation = [...this.pendingBlockingConsultations.values()].find((c) => c.id === qId);
+              if (consultation) {
+                await this.postLog(
+                  `✅ Received answer from ${answer.persona}: "${answer.content}"`,
+                  story.persona
+                );
+              }
+            }
+
+            // Log any unanswered consultations
+            const unanswered = [...this.pendingBlockingConsultations.values()].filter(
+              (c) => !answers.has(c.id)
+            );
+            if (unanswered.length > 0) {
               await this.postLog(
-                `✅ Received answer from ${answer.persona}: "${answer.content}"`,
+                `⚠️ ${unanswered.length} consultation(s) timed out without answer`,
                 story.persona
               );
             }
+
+            // Clear tracking
+            this.pendingBlockingConsultations.clear();
           }
 
-          // Log any unanswered consultations
-          const unanswered = [...this.pendingBlockingConsultations.values()].filter(
-            (c) => !answers.has(c.id)
-          );
-          if (unanswered.length > 0) {
-            await this.postLog(
-              `⚠️ ${unanswered.length} consultation(s) timed out without answer`,
-              story.persona
-            );
+          // Mark as complete (both in coordination API and locally)
+          await this.completeStory(story.id, story.storyIndex, story.persona, result.success, result.error);
+
+          // Track locally so we don't re-fetch this story in the same run
+          this.completedStoryIndices.add(story.storyIndex);
+
+          if (result.success) {
+            completedStories++;
+            await this.postLog(`Story ${story.storyIndex} completed!`, story.persona);
+          } else {
+            failedStories++;
+            await this.postLog(`Story ${story.storyIndex} failed: ${result.error}`, story.persona);
           }
-
-          // Clear tracking
-          this.pendingBlockingConsultations.clear();
         }
 
-        // Mark as complete (both in coordination API and locally)
-        await this.completeStory(story.id, story.storyIndex, story.persona, result.success, result.error);
-
-        // Track locally so we don't re-fetch this story in the same run
-        this.completedStoryIndices.add(story.storyIndex);
-
-        if (result.success) {
-          completedStories++;
-          await this.postLog(`Story ${story.storyIndex} completed!`, story.persona);
-        } else {
-          failedStories++;
-          await this.postLog(`Story ${story.storyIndex} failed: ${result.error}`, story.persona);
-        }
+        // Small delay between iterations
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
-
-      // Small delay between iterations
-      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
     // Report final status
@@ -2943,5 +3227,9 @@ async function main(): Promise<void> {
   }
 }
 
-// Run
-main();
+// Run only when executed as Docker entrypoint (not when imported by remote-bootstrap)
+// In remote mode, __WORKERMILL_MODE is set and remote-bootstrap imports this module
+// and instantiates MultiExpertCoordinator directly with its own config
+if (!process.env.__WORKERMILL_MODE) {
+  main();
+}

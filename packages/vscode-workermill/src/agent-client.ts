@@ -28,6 +28,7 @@ export interface AgentStatus {
 export interface TaskInfo {
   id: string;
   summary: string;
+  description?: string;
   status: "planning" | "running" | "completed" | "failed";
   persona?: string;
   model?: string;

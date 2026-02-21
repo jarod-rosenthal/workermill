@@ -124,7 +124,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Auto-switch feed to new task when it starts (only if feed is idle or showing finished task)
   client.on(
     "task:started",
-    (info: { id: string; summary: string; persona?: string; model?: string; repo?: string }) => {
+    (info: { id: string; summary: string; description?: string; persona?: string; model?: string; repo?: string }) => {
       if (
         !currentFeedTaskId ||
         currentFeedTaskStatus === "completed" ||

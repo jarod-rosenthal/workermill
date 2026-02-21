@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+***REMOVED******REMOVED*** 🚨🚨🚨 ABSOLUTE RULE — NEVER BYPASS PROCESSES 🚨🚨🚨
+
+**NEVER change `EXECUTION_MODE`, kill dev environment processes, restart services, add the `workermill` label, trigger worker tasks, or bypass authentication to hit the API directly. NEVER use `EXECUTION_MODE=local` to skip Cognito auth. NEVER kill processes on ports 3001/5173/5433 without explicit user approval. NEVER add the `workermill` label to a card — it auto-triggers a worker task. The ONLY way to start/stop/restart the dev environment is `./bin/local-workermill start|stop` — run by the USER, not by Claude. If you need to interact with the boards API and auth is in the way, ASK THE USER. Do not work around it.**
+
+**NEVER create board cards by bypassing the normal process. Claude does NOT have auth to use the boards API directly. If the user asks to create a card, provide the card details as TEXT OUTPUT for the user to create through the dashboard UI. Do not attempt to curl the API, change auth modes, or work around authentication in any way.**
+
 ***REMOVED******REMOVED*** ⛔ Critical Rules - READ FIRST
 
 ***REMOVED******REMOVED******REMOVED*** DO NOT CHANGE Working Patterns
@@ -175,7 +181,7 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 | **Install remote agent** | `curl -fsSL https://workermill.com/install.sh \| bash` |
 | **Build agent binary** | `cd agent && npm run build && bun build --compile dist/entry.js --outfile dist/bin/workermill-agent` |
 | **Build agent (shortcut)** | `cd agent && npm run build:binary` |
-| **Release agent binary** | Bump version → `git tag agent-v<version>` → `git push --tags` |
+| **Release agent binary** | Bump version → `git tag agent-v<version>` → push tag to `upstream` (workermill/workermill) ONLY |
 | **Publish agent to npm** | `cd agent && npm run build && npm publish --access public` (fallback) |
 | Type check worker | `cd worker && npm run typecheck` |
 | Build worker code | `cd worker && npm run build` |
@@ -443,7 +449,8 @@ npm run typecheck   ***REMOVED*** tsc --noEmit
 npm run package     ***REMOVED*** → workermill-{version}.vsix
 ```
 - **ALWAYS bump version** in package.json before packaging — VS Code caches extensions by version
-- Marketplace publish: `git tag vscode-v{version}` → push to `jarod-rosenthal/workermill` → CI publishes to Marketplace
+- Marketplace publish: `git tag vscode-v{version}` → push to `origin` (jarod-rosenthal) ONLY → CI publishes to Marketplace
+- **Do NOT push `vscode-v*` tags to `upstream`** — the workflow will fail (no `VSCE_PAT`)
 - Manual install: `code --install-extension workermill-{version}.vsix`
 - **Testing is done on a SEPARATE machine** — not the dev machine. Do not assume `~/.workermill/` exists on the test machine.
 
@@ -847,13 +854,18 @@ Location: `api/src/__tests__/integration/`. Each test runs in a transaction that
 
 ***REMOVED******REMOVED******REMOVED*** CI/CD Workflows
 
-| Workflow | Trigger | Repo | Purpose |
-|----------|---------|------|---------|
+| Workflow | Trigger | Runs on repo | Purpose |
+|----------|---------|--------------|---------|
 | `ci-cd.yml` | Manual (workflow_dispatch) | both | Main pipeline — lint, test, deploy |
-| `agent-release.yml` | `agent-v*` tags | `workermill/workermill` | Build 4 platform binaries → upload to S3 CDN + GitHub Release |
-| `vscode-release.yml` | `vscode-v*` tags | `jarod-rosenthal/workermill` | Package → publish to VS Code Marketplace |
+| `agent-release.yml` | `agent-v*` tags | **`workermill/workermill` ONLY** | Build 4 platform binaries → upload to S3 CDN + GitHub Release |
+| `vscode-release.yml` | `vscode-v*` tags | **`jarod-rosenthal/workermill` ONLY** | Package → publish to VS Code Marketplace |
 
 No automatic triggers on push/PR.
+
+**CRITICAL: Workflow ↔ repo mapping matters.** Both repos have the same workflow files, but:
+- `agent-release.yml` needs AWS secrets (only on `workermill/workermill`) — will fail on `jarod-rosenthal/workermill`
+- `vscode-release.yml` needs `VSCE_PAT` (only on `jarod-rosenthal/workermill`) — will fail on `workermill/workermill`
+- Tags pushed to the WRONG repo will trigger a failing workflow. The workflow files use `if: github.repository == '...'` guards to prevent this.
 
 ***REMOVED******REMOVED******REMOVED*** GitHub Repositories
 
@@ -864,6 +876,10 @@ No automatic triggers on push/PR.
 
 Both repos share the same code. Push to both: `git push origin main && git push upstream main`.
 Git remote `origin` = `jarod-rosenthal/workermill`, `upstream` = `workermill/workermill`.
+
+**Tag routing:**
+- `vscode-v*` tags → push to `origin` only (jarod-rosenthal)
+- `agent-v*` tags → push to `upstream` only (workermill/workermill)
 
 ---
 

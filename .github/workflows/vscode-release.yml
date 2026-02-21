@@ -7,6 +7,7 @@ on:
 
 jobs:
   publish:
+    if: github.repository == 'jarod-rosenthal/workermill'
     runs-on: ubuntu-latest
     permissions:
       contents: write

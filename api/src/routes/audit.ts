@@ -7,6 +7,7 @@
 
 import { Router, Request, Response } from "express";
 import { authenticateUser } from "../middleware/auth.js";
+import { requireCurrentTos } from "../middleware/tos.js";
 import {
   queryAuditLogs,
   getAuditSummary,
@@ -20,6 +21,7 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticateUser);
+router.use(requireCurrentTos);
 
 /**
  * GET /api/audit/logs

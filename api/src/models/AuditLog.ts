@@ -35,7 +35,8 @@ export type AuditAction =
   | "logout"
   | "password_changed"
   | "mfa_enabled"
-  | "mfa_disabled";
+  | "mfa_disabled"
+  | "tos_accepted";
 
 export type AuditResourceType =
   | "organization"

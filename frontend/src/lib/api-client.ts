@@ -61,6 +61,12 @@ apiClient.interceptors.response.use(
   (error) => {
     const status = error.response?.status;
 
+    // Handle 403 with TOS update required — prompt user to accept new TOS
+    if (status === 403 && error.response?.data?.tosUpdateRequired) {
+      window.dispatchEvent(new CustomEvent("workermill:tos-required"));
+      return Promise.reject(error);
+    }
+
     // Handle 401 (session expired) - redirect to login
     if (status === 401) {
       // Check if we're already on the login page to avoid redirect loops
@@ -142,10 +148,24 @@ export const authAPI = {
   getMe: async () => {
     const response = await apiClient.get("/auth/me");
     return response.data as {
-      user: { id: string; email: string; fullName: string; role: string; status: string };
+      user: {
+        id: string;
+        email: string;
+        fullName: string;
+        role: string;
+        status: string;
+        tosAcceptedAt: string | null;
+        tosVersion: string | null;
+      };
+      currentTosVersion: string;
       organization: { id: string; name: string; plan: string } | null;
       needsSetup: boolean;
     };
+  },
+
+  acceptTos: async () => {
+    const response = await apiClient.post("/auth/accept-tos");
+    return response.data as { success: boolean; tosVersion: string; acceptedAt: string };
   },
 
   checkPendingInvite: async () => {

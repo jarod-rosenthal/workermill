@@ -14,6 +14,631 @@ import "./article.css";
 
 // Content for each blog post
 const postContent: Record<string, React.ReactNode> = {
+  "anatomy-of-a-one-shot-spec": (
+    <>
+      <p className="article-lead">
+        When a human developer receives a vague ticket, they do something AI
+        agents cannot: they walk over to a colleague's desk and ask what it
+        means. They read between the lines. They fill in gaps with institutional
+        knowledge and years of accumulated context. AI agents don't have that
+        luxury.{" "}
+        <strong>
+          For an AI team, the specification is the entire universe of
+          information they have to work with.
+        </strong>{" "}
+        Get the spec right, and you get a deployed platform. Get it wrong, and
+        you get expensive, confidently-written garbage.
+      </p>
+
+      <p>
+        This isn't theoretical. We've shipped five production platforms through
+        WorkerMill — 281,000 lines of code across OnCallShift, CalMill,
+        TeamBoard, TaskPulse, and ShipAPI — and the single biggest predictor of
+        success isn't the model, the prompt, or the tooling. It's the
+        specification. Every failed task traces back to a spec that left
+        something ambiguous. Every task that shipped clean on the first attempt
+        had a spec that left nothing to interpretation.
+      </p>
+
+      <p>
+        This article is about what we've learned. We'll use our next showcase
+        project — <strong>FlagDeck</strong>, an open-source feature flag and
+        experimentation platform built with Go, SvelteKit, MongoDB, and
+        Redis — as a running case study to illustrate what separates specs that
+        ship from specs that spiral.
+      </p>
+
+      <h2>Why "One-Shot" Matters</h2>
+      <p>
+        In traditional development, specs are living documents. You write a
+        rough draft, a developer asks questions, you refine, they build, you
+        iterate. The feedback loop is measured in hours or days, and the human
+        in the loop compensates for ambiguity in real time.
+      </p>
+      <p>
+        Spec-driven development with AI agents inverts this model. Thoughtworks
+        identified this as one of 2025's defining engineering practices: using
+        "well-crafted software requirement specifications as prompts, aided by
+        AI coding agents, to generate executable code." The key word is{" "}
+        <em>well-crafted</em>. Red Hat's research found that specs with
+        explicit technical detail achieve "95% or higher accuracy in
+        implementing specs on the first go, with code that's error-free and
+        unit tested."
+      </p>
+      <p>
+        The inverse is equally true. Vague specs don't just produce mediocre
+        code — they produce <em>confidently wrong</em> code. An AI agent won't
+        tell you it's confused. It will pick an interpretation and execute it
+        with full conviction. The bug rate for AI-assisted development is
+        already 1.7x higher than traditional methods, according to recent
+        industry analysis. Most of those bugs trace back to ambiguous inputs,
+        not model limitations.
+      </p>
+
+      <div className="article-callout">
+        <strong>The One-Shot Principle:</strong>
+        Every piece of information an AI agent needs to build correctly must
+        exist in the spec before execution begins. There is no "they'll figure
+        it out" — they won't. They'll hallucinate something plausible instead.
+      </div>
+
+      <h2>Introducing FlagDeck — Our Next Showcase</h2>
+      <p>
+        FlagDeck is an open-source feature flag and experimentation platform.
+        Think LaunchDarkly or Growthbook, but self-hosted and designed to be
+        built from a single spec by WorkerMill's AI team. It's our sixth
+        showcase project, and we chose it for two reasons.
+      </p>
+      <p>
+        First, <strong>stack diversity</strong>. Our existing showcases lean
+        heavily on Next.js and Prisma (CalMill, TeamBoard, TaskPulse all use
+        this combination) and PostgreSQL (every project so far). FlagDeck
+        breaks away entirely:
+      </p>
+      <ul>
+        <li>
+          <strong>Go (Fiber)</strong> — A compiled, statically-typed backend.
+          No TypeScript, no Node.js. This tests whether WorkerMill's agents
+          can produce idiomatic Go with proper error handling, goroutines, and
+          interface patterns.
+        </li>
+        <li>
+          <strong>SvelteKit 2</strong> — A reactive frontend framework with a
+          fundamentally different mental model than React. Components compile
+          away, reactivity is built into the language, and the routing paradigm
+          is file-based. Our agents have never touched Svelte.
+        </li>
+        <li>
+          <strong>MongoDB</strong> — A document database instead of
+          PostgreSQL. Feature flag configurations are inherently
+          schema-flexible — targeting rules vary per flag, experiment
+          configurations differ by type. Documents fit better than rows.
+        </li>
+        <li>
+          <strong>Redis</strong> — For sub-millisecond flag evaluation caching.
+          When a production app evaluates a feature flag on every request, you
+          can't round-trip to MongoDB each time.
+        </li>
+      </ul>
+      <p>
+        Second, <strong>spec complexity</strong>. Feature flags are deceptively
+        simple on the surface — a flag is either on or off. But the reality is
+        a minefield of logic: targeting rules with AND/OR operators, percentage
+        rollouts that must be deterministic per user, A/B experiment statistics
+        that must be mathematically correct, SDK version compatibility between
+        server and client, and audit trails that must capture every change. If
+        any of this logic is wrong, features ship to the wrong users in
+        production.
+      </p>
+      <p>
+        FlagDeck is exactly the kind of project where a sloppy spec produces
+        code that <em>looks</em> right but <em>behaves</em> wrong at scale.
+        That makes it the perfect case study.
+      </p>
+
+      <h2>The Five Pillars of a One-Shot Spec</h2>
+      <p>
+        After building five showcase projects and running hundreds of tasks
+        through WorkerMill's planning and execution pipeline, we've identified
+        five areas where spec quality makes or breaks one-shot execution.
+      </p>
+
+      <h3>1. Logic That Compiles in Your Head</h3>
+      <p>
+        The most common spec failure isn't missing information — it's{" "}
+        <strong>ambiguous logic</strong>. Consider FlagDeck's targeting engine.
+        A feature flag targets users based on rules like "country is US AND
+        plan is pro OR email contains @beta.com." How should this evaluate?
+      </p>
+      <ul>
+        <li>
+          <code>(country = US AND plan = pro) OR (email contains @beta.com)</code>{" "}
+          — Standard operator precedence. Beta users always get the flag.
+        </li>
+        <li>
+          <code>country = US AND (plan = pro OR email contains @beta.com)</code>{" "}
+          — Left-to-right grouping. Only US-based beta users qualify.
+        </li>
+      </ul>
+      <p>
+        A human developer would Slack the PM and ask. An AI agent picks one and
+        implements it with absolute certainty. If the spec doesn't define
+        operator precedence — "targeting rules evaluate AND before OR, matching
+        standard boolean precedence; explicit groups override with
+        parentheses" — you'll get a flag engine that's silently wrong for 30%
+        of your edge cases.
+      </p>
+      <p>
+        This pattern repeats everywhere in FlagDeck. Percentage rollouts: is
+        the hash based on user ID alone, or user ID + flag key? (The answer
+        matters — user-ID-only means a user who's in the 10% bucket for one
+        flag is in the 10% bucket for{" "}
+        <em>every</em> flag.) Experiment statistics: when the spec says
+        "calculate statistical significance," does that mean a chi-squared
+        test, a z-test, or Bayesian analysis? Each gives different results.
+      </p>
+
+      <div className="article-callout">
+        <strong>Spec Rule #1:</strong>
+        If two reasonable developers could interpret a requirement differently,
+        the spec is incomplete. Define operator precedence, hash algorithms,
+        statistical methods, sort orders, and tie-breaking rules explicitly.
+        The cost of an extra paragraph in the spec is zero. The cost of
+        debugging a wrong implementation is hours.
+      </div>
+
+      <h3>2. Version Pinning — The Silent Killer</h3>
+      <p>
+        AI models are trained on code from across time. When a spec says "use
+        Go and SvelteKit," the agent might generate Go 1.18 code (no generics
+        usage) or SvelteKit 1.x patterns (different routing system). Both are
+        valid — but incompatible with what you actually want.
+      </p>
+      <p>
+        FlagDeck's spec must pin every major dependency with version-specific
+        capabilities:
+      </p>
+      <ul>
+        <li>
+          <strong>Go 1.22+</strong> — because we want{" "}
+          <code>range-over-func</code> for iterator patterns and the new{" "}
+          <code>net/http</code> routing with method patterns
+          (<code>GET /flags/&#123;id&#125;</code>).
+        </li>
+        <li>
+          <strong>SvelteKit 2.x</strong> — because the routing paradigm
+          changed (shallow routing, new hooks API). SvelteKit 1 code won't
+          work.
+        </li>
+        <li>
+          <strong>MongoDB 7.x driver</strong> — because we want the new
+          Queryable Encryption API for sensitive flag configurations.
+        </li>
+        <li>
+          <strong>Redis 7+</strong> — because we need Redis Functions for
+          server-side flag evaluation scripts.
+        </li>
+      </ul>
+      <p>
+        Addy Osmani, a leading voice in AI-assisted development, recommends
+        creating explicit configuration files (like <code>CLAUDE.md</code>)
+        that "specify coding conventions, preferred patterns, version
+        requirements, and avoided approaches." For one-shot specs, we take this
+        further: the spec itself includes a <strong>compatibility
+        matrix</strong> that cross-references versions and their specific APIs.
+      </p>
+      <p>
+        GitHub's Spec Kit takes a complementary approach with{" "}
+        <code>[NEEDS CLARIFICATION]</code> markers that force AI agents to flag
+        uncertainty rather than hallucinate. When we adapted this pattern for
+        WorkerMill's planner, planning failures dropped by roughly a third —
+        the agent would surface version ambiguities instead of silently picking
+        the wrong one.
+      </p>
+
+      <div className="article-callout">
+        <strong>Spec Rule #2:</strong>
+        Pin every dependency to a major version and list the specific APIs you
+        expect to use. "Use React" is insufficient. "Use React 19 with the new{" "}
+        <code>use()</code> hook for promise resolution and Server Components
+        for the dashboard layout" leaves no room for version drift.
+      </div>
+
+      <h3>3. E2E Tests as Executable Requirements</h3>
+      <p>
+        Here's an insight that changed how we write specs: the best acceptance
+        criteria are tests, and the best tests are acceptance criteria. They
+        are the same artifact expressed in different languages.
+      </p>
+      <p>
+        When FlagDeck's spec says "percentage rollouts should distribute users
+        deterministically based on a hash of user ID and flag key," that's a
+        requirement. It's also a test:
+      </p>
+      <ul>
+        <li>
+          Given a flag with 50% rollout, when 10,000 users evaluate,
+          approximately 5,000 should receive the feature (within 2% tolerance).
+        </li>
+        <li>
+          Given the same user ID and flag key, the result must be identical
+          across 1,000 consecutive evaluations.
+        </li>
+        <li>
+          Given a different flag key with the same user ID, the result should
+          be statistically independent.
+        </li>
+      </ul>
+      <p>
+        This dual nature is powerful because it gives AI agents two things they
+        desperately need: <strong>concrete examples</strong> of expected
+        behavior and <strong>automated verification</strong> of their output.
+        Recent industry analysis found that "strong testing practices amplify
+        AI effectiveness — agents handle code generation faster when tests
+        exist to catch failures."
+      </p>
+      <p>
+        WorkerMill's QA engineer persona doesn't just write tests after the
+        fact. The spec includes test scenarios <em>as requirements</em>, and
+        the planning agent decomposes them into dedicated test stories that run
+        alongside implementation. For ShipAPI, this approach produced 344 tests
+        across 12 epics — and every epic passed its tech lead review on the
+        first attempt.
+      </p>
+      <p>
+        The shift happening in 2026 is what David Loker of CodeRabbit
+        described: "2025 was about how fast we could generate code. The shift
+        is toward how confident we can be in the code that we're shipping."
+        E2E tests are how you get that confidence. They're not an afterthought.
+        They're the foundation.
+      </p>
+
+      <div className="article-callout">
+        <strong>Spec Rule #3:</strong>
+        Write acceptance criteria as test scenarios. If a requirement can't be
+        expressed as a pass/fail test, it's either too vague or too subjective
+        for AI execution. "The UI should feel responsive" is untestable. "Page
+        load time under 200ms for the flag list with 1,000 flags" is both a
+        requirement and a benchmark.
+      </div>
+
+      <h3>4. Division of Labor — The File Cap Principle</h3>
+      <p>
+        One of WorkerMill's hardest-won lessons is that{" "}
+        <strong>
+          the way you decompose work determines whether agents can execute in
+          parallel
+        </strong>
+        . This isn't just a performance optimization — it's a correctness
+        guarantee.
+      </p>
+      <p>
+        When two AI agents modify the same file simultaneously, you get merge
+        conflicts. Merge conflicts in AI-generated code are catastrophic
+        because neither agent understands the other's changes, and automated
+        resolution is unreliable. WorkerMill solves this with a strict rule:{" "}
+        <strong>maximum 5 target files per story, with zero overlaps
+        between stories</strong>.
+      </p>
+      <p>
+        For FlagDeck, the planning agent would decompose the work something
+        like this:
+      </p>
+      <ul>
+        <li>
+          <strong>Story 1</strong> (<code>backend_developer</code>): Go project
+          scaffold, Fiber router, MongoDB connection, health endpoint, Docker
+          Compose. <em>4 files</em>.
+        </li>
+        <li>
+          <strong>Story 2</strong> (<code>backend_developer</code>): Flag CRUD
+          API — create, read, update, delete, list with pagination.{" "}
+          <em>3 files</em>.
+        </li>
+        <li>
+          <strong>Story 3</strong> (<code>backend_developer</code> +{" "}
+          <code>security_engineer</code>): Targeting evaluation engine — rule
+          parser, hash-based percentage rollout, user attribute matching,
+          Redis caching. <em>5 files</em>.
+        </li>
+        <li>
+          <strong>Story 4</strong> (<code>frontend_developer</code>): SvelteKit
+          dashboard — flag list, create/edit form, targeting rule builder UI.{" "}
+          <em>5 files</em>.
+        </li>
+        <li>
+          <strong>Story 5</strong> (<code>backend_developer</code>): Experiment
+          engine — A/B test creation, variant assignment, conversion tracking,
+          significance calculation. <em>4 files</em>.
+        </li>
+        <li>
+          <strong>Story 6</strong> (<code>qa_engineer</code>): E2E test suite —
+          flag evaluation determinism, targeting rule accuracy, experiment
+          statistics validation, API contract tests. <em>5 files</em>.
+        </li>
+        <li>
+          <strong>Story 7</strong> (<code>devops_engineer</code>): Deployment
+          configuration — Dockerfile, CI pipeline, environment configuration,
+          monitoring setup. <em>4 files</em>.
+        </li>
+      </ul>
+      <p>
+        Notice how Stories 1-3 have dependencies (you need the scaffold before
+        CRUD, CRUD before targeting), but Stories 4, 6, and 7 can run in
+        parallel once the API contract is defined. The file cap forces clean
+        boundaries. Each agent works in isolation, and the consolidated PR
+        merges cleanly.
+      </p>
+      <p>
+        This aligns with what researchers at UC San Diego and Cornell found:
+        professional developers working with AI agents "control rather than
+        delegate," and hierarchical agent architectures (planners, workers,
+        judges) consistently outperform flat topologies. The file cap is the
+        mechanical enforcement of that hierarchy — it prevents the "bag of
+        agents" anti-pattern where adding more agents actually amplifies
+        errors rather than reducing them.
+      </p>
+
+      <div className="article-callout">
+        <strong>Spec Rule #4:</strong>
+        Decompose work so that no two stories touch the same file. If a file
+        needs changes from multiple stories, either consolidate the stories or
+        restructure the code so each concern lives in its own file. The file
+        cap isn't a limitation — it's what makes parallel execution safe.
+      </div>
+
+      <h3>5. The Critic's Veto — Validating Before Building</h3>
+      <p>
+        The most expensive bug is the one you find after implementation. The
+        cheapest is the one you catch before a single line of code is written.
+        This is why WorkerMill's planning pipeline includes a{" "}
+        <strong>critic agent</strong> that evaluates every plan before
+        execution begins.
+      </p>
+      <p>
+        The critic doesn't write code or use tools. It's a lightweight
+        reasoning agent with a single job: score the plan on a 0-100 scale
+        and identify issues. Plans scoring below 85 get sent back to the
+        planner with specific feedback. This creates an iterative refinement
+        loop — up to three rounds — that catches problems when fixing them
+        costs nothing.
+      </p>
+      <p>
+        What does the critic check? For FlagDeck, it would flag issues like:
+      </p>
+      <ul>
+        <li>
+          <strong>File overlaps</strong> — Story 3 and Story 5 both target{" "}
+          <code>evaluation.go</code>? Rejected. The planner must split the
+          evaluation engine into separate files or merge the stories.
+        </li>
+        <li>
+          <strong>Missing operational steps</strong> — The plan includes
+          MongoDB schemas but no migration strategy? Flagged.
+        </li>
+        <li>
+          <strong>Oversized stories</strong> — A story targeting 8 files
+          auto-scores below 85. The planner must decompose further.
+        </li>
+        <li>
+          <strong>Dependency cycles</strong> — Story A depends on B, B depends
+          on C, C depends on A? Deadlock. Restructure required.
+        </li>
+        <li>
+          <strong>Vague instructions</strong> — "Implement targeting" without
+          specifying rule evaluation order? The critic catches ambiguity the
+          planner missed.
+        </li>
+      </ul>
+      <p>
+        Google's Agent Development Kit documents this as the "Generator and
+        Critic" pattern — binary pass/fail feedback with conditional looping
+        until compliance. In our data, plans that initially score 60-70
+        regularly improve to 85+ after a single critic iteration. The feedback
+        is specific and actionable: "Story 3 targets 7 files; split the Redis
+        caching layer into a separate story."
+      </p>
+      <p>
+        For our ShipAPI showcase, the planner-critic loop produced plans that
+        achieved <strong>9/10 tech lead approval scores on the first
+        review</strong> — meaning the code that came out of well-validated plans
+        rarely needed revision. The cost of three critique iterations is
+        negligible. The cost of re-executing five stories because the plan was
+        wrong is enormous.
+      </p>
+
+      <div className="article-callout">
+        <strong>Spec Rule #5:</strong>
+        Build validation into the process, not after it. A critic that catches
+        a file overlap before execution saves hours. A reviewer that catches
+        it after execution saves nothing — the work is already done wrong.
+        Front-load your quality gates.
+      </div>
+
+      <h2>The Tech Lead Gate — Your Last Line of Defense</h2>
+      <p>
+        Even with a validated plan and well-scoped stories, code can still go
+        wrong during execution. An agent might misinterpret a Go interface
+        pattern, write a Svelte component that doesn't handle reactivity
+        correctly, or produce a MongoDB query that works in tests but fails at
+        scale.
+      </p>
+      <p>
+        WorkerMill's tech lead reviewer runs <em>after</em> all stories
+        complete, inspecting the consolidated output against the original
+        requirements. It checks for:
+      </p>
+      <ul>
+        <li>
+          Adherence to existing codebase patterns — does the new code match
+          the conventions in the project?
+        </li>
+        <li>
+          Security vulnerabilities — exposed secrets, missing input
+          validation, SQL/NoSQL injection vectors.
+        </li>
+        <li>
+          Edge case coverage — what happens with empty inputs, null values,
+          concurrent requests?
+        </li>
+        <li>
+          Test coverage — did the QA engineer's tests actually verify the
+          critical paths?
+        </li>
+      </ul>
+      <p>
+        The tech lead has three options:{" "}
+        <strong>approve</strong> (merge the PR),{" "}
+        <strong>request revision</strong> (send specific stories back for
+        rework), or{" "}
+        <strong>reject</strong> (fundamental approach is wrong). Revision
+        requests are surgical — the tech lead specifies exactly which stories
+        need changes and why, so only the affected work is re-executed.
+      </p>
+      <p>
+        Across our five showcase projects, the tech lead approved 93% of tasks
+        on the first attempt. The remaining 7% needed one revision cycle. Zero
+        tasks were rejected outright. This validates the upstream quality
+        pipeline: when the spec is solid and the plan is critic-approved, the
+        code is overwhelmingly correct.
+      </p>
+
+      <h2>What Makes Specs Fail — Patterns from Production</h2>
+      <p>
+        We've run enough tasks through WorkerMill to recognize the failure
+        patterns. They're remarkably consistent:
+      </p>
+
+      <h3>Vague Acceptance Criteria</h3>
+      <p>
+        "The dashboard should be responsive" tells an AI agent nothing. Does
+        responsive mean it works on mobile? That it uses CSS Grid? That it
+        adapts layout at 768px and 1024px breakpoints? Without specifics, the
+        agent makes assumptions — and they're often wrong.
+      </p>
+
+      <h3>Missing Edge Cases</h3>
+      <p>
+        FlagDeck's targeting engine will encounter: flags with no rules
+        (default behavior?), users with missing attributes (fail open or fail
+        closed?), percentage rollouts at exactly 0% or 100% (are these special
+        cases?), and evaluation during MongoDB downtime (serve stale cache
+        or fail?). Every unspecified edge case is a coin flip.
+      </p>
+
+      <h3>Assumed Context</h3>
+      <p>
+        "Follow the existing pattern" assumes the agent knows what the
+        existing pattern is. For a greenfield project like FlagDeck, there IS
+        no existing pattern — the spec must <em>establish</em> patterns
+        explicitly. For additions to existing codebases, WorkerMill's planner
+        clones the repo and explores the architecture first, but the spec
+        should still reference specific files and patterns by name.
+      </p>
+
+      <h3>Version Drift</h3>
+      <p>
+        We learned this the hard way: if the spec says "use SvelteKit" and
+        the AI generates SvelteKit 1.x code, the resulting application won't
+        work with SvelteKit 2.x dependencies. Version drift is especially
+        dangerous because the code <em>looks correct</em> — it just targets
+        the wrong API surface.
+      </p>
+
+      <h3>Untestable Requirements</h3>
+      <p>
+        "The flag evaluation should be fast" is untestable. "Flag evaluation
+        should complete in under 5ms for single-user lookup with Redis warm
+        cache, and under 50ms for cold cache with MongoDB fallback" is a
+        benchmark that both the developer and the QA engineer can work with.
+      </p>
+
+      <div className="article-callout article-callout-success">
+        <strong>The Pattern:</strong>
+        Every spec failure we've seen falls into one of these five categories.
+        Before submitting a spec to WorkerMill, run through each one as a
+        checklist. If you can find an ambiguity, so will the AI — and it'll
+        resolve it by guessing.
+      </div>
+
+      <h2>The FlagDeck Spec — Putting It All Together</h2>
+      <p>
+        Here's what a production-ready spec structure looks like for FlagDeck.
+        This isn't the full spec — that will ship with the showcase — but it
+        illustrates the level of detail that produces clean, one-shot
+        execution:
+      </p>
+
+      <h3>Compatibility Matrix</h3>
+      <ul>
+        <li>Go 1.22+ with Fiber v2, using standard library slog for structured logging</li>
+        <li>SvelteKit 2.x with Svelte 5 runes, adapter-auto for deployment</li>
+        <li>MongoDB 7.x with official Go driver v2, document validation schemas</li>
+        <li>Redis 7+ with go-redis/v9, connection pooling, and pipeline batching</li>
+      </ul>
+
+      <h3>Evaluation Engine Contract</h3>
+      <ul>
+        <li>Targeting rules: evaluate AND before OR (standard boolean precedence)</li>
+        <li>Percentage rollout: MurmurHash3 of (flagKey + userID), modulo 100</li>
+        <li>Cache: Redis GET with 30-second TTL, MongoDB fallback on cache miss</li>
+        <li>Default: flag OFF for unmatched users (fail closed)</li>
+        <li>Audit: every flag state change produces an event with actor, timestamp, and diff</li>
+      </ul>
+
+      <h3>Test Matrix (Minimum)</h3>
+      <ul>
+        <li>Targeting: 100% coverage of AND/OR/NOT operators with nested groups</li>
+        <li>Rollout: statistical distribution test — 10K users, 50% rollout, within 2% tolerance</li>
+        <li>Determinism: same inputs produce same output across 1,000 evaluations</li>
+        <li>Independence: different flag keys produce statistically independent distributions</li>
+        <li>Cache: evaluation works correctly with warm cache, cold cache, and Redis down</li>
+        <li>API: full CRUD contract tests for flags, experiments, and audit endpoints</li>
+      </ul>
+
+      <p>
+        This level of detail might feel excessive for human developers. For AI
+        agents, it's exactly right. Every decision is made in the spec. Every
+        edge case is defined. Every test is specified before a line of code
+        exists.
+      </p>
+
+      <h2>The Spec Is the Product</h2>
+      <p>
+        The most important mindset shift in spec-driven development is this:{" "}
+        <strong>the specification is not documentation about the
+        product — it IS the product</strong>. The code is just a compiled
+        version of the spec. If the spec is wrong, the code will be wrong. If
+        the spec is complete, the code will be complete.
+      </p>
+      <p>
+        This isn't unique to WorkerMill. Amazon's Kiro IDE implements a
+        three-phase workflow — requirements, design, task decomposition — that
+        keeps specs "synced with your evolving codebase." GitHub's Spec Kit
+        introduces constitution-based development where high-level
+        architectural principles constrain all subsequent code generation. The
+        entire industry is converging on the same realization: as AI gets
+        better at writing code, the bottleneck shifts from implementation to
+        specification.
+      </p>
+      <p>
+        The engineers who thrive in this world are the ones who can think
+        precisely about what they want <em>before</em> anyone — human or
+        AI — starts building it. That's always been the hardest part of
+        software engineering. Now it's the most valuable part too.
+      </p>
+
+      <div className="article-callout article-callout-success">
+        <strong>FlagDeck is coming to the WorkerMill showcase.</strong>{" "}
+        We'll build the entire platform — Go backend, SvelteKit dashboard,
+        MongoDB storage, Redis caching — from a single spec, streamed live on
+        the dashboard. Watch the planning agent decompose it, the critic
+        validate it, the experts build it in parallel, and the tech lead
+        review it. Every line of code, every decision, every test — visible in
+        real time. Follow us for the launch.
+      </div>
+    </>
+  ),
   "dark-factory-level-5-agentic-coding": (
     <>
       <p className="article-lead">

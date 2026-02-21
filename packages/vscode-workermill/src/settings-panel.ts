@@ -124,6 +124,9 @@ export class SettingsPanel {
       } else if (msg.type === "pull-sandbox-image") {
         this.pullSandboxImage();
         return;
+      } else if (msg.type === "sign-out") {
+        vscode.commands.executeCommand("workermill.signOut");
+        return;
       }
 
       const config = readAgentConfig();
@@ -144,6 +147,8 @@ export class SettingsPanel {
         vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/dashboard`));
       } else if (msg.type === "open-web-settings") {
         vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/settings`));
+      } else if (msg.type === "open-pricing") {
+        vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/pricing`));
       }
     });
 
@@ -467,6 +472,35 @@ export class SettingsPanel {
     .footer { margin-top: 24px; color: var(--muted); font-size: 0.85em; }
     .footer a { color: var(--vscode-textLink-foreground); text-decoration: none; }
     .footer a:hover { text-decoration: underline; }
+    .pro-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 0.75em;
+      font-weight: 700;
+      background: color-mix(in srgb, var(--vscode-textLink-foreground) 15%, transparent);
+      color: var(--vscode-textLink-foreground);
+      margin-left: 4px;
+      vertical-align: middle;
+      letter-spacing: 0.03em;
+    }
+    .locked-option {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .locked-option input { pointer-events: none; }
+    .scm-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .scm-row.locked { opacity: 0.55; }
+    .upgrade-hint {
+      font-size: 0.85em;
+      color: var(--vscode-textLink-foreground);
+      margin-top: 8px;
+    }
+    .upgrade-hint a {
+      color: var(--vscode-textLink-foreground);
+      text-decoration: underline;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -479,12 +513,13 @@ export class SettingsPanel {
     <!-- Issue Tracker -->
     <div class="section">
       <h2>Issue Tracker</h2>
-      <div class="radio-group">
-        <label><input type="radio" name="tracker" value="jira" /> Jira</label>
-        <label><input type="radio" name="tracker" value="github-issues" /> GitHub Issues</label>
-        <label><input type="radio" name="tracker" value="linear" /> Linear</label>
+      <div class="radio-group" style="flex-wrap: wrap;">
         <label><input type="radio" name="tracker" value="internal" /> Internal Boards</label>
+        <label><input type="radio" name="tracker" value="jira" /> Jira</label>
+        <label id="tracker-github-label" class="locked-option"><input type="radio" name="tracker" value="github-issues" disabled /> GitHub Issues <span class="pro-badge">PRO</span></label>
+        <label id="tracker-linear-label" class="locked-option"><input type="radio" name="tracker" value="linear" disabled /> Linear <span class="pro-badge">PRO</span></label>
       </div>
+      <div id="tracker-upgrade" class="upgrade-hint hidden">Upgrade to Pro to unlock all issue trackers. <a id="btn-upgrade-tracker" href="***REMOVED***">View plans</a></div>
 
       <div id="tracker-status" class="status"></div>
 
@@ -534,10 +569,11 @@ export class SettingsPanel {
     <div class="section">
       <h2>Source Control</h2>
       <div id="scm-status">
-        <p>GitHub: <span id="scm-github-badge"></span></p>
-        <p>Bitbucket: <span id="scm-bitbucket-badge"></span></p>
-        <p>GitLab: <span id="scm-gitlab-badge"></span></p>
+        <div class="scm-row"><span>GitHub:</span> <span id="scm-github-badge"></span></div>
+        <div class="scm-row locked" id="scm-bitbucket-row"><span>Bitbucket:</span> <span id="scm-bitbucket-badge"></span> <span class="pro-badge">PRO</span></div>
+        <div class="scm-row locked" id="scm-gitlab-row"><span>GitLab:</span> <span id="scm-gitlab-badge"></span> <span class="pro-badge">PRO</span></div>
       </div>
+      <div id="scm-upgrade" class="upgrade-hint hidden">Upgrade to Pro to connect Bitbucket and GitLab. <a id="btn-upgrade-scm" href="***REMOVED***">View plans</a></div>
       <div class="hint" style="margin-top: 8px;">Manage SCM tokens in <button class="btn-link" id="btn-web-settings-scm">web settings</button>.</div>
     </div>
 
@@ -562,15 +598,19 @@ export class SettingsPanel {
     <!-- Account -->
     <div class="section">
       <h2>Account</h2>
+      <div id="plan-info" class="hidden" style="margin-bottom: 12px;">
+        <span>Plan: </span><span id="plan-name" class="badge configured">Free</span>
+      </div>
       <div class="btn-row">
         <button class="btn-secondary" id="btn-dashboard">Open Dashboard</button>
         <button class="btn-secondary" id="btn-web-settings">All Settings (Web)</button>
+        <button class="btn-secondary" id="btn-sign-out" style="margin-left: auto; color: var(--error);">Sign Out</button>
       </div>
     </div>
   </div>
 
   <div class="footer">
-    WorkerMill v0.1.7 &mdash; <a href="https://workermill.com/docs">Documentation</a>
+    WorkerMill &mdash; <a href="https://workermill.com/docs">Documentation</a>
   </div>
 
   <script>
@@ -587,6 +627,8 @@ export class SettingsPanel {
     const jiraStatus = document.getElementById("jira-status");
     const trackerStatus = document.getElementById("tracker-status");
 
+    let orgPlan = "free";
+
     // Radio toggle — skip save during initial load
     let initialLoad = true;
     radios.forEach(r => r.addEventListener("change", () => {
@@ -599,6 +641,51 @@ export class SettingsPanel {
         vscode.postMessage({ type: "save-tracker", tracker: val });
       }
     }));
+
+    function applyPlanRestrictions(plan) {
+      orgPlan = plan;
+      const isPaid = plan === "pro" || plan === "enterprise";
+
+      // Issue tracker: Internal Boards + Jira = free, GitHub Issues + Linear = Pro
+      const githubLabel = document.getElementById("tracker-github-label");
+      const linearLabel = document.getElementById("tracker-linear-label");
+      const githubRadio = githubLabel.querySelector("input");
+      const linearRadio = linearLabel.querySelector("input");
+      const trackerUpgrade = document.getElementById("tracker-upgrade");
+
+      if (isPaid) {
+        githubLabel.classList.remove("locked-option");
+        linearLabel.classList.remove("locked-option");
+        githubRadio.disabled = false;
+        linearRadio.disabled = false;
+        githubLabel.querySelectorAll(".pro-badge").forEach(b => b.classList.add("hidden"));
+        linearLabel.querySelectorAll(".pro-badge").forEach(b => b.classList.add("hidden"));
+        trackerUpgrade.classList.add("hidden");
+      } else {
+        githubLabel.classList.add("locked-option");
+        linearLabel.classList.add("locked-option");
+        githubRadio.disabled = true;
+        linearRadio.disabled = true;
+        trackerUpgrade.classList.remove("hidden");
+      }
+
+      // SCM: GitHub = free, Bitbucket + GitLab = Pro
+      const bbRow = document.getElementById("scm-bitbucket-row");
+      const glRow = document.getElementById("scm-gitlab-row");
+      const scmUpgrade = document.getElementById("scm-upgrade");
+
+      if (isPaid) {
+        bbRow.classList.remove("locked");
+        glRow.classList.remove("locked");
+        bbRow.querySelectorAll(".pro-badge").forEach(b => b.classList.add("hidden"));
+        glRow.querySelectorAll(".pro-badge").forEach(b => b.classList.add("hidden"));
+        scmUpgrade.classList.add("hidden");
+      } else {
+        bbRow.classList.add("locked");
+        glRow.classList.add("locked");
+        scmUpgrade.classList.remove("hidden");
+      }
+    }
 
     // Buttons
     document.getElementById("btn-save-jira").addEventListener("click", () => {
@@ -626,6 +713,17 @@ export class SettingsPanel {
     });
     document.getElementById("btn-dashboard-boards").addEventListener("click", () => {
       vscode.postMessage({ type: "open-dashboard" });
+    });
+    document.getElementById("btn-upgrade-tracker").addEventListener("click", (e) => {
+      e.preventDefault();
+      vscode.postMessage({ type: "open-pricing" });
+    });
+    document.getElementById("btn-upgrade-scm").addEventListener("click", (e) => {
+      e.preventDefault();
+      vscode.postMessage({ type: "open-pricing" });
+    });
+    document.getElementById("btn-sign-out").addEventListener("click", () => {
+      vscode.postMessage({ type: "sign-out" });
     });
 
     // Sandbox toggle
@@ -658,8 +756,15 @@ export class SettingsPanel {
         contentEl.classList.remove("hidden");
         const d = msg.data;
 
-        // Select current tracker radio
-        const tracker = d.defaultIssueTracker || "jira";
+        // Apply plan restrictions before selecting radios
+        applyPlanRestrictions(d.plan || "free");
+
+        // Select current tracker radio (fall back to "internal" if selected tracker is locked)
+        let tracker = d.defaultIssueTracker || "internal";
+        const isPaid = orgPlan === "pro" || orgPlan === "enterprise";
+        if (!isPaid && (tracker === "github-issues" || tracker === "linear")) {
+          tracker = "internal";
+        }
         const trackerRadio = document.querySelector('input[name="tracker"][value="' + tracker + '"]');
         if (trackerRadio) {
           trackerRadio.checked = true;
@@ -681,6 +786,14 @@ export class SettingsPanel {
         document.getElementById("scm-github-badge").innerHTML = badge(d.github?.configured);
         document.getElementById("scm-bitbucket-badge").innerHTML = badge(d.bitbucket?.configured);
         document.getElementById("scm-gitlab-badge").innerHTML = badge(d.gitlab?.configured);
+
+        // Show plan in Account section
+        const planInfo = document.getElementById("plan-info");
+        const planName = document.getElementById("plan-name");
+        planInfo.classList.remove("hidden");
+        const planLabel = (d.plan || "free").charAt(0).toUpperCase() + (d.plan || "free").slice(1);
+        planName.textContent = planLabel;
+        planName.className = "badge " + ((d.plan === "pro" || d.plan === "enterprise") ? "configured" : "not-configured");
       }
 
       if (msg.type === "tracker-saved") {

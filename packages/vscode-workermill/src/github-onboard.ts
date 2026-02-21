@@ -191,24 +191,34 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
     return false;
   }
 
-  // Optional: offer Docker sandbox mode if Docker is available
-  if (checkDockerAvailable()) {
-    const enableSandbox = await vscode.window.showInformationMessage(
-      "Docker detected! Enable sandbox mode to run AI workers in isolated containers?",
-      "Enable Docker Sandbox",
-      "Skip (Use Native)",
-    );
-    if (enableSandbox === "Enable Docker Sandbox") {
-      enableDockerSandbox(log);
-      log("Restarting agent with Docker sandbox...");
-      await stopAgentProcess();
+  // Auto-enable Docker sandbox if available with sufficient RAM, otherwise warn
+  const ramGB = Math.round(os.totalmem() / (1024 * 1024 * 1024));
+  if (checkDockerAvailable() && ramGB >= 8) {
+    // Auto-enable Docker sandbox — no prompt
+    log("Docker detected with sufficient RAM — enabling sandbox mode");
+    enableDockerSandbox(log);
+    await stopAgentProcess();
+    startAgentProcess(log);
+    const dockerPort = await waitForAgentReady(log);
+    if (!dockerPort) {
+      // Docker sandbox failed to start — fall back to native
+      log("Docker sandbox failed — falling back to native mode");
+      disableDockerSandbox(log);
       startAgentProcess(log);
-      const dockerPort = await waitForAgentReady(log);
-      if (!dockerPort) {
-        vscode.window.showWarningMessage(
-          "Agent restart with Docker sandbox failed. Check agent logs and try enabling sandbox in Settings.",
-        );
-      }
+      await waitForAgentReady(log);
+    }
+  } else {
+    // No Docker or insufficient RAM — warn the user
+    const action = await vscode.window.showWarningMessage(
+      "AI workers will run with full access to your filesystem and network. " +
+        "For isolated execution, install Docker Desktop — WorkerMill will use it automatically.",
+      "Install Docker Desktop",
+      "Continue Without Docker",
+    );
+    if (action === "Install Docker Desktop") {
+      vscode.env.openExternal(
+        vscode.Uri.parse("https://www.docker.com/products/docker-desktop/"),
+      );
     }
   }
 
@@ -235,6 +245,19 @@ function enableDockerSandbox(log?: (msg: string) => void): void {
   config.sandbox = "docker";
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
   log?.("Docker sandbox enabled in config");
+}
+
+function disableDockerSandbox(log?: (msg: string) => void): void {
+  const configPath = path.join(os.homedir(), ".workermill", "config.json");
+  let config: Record<string, unknown> = {};
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  } catch {
+    /* no existing config */
+  }
+  delete config.sandbox;
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+  log?.("Docker sandbox removed from config");
 }
 
 /**

@@ -603,7 +603,7 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   const planInputTokens = response.usage?.inputTokens || 0;
   const planOutputTokens = response.usage?.outputTokens || 0;
   await AppDataSource.query(
-    `UPDATE "worker_task"
+    `UPDATE "worker_tasks"
      SET "planningInputTokens" = COALESCE("planningInputTokens", 0) + $1,
          "planningOutputTokens" = COALESCE("planningOutputTokens", 0) + $2,
          "plan_json" = $3::jsonb,

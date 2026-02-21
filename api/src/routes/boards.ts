@@ -19,6 +19,7 @@ import {
   KbStarredBoard,
   KbCardDependency,
   Organization,
+  User,
   WorkerTask,
   PLAN_FEATURES,
 } from "../models/index.js";
@@ -629,6 +630,8 @@ router.get(
         .leftJoinAndSelect("cardLabels.label", "label")
         .leftJoinAndSelect("card.checklistItems", "checklist")
         .leftJoinAndSelect("card.workerTask", "workerTask")
+        .leftJoinAndSelect("card.assignee", "assignee")
+        .leftJoinAndSelect("card.createdBy", "createdBy")
         .leftJoinAndSelect("card.dependencies", "dependencies")
         .leftJoinAndSelect("dependencies.dependsOnCard", "depCard")
         .leftJoinAndSelect("card.dependents", "dependents")
@@ -690,7 +693,9 @@ router.get(
               dueDate: card.dueDate,
               coverColor: card.coverColor,
               assigneeId: card.assigneeId,
-              assigneeName: null,
+              assigneeName: card.assignee?.fullName || null,
+              requesterName: card.createdBy?.fullName || null,
+              issueKey: card.cardNumber ? `${board.prefix}-${card.cardNumber}` : null,
               workerTaskId: card.workerTaskId,
               workerStatus: card.workerTask?.status || null,
               githubRepo: card.githubRepo,
@@ -879,6 +884,8 @@ router.get(
         .leftJoinAndSelect("cardLabels.label", "label")
         .leftJoinAndSelect("card.checklistItems", "checklist")
         .leftJoinAndSelect("card.workerTask", "workerTask")
+        .leftJoinAndSelect("card.assignee", "assignee")
+        .leftJoinAndSelect("card.createdBy", "createdBy")
         .orderBy("card.position", "ASC")
         .getMany();
 
@@ -906,7 +913,10 @@ router.get(
             priority: card.priority,
             dueDate: card.dueDate,
             assigneeId: card.assigneeId,
+            assigneeName: card.assignee?.fullName || null,
+            requesterName: card.createdBy?.fullName || null,
             coverColor: card.coverColor,
+            issueKey: card.cardNumber ? `${board.prefix}-${card.cardNumber}` : null,
             workerTaskId: card.workerTaskId,
             workerStatus: card.workerTask?.status || null,
             githubRepo: card.githubRepo,
@@ -1167,10 +1177,11 @@ router.post(
       const cardRepo = AppDataSource.getRepository(KbCard);
 
       // Atomically claim the next card number (org check via board lookup above)
-      const [{ next_num }] = await AppDataSource.query(
+      const numResult = await AppDataSource.query(
         `UPDATE "kb_boards" SET "next_card_number" = "next_card_number" + 1 WHERE "id" = $1 AND "org_id" = $2 RETURNING "next_card_number" - 1 AS next_num`,
         [boardId, org.id],
       );
+      const next_num: number = numResult?.[0]?.next_num ?? board.nextCardNumber ?? 1;
 
       const maxPos = await cardRepo
         .createQueryBuilder("c")
@@ -1189,12 +1200,42 @@ router.post(
         coverColor: coverColor || null,
         githubRepo: githubRepo || null,
         cardNumber: next_num,
+        createdById: req.user?.id || null,
       });
       await cardRepo.save(card);
 
       await logActivity(boardId, req.user!.id, "created", "card", card.id, { title });
 
-      res.status(201).json({ card: { ...card, issueKey: `${board.prefix}-${next_num}` } });
+      // Look up the creator name for the response
+      const creator = req.user?.id
+        ? await AppDataSource.getRepository(User).findOne({ where: { id: req.user.id }, select: ["id", "fullName"] })
+        : null;
+
+      res.status(201).json({
+        card: {
+          id: card.id,
+          boardId: card.boardId,
+          columnId: card.columnId,
+          title: card.title,
+          description: card.description,
+          position: card.position,
+          priority: card.priority,
+          dueDate: card.dueDate,
+          coverColor: card.coverColor,
+          assigneeId: card.assigneeId ?? null,
+          assigneeName: null,
+          requesterName: creator?.fullName || null,
+          issueKey: next_num != null ? `${board.prefix}-${next_num}` : null,
+          workerTaskId: card.workerTaskId ?? null,
+          workerStatus: null,
+          githubRepo: card.githubRepo,
+          labels: [],
+          checklistItems: [],
+          commentCount: 0,
+          createdAt: card.createdAt,
+          updatedAt: card.updatedAt,
+        },
+      });
     } catch (error) {
       logger.error("Error creating card", { error });
       res.status(500).json({ error: "Failed to create card" });
@@ -1235,6 +1276,7 @@ router.get(
         .leftJoinAndSelect("comments.author", "commentAuthor")
         .leftJoinAndSelect("card.checklistItems", "checklist")
         .leftJoinAndSelect("card.assignee", "assignee")
+        .leftJoinAndSelect("card.createdBy", "createdBy")
         .leftJoinAndSelect("card.workerTask", "workerTask")
         .addOrderBy("comments.createdAt", "DESC")
         .addOrderBy("checklist.position", "ASC")
@@ -1256,11 +1298,15 @@ router.get(
           priority: card.priority,
           dueDate: card.dueDate,
           coverColor: card.coverColor,
+          issueKey: card.cardNumber ? `${board.prefix}-${card.cardNumber}` : null,
           workerTaskId: card.workerTaskId,
           workerStatus: card.workerTask?.status || null,
           githubRepo: card.githubRepo,
           assignee: card.assignee
             ? { id: card.assignee.id, fullName: card.assignee.fullName, email: card.assignee.email }
+            : null,
+          requester: card.createdBy
+            ? { id: card.createdBy.id, fullName: card.createdBy.fullName }
             : null,
           labels: card.cardLabels?.map((cl) => ({
             id: cl.label?.id,

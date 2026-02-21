@@ -33,11 +33,13 @@ export interface Card {
   title: string;
   description: string | null;
   position: number;
+  issueKey: string | null;
   priority: "urgent" | "high" | "medium" | "low" | null;
   dueDate: string | null;
   coverColor: string | null;
   assigneeId: string | null;
   assigneeName: string | null;
+  requesterName: string | null;
   labels: Label[];
   checklistItems: ChecklistItem[];
   commentCount: number;
@@ -84,6 +86,13 @@ export interface Activity {
   userId: string;
   userName: string;
   createdAt: string;
+}
+
+export interface OrgMember {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
 }
 
 export interface BoardDetail {
@@ -474,4 +483,10 @@ export async function removeCardDependency(
     `/boards/${boardId}/cards/${cardId}/dependencies/${depCardId}`,
   );
   return data;
+}
+
+// Org Members
+export async function getOrgMembers(): Promise<OrgMember[]> {
+  const response = await apiClient.get("/organizations/current/members");
+  return response.data.members ?? response.data;
 }

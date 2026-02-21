@@ -108,7 +108,7 @@ const showcaseProjects: ShowcaseProject[] = [
     description:
       "Async Python API with JWT authentication, RBAC, rate limiting, audit logging, product/category/warehouse CRUD, stock management, Alembic migrations, 344 tests, CI pipeline, and Swagger/ReDoc documentation. 10 epics, all deployed. Live on Railway.",
     stack: "FastAPI + SQLAlchemy 2 + Pydantic V2 + Neon PostgreSQL",
-    storyCount: 10,
+    storyCount: 11,
     cost: "$98",
     duration: "~4 hrs",
     linesOfCode: "15,000",

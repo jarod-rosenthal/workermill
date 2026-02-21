@@ -100,22 +100,22 @@ export default function ColumnHeader({
   };
 
   return (
-    <div className="mb-3">
+    <div className="mb-3 pb-2.5 border-b border-border/30">
       {/* Color stripe */}
       {column.color && (
         <div
-          className="h-1.5 rounded-t-lg -mx-3 -mt-3 mb-3"
+          className="h-1.5 rounded-full -mx-1 mb-3"
           style={{ backgroundColor: column.color }}
         />
       )}
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 group/header">
         {/* Drag handle */}
         <div
-          className="cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+          className="cursor-grab active:cursor-grabbing text-muted-foreground/30 opacity-0 group-hover/header:opacity-100 hover:text-muted-foreground transition-all -ml-1"
           {...dragHandleProps}
         >
-          <GripVertical className="w-4 h-4" />
+          <GripVertical className="w-3.5 h-3.5" />
         </div>
 
         {/* Column name */}
@@ -132,11 +132,11 @@ export default function ColumnHeader({
                 setIsEditing(false);
               }
             }}
-            className="flex-1 px-1.5 py-0.5 text-sm font-semibold rounded border border-primary bg-background focus:outline-none"
+            className="flex-1 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wider rounded border border-primary bg-background focus:outline-none"
           />
         ) : (
           <span
-            className="flex-1 text-sm font-semibold truncate cursor-pointer"
+            className="flex-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground truncate cursor-pointer hover:text-foreground transition-colors"
             onDoubleClick={() => {
               setEditName(column.name);
               setIsEditing(true);
@@ -149,10 +149,10 @@ export default function ColumnHeader({
 
         {/* Card count badge */}
         <span
-          className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${
+          className={`text-[10px] font-bold tabular-nums min-w-[20px] text-center py-0.5 px-1.5 rounded-full ${
             isOverWip
               ? "bg-red-500/20 text-red-400"
-              : "bg-muted text-muted-foreground"
+              : "bg-border/50 text-muted-foreground"
           }`}
           title={
             column.wipLimit
@@ -167,19 +167,19 @@ export default function ColumnHeader({
         {/* Add card button */}
         <button
           onClick={onAddCard}
-          className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+          className="p-1 rounded hover:bg-background/60 transition-colors text-muted-foreground/50 hover:text-foreground"
           title="Add card"
         >
-          <Plus className="w-4 h-4" />
+          <Plus className="w-3.5 h-3.5" />
         </button>
 
         {/* Kebab menu */}
         <div className="relative" ref={menuRef}>
           <button
             onClick={() => setShowMenu(!showMenu)}
-            className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+            className="p-1 rounded hover:bg-background/60 transition-colors text-muted-foreground/50 hover:text-foreground"
           >
-            <MoreHorizontal className="w-4 h-4" />
+            <MoreHorizontal className="w-3.5 h-3.5" />
           </button>
 
           {showMenu && (

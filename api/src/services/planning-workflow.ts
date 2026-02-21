@@ -76,6 +76,7 @@ import {
   shouldUseLocalCritic,
   formatLocalRefinementFeedback,
 } from "./critic-agent-local.js";
+import { getOrgCredentials } from "./org-credentials.js";
 
 /**
  * Find tasks that need planning (PRD analysis)
@@ -831,6 +832,20 @@ async function processLocalPlanningAgent(
   );
 
   try {
+    // Fetch SCM token so the local planner can clone the target repo
+    let scmToken: string | undefined;
+    if (task.githubRepo && task.orgId) {
+      try {
+        const creds = await getOrgCredentials(task.orgId);
+        scmToken = creds.scmToken || creds.githubToken || undefined;
+      } catch (credErr) {
+        logger.warn("Could not fetch SCM token for local planner — will use TARGET_REPO_PATH fallback", {
+          taskId: task.id,
+          error: credErr instanceof Error ? credErr.message : String(credErr),
+        });
+      }
+    }
+
     // Construct planning input from task
     const planningInput = {
       taskId: task.id,
@@ -840,6 +855,9 @@ async function processLocalPlanningAgent(
       labels: (task.jiraFields as Record<string, unknown>)?.labels as
         | string[]
         | undefined,
+      githubRepo: task.githubRepo || undefined,
+      scmProvider: task.scmProvider || undefined,
+      scmToken,
     };
 
     // Run local planning agent with milestone logs + real-time progress via emitter
@@ -858,7 +876,7 @@ async function processLocalPlanningAgent(
     // Update planning token usage on the task for cost tracking — atomic increment
     if (plan.usage) {
       await AppDataSource.query(
-        `UPDATE "worker_task"
+        `UPDATE "worker_tasks"
          SET "planningInputTokens" = COALESCE("planningInputTokens", 0) + $1,
              "planningOutputTokens" = COALESCE("planningOutputTokens", 0) + $2
          WHERE "id" = $3`,

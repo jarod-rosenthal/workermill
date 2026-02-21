@@ -10,6 +10,7 @@ import {
   RefreshCw,
   ArrowLeft,
   LayoutGrid,
+  CreditCard,
 } from "lucide-react";
 import { useBoardsStore } from "../../store/boards-store";
 import CreateBoardDialog from "./CreateBoardDialog";
@@ -236,6 +237,24 @@ export default function BoardsList() {
 
 // ── Board Card Component ───────────────────────────────────────────────────
 
+// Stable accent color from board name
+const ACCENT_COLORS = [
+  "#3b82f6",
+  "#8b5cf6",
+  "#06b6d4",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#ec4899",
+  "#6366f1",
+];
+
+function getBoardAccent(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return ACCENT_COLORS[Math.abs(hash) % ACCENT_COLORS.length];
+}
+
 interface BoardCardProps {
   board: {
     id: string;
@@ -259,33 +278,39 @@ function BoardCard({
   isMenuOpen,
   onDelete,
 }: BoardCardProps) {
+  const accent = getBoardAccent(board.name);
+
   return (
-    <div className="relative group rounded-xl border border-border bg-card hover:border-primary/50 transition-all" data-testid="board-card">
-      <Link to={`/boards/${board.id}`} className="block p-5">
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Columns3 className="w-5 h-5 text-primary" />
-            </div>
-            <div>
-              <h3 className="font-semibold">{board.name}</h3>
-              {board.description && (
-                <p className="text-xs text-muted-foreground line-clamp-1">
-                  {board.description}
-                </p>
-              )}
-            </div>
+    <div className="relative group rounded-xl border border-border/60 bg-card hover:border-primary/40 hover:shadow-[0_4px_16px_rgba(0,0,0,0.15)] transition-all duration-200" data-testid="board-card">
+      <Link to={`/boards/${board.id}`} className="block p-4 pr-20">
+        <div className="flex items-start gap-3 mb-3">
+          <div
+            className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+            style={{ backgroundColor: accent + "18" }}
+          >
+            <Columns3 className="w-4.5 h-4.5" style={{ color: accent }} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-semibold text-[15px] truncate leading-tight">{board.name}</h3>
+            {board.description && (
+              <p className="text-xs text-muted-foreground/70 line-clamp-1 mt-0.5">
+                {board.description}
+              </p>
+            )}
           </div>
         </div>
 
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground/70">
           <span className="flex items-center gap-1">
-            <Columns3 className="w-3.5 h-3.5" />
-            {board.columnCount} columns
+            <Columns3 className="w-3 h-3" />
+            {board.columnCount}
           </span>
-          <span>{board.cardCount} cards</span>
           <span className="flex items-center gap-1">
-            <Clock className="w-3.5 h-3.5" />
+            <CreditCard className="w-3 h-3" />
+            {board.cardCount}
+          </span>
+          <span className="flex items-center gap-1 ml-auto">
+            <Clock className="w-3 h-3" />
             {new Date(board.updatedAt).toLocaleDateString("en-US", {
               month: "short",
               day: "numeric",
@@ -295,17 +320,17 @@ function BoardCard({
       </Link>
 
       {/* Action buttons overlay */}
-      <div className="absolute top-4 right-4 flex items-center gap-1">
+      <div className="absolute top-5 right-3 flex items-center gap-0.5">
         <button
           onClick={(e) => onStar(board.id, e)}
-          className="p-1.5 rounded-lg hover:bg-muted transition-colors"
+          className="p-1 rounded-md hover:bg-muted transition-colors"
           title={board.isStarred ? "Unstar" : "Star"}
         >
           <Star
-            className={`w-4 h-4 ${
+            className={`w-3.5 h-3.5 ${
               board.isStarred
                 ? "text-yellow-500 fill-yellow-500"
-                : "text-muted-foreground"
+                : "text-muted-foreground/40 group-hover:text-muted-foreground"
             }`}
           />
         </button>
@@ -315,13 +340,13 @@ function BoardCard({
             e.stopPropagation();
             onMenuOpen(board.id);
           }}
-          className="p-1.5 rounded-lg hover:bg-muted transition-colors"
+          className="p-1 rounded-md hover:bg-muted transition-colors text-muted-foreground/40 group-hover:text-muted-foreground"
         >
-          <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
+          <MoreHorizontal className="w-3.5 h-3.5" />
         </button>
 
         {isMenuOpen && (
-          <div className="absolute right-0 top-full mt-1 w-40 rounded-lg border border-border bg-card shadow-lg py-1 z-50">
+          <div className="absolute right-0 top-full mt-1 w-40 rounded-lg border border-border bg-card shadow-xl py-1 z-50">
             <button
               onClick={(e) => {
                 e.preventDefault();

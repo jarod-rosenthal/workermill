@@ -57,6 +57,9 @@ export class KbCard {
   @Column({ name: "card_number", type: "int", nullable: true })
   cardNumber: number | null;
 
+  @Column({ name: "created_by_id", type: "uuid", nullable: true })
+  createdById: string | null;
+
   @Column({ name: "worker_task_id", type: "uuid", nullable: true })
   workerTaskId: string | null;
 
@@ -81,6 +84,10 @@ export class KbCard {
   @ManyToOne(() => User, { onDelete: "SET NULL" })
   @JoinColumn({ name: "assignee_id" })
   assignee: User | null;
+
+  @ManyToOne(() => User, { onDelete: "SET NULL" })
+  @JoinColumn({ name: "created_by_id" })
+  createdBy: User | null;
 
   @ManyToOne(() => WorkerTask, { onDelete: "SET NULL" })
   @JoinColumn({ name: "worker_task_id" })

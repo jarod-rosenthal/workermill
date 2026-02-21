@@ -861,5 +861,62 @@ This PR consolidates all stories from Epic SAPFB-10.
 | Lint | \u2705 Pass | 0 warnings |
 | Tests | \u2705 Pass | 0 passed |
 | Security | \u2705 Clean | 0M/0L |`
+  },
+  {
+    "id": "sa-11",
+    "title": "ShipAPI-PRD: Public showcase stats endpoint and landing page",
+    "priority": "medium",
+    "storyCount": 3,
+    "duration": "~12 min",
+    "status": "deployed",
+    "techLeadScore": "9/10",
+    "prNumber": 11,
+    "prUrl": "https://github.com/workermill-examples/shipapi/pull/11",
+    "commentCount": 3,
+    "personas": [
+      "backend_developer",
+      "frontend_developer",
+      "qa_engineer"
+    ],
+    "description": `### Epic Overview
+Add a public showcase stats endpoint and a dark-themed responsive landing page to ShipAPI, with integration tests covering both features. The stats endpoint returns live metrics (product count, warehouse count, transfer count, etc.) for display on the WorkerMill showcase. The landing page serves as the public face of the deployed API.
+
+### Deliverables
+1. \`src/api/showcase.py\` — GET /showcase/stats endpoint returning live database metrics (total products, categories, warehouses, stock levels, transfers, audit entries)
+2. Landing page route — Dark-themed responsive HTML page with API overview, live stats, and links to Swagger/ReDoc docs
+3. Integration tests — Full test coverage for showcase stats endpoint and landing page route
+
+### Technical Specification
+- Stats endpoint queries live database counts — no caching, real-time metrics
+- Landing page uses FastAPI HTMLResponse with inline CSS (dark theme matching ShipAPI branding)
+- Tests verify both JSON stats response and HTML landing page render correctly`,
+    "buildLog": `## Epic Implementation
+
+This PR consolidates all stories from Epic ShipAPI-PRD-Full-Build-Specification-96948bf9.
+
+### Stories Included
+
+- **Backend — Public showcase stats endpoint and landing page route complete**
+  - Files: src/api/router.py, src/api/showcase.py, src/main.py (+2 more)
+- **Frontend — Dark-themed responsive landing page template complete**
+  - Files: src/api/router.py, src/api/showcase.py, src/main.py (+3 more)
+- **QA — Integration tests for showcase stats and landing page complete**
+  - Files: src/api/router.py, src/api/showcase.py, src/main.py (+3 more)
+
+### Branches Merged
+
+- \`story/shipapi-prd-full-build-specification-96948bf9/0-backend-public-showcase-stats\`
+- \`story/shipapi-prd-full-build-specification-96948bf9/1-frontend-dark-themed-responsiv\`
+- \`story/shipapi-prd-full-build-specification-96948bf9/2-qa-integration-tests-for-showc\`
+
+### Code Quality
+
+| Metric | Score | Details |
+|--------|-------|--------|
+| **Overall** | **100%** | |
+| TypeCheck | \u2705 Pass | |
+| Lint | \u2705 Pass | 0 warnings |
+| Tests | \u2705 Pass | 0 passed |
+| Security | \u2705 Clean | 0M/0L |`
   }
 ];

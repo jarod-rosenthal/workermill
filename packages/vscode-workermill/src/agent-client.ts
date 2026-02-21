@@ -181,6 +181,16 @@ export class AgentClient extends EventEmitter {
     return this.post("/api/tasks/run", { jiraIssueKey: issueKey });
   }
 
+  /** Run a markdown file as a single worker task (creates a Quick Tasks card) */
+  async runFileAsTask(summary: string, description: string, githubRepo?: string): Promise<unknown> {
+    return this.post("/api/tasks/run-file", { summary, description, githubRepo });
+  }
+
+  /** Get available repositories from org settings */
+  async getRepos(): Promise<{ repos: string[]; defaultRepo: string | null; scmProvider?: string }> {
+    return this.get<{ repos: string[]; defaultRepo: string | null; scmProvider?: string }>("/api/repos");
+  }
+
   /** Get cloud-stored logs for a task (all phases: planning + execution) */
   async getCloudLogs(taskId: string, since?: string): Promise<unknown[]> {
     const qs = since ? `?since=${encodeURIComponent(since)}` : "";

@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "publisher": "workermill",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -131,8 +131,13 @@
       },
       {
         "command": "workermill.buildFromPrd",
-        "title": "WorkerMill: Build from PRD",
+        "title": "WorkerMill: Product Build",
         "icon": "$(rocket)"
+      },
+      {
+        "command": "workermill.runFileAsTask",
+        "title": "WorkerMill: Run as Task",
+        "icon": "$(play)"
       },
       {
         "command": "workermill.openDashboard",
@@ -194,6 +199,11 @@
           "command": "workermill.buildFromPrd",
           "when": "resourceExtname == .md",
           "group": "workermill@1"
+        },
+        {
+          "command": "workermill.runFileAsTask",
+          "when": "resourceExtname == .md",
+          "group": "workermill@2"
         }
       ],
       "editor/title": [
@@ -208,6 +218,11 @@
           "command": "workermill.buildFromPrd",
           "when": "resourceExtname == .md",
           "group": "workermill@1"
+        },
+        {
+          "command": "workermill.runFileAsTask",
+          "when": "resourceExtname == .md",
+          "group": "workermill@2"
         }
       ]
     },

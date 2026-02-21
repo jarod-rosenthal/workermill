@@ -19,6 +19,118 @@ import { spawn, execFileSync } from "child_process";
 const CDN_BASE = "https://workermill.com/agent/latest";
 
 /**
+ * Check if Git is installed and on PATH.
+ * Returns the path if found, null if not.
+ */
+export function findGit(): string | null {
+  const isWin = process.platform === "win32";
+  const name = isWin ? "git.exe" : "git";
+
+  try {
+    const cmd = isWin ? "where.exe" : "which";
+    const result = execFileSync(cmd, [name], { encoding: "utf-8", timeout: 5000 }).trim();
+    const firstMatch = result.split("\n")[0];
+    if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
+  } catch { /* not on PATH */ }
+
+  // Check known install locations on Windows
+  if (isWin) {
+    const candidates = [
+      path.join(process.env.ProgramFiles || "C:\\Program Files", "Git", "cmd", "git.exe"),
+      path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Git", "cmd", "git.exe"),
+      path.join(os.homedir(), "AppData", "Local", "Programs", "Git", "cmd", "git.exe"),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Prompt the user to install Git if missing.
+ * Runs the installer in a VS Code terminal (winget on Windows, brew/apt on Unix),
+ * then polls for the binary — same pattern as promptInstallClaudeCli.
+ */
+export async function promptInstallGit(
+  log?: (msg: string) => void,
+): Promise<boolean> {
+  if (findGit()) return true;
+
+  log?.("Git not found — prompting user to install");
+
+  const isWin = process.platform === "win32";
+  const isMac = process.platform === "darwin";
+  const action = await vscode.window.showWarningMessage(
+    "Git is required for WorkerMill to clone repositories and run tasks. Install it now?",
+    "Install Git",
+    "Skip for Now",
+  );
+
+  if (action !== "Install Git") return false;
+
+  let installCmd: string;
+  if (isWin) {
+    installCmd = "winget install --id Git.Git -e --source winget";
+  } else if (isMac) {
+    installCmd = "xcode-select --install 2>/dev/null || brew install git";
+  } else {
+    installCmd = "sudo apt-get install -y git || sudo dnf install -y git || sudo pacman -S --noconfirm git";
+  }
+
+  const terminal = vscode.window.createTerminal({
+    name: "Install Git",
+    iconPath: new vscode.ThemeIcon("cloud-download"),
+  });
+  terminal.show();
+  terminal.sendText(installCmd);
+
+  log?.(`Running: ${installCmd}`);
+
+  // Poll for git to appear
+  const found = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Waiting for Git install to complete...",
+      cancellable: true,
+    },
+    async (_progress, token) => {
+      const maxWaitMs = 120_000;
+      const pollMs = 3_000;
+      const start = Date.now();
+
+      while (Date.now() - start < maxWaitMs) {
+        if (token.isCancellationRequested) return false;
+        await new Promise((r) => setTimeout(r, pollMs));
+        if (findGit()) return true;
+      }
+      return false;
+    },
+  );
+
+  if (found) {
+    log?.(`Git detected at: ${findGit()}`);
+    vscode.window.showInformationMessage("Git installed successfully!");
+    return true;
+  }
+
+  log?.("Git not detected after install — may need VS Code reload");
+  const reload = await vscode.window.showWarningMessage(
+    "Git install finished but wasn't detected. You may need to reload VS Code for PATH changes to take effect.",
+    "Reload Window",
+    "Continue Anyway",
+  );
+
+  if (reload === "Reload Window") {
+    vscode.commands.executeCommand("workbench.action.reloadWindow");
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Check if Claude Code CLI is installed. Mirrors the agent's findClaudePath() logic.
  * Returns the path if found, null if not.
  */

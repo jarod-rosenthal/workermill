@@ -1,18 +1,30 @@
 import { useState, useEffect } from "react";
 import { Loader2, FileText } from "lucide-react";
 import { authAPI } from "../lib/api-client";
+import { useAuthStore } from "../store/auth-store";
 
 export function TosModal() {
+  const tosRequired = useAuthStore((state) => state.tosRequired);
+  const setTosRequired = useAuthStore((state) => state.setTosRequired);
   const [open, setOpen] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Open from auth store (proactive check from /me response)
   useEffect(() => {
-    const handler = () => setOpen(true);
+    if (tosRequired) setOpen(true);
+  }, [tosRequired]);
+
+  // Also listen for event-driven trigger (fallback from axios interceptor)
+  useEffect(() => {
+    const handler = () => {
+      setTosRequired(true);
+      setOpen(true);
+    };
     window.addEventListener("workermill:tos-required", handler);
     return () => window.removeEventListener("workermill:tos-required", handler);
-  }, []);
+  }, [setTosRequired]);
 
   const handleAccept = async () => {
     setLoading(true);
@@ -21,6 +33,7 @@ export function TosModal() {
       await authAPI.acceptTos();
       setOpen(false);
       setAgreed(false);
+      setTosRequired(false);
       window.location.reload();
     } catch {
       setError("Failed to accept Terms of Service. Please try again.");

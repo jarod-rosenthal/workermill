@@ -67,6 +67,7 @@ function ProtectedRoute({ children, allowSetup = false }: { children: React.Reac
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitialized = useAuthStore((state) => state.isInitialized);
   const needsSetup = useAuthStore((state) => state.needsSetup);
+  const tosRequired = useAuthStore((state) => state.tosRequired);
 
   if (!isInitialized) {
     return (
@@ -78,6 +79,18 @@ function ProtectedRoute({ children, allowSetup = false }: { children: React.Reac
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Block all protected content while TOS acceptance is pending.
+  // TosModal is rendered at the root level and will handle the accept flow.
+  // This prevents dashboard components from firing API calls that would all
+  // return 403 and pile up error toasts.
+  if (tosRequired) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
   }
 
   // Redirect to onboarding if user needs to complete setup (unless allowSetup is true)
@@ -136,6 +149,8 @@ function App() {
   const setUser = useAuthStore((state) => state.setUser);
   const setOrganization = useAuthStore((state) => state.setOrganization);
   const setNeedsSetup = useAuthStore((state) => state.setNeedsSetup);
+  const setTosRequired = useAuthStore((state) => state.setTosRequired);
+  const tosRequired = useAuthStore((state) => state.tosRequired);
   const organization = useAuthStore((state) => state.organization);
 
   useEffect(() => {
@@ -149,11 +164,15 @@ function App() {
         setUser(me.user);
         setOrganization(me.organization);
         setNeedsSetup(me.needsSetup);
+        // Check TOS from /me response — block app before any dashboard API calls fire
+        if (me.currentTosVersion && me.user.tosVersion !== me.currentTosVersion) {
+          setTosRequired(true);
+        }
       }).catch(() => {
         // Token might be invalid, the interceptor will handle redirect
       });
     }
-  }, [isInitialized, isAuthenticated, setUser, setOrganization, setNeedsSetup]);
+  }, [isInitialized, isAuthenticated, setUser, setOrganization, setNeedsSetup, setTosRequired]);
 
   return (
     <ToastProvider>

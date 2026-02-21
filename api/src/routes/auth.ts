@@ -2054,6 +2054,7 @@ router.post(
   [
     body("githubToken").isString().notEmpty().withMessage("githubToken is required"),
     body("githubUsername").isString().notEmpty().withMessage("githubUsername is required"),
+    body("tosAccepted").isBoolean().equals("true").withMessage("Terms of Service must be accepted"),
   ],
   async (req: Request, res: Response) => {
     try {
@@ -2062,7 +2063,7 @@ router.post(
         return res.status(400).json({ error: errors.array()[0].msg });
       }
 
-      const { githubToken, githubUsername } = req.body;
+      const { githubToken, githubUsername, tosAccepted } = req.body;
 
       // Validate GitHub token and get user info
       let githubUser: { login: string; name: string | null; id: number };
@@ -2137,8 +2138,8 @@ router.post(
         role: "admin",
         status: "active",
         orgId: null,
-        tosAcceptedAt: new Date(),
-        tosVersion: TOS_VERSION,
+        tosAcceptedAt: tosAccepted ? new Date() : null,
+        tosVersion: tosAccepted ? TOS_VERSION : null,
       });
       await userRepo.save(user);
 

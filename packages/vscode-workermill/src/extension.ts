@@ -566,7 +566,7 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
 
-    // Build a board from a PRD (.md file) — context menu + editor title button
+    // Build a board from a spec (.md file) — context menu + editor title button
     vscode.commands.registerCommand(
       "workermill.buildFromPrd",
       async (uri?: vscode.Uri) => {

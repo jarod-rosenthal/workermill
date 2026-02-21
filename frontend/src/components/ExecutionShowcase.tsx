@@ -26,7 +26,7 @@ interface Epic {
 // ─── Step definitions (Railway-style labeled tabs) ──────────────────────────
 
 const STEPS = [
-  { label: "PRD", icon: FileText },
+  { label: "Spec", icon: FileText },
   { label: "Decompose", icon: Zap },
   { label: "Plan", icon: Cpu },
   { label: "Execute", icon: Play },
@@ -197,7 +197,7 @@ function ContextMenuContent() {
           <div className="border-t border-white/[0.08] my-1" />
           <div className="px-3 py-2 mx-1.5 text-[11px] text-blue-300 bg-blue-500/15 font-medium flex items-center gap-2 rounded-md">
             <Play className="w-3 h-3 fill-blue-300" />
-            WorkerMill: Build from PRD
+            WorkerMill: Full Build
           </div>
           <div className="border-t border-white/[0.08] my-1" />
           <div className="px-4 py-1.5 text-[11px] text-slate-500">
@@ -225,7 +225,7 @@ function DecomposingContent() {
           $ workermill build --from-prd SHIPAPI_PRD.md
         </div>
         <div className="h-3" />
-        <div className="text-blue-400">Decomposing PRD into epics...</div>
+        <div className="text-blue-400">Decomposing spec into tasks...</div>
         <div className="text-slate-600 pl-3">
           Analyzing requirements and dependencies
         </div>

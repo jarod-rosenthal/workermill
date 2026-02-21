@@ -815,6 +815,38 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
+    // Sign out — stop agent, delete config, reset to welcome view
+    vscode.commands.registerCommand("workermill.signOut", async () => {
+      const confirm = await vscode.window.showWarningMessage(
+        "Sign out of WorkerMill? This will stop the agent and remove your configuration.",
+        { modal: true },
+        "Sign Out",
+      );
+      if (confirm !== "Sign Out") return;
+
+      log("Signing out...");
+      client.disconnect();
+      await stopAgentProcess();
+
+      // Delete config file
+      const configPath = path.join(os.homedir(), ".workermill", "config.json");
+      try {
+        fs.unlinkSync(configPath);
+      } catch {
+        /* already gone */
+      }
+
+      // Reset context keys to show welcome view
+      treeProvider.agentConfigured = false;
+      vscode.commands.executeCommand("setContext", "workermill.agentConfigured", false);
+      vscode.commands.executeCommand("setContext", "workermill.agentConnected", false);
+      treeProvider.refresh();
+
+      vscode.window.showInformationMessage(
+        "Signed out of WorkerMill. Use the sidebar to sign in with a different account.",
+      );
+    }),
+
     // Restart agent
     vscode.commands.registerCommand("workermill.restartAgent", async () => {
       if (!isAgentInstalled()) {
@@ -965,7 +997,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 }
 
-export function deactivate(): void {
+export async function deactivate(): Promise<void> {
   LiveDiffPanel.disposeAll();
   TaskDetailPanel.disposeAll();
   SettingsPanel.dispose();
@@ -973,4 +1005,7 @@ export function deactivate(): void {
   if (statusBar) statusBar.dispose();
   if (notifications) notifications.dispose();
   if (client) client.dispose();
+
+  // Stop the agent process when VS Code closes
+  await stopAgentProcess();
 }

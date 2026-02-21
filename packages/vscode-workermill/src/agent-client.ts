@@ -326,6 +326,21 @@ export class AgentClient extends EventEmitter {
     };
   }
 
+  /** Stop reconnecting and close SSE, but keep the instance usable (re-connectable). */
+  disconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.taskStream) {
+      try { this.taskStream.destroy(); } catch { /* ignore */ }
+      this.taskStream = null;
+    }
+    this.port = null;
+    this.connected = false;
+    this.emit("disconnected");
+  }
+
   /** Clean up all connections */
   dispose(): void {
     this.disposed = true;

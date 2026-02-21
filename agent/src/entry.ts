@@ -12,6 +12,8 @@ const mode = process.env.__WORKERMILL_MODE;
 
 if (mode === "worker") {
   await import("./worker-shim.js");
+} else if (mode === "ai-sdk-executor") {
+  await import("./ai-sdk-executor-shim.js");
 } else if (mode === "manager") {
   await import("./manager-shim.js");
 } else {

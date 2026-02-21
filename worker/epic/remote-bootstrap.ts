@@ -22,6 +22,7 @@ import axios from "axios";
 import { EpicCoordinator } from "./coordinator.js";
 import { DecisionClient } from "./decision-client.js";
 import type { EpicConfig, ResilienceConfig } from "./types.js";
+import type { MultiExpertCoordinator as MultiExpertCoordinatorType } from "../multi-expert/index.js";
 
 // ---------------------------------------------------------------------------
 // Environment Validation
@@ -35,15 +36,19 @@ function validateEnv(): void {
     if (!process.env[key]) missing.push(key);
   }
 
-  // Auth check: need ANTHROPIC_API_KEY or OAuth credentials
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-    const credPath = join(
-      process.env.HOME || process.env.USERPROFILE || "~",
-      ".claude",
-      ".credentials.json",
-    );
-    if (!existsSync(credPath)) {
-      missing.push("ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN or ~/.claude/.credentials.json");
+  // Auth check: need ANTHROPIC_API_KEY or OAuth credentials (Anthropic provider only)
+  // Non-Anthropic providers validate their own keys in the Multi-Expert coordinator
+  const workerProvider = process.env.WORKER_PROVIDER || "anthropic";
+  if (workerProvider === "anthropic") {
+    if (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+      const credPath = join(
+        process.env.HOME || process.env.USERPROFILE || "~",
+        ".claude",
+        ".credentials.json",
+      );
+      if (!existsSync(credPath)) {
+        missing.push("ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN or ~/.claude/.credentials.json");
+      }
     }
   }
 
@@ -361,6 +366,41 @@ function loadResilienceConfig(): ResilienceConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Multi-Expert Config Loader
+// ---------------------------------------------------------------------------
+
+function loadMultiExpertConfig(repoDir: string) {
+  // Parse provider routing from JSON environment variable
+  let providerRouting: Record<string, { provider: string; model: string }> | undefined;
+  if (process.env.PROVIDER_ROUTING) {
+    try {
+      providerRouting = JSON.parse(process.env.PROVIDER_ROUTING);
+    } catch {
+      console.warn("[Bootstrap] Failed to parse PROVIDER_ROUTING, ignoring");
+    }
+  }
+
+  return {
+    parentTaskId: process.env.PARENT_TASK_ID!,
+    apiBaseUrl: process.env.API_BASE_URL!,
+    orgApiKey: process.env.ORG_API_KEY!,
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
+    githubToken: process.env.SCM_TOKEN || process.env.GITHUB_TOKEN!,
+    githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN,
+    targetRepo: process.env.TARGET_REPO!,
+    model: process.env.WORKER_MODEL || process.env.MODEL,
+    managerModel: process.env.MANAGER_MODEL,
+    jiraIssueKey: process.env.JIRA_ISSUE_KEY || process.env.TICKET_KEY || "",
+    providerRouting,
+    googleApiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_API_KEY,
+    openaiApiKey: process.env.OPENAI_API_KEY,
+    ollamaHost: process.env.OLLAMA_HOST,
+    skipManagerReview: process.env.SKIP_MANAGER_REVIEW === "true",
+    repoPath: repoDir,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -409,33 +449,53 @@ async function main(): Promise<void> {
   // 7. Pre-install dependencies
   preInstallDeps(repoDir);
 
-  // 8. Start Epic coordinator
+  // 8. Dispatch to correct coordinator based on provider
+  const workerProvider = process.env.WORKER_PROVIDER || "anthropic";
   let exitCode = 0;
+
   try {
-    const config = loadConfig(repoDir, mainBranch);
-    const resilience = loadResilienceConfig();
+    if (workerProvider === "anthropic") {
+      // Epic coordinator — existing Anthropic path (unchanged)
+      const config = loadConfig(repoDir, mainBranch);
+      const resilience = loadResilienceConfig();
 
-    const decisionClient = new DecisionClient({
-      apiBaseUrl: config.apiBaseUrl,
-      orgApiKey: config.orgApiKey,
-      logger: (msg) => console.log(msg),
-    });
+      const decisionClient = new DecisionClient({
+        apiBaseUrl: config.apiBaseUrl,
+        orgApiKey: config.orgApiKey,
+        logger: (msg) => console.log(msg),
+      });
 
-    const coordinator = new EpicCoordinator(config, resilience, decisionClient);
+      const coordinator = new EpicCoordinator(config, resilience, decisionClient);
 
-    // Graceful shutdown handler
-    let shutdownInProgress = false;
-    const shutdown = async () => {
-      if (shutdownInProgress) return;
-      shutdownInProgress = true;
-      console.log("\n[Bootstrap] Received shutdown signal");
-      await coordinator.gracefulShutdown();
-    };
-    process.on("SIGINT", shutdown);
-    process.on("SIGTERM", shutdown);
+      // Graceful shutdown handler
+      let shutdownInProgress = false;
+      const shutdown = async () => {
+        if (shutdownInProgress) return;
+        shutdownInProgress = true;
+        console.log("\n[Bootstrap] Received shutdown signal");
+        await coordinator.gracefulShutdown();
+      };
+      process.on("SIGINT", shutdown);
+      process.on("SIGTERM", shutdown);
 
-    await coordinator.start();
-    console.log("[Bootstrap] Epic session ended");
+      await coordinator.start();
+      console.log("[Bootstrap] Epic session ended");
+    } else {
+      // Multi-Expert coordinator — non-Anthropic providers
+      console.log(`[Bootstrap] Non-Anthropic provider: ${workerProvider}`);
+      console.log("[Bootstrap] Dispatching to Multi-Expert coordinator");
+
+      const { MultiExpertCoordinator } = await import("../multi-expert/index.js") as { MultiExpertCoordinator: new (config: ReturnType<typeof loadMultiExpertConfig>) => MultiExpertCoordinatorType };
+      const meConfig = loadMultiExpertConfig(repoDir);
+      const coordinator = new MultiExpertCoordinator(meConfig);
+
+      // Graceful shutdown handler (same pattern as Epic)
+      process.on("SIGINT", () => coordinator.stop());
+      process.on("SIGTERM", () => coordinator.stop());
+
+      await coordinator.start();
+      console.log("[Bootstrap] Multi-Expert session ended");
+    }
   } catch (error) {
     console.error("[Bootstrap] Fatal error:", error);
     exitCode = 1;

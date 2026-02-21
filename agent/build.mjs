@@ -106,6 +106,24 @@ await build({
 });
 console.log("✓ dist/manager-worker.js bundled from worker/manager/index.ts");
 
+// Step 4b: Bundle multi-expert worker entry point (for npm fallback path)
+await build({
+  ...shared,
+  entryPoints: ["../worker/multi-expert/index.ts"],
+  outfile: "dist/multi-expert-worker.js",
+  banner: { js: "// WorkerMill Multi-Expert - minified" },
+});
+console.log("✓ dist/multi-expert-worker.js bundled from worker/multi-expert/index.ts");
+
+// Step 4c: Bundle AI SDK executor (for npm fallback path)
+await build({
+  ...shared,
+  entryPoints: ["../worker/agents/ai-sdk-executor.js"],
+  outfile: "dist/ai-sdk-executor.js",
+  banner: { js: "// WorkerMill AI SDK Executor - minified" },
+});
+console.log("✓ dist/ai-sdk-executor.js bundled from worker/agents/ai-sdk-executor.js");
+
 // Step 5: Bundle unified entry point (for standalone binary compilation)
 // Bundles directly from TypeScript source (not tsc output) because the shims
 // import from ../../worker/ which is outside tsc's rootDir. esbuild handles TS natively.
@@ -130,7 +148,7 @@ var require = (typeof globalThis.require !== "undefined") ? globalThis.require :
 console.log("✓ dist/entry.js unified bundle (for binary compilation)");
 
 // Remove all other .js files from dist/ (they're now bundled)
-const keepFiles = new Set(["cli.js", "index.js", "worker.js", "manager-worker.js", "entry.js"]);
+const keepFiles = new Set(["cli.js", "index.js", "worker.js", "manager-worker.js", "multi-expert-worker.js", "ai-sdk-executor.js", "entry.js"]);
 
 function cleanUnbundled(dir) {
   try {

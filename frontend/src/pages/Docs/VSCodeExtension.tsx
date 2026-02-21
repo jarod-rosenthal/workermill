@@ -66,11 +66,11 @@ const features = [
   },
   {
     icon: FileText,
-    title: "PRD Decomposition",
+    title: "Full Build",
     color: "text-rose-500",
     bgColor: "bg-rose-500/10",
     description:
-      "Right-click any .md file and select \"Build from PRD\" to decompose a product requirements document into a board of tasks.",
+      "Right-click any .md file and select \"Full Build\" to decompose a spec into a board of tasks.",
   },
 ];
 
@@ -96,9 +96,9 @@ const commands = [
     description: "Approve an execution plan for a task",
   },
   {
-    command: "WorkerMill: Build from PRD",
+    command: "WorkerMill: Full Build",
     trigger: ".md file context menu",
-    description: "Decompose a PRD into a board of tasks",
+    description: "Decompose a spec into a board of tasks",
   },
   {
     command: "WorkerMill: Open Live Diff",
@@ -210,7 +210,7 @@ export default function VSCodeExtension() {
           <h3 className="font-semibold text-foreground">Run from Your IDE</h3>
           <p className="text-sm text-muted-foreground">
             Search Jira issues, run tasks, respond to blockers, approve plans,
-            and decompose PRDs — all from VS Code.
+            and run Full Builds — all from VS Code.
           </p>
         </div>
       </div>
@@ -615,7 +615,7 @@ export default function VSCodeExtension() {
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold text-foreground flex items-center gap-2">
           <Rocket className="w-6 h-6 text-muted-foreground" />
-          PRD Decomposition
+          Full Build
         </h2>
         <div className="bg-card border border-border rounded-xl p-6 space-y-4">
           <p className="text-muted-foreground">
@@ -633,12 +633,12 @@ export default function VSCodeExtension() {
             <li>
               Right-click and select{" "}
               <strong className="text-foreground">
-                Build from PRD
+                Full Build
               </strong>{" "}
               (or click the rocket icon in the editor title bar)
             </li>
             <li>
-              The agent decomposes the PRD using Claude CLI locally, streaming
+              The agent decomposes the spec using Claude CLI locally, streaming
               progress in real time
             </li>
             <li>
@@ -647,7 +647,7 @@ export default function VSCodeExtension() {
             </li>
           </ol>
           <p className="text-xs text-muted-foreground">
-            PRD decomposition runs entirely on your machine using your Claude
+            Full Build runs entirely on your machine using your Claude
             Max subscription. The resulting board and cards are synced to the
             cloud dashboard.
           </p>

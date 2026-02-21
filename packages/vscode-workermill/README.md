@@ -8,7 +8,7 @@ Watch AI experts build your project — real-time monitoring and control for you
 - **Real-time task logs** streamed to pseudoterminal tabs
 - **Live code changes** — see what AI workers are modifying as they work
 - **Activity feed** — follow expert collaboration in real-time
-- **Product Build** — decompose a PRD (.md file) into a full board of tasks
+- **Product Build** — decompose a spec into a full board of tasks
 - **One-click onboarding** — sign up with GitHub, no terminal commands needed
 
 ***REMOVED******REMOVED*** Getting Started
@@ -31,7 +31,7 @@ Or if you already have an account: **Sign In** or **Use API Key**.
 |---------|-------------|
 | **WorkerMill: Run Task** | Run a Jira/GitHub issue by key |
 | **WorkerMill: Search Issues** | Search and run issues from a picker |
-| **WorkerMill: Product Build** | Decompose a .md PRD into board cards |
+| **WorkerMill: Product Build** | Decompose a .md spec into board cards |
 | **WorkerMill: Run as Task** | Run a .md file as a single worker task |
 | **WorkerMill: Talk to Worker** | Send a message to an active worker |
 | **WorkerMill: Show Task Logs** | Open log terminal for an active task |

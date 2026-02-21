@@ -547,7 +547,7 @@ export default function BoardView() {
             )}
             {currentBoard.prdContent && (
               <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 rounded text-xs font-medium">
-                From PRD
+                Full Build
               </span>
             )}
           </div>

@@ -1062,7 +1062,7 @@ export function EmbeddedDependencyGraph({ stories, parentTaskStatus, personaMap 
             fontSize="8"
             fontWeight="500"
           >
-            📋 PRD
+            📋 Spec
           </text>
           <text
             x={startNodeWidth / 2}

@@ -582,6 +582,7 @@ async function cloneTargetRepo(
     execSync(`git clone --depth 1 --single-branch "${cloneUrl}" "${tmpDir}"`, {
       stdio: ["ignore", "ignore", "pipe"],
       timeout: 60_000,
+      windowsHide: true,
     });
     console.log(
       `${ts()} ${taskLabel} ${chalk.green("✓")} Repo cloned to ${chalk.dim(tmpDir)}`,
@@ -599,7 +600,7 @@ async function cloneTargetRepo(
     );
     // Cleanup partial clone
     try {
-      execSync(`rm -rf "${tmpDir}"`, { stdio: "ignore" });
+      execSync(`rm -rf "${tmpDir}"`, { stdio: "ignore", windowsHide: true });
     } catch {
       /* ignore */
     }
@@ -1097,7 +1098,7 @@ export async function planTask(
     // Cleanup temp clone
     if (repoPath) {
       try {
-        execSync(`rm -rf "${repoPath}"`, { stdio: "ignore" });
+        execSync(`rm -rf "${repoPath}"`, { stdio: "ignore", windowsHide: true });
       } catch {
         /* ignore */
       }

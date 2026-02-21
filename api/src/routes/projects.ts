@@ -18,6 +18,7 @@ import {
   type WorkerPersona,
 } from "../models/index.js";
 import { authenticateUser, requireAdmin } from "../middleware/auth.js";
+import { requireCurrentTos } from "../middleware/tos.js";
 import { logger } from "../utils/logger.js";
 import { localEpicSpawner } from "../services/local-epic-spawner.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
@@ -26,6 +27,7 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticateUser);
+router.use(requireCurrentTos);
 
 // =============================================================================
 // Helper Functions

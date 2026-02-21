@@ -7,6 +7,7 @@
 
 import { Router, Request, Response } from "express";
 import { authenticateUser } from "../middleware/auth.js";
+import { requireCurrentTos } from "../middleware/tos.js";
 import { requirePlatformAdmin } from "../middleware/platform-auth.js";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask, SupportTicket, Organization } from "../models/index.js";
@@ -23,6 +24,7 @@ const router = Router();
 
 // Apply authentication and platform admin check to all routes
 router.use(authenticateUser);
+router.use(requireCurrentTos);
 router.use(requirePlatformAdmin);
 
 /**

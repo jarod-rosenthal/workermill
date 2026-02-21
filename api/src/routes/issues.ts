@@ -10,6 +10,7 @@
 import { Router, type Request, type Response } from "express";
 import { query, validationResult } from "express-validator";
 import { authenticateRequest } from "../middleware/auth.js";
+import { requireCurrentTos } from "../middleware/tos.js";
 import { getOrgCredentials } from "../services/org-credentials.js";
 import { AppDataSource } from "../db/connection.js";
 import { KbCard } from "../models/KbCard.js";
@@ -22,6 +23,7 @@ const router = Router();
 
 // All issue routes require authentication
 router.use(authenticateRequest);
+router.use(requireCurrentTos);
 
 // ─── Shared types ────────────────────────────────────────────────────────
 

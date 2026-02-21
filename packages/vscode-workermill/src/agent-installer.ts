@@ -678,6 +678,7 @@ export function startAgentProcess(log?: (msg: string) => void): void {
       detached: true,
       stdio: ["ignore", logFd, logFd],
       env,
+      windowsHide: true,
     });
 
     child.on("error", (err) => {
@@ -700,7 +701,7 @@ export async function stopAgentProcess(): Promise<boolean> {
   // Try graceful stop via CLI command
   if (fs.existsSync(binary)) {
     const stopped = await new Promise<boolean>((resolve) => {
-      const child = spawn(binary, ["stop"], { stdio: "ignore" });
+      const child = spawn(binary, ["stop"], { stdio: "ignore", windowsHide: true });
       child.on("close", (code) => resolve(code === 0));
       child.on("error", () => resolve(false));
       setTimeout(() => {

@@ -593,9 +593,31 @@ export function startAgentProcess(log?: (msg: string) => void): void {
   const logFd = fs.openSync(logFile, "a");
 
   try {
+    // On Windows, read fresh PATH from registry so the agent sees
+    // binaries installed after VS Code started (e.g. Git via winget)
+    const env = { ...process.env };
+    if (process.platform === "win32") {
+      try {
+        const regOut = execFileSync(
+          "reg",
+          ["query", "HKCU\\Environment", "/v", "Path"],
+          { encoding: "utf-8", timeout: 5000 },
+        );
+        const match = regOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
+        if (match) {
+          const userPath = match[1].trim();
+          // Merge fresh user PATH with system PATH
+          const systemPath = process.env.PATH || "";
+          env.PATH = `${userPath};${systemPath}`;
+          log?.(`Refreshed PATH for agent process`);
+        }
+      } catch { /* registry read failed, use inherited PATH */ }
+    }
+
     const child = spawn(binary, ["start"], {
       detached: true,
       stdio: ["ignore", logFd, logFd],
+      env,
     });
 
     child.on("error", (err) => {

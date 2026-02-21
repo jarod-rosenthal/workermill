@@ -148,6 +148,15 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
     }
   }
 
+  // Check dependencies BEFORE starting the agent — Git is a hard requirement
+  const hasGit = await promptInstallGit(log);
+  if (!hasGit) {
+    vscode.window.showWarningMessage(
+      "Git is required for WorkerMill. Install Git and reload VS Code to continue.",
+    );
+    return false;
+  }
+
   log("Starting agent...");
   startAgentProcess(log);
 
@@ -167,9 +176,7 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
     return false;
   }
 
-  // Check dependencies — fire-and-forget so they don't block the connection flow
-  // Git and Claude CLI are needed to run tasks, not to connect
-  promptInstallGit(log);
+  // Claude CLI check — fire-and-forget, not blocking (soft dependency)
   promptInstallClaudeCli(log);
 
   return true;

@@ -29,6 +29,7 @@ import {
   startAgentProcess,
   stopAgentProcess,
   waitForAgentReady,
+  promptInstallGit,
 } from "./agent-installer";
 import { signUpWithGitHub, signInWithGitHub, enterApiKey } from "./github-onboard";
 
@@ -783,6 +784,13 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       if (!client.isConnected()) {
+        const hasGit = await promptInstallGit(log);
+        if (!hasGit) {
+          vscode.window.showWarningMessage(
+            "Git is required for WorkerMill. Install Git and reload VS Code.",
+          );
+          return;
+        }
         startAgentProcess(log);
         const port = await vscode.window.withProgress(
           {

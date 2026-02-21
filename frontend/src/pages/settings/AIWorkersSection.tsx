@@ -358,7 +358,7 @@ export function AIWorkersSection({
             icon={<BarChart3 className="w-4 h-4" />}
             iconBgColor="bg-purple-500/20"
             iconColor="text-purple-500"
-            summary={`${PROVIDER_OPTIONS.find((p) => p.value === settings.planningAgentProvider)?.label.split(" ")[0] || "Anthropic"} - ${settings.planningMode === "simplified" ? "Simplified" : "Strict"} - ${settings.storyCalibrationMultiplier}x`}
+            summary={`${PROVIDER_OPTIONS.find((p) => p.value === settings.planningAgentProvider)?.label.split(" ")[0] || "Anthropic"} — ${MODEL_OPTIONS[settings.planningAgentProvider]?.find((m) => m.value === settings.planningAgentModel)?.label || settings.planningAgentModel}`}
           >
             <div className="space-y-6">
               {/* Planning Mode Toggle */}

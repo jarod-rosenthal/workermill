@@ -42,13 +42,6 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
     cacheWrite: 0.00125,
     cacheRead: 0.0001,
   },
-  // Sonnet 5 (latest) - pricing TBD, using Sonnet 4.6 rates
-  "claude-sonnet-5-20260203": {
-    input: 0.003,
-    output: 0.015,
-    cacheWrite: 0.00375,
-    cacheRead: 0.0003,
-  },
   // Sonnet 4.6 (current balanced tier)
   "claude-sonnet-4-6": {
     input: 0.003,

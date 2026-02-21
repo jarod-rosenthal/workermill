@@ -519,7 +519,7 @@ export class SettingsPanel {
         <label id="tracker-github-label" class="locked-option"><input type="radio" name="tracker" value="github-issues" disabled /> GitHub Issues <span class="pro-badge">PRO</span></label>
         <label id="tracker-linear-label" class="locked-option"><input type="radio" name="tracker" value="linear" disabled /> Linear <span class="pro-badge">PRO</span></label>
       </div>
-      <div id="tracker-upgrade" class="upgrade-hint hidden">Upgrade to Pro to unlock all issue trackers. <a id="btn-upgrade-tracker" href="***REMOVED***">View plans</a></div>
+      <div id="tracker-upgrade" class="upgrade-hint hidden">Upgrade to Max to unlock all issue trackers. <a id="btn-upgrade-tracker" href="***REMOVED***">View plans</a></div>
 
       <div id="tracker-status" class="status"></div>
 
@@ -573,7 +573,7 @@ export class SettingsPanel {
         <div class="scm-row locked" id="scm-bitbucket-row"><span>Bitbucket:</span> <span id="scm-bitbucket-badge"></span> <span class="pro-badge">PRO</span></div>
         <div class="scm-row locked" id="scm-gitlab-row"><span>GitLab:</span> <span id="scm-gitlab-badge"></span> <span class="pro-badge">PRO</span></div>
       </div>
-      <div id="scm-upgrade" class="upgrade-hint hidden">Upgrade to Pro to connect Bitbucket and GitLab. <a id="btn-upgrade-scm" href="***REMOVED***">View plans</a></div>
+      <div id="scm-upgrade" class="upgrade-hint hidden">Upgrade to Max to connect Bitbucket and GitLab. <a id="btn-upgrade-scm" href="***REMOVED***">View plans</a></div>
       <div class="hint" style="margin-top: 8px;">Manage SCM tokens in <button class="btn-link" id="btn-web-settings-scm">web settings</button>.</div>
     </div>
 
@@ -627,7 +627,7 @@ export class SettingsPanel {
     const jiraStatus = document.getElementById("jira-status");
     const trackerStatus = document.getElementById("tracker-status");
 
-    let orgPlan = "free";
+    let orgPlan = "pro";
 
     // Radio toggle — skip save during initial load
     let initialLoad = true;
@@ -644,7 +644,7 @@ export class SettingsPanel {
 
     function applyPlanRestrictions(plan) {
       orgPlan = plan;
-      const isPaid = plan === "pro" || plan === "enterprise";
+      const isPaid = plan === "max" || plan === "enterprise";
 
       // Issue tracker: Internal Boards + Jira = free, GitHub Issues + Linear = Pro
       const githubLabel = document.getElementById("tracker-github-label");
@@ -757,11 +757,11 @@ export class SettingsPanel {
         const d = msg.data;
 
         // Apply plan restrictions before selecting radios
-        applyPlanRestrictions(d.plan || "free");
+        applyPlanRestrictions(d.plan || "pro");
 
         // Select current tracker radio (fall back to "internal" if selected tracker is locked)
         let tracker = d.defaultIssueTracker || "internal";
-        const isPaid = orgPlan === "pro" || orgPlan === "enterprise";
+        const isPaid = orgPlan === "max" || orgPlan === "enterprise";
         if (!isPaid && (tracker === "github-issues" || tracker === "linear")) {
           tracker = "internal";
         }
@@ -791,9 +791,9 @@ export class SettingsPanel {
         const planInfo = document.getElementById("plan-info");
         const planName = document.getElementById("plan-name");
         planInfo.classList.remove("hidden");
-        const planLabel = (d.plan || "free").charAt(0).toUpperCase() + (d.plan || "free").slice(1);
+        const planLabel = (d.plan || "pro").charAt(0).toUpperCase() + (d.plan || "pro").slice(1);
         planName.textContent = planLabel;
-        planName.className = "badge " + ((d.plan === "pro" || d.plan === "enterprise") ? "configured" : "not-configured");
+        planName.className = "badge " + ((d.plan === "max" || d.plan === "enterprise") ? "configured" : "not-configured");
       }
 
       if (msg.type === "tracker-saved") {

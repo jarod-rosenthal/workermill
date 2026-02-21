@@ -99,7 +99,7 @@ router.get(
     const maxWorkers = PLAN_MAX_WORKERS[plan] ?? 1;
     const maxExperts = PLAN_MAX_EXPERTS[plan] ?? 3;
     const logRetention = PLAN_LOG_RETENTION[plan] ?? 14;
-    const features = PLAN_FEATURES[plan] ?? PLAN_FEATURES.free;
+    const features = PLAN_FEATURES[plan] ?? PLAN_FEATURES.pro;
 
     // Calculate billing period (defaults to current month if no billingCycleStart)
     let periodStart: Date;
@@ -158,10 +158,10 @@ router.get(
   asyncHandler(async (_req: Request, res: Response) => {
     const plans = [
       {
-        id: "free",
-        name: "Free",
-        price: 0,
-        userLimit: 1,
+        id: "pro",
+        name: "Pro",
+        price: 19,
+        userLimit: 5,
         maxWorkers: 1,
         maxExperts: 3,
         logRetention: 14,
@@ -175,18 +175,17 @@ router.get(
         ],
       },
       {
-        id: "pro",
-        name: "Pro",
-        price: 29,
-        launchPrice: 14.50,
-        userLimit: 5,
-        maxWorkers: 5,
-        maxExperts: -1,
+        id: "max",
+        name: "Max",
+        price: 39,
+        userLimit: 25,
+        maxWorkers: 3,
+        maxExperts: 7,
         logRetention: 90,
         features: [
           "All AI providers (OpenAI, Google, Ollama)",
-          "5 concurrent workers",
-          "Unlimited expert personas",
+          "3 concurrent workers",
+          "7 expert personas per task",
           "Cloud execution + Warm Pool",
           "90-day log retention",
           "Advanced analytics",
@@ -196,7 +195,6 @@ router.get(
           "Priority support",
         ],
         highlighted: true,
-        badge: "Launch Price",
       },
       {
         id: "enterprise",
@@ -297,8 +295,8 @@ router.post(
   requireAdmin,
   body("plan")
     .isString()
-    .isIn(["pro"])
-    .withMessage("plan must be: pro (enterprise is contact-sales, free needs no checkout)"),
+    .isIn(["max"])
+    .withMessage("plan must be: max (enterprise is contact-sales, pro needs no checkout)"),
   validateRequest,
   asyncHandler(async (req: Request, res: Response) => {
     if (!config.stripe?.secretKey) {

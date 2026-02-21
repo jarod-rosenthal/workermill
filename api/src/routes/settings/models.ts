@@ -143,14 +143,14 @@ router.post("/providers/:providerId/test", async (req: Request, res: Response) =
       return;
     }
 
-    // Block non-Anthropic providers on free plan
+    // Block non-Anthropic providers on Pro plan
     if (providerId !== "anthropic") {
       const features =
-        PLAN_FEATURES[org.plan as OrganizationPlan] ?? PLAN_FEATURES.free;
+        PLAN_FEATURES[org.plan as OrganizationPlan] ?? PLAN_FEATURES.pro;
       if (!features.multiProvider) {
         res.status(403).json({
           error:
-            "Free plan only supports Anthropic Claude. Upgrade to Pro for all AI providers.",
+            "Pro plan only supports Anthropic Claude. Upgrade to Max for all AI providers.",
         });
         return;
       }
@@ -256,14 +256,14 @@ router.put(
         return;
       }
 
-      // Block non-Anthropic providers on free plan
+      // Block non-Anthropic providers on Pro plan
       if (providerId !== "anthropic") {
         const features =
-          PLAN_FEATURES[org.plan as OrganizationPlan] ?? PLAN_FEATURES.free;
+          PLAN_FEATURES[org.plan as OrganizationPlan] ?? PLAN_FEATURES.pro;
         if (!features.multiProvider) {
           res.status(403).json({
             error:
-              "Free plan only supports Anthropic Claude. Upgrade to Pro for all AI providers.",
+              "Pro plan only supports Anthropic Claude. Upgrade to Max for all AI providers.",
           });
           return;
         }

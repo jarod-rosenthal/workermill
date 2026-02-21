@@ -365,7 +365,7 @@ router.post(
 
       // Enforce seat limits based on plan
       const seatLimit =
-        PLAN_USER_LIMITS[org.plan as OrganizationPlan] ?? PLAN_USER_LIMITS.free;
+        PLAN_USER_LIMITS[org.plan as OrganizationPlan] ?? PLAN_USER_LIMITS.pro;
       if (seatLimit !== -1) {
         const userOrgCount = AppDataSource.getRepository(UserOrganization);
         const currentSeats = await userOrgCount.count({

@@ -1,4 +1,4 @@
-import { Check, Sparkles, Crown, Zap, Flame } from "lucide-react";
+import { Check, Sparkles, Crown, Flame } from "lucide-react";
 
 interface PricingTier {
   name: string;
@@ -16,78 +16,53 @@ interface PricingTier {
 
 const tiers: PricingTier[] = [
   {
-    name: "Free",
-    price: "$0",
-    period: "",
-    description: "For solo developers exploring AI-powered development",
-    highlight_line: "Full product, your hardware",
-    icon: <Zap className="w-5 h-5" />,
+    name: "Pro",
+    price: "$19",
+    period: "/mo",
+    description:
+      "For developers and small teams getting started with autonomous AI coding",
+    highlight_line: "90-day free trial — no credit card required",
+    icon: <Sparkles className="w-5 h-5" />,
+    badge: "Coming Soon",
     features: [
-      "30 tasks per month",
-      "1 concurrent worker",
+      "1 concurrent workload",
       "Up to 3 experts per task",
+      "Up to 5 users",
+      "Simplified planning (single-pass)",
       "Automated PR reviews",
-      "GitHub Issues + internal board",
+      "GitHub Issues + WorkerMill Kanban",
       "Anthropic Claude models",
       "Local + BYOK execution",
       "MCP servers",
       "Basic analytics",
-      "7-day log retention",
-      "Community support",
-    ],
-    cta: "Coming Soon",
-    disabled: true,
-    badge: "Coming Soon",
-  },
-  {
-    name: "Pro",
-    price: "$14.50",
-    period: "/mo",
-    description: "For developers and small teams who want speed",
-    highlight_line: "Up to 15 seats included",
-    icon: <Sparkles className="w-5 h-5" />,
-    highlighted: true,
-    badge: "Coming Soon",
-    features: [
-      "150 tasks per month",
-      "5 concurrent tasks",
-      "Up to 5 experts per task",
-      "Up to 15 users",
-      "All integrations (Jira, GitLab, Bitbucket, Linear)",
-      "All AI providers (OpenAI, Google, Ollama)",
-      "Local or cloud execution",
-      "Automated PR reviews",
-      "MCP servers",
-      "Advanced analytics",
-      "Role-based access",
-      "30-day log retention",
-      "Email support (< 24hr)",
+      "14-day log retention",
+      "Email support",
     ],
     cta: "Coming Soon",
     disabled: true,
   },
   {
     name: "Max",
-    price: "$29.50",
+    price: "$39",
     period: "/mo",
-    description: "For power users and teams who need the full platform",
+    description:
+      "For professional teams who need full power, multi-provider support, and cloud execution",
     highlight_line: "Up to 25 seats included",
     icon: <Flame className="w-5 h-5" />,
     badge: "Coming Soon",
     features: [
-      "300 tasks per month",
-      "10 concurrent tasks",
-      "Up to 10 experts per task",
+      "3 concurrent workloads",
+      "Up to 7 experts per task",
       "Up to 25 users",
-      "All integrations & AI providers",
+      "Advanced planning (critic review loop)",
+      "Automated PR reviews",
+      "All integrations (Jira, Linear, GitHub, GitLab, Bitbucket)",
+      "All AI providers (OpenAI, Google, Anthropic)",
       "Local or cloud execution",
-      "Auto-annealing agents",
-      "Auto CI/CD deployments",
+      "CI/CD auto-deployments",
       "Codebase RAG",
       "Memory & skills persistence",
-      "Automated PR reviews",
-      "MCP servers",
-      "Advanced analytics + RBAC",
+      "Role-based access",
       "90-day log retention",
       "Priority support (< 4hr)",
     ],
@@ -103,7 +78,7 @@ const tiers: PricingTier[] = [
     icon: <Crown className="w-5 h-5" />,
     badge: "Coming Soon",
     features: [
-      "Custom task & worker limits",
+      "Custom workload & expert limits",
       "Custom user seats",
       "Everything in Max, plus:",
       "Self-hosted option",
@@ -128,19 +103,19 @@ export function Pricing() {
       <div className="max-w-6xl mx-auto">
         <div className="text-center mb-12">
           <h2 className="text-3xl font-bold text-foreground mb-4">
-            Start Free, Scale When Ready
+            Start Building, Scale When Ready
           </h2>
           <p className="text-muted-foreground text-lg max-w-2xl mx-auto mb-4">
-            Full product on Free. Upgrade for parallel workers, cloud execution,
-            and team features.
+            90-day free trial on Pro. Upgrade to Max for parallel workloads,
+            cloud execution, and team features.
           </p>
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-full">
-            <Zap className="w-4 h-4 text-green-500" />
-            <span className="text-sm font-medium text-green-500">Free tier includes automated PR reviews, GitHub, internal board, and MCP servers</span>
+            <Sparkles className="w-4 h-4 text-green-500" />
+            <span className="text-sm font-medium text-green-500">Pro trial includes automated PR reviews, GitHub Issues, internal board, and MCP servers</span>
           </div>
         </div>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           {tiers.map((tier, index) => (
             <div
               key={index}
@@ -243,9 +218,12 @@ export function Pricing() {
           </h3>
           <div className="grid md:grid-cols-3 gap-6 text-center">
             <div>
-              <p className="font-medium text-foreground mb-1">Full Product, Free</p>
+              <p className="font-medium text-foreground mb-1">
+                Full Product, Free Trial
+              </p>
               <p className="text-sm text-muted-foreground">
-                No trial limits. Automated PR reviews, GitHub Issues, internal board, and MCP servers — all included.
+                90-day Pro trial with automated PR reviews, GitHub Issues,
+                internal board, and MCP servers — all included.
               </p>
             </div>
             <div>

@@ -33,11 +33,11 @@ interface AIWorkersSectionProps {
   orgPlan?: string;
 }
 
-function ProBadge() {
+function MaxBadge() {
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 rounded-full border border-amber-500/30">
       <Crown className="w-3 h-3" />
-      Pro
+      Max
     </span>
   );
 }
@@ -51,7 +51,7 @@ function LockedOverlay() {
       <div className="flex flex-col items-center gap-1.5">
         <Lock className="w-5 h-5 text-muted-foreground/60 group-hover:text-amber-400 transition-colors" />
         <span className="text-xs text-muted-foreground/80 font-medium group-hover:text-amber-400 transition-colors">
-          Upgrade to Pro
+          Upgrade to Max
         </span>
       </div>
     </Link>
@@ -70,7 +70,7 @@ export function AIWorkersSection({
   getRoutingSummary,
   orgPlan,
 }: AIWorkersSectionProps) {
-  const isFreePlan = !orgPlan || orgPlan === "free";
+  const isProPlan = !orgPlan || orgPlan === "pro";
   return (
     <div className="space-y-6">
       <div>
@@ -112,14 +112,14 @@ export function AIWorkersSection({
             defaultOpen={false}
           >
             <div className="space-y-6">
-              {isFreePlan ? (
+              {isProPlan ? (
                 <>
-                  {/* Free tier: Anthropic only, no provider picker */}
+                  {/* Pro tier: Anthropic only, no provider picker */}
                   <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary/5 border border-primary/20">
                     <span className="text-2xl">🤖</span>
                     <div>
                       <p className="text-sm font-medium text-foreground">Provider: Anthropic</p>
-                      <p className="text-xs text-muted-foreground">Free plan uses Anthropic models. <Link to="/pricing" className="text-primary hover:underline">Upgrade to Pro</Link> for more providers.</p>
+                      <p className="text-xs text-muted-foreground">Pro plan uses Anthropic models. <Link to="/pricing" className="text-primary hover:underline">Upgrade to Max</Link> for more providers.</p>
                     </div>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
@@ -228,14 +228,14 @@ export function AIWorkersSection({
             summary={getManagerSummary()}
           >
             <div className="space-y-6">
-              {isFreePlan ? (
+              {isProPlan ? (
                 <>
-                  {/* Free tier: Anthropic only */}
+                  {/* Pro tier: Anthropic only */}
                   <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-indigo-500/5 border border-indigo-500/20">
                     <span className="text-2xl">🤖</span>
                     <div>
                       <p className="text-sm font-medium text-foreground">Provider: Anthropic</p>
-                      <p className="text-xs text-muted-foreground">Free plan uses Anthropic models. <Link to="/pricing" className="text-primary hover:underline">Upgrade to Pro</Link> for more providers.</p>
+                      <p className="text-xs text-muted-foreground">Pro plan uses Anthropic models. <Link to="/pricing" className="text-primary hover:underline">Upgrade to Max</Link> for more providers.</p>
                     </div>
                   </div>
                   <div>
@@ -364,12 +364,12 @@ export function AIWorkersSection({
               {/* Planning Mode Toggle */}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-3">Planning Mode</label>
-                {isFreePlan ? (
+                {isProPlan ? (
                   <div className="p-3 rounded-lg border-2 border-purple-500 bg-purple-500/10 text-left">
                     <div className="text-sm font-medium text-foreground">Simplified</div>
                     <p className="text-xs text-muted-foreground mt-1">
                       Single planning pass — critic feedback is incorporated but never blocks.{" "}
-                      <Link to="/pricing" className="text-primary hover:underline">Upgrade to Pro</Link> for Strict mode.
+                      <Link to="/pricing" className="text-primary hover:underline">Upgrade to Max</Link> for Strict mode.
                     </p>
                   </div>
                 ) : (
@@ -404,14 +404,14 @@ export function AIWorkersSection({
                 )}
               </div>
 
-              {isFreePlan ? (
+              {isProPlan ? (
                 <>
-                  {/* Free tier: Anthropic only */}
+                  {/* Pro tier: Anthropic only */}
                   <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-purple-500/5 border border-purple-500/20">
                     <span className="text-2xl">🤖</span>
                     <div>
                       <p className="text-sm font-medium text-foreground">Provider: Anthropic</p>
-                      <p className="text-xs text-muted-foreground">Free plan uses Anthropic models. <Link to="/pricing" className="text-primary hover:underline">Upgrade to Pro</Link> for more providers.</p>
+                      <p className="text-xs text-muted-foreground">Pro plan uses Anthropic models. <Link to="/pricing" className="text-primary hover:underline">Upgrade to Max</Link> for more providers.</p>
                     </div>
                   </div>
                   <div>
@@ -525,9 +525,9 @@ export function AIWorkersSection({
               {/* Max Concurrent Containers */}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-2">Max Concurrent Containers</label>
-                {isFreePlan ? (
+                {isProPlan ? (
                   <div className="px-4 py-3 rounded-lg bg-background/50 border border-border text-muted-foreground text-sm">
-                    1 <span className="text-xs text-amber-400 ml-2">(Free tier limit)</span>
+                    1 <span className="text-xs text-amber-400 ml-2">(Pro tier limit)</span>
                   </div>
                 ) : (
                   <div className="flex items-center gap-4">
@@ -554,7 +554,7 @@ export function AIWorkersSection({
                 {validationErrors.maxConcurrentWorkers && (
                   <p className="text-xs text-red-500 mt-1">{validationErrors.maxConcurrentWorkers}</p>
                 )}
-                {!isFreePlan && <p className="text-xs text-muted-foreground mt-1">Maximum worker containers running simultaneously (1-14)</p>}
+                {!isProPlan && <p className="text-xs text-muted-foreground mt-1">Maximum worker containers running simultaneously (1-14)</p>}
               </div>
 
               {/* Max Parallel Experts */}
@@ -564,7 +564,7 @@ export function AIWorkersSection({
                   <input
                     type="range"
                     min="1"
-                    max={isFreePlan ? 3 : 14}
+                    max={isProPlan ? 3 : 7}
                     value={settings.maxParallelExperts}
                     onChange={(e) => updateSetting("maxParallelExperts", parseInt(e.target.value))}
                     className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-accent"
@@ -573,7 +573,7 @@ export function AIWorkersSection({
                     <input
                       type="number"
                       min="1"
-                      max={isFreePlan ? 3 : 14}
+                      max={isProPlan ? 3 : 7}
                       value={settings.maxParallelExperts}
                       onChange={(e) => updateSetting("maxParallelExperts", parseInt(e.target.value) || 3)}
                       className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
@@ -584,8 +584,8 @@ export function AIWorkersSection({
                   <p className="text-xs text-red-500 mt-1">{validationErrors.maxParallelExperts}</p>
                 )}
                 <p className="text-xs text-muted-foreground mt-1">
-                  Maximum expert subagents running in parallel per task (1-{isFreePlan ? 3 : 14})
-                  {isFreePlan && <span className="text-amber-400 ml-1">(max 3 on Free)</span>}
+                  Maximum expert subagents running in parallel per task (1-{isProPlan ? 3 : 7})
+                  {isProPlan && <span className="text-amber-400 ml-1">(max 3 on Pro)</span>}
                 </p>
               </div>
 
@@ -641,9 +641,9 @@ export function AIWorkersSection({
 
           {/* Warm Container Pool */}
           <div className="relative">
-            {isFreePlan && <LockedOverlay />}
+            {isProPlan && <LockedOverlay />}
             <CollapsibleSection
-              title={<>Warm Container Pool {isFreePlan && <ProBadge />}</>}
+              title={<>Warm Container Pool {isProPlan && <MaxBadge />}</>}
               icon={<Zap className="w-4 h-4" />}
               iconBgColor="bg-amber-500/20"
               iconColor="text-amber-500"
@@ -754,9 +754,9 @@ export function AIWorkersSection({
 
           {/* Provider Routing */}
           <div className="relative">
-            {isFreePlan && <LockedOverlay />}
+            {isProPlan && <LockedOverlay />}
             <CollapsibleSection
-              title={<>Provider Routing {isFreePlan && <ProBadge />}</>}
+              title={<>Provider Routing {isProPlan && <MaxBadge />}</>}
               icon={<Router className="w-4 h-4" />}
               iconBgColor="bg-orange-500/20"
               iconColor="text-orange-500"
@@ -881,9 +881,9 @@ export function AIWorkersSection({
 
           {/* Memory & Learning Section */}
           <div className="relative">
-            {isFreePlan && <LockedOverlay />}
+            {isProPlan && <LockedOverlay />}
           <CollapsibleSection
-            title={<>Memory & Learning {isFreePlan && <ProBadge />}</>}
+            title={<>Memory & Learning {isProPlan && <MaxBadge />}</>}
             icon={<Brain className="w-4 h-4" />}
             iconBgColor="bg-violet-500/20"
             iconColor="text-violet-500"
@@ -926,18 +926,18 @@ export function AIWorkersSection({
                     <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
                       <Code className="w-4 h-4 text-violet-500" />
                       Codebase Indexing
-                      {isFreePlan && <ProBadge />}
+                      {isProPlan && <MaxBadge />}
                     </h4>
                     <p className="text-xs text-muted-foreground mt-1">
                       Enable semantic search across your repository code for context-aware AI assistance
                     </p>
                   </div>
-                  <label className={`relative inline-flex items-center ${isFreePlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
+                  <label className={`relative inline-flex items-center ${isProPlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
                     <input
                       type="checkbox"
                       checked={settings.codebaseIndexingEnabled}
-                      onChange={(e) => { if (!isFreePlan) updateSetting("codebaseIndexingEnabled", e.target.checked); }}
-                      disabled={isFreePlan}
+                      onChange={(e) => { if (!isProPlan) updateSetting("codebaseIndexingEnabled", e.target.checked); }}
+                      disabled={isProPlan}
                       className="sr-only peer"
                     />
                     <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-violet-500/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500"></div>

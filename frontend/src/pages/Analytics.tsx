@@ -511,7 +511,7 @@ export default function Analytics() {
         const data = await usageRes.json();
         // Map billing status data to UsageStats interface
         setUsage({
-          plan: data.plan ?? "free",
+          plan: data.plan ?? "pro",
           tasks: {
             used: data.usage?.tasks ?? 0,
             quota: data.usage?.quota ?? 0,

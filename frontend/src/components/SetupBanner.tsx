@@ -29,7 +29,7 @@ export function SetupBanner() {
   const [dismissed, setDismissed] = useState(false);
   const navigate = useNavigate();
   const organization = useAuthStore((state) => state.organization);
-  const isFreePlan = !organization?.plan || organization.plan === "free";
+  const isProPlan = !organization?.plan || organization.plan === "pro";
 
   useEffect(() => {
     fetchSetupStatus();
@@ -86,13 +86,13 @@ export function SetupBanner() {
       const aiProviderConfigured = configuredProviders.length > 0;
 
       // Calculate completion based on plan
-      // Free tier: SCM is the only required step (Anthropic via Claude Max, no API key needed)
-      // Pro tier: SCM + AI Provider required
+      // Pro tier: SCM is the only required step (Anthropic via Claude Max, no API key needed)
+      // Max tier: SCM + AI Provider required
       // Issue tracker is always optional (internal board is the fallback)
       let completedSteps = 0;
-      let totalSteps = isFreePlan ? 1 : 2;
+      let totalSteps = isProPlan ? 1 : 2;
       if (scmConfigured) completedSteps++;
-      if (!isFreePlan && aiProviderConfigured) completedSteps++;
+      if (!isProPlan && aiProviderConfigured) completedSteps++;
 
       const complete = completedSteps >= totalSteps;
 
@@ -150,7 +150,7 @@ export function SetupBanner() {
                 configured={status.scm.configured}
                 icon={GitBranch}
               />
-              {!isFreePlan && (
+              {!isProPlan && (
                 <SetupCheckItem
                   label="AI Provider"
                   description={status.aiProvider.configured ? `Configured: ${status.aiProvider.providers.join(", ")}` : "Configure Anthropic, OpenAI, or Google"}
@@ -229,7 +229,7 @@ export function SetupProgress() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const organization = useAuthStore((state) => state.organization);
-  const isFreePlan = !organization?.plan || organization.plan === "free";
+  const isProPlan = !organization?.plan || organization.plan === "pro";
 
   useEffect(() => {
     fetchSetupStatus();
@@ -270,9 +270,9 @@ export function SetupProgress() {
       );
 
       let completedSteps = 0;
-      const totalSteps = isFreePlan ? 1 : 2;
+      const totalSteps = isProPlan ? 1 : 2;
       if (scmConfigured) completedSteps++;
-      if (!isFreePlan && aiProviderConfigured) completedSteps++;
+      if (!isProPlan && aiProviderConfigured) completedSteps++;
 
       const complete = completedSteps >= totalSteps;
 

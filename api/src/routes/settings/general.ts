@@ -319,9 +319,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         res.status(400).json({ error: "logRetentionDays must be between 1 and 90 (or -1 for unlimited)" });
         return;
       }
-      // Free tier: silently clamp to 7 days (existing DB values may exceed limit)
-      if (org.plan === "free" && days > 7) {
-        days = 7;
+      // Pro tier: silently clamp to 14 days (existing DB values may exceed limit)
+      if (org.plan === "pro" && days > 14) {
+        days = 14;
       }
       org.logRetentionDays = days;
     }
@@ -332,9 +332,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         res.status(400).json({ error: "taskRetentionDays must be between 1 and 90 (or -1 for unlimited)" });
         return;
       }
-      // Free tier: silently clamp to 7 days (existing DB values may exceed limit)
-      if (org.plan === "free" && days > 7) {
-        days = 7;
+      // Pro tier: silently clamp to 14 days (existing DB values may exceed limit)
+      if (org.plan === "pro" && days > 14) {
+        days = 14;
       }
       org.taskRetentionDays = days;
     }
@@ -368,8 +368,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.maxParallelExperts = max;
     }
 
-    // Validate and update Warm Container Pool Settings (Pro+ only)
-    const planFeatures = PLAN_FEATURES[org.plan as OrganizationPlan] ?? PLAN_FEATURES.free;
+    // Validate and update Warm Container Pool Settings (Max+ only)
+    const planFeatures = PLAN_FEATURES[org.plan as OrganizationPlan] ?? PLAN_FEATURES.pro;
     if (warmPoolSize !== undefined) {
       const size = parseInt(warmPoolSize, 10);
       if (isNaN(size) || size < 0 || size > 5) {
@@ -488,7 +488,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         return;
       }
       if (!planFeatures.multiProvider && primaryProvider !== "anthropic") {
-        res.status(403).json({ error: "Free plan only supports Anthropic Claude. Upgrade to Pro for all AI providers." });
+        res.status(403).json({ error: "Pro plan only supports Anthropic Claude. Upgrade to Max for all AI providers." });
         return;
       }
       org.primaryProvider = primaryProvider;
@@ -597,8 +597,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         res.status(400).json({ error: "Invalid managerProvider. Must be one of: anthropic, openai, google, ollama, openrouter, groq, deepseek, mistral, xai, bedrock, azure" });
         return;
       }
-      if (org.plan === "free" && managerProvider !== "anthropic") {
-        res.status(403).json({ error: "Free plan Tech Lead is restricted to Anthropic. Upgrade to Pro for all providers." });
+      if (org.plan === "pro" && managerProvider !== "anthropic") {
+        res.status(403).json({ error: "Pro plan Tech Lead is restricted to Anthropic. Upgrade to Max for all providers." });
         return;
       }
       org.managerProvider = managerProvider;
@@ -655,8 +655,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         res.status(400).json({ error: "Invalid planningAgentProvider. Must be one of: anthropic, openai, google, ollama, openrouter, groq, deepseek, mistral, xai, bedrock, azure" });
         return;
       }
-      if (org.plan === "free" && planningAgentProvider !== "anthropic") {
-        res.status(403).json({ error: "Free plan Planning Agent is restricted to Anthropic. Upgrade to Pro for all providers." });
+      if (org.plan === "pro" && planningAgentProvider !== "anthropic") {
+        res.status(403).json({ error: "Pro plan Planning Agent is restricted to Anthropic. Upgrade to Max for all providers." });
         return;
       }
       org.planningAgentProvider = planningAgentProvider;
@@ -693,8 +693,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         res.status(400).json({ error: "planningMode must be 'strict' or 'simplified'" });
         return;
       }
-      if (org.plan === "free" && planningMode === "strict") {
-        res.status(403).json({ error: "Free plan only supports Simplified planning mode. Upgrade to Pro for Strict mode." });
+      if (org.plan === "pro" && planningMode === "strict") {
+        res.status(403).json({ error: "Pro plan only supports Simplified planning mode. Upgrade to Max for Strict mode." });
         return;
       }
       org.planningMode = planningMode;
@@ -895,8 +895,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     }
 
     if (autoSkillExtraction !== undefined) {
-      if (org.plan === "free" && Boolean(autoSkillExtraction)) {
-        res.status(403).json({ error: "Memory & Learning requires Pro plan or higher." });
+      if (org.plan === "pro" && Boolean(autoSkillExtraction)) {
+        res.status(403).json({ error: "Memory & Learning requires Max plan or higher." });
         return;
       }
       org.autoSkillExtraction = Boolean(autoSkillExtraction);
@@ -916,8 +916,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     // Validate and update Quality Gate Settings
     if (qualityGateEnabled !== undefined) {
-      if (org.plan === "free" && Boolean(qualityGateEnabled)) {
-        res.status(403).json({ error: "Quality Gates require Pro plan or higher." });
+      if (org.plan === "pro" && Boolean(qualityGateEnabled)) {
+        res.status(403).json({ error: "Quality Gates require Max plan or higher." });
         return;
       }
       org.qualityGateEnabled = Boolean(qualityGateEnabled);
@@ -1117,8 +1117,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     // Validate and update Codebase RAG settings (Pro+ only)
     if (codebaseIndexingEnabled !== undefined) {
-      if (org.plan === "free" && codebaseIndexingEnabled === true) {
-        res.status(403).json({ error: "Codebase RAG requires Pro plan or higher." });
+      if (org.plan === "pro" && codebaseIndexingEnabled === true) {
+        res.status(403).json({ error: "Codebase RAG requires Max plan or higher." });
         return;
       }
       org.codebaseIndexingEnabled = codebaseIndexingEnabled === true;

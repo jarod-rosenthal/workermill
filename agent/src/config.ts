@@ -7,7 +7,7 @@
  */
 
 import { existsSync, readFileSync, mkdirSync, writeFileSync, chmodSync } from "fs";
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import { hostname, homedir } from "os";
 import { join } from "path";
 
@@ -165,7 +165,82 @@ export function loadConfig(): AgentConfig {
 }
 
 /**
- * Find claude binary. Checks PATH, then known install locations.
+ * On Windows, search for a binary on the fresh PATH read from the registry.
+ * This detects binaries installed after the process started (stale PATH).
+ * Returns the full path if found, null otherwise. No-op on non-Windows.
+ */
+function findOnFreshWindowsPath(name: string): string | null {
+  if (process.platform !== "win32") return null;
+
+  const allDirs: string[] = [];
+
+  // System PATH (HKLM — where Git installer writes)
+  try {
+    const sysOut = execFileSync(
+      "reg",
+      ["query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment", "/v", "Path"],
+      { encoding: "utf-8", timeout: 5000 },
+    );
+    const match = sysOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
+    if (match) allDirs.push(...match[1].trim().split(";").filter(Boolean));
+  } catch { /* registry read failed */ }
+
+  // User PATH (HKCU — where some winget installs write)
+  try {
+    const userOut = execFileSync(
+      "reg",
+      ["query", "HKCU\\Environment", "/v", "Path"],
+      { encoding: "utf-8", timeout: 5000 },
+    );
+    const match = userOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
+    if (match) allDirs.push(...match[1].trim().split(";").filter(Boolean));
+  } catch { /* registry read failed */ }
+
+  for (const dir of allDirs) {
+    const expanded = dir.replace(/%([^%]+)%/g, (_, v) => process.env[v] || "");
+    const candidate = join(expanded, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Find Git binary. Checks PATH, then Windows registry PATH, then known locations.
+ */
+export function findGitPath(): string | null {
+  const isWin = process.platform === "win32";
+  const name = isWin ? "git.exe" : "git";
+
+  // Check PATH first
+  try {
+    const cmd = isWin ? "where" : "which";
+    const resolved = execSync(`${cmd} ${name}`, { encoding: "utf-8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"] }).trim().split("\n")[0];
+    if (resolved && existsSync(resolved)) return resolved;
+  } catch { /* not on PATH */ }
+
+  // On Windows, re-read PATH from registry (detects post-startup installs)
+  if (isWin) {
+    const freshResult = findOnFreshWindowsPath(name);
+    if (freshResult) return freshResult;
+
+    // Check known install locations
+    const candidates = [
+      join(process.env.ProgramFiles || "C:\\Program Files", "Git", "cmd", "git.exe"),
+      join(process.env.ProgramFiles || "C:\\Program Files", "Git", "bin", "git.exe"),
+      join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Git", "cmd", "git.exe"),
+      join(homedir(), "AppData", "Local", "Programs", "Git", "cmd", "git.exe"),
+      join(homedir(), "AppData", "Local", "Programs", "Git", "bin", "git.exe"),
+    ];
+    for (const c of candidates) {
+      if (existsSync(c)) return c;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Find claude binary. Checks PATH, then Windows registry PATH, then known install locations.
  */
 export function findClaudePath(): string | null {
   const isWin = process.platform === "win32";
@@ -178,14 +253,31 @@ export function findClaudePath(): string | null {
     return "claude"; // fallback to bare name if resolution fails
   } catch { /* not in PATH */ }
 
+  // On Windows, re-read PATH from registry (detects post-startup installs)
+  if (isWin) {
+    const freshResult = findOnFreshWindowsPath("claude.exe");
+    if (freshResult) return freshResult;
+  }
+
   const candidates: string[] = [];
 
   if (isWin) {
+    const localAppData = process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local");
+    const appData = process.env.APPDATA || join(homedir(), "AppData", "Roaming");
     candidates.push(
+      // winget install locations
+      join(localAppData, "Microsoft", "WinGet", "Links", "claude.exe"),
+      join(localAppData, "Microsoft", "WindowsApps", "claude.exe"),
+      // Standard install locations
       join(process.env.ProgramFiles || "C:\\Program Files", "ClaudeCode", "claude.exe"),
-      join(process.env.LOCALAPPDATA || "", "Programs", "ClaudeCode", "claude.exe"),
-      join(homedir(), "AppData", "Local", "Programs", "ClaudeCode", "claude.exe"),
+      join(localAppData, "Programs", "ClaudeCode", "claude.exe"),
+      join(localAppData, "Programs", "claude-code", "claude.exe"),
+      // npm global
+      join(appData, "npm", "claude.cmd"),
+      join(localAppData, "npm", "claude.cmd"),
+      // Other
       join(homedir(), ".local", "bin", "claude.exe"),
+      join(homedir(), ".claude", "bin", "claude.exe"),
     );
   } else {
     candidates.push(
@@ -213,15 +305,17 @@ export interface PrerequisiteResult {
  */
 export function checkPrerequisites(): PrerequisiteResult[] {
   const results: PrerequisiteResult[] = [];
-  const isWin = process.platform === "win32";
-  const which = isWin ? "where" : "which";
 
-  // Git
-  try {
-    execSync(`${which} git`, { stdio: "ignore", timeout: 10000 });
-    const version = execSync("git --version", { encoding: "utf-8", timeout: 10000 }).trim();
-    results.push({ name: "Git", ok: true, detail: version });
-  } catch {
+  // Git — use findGitPath() which checks PATH, registry, and known locations
+  const gitPath = findGitPath();
+  if (gitPath) {
+    try {
+      const version = execSync(`"${gitPath}" --version`, { encoding: "utf-8", timeout: 10000 }).trim();
+      results.push({ name: "Git", ok: true, detail: version });
+    } catch {
+      results.push({ name: "Git", ok: true, detail: gitPath });
+    }
+  } else {
     results.push({ name: "Git", ok: false, detail: "Not installed" });
   }
 
@@ -254,12 +348,8 @@ export function checkPrerequisites(): PrerequisiteResult[] {
  * Validate prerequisites (exits on failure — backward compat).
  */
 export function validatePrerequisites(): void {
-  // Check Git
-  const isWin = process.platform === "win32";
-  const which = isWin ? "where" : "which";
-  try {
-    execSync(`${which} git`, { stdio: "ignore", timeout: 10000 });
-  } catch {
+  // Check Git — use findGitPath() which checks PATH, registry, and known locations
+  if (!findGitPath()) {
     console.error("Git is not installed. Install Git and ensure it's in PATH.");
     process.exit(1);
   }

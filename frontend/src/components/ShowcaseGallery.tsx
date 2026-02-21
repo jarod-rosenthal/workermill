@@ -219,8 +219,8 @@ export default function ShowcaseGallery() {
                 key={project.id}
                 className="card-elevated border border-border/50 rounded-2xl overflow-hidden opacity-60"
               >
-                <div className="px-6 pt-6 pb-4">
-                  <div className="flex items-center justify-between mb-3">
+                <div className="px-5 pt-5 pb-3">
+                  <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary">
                         {project.icon}
@@ -233,10 +233,10 @@ export default function ShowcaseGallery() {
                       Coming Soon
                     </span>
                   </div>
-                  <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                  <p className="text-sm text-muted-foreground leading-relaxed mb-3">
                     {project.tagline}
                   </p>
-                  <div className="inline-block px-2.5 py-1 rounded-lg bg-primary/10 border border-primary/20 text-xs font-medium text-primary">
+                  <div className="inline-block px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20 text-[11px] font-medium text-primary">
                     {project.stack}
                   </div>
                 </div>
@@ -250,7 +250,7 @@ export default function ShowcaseGallery() {
                 {(() => {
                   const cardBody = (
                     <>
-                      <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
                           <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary">
                             {project.icon}
@@ -261,71 +261,56 @@ export default function ShowcaseGallery() {
                         </div>
                         {project.liveUrl && <BuiltByBadge />}
                       </div>
-                      <p className="text-sm text-muted-foreground leading-relaxed mb-4">
-                        {project.description}
+                      <p className="text-sm text-muted-foreground leading-relaxed mb-3">
+                        {project.tagline}
                       </p>
-                      <div className="inline-block px-2.5 py-1 rounded-lg bg-primary/10 border border-primary/20 text-xs font-medium text-primary">
+                      <div className="inline-block px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20 text-[11px] font-medium text-primary">
                         {project.stack}
                       </div>
 
-                      {/* Stats */}
-                      <div className="grid grid-cols-3 gap-3 mt-4 pt-4 border-t border-border/30">
-                        <div className="text-center">
-                          <div className="flex items-center justify-center gap-1 text-sm font-semibold text-foreground">
-                            <Layers className="w-3.5 h-3.5 text-muted-foreground" />
-                            {project.storyCount}
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            stories
-                          </div>
-                        </div>
+                      {/* Stats — compact inline row */}
+                      <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border/30 text-xs">
+                        <span className="flex items-center gap-1 text-foreground font-medium">
+                          <Layers className="w-3 h-3 text-muted-foreground" />
+                          {project.storyCount} stories
+                        </span>
                         {project.linesOfCode && (
-                          <div className="text-center">
-                            <div className="flex items-center justify-center gap-1 text-sm font-semibold text-emerald-400">
-                              <FileCode className="w-3.5 h-3.5" />
-                              {project.linesOfCode}
-                            </div>
-                            <div className="text-xs text-muted-foreground mt-0.5">
-                              lines
-                            </div>
-                          </div>
+                          <span className="flex items-center gap-1 text-emerald-400 font-medium">
+                            <FileCode className="w-3 h-3" />
+                            {project.linesOfCode}
+                          </span>
                         )}
-                        <div className="text-center">
-                          <div className="flex items-center justify-center gap-1 text-sm font-semibold text-foreground">
-                            <Clock className="w-3.5 h-3.5 text-muted-foreground" />
-                            {project.duration}
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            time
-                          </div>
-                        </div>
+                        <span className="flex items-center gap-1 text-foreground font-medium">
+                          <Clock className="w-3 h-3 text-muted-foreground" />
+                          {project.duration}
+                        </span>
                       </div>
                       {project.cost && (
-                        <p className="text-[11px] text-muted-foreground/70 mt-3 italic">
+                        <p className="text-[11px] text-muted-foreground/60 mt-2 italic">
                           {project.cost} at API token rates
                         </p>
                       )}
                     </>
                   );
                   return project.id !== "oncallshift" ? (
-                    <Link to={`/showcase/${project.id}`} className="block px-6 pt-6 pb-4">
+                    <Link to={`/showcase/${project.id}`} className="block px-5 pt-5 pb-3">
                       {cardBody}
                     </Link>
                   ) : (
-                    <div className="px-6 pt-6 pb-4">
+                    <div className="px-5 pt-5 pb-3">
                       {cardBody}
                     </div>
                   );
                 })()}
 
                 {/* Actions */}
-                <div className="px-6 py-4 border-t border-border/30 flex gap-3">
+                <div className="px-5 py-3 border-t border-border/30 flex gap-2">
                   {project.liveUrl && (
                     <a
                       href={project.liveUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
                     >
                       <Globe className="w-3 h-3" />
                       Live Demo
@@ -336,7 +321,7 @@ export default function ShowcaseGallery() {
                       href={project.repoUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 transition-colors text-foreground"
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 transition-colors text-foreground"
                     >
                       <ExternalLink className="w-3 h-3" />
                       View repo
@@ -345,7 +330,7 @@ export default function ShowcaseGallery() {
                   {project.id !== "oncallshift" && (
                     <Link
                       to={`/showcase/${project.id}`}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 transition-colors text-foreground"
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 transition-colors text-foreground"
                     >
                       <Layers className="w-3 h-3" />
                       Build log

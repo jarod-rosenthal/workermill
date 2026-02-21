@@ -593,9 +593,27 @@ export function startAgentProcess(log?: (msg: string) => void): void {
   const logFd = fs.openSync(logFile, "a");
 
   try {
-    // On Windows, read fresh PATH from registry so the agent sees
-    // binaries installed after VS Code started (e.g. Git via winget)
+    // Build a PATH that includes known binary locations so the agent's
+    // prerequisite checks pass even when VS Code's inherited PATH is stale
+    // (e.g. Git/Claude installed via winget after VS Code launched)
     const env = { ...process.env };
+    const extraDirs: string[] = [];
+
+    // Add Git's directory if we can find it
+    const gitPath = findGit();
+    if (gitPath) {
+      extraDirs.push(path.dirname(gitPath));
+      log?.(`Found Git at: ${gitPath}`);
+    }
+
+    // Add Claude CLI's directory if we can find it
+    const claudePath = findClaudeCli();
+    if (claudePath) {
+      extraDirs.push(path.dirname(claudePath));
+      log?.(`Found Claude CLI at: ${claudePath}`);
+    }
+
+    // On Windows, also read fresh PATH from registry
     if (process.platform === "win32") {
       try {
         const regOut = execFileSync(
@@ -605,13 +623,16 @@ export function startAgentProcess(log?: (msg: string) => void): void {
         );
         const match = regOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
         if (match) {
-          const userPath = match[1].trim();
-          // Merge fresh user PATH with system PATH
-          const systemPath = process.env.PATH || "";
-          env.PATH = `${userPath};${systemPath}`;
-          log?.(`Refreshed PATH for agent process`);
+          const userPath = match[1].trim().replace(/%([^%]+)%/g, (_, v) => process.env[v] || "");
+          extraDirs.push(userPath);
+          log?.(`Refreshed user PATH from registry`);
         }
-      } catch { /* registry read failed, use inherited PATH */ }
+      } catch { /* registry read failed */ }
+    }
+
+    if (extraDirs.length > 0) {
+      const sep = process.platform === "win32" ? ";" : ":";
+      env.PATH = `${extraDirs.join(sep)}${sep}${process.env.PATH || ""}`;
     }
 
     const child = spawn(binary, ["start"], {

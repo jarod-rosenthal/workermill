@@ -442,6 +442,7 @@ export function runCriticCli(
       {
         env,
         stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
       },
     );
 

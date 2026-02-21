@@ -19,6 +19,7 @@ import {
   startAgentProcess,
   writeAgentConfig,
   waitForAgentReady,
+  promptInstallGit,
   promptInstallClaudeCli,
 } from "./agent-installer";
 
@@ -166,8 +167,9 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
     return false;
   }
 
-  // Check if Claude Code CLI is installed — required for AI worker execution
-  // Fire-and-forget: don't block the connection flow waiting for Claude install
+  // Check dependencies — fire-and-forget so they don't block the connection flow
+  // Git and Claude CLI are needed to run tasks, not to connect
+  promptInstallGit(log);
   promptInstallClaudeCli(log);
 
   return true;

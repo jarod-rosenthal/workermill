@@ -426,7 +426,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         sendEvent("progress", { message: msg });
       });
 
-      sendEvent("progress", { message: `Decomposed into ${decomposed.cards.length} cards. Creating board...` });
+      sendEvent("progress", { message: `Creating board with ${decomposed.cards.length} cards...` });
 
       // Send pre-decomposed cards to cloud API to create the board
       const result = await cloudProxy("POST", "/api/prd/decompose", {
@@ -707,7 +707,7 @@ async function decomposePrdLocal(
     throw new Error("AI returned empty output");
   }
 
-  onProgress?.(`✅ Generation complete (${elapsed}s). Parsing JSON...`);
+  onProgress?.(`✅ Generation complete. Finalizing board...`);
 
   // Strip markdown fences if present (greedy match for large content)
   let jsonStr = resultText.trim();
@@ -756,19 +756,32 @@ async function decomposePrdViaAgentSdk(
     }
   }
 
-  const heartbeat = setInterval(() => {
-    if (!textStarted) {
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-      onProgress?.(`⏳ Waiting for response... ${elapsed}s`);
-    }
-  }, 8_000);
-
   const claudePath = findClaudePath();
   if (!claudePath) {
-    clearInterval(heartbeat);
     throw new Error("Claude Code CLI not found. Install Claude Code and ensure it's available on your PATH.");
   }
-  onProgress?.(`Generating cards...`);
+  onProgress?.("Analyzing PRD and generating implementation cards — this typically takes 1–3 minutes...");
+
+  const phases = [
+    "Reading and understanding your PRD...",
+    "Identifying features and components...",
+    "Breaking down into implementation cards...",
+    "Defining dependencies and priorities...",
+    "Structuring the project board...",
+  ];
+  let phaseIdx = 0;
+
+  const heartbeat = setInterval(() => {
+    if (!textStarted) {
+      if (phaseIdx < phases.length) {
+        onProgress?.(`⏳ ${phases[phaseIdx]}`);
+        phaseIdx++;
+      } else {
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        onProgress?.(`⏳ Still working... (${elapsed}s)`);
+      }
+    }
+  }, 15_000);
 
   // Clean env to prevent nested-session detection
   const cleanEnv: Record<string, string | undefined> = { ...process.env };
@@ -801,8 +814,7 @@ async function decomposePrdViaAgentSdk(
           if (!textStarted) {
             textStarted = true;
             clearInterval(heartbeat);
-            const elapsed = Math.round((Date.now() - startTime) / 1000);
-            onProgress?.(`✅ Streaming started (${elapsed}s)...`);
+            onProgress?.("✅ Cards are being generated...");
           }
           resultText += event.delta.text;
           processTextDelta(event.delta.text);

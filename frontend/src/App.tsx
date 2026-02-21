@@ -88,6 +88,27 @@ function ProtectedRoute({ children, allowSetup = false }: { children: React.Reac
   return <>{children}</>;
 }
 
+/** Force dark theme on public marketing pages (landing, blog, showcase, docs). */
+function DarkRoute({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    const root = document.documentElement;
+    const previous = root.getAttribute("data-theme");
+    root.setAttribute("data-theme", "dark");
+    return () => {
+      // Restore user's theme preference when leaving
+      const stored = localStorage.getItem("theme");
+      if (stored === "light" || stored === "dark") {
+        root.setAttribute("data-theme", stored);
+      } else {
+        // "system" or unset — resolve from preference
+        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        root.setAttribute("data-theme", prefersDark ? "dark" : "light");
+      }
+    };
+  }, []);
+  return <>{children}</>;
+}
+
 function LoginRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitialized = useAuthStore((state) => state.isInitialized);
@@ -140,16 +161,16 @@ function App() {
       <TosModal />
       <BrowserRouter>
         <Routes>
-          {/* Public routes */}
-          <Route path="/" element={<LandingV0 />} />
+          {/* Public marketing routes — forced dark theme */}
+          <Route path="/" element={<DarkRoute><LandingV0 /></DarkRoute>} />
           <Route path="/product" element={<Navigate to="/***REMOVED***how-it-works" replace />} />
           <Route path="/solutions" element={<Navigate to="/***REMOVED***showcase" replace />} />
           <Route path="/pricing" element={<Navigate to="/***REMOVED***pricing" replace />} />
-          <Route path="/blog" element={<BlogList />} />
-          <Route path="/blog/:slug" element={<BlogPost />} />
+          <Route path="/blog" element={<DarkRoute><BlogList /></DarkRoute>} />
+          <Route path="/blog/:slug" element={<DarkRoute><BlogPost /></DarkRoute>} />
           <Route path="/status" element={<StatusPage />} />
-          <Route path="/showcase/:projectId" element={<ShowcaseViewer />} />
-          <Route path="/demo" element={<Demo />} />
+          <Route path="/showcase/:projectId" element={<DarkRoute><ShowcaseViewer /></DarkRoute>} />
+          <Route path="/demo" element={<DarkRoute><Demo /></DarkRoute>} />
 
           <Route
             path="/login"
@@ -195,8 +216,8 @@ function App() {
             }
           />
 
-          {/* Public docs - accessible without authentication */}
-          <Route path="/docs" element={<DocsLayout />}>
+          {/* Public docs - accessible without authentication, forced dark */}
+          <Route path="/docs" element={<DarkRoute><DocsLayout /></DarkRoute>}>
             <Route index element={<DocsOverview />} />
             <Route path="quick-start" element={<QuickStart />} />
             <Route path="agent" element={<AgentSetup />} />

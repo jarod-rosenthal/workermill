@@ -43,8 +43,11 @@ export function findGit(): string | null {
   if (isWin) {
     const candidates = [
       path.join(process.env.ProgramFiles || "C:\\Program Files", "Git", "cmd", "git.exe"),
+      path.join(process.env.ProgramFiles || "C:\\Program Files", "Git", "bin", "git.exe"),
       path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Git", "cmd", "git.exe"),
+      path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Git", "bin", "git.exe"),
       path.join(os.homedir(), "AppData", "Local", "Programs", "Git", "cmd", "git.exe"),
+      path.join(os.homedir(), "AppData", "Local", "Programs", "Git", "bin", "git.exe"),
     ];
     for (const c of candidates) {
       if (fs.existsSync(c)) return c;
@@ -137,30 +140,73 @@ export async function promptInstallGit(
 }
 
 /**
- * On Windows, read the current user PATH from the registry so we can detect
- * binaries installed after the extension host started (e.g. winget installs).
- * Returns the resolved path if found on the fresh PATH, null otherwise.
+ * On Windows, read the FULL current PATH from the registry (user + system)
+ * so we can detect binaries installed after the extension host started.
+ * Returns the resolved path if found, null otherwise.
  */
 function findOnFreshWindowsPath(name: string): string | null {
+  const allDirs: string[] = [];
+
+  // Read system PATH (HKLM — where Git installer typically writes)
   try {
-    // Read current user PATH from registry (picks up winget/installer PATH changes)
-    const userPath = execFileSync(
+    const sysOut = execFileSync(
+      "reg",
+      ["query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment", "/v", "Path"],
+      { encoding: "utf-8", timeout: 5000 },
+    );
+    const match = sysOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
+    if (match) {
+      allDirs.push(...match[1].trim().split(";").filter(Boolean));
+    }
+  } catch { /* registry read failed */ }
+
+  // Read user PATH (HKCU — where some winget installs write)
+  try {
+    const userOut = execFileSync(
       "reg",
       ["query", "HKCU\\Environment", "/v", "Path"],
       { encoding: "utf-8", timeout: 5000 },
     );
-    const match = userPath.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
-    if (!match) return null;
-
-    const dirs = match[1].trim().split(";").filter(Boolean);
-    for (const dir of dirs) {
-      // Expand %LOCALAPPDATA% etc.
-      const expanded = dir.replace(/%([^%]+)%/g, (_, v) => process.env[v] || "");
-      const candidate = path.join(expanded, name);
-      if (fs.existsSync(candidate)) return candidate;
+    const match = userOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
+    if (match) {
+      allDirs.push(...match[1].trim().split(";").filter(Boolean));
     }
   } catch { /* registry read failed */ }
+
+  for (const dir of allDirs) {
+    const expanded = dir.replace(/%([^%]+)%/g, (_, v) => process.env[v] || "");
+    const candidate = path.join(expanded, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
   return null;
+}
+
+/** Read the full fresh PATH string from Windows registry (user + system). */
+function getFreshWindowsPath(): string {
+  const parts: string[] = [];
+
+  try {
+    const sysOut = execFileSync(
+      "reg",
+      ["query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment", "/v", "Path"],
+      { encoding: "utf-8", timeout: 5000 },
+    );
+    const match = sysOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
+    if (match) parts.push(match[1].trim().replace(/%([^%]+)%/g, (_, v) => process.env[v] || ""));
+  } catch { /* ignore */ }
+
+  try {
+    const userOut = execFileSync(
+      "reg",
+      ["query", "HKCU\\Environment", "/v", "Path"],
+      { encoding: "utf-8", timeout: 5000 },
+    );
+    const match = userOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
+    if (match) parts.push(match[1].trim().replace(/%([^%]+)%/g, (_, v) => process.env[v] || ""));
+  } catch { /* ignore */ }
+
+  return parts.join(";");
 }
 
 /**
@@ -613,21 +659,14 @@ export function startAgentProcess(log?: (msg: string) => void): void {
       log?.(`Found Claude CLI at: ${claudePath}`);
     }
 
-    // On Windows, also read fresh PATH from registry
+    // On Windows, read fresh PATH from registry (both system HKLM + user HKCU)
+    // This is critical because Git installer writes to HKLM, not HKCU
     if (process.platform === "win32") {
-      try {
-        const regOut = execFileSync(
-          "reg",
-          ["query", "HKCU\\Environment", "/v", "Path"],
-          { encoding: "utf-8", timeout: 5000 },
-        );
-        const match = regOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
-        if (match) {
-          const userPath = match[1].trim().replace(/%([^%]+)%/g, (_, v) => process.env[v] || "");
-          extraDirs.push(userPath);
-          log?.(`Refreshed user PATH from registry`);
-        }
-      } catch { /* registry read failed */ }
+      const freshPath = getFreshWindowsPath();
+      if (freshPath) {
+        extraDirs.push(freshPath);
+        log?.("Refreshed PATH from registry (system + user)");
+      }
     }
 
     if (extraDirs.length > 0) {

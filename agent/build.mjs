@@ -121,6 +121,7 @@ await build({
   outfile: "dist/entry.js",
   packages: undefined, // Override shared.packages: inline ALL npm packages
   external: nodeBuiltins, // Keep Node builtins external (provided by Bun & Node.js runtimes)
+  mangleProps: undefined, // Disable property mangling — breaks inlined SDKs (claude-agent-sdk RegExp crash)
   banner: {
     js: `import { createRequire as __createRequire } from "module";
 var require = (typeof globalThis.require !== "undefined") ? globalThis.require : __createRequire(import.meta.url);`,

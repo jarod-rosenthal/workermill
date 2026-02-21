@@ -423,3 +423,16 @@ export function checkDockerAvailable(): boolean {
     return false;
   }
 }
+
+/**
+ * Check if Docker CLI is installed (even if the daemon is not running).
+ * `docker --version` prints version info without contacting the daemon.
+ */
+export function isDockerInstalled(): boolean {
+  try {
+    execSync("docker --version", { stdio: "ignore", timeout: 5000, windowsHide: true });
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -231,17 +231,26 @@ export class SettingsPanel {
     }
 
     let dockerAvailable = false;
+    let dockerInstalled = false;
     try {
       execFileSync("docker", ["version"], { timeout: 5000, stdio: "ignore" });
       dockerAvailable = true;
+      dockerInstalled = true;
     } catch {
-      /* Docker not available */
+      // Docker daemon not running — check if CLI is installed
+      try {
+        execFileSync("docker", ["--version"], { timeout: 5000, stdio: "ignore" });
+        dockerInstalled = true;
+      } catch {
+        /* Docker not installed */
+      }
     }
 
     this.postMessage({
       type: "sandbox-loaded",
       sandbox,
       dockerAvailable,
+      dockerInstalled,
     });
   }
 
@@ -250,10 +259,17 @@ export class SettingsPanel {
       try {
         execFileSync("docker", ["version"], { timeout: 5000, stdio: "ignore" });
       } catch {
+        let dockerInstalled = false;
+        try {
+          execFileSync("docker", ["--version"], { timeout: 5000, stdio: "ignore" });
+          dockerInstalled = true;
+        } catch { /* not installed */ }
         this.postMessage({
           type: "sandbox-updated",
           sandbox: "none",
-          error: "Docker is not installed or not running. Please install Docker and try again.",
+          error: dockerInstalled
+            ? "Docker Desktop is not running. Please start Docker Desktop and try again."
+            : "Docker is not installed. Please install Docker Desktop and try again.",
         });
         return;
       }
@@ -702,6 +718,9 @@ export class SettingsPanel {
         if (msg.dockerAvailable) {
           sandboxToggle.disabled = false;
           showStatus(sandboxStatus, "info", msg.sandbox === "docker" ? "Docker sandbox is active" : "Docker is available");
+        } else if (msg.dockerInstalled) {
+          sandboxToggle.disabled = true;
+          showStatus(sandboxStatus, "error", "Docker is installed but not running — start Docker Desktop to enable sandbox mode");
         } else {
           sandboxToggle.disabled = true;
           showStatus(sandboxStatus, "error", "Docker not detected — install Docker to enable sandbox mode");

@@ -21,6 +21,7 @@ import {
   getConfigFile,
   findClaudePath,
   checkDockerAvailable,
+  isDockerInstalled,
   type FileConfig,
 } from "../config.js";
 
@@ -348,6 +349,11 @@ export async function setupCommand(): Promise<void> {
   if (checkDockerAvailable() && totalRamGB >= 8) {
     sandboxMode = "docker";
     console.log(chalk.green("  ✓") + " Docker detected — sandbox mode enabled automatically");
+  } else if (isDockerInstalled() && totalRamGB >= 8) {
+    console.log();
+    console.log(chalk.yellow("  ⚠ Docker Desktop is installed but not running."));
+    console.log(chalk.yellow("    Start Docker Desktop and re-run setup to enable sandbox mode."));
+    console.log(chalk.dim("    Continuing without sandbox — AI workers will run with full system access."));
   } else {
     console.log();
     console.log(chalk.yellow("  ⚠ No Docker sandbox — AI workers will run with full access to your system."));

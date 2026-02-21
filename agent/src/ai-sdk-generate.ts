@@ -101,14 +101,14 @@ function buildTools(workingDir: string) {
           // Use find as a cross-platform glob (fast-glob not available)
           const result = execSync(
             `find . -path './.git' -prune -o -path './node_modules' -prune -o -name '${input.pattern.replace(/\*\*/g, "*")}' -print 2>/dev/null | head -200`,
-            { cwd: workingDir, encoding: "utf-8", timeout: 15000 },
+            { cwd: workingDir, encoding: "utf-8", timeout: 15000, windowsHide: true },
           ).trim();
 
           if (!result) {
             // Try with a broader approach for ** patterns
             const broader = execSync(
               `find . -path './.git' -prune -o -path './node_modules' -prune -o -type f -print 2>/dev/null | head -500`,
-              { cwd: workingDir, encoding: "utf-8", timeout: 15000 },
+              { cwd: workingDir, encoding: "utf-8", timeout: 15000, windowsHide: true },
             ).trim();
             return broader || "No files found";
           }
@@ -153,7 +153,7 @@ function buildTools(workingDir: string) {
           const includeFlag = input.glob ? `--include='${input.glob}'` : "";
           const result = execSync(
             `grep -rn ${includeFlag} --exclude-dir=node_modules --exclude-dir=.git '${input.pattern.replace(/'/g, "'\\''")}' . 2>/dev/null | head -100`,
-            { cwd: workingDir, encoding: "utf-8", timeout: 15000 },
+            { cwd: workingDir, encoding: "utf-8", timeout: 15000, windowsHide: true },
           ).trim();
           return result || "No matches found";
         } catch {

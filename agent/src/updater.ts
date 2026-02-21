@@ -34,7 +34,7 @@ export async function selfUpdate(): Promise<boolean> {
     if (isNpmInstall()) {
       console.log(chalk.dim("  Detected npm installation, using npm update..."));
       try {
-        execSync("npm install -g @workermill/agent@latest", { stdio: "inherit" });
+        execSync("npm install -g @workermill/agent@latest", { stdio: "inherit", windowsHide: true });
         return true;
       } catch {
         return false;
@@ -104,7 +104,7 @@ export async function selfUpdate(): Promise<boolean> {
     } catch {
       // Fallback: on Windows, can't rename running exe
       try {
-        execSync(`copy /Y "${tmpFile}" "${selfPath}"`, { stdio: "ignore" });
+        execSync(`copy /Y "${tmpFile}" "${selfPath}"`, { stdio: "ignore", windowsHide: true });
       } catch {
         console.error(chalk.red("  Could not replace binary. Download manually from:"));
         console.error(chalk.cyan("  https://workermill.com/docs/agent"));

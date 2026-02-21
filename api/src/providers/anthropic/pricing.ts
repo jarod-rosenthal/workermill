@@ -44,19 +44,6 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     supportsCaching: true,
   },
 
-  // Sonnet 5 (latest balanced tier) - pricing TBD, using Sonnet 4.6 rates
-  "claude-sonnet-5-20260203": {
-    id: "claude-sonnet-5-20260203",
-    displayName: "Claude Sonnet 5",
-    tier: "balanced",
-    inputRate: 0.003,
-    outputRate: 0.015,
-    cacheWriteRate: 0.00375, // 1.25x input
-    cacheReadRate: 0.0003, // 0.1x input
-    contextWindow: 200000,
-    supportsStreaming: true,
-    supportsCaching: true,
-  },
   // Sonnet 4.6 (current balanced tier)
   "claude-sonnet-4-6": {
     id: "claude-sonnet-4-6",

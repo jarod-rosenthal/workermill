@@ -240,11 +240,6 @@ export const MODEL_OPTIONS: Record<string, ModelOption[]> = {
   anthropic: [
     { value: "claude-opus-4-6", label: "Claude Opus 4.6", tier: "Powerful" },
     {
-      value: "claude-sonnet-5-20260203",
-      label: "Claude Sonnet 5",
-      tier: "Balanced",
-    },
-    {
       value: "claude-sonnet-4-6",
       label: "Claude Sonnet 4.6",
       tier: "Balanced",

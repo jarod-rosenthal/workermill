@@ -66,7 +66,6 @@ import { CheckpointStatus, CheckpointStatusBadge } from "../../components/Checkp
 import { LogSearch } from "../../components/LogSearch";
 import { OrgSwitcher } from "../../components/OrgSwitcher";
 import { useAuthStore } from "../../store/auth-store";
-import { OnboardingWizard, useOnboardingState } from "../../components/OnboardingWizard";
 import { SetupBanner } from "../../components/SetupBanner";
 import { DashboardSkeleton } from "../../components/ui/skeleton";
 import {
@@ -468,8 +467,6 @@ export default function Dashboard() {
     });
   }, [data?.activeTasks]);
 
-  // Onboarding state
-  const { shouldShowOnboarding, dismissOnboarding, resetOnboarding } = useOnboardingState();
 
   const fetchData = useCallback(async () => {
     try {
@@ -2348,7 +2345,7 @@ export default function Dashboard() {
             <div className="w-px h-6 bg-border/50" />
 
             {/* Profile Dropdown */}
-            <ProfileDropdown onShowQuickStart={resetOnboarding} />
+            <ProfileDropdown />
           </div>
         </div>
       </header>
@@ -2385,7 +2382,7 @@ export default function Dashboard() {
 
       {/* Setup Incomplete Banner */}
       <div className="max-w-7xl mx-auto px-6 pt-4">
-        <SetupBanner onContinueSetup={resetOnboarding} />
+        <SetupBanner />
       </div>
 
       {/* Success/Error Alerts */}
@@ -4311,14 +4308,6 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* Onboarding Wizard */}
-      {shouldShowOnboarding && (
-        <OnboardingWizard
-          onClose={dismissOnboarding}
-          onComplete={dismissOnboarding}
-        />
       )}
 
       {/* Log Search Modal */}

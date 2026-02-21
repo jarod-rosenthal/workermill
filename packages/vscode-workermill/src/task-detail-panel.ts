@@ -462,7 +462,7 @@ export class TaskDetailPanel {
 
 <div class="detail-section" id="detailSection">
   <h2>Task Details</h2>
-  <div class="detail-description" id="taskDescription"></div>
+  <div class="detail-description" id="taskDescription">${task.description ? esc(task.description) : ""}</div>
   <div class="detail-links">
     <div class="detail-link" id="ticketRow" style="display:none">
       <span class="detail-link-label">Ticket</span>

@@ -992,8 +992,22 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   client.on("disconnected", () => {
-    log("Agent disconnected — will retry in 5s");
+    log("Agent disconnected — will retry with backoff");
     vscode.commands.executeCommand("setContext", "workermill.agentConnected", false);
+  });
+
+  client.on("reconnectGaveUp", () => {
+    log("Reconnect attempts exhausted");
+    vscode.window
+      .showWarningMessage(
+        "Could not connect to WorkerMill agent after multiple attempts.",
+        "Retry",
+      )
+      .then((action) => {
+        if (action === "Retry") {
+          client.connect();
+        }
+      });
   });
 }
 

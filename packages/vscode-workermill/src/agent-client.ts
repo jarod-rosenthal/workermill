@@ -12,7 +12,9 @@ import * as path from "path";
 import * as os from "os";
 
 const PORT_FILE = path.join(os.homedir(), ".workermill", "agent.port");
-const RECONNECT_INTERVAL = 5_000;
+const INITIAL_RECONNECT_MS = 2_000;
+const MAX_RECONNECT_MS = 30_000;
+const MAX_RECONNECT_ATTEMPTS = 20;
 
 export interface AgentStatus {
   version: string;
@@ -76,6 +78,7 @@ export class AgentClient extends EventEmitter {
   private taskStream: http.ClientRequest | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private disposed = false;
+  private reconnectAttempts = 0;
 
   constructor() {
     super();
@@ -95,6 +98,7 @@ export class AgentClient extends EventEmitter {
     try {
       const status = await this.getStatus();
       this.connected = true;
+      this.reconnectAttempts = 0; // Reset on successful connection
       this.emit("connected", status);
       this.startTaskStream();
       return true;
@@ -338,6 +342,7 @@ export class AgentClient extends EventEmitter {
     }
     this.port = null;
     this.connected = false;
+    this.reconnectAttempts = 0;
     this.emit("disconnected");
   }
 
@@ -365,10 +370,27 @@ export class AgentClient extends EventEmitter {
 
   private scheduleReconnect(): void {
     if (this.disposed || this.reconnectTimer) return;
+
+    // Don't reconnect if there's no config file (user signed out or never set up)
+    if (!fs.existsSync(path.join(os.homedir(), ".workermill", "config.json"))) return;
+
+    // Give up after MAX_RECONNECT_ATTEMPTS — user can manually reconnect
+    if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      this.emit("reconnectGaveUp");
+      return;
+    }
+
+    // Exponential backoff: 2s → 4s → 8s → 16s → 30s (capped)
+    const delay = Math.min(
+      INITIAL_RECONNECT_MS * Math.pow(2, this.reconnectAttempts),
+      MAX_RECONNECT_MS,
+    );
+    this.reconnectAttempts++;
+
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
-    }, RECONNECT_INTERVAL);
+    }, delay);
   }
 
   private startTaskStream(): void {

@@ -135,15 +135,15 @@ export async function setupCommand(): Promise<void> {
   console.log(chalk.dim("  System"));
   console.log(`  ${chalk.dim("RAM:")}  ${totalRamGB} GB   ${chalk.dim("CPUs:")} ${cpuCount}`);
 
-  if (totalRamGB < 8) {
+  if (totalRamGB < 4) {
     console.log();
     console.log(chalk.red("  ✗ Insufficient RAM"));
-    console.log(chalk.yellow("  WorkerMill requires at least 8 GB of RAM (16 GB recommended)."));
+    console.log(chalk.yellow("  WorkerMill requires at least 4 GB of RAM (8 GB recommended)."));
     console.log(chalk.yellow(`  Your system has ${totalRamGB} GB.`));
     console.log();
     process.exit(1);
-  } else if (totalRamGB < 16) {
-    console.log(chalk.yellow(`  ⚠ ${totalRamGB} GB RAM is below the recommended 16 GB.`));
+  } else if (totalRamGB < 8) {
+    console.log(chalk.yellow(`  ⚠ ${totalRamGB} GB RAM is below the recommended 8 GB.`));
     console.log(chalk.yellow("    Workers may run slowly or be killed by the OS under memory pressure."));
   } else {
     console.log(chalk.green("  ✓ System meets requirements"));

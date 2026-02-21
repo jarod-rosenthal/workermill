@@ -29,6 +29,7 @@ import {
   stopAgentProcess,
   waitForAgentReady,
   promptInstallGit,
+  readAgentStartupError,
 } from "./agent-installer";
 import { signUpWithGitHub, signInWithGitHub, enterApiKey } from "./github-onboard";
 
@@ -894,9 +895,14 @@ export function activate(context: vscode.ExtensionContext): void {
         if (port) {
           client.connect();
         } else {
-          vscode.window.showWarningMessage(
-            "Agent didn't start. Check Output > WorkerMill for details.",
-          );
+          const error = readAgentStartupError();
+          if (error) {
+            vscode.window.showErrorMessage(`WorkerMill agent failed to start: ${error}`);
+          } else {
+            vscode.window.showWarningMessage(
+              "Agent didn't start. Check ~/.workermill/agent.log for details.",
+            );
+          }
         }
       }
     }),
@@ -922,6 +928,15 @@ export function activate(context: vscode.ExtensionContext): void {
   // Auto-start agent if installed and configured, otherwise let welcome view guide user
   if (installed && configured) {
     startAgentProcess(log);
+    // Check if agent actually started after a brief delay
+    waitForAgentReady(log, 10_000).then((port) => {
+      if (!port) {
+        const error = readAgentStartupError();
+        if (error) {
+          vscode.window.showErrorMessage(`WorkerMill: ${error}`);
+        }
+      }
+    });
   } else if (configured && !installed) {
     log("Agent configured but not installed — auto-installing...");
     installAgent().then((success) => {

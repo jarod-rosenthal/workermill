@@ -26,6 +26,7 @@ import {
   waitForAgentReady,
   promptInstallGit,
   promptInstallClaudeCli,
+  readAgentStartupError,
 } from "./agent-installer";
 
 const API_BASE = "https://workermill.com";
@@ -162,6 +163,10 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
     return false;
   }
 
+  // Claude CLI check — prompt before starting agent so the user can install it
+  // before the agent's prerequisite check runs. "Skip" continues anyway.
+  await promptInstallClaudeCli(log);
+
   log("Starting agent...");
   startAgentProcess(log);
 
@@ -175,14 +180,16 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
   );
 
   if (!port) {
-    vscode.window.showWarningMessage(
-      "Agent started but didn't become ready. Run 'WorkerMill: Connect' to retry.",
-    );
+    const error = readAgentStartupError();
+    if (error) {
+      vscode.window.showErrorMessage(`WorkerMill agent failed to start: ${error}`);
+    } else {
+      vscode.window.showWarningMessage(
+        "Agent didn't start. Check ~/.workermill/agent.log for details.",
+      );
+    }
     return false;
   }
-
-  // Claude CLI check — fire-and-forget, not blocking (soft dependency)
-  promptInstallClaudeCli(log);
 
   // Optional: offer Docker sandbox mode if Docker is available
   if (checkDockerAvailable()) {

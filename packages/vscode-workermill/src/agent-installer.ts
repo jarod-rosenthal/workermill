@@ -775,6 +775,54 @@ export async function waitForAgentReady(
   return 0;
 }
 
+/**
+ * Read the agent log file and extract an actionable error message.
+ * Called when the agent fails to start (port file never appears).
+ */
+export function readAgentStartupError(): string | null {
+  const logFile = path.join(os.homedir(), ".workermill", "agent.log");
+  try {
+    const content = fs.readFileSync(logFile, "utf-8");
+    const lines = content.split("\n").filter((l) => l.trim());
+    const tail = lines.slice(-30);
+    const combined = tail.join("\n");
+
+    // Check known error patterns and return actionable messages
+    const ramMatch = combined.match(/Insufficient RAM:\s*(\d+)\s*GB/);
+    if (ramMatch) {
+      return `Your system has ${ramMatch[1]} GB RAM but WorkerMill requires at least 4 GB (8 GB recommended). Close other applications or upgrade your system.`;
+    }
+
+    if (/Git is not installed/i.test(combined) || /Git:.*not found/i.test(combined)) {
+      return "Git is required. Install Git and reload VS Code.";
+    }
+
+    if (/Claude CLI/i.test(combined) && /(not found|not installed)/i.test(combined)) {
+      return "Claude Code CLI is required for AI workers. Install it and restart.";
+    }
+
+    if (/Docker sandbox is enabled but Docker is not running/i.test(combined)) {
+      return "Docker sandbox is enabled but Docker isn't running. Start Docker or disable sandbox mode.";
+    }
+
+    // Generic "Failed to start" or API errors — show the raw line
+    for (let i = tail.length - 1; i >= 0; i--) {
+      if (/Failed to start|ECONNREFUSED|ENOTFOUND|API.*error/i.test(tail[i])) {
+        return tail[i].trim();
+      }
+    }
+
+    // Fallback: return the last non-empty line
+    if (tail.length > 0) {
+      return tail[tail.length - 1].trim();
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Check if the agent config file exists (setup has been completed). */
 export function isAgentConfigured(): boolean {
   const configPath = path.join(os.homedir(), ".workermill", "config.json");

@@ -121,13 +121,16 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
   console.log(chalk.dim("  ─────────────────────────────────────"));
   console.log();
 
-  // RAM check
+  // RAM check — 4 GB hard minimum for native mode, 8 GB for Docker sandbox
   const totalRamGB = Math.round(totalmem() / (1024 * 1024 * 1024));
-  if (totalRamGB < 8) {
-    console.log(chalk.red(`  ✗ Insufficient RAM: ${totalRamGB} GB (minimum 8 GB, recommended 16 GB)`));
+  if (config.sandbox === "docker" && totalRamGB < 8) {
+    console.log(chalk.red(`  ✗ Insufficient RAM: ${totalRamGB} GB (Docker sandbox requires at least 8 GB)`));
     process.exit(1);
-  } else if (totalRamGB < 16) {
-    console.log(chalk.yellow(`  ⚠ RAM: ${totalRamGB} GB (below recommended 16 GB — workers may be slow)`));
+  } else if (totalRamGB < 4) {
+    console.log(chalk.red(`  ✗ Insufficient RAM: ${totalRamGB} GB (minimum 4 GB, recommended 8 GB)`));
+    process.exit(1);
+  } else if (totalRamGB < 8) {
+    console.log(chalk.yellow(`  ⚠ RAM: ${totalRamGB} GB (below recommended 8 GB — workers may be slow)`));
   }
 
   console.log(chalk.dim(`  Agent:     ${config.agentId}`));

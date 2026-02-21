@@ -205,9 +205,14 @@ function findOnFreshWindowsPath(name: string): string | null {
 }
 
 /**
- * Find Git binary. Checks PATH, then Windows registry PATH, then known locations.
+ * Find Git binary. Checks GIT_EXEC_PATH env, then PATH, then Windows registry PATH,
+ * then known locations.
  */
 export function findGitPath(): string | null {
+  // Check explicit env var first (set by VS Code extension)
+  const envPath = process.env.WORKERMILL_GIT_PATH;
+  if (envPath && existsSync(envPath)) return envPath;
+
   const isWin = process.platform === "win32";
   const name = isWin ? "git.exe" : "git";
 
@@ -240,9 +245,14 @@ export function findGitPath(): string | null {
 }
 
 /**
- * Find claude binary. Checks PATH, then Windows registry PATH, then known install locations.
+ * Find claude binary. Checks CLAUDE_CLI_PATH env, then PATH, then Windows registry PATH,
+ * then known install locations.
  */
 export function findClaudePath(): string | null {
+  // Check explicit env var first (set by VS Code extension)
+  const envPath = process.env.CLAUDE_CLI_PATH;
+  if (envPath && existsSync(envPath)) return envPath;
+
   const isWin = process.platform === "win32";
   const which = isWin ? "where" : "which";
 

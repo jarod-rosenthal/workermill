@@ -129,21 +129,12 @@ COPY epic /app/epic
 WORKDIR /app/epic
 RUN npm install && npm run build
 RUN echo "Epic executor compiled successfully!" && ls -la /app/epic/dist/
-***REMOVED*** Copy lib into epic so runtime imports resolve correctly
-***REMOVED*** (compiled dist/coordination-client.js imports ../lib/dist/api-retry.js which resolves relative to dist/)
-RUN cp -r /app/lib /app/epic/lib
 
 ***REMOVED*** Multi-Expert Coordinator (uses AI SDK for multi-provider execution)
 COPY multi-expert /app/multi-expert
 WORKDIR /app/multi-expert
 RUN npm install && npm run build
 RUN echo "Multi-Expert coordinator compiled successfully!" && ls -la /app/multi-expert/dist/
-***REMOVED*** Copy lib into multi-expert so runtime imports resolve correctly
-***REMOVED*** (compiled dist/index.js imports ../lib/dist/api-retry.js which resolves relative to dist/)
-RUN cp -r /app/lib /app/multi-expert/lib
-***REMOVED*** Copy epic into multi-expert so quality-runner imports resolve correctly
-***REMOVED*** (compiled dist/index.js imports ../epic/dist/quality-runner.js which resolves relative to dist/)
-RUN cp -r /app/epic /app/multi-expert/epic
 
 ***REMOVED*** Virtual Manager (Agent SDK-based PR review and log analysis)
 COPY manager /app/manager
@@ -159,24 +150,23 @@ RUN echo "Standard SDK executor compiled successfully!" && ls -la /app/standard/
 
 WORKDIR /app
 
-***REMOVED*** ── IP Protection: minify compiled JS and strip source ────────────────────
-***REMOVED*** Makes reverse engineering significantly harder while keeping runtime intact
-RUN npm install -g esbuild && \
-    for dir in epic/dist multi-expert/dist manager/dist standard/dist execution-compiled agents scripts lib/dist; do \
-      if [ -d "/app/$dir" ]; then \
-        find "/app/$dir" \( -name '*.js' -o -name '*.cjs' \) -type f | while read f; do \
-          esbuild "$f" --minify --allow-overwrite --outfile="$f" 2>/dev/null || true; \
-        done; \
-      fi; \
-    done && \
-    ***REMOVED*** Remove TypeScript source files (not needed at runtime — dist/ has compiled JS)
-    find /app/epic/src /app/multi-expert/src /app/manager/src /app/standard/src \
-         \( -name '*.ts' -o -name '*.tsx' \) -type f -delete 2>/dev/null; \
-    find /app/execution -name '*.ts' -type f -delete 2>/dev/null; \
-    ***REMOVED*** Remove source maps and TypeScript configs
-    find /app -name '*.js.map' -not -path '*/node_modules/*' -delete 2>/dev/null; \
-    find /app -name 'tsconfig*.json' -not -path '*/node_modules/*' -delete 2>/dev/null; \
-    true
+***REMOVED*** ── IP Protection: bundle + minify + mangle (aligned with agent/build.mjs) ──
+***REMOVED*** Full esbuild bundling with tree-shaking, property mangling, and single-file output.
+***REMOVED*** Cross-component imports are resolved via plugin (eliminates cp -r hacks above).
+COPY bundle.mjs /app/bundle.mjs
+RUN npm install --no-save esbuild && node /app/bundle.mjs && rm /app/bundle.mjs
+
+***REMOVED*** Verify bundled output and runtime assets
+RUN test -f /app/epic/dist/index.js && \
+    test -f /app/multi-expert/dist/index.js && \
+    test -f /app/manager/dist/index.js && \
+    test -f /app/standard/dist/index.js && \
+    test -f /app/execution-compiled/git/create_pr.js && \
+    test -f /app/agents/ai-sdk-executor.js && \
+    test -f /app/AGENTS.md && \
+    test -d /app/directives && \
+    test -f /app/lib/checkpoint.sh && \
+    echo "Bundle verification passed"
 
 ***REMOVED*** Copy entrypoint scripts
 COPY entrypoint.sh /app/entrypoint.sh

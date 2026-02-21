@@ -11,6 +11,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as https from "https";
+import * as http from "http";
 import { execFileSync } from "child_process";
 import {
   stopAgentProcess,
@@ -28,7 +29,7 @@ function readAgentConfig(): { apiUrl: string; apiKey: string } | null {
   return null;
 }
 
-function httpsRequest<T>(
+function apiRequest<T>(
   method: string,
   url: string,
   apiKey: string,
@@ -36,6 +37,7 @@ function httpsRequest<T>(
 ): Promise<{ status: number; data: T }> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
+    const isHttps = parsed.protocol === "https:";
     const payload = body ? JSON.stringify(body) : undefined;
     const headers: Record<string, string> = {
       "x-api-key": apiKey,
@@ -47,10 +49,11 @@ function httpsRequest<T>(
       headers["Content-Length"] = String(Buffer.byteLength(payload));
     }
 
-    const req = https.request(
+    const transport = isHttps ? https : http;
+    const req = transport.request(
       {
         hostname: parsed.hostname,
-        port: parsed.port || 443,
+        port: parsed.port || (isHttps ? 443 : 80),
         path: parsed.pathname + parsed.search,
         method,
         headers,
@@ -58,7 +61,7 @@ function httpsRequest<T>(
       (res) => {
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume();
-          httpsRequest<T>(method, res.headers.location, apiKey, body).then(resolve, reject);
+          apiRequest<T>(method, res.headers.location, apiKey, body).then(resolve, reject);
           return;
         }
         let data = "";
@@ -165,7 +168,7 @@ export class SettingsPanel {
 
   private async loadIntegrations(config: { apiUrl: string; apiKey: string }): Promise<void> {
     try {
-      const { status, data } = await httpsRequest<Record<string, unknown>>(
+      const { status, data } = await apiRequest<Record<string, unknown>>(
         "GET",
         `${config.apiUrl}/api/settings/integrations`,
         config.apiKey,
@@ -186,7 +189,7 @@ export class SettingsPanel {
   ): Promise<void> {
     try {
       this.postMessage({ type: "saving" });
-      const { status, data } = await httpsRequest<{ success?: boolean; error?: string }>(
+      const { status, data } = await apiRequest<{ success?: boolean; error?: string }>(
         "PUT",
         `${config.apiUrl}/api/settings/integrations/jira`,
         config.apiKey,
@@ -209,7 +212,7 @@ export class SettingsPanel {
     tracker: string,
   ): Promise<void> {
     try {
-      const { status } = await httpsRequest<{ error?: string }>(
+      const { status } = await apiRequest<{ error?: string }>(
         "PUT",
         `${config.apiUrl}/api/settings`,
         config.apiKey,
@@ -335,7 +338,7 @@ export class SettingsPanel {
   private async testJira(config: { apiUrl: string; apiKey: string }): Promise<void> {
     try {
       this.postMessage({ type: "testing" });
-      const { status, data } = await httpsRequest<{ success?: boolean; message?: string; error?: string; user?: string }>(
+      const { status, data } = await apiRequest<{ success?: boolean; message?: string; error?: string; user?: string }>(
         "POST",
         `${config.apiUrl}/api/settings/integrations/jira/test`,
         config.apiKey,

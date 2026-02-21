@@ -22,6 +22,7 @@ export interface LocalTaskInfo {
   id: string;
   parentTaskId?: string;
   summary: string;
+  description?: string;
   status: "planning" | "running" | "completed" | "failed";
   persona?: string;
   model?: string;
@@ -55,12 +56,12 @@ export const agentEvents = new EventEmitter();
 agentEvents.setMaxListeners(100);
 
 // Event types:
-//   "task:started"       { id, summary, persona, model, repo }
+//   "task:started"       { id, summary, description?, persona, model, repo }
 //   "task:completed"     { id, exitCode }
 //   "task:failed"        { id, exitCode, error }
 //   "task:rate_limited"  { id }
 //   "task:log"           { id, line, severity }
-//   "task:planning"      { id, summary }
+//   "task:planning"      { id, summary, description? }
 //   "task:plan_done"     { id, success }
 //   "state:changed"      {} (generic — triggers full state refresh for clients)
 
@@ -72,11 +73,12 @@ agentEvents.setMaxListeners(100);
  */
 const localTasks = new Map<string, LocalTaskInfo>();
 
-agentEvents.on("task:started", (info: { id: string; parentTaskId?: string; summary: string; persona?: string; model?: string; repo?: string }) => {
+agentEvents.on("task:started", (info: { id: string; parentTaskId?: string; summary: string; description?: string; persona?: string; model?: string; repo?: string }) => {
   localTasks.set(info.id, {
     id: info.id,
     parentTaskId: info.parentTaskId,
     summary: info.summary,
+    description: info.description,
     status: "running",
     persona: info.persona,
     model: info.model,
@@ -85,10 +87,11 @@ agentEvents.on("task:started", (info: { id: string; parentTaskId?: string; summa
   });
 });
 
-agentEvents.on("task:planning", (info: { id: string; summary: string }) => {
+agentEvents.on("task:planning", (info: { id: string; summary: string; description?: string }) => {
   localTasks.set(info.id, {
     id: info.id,
     summary: info.summary,
+    description: info.description,
     status: "planning",
     startedAt: new Date().toISOString(),
   });

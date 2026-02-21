@@ -208,7 +208,7 @@ async function handlePlanningTask(
   console.log();
   console.log(`${ts()} ${chalk.magenta("◆ PLANNING")} ${taskLabel} ${task.summary.substring(0, 60)}`);
   planningInProgress.add(task.id);
-  agentEvents.emit("task:planning", { id: task.id, summary: task.summary });
+  agentEvents.emit("task:planning", { id: task.id, summary: task.summary, description: task.description });
 
   // Run planning asynchronously (don't block the poll loop)
   planTask(task, config, credentials)

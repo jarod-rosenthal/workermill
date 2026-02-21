@@ -518,6 +518,7 @@ export async function spawnDockerWorker(
     id: task.id,
     parentTaskId: task.parentTaskId || task.id,
     summary: task.summary,
+    description: task.description,
     persona: task.workerPersona,
     model: task.workerModel,
     repo: task.githubRepo,

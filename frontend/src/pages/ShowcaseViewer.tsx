@@ -102,8 +102,8 @@ const showcaseData: Record<string, ShowcaseDetail> = {
       "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time SSE updates, PWA offline support, workspace dashboards, activity feeds, and E2E tests. 5 epics executed sequentially, each building on the last. Deployed to Vercel at teamboard.workermill.com.",
     stack: "Next.js 15 + Prisma + TailwindCSS + Neon PostgreSQL",
     storyCount: 44,
-    cost: "$175",
-    duration: "~354 min",
+    cost: "$241",
+    duration: "~461 min",
     linesOfCode: "28,000",
     repoUrl: "https://github.com/workermill-examples/teamboard",
     liveUrl: "https://teamboard.workermill.com",
@@ -190,16 +190,16 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     id: "shipapi",
     name: "ShipAPI",
     tagline:
-      "Inventory management REST API — built across 10 sequential epics by AI workers.",
+      "Inventory management REST API — built across 12 sequential epics by AI workers.",
     description:
-      "Async Python REST API with JWT authentication, RBAC, rate limiting, audit logging, product/category/warehouse CRUD, stock management with atomic operations, Alembic migrations, 344 tests, GitHub Actions CI pipeline, and interactive Swagger/ReDoc documentation. 10 epics executed sequentially, each building on the last. Deployed to Railway at shipapi.up.railway.app.",
+      "Async Python REST API with JWT authentication, RBAC, rate limiting, audit logging, product/category/warehouse CRUD, stock management with atomic operations, Alembic migrations, 344 tests, GitHub Actions CI pipeline, and interactive Swagger/ReDoc documentation. 12 epics executed sequentially, each building on the last. Deployed to Railway at shipapi.workermill.com.",
     stack: "FastAPI + SQLAlchemy 2 + Pydantic V2 + Neon PostgreSQL",
-    storyCount: 52,
-    cost: "$98",
-    duration: "~247 min",
-    linesOfCode: "15,000",
+    storyCount: 56,
+    cost: "$154",
+    duration: "~262 min",
+    linesOfCode: "18,000",
     repoUrl: "https://github.com/workermill-examples/shipapi",
-    liveUrl: "https://shipapi.up.railway.app/docs",
+    liveUrl: "https://shipapi.workermill.com",
     category: "api",
     personasUsed: [
       "backend_developer",
@@ -383,7 +383,7 @@ export default function ShowcaseViewer() {
                   {project.cost.replace("$", "")}
                 </div>
                 <div className="text-sm text-muted-foreground mt-1">
-                  total cost (BYOK)
+                  est. API token cost
                 </div>
               </>
             ) : (

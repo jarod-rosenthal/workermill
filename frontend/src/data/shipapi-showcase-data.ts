@@ -864,7 +864,7 @@ This PR consolidates all stories from Epic SAPFB-10.
   },
   {
     "id": "sa-11",
-    "title": "ShipAPI-PRD: Public showcase stats endpoint and landing page",
+    "title": "SAPFB-11: Public showcase stats endpoint and landing page",
     "priority": "medium",
     "storyCount": 3,
     "duration": "~12 min",
@@ -908,6 +908,66 @@ This PR consolidates all stories from Epic ShipAPI-PRD-Full-Build-Specification-
 - \`story/shipapi-prd-full-build-specification-96948bf9/0-backend-public-showcase-stats\`
 - \`story/shipapi-prd-full-build-specification-96948bf9/1-frontend-dark-themed-responsiv\`
 - \`story/shipapi-prd-full-build-specification-96948bf9/2-qa-integration-tests-for-showc\`
+
+***REMOVED******REMOVED******REMOVED*** Code Quality
+
+| Metric | Score | Details |
+|--------|-------|--------|
+| **Overall** | **100%** | |
+| TypeCheck | \u2705 Pass | |
+| Lint | \u2705 Pass | 0 warnings |
+| Tests | \u2705 Pass | 0 passed |
+| Security | \u2705 Clean | 0M/0L |`
+  },
+  {
+    "id": "sa-12",
+    "title": "SAPFB-12: Document pre-commit quality gate in CLAUDE.md",
+    "priority": "medium",
+    "storyCount": 4,
+    "duration": "~15 min",
+    "status": "deployed",
+    "techLeadScore": "9/10",
+    "prNumber": 12,
+    "prUrl": "https://github.com/workermill-examples/shipapi/pull/12",
+    "commentCount": 1,
+    "personas": [
+      "backend_developer",
+      "devops_engineer"
+    ],
+    "description": `***REMOVED******REMOVED******REMOVED*** Epic Overview
+Fix CI-blocking lint and type errors, add a post-deploy smoke test to the deploy workflow, and document the pre-commit quality gate in CLAUDE.md so future workers run checks before committing.
+
+***REMOVED******REMOVED******REMOVED*** Deliverables
+1. Fix lint and type errors in \`src/database.py\` and \`tests/test_showcase.py\` that were blocking CI
+2. Add post-deploy smoke test step to \`.github/workflows/deploy.yml\` — verifies the health endpoint responds after deployment
+3. Document the pre-commit quality gate in \`CLAUDE.md\` — workers must run \`ruff check\`, \`ruff format --check\`, and \`mypy src --strict\` before committing
+4. Run the full quality gate and verify CI is green end-to-end
+
+***REMOVED******REMOVED******REMOVED*** Technical Specification
+- Smoke test uses curl with retry loop against the live health endpoint
+- CLAUDE.md quality gate section ensures all future workers run lint/format/type checks before pushing
+- All fixes are minimal — only addressing the specific CI blockers, no unrelated changes`,
+    "buildLog": `***REMOVED******REMOVED*** Epic Implementation
+
+This PR consolidates all stories from Epic SAPFB-20.
+
+***REMOVED******REMOVED******REMOVED*** Stories Included
+
+- **Fix CI-blocking lint and type errors complete**
+  - Files: src/database.py, tests/test_showcase.py
+- **Add post-deploy smoke test to deploy.yml complete**
+  - Files: .github/workflows/deploy.yml
+- **Document pre-commit quality gate in CLAUDE.md complete**
+  - Files: CLAUDE.md
+- **Run quality gate and verify CI green complete**
+  - Files: .github/workflows/deploy.yml, CLAUDE.md, src/database.py, tests/test_showcase.py
+
+***REMOVED******REMOVED******REMOVED*** Branches Merged
+
+- \`story/sapfb-20/0-fix-ci-blocking-lint-and-type\`
+- \`story/sapfb-20/1-add-post-deploy-smoke-test-to\`
+- \`story/sapfb-20/2-document-pre-commit-quality-ga\`
+- \`story/sapfb-20/3-run-quality-gate-and-verify-ci\`
 
 ***REMOVED******REMOVED******REMOVED*** Code Quality
 

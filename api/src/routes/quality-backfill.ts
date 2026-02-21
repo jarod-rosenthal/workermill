@@ -7,6 +7,7 @@
 
 import { Router, Request, Response } from "express";
 import { authenticateUser } from "../middleware/auth.js";
+import { requireCurrentTos } from "../middleware/tos.js";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask } from "../models/WorkerTask.js";
 import { logger } from "../utils/logger.js";
@@ -18,6 +19,7 @@ import * as os from "os";
 const router = Router();
 
 router.use(authenticateUser);
+router.use(requireCurrentTos);
 
 interface QualityMetrics {
   qualityScore: number;

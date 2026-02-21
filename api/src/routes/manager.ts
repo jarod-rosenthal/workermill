@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { authenticateUser } from "../middleware/auth.js";
+import { requireCurrentTos } from "../middleware/tos.js";
 import { AppDataSource } from "../db/connection.js";
 import { Organization } from "../models/index.js";
 import { logger } from "../utils/logger.js";
@@ -7,6 +8,7 @@ import { body, validateRequest } from "../middleware/validation.js";
 
 const router = Router();
 router.use(authenticateUser);
+router.use(requireCurrentTos);
 
 const VALID_MODELS = [
   "claude-opus-4-6",

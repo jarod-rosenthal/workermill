@@ -31,11 +31,10 @@ import {
   AdminInitiateAuthCommand,
   AuthFlowType as AdminAuthFlowType,
 } from "@aws-sdk/client-cognito-identity-provider";
+import { TOS_VERSION } from "../constants/tos.js";
+import { logTosAccepted } from "../services/audit.js";
 
 const router = Router();
-
-// Current Terms of Service version - update this when ToS changes
-const TOS_VERSION = "2026-01-28";
 
 // Cognito client
 const cognitoClient = new CognitoIdentityProviderClient({
@@ -130,6 +129,8 @@ router.post("/login", async (req: Request, res: Response) => {
             role: hasValidInvite ? "member" : "admin", // Member if invited, admin if creating own org
             status: "active",
             orgId: null, // No org yet - requires invite acceptance or onboarding
+            tosAcceptedAt: new Date(),
+            tosVersion: TOS_VERSION,
           });
           await userRepo.save(user);
 
@@ -237,6 +238,8 @@ router.post("/mfa-challenge", async (req: Request, res: Response) => {
             role: hasValidInvite ? "member" : "admin", // Member if invited, admin if creating own org
             status: "active",
             orgId: null, // No org yet - requires invite acceptance or onboarding
+            tosAcceptedAt: new Date(),
+            tosVersion: TOS_VERSION,
           });
           await userRepo.save(user);
 
@@ -505,6 +508,14 @@ router.post(
           email,
           cognitoUserId,
         });
+
+        if (tosAccepted) {
+          logTosAccepted(
+            { organizationId: org.id, userId: user.id, ipAddress: req.ip || null },
+            TOS_VERSION,
+            "signup",
+          ).catch(() => {});
+        }
       }
 
       // Apply referral code if provided (only if user has an org)
@@ -761,7 +772,10 @@ router.get("/me", authenticateUserAllowNoOrg, async (req: Request, res: Response
         status: user.status,
         supportAdmin: user.supportAdmin || false,
         isPlatformAdmin,
+        tosAcceptedAt: user.tosAcceptedAt,
+        tosVersion: user.tosVersion,
       },
+      currentTosVersion: TOS_VERSION,
       organization: org ? {
         id: org.id,
         name: org.name,
@@ -772,6 +786,40 @@ router.get("/me", authenticateUserAllowNoOrg, async (req: Request, res: Response
   } catch (error) {
     logger.error("Error getting user info", { error });
     res.status(500).json({ error: "Failed to get user info" });
+  }
+});
+
+/**
+ * POST /api/auth/accept-tos
+ * Accept the current Terms of Service version.
+ * Used when TOS version changes and existing users need to re-accept.
+ */
+router.post("/accept-tos", authenticateUserAllowNoOrg, async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const userRepo = AppDataSource.getRepository(User);
+    const now = new Date();
+
+    // Atomic update — avoids clobbering concurrent changes
+    await userRepo.update(
+      { id: user.id },
+      { tosAcceptedAt: now, tosVersion: TOS_VERSION },
+    );
+
+    // Audit log (fire-and-forget — org may not exist for mid-onboarding users)
+    const orgId = req.organization?.id || user.orgId;
+    if (orgId) {
+      logTosAccepted(
+        { organizationId: orgId, userId: user.id, ipAddress: req.ip || null },
+        TOS_VERSION,
+        "accept-tos-endpoint",
+      ).catch(() => {});
+    }
+
+    res.json({ success: true, tosVersion: TOS_VERSION, acceptedAt: now });
+  } catch (error) {
+    logger.error("Error accepting TOS", { error });
+    res.status(500).json({ error: "Failed to accept Terms of Service" });
   }
 });
 
@@ -1174,6 +1222,8 @@ router.post(
                 role: hasValidInvite ? "member" : "admin",
                 status: "active",
                 orgId: null, // No org yet - requires invite acceptance or onboarding
+                tosAcceptedAt: new Date(),
+                tosVersion: TOS_VERSION,
               });
               await userRepo.save(user);
 
@@ -1501,6 +1551,8 @@ router.post(
             role: "member", // Will be set by invite acceptance
             status: "active",
             orgId: null, // No org yet - will be assigned on invite acceptance
+            tosAcceptedAt: new Date(),
+            tosVersion: TOS_VERSION,
           });
           await userRepo.save(user);
           isNewUser = true;
@@ -1523,6 +1575,8 @@ router.post(
             role,
             status: "active",
             orgId: null, // UserOrganization is source of truth
+            tosAcceptedAt: new Date(),
+            tosVersion: TOS_VERSION,
           });
           await userRepo.save(user);
           isNewUser = true;
@@ -1911,6 +1965,8 @@ router.post(
             role: "member",
             status: "active",
             orgId: null,
+            tosAcceptedAt: new Date(),
+            tosVersion: TOS_VERSION,
           });
           await userRepo.save(user);
 
@@ -2160,6 +2216,14 @@ router.post(
       // Fire notifications (non-blocking)
       notifyNewSignup({ email: primaryEmail, fullName: name, organizationName: org.name }).catch(() => {});
       sendWelcomeEmail(user, org, false).catch(() => {});
+
+      if (tosAccepted) {
+        logTosAccepted(
+          { organizationId: org.id, userId: user.id, ipAddress: req.ip || null },
+          TOS_VERSION,
+          "github-onboard",
+        ).catch(() => {});
+      }
 
       logger.info("GitHub onboard completed", { userId: user.id, orgId: org.id, email: primaryEmail });
 

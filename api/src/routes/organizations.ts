@@ -4,18 +4,19 @@ import { randomBytes } from "crypto";
 import { AppDataSource } from "../db/connection.js";
 import { Organization, User, OrgInvite, UserOrganization, type InviteRole, PLAN_USER_LIMITS, type OrganizationPlan } from "../models/index.js";
 import { authenticateUser, authenticateCognitoOnly, requireAdmin } from "../middleware/auth.js";
+import { requireCurrentTos } from "../middleware/tos.js";
 import { logger } from "../utils/logger.js";
 import { randomUUID } from "crypto";
 import bcrypt from "bcrypt";
 import { sendInviteEmail, sendOrgAddedEmail, sendWelcomeEmail } from "../services/email/index.js";
+import { TOS_VERSION } from "../constants/tos.js";
+import { logTosAccepted } from "../services/audit.js";
 
 const router = Router();
 
-// Current Terms of Service version - update this when ToS changes
-const TOS_VERSION = "2026-01-28";
-
 // All routes require authentication
 router.use(authenticateUser);
+router.use(requireCurrentTos);
 
 /**
  * GET /api/organizations/current
@@ -814,6 +815,11 @@ inviteRouter.post(
             existingUser.tosAcceptedAt = new Date();
             existingUser.tosVersion = TOS_VERSION;
             await userRepo.save(existingUser);
+            logTosAccepted(
+              { organizationId: invite.orgId, userId: existingUser.id, ipAddress: req.ip || null },
+              TOS_VERSION,
+              "invite-acceptance",
+            ).catch(() => {});
           }
 
           // Create UserOrganization record (single source of truth)
@@ -929,6 +935,14 @@ inviteRouter.post(
       sendWelcomeEmail(newUser, invite.organization, true).catch((err) => {
         logger.warn("Failed to send welcome email", { error: err, userId: newUser.id });
       });
+
+      if (tosAccepted) {
+        logTosAccepted(
+          { organizationId: invite.orgId, userId: newUser.id, ipAddress: req.ip || null },
+          TOS_VERSION,
+          "invite-acceptance",
+        ).catch(() => {});
+      }
 
       logger.info("Organization invite accepted", {
         orgId: invite.orgId,

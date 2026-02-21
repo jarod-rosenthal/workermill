@@ -432,6 +432,23 @@ export async function logLogout(context: AuditContext): Promise<AuditLog> {
 }
 
 /**
+ * Log TOS acceptance
+ */
+export async function logTosAccepted(
+  context: AuditContext,
+  tosVersion: string,
+  source: string,
+): Promise<AuditLog> {
+  return logAuditEvent(context, {
+    action: "tos_accepted",
+    resourceType: "user",
+    resourceId: context.userId || undefined,
+    changes: { metadata: { tosVersion, source } },
+    description: `User accepted Terms of Service v${tosVersion} via ${source}`,
+  });
+}
+
+/**
  * Query audit logs with filters
  */
 export interface AuditLogFilters {

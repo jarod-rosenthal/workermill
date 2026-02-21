@@ -12,6 +12,7 @@ import {
 import bcrypt from "bcrypt";
 import { v4 as uuidv4 } from "uuid";
 import { authenticateUser } from "../middleware/auth.js";
+import { requireCurrentTos } from "../middleware/tos.js";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { AppDataSource } from "../db/connection.js";
@@ -21,6 +22,7 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticateUser);
+router.use(requireCurrentTos);
 
 // Cognito client
 const cognitoClient = new CognitoIdentityProviderClient({

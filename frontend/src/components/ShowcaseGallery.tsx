@@ -77,8 +77,8 @@ const showcaseProjects: ShowcaseProject[] = [
       "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time updates, workspace dashboards, and activity feeds. 5 stories, all approved. Deployed to Vercel.",
     stack: "Next.js 15 + Prisma + TailwindCSS + Neon PostgreSQL",
     storyCount: 5,
-    cost: "$175",
-    duration: "~6 hrs",
+    cost: "$241",
+    duration: "~8 hrs",
     linesOfCode: "28,000",
     repoUrl: "https://github.com/workermill-examples/teamboard",
     liveUrl: "https://teamboard.workermill.com",
@@ -106,14 +106,14 @@ const showcaseProjects: ShowcaseProject[] = [
     name: "ShipAPI",
     tagline: "Inventory management REST API with JWT auth, rate limiting, and Swagger UI.",
     description:
-      "Async Python API with JWT authentication, RBAC, rate limiting, audit logging, product/category/warehouse CRUD, stock management, Alembic migrations, 344 tests, CI pipeline, and Swagger/ReDoc documentation. 10 epics, all deployed. Live on Railway.",
+      "Async Python API with JWT authentication, RBAC, rate limiting, audit logging, product/category/warehouse CRUD, stock management, Alembic migrations, 344 tests, CI pipeline, and Swagger/ReDoc documentation. 12 epics, all deployed. Live on Railway.",
     stack: "FastAPI + SQLAlchemy 2 + Pydantic V2 + Neon PostgreSQL",
-    storyCount: 11,
-    cost: "$98",
-    duration: "~4 hrs",
-    linesOfCode: "15,000",
+    storyCount: 12,
+    cost: "$154",
+    duration: "~4.5 hrs",
+    linesOfCode: "18,000",
     repoUrl: "https://github.com/workermill-examples/shipapi",
-    liveUrl: "https://shipapi.up.railway.app/docs",
+    liveUrl: "https://shipapi.workermill.com",
     category: "api",
     icon: <Terminal className="w-4 h-4" />,
   },
@@ -171,7 +171,7 @@ export default function ShowcaseGallery() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            278K lines of production code across 5 projects, deployed to AWS,
+            281K lines of production code across 5 projects, deployed to AWS,
             Vercel, and Railway. Every project built from tickets — planned,
             coded, tested, reviewed, and deployed autonomously.
           </p>
@@ -198,7 +198,7 @@ export default function ShowcaseGallery() {
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <GitPullRequest className="w-4 h-4 text-teal-400" />
-              <span className="text-2xl font-bold text-white">52</span>
+              <span className="text-2xl font-bold text-white">53</span>
             </div>
             <p className="text-xs text-slate-400">PRs shipped across builds</p>
           </div>
@@ -269,7 +269,7 @@ export default function ShowcaseGallery() {
                       </div>
 
                       {/* Stats */}
-                      <div className="grid grid-cols-4 gap-3 mt-4 pt-4 border-t border-border/30">
+                      <div className="grid grid-cols-3 gap-3 mt-4 pt-4 border-t border-border/30">
                         <div className="text-center">
                           <div className="flex items-center justify-center gap-1 text-sm font-semibold text-foreground">
                             <Layers className="w-3.5 h-3.5 text-muted-foreground" />
@@ -299,16 +299,12 @@ export default function ShowcaseGallery() {
                             time
                           </div>
                         </div>
-                        <div className="text-center">
-                          <div className="flex items-center justify-center gap-1 text-sm font-semibold text-emerald-400">
-                            <Zap className="w-3.5 h-3.5" />
-                            {project.cost}
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            cost
-                          </div>
-                        </div>
                       </div>
+                      {project.cost && (
+                        <p className="text-[11px] text-muted-foreground/70 mt-3 italic">
+                          {project.cost} at API token rates
+                        </p>
+                      )}
                     </>
                   );
                   return project.id !== "oncallshift" ? (
@@ -379,7 +375,7 @@ export default function ShowcaseGallery() {
                 Real metrics, not cherry-picked
               </h3>
               <p className="text-sm text-slate-400 leading-relaxed">
-                Autonomous coding is hard. Across the 52 showcase tasks above, 2
+                Autonomous coding is hard. Across the 53 showcase tasks above, 2
                 failed — a planning agent that returned malformed JSON and a
                 manager review that caught inaccuracies the worker
                 couldn&apos;t fix in its allowed retries. That&apos;s a 96%

@@ -216,9 +216,7 @@ export async function setupCommand(): Promise<void> {
         console.log(chalk.yellow("  Winget updated your PATH but this shell doesn't have it yet."));
         console.log(chalk.yellow("  Close this terminal, open a new one, and re-run: workermill-agent"));
       } else {
-        console.log("  Try manually:");
-        console.log(chalk.cyan("    curl -fsSL https://claude.ai/install.sh | bash"));
-        console.log("  Then re-run: workermill-agent");
+        console.log("  Install Claude Code manually, then re-run: workermill-agent");
       }
       process.exit(1);
     }

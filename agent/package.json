@@ -1,6 +1,6 @@
 {
   "name": "@workermill/agent",
-  "version": "0.10.12",
+  "version": "0.10.13",
   "description": "WorkerMill Remote Agent - Run AI workers locally with your Claude Max subscription",
   "type": "module",
   "main": "./dist/index.js",

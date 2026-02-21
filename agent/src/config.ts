@@ -356,8 +356,8 @@ export function validatePrerequisites(): void {
 
   // Check Claude CLI
   if (!findClaudePath()) {
-    console.error("Claude CLI is not installed.");
-    console.error("Install it: curl -fsSL https://claude.ai/install.sh | bash");
+    console.error("Claude Code CLI is not installed.");
+    console.error("Install Claude Code and ensure it's available on your PATH.");
     process.exit(1);
   }
 

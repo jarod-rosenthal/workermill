@@ -766,7 +766,7 @@ async function decomposePrdViaAgentSdk(
   const claudePath = findClaudePath();
   if (!claudePath) {
     clearInterval(heartbeat);
-    throw new Error("Claude Code CLI not found. Install it with: curl -fsSL https://claude.ai/install.sh | bash");
+    throw new Error("Claude Code CLI not found. Install Claude Code and ensure it's available on your PATH.");
   }
   onProgress?.(`Generating cards...`);
 

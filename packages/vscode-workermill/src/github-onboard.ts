@@ -238,6 +238,19 @@ export async function signUpWithGitHub(
   log: (msg: string) => void,
 ): Promise<boolean> {
   try {
+    // Require TOS acceptance before proceeding with account creation
+    const tosChoice = await vscode.window.showInformationMessage(
+      "By creating a WorkerMill account, you agree to our Terms of Service and Privacy Policy.",
+      { modal: true, detail: "https://workermill.com/terms\nhttps://workermill.com/privacy" },
+      "I Agree",
+      "View Terms",
+    );
+    if (tosChoice === "View Terms") {
+      vscode.env.openExternal(vscode.Uri.parse("https://workermill.com/terms"));
+      return false;
+    }
+    if (tosChoice !== "I Agree") return false;
+
     log("GitHub sign-up: requesting GitHub session...");
     const session = await vscode.authentication.getSession(
       "github",
@@ -252,6 +265,7 @@ export async function signUpWithGitHub(
       {
         githubToken: session.accessToken,
         githubUsername: session.account.label,
+        tosAccepted: true,
       },
     );
 

@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { AppDataSource } from "../../db/connection.js";
 import { WorkerTask } from "../../models/index.js";
 import { authenticateRequest } from "../../middleware/auth.js";
+import { requireCurrentTos } from "../../middleware/tos.js";
 import { logger } from "../../utils/logger.js";
 import { body, param, validateRequest } from "../../middleware/validation.js";
 import { postTicketComment } from "../../utils/ticket-comments.js";
@@ -10,6 +11,7 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticateRequest);
+router.use(requireCurrentTos);
 
 // =============================================================================
 // Plan Review Endpoints (PRD Orchestration)

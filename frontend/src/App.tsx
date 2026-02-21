@@ -61,6 +61,7 @@ import { BlogList, BlogPost } from "./pages/Blog";
 import { useAuthStore } from "./store/auth-store";
 import { authAPI } from "./lib/api-client";
 import { ToastProvider } from "./contexts/ToastContext";
+import { TosModal } from "./components/TosModal";
 import { ApiToastBridge } from "./components/ApiToastBridge";
 function ProtectedRoute({ children, allowSetup = false }: { children: React.ReactNode; allowSetup?: boolean }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -136,6 +137,7 @@ function App() {
   return (
     <ToastProvider>
       <ApiToastBridge />
+      <TosModal />
       <BrowserRouter>
         <Routes>
           {/* Public routes */}

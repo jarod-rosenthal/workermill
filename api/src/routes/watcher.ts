@@ -1,11 +1,13 @@
 import { Router, Request, Response } from "express";
 import { authenticateUser } from "../middleware/auth.js";
+import { requireCurrentTos } from "../middleware/tos.js";
 import { AppDataSource } from "../db/connection.js";
 import { Organization } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 
 const router = Router();
 router.use(authenticateUser);
+router.use(requireCurrentTos);
 
 router.get("/status", async (req: Request, res: Response) => {
   const org = req.organization!;

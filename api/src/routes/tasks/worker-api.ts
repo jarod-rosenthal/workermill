@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { AppDataSource } from "../../db/connection.js";
 import { WorkerTask, WorkerTaskLog, WorkerContext, KbCard, Organization } from "../../models/index.js";
 import { authenticateRequest, authenticateApiKey } from "../../middleware/auth.js";
+import { requireCurrentTos } from "../../middleware/tos.js";
 import { getECSTaskRunner } from "../../services/ecs-task-runner.js";
 import { getCostTracker } from "../../services/cost-tracker.js";
 import { logger } from "../../utils/logger.js";
@@ -14,6 +15,7 @@ const router = Router();
 
 // All routes require authentication (matches original global router.use(authenticateRequest))
 router.use(authenticateRequest);
+router.use(requireCurrentTos);
 
 /**
  * GET /api/tasks/:id/logs

@@ -28,11 +28,13 @@ interface AuthState {
   user: User | null;
   organization: Organization | null;
   needsSetup: boolean;
+  tosRequired: boolean;
   isInitialized: boolean;
   setTokens: (tokens: AuthTokens) => void;
   setUser: (user: User | null) => void;
   setOrganization: (org: Organization | null) => void;
   setNeedsSetup: (needsSetup: boolean) => void;
+  setTosRequired: (tosRequired: boolean) => void;
   clearAuth: () => void;
   initialize: () => void;
   logout: () => void;
@@ -44,6 +46,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   organization: null,
   needsSetup: false,
+  tosRequired: false,
   isInitialized: false,
 
   setTokens: (tokens: AuthTokens) => {
@@ -65,11 +68,15 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ needsSetup });
   },
 
+  setTosRequired: (tosRequired: boolean) => {
+    set({ tosRequired });
+  },
+
   clearAuth: () => {
     localStorage.removeItem("accessToken");
     localStorage.removeItem("refreshToken");
     localStorage.removeItem("idToken");
-    set({ tokens: null, user: null, organization: null, needsSetup: false, isAuthenticated: false });
+    set({ tokens: null, user: null, organization: null, needsSetup: false, tosRequired: false, isAuthenticated: false });
   },
 
   initialize: () => {
@@ -97,6 +104,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     localStorage.removeItem("accessToken");
     localStorage.removeItem("refreshToken");
     localStorage.removeItem("idToken");
-    set({ tokens: null, user: null, organization: null, needsSetup: false, isAuthenticated: false });
+    set({ tokens: null, user: null, organization: null, needsSetup: false, tosRequired: false, isAuthenticated: false });
   },
 }));

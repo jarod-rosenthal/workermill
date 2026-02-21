@@ -63,7 +63,15 @@ apiClient.interceptors.response.use(
 
     // Handle 403 with TOS update required — prompt user to accept new TOS
     if (status === 403 && error.response?.data?.tosUpdateRequired) {
+      // Set store flag so ProtectedRoute blocks dashboard rendering
+      useAuthStore.getState().setTosRequired(true);
       window.dispatchEvent(new CustomEvent("workermill:tos-required"));
+      return Promise.reject(error);
+    }
+
+    // Suppress all error toasts while TOS acceptance is pending — the user
+    // can't do anything until they accept, so errors would just be noise.
+    if (useAuthStore.getState().tosRequired) {
       return Promise.reject(error);
     }
 

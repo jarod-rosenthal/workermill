@@ -391,7 +391,7 @@ Users can describe what they want to build and see a lightweight plan preview �
 | Complexity score (4-12 scale) | Included in Haiku call |
 | Cost and time estimates | Included in Haiku call |
 
-**Purpose:** Acquisition hook. Works in the browser before the user installs anything. Rate-limited to 5/day on free tier. At 1,000 previews/day this costs $30/day — if you hit 10,000/day you have a scaling problem worth celebrating.
+**Purpose:** Acquisition hook. Works in the browser before the user installs anything. Rate-limited to 5/day on the Pro tier. At 1,000 previews/day this costs $30/day — if you hit 10,000/day you have a scaling problem worth celebrating.
 
 **Why Haiku is safe:** Plan preview uses a lightweight Haiku call (~$0.03) for an approximate breakdown. The full detailed planning with Sonnet/Opus happens during execution (on the user's machine). WorkerMill never pays for expensive model calls.
 
@@ -434,12 +434,12 @@ Users who want hands-off execution or don't have Claude Max use WorkerMill's clo
 ### The Growth Funnel
 
 ```
-Free Plan Preview ──▶ Local Mode ──▶ Paid Local ──▶ Cloud Mode
-   (acquisition)       (activation)    (retention)     (revenue)
+Free Plan Preview ──▶ Pro (Local) ──▶ Max (Cloud) ──▶ Enterprise
+   (acquisition)       (activation)     (expansion)      (revenue)
 
-~$0.03/preview        $0/execution    $29/mo           $99/mo+
-See the value         Experience it    Unlock limits    Hands-off
-Browser only          CLI (no Docker)  + features       + scale
+~$0.03/preview        $19/mo           $39/mo           Custom
+See the value         Local + BYOK     Cloud + warm     Dedicated
+Browser only          1 worker         5 workers        Unlimited
 ```
 
 ### Why This Works Financially
@@ -448,7 +448,7 @@ Browser only          CLI (no Docker)  + features       + scale
 |------------|-------------------|-----------------|---------|
 | 100 users, 5 previews/day | $15/day | ~$0 | Subscriptions |
 | 1,000 users, 5 previews/day | $150/day | ~$0 | Subscriptions |
-| 10,000 users | Rate-limit free tier, paid preview | ~$0 | Subscriptions + cloud |
+| 10,000 users | Rate-limit Pro tier, paid preview | ~$0 | Subscriptions + cloud |
 
 The expensive LLM calls (Sonnet/Opus for detailed planning and execution) always happen on the user's machine in local mode. WorkerMill only pays for Haiku previews (~$0.03 each) and API server costs.
 
@@ -667,9 +667,9 @@ WorkerMill's current positioning ("mission control for autonomous AI coding agen
 
 | Phase | Positioning | User | Revenue Model |
 |-------|------------|------|---------------|
-| **Land** | "Build production-grade MVPs from a description" | Solo founders, indie hackers, hackathon teams | Free plan preview → local mode |
-| **Expand** | "Keep building on what we scaffolded" | Same users, now with a real product | Local mode → BYOK/cloud |
-| **Scale** | "Your AI engineering team" | Growing startups, enterprise teams | Cloud credits + team subscriptions |
+| **Land** | "Build production-grade MVPs from a description" | Solo founders, indie hackers, hackathon teams | Free plan preview → Pro ($19/mo) |
+| **Expand** | "Keep building on what we scaffolded" | Same users, now with a real product | Pro → Max ($39/mo) |
+| **Scale** | "Your AI engineering team" | Growing startups, enterprise teams | Max → Enterprise (custom) |
 
 ### The Messaging Shift
 

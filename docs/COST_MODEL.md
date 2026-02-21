@@ -10,9 +10,9 @@
 
 WorkerMill is a **BYOK (Bring Your Own Key)** platform. Customers pay their AI provider directly for tokens. WorkerMill's revenue comes from:
 1. **Platform subscription** (orchestration, monitoring, workflow automation)
-2. **Cloud execution** (Pro/Enterprise tiers provide managed worker containers)
+2. **Cloud execution** (Max/Enterprise tiers provide managed worker containers)
 
-The 3-tier model (Free/Pro/Enterprise) is designed so that Free has zero marginal cost (runs locally), Pro covers cloud infrastructure with healthy margins, and Enterprise is custom-priced for dedicated environments.
+The 3-tier model (Pro/Max/Enterprise) is designed so that Pro is the affordable entry point, Max covers cloud infrastructure with healthy margins, and Enterprise is custom-priced for dedicated environments.
 
 ---
 
@@ -47,18 +47,18 @@ Based on Opus pricing ($0.005/1K input, $0.025/1K output) and token patterns fro
 
 ## 3. Pricing Tier Cost Analysis
 
-### Free Tier ($0/mo)
+### Pro Tier ($19/mo)
 
 | Cost Component | Amount | Notes |
 |----------------|--------|-------|
 | **AI tokens** | $0 to WorkerMill | User pays their AI provider directly (BYOK) |
 | **Compute** | $0 to WorkerMill | Workers run on user's local machine (Docker) |
 | **API overhead** | Negligible | Shared API infrastructure, minimal per-user cost |
-| **Total marginal cost** | **~$0** | Pure customer acquisition — zero cost to serve |
+| **Total marginal cost** | **~$0** | Near-zero cost to serve |
 
-The Free tier (1 user, 1 worker, 3 experts/task, 14-day logs) runs entirely on user hardware. WorkerMill only serves API requests for task coordination and log streaming.
+The Pro tier (1 user, 1 worker, 3 experts/task, 14-day logs) runs entirely on user hardware. WorkerMill only serves API requests for task coordination and log streaming. At $19/mo, this tier covers API infrastructure costs with healthy margins.
 
-### Pro Tier ($29/mo, launch price $14.50/mo)
+### Max Tier ($39/mo)
 
 | Cost Component | Amount | Notes |
 |----------------|--------|-------|
@@ -68,8 +68,7 @@ The Free tier (1 user, 1 worker, 3 experts/task, 14-day logs) runs entirely on u
 | **Log storage (90 days)** | ~$1-2/mo | PostgreSQL storage for extended retention |
 | **Total per-customer cost** | **~$5-10/mo** | At moderate usage (200 tasks/mo) |
 
-**Margin at $29/mo:** ~66-83%
-**Margin at launch $14.50/mo:** ~31-65%
+**Margin at $39/mo:** ~74-87%
 
 ### Enterprise Tier (Custom pricing)
 
@@ -115,7 +114,7 @@ Custom-priced to cover dedicated infrastructure with target 70%+ margins. Includ
 
 ## 5. Compute Costs
 
-### ECS Fargate Spot (Pro/Enterprise Cloud Workers)
+### ECS Fargate Spot (Max/Enterprise Cloud Workers)
 
 | Resource | Configuration | Cost |
 |----------|---------------|------|
@@ -129,20 +128,21 @@ Custom-priced to cover dedicated infrastructure with target 70%+ margins. Includ
 
 ## 6. Monthly Usage Projections by Tier
 
-### Free Tier User (Solo Dev)
+### Pro Tier User (Solo Dev)
 - **Workers:** 1 concurrent
 - **Experts/task:** Up to 3
 - **Tasks/month:** Unlimited (typically 20-50)
 - **Cost to WorkerMill:** ~$0 (runs locally)
-- **Cost to user:** AI tokens only (~$5-50/mo depending on model mix)
+- **Revenue:** $19/mo
+- **Cost to user:** $19/mo platform + AI tokens (~$5-50/mo depending on model mix)
 
-### Pro Tier User (Small Team)
+### Max Tier User (Small Team)
 - **Workers:** Up to 5 concurrent
 - **Experts/task:** Unlimited
 - **Tasks/month:** Unlimited (typically 100-500)
 - **Cost to WorkerMill:** ~$5-10/mo compute
-- **Revenue:** $29/mo ($14.50 at launch)
-- **Cost to user:** $29/mo platform + AI tokens (~$50-300/mo depending on volume)
+- **Revenue:** $39/mo
+- **Cost to user:** $39/mo platform + AI tokens (~$50-300/mo depending on volume)
 
 ### Enterprise User (Large Org)
 - **Workers:** Unlimited concurrent
@@ -157,9 +157,9 @@ Custom-priced to cover dedicated infrastructure with target 70%+ margins. Includ
 
 ### vs. Hiring Engineers
 
-| Metric | Junior Engineer | WorkerMill Pro |
+| Metric | Junior Engineer | WorkerMill Max |
 |--------|-----------------|----------------|
-| Monthly cost | $8,000-10,000 fully loaded | $29 platform + ~$50-300 AI |
+| Monthly cost | $8,000-10,000 fully loaded | $39 platform + ~$50-300 AI |
 | Tasks/month | ~20-30 tickets | Unlimited (5 concurrent) |
 | Availability | 8 hours/day, 5 days/week | 24/7 |
 | Ramp time | 3-6 months | Immediate |
@@ -167,7 +167,7 @@ Custom-priced to cover dedicated infrastructure with target 70%+ margins. Includ
 
 ### vs. Cursor/Copilot
 
-| Metric | Copilot ($19/seat) | WorkerMill Pro ($29/mo) |
+| Metric | Copilot ($19/seat) | WorkerMill Max ($39/mo) |
 |--------|--------------------|-----------------------------|
 | What it does | Autocomplete | End-to-end task execution |
 | Integration | IDE only | Jira → PR → Deploy |
@@ -176,13 +176,13 @@ Custom-priced to cover dedicated infrastructure with target 70%+ margins. Includ
 
 ### vs. Devin ($500/mo)
 
-| Metric | Devin | WorkerMill Pro ($29/mo) |
+| Metric | Devin | WorkerMill Max ($39/mo) |
 |--------|-------|----------------------------|
 | Model | Fixed, opaque | BYOK, your choice |
 | Cost transparency | None | Per-token tracking |
 | Personas | 1 generic | 7+ specialists |
 | Workflow | Slack→PR | Jira/Linear→Deploy |
-| **Price** | **$500/mo** | **$29/mo + BYOK tokens** |
+| **Price** | **$500/mo** | **$39/mo + BYOK tokens** |
 
 ---
 
@@ -192,8 +192,8 @@ Custom-priced to cover dedicated infrastructure with target 70%+ margins. Includ
 
 | Tier | Price | Users | Workers | Experts | Log Retention |
 |------|-------|-------|---------|---------|---------------|
-| **Free** | $0/mo | 1 | 1 | 3/task | 14 days |
-| **Pro** | $29/mo (launch: $14.50) | 5 | 5 | Unlimited | 90 days |
+| **Pro** | $19/mo | 1 | 1 | 3/task | 14 days |
+| **Max** | $39/mo | 5 | 5 | Unlimited | 90 days |
 | **Enterprise** | Custom | Unlimited | Unlimited | Unlimited | Unlimited |
 
 ### Total Customer Cost (Platform + AI)
@@ -202,15 +202,15 @@ With blended model usage (40% Haiku, 30% Sonnet, 20% Opus, 10% GPT-5.1):
 
 | Usage Level | Tasks/mo | AI Cost (~$1.05/task) | Platform | **Total** |
 |-------------|----------|----------------------|----------|-----------|
-| Solo (Free) | 30 | ~$32 | $0 | **~$32/mo** |
-| Small Team (Pro) | 200 | ~$210 | $29 | **~$239/mo** |
+| Solo (Pro) | 30 | ~$32 | $19 | **~$51/mo** |
+| Small Team (Max) | 200 | ~$210 | $39 | **~$249/mo** |
 | Mid-Market (Enterprise) | 1000 | ~$1,050 | Custom | **Custom** |
 
 ### Value Proposition
 
-At $239/mo total (Pro + AI) for 200 tasks/month vs hiring:
+At $249/mo total (Max + AI) for 200 tasks/month vs hiring:
 - **Junior engineer (with AI tools):** $10,000/mo for ~25 tasks
-- **WorkerMill Pro:** $239/mo for 200 tasks = **$1.20/task**
+- **WorkerMill Max:** $249/mo for 200 tasks = **$1.25/task**
 - **Savings:** ~97% cost reduction per task
 
 ---

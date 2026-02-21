@@ -61,16 +61,16 @@ A customer must have:
 
 ### Philosophy
 
-- **Simple 3-tier model**: Free, Pro, Enterprise — no per-task billing, no overage rates
-- **BYOK (Bring Your Own Keys)**: Free tier runs on user hardware with their own AI API keys
+- **Simple 3-tier model**: Pro, Max, Enterprise — no per-task billing, no overage rates
+- **BYOK (Bring Your Own Keys)**: Pro tier runs on user hardware with their own AI API keys
 - **Unlimited tasks on all tiers**: No artificial task limits — pay for capacity, not usage
 - **Professional pricing signals professional tool**
 
 ### Pricing Tiers
 
-| | **Free** | **Pro** | **Enterprise** |
+| | **Pro** | **Max** | **Enterprise** |
 |---|---------|---------|----------------|
-| **Price** | $0/mo | $29/mo (launch: $14.50) | Custom |
+| **Price** | $19/mo | $39/mo | Custom |
 | **Users** | 1 | 5 | Unlimited |
 | **Concurrent Workers** | 1 | 5 | Unlimited |
 | **Expert Personas/Task** | 3 | Unlimited | Unlimited |
@@ -85,8 +85,8 @@ A customer must have:
 
 | Tier | Key Value |
 |------|-----------|
-| **Free** | Get started with zero cost. Run workers locally with your own AI keys. Perfect for solo devs evaluating the platform. |
-| **Pro** | Cloud execution with warm worker pools for faster start times. Team collaboration with 5 seats. Extended log retention for debugging and audits. |
+| **Pro** | Get started at an affordable price. Run workers locally with your own AI keys. Perfect for solo devs getting value from the platform. |
+| **Max** | Cloud execution with warm worker pools for faster start times. Team collaboration with 5 seats. Extended log retention for debugging and audits. |
 | **Enterprise** | Full compliance suite (SSO/SAML, SOC 2, HIPAA BAA). Dedicated infrastructure with custom SLAs. Unlimited everything. |
 
 ### Payment Options
@@ -106,13 +106,13 @@ A customer must have:
 | Cursor | Individual devs | Seat-based | $20/mo |
 | Devin | Dev teams | Seat-based | $500/mo |
 | Factory | Enterprise | Custom | Unknown |
-| **WorkerMill** | Dev teams | Capacity-based | Free - $29/mo |
+| **WorkerMill** | Dev teams | Capacity-based | $19 - $39/mo |
 
 ### Differentiation
 
 | vs Copilot/Cursor | vs Devin |
 |-------------------|----------|
-| Autonomous tasks, not autocomplete | Free tier available, Pro at $29/mo vs $500/mo |
+| Autonomous tasks, not autocomplete | Pro tier at $19/mo, Max at $39/mo vs $500/mo |
 | Works while you sleep | Multi-provider flexibility (BYOK) |
 | Ticket-driven, not editor-based | Orchestrates multiple expert personas |
 
@@ -133,13 +133,13 @@ WorkerMill's BYOK model means customers pay AI providers directly for tokens. Th
 
 ### Value Propositions
 
-**For Solo Devs (Free):**
-> Start automating your backlog today. Zero cost, zero commitment. Bring your own API keys and run locally.
+**For Solo Devs (Pro):**
+> Start automating your backlog today. Affordable entry at $19/mo. Bring your own API keys and run locally.
 
-**For Small Teams (Pro):**
+**For Small Teams (Max):**
 > Stop context-switching. Write the ticket, get the PR. Cloud workers with warm pools ship faster.
 
-**For Agencies (Pro):**
+**For Agencies (Max):**
 > Multiply your throughput. Handle more clients without hiring. 5 concurrent workers running 24/7.
 
 **For Enterprise:**
@@ -180,9 +180,9 @@ WorkerMill creates PRs. Deployment happens through your existing pipeline or one
 
 > You bring your own API keys. WorkerMill supports Anthropic (Claude), OpenAI, Google (Gemini), and self-hosted Ollama. You choose the model for each task.
 
-### "Why is there a free tier?"
+### "Why start at $19/mo instead of free?"
 
-> We believe the best way to evaluate an AI coding tool is to use it on your real codebase. The free tier gives you unlimited tasks with 1 worker — enough to see real results before upgrading.
+> WorkerMill is professional infrastructure, not a toy. At $19/mo, Pro gives you unlimited tasks with 1 worker — enough to see real results and automate your backlog. The low price point ensures every user gets a quality experience with full platform support.
 
 ---
 
@@ -197,23 +197,24 @@ WorkerMill creates PRs. Deployment happens through your existing pipeline or one
 | NAT Gateway / VPC Endpoints | Fixed | ~$14-35 |
 | CloudWatch/S3/misc | Fixed | ~$15 |
 | **Fixed floor** | | **~$77-116** |
-| Worker containers (Pro/Enterprise) | Variable | ~$0.025/task |
+| Worker containers (Max/Enterprise) | Variable | ~$0.025/task |
 
-### Free Tier Economics
+### Pro Tier Economics
 
-The Free tier has **zero marginal cost** to WorkerMill:
+The Pro tier has **near-zero marginal cost** to WorkerMill:
 - Workers run on the user's local machine (Docker containers)
 - AI tokens paid directly by user (BYOK)
 - Only platform API calls hit WorkerMill infrastructure
 - Negligible per-user cost at the API layer
+- **Revenue: $19/mo with ~95%+ margin**
 
-### Pro Tier Margin
+### Max Tier Margin
 
-At $29/mo (launch $14.50/mo) with cloud execution:
+At $39/mo with cloud execution:
 - Average 5 concurrent workers, usage varies
 - Compute cost per task: ~$0.025
 - At 200 tasks/month: $5 compute cost
-- **Margin: ~83% at $29/mo, ~66% at launch price**
+- **Margin: ~74-87% at $39/mo**
 
 ### Enterprise Margin
 
@@ -229,7 +230,7 @@ Custom pricing covers dedicated infrastructure costs with target 70%+ margins.
 
 **Subhead:** WorkerMill orchestrates AI coding agents that work on your backlog while you focus on what matters.
 
-**CTA:** Get started free / See how it works
+**CTA:** Get started / See how it works
 
 ### How It Works Section
 
@@ -250,8 +251,8 @@ Custom pricing covers dedicated infrastructure costs with target 70%+ margins.
 ### Pricing Section
 
 ```
-FREE             PRO              ENTERPRISE
-$0/mo            $29/mo           Custom
+PRO              MAX              ENTERPRISE
+$19/mo           $39/mo           Custom
 Unlimited tasks  Unlimited tasks  Unlimited tasks
 1 user           5 users          Unlimited users
 1 worker         5 workers        Unlimited workers
@@ -279,7 +280,6 @@ Local + BYOK     Cloud + warm     Dedicated infra
 
 ## Open Questions
 
-1. **Launch pricing duration?** How long does the $14.50 introductory rate last?
-2. **Annual discount?** 2 months free standard?
-3. **Self-hosted option?** For enterprise customers who need on-prem?
-4. **Pro trial?** Should Pro have a 14-day free trial?
+1. **Annual discount?** 2 months free standard?
+2. **Self-hosted option?** For enterprise customers who need on-prem?
+3. **Trial period?** Should Pro/Max have a 14-day free trial?

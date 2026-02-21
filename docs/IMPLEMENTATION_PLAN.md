@@ -13,7 +13,7 @@
 1. **Hybrid architecture** — Cloud brain orchestrates, local workers execute. User's code never leaves their machine. WorkerMill's IP never leaves the server.
 2. **CLI distribution** — `npx workermill` → auto-bootstraps everything. One command to turn a Claude Max subscription into an AI engineering team.
 3. **Build page** — Describe what you want on workermill.com, see a plan preview for free (~$0.03 Haiku), choose how to execute (local/BYOK/cloud).
-4. **Three-tier model** — Free plan preview ($0.03) → Local mode ($0) → Paid local ($29/mo) → Cloud mode (revenue).
+4. **Three-tier model** — Free plan preview ($0.03 acquisition hook) → Pro ($19/mo, local execution) → Max ($39/mo, cloud execution) → Enterprise (custom).
 
 **Scope:** 5 phases over ~10-14 weeks. Phase 0 (hybrid foundation) is the architectural prerequisite. Phase 1 (build page) is the highest-impact user-facing change.
 
@@ -563,7 +563,7 @@ Lightweight plan preview powered by Haiku (~$0.03). Works in the browser before 
 }
 ```
 
-**Implementation:** Uses Haiku (WorkerMill's API key, ~$0.03/call) for a lightweight breakdown. NOT a full plan — no detailed story descriptions, no dependency graph. Just enough to show the user the value of WorkerMill's planning intelligence. Rate-limited to 5/day on free tier.
+**Implementation:** Uses Haiku (WorkerMill's API key, ~$0.03/call) for a lightweight breakdown. NOT a full plan — no detailed story descriptions, no dependency graph. Just enough to show the user the value of WorkerMill's planning intelligence. Rate-limited to 5/day on the Pro tier.
 
 **Why Haiku, not Sonnet:** The preview is an acquisition cost. At $0.03 per call, it's sustainable at scale. The detailed planning (Sonnet/Opus) happens during execution on the user's machine.
 
@@ -1000,11 +1000,11 @@ The orchestration intelligence (planning agent, coordinator, blocker manager, qu
 
 Revenue comes from usage limits and feature gating, not from LLM costs (which are user-paid in local mode).
 
-| | Free | Pro ($29/mo) | Team ($99/mo) | Enterprise |
+| | Pro ($19/mo) | Max ($39/mo) | Team ($99/mo) | Enterprise |
 |---|---|---|---|---|
 | **Plan previews** | 5/day | Unlimited | Unlimited | Unlimited |
-| **Builds (local mode)** | 3/month | Unlimited | Unlimited | Unlimited |
-| **Concurrent workers** | 1 | 4 | 8 | Custom |
+| **Builds (local mode)** | Unlimited | Unlimited | Unlimited | Unlimited |
+| **Concurrent workers** | 1 | 5 | 8 | Custom |
 | **Stories per build** | 8 max | Unlimited | Unlimited | Unlimited |
 | **Tech lead review** | No | Yes | Yes | Yes |
 | **Skill/memory system** | No | Yes | Yes | Yes |
@@ -1015,7 +1015,7 @@ Revenue comes from usage limits and feature gating, not from LLM costs (which ar
 | **SSO/SAML** | No | No | No | Yes |
 | **Audit logs** | No | No | Basic | Full |
 
-**Key insight:** Free tier users can still build real projects (3/month, 1 worker, 8 stories). The limits push power users to Pro. Teams need the team dashboard. Enterprise needs SSO and audit logs.
+**Key insight:** Pro tier users can build real projects with 1 worker and up to 8 stories per build. The limits push power users to Max. Teams need the team dashboard. Enterprise needs SSO and audit logs.
 
 **Cloud mode** is an add-on for users who don't want to run Docker locally. Cloud credits cover LLM + compute costs. BYOK users pay only for compute.
 
@@ -1131,7 +1131,7 @@ Week 12: Cloud credits system + component decomposition
 | Planning agent produces poor plans from vague descriptions | Stack templates constrain decisions; starter projects guide first experience; plan preview lets users edit |
 | Workers fail on greenfield repos | Scaffolding story runs first; templates include known-good configs |
 | Local worker connectivity issues | Retry logic on API calls; offline queue for transient failures; clear error messages |
-| Cost of free plan previews at scale | Haiku at $0.03/preview; rate limit to 5/day for free tier; cache identical descriptions |
+| Cost of free plan previews at scale | Haiku at $0.03/preview; rate limit to 5/day for Pro tier; cache identical descriptions |
 | IP extracted from Docker image | Image contains only execution scripts; all intelligence is server-side API calls |
 | **Assembled planning prompt leaked from worker** | Prompt is disposable output, changes every time; the IP is the assembly logic + validation, not the prompt text itself; accepted risk |
 | **Separate clones use too much disk** | `--reference` hardlinks objects from cached bare clone; for new projects repos are tiny; `cleanupTask()` deletes clones on completion |

@@ -118,12 +118,12 @@ const showcaseProjects: ShowcaseProject[] = [
     icon: <Terminal className="w-4 h-4" />,
   },
   {
-    id: "pulseview",
-    name: "PulseView",
-    tagline: "Real-time event analytics with always-alive demo data.",
-    stack: "Express + React + Socket.io + GCP",
-    category: "analytics",
-    icon: <BarChart3 className="w-4 h-4" />,
+    id: "flagdeck",
+    name: "FlagDeck",
+    tagline: "Open-source feature flags and experimentation platform.",
+    stack: "Go (Fiber) + SvelteKit 2 + MongoDB + Redis",
+    category: "developer-tools",
+    icon: <Zap className="w-4 h-4" />,
     comingSoon: true,
   },
   {

@@ -9,14 +9,12 @@ import { body, param, query, validationResult } from "express-validator";
 import { codebaseIndexer, IndexingOptions } from "../services/codebase-indexer.js";
 import { codebaseRetriever, CodeSearchOptions } from "../services/codebase-retriever.js";
 import { authenticateRequest } from "../middleware/auth.js";
-import { requireCurrentTos } from "../middleware/tos.js";
 import { logger } from "../utils/logger.js";
 
 const router = Router();
 
 // All routes require authentication
 router.use(authenticateRequest);
-router.use(requireCurrentTos);
 
 // Block codebase RAG for free plan
 router.use((req: Request, res: Response, next) => {

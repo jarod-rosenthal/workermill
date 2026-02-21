@@ -7,7 +7,6 @@ import { KbColumn } from "../../models/KbColumn.js";
 import type { OrganizationPlan } from "../../models/Organization.js";
 import { RemoteAgent } from "../../models/RemoteAgent.js";
 import { authenticateRequest } from "../../middleware/auth.js";
-import { requireCurrentTos } from "../../middleware/tos.js";
 import { logger } from "../../utils/logger.js";
 import { body, param, query, validateRequest } from "../../middleware/validation.js";
 import { fetchJiraIssue } from "../../utils/jira.js";
@@ -59,7 +58,6 @@ async function fetchBoardCard(
 
 // All routes require authentication
 router.use(authenticateRequest);
-router.use(requireCurrentTos);
 
 /**
  * @swagger

@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { authenticateRequest } from "../../middleware/auth.js";
-import { requireCurrentTos } from "../../middleware/tos.js";
 import generalRouter from "./general.js";
 import integrationsRouter from "./integrations.js";
 import modelsRouter from "./models.js";
@@ -11,7 +10,6 @@ const router = Router();
 
 // All settings routes require authentication (supports both JWT and API key)
 router.use(authenticateRequest);
-router.use(requireCurrentTos);
 
 // Core settings (GET /, PUT /, test-email, test-welcome-email, slug)
 router.use(generalRouter);

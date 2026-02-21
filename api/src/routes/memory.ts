@@ -9,7 +9,6 @@ import { Router, type Request, type Response } from "express";
 import { body, query, validationResult } from "express-validator";
 import { MoreThan } from "typeorm";
 import { authenticateRequest } from "../middleware/auth.js";
-import { requireCurrentTos } from "../middleware/tos.js";
 import { AppDataSource } from "../db/connection.js";
 import {
   SemanticMemory,
@@ -38,7 +37,6 @@ const router = Router();
 
 // All memory routes require authentication
 router.use(authenticateRequest);
-router.use(requireCurrentTos);
 
 /**
  * POST /api/memory/search

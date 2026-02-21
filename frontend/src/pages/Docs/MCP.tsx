@@ -44,10 +44,10 @@ const toolCategories = [
     title: "Plan Management",
     icon: FileText,
     tools: [
-      { name: "workermill_get_plan", description: "Get execution plan for PRD task", params: "id" },
+      { name: "workermill_get_plan", description: "Get execution plan for a task", params: "id" },
       { name: "workermill_approve_plan", description: "Approve an execution plan", params: "id, executionMode?" },
       { name: "workermill_request_changes", description: "Request changes to a plan", params: "id, feedback" },
-      { name: "workermill_get_children", description: "Get child tasks of a PRD", params: "id" },
+      { name: "workermill_get_children", description: "Get child tasks of a build", params: "id" },
     ],
   },
   {

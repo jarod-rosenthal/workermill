@@ -621,9 +621,9 @@ export function AIWorkersSection({
               {/* PRD Auto-Run */}
               <div className="flex items-center justify-between p-4 bg-accent/5 border border-accent/20 rounded-xl">
                 <div>
-                  <h4 className="text-sm font-medium text-foreground">Auto-run PRD Cards</h4>
+                  <h4 className="text-sm font-medium text-foreground">Auto-run Full Build Cards</h4>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Automatically execute cards when dependencies are met (PRD boards only)
+                    Automatically execute cards when dependencies are met (Full Build boards only)
                   </p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">

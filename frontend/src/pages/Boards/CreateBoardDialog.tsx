@@ -180,7 +180,7 @@ export default function CreateBoardDialog({
 
     // Validate inputs
     if (prdSource === "text" && !prdContent.trim()) {
-      setError("Please paste your PRD content");
+      setError("Please paste your spec content");
       return;
     }
     if (prdSource === "file" && !prdContent.trim()) {
@@ -217,7 +217,7 @@ export default function CreateBoardDialog({
       setPrdState("success");
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to decompose PRD",
+        err instanceof Error ? err.message : "Failed to decompose spec",
       );
       setPrdState("error");
     }
@@ -278,7 +278,7 @@ export default function CreateBoardDialog({
               setError(null);
             }}
           >
-            Import from PRD
+            Full Build
           </button>
         </div>
 
@@ -415,7 +415,7 @@ export default function CreateBoardDialog({
               <div className="flex flex-col items-center justify-center py-12">
                 <Loader2 className="w-10 h-10 animate-spin text-primary mb-4" />
                 <p className="text-sm text-muted-foreground">
-                  Decomposing PRD into cards...
+                  Decomposing spec into cards...
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
                   This may take a moment
@@ -541,12 +541,12 @@ export default function CreateBoardDialog({
                   {prdSource === "text" && (
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        PRD Content
+                        Spec Content
                       </label>
                       <textarea
                         value={prdContent}
                         onChange={(e) => setPrdContent(e.target.value)}
-                        placeholder="Paste your PRD markdown here..."
+                        placeholder="Paste your spec or requirements here..."
                         rows={8}
                         className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none font-mono text-sm"
                         autoFocus
@@ -590,7 +590,7 @@ export default function CreateBoardDialog({
                   {prdSource === "url" && (
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        PRD URL
+                        Spec URL
                       </label>
                       <input
                         type="url"
@@ -630,11 +630,11 @@ export default function CreateBoardDialog({
                           type="text"
                           value={prdRepoPath}
                           onChange={(e) => setPrdRepoPath(e.target.value)}
-                          placeholder="docs/PRD.md"
+                          placeholder="docs/spec.md"
                           className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
                         />
                         <p className="text-xs text-muted-foreground mt-1">
-                          Path to the PRD file in the repository. Defaults to
+                          Path to the spec file in the repository. Defaults to
                           README.md.
                         </p>
                       </div>
@@ -650,7 +650,7 @@ export default function CreateBoardDialog({
                       type="text"
                       value={prdBoardName}
                       onChange={(e) => setPrdBoardName(e.target.value)}
-                      placeholder="Auto-derived from PRD title"
+                      placeholder="Auto-derived from spec title"
                       className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
                     />
                   </div>

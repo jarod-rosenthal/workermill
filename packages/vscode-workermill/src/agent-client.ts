@@ -197,7 +197,7 @@ export class AgentClient extends EventEmitter {
     return this.get<unknown[]>(`/api/tasks/${taskId}/logs${qs}`);
   }
 
-  /** Build a board from a PRD document — streams progress via SSE */
+  /** Build a board from a spec document — streams progress via SSE */
   buildFromPrdStreaming(
     payload: {
       source: string;
@@ -241,7 +241,7 @@ export class AgentClient extends EventEmitter {
                 } else if (event.type === "done" && event.result) {
                   resolve(event.result);
                 } else if (event.type === "error") {
-                  reject(new Error(event.error || "PRD decomposition failed"));
+                  reject(new Error(event.error || "Full Build failed"));
                 }
               } catch {
                 /* ignore unparseable events */
@@ -261,7 +261,7 @@ export class AgentClient extends EventEmitter {
                     resolve(event.result);
                     return;
                   } else if (event.type === "error") {
-                    reject(new Error(event.error || "PRD decomposition failed"));
+                    reject(new Error(event.error || "Full Build failed"));
                     return;
                   }
                 } catch {
@@ -270,7 +270,7 @@ export class AgentClient extends EventEmitter {
               }
             }
             // If we haven't resolved/rejected yet, stream ended unexpectedly
-            reject(new Error("PRD decomposition stream ended without result"));
+            reject(new Error("Full Build stream ended without result"));
           });
           res.on("error", reject);
         },
@@ -279,7 +279,7 @@ export class AgentClient extends EventEmitter {
       // 5 minute timeout for full decomposition
       req.setTimeout(300_000, () => {
         req.destroy();
-        reject(new Error("PRD decomposition timed out (5 minutes)"));
+        reject(new Error("Full Build timed out (5 minutes)"));
       });
       req.write(body);
       req.end();
@@ -456,7 +456,7 @@ export class AgentClient extends EventEmitter {
         });
       });
       req.on("error", reject);
-      // PRD decomposition via Agent SDK can take 2+ minutes — use 5min timeout for POST
+      // Full Build via Agent SDK can take 2+ minutes — use 5min timeout for POST
       req.setTimeout(300_000, () => { req.destroy(); reject(new Error("Timeout")); });
       req.write(body);
       req.end();

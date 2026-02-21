@@ -535,7 +535,7 @@ export default function Analytics() {
         setDailyUsage(data.daily || []);
       }
 
-      // Fetch PRD workflow metrics
+      // Fetch Full Build workflow metrics
       const prdRes = await fetch(`/api/analytics/prd-metrics?range=${timeRange}`, {
         headers: { Authorization: `Bearer ${tokens?.accessToken}` },
       });

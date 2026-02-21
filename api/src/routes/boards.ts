@@ -29,6 +29,7 @@ import type { WorkerPersona } from "../models/WorkerTask.js";
 import { syncKbCardColumn } from "../services/task-monitor.js";
 import { resetCancelledTask } from "./tasks/lifecycle.js";
 import { authenticateUser } from "../middleware/auth.js";
+import { requireCurrentTos } from "../middleware/tos.js";
 import { logger } from "../utils/logger.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
 
@@ -36,6 +37,7 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticateUser);
+router.use(requireCurrentTos);
 
 // =============================================================================
 // Helper: Derive board prefix from name

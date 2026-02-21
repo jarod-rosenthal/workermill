@@ -4,7 +4,6 @@ import { randomBytes } from "crypto";
 import { AppDataSource } from "../db/connection.js";
 import { Organization, User, OrgInvite, UserOrganization, type InviteRole, PLAN_USER_LIMITS, type OrganizationPlan } from "../models/index.js";
 import { authenticateUser, authenticateCognitoOnly, requireAdmin } from "../middleware/auth.js";
-import { requireCurrentTos } from "../middleware/tos.js";
 import { logger } from "../utils/logger.js";
 import { randomUUID } from "crypto";
 import bcrypt from "bcrypt";
@@ -16,7 +15,6 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticateUser);
-router.use(requireCurrentTos);
 
 /**
  * GET /api/organizations/current

@@ -3,7 +3,6 @@ import { In } from "typeorm";
 import { AppDataSource } from "../../db/connection.js";
 import { WorkerTask, WorkerTaskLog, WorkerContext, InternalTask, BoardColumn } from "../../models/index.js";
 import { authenticateRequest } from "../../middleware/auth.js";
-import { requireCurrentTos } from "../../middleware/tos.js";
 import { logger } from "../../utils/logger.js";
 import { param, validateRequest } from "../../middleware/validation.js";
 import { cascadeCancellationToChildren } from "../../services/task-monitor.js";
@@ -15,7 +14,6 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticateRequest);
-router.use(requireCurrentTos);
 
 /**
  * POST /api/tasks/:id/cancel

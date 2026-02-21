@@ -386,6 +386,42 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
+  // POST /api/tasks/run-file — create a Quick Tasks card + run as worker task
+  if (req.method === "POST" && path === "/api/tasks/run-file") {
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const body = JSON.parse(await readBody(req));
+      const result = await cloudProxy("POST", "/api/tasks/run-file", body);
+      return json(res, result, 201);
+    } catch (err: unknown) {
+      const e = err as { status?: number; data?: unknown; message?: string };
+      const status = e.status || 500;
+      if (e.data) return json(res, e.data, status);
+      return json(res, { error: e.message || String(err) }, status);
+    }
+  }
+
+  // GET /api/repos — lightweight repos endpoint for VS Code repo picker
+  if (req.method === "GET" && path === "/api/repos") {
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const settings = await cloudProxy("GET", "/api/settings") as Record<string, unknown>;
+      const repos = (settings?.repositories ?? []) as string[];
+      const scmProvider = (settings?.scmProvider ?? "github") as string;
+      let defaultRepo: string | null = null;
+      if (scmProvider === "bitbucket") {
+        defaultRepo = (settings?.defaultBitbucketRepo as string) || null;
+      } else if (scmProvider === "gitlab") {
+        defaultRepo = (settings?.defaultGitlabRepo as string) || null;
+      } else {
+        defaultRepo = (settings?.defaultGithubRepo as string) || null;
+      }
+      return json(res, { repos, defaultRepo, scmProvider });
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
   // POST /api/prd/build — decompose PRD locally with SSE streaming
   if (req.method === "POST" && path === "/api/prd/build") {
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);

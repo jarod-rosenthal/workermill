@@ -186,7 +186,7 @@ export class CostTracker {
     if (setClauses.length > 0) {
       values.push(taskId);
       await this.dataSource.query(
-        `UPDATE "worker_task" SET ${setClauses.join(", ")} WHERE "id" = $${paramIdx}`,
+        `UPDATE "worker_tasks" SET ${setClauses.join(", ")} WHERE "id" = $${paramIdx}`,
         values,
       );
     }

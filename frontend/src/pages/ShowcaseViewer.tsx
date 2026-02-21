@@ -194,9 +194,9 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     description:
       "Async Python REST API with JWT authentication, RBAC, rate limiting, audit logging, product/category/warehouse CRUD, stock management with atomic operations, Alembic migrations, 344 tests, GitHub Actions CI pipeline, and interactive Swagger/ReDoc documentation. 10 epics executed sequentially, each building on the last. Deployed to Railway at shipapi.up.railway.app.",
     stack: "FastAPI + SQLAlchemy 2 + Pydantic V2 + Neon PostgreSQL",
-    storyCount: 49,
+    storyCount: 52,
     cost: "$98",
-    duration: "~235 min",
+    duration: "~247 min",
     linesOfCode: "15,000",
     repoUrl: "https://github.com/workermill-examples/shipapi",
     liveUrl: "https://shipapi.up.railway.app/docs",

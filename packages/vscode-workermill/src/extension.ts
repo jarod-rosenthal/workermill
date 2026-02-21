@@ -11,7 +11,6 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { exec } from "child_process";
 import { AgentClient, type TaskInfo, type IssueInfo } from "./agent-client";
 import { TeamTreeProvider } from "./team-tree";
 import { FeedViewProvider } from "./feed-view";
@@ -32,6 +31,55 @@ import {
   promptInstallGit,
 } from "./agent-installer";
 import { signUpWithGitHub, signInWithGitHub, enterApiKey } from "./github-onboard";
+
+/**
+ * Show a QuickPick for repository selection if multiple repos are configured.
+ * Returns the selected repo, or undefined if the user cancelled.
+ */
+async function pickRepo(agentClient: AgentClient): Promise<string | undefined> {
+  try {
+    const { repos, defaultRepo } = await agentClient.getRepos();
+
+    // No repos configured — use default if available
+    if (repos.length === 0 && defaultRepo) return defaultRepo;
+    if (repos.length === 0) {
+      vscode.window.showWarningMessage(
+        "No repositories configured. Add one in WorkerMill Settings > Integrations.",
+      );
+      return undefined;
+    }
+
+    // Single repo — auto-select
+    if (repos.length === 1) return repos[0];
+
+    // Multiple repos — show QuickPick
+    const items = repos.map((r) => ({
+      label: r,
+      description: r === defaultRepo ? "(default)" : "",
+    }));
+
+    // Put default repo first
+    if (defaultRepo) {
+      const idx = items.findIndex((i) => i.label === defaultRepo);
+      if (idx > 0) {
+        const [item] = items.splice(idx, 1);
+        items.unshift(item);
+      }
+    }
+
+    const selected = await vscode.window.showQuickPick(items, {
+      placeHolder: "Select target repository",
+    });
+
+    return selected?.label;
+  } catch (err) {
+    // If repos endpoint fails (e.g., older agent), fall back to no repo selection
+    vscode.window.showWarningMessage(
+      `Could not fetch repositories: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return undefined;
+  }
+}
 
 let client: AgentClient;
 let statusBar: StatusBar;
@@ -553,34 +601,11 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        // Detect git remote for githubRepo
+        // Pick target repo via QuickPick (falls back to git remote detection)
         let githubRepo: string | undefined;
-        const workspaceFolder = vscode.workspace.getWorkspaceFolder(fileUri);
-        const cwd = workspaceFolder?.uri.fsPath || path.dirname(fileUri.fsPath);
-
-        try {
-          const remoteUrl = await new Promise<string>((resolve, reject) => {
-            exec(
-              "git remote get-url origin",
-              { cwd, timeout: 5000 },
-              (err, stdout) => {
-                if (err) reject(err);
-                else resolve(stdout.trim());
-              },
-            );
-          });
-
-          // Parse remote URL to owner/repo format
-          // Handles: git@github.com:owner/repo.git, https://github.com/owner/repo.git
-          const match = remoteUrl.match(
-            /(?:github\.com)[:/]([^/]+\/[^/]+?)(?:\.git)?$/,
-          );
-          if (match) {
-            githubRepo = match[1];
-          }
-        } catch {
-          // Not a git repo or no remote — continue without githubRepo
-        }
+        const pickedRepo = await pickRepo(client);
+        if (pickedRepo === undefined) return; // cancelled
+        githubRepo = pickedRepo;
 
         // Infer board name from first ***REMOVED*** heading
         const headingMatch = fileContent.match(/^***REMOVED***\s+(.+)$/m);
@@ -588,7 +613,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
         // Ask for board name
         const boardName = await vscode.window.showInputBox({
-          prompt: "Board name for the PRD",
+          prompt: "Board name for this product build",
           value: inferredName || "",
           placeHolder: "e.g. User Authentication Redesign",
         });
@@ -603,16 +628,16 @@ export function activate(context: vscode.ExtensionContext): void {
           onDidClose: closeEmitter.event,
           open: () => {
             writeEmitter.fire(
-              "\x1b[1m\x1b[94mWorkerMill PRD Decomposition\x1b[0m\r\n",
+              "\x1b[1m\x1b[94mWorkerMill Product Build\x1b[0m\r\n",
             );
             writeEmitter.fire(
-              "\x1b[2mDecomposing PRD...\x1b[0m\r\n\r\n",
+              "\x1b[2mBuilding product...\x1b[0m\r\n\r\n",
             );
           },
           close: () => {},
         };
         const terminal = vscode.window.createTerminal({
-          name: "WM: PRD Decompose",
+          name: "WM: Product Build",
           pty,
           iconPath: new vscode.ThemeIcon("rocket"),
         });
@@ -656,7 +681,74 @@ export function activate(context: vscode.ExtensionContext): void {
             err instanceof Error ? err.message : String(err);
           writeEmitter.fire(`\r\n\x1b[1m\x1b[91m✗ ${msg}\x1b[0m\r\n`);
           vscode.window.showErrorMessage(
-            `Failed to build from PRD: ${msg}`,
+            `Product Build failed: ${msg}`,
+          );
+        }
+      },
+    ),
+
+    // Run a .md file as a single worker task — context menu + editor title
+    vscode.commands.registerCommand(
+      "workermill.runFileAsTask",
+      async (uri?: vscode.Uri) => {
+        if (!client.isConnected()) {
+          vscode.window.showErrorMessage(
+            "WorkerMill agent is not running. Start with: workermill-agent start",
+          );
+          return;
+        }
+
+        // Get file content — from context menu URI or active editor
+        let fileContent: string;
+        let fileName: string;
+
+        if (uri) {
+          const bytes = await vscode.workspace.fs.readFile(uri);
+          fileContent = Buffer.from(bytes).toString("utf-8");
+          fileName = path.basename(uri.fsPath, ".md");
+        } else {
+          const editor = vscode.window.activeTextEditor;
+          if (!editor || editor.document.languageId !== "markdown") {
+            vscode.window.showWarningMessage(
+              "Open a .md file or right-click one in the explorer.",
+            );
+            return;
+          }
+          fileContent = editor.document.getText();
+          fileName = path.basename(editor.document.fileName, ".md");
+        }
+
+        if (!fileContent.trim()) {
+          vscode.window.showWarningMessage("The selected file is empty.");
+          return;
+        }
+
+        // Extract first heading as summary, fallback to filename
+        const headingMatch = fileContent.match(/^***REMOVED***\s+(.+)$/m);
+        const summary = headingMatch ? headingMatch[1].trim() : fileName;
+
+        // Pick target repo
+        const selectedRepo = await pickRepo(client);
+        if (selectedRepo === undefined) return; // cancelled
+
+        // Confirm
+        const confirm = await vscode.window.showInformationMessage(
+          `Run "${summary}" as a task against ${selectedRepo}?`,
+          "Run",
+          "Cancel",
+        );
+        if (confirm !== "Run") return;
+
+        try {
+          await client.runFileAsTask(summary, fileContent, selectedRepo);
+          vscode.window.showInformationMessage(
+            `WorkerMill: "${summary}" submitted as task`,
+          );
+          treeProvider.refresh();
+          vscode.commands.executeCommand("workermill.teamPanel.focus");
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed to run as task: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       },

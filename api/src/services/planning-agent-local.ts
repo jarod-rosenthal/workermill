@@ -17,9 +17,9 @@
  * - OPENAI_API_KEY, GOOGLE_API_KEY, OLLAMA_BASE_URL
  */
 
-import { spawn } from "child_process";
-import { readFileSync, writeFileSync, existsSync } from "fs";
-import { homedir } from "os";
+import { spawn, execSync } from "child_process";
+import { readFileSync, writeFileSync, existsSync, rmSync } from "fs";
+import { homedir, tmpdir } from "os";
 import { join } from "path";
 import { generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -233,6 +233,12 @@ export interface PlanningInput {
     description: string | null;
     specialties: string[];
   }>;
+  /** Target repo (e.g. "workermill-examples/shipapi") — used to clone for Claude CLI cwd. */
+  githubRepo?: string;
+  /** SCM provider (github, gitlab, bitbucket) — needed for clone URL. */
+  scmProvider?: string;
+  /** SCM token for cloning the target repo. */
+  scmToken?: string;
 }
 
 /**
@@ -265,6 +271,85 @@ export interface ValidatedExecutionPlan extends ExecutionPlan {
 }
 
 /**
+ * Build an authenticated clone URL for the target repo.
+ * Matches the pattern from agent/src/planner.ts.
+ */
+function buildCloneUrl(
+  repo: string,
+  token: string,
+  scmProvider: string,
+): string {
+  // If it's already a full URL, inject the token
+  if (repo.startsWith("https://")) {
+    const url = new URL(repo);
+    url.username = scmProvider === "bitbucket" ? "x-token-auth" : "x-access-token";
+    url.password = token;
+    if (!url.pathname.endsWith(".git")) {
+      url.pathname += ".git";
+    }
+    return url.toString();
+  }
+
+  // Short form: owner/repo
+  switch (scmProvider) {
+    case "bitbucket":
+      return `https://x-token-auth:${token}@bitbucket.org/${repo}.git`;
+    case "gitlab":
+      return `https://oauth2:${token}@gitlab.com/${repo}.git`;
+    case "github":
+    default:
+      return `https://x-access-token:${token}@github.com/${repo}.git`;
+  }
+}
+
+/**
+ * Clone the target repo to a temp directory so the planner can explore with tools.
+ * Returns the path on success, or null on failure.
+ * Matches agent/src/planner.ts pattern.
+ */
+function cloneTargetRepo(
+  repo: string,
+  token: string,
+  scmProvider: string,
+  taskId: string,
+): string | null {
+  const tmpDir = join(tmpdir(), `workermill-planning-${taskId.slice(0, 8)}-${Date.now()}`);
+
+  try {
+    const cloneUrl = buildCloneUrl(repo, token, scmProvider);
+    const safeUrl = cloneUrl.replace(/\/\/[^@]+@/, "//***@");
+    logger.info("Cloning repo for local planner", { taskId, repo: safeUrl });
+    execSync(`git clone --depth 1 --single-branch "${cloneUrl}" "${tmpDir}"`, {
+      stdio: ["ignore", "ignore", "pipe"],
+      timeout: 60_000,
+    });
+    logger.info("Repo cloned for local planner", { taskId, path: tmpDir });
+    return tmpDir;
+  } catch (error) {
+    const stderr = (error as { stderr?: Buffer })?.stderr?.toString()?.trim() || "";
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const detail = stderr || errMsg;
+    // Redact tokens from error output
+    const safeDetail = detail
+      .replace(/ghp_[A-Za-z0-9]+/g, "ghp_***")
+      .replace(/ghs_[A-Za-z0-9]+/g, "ghs_***")
+      .replace(/x-token-auth:[^@]+/g, "x-token-auth:***")
+      .replace(/x-access-token:[^@]+/g, "x-access-token:***");
+    logger.warn("Clone failed, planner will run without repo access", {
+      taskId,
+      error: safeDetail.substring(0, 300),
+    });
+    // Cleanup partial clone
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+}
+
+/**
  * Run the planning agent locally.
  * Routes to Claude CLI for Anthropic, AI SDK for other providers.
  * Applies validation and auto-fixes to ensure proper dependency ordering.
@@ -285,17 +370,56 @@ export async function runLocalPlanningAgent(
     promptLength: prompt.length,
   });
 
+  // Clone the target repo so the planner can explore it with tools.
+  // Priority: 1) clone from remote if githubRepo + scmToken, 2) TARGET_REPO_PATH env var, 3) no cwd
+  let clonePath: string | null = null;
+  let repoPath: string | undefined;
+
+  if (input.githubRepo && input.scmToken) {
+    clonePath = cloneTargetRepo(
+      input.githubRepo,
+      input.scmToken,
+      input.scmProvider || "github",
+      input.taskId,
+    );
+    if (clonePath) {
+      repoPath = clonePath;
+      onProgress?.(`Cloned ${input.githubRepo} for analysis`);
+    }
+  }
+
+  // Fallback: local repo path (for local dev where the repo is on disk)
+  if (!repoPath && process.env.TARGET_REPO_PATH) {
+    repoPath = process.env.TARGET_REPO_PATH;
+    logger.info("Using TARGET_REPO_PATH for local planner cwd", {
+      taskId: input.taskId,
+      path: repoPath,
+    });
+  }
+
   // Get raw plan from LLM
   let rawPlan: ExecutionPlan;
-  if (provider === "anthropic") {
-    // Ensure OAuth token is valid before calling Claude CLI
-    const tokenValid = await ensureValidOAuthToken();
-    if (!tokenValid) {
-      throw new Error("OAuth token invalid or expired. Run 'claude auth login' to re-authenticate.");
+  try {
+    if (provider === "anthropic") {
+      // Ensure OAuth token is valid before calling Claude CLI
+      const tokenValid = await ensureValidOAuthToken();
+      if (!tokenValid) {
+        throw new Error("OAuth token invalid or expired. Run 'claude auth login' to re-authenticate.");
+      }
+      rawPlan = await runWithClaudeCli(input, prompt, model, onProgress, onPlanningProgress, repoPath);
+    } else {
+      rawPlan = await runWithAiSdk(input, prompt, provider, model);
     }
-    rawPlan = await runWithClaudeCli(input, prompt, model, onProgress, onPlanningProgress);
-  } else {
-    rawPlan = await runWithAiSdk(input, prompt, provider, model);
+  } finally {
+    // Clean up cloned repo (only if we cloned it, not TARGET_REPO_PATH)
+    if (clonePath) {
+      try {
+        rmSync(clonePath, { recursive: true, force: true });
+        logger.info("Cleaned up planning clone", { taskId: input.taskId, path: clonePath });
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   // Convert to V2 format for validation
@@ -346,6 +470,7 @@ async function runWithClaudeCli(
   model: string,
   onProgress?: PlanningProgressCallback,
   onPlanningProgress?: PlanningProgressDetailCallback,
+  cwd?: string,
 ): Promise<ExecutionPlan & { usage?: PlanningUsage }> {
   const claudePath = process.env.CLAUDE_CLI_PATH || "/home/user/.local/bin/claude";
 
@@ -353,6 +478,7 @@ async function runWithClaudeCli(
     taskId: input.taskId,
     model,
     claudePath,
+    cwd: cwd || "(api working directory)",
   });
 
   return new Promise((resolve, reject) => {
@@ -382,6 +508,7 @@ async function runWithClaudeCli(
       {
         env: cleanEnv,
         stdio: ["pipe", "pipe", "pipe"],
+        ...(cwd ? { cwd } : {}),
       }
     );
 

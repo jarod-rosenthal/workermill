@@ -3,6 +3,7 @@ import { AppDataSource } from "../../db/connection.js";
 import { WorkerTask, PLAN_FEATURES } from "../../models/index.js";
 import { KbCard } from "../../models/KbCard.js";
 import { KbBoard } from "../../models/KbBoard.js";
+import { KbColumn } from "../../models/KbColumn.js";
 import type { OrganizationPlan } from "../../models/Organization.js";
 import { RemoteAgent } from "../../models/RemoteAgent.js";
 import { authenticateRequest } from "../../middleware/auth.js";
@@ -14,6 +15,7 @@ import { inferPersonaFromJiraIssue } from "../../services/persona-inference.js";
 import { syncKbCardColumn } from "../../services/task-monitor.js";
 import { normalizeRepoWithOwner } from "./helpers.js";
 import { resetCancelledTask } from "./lifecycle.js";
+import { runCardAsWorkerTask } from "../boards.js";
 import { taskCreationLimiter } from "../../middleware/rate-limit.js";
 
 const router = Router();
@@ -25,7 +27,7 @@ const router = Router();
 async function fetchBoardCard(
   orgId: string,
   issueKey: string,
-): Promise<{ summary: string; description: string; labels: string[] } | null> {
+): Promise<{ summary: string; description: string; labels: string[]; cardId: string } | null> {
   // Match prefix-number where prefix may contain non-ASCII chars (e.g., em dashes from board names)
   const match = issueKey.match(/^(.+)-(\d+)$/);
   if (!match) return null;
@@ -50,6 +52,7 @@ async function fetchBoardCard(
     labels: (card.cardLabels || [])
       .map((cl) => cl.label?.name)
       .filter(Boolean) as string[],
+    cardId: card.id,
   };
 }
 
@@ -179,6 +182,7 @@ router.post(
     let issueLabels: string[] = [];
     let inferredPersona = workerPersona;
     let jiraFields: Record<string, unknown> = {};
+    let boardCardId: string | null = null;
 
     // Determine which issue tracker to use based on org settings
     const issueTrackerProvider = org.issueTrackerProvider || "jira";
@@ -186,17 +190,24 @@ router.post(
     let issueData: { summary: string; description: string; labels: string[] } | null = null;
 
     if (issueTrackerProvider === "internal") {
-      // Fetch from internal KbBoard/KbCard
-      issueData = await fetchBoardCard(org.id, jiraIssueKey);
-      if (issueData) {
+      // Fetch from internal KbBoard/KbCard — card MUST exist for internal boards
+      const boardCard = await fetchBoardCard(org.id, jiraIssueKey);
+      if (boardCard) {
+        issueData = boardCard;
+        boardCardId = boardCard.cardId;
         logger.info("Fetched internal board card details for task", {
           issueKey: jiraIssueKey,
+          cardId: boardCardId,
           summary: issueData.summary,
           descriptionLength: issueData.description?.length || 0,
           labels: issueData.labels,
         });
       } else {
-        logger.warn("Could not fetch internal board card - using defaults", { issueKey: jiraIssueKey });
+        logger.error("Internal board card not found — refusing to create task", { issueKey: jiraIssueKey });
+        res.status(400).json({
+          error: `Board card not found for ${jiraIssueKey}. Ensure the card exists and has a valid card number.`,
+        });
+        return;
       }
     } else if (issueTrackerProvider === "linear") {
       // Fetch from Linear
@@ -215,7 +226,11 @@ router.post(
       // Default to Jira (also try internal boards as fallback)
       issueData = await fetchJiraIssue(org.id, jiraIssueKey);
       if (!issueData) {
-        issueData = await fetchBoardCard(org.id, jiraIssueKey);
+        const boardCard = await fetchBoardCard(org.id, jiraIssueKey);
+        if (boardCard) {
+          issueData = boardCard;
+          boardCardId = boardCard.cardId;
+        }
       }
       if (issueData) {
         logger.info("Fetched issue details for manual task", {
@@ -460,23 +475,11 @@ router.post(
     await taskRepo.save(task);
 
     // Link to KbCard and move it on the board (same as board run endpoint)
-    if (issueTrackerProvider === "internal" || (!issueData && issueTrackerProvider === "jira")) {
-      // Try to find the matching KbCard
-      const keyMatch = jiraIssueKey.match(/^(.+)-(\d+)$/);
-      if (keyMatch) {
-        const cardRepo = AppDataSource.getRepository(KbCard);
-        const card = await cardRepo.findOne({
-          where: {
-            cardNumber: parseInt(keyMatch[2], 10),
-            board: { prefix: keyMatch[1].toUpperCase(), orgId: org.id },
-          },
-          relations: ["board"],
-        });
-        if (card) {
-          await cardRepo.update(card.id, { workerTaskId: task.id });
-          syncKbCardColumn(task.id, initialStatus === "planning" ? "planning" : "claimed").catch(() => {});
-        }
-      }
+    if (boardCardId) {
+      const cardRepo = AppDataSource.getRepository(KbCard);
+      await cardRepo.update(boardCardId, { workerTaskId: task.id });
+      syncKbCardColumn(task.id, initialStatus === "planning" ? "planning" : "claimed").catch(() => {});
+      logger.info("Linked board card to worker task", { cardId: boardCardId, taskId: task.id });
     }
 
     logger.info("Created manual worker task", {
@@ -493,6 +496,147 @@ router.post(
       res.status(500).json({ error: "Failed to create task" });
     }
   }
+);
+
+/**
+ * POST /api/tasks/run-file
+ *
+ * Create a KbCard on a "Quick Tasks" board from inline markdown content
+ * and immediately run it as a worker task. Used by the VS Code extension's
+ * "Run as Task" command for .md files.
+ */
+router.post(
+  "/run-file",
+  taskCreationLimiter,
+  body("summary")
+    .isString()
+    .notEmpty()
+    .isLength({ max: 500 })
+    .withMessage("summary is required and must be ≤ 500 characters"),
+  body("description")
+    .isString()
+    .notEmpty()
+    .isLength({ max: 500000 })
+    .withMessage("description is required and must be ≤ 500KB"),
+  body("githubRepo")
+    .optional()
+    .isString()
+    .isLength({ max: 255 })
+    .withMessage("githubRepo must be ≤ 255 characters"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const { summary, description, githubRepo } = req.body;
+
+      const boardRepo = AppDataSource.getRepository(KbBoard);
+      const colRepo = AppDataSource.getRepository(KbColumn);
+      const cardRepo = AppDataSource.getRepository(KbCard);
+
+      // Find or create "Quick Tasks" board for this org
+      let board = await boardRepo.findOne({
+        where: { orgId: org.id, prefix: "QT" },
+      });
+
+      if (!board) {
+        // Check if prefix "QT" is taken by another board name
+        const maxPos = await boardRepo
+          .createQueryBuilder("b")
+          .where("b.orgId = :orgId", { orgId: org.id })
+          .select("MAX(b.position)", "max")
+          .getRawOne();
+
+        board = boardRepo.create({
+          orgId: org.id,
+          name: "Quick Tasks",
+          description: "Cards created from VS Code 'Run as Task'",
+          position: (maxPos?.max ?? -1) + 1,
+          prefix: "QT",
+          nextCardNumber: 1,
+        });
+        await boardRepo.save(board);
+
+        // Create default columns
+        const defaultColumns = [
+          { name: "To Do", position: 0, color: "***REMOVED***6b7280" },
+          { name: "In Progress", position: 1, color: "***REMOVED***f59e0b" },
+          { name: "Review", position: 2, color: "***REMOVED***8b5cf6" },
+          { name: "Approved", position: 3, color: "***REMOVED***3b82f6" },
+          { name: "Deployed", position: 4, color: "***REMOVED***10b981" },
+        ];
+        const columns: KbColumn[] = [];
+        for (const def of defaultColumns) {
+          columns.push(
+            colRepo.create({
+              boardId: board.id,
+              name: def.name,
+              position: def.position,
+              color: def.color,
+            }),
+          );
+        }
+        await colRepo.save(columns);
+      }
+
+      // Get "To Do" column
+      const todoColumn = await colRepo.findOne({
+        where: { boardId: board.id, name: "To Do" },
+      });
+      if (!todoColumn) {
+        res.status(500).json({ error: "Quick Tasks board has no 'To Do' column" });
+        return;
+      }
+
+      // Atomically claim next card number
+      const [{ next_num }] = await AppDataSource.query(
+        `UPDATE "kb_boards" SET "next_card_number" = "next_card_number" + 1 WHERE "id" = $1 AND "org_id" = $2 RETURNING "next_card_number" - 1 AS next_num`,
+        [board.id, org.id],
+      );
+      const cardNumber = Number(next_num) || 1;
+
+      // Create card
+      const card = cardRepo.create({
+        boardId: board.id,
+        columnId: todoColumn.id,
+        title: summary,
+        description,
+        position: 0,
+        cardNumber,
+        githubRepo: githubRepo || org.getDefaultRepo() || null,
+      });
+      await cardRepo.save(card);
+
+      // Run card as worker task (same logic as board "Run" button)
+      const workerTask = await runCardAsWorkerTask(card.id, org.id);
+
+      // If a specific repo was requested, override on the worker task
+      if (githubRepo && workerTask.githubRepo !== githubRepo) {
+        const taskRepo = AppDataSource.getRepository(WorkerTask);
+        await taskRepo.update(workerTask.id, { githubRepo });
+        workerTask.githubRepo = githubRepo;
+      }
+
+      const issueKey = `QT-${cardNumber}`;
+      logger.info("Created Quick Task card and worker task", {
+        issueKey,
+        cardId: card.id,
+        taskId: workerTask.id,
+        boardId: board.id,
+        orgId: org.id,
+      });
+
+      res.status(201).json({
+        taskId: workerTask.id,
+        issueKey,
+        boardId: board.id,
+        cardId: card.id,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error("Error creating run-file task", { error: msg });
+      res.status(500).json({ error: `Failed to create task: ${msg}` });
+    }
+  },
 );
 
 /**

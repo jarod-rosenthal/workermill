@@ -591,7 +591,7 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 | `orchestrator.ts` | Poll loop, system control (start/stop/status) |
 | `settings.ts` | Organization settings CRUD |
 | `organizations.ts` | Org management (create, list, switch) |
-| `billing.ts` | Stripe billing (Free/Pro/Enterprise plans) |
+| `billing.ts` | Stripe billing (Pro/Max/Enterprise plans) |
 | `coordination.ts` | Multi-worker file locking and task communication |
 | `issues.ts` | Jira issue search and project listing (used by VS Code extension) |
 | `boards.ts` | Kanban boards CRUD — cards, columns, labels, checklists |

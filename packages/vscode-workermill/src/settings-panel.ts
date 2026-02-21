@@ -11,6 +11,13 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as https from "https";
+import { execFileSync } from "child_process";
+import {
+  stopAgentProcess,
+  startAgentProcess,
+  waitForAgentReady,
+  getAgentBinaryPath,
+} from "./agent-installer";
 
 function readAgentConfig(): { apiUrl: string; apiKey: string } | null {
   try {
@@ -107,6 +114,18 @@ export class SettingsPanel {
     this.panel.webview.html = this.getHtml();
 
     this.panel.webview.onDidReceiveMessage(async (msg) => {
+      // Sandbox operations use local config only — no cloud API needed
+      if (msg.type === "load-sandbox") {
+        await this.loadSandbox();
+        return;
+      } else if (msg.type === "toggle-sandbox") {
+        await this.toggleSandbox(msg.enabled);
+        return;
+      } else if (msg.type === "pull-sandbox-image") {
+        this.pullSandboxImage();
+        return;
+      }
+
       const config = readAgentConfig();
       if (!config) {
         this.postMessage({ type: "error", message: "Agent not configured. Please sign in first." });
@@ -199,6 +218,97 @@ export class SettingsPanel {
     } catch (err) {
       this.postMessage({ type: "error", message: `Could not save tracker: ${err instanceof Error ? err.message : String(err)}` });
     }
+  }
+
+  private async loadSandbox(): Promise<void> {
+    const configPath = path.join(os.homedir(), ".workermill", "config.json");
+    let sandbox: string = "none";
+    try {
+      const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      if (raw.sandbox === "docker") sandbox = "docker";
+    } catch {
+      /* no config */
+    }
+
+    let dockerAvailable = false;
+    try {
+      execFileSync("docker", ["version"], { timeout: 5000, stdio: "ignore" });
+      dockerAvailable = true;
+    } catch {
+      /* Docker not available */
+    }
+
+    this.postMessage({
+      type: "sandbox-loaded",
+      sandbox,
+      dockerAvailable,
+    });
+  }
+
+  private async toggleSandbox(enabled: boolean): Promise<void> {
+    if (enabled) {
+      try {
+        execFileSync("docker", ["version"], { timeout: 5000, stdio: "ignore" });
+      } catch {
+        this.postMessage({
+          type: "sandbox-updated",
+          sandbox: "none",
+          error: "Docker is not installed or not running. Please install Docker and try again.",
+        });
+        return;
+      }
+    }
+
+    const configPath = path.join(os.homedir(), ".workermill", "config.json");
+    let config: Record<string, unknown> = {};
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    } catch {
+      /* no config */
+    }
+
+    if (enabled) {
+      config.sandbox = "docker";
+    } else {
+      delete config.sandbox;
+    }
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+
+    this.postMessage({ type: "sandbox-restarting" });
+
+    try {
+      await stopAgentProcess();
+      startAgentProcess();
+      const port = await waitForAgentReady(undefined, 20_000);
+      if (port) {
+        this.postMessage({
+          type: "sandbox-updated",
+          sandbox: enabled ? "docker" : "none",
+        });
+      } else {
+        this.postMessage({
+          type: "sandbox-updated",
+          sandbox: enabled ? "docker" : "none",
+          error: "Agent restarted but did not become ready. Check agent logs.",
+        });
+      }
+    } catch (err) {
+      this.postMessage({
+        type: "sandbox-updated",
+        sandbox: enabled ? "docker" : "none",
+        error: `Agent restart failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  private pullSandboxImage(): void {
+    const binary = getAgentBinaryPath();
+    const terminal = vscode.window.createTerminal({
+      name: "Pull Sandbox Image",
+      iconPath: new vscode.ThemeIcon("cloud-download"),
+    });
+    terminal.show();
+    terminal.sendText(`"${binary}" pull`);
   }
 
   private async testJira(config: { apiUrl: string; apiKey: string }): Promise<void> {
@@ -415,6 +525,24 @@ export class SettingsPanel {
       <div class="hint" style="margin-top: 8px;">Manage SCM tokens in <button class="btn-link" id="btn-web-settings-scm">web settings</button>.</div>
     </div>
 
+    <!-- Docker Sandbox -->
+    <div class="section">
+      <h2>Docker Sandbox</h2>
+      <p>Run AI workers inside Docker containers for filesystem and network isolation.</p>
+      <div id="sandbox-status" class="status"></div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="sandbox-toggle" disabled />
+          Enable Docker sandbox mode
+        </label>
+        <div class="hint">Requires Docker installed and running. Workers will run in containers instead of native processes.</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-secondary" id="btn-pull-image">Pull Latest Image</button>
+      </div>
+      <div id="sandbox-pull-status" class="status"></div>
+    </div>
+
     <!-- Account -->
     <div class="section">
       <h2>Account</h2>
@@ -482,6 +610,16 @@ export class SettingsPanel {
     });
     document.getElementById("btn-dashboard-boards").addEventListener("click", () => {
       vscode.postMessage({ type: "open-dashboard" });
+    });
+
+    // Sandbox toggle
+    const sandboxToggle = document.getElementById("sandbox-toggle");
+    const sandboxStatus = document.getElementById("sandbox-status");
+    sandboxToggle.addEventListener("change", () => {
+      vscode.postMessage({ type: "toggle-sandbox", enabled: sandboxToggle.checked });
+    });
+    document.getElementById("btn-pull-image").addEventListener("click", () => {
+      vscode.postMessage({ type: "pull-sandbox-image" });
     });
 
     function badge(configured) {
@@ -557,10 +695,37 @@ export class SettingsPanel {
       if (msg.type === "test-error") {
         showStatus(jiraStatus, "error", msg.message);
       }
+
+      // Sandbox messages
+      if (msg.type === "sandbox-loaded") {
+        sandboxToggle.checked = msg.sandbox === "docker";
+        if (msg.dockerAvailable) {
+          sandboxToggle.disabled = false;
+          showStatus(sandboxStatus, "info", msg.sandbox === "docker" ? "Docker sandbox is active" : "Docker is available");
+        } else {
+          sandboxToggle.disabled = true;
+          showStatus(sandboxStatus, "error", "Docker not detected — install Docker to enable sandbox mode");
+        }
+      }
+      if (msg.type === "sandbox-restarting") {
+        sandboxToggle.disabled = true;
+        showStatus(sandboxStatus, "info", "Restarting agent...");
+      }
+      if (msg.type === "sandbox-updated") {
+        sandboxToggle.disabled = false;
+        sandboxToggle.checked = msg.sandbox === "docker";
+        if (msg.error) {
+          showStatus(sandboxStatus, "error", msg.error);
+        } else {
+          showStatus(sandboxStatus, "success", msg.sandbox === "docker" ? "Docker sandbox enabled — agent restarted" : "Docker sandbox disabled — agent restarted");
+          setTimeout(() => { sandboxStatus.className = "status"; }, 5000);
+        }
+      }
     });
 
     // Initial load
     vscode.postMessage({ type: "load-integrations" });
+    vscode.postMessage({ type: "load-sandbox" });
   </script>
 </body>
 </html>`;

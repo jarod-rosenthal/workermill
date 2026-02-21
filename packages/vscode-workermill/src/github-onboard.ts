@@ -13,10 +13,15 @@
 
 import * as vscode from "vscode";
 import * as https from "https";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import { execFileSync } from "child_process";
 import {
   isAgentInstalled,
   installAgent,
   startAgentProcess,
+  stopAgentProcess,
   writeAgentConfig,
   waitForAgentReady,
   promptInstallGit,
@@ -179,7 +184,50 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
   // Claude CLI check — fire-and-forget, not blocking (soft dependency)
   promptInstallClaudeCli(log);
 
+  // Optional: offer Docker sandbox mode if Docker is available
+  if (checkDockerAvailable()) {
+    const enableSandbox = await vscode.window.showInformationMessage(
+      "Docker detected! Enable sandbox mode to run AI workers in isolated containers?",
+      "Enable Docker Sandbox",
+      "Skip (Use Native)",
+    );
+    if (enableSandbox === "Enable Docker Sandbox") {
+      enableDockerSandbox(log);
+      log("Restarting agent with Docker sandbox...");
+      await stopAgentProcess();
+      startAgentProcess(log);
+      const dockerPort = await waitForAgentReady(log);
+      if (!dockerPort) {
+        vscode.window.showWarningMessage(
+          "Agent restart with Docker sandbox failed. Check agent logs and try enabling sandbox in Settings.",
+        );
+      }
+    }
+  }
+
   return true;
+}
+
+function checkDockerAvailable(): boolean {
+  try {
+    execFileSync("docker", ["version"], { timeout: 5000, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function enableDockerSandbox(log?: (msg: string) => void): void {
+  const configPath = path.join(os.homedir(), ".workermill", "config.json");
+  let config: Record<string, unknown> = {};
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  } catch {
+    /* no existing config */
+  }
+  config.sandbox = "docker";
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+  log?.("Docker sandbox enabled in config");
 }
 
 /**

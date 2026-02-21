@@ -20,6 +20,7 @@ export interface AgentStatus {
   apiUrl: string;
   uptime: number;
   tasks: TaskInfo[];
+  sandbox?: "none" | "docker";
 }
 
 export interface TaskInfo {

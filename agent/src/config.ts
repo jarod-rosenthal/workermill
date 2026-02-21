@@ -179,7 +179,7 @@ function findOnFreshWindowsPath(name: string): string | null {
     const sysOut = execFileSync(
       "reg",
       ["query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment", "/v", "Path"],
-      { encoding: "utf-8", timeout: 5000 },
+      { encoding: "utf-8", timeout: 5000, windowsHide: true },
     );
     const match = sysOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
     if (match) allDirs.push(...match[1].trim().split(";").filter(Boolean));
@@ -190,7 +190,7 @@ function findOnFreshWindowsPath(name: string): string | null {
     const userOut = execFileSync(
       "reg",
       ["query", "HKCU\\Environment", "/v", "Path"],
-      { encoding: "utf-8", timeout: 5000 },
+      { encoding: "utf-8", timeout: 5000, windowsHide: true },
     );
     const match = userOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
     if (match) allDirs.push(...match[1].trim().split(";").filter(Boolean));
@@ -219,7 +219,7 @@ export function findGitPath(): string | null {
   // Check PATH first
   try {
     const cmd = isWin ? "where" : "which";
-    const resolved = execSync(`${cmd} ${name}`, { encoding: "utf-8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"] }).trim().split("\n")[0];
+    const resolved = execSync(`${cmd} ${name}`, { encoding: "utf-8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim().split("\n")[0];
     if (resolved && existsSync(resolved)) return resolved;
   } catch { /* not on PATH */ }
 
@@ -258,7 +258,7 @@ export function findClaudePath(): string | null {
 
   // Check PATH first — return absolute path for SDK compatibility
   try {
-    const resolved = execSync(`${which} claude`, { encoding: "utf-8", timeout: 10000 }).trim().split("\n")[0];
+    const resolved = execSync(`${which} claude`, { encoding: "utf-8", timeout: 10000, windowsHide: true }).trim().split("\n")[0];
     if (resolved && existsSync(resolved)) return resolved;
     return "claude"; // fallback to bare name if resolution fails
   } catch { /* not in PATH */ }
@@ -320,7 +320,7 @@ export function checkPrerequisites(): PrerequisiteResult[] {
   const gitPath = findGitPath();
   if (gitPath) {
     try {
-      const version = execSync(`"${gitPath}" --version`, { encoding: "utf-8", timeout: 10000 }).trim();
+      const version = execSync(`"${gitPath}" --version`, { encoding: "utf-8", timeout: 10000, windowsHide: true }).trim();
       results.push({ name: "Git", ok: true, detail: version });
     } catch {
       results.push({ name: "Git", ok: true, detail: gitPath });
@@ -333,7 +333,7 @@ export function checkPrerequisites(): PrerequisiteResult[] {
   const claudePath = findClaudePath();
   if (claudePath) {
     try {
-      const version = execSync(`"${claudePath}" --version`, { encoding: "utf-8", timeout: 10000 }).trim();
+      const version = execSync(`"${claudePath}" --version`, { encoding: "utf-8", timeout: 10000, windowsHide: true }).trim();
       results.push({ name: "Claude CLI", ok: true, detail: version });
     } catch {
       results.push({ name: "Claude CLI", ok: true, detail: claudePath });
@@ -397,6 +397,7 @@ export function getSystemInfo(): {
       claudeVersion = execSync(`"${claudeBin}" --version`, {
         encoding: "utf-8",
         timeout: 10000,
+        windowsHide: true,
       }).trim();
     } catch {
       /* ignore */
@@ -416,7 +417,7 @@ export function getSystemInfo(): {
  */
 export function checkDockerAvailable(): boolean {
   try {
-    execSync("docker version", { stdio: "ignore", timeout: 10000 });
+    execSync("docker version", { stdio: "ignore", timeout: 10000, windowsHide: true });
     return true;
   } catch {
     return false;

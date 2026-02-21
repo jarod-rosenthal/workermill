@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
-import { AlertTriangle, CheckCircle, X, Ticket, GitBranch, Bot, ArrowRight, Loader2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { AlertTriangle, CheckCircle, X, Ticket, GitBranch, Bot, ArrowRight, Loader2, LayoutGrid } from "lucide-react";
+import { useAuthStore } from "../store/auth-store";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -21,14 +23,13 @@ interface SetupStatus {
   totalSteps: number;
 }
 
-interface SetupBannerProps {
-  onContinueSetup?: () => void;
-}
-
-export function SetupBanner({ onContinueSetup }: SetupBannerProps) {
+export function SetupBanner() {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [dismissed, setDismissed] = useState(false);
+  const navigate = useNavigate();
+  const organization = useAuthStore((state) => state.organization);
+  const isFreePlan = !organization?.plan || organization.plan === "free";
 
   useEffect(() => {
     fetchSetupStatus();
@@ -84,14 +85,16 @@ export function SetupBanner({ onContinueSetup }: SetupBannerProps) {
       }
       const aiProviderConfigured = configuredProviders.length > 0;
 
-      // Calculate completion
+      // Calculate completion based on plan
+      // Free tier: SCM is the only required step (Anthropic via Claude Max, no API key needed)
+      // Pro tier: SCM + AI Provider required
+      // Issue tracker is always optional (internal board is the fallback)
       let completedSteps = 0;
-      if (issueTrackerConfigured) completedSteps++;
+      let totalSteps = isFreePlan ? 1 : 2;
       if (scmConfigured) completedSteps++;
-      if (aiProviderConfigured) completedSteps++;
+      if (!isFreePlan && aiProviderConfigured) completedSteps++;
 
-      const totalSteps = 3;
-      const complete = completedSteps === totalSteps;
+      const complete = completedSteps >= totalSteps;
 
       setStatus({
         issueTracker: { configured: issueTrackerConfigured, provider: issueTrackerProvider },
@@ -125,7 +128,7 @@ export function SetupBanner({ onContinueSetup }: SetupBannerProps) {
               Complete your setup to start using AI workers
             </h3>
             <p className="text-sm text-muted-foreground mb-4">
-              {status.completedSteps} of {status.totalSteps} integrations configured.
+              {status.completedSteps} of {status.totalSteps} required integration{status.totalSteps !== 1 ? "s" : ""} configured.
               Complete the remaining steps to run your first workload.
             </p>
 
@@ -142,27 +145,30 @@ export function SetupBanner({ onContinueSetup }: SetupBannerProps) {
             {/* Checklist */}
             <div className="space-y-2 mb-4">
               <SetupCheckItem
-                label="Issue Tracker"
-                description={status.issueTracker.configured ? `Connected to ${status.issueTracker.provider}` : "Connect Jira or Linear"}
-                configured={status.issueTracker.configured}
-                icon={Ticket}
-              />
-              <SetupCheckItem
                 label="Source Control"
-                description={status.scm.configured ? `Connected to ${status.scm.provider}` : "Connect GitHub or Bitbucket"}
+                description={status.scm.configured ? `Connected to ${status.scm.provider}` : "Connect GitHub, Bitbucket, or GitLab"}
                 configured={status.scm.configured}
                 icon={GitBranch}
               />
+              {!isFreePlan && (
+                <SetupCheckItem
+                  label="AI Provider"
+                  description={status.aiProvider.configured ? `Configured: ${status.aiProvider.providers.join(", ")}` : "Configure Anthropic, OpenAI, or Google"}
+                  configured={status.aiProvider.configured}
+                  icon={Bot}
+                />
+              )}
               <SetupCheckItem
-                label="AI Provider"
-                description={status.aiProvider.configured ? `Configured: ${status.aiProvider.providers.join(", ")}` : "Configure Anthropic, OpenAI, or Google"}
-                configured={status.aiProvider.configured}
-                icon={Bot}
+                label="Issue Tracker"
+                description={status.issueTracker.configured ? `Connected to ${status.issueTracker.provider}` : "Using internal board"}
+                configured={true}
+                icon={status.issueTracker.configured ? Ticket : LayoutGrid}
+                optional={!status.issueTracker.configured}
               />
             </div>
 
             <button
-              onClick={onContinueSetup}
+              onClick={() => navigate("/settings")}
               className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 text-black font-medium rounded-lg hover:bg-amber-400 transition-colors"
             >
               Continue Setup
@@ -187,9 +193,10 @@ interface SetupCheckItemProps {
   description: string;
   configured: boolean;
   icon: React.ComponentType<{ className?: string }>;
+  optional?: boolean;
 }
 
-function SetupCheckItem({ label, description, configured, icon: Icon }: SetupCheckItemProps) {
+function SetupCheckItem({ label, description, configured, icon: Icon, optional }: SetupCheckItemProps) {
   return (
     <div className="flex items-center gap-3">
       <div
@@ -198,15 +205,18 @@ function SetupCheckItem({ label, description, configured, icon: Icon }: SetupChe
         }`}
       >
         {configured ? (
-          <CheckCircle className="w-4 h-4 text-green-500" />
+          <CheckCircle className={`w-4 h-4 ${optional ? "text-green-500/60" : "text-green-500"}`} />
         ) : (
           <Icon className="w-3 h-3 text-muted-foreground" />
         )}
       </div>
       <div className="flex-1">
-        <span className={`text-sm ${configured ? "text-muted-foreground line-through" : "text-foreground"}`}>
+        <span className={`text-sm ${configured && !optional ? "text-muted-foreground line-through" : "text-foreground"}`}>
           {label}
         </span>
+        {optional && (
+          <span className="text-xs text-muted-foreground/70 ml-1.5">Optional</span>
+        )}
         <span className="text-xs text-muted-foreground ml-2">{description}</span>
       </div>
     </div>
@@ -214,13 +224,12 @@ function SetupCheckItem({ label, description, configured, icon: Icon }: SetupChe
 }
 
 // Compact version for sidebar or smaller areas
-interface SetupProgressProps {
-  onContinueSetup?: () => void;
-}
-
-export function SetupProgress({ onContinueSetup }: SetupProgressProps) {
+export function SetupProgress() {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const organization = useAuthStore((state) => state.organization);
+  const isFreePlan = !organization?.plan || organization.plan === "free";
 
   useEffect(() => {
     fetchSetupStatus();
@@ -230,12 +239,10 @@ export function SetupProgress({ onContinueSetup }: SetupProgressProps) {
     try {
       const token = localStorage.getItem("accessToken");
 
-      // Fetch integrations status from existing endpoint
       const integrationsResponse = await fetch(`${API_BASE}/api/settings/integrations`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      // Fetch providers status from existing endpoint
       const providersResponse = await fetch(`${API_BASE}/api/settings/providers`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -247,32 +254,27 @@ export function SetupProgress({ onContinueSetup }: SetupProgressProps) {
       const integrations = await integrationsResponse.json();
       const providersData = await providersResponse.json();
 
-      // Determine issue tracker status
       const jiraConfigured = integrations.jira?.configured || false;
       const linearConfigured = integrations.linear?.configured || false;
       const issueTrackerConfigured = jiraConfigured || linearConfigured;
 
-      // Determine SCM status
       const githubConfigured = integrations.github?.configured || false;
       const bitbucketConfigured = integrations.bitbucket?.configured || false;
       const gitlabConfigured = integrations.gitlab?.configured || false;
       const scmConfigured = githubConfigured || bitbucketConfigured || gitlabConfigured;
 
-      // Determine AI provider status
       const providers = providersData.providers || [];
       const aiProviderConfigured = providers.some(
         (p: { id: string; configured: boolean }) =>
-          p.configured && ["anthropic", "openai", "google"].includes(p.id)
+          p.configured && ["anthropic", "openai", "google"].includes(p.id),
       );
 
-      // Calculate completion
       let completedSteps = 0;
-      if (issueTrackerConfigured) completedSteps++;
+      const totalSteps = isFreePlan ? 1 : 2;
       if (scmConfigured) completedSteps++;
-      if (aiProviderConfigured) completedSteps++;
+      if (!isFreePlan && aiProviderConfigured) completedSteps++;
 
-      const totalSteps = 3;
-      const complete = completedSteps === totalSteps;
+      const complete = completedSteps >= totalSteps;
 
       setStatus({
         issueTracker: { configured: issueTrackerConfigured, provider: null },
@@ -306,7 +308,7 @@ export function SetupProgress({ onContinueSetup }: SetupProgressProps) {
 
   return (
     <button
-      onClick={onContinueSetup}
+      onClick={() => navigate("/settings")}
       className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 transition-colors w-full text-left"
     >
       <AlertTriangle className="w-4 h-4 text-amber-500" />

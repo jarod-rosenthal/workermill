@@ -5,7 +5,6 @@ import { AuthCallback } from "./pages/AuthCallback";
 import { MicrosoftCallback } from "./pages/MicrosoftCallback";
 import { GitHubCallback } from "./pages/GitHubCallback";
 import Dashboard from "./pages/Dashboard";
-import SetupWizard from "./pages/SetupWizard";
 import Profile from "./pages/Profile";
 import Settings from "./pages/settings";
 import LandingV0 from "./pages/LandingV0";
@@ -243,14 +242,6 @@ function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/setup"
-            element={
-              <ProtectedRoute>
-                <SetupWizard />
               </ProtectedRoute>
             }
           />

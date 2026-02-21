@@ -309,11 +309,6 @@ export const MODEL_OPTIONS = [
     shortLabel: "Opus 4.6",
   },
   {
-    value: "claude-sonnet-5-20260203",
-    label: "Claude Sonnet 5",
-    shortLabel: "Sonnet 5",
-  },
-  {
     value: "claude-sonnet-4-6",
     label: "Claude Sonnet 4.6",
     shortLabel: "Sonnet 4.6",

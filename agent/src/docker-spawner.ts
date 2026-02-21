@@ -493,6 +493,7 @@ export async function spawnDockerWorker(
   const proc = spawn("docker", dockerArgs, {
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,
+    windowsHide: true,
   });
 
   if (!proc.pid) {

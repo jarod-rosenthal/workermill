@@ -130,6 +130,7 @@ export function restartAgent(): never {
   const child = spawn(process.execPath, process.argv.slice(1), {
     stdio: "inherit",
     detached: true,
+    windowsHide: true,
   });
 
   child.unref();

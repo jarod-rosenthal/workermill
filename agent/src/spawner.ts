@@ -350,6 +350,7 @@ export async function spawnWorker(
     cwd: workDir,
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,
+    windowsHide: true,
   });
 
   if (!proc.pid) {
@@ -643,6 +644,7 @@ export async function spawnManagerWorker(
     cwd: workDir,
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,
+    windowsHide: true,
   });
 
   if (!proc.pid) {

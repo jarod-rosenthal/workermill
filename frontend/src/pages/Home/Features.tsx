@@ -17,13 +17,13 @@ const valueProps = [
   },
   {
     icon: Wallet,
-    title: "Free to start. No credit card.",
+    title: "Start building today. From $19/mo.",
     description:
-      "Already have an Anthropic account? WorkerMill turns it into an AI engineering team at $0 cost. Start free with local execution, upgrade for parallel experts and team features.",
+      "Already have an Anthropic account? WorkerMill turns it into an AI engineering team. Start with Pro for local execution, upgrade to Max for parallel experts and cloud features.",
     bullets: [
-      "Free tier: Local execution + your Anthropic account = $0",
+      "Pro: Local execution + your Anthropic account from $19/mo",
       "Tech lead review included on every plan",
-      "Upgrade for parallel execution and cloud",
+      "Upgrade to Max for parallel execution and cloud",
       "BYOK: Bring your own API key, zero markup",
     ],
     visual: "subscription",

@@ -100,7 +100,7 @@ export default function Dashboard() {
   const logout = useAuthStore((state) => state.logout);
   const _user = useAuthStore((state) => state.user);
   const organization = useAuthStore((state) => state.organization);
-  const isFreePlan = !organization?.plan || organization.plan === "free";
+  const isProPlan = !organization?.plan || organization.plan === "pro";
 
   // Coordination store for blocker alerts
   const coordinationMessages = useCoordinationStore((s) => s.messages);
@@ -243,7 +243,7 @@ export default function Dashboard() {
 
   // Action buttons state
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
-  const [taskSource, setTaskSource] = useState<"external" | "internal">(isFreePlan ? "internal" : "external");
+  const [taskSource, setTaskSource] = useState<"external" | "internal">(isProPlan ? "internal" : "external");
   const [createTaskForm, setCreateTaskForm] = useState({
     jiraIssueKey: "",
     workerPersona: "", // Empty = auto/dynamic routing (Epic/Multi-Provider modes)
@@ -2234,13 +2234,13 @@ export default function Dashboard() {
               >
                 <Zap className="w-4 h-4 text-green-500" />
                 <span className="text-sm font-medium">Insights</span>
-                {isFreePlan && <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full">PRO</span>}
+                {isProPlan && <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full">MAX</span>}
                 <ChevronDown className={`w-3 h-3 transition-transform ${isEfficiencyDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
               {isEfficiencyDropdownOpen && (
                 <div className="absolute right-0 top-full mt-2 w-48 rounded-xl bg-card border border-border shadow-xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                   <div className="py-1">
-                    {isFreePlan ? (
+                    {isProPlan ? (
                       <>
                         <Link
                           to="/pricing"
@@ -2249,7 +2249,7 @@ export default function Dashboard() {
                         >
                           <BarChart3 className="w-4 h-4 text-green-500/50" />
                           Analytics
-                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">PRO</span>
+                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">MAX</span>
                         </Link>
                         <Link
                           to="/pricing"
@@ -2258,7 +2258,7 @@ export default function Dashboard() {
                         >
                           <DollarSign className="w-4 h-4 text-emerald-500/50" />
                           Cost Intelligence
-                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">PRO</span>
+                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">MAX</span>
                         </Link>
                         <Link
                           to="/pricing"
@@ -2267,7 +2267,7 @@ export default function Dashboard() {
                         >
                           <Brain className="w-4 h-4 text-purple-500/50" />
                           Memory Management
-                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">PRO</span>
+                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">MAX</span>
                         </Link>
                         <Link
                           to="/pricing"
@@ -2276,7 +2276,7 @@ export default function Dashboard() {
                         >
                           <BookOpen className="w-4 h-4 text-blue-500/50" />
                           Skill Library
-                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">PRO</span>
+                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">MAX</span>
                         </Link>
                         <Link
                           to="/pricing"
@@ -2285,7 +2285,7 @@ export default function Dashboard() {
                         >
                           <Target className="w-4 h-4 text-rose-500/50" />
                           Directive Analytics
-                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">PRO</span>
+                          <span className="text-[10px] font-semibold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full ml-auto">MAX</span>
                         </Link>
                       </>
                     ) : (
@@ -2471,9 +2471,9 @@ export default function Dashboard() {
               <div className="flex items-center gap-2">
                 {/* Local Mode Toggle - auto-detects remote agent, shows connection status */}
                 {(() => {
-                  const isEffectivelyLocal = isFreePlan || remoteAgentOnly || (hasRemoteAgent && remoteAgentOnline);
-                  const connectionLost = !isFreePlan && hasRemoteAgent && !remoteAgentOnline && !remoteAgentOnly;
-                  const label = isFreePlan
+                  const isEffectivelyLocal = isProPlan || remoteAgentOnly || (hasRemoteAgent && remoteAgentOnline);
+                  const connectionLost = !isProPlan && hasRemoteAgent && !remoteAgentOnline && !remoteAgentOnly;
+                  const label = isProPlan
                     ? "Local ON"
                     : connectionLost
                       ? "Local (Disconnected)"
@@ -2485,7 +2485,7 @@ export default function Dashboard() {
                     : isEffectivelyLocal
                       ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/50"
                       : "bg-muted/50 text-muted-foreground border border-border hover:border-cyan-500/30";
-                  const title = isFreePlan
+                  const title = isProPlan
                     ? "Local mode — tasks run on your remote agent"
                     : connectionLost
                       ? `Remote agent ${remoteAgentHostname || "unknown"} is offline — last heartbeat stale`
@@ -2495,9 +2495,9 @@ export default function Dashboard() {
 
                   return (
                     <button
-                      onClick={isFreePlan ? undefined : toggleLocalMode}
-                      disabled={isFreePlan || autoToggleLoading === "localMode"}
-                      className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${colorClass} ${isFreePlan || autoToggleLoading === "localMode" ? "opacity-50 cursor-not-allowed" : ""}`}
+                      onClick={isProPlan ? undefined : toggleLocalMode}
+                      disabled={isProPlan || autoToggleLoading === "localMode"}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${colorClass} ${isProPlan || autoToggleLoading === "localMode" ? "opacity-50 cursor-not-allowed" : ""}`}
                       title={title}
                     >
                       {autoToggleLoading === "localMode" ? (
@@ -2514,81 +2514,81 @@ export default function Dashboard() {
 
                 {/* PR-Review Toggle */}
                 <button
-                  onClick={isFreePlan ? undefined : toggleAutoReview}
-                  disabled={isFreePlan || autoToggleLoading === "review"}
+                  onClick={isProPlan ? undefined : toggleAutoReview}
+                  disabled={isProPlan || autoToggleLoading === "review"}
                   className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                    isFreePlan || autoReviewEnabled
+                    isProPlan || autoReviewEnabled
                       ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/50"
                       : "bg-muted/50 text-muted-foreground border border-border hover:border-indigo-500/30"
-                  } ${isFreePlan || autoToggleLoading === "review" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  title={isFreePlan ? "PR-Review is always enabled on Free plan" : autoReviewEnabled ? "AI PR review enabled for all tasks" : "Click to enable AI PR review"}
+                  } ${isProPlan || autoToggleLoading === "review" ? "opacity-50 cursor-not-allowed" : ""}`}
+                  title={isProPlan ? "PR-Review is always enabled on Pro plan" : autoReviewEnabled ? "AI PR review enabled for all tasks" : "Click to enable AI PR review"}
                 >
                   {autoToggleLoading === "review" ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   ) : (
                     <Eye className="w-3.5 h-3.5" />
                   )}
-                  PR-Review {isFreePlan ? "ON" : autoReviewEnabled ? "ON" : "OFF"}
+                  PR-Review {isProPlan ? "ON" : autoReviewEnabled ? "ON" : "OFF"}
                 </button>
 
                 {/* Auto-Deploy Toggle */}
                 <button
-                  onClick={isFreePlan ? undefined : toggleAutoDeploy}
-                  disabled={isFreePlan || autoToggleLoading === "deploy"}
+                  onClick={isProPlan ? undefined : toggleAutoDeploy}
+                  disabled={isProPlan || autoToggleLoading === "deploy"}
                   className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                    isFreePlan
+                    isProPlan
                       ? "bg-muted/50 text-muted-foreground border border-border cursor-not-allowed"
                       : autoDeployEnabled
                         ? "bg-green-500/20 text-green-400 border border-green-500/50"
                         : "bg-muted/50 text-muted-foreground border border-border hover:border-green-500/30"
                   } ${autoToggleLoading === "deploy" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  title={isFreePlan ? "Auto-deploy requires Pro plan" : autoDeployEnabled ? "Auto-deploy enabled for all tasks" : "Click to enable auto-deploy"}
+                  title={isProPlan ? "Auto-deploy requires Max plan" : autoDeployEnabled ? "Auto-deploy enabled for all tasks" : "Click to enable auto-deploy"}
                 >
                   {autoToggleLoading === "deploy" ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   ) : (
                     <Rocket className="w-3.5 h-3.5" />
                   )}
-                  Deploy {isFreePlan ? "OFF" : autoDeployEnabled ? "ON" : "OFF"}
-                  {isFreePlan && <Crown className="w-3 h-3 text-amber-400" />}
+                  Deploy {isProPlan ? "OFF" : autoDeployEnabled ? "ON" : "OFF"}
+                  {isProPlan && <Crown className="w-3 h-3 text-amber-400" />}
                 </button>
 
                 {/* Anneal Toggle */}
                 <button
-                  onClick={isFreePlan ? undefined : toggleAutoImprove}
-                  disabled={isFreePlan || autoToggleLoading === "improve"}
+                  onClick={isProPlan ? undefined : toggleAutoImprove}
+                  disabled={isProPlan || autoToggleLoading === "improve"}
                   className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                    isFreePlan
+                    isProPlan
                       ? "bg-muted/50 text-muted-foreground border border-border cursor-not-allowed"
                       : autoImproveEnabled
                         ? "bg-amber-500/20 text-amber-400 border border-amber-500/50"
                         : "bg-muted/50 text-muted-foreground border border-border hover:border-amber-500/30"
                   } ${autoToggleLoading === "improve" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  title={isFreePlan ? "Anneal requires Pro plan" : autoImproveEnabled ? "Anneal enabled - iteratively refines and improves WorkerMill" : "Click to enable annealing"}
+                  title={isProPlan ? "Anneal requires Max plan" : autoImproveEnabled ? "Anneal enabled - iteratively refines and improves WorkerMill" : "Click to enable annealing"}
                 >
                   {autoToggleLoading === "improve" ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   ) : (
                     <Sparkles className="w-3.5 h-3.5" />
                   )}
-                  Anneal {isFreePlan ? "OFF" : autoImproveEnabled ? "ON" : "OFF"}
-                  {isFreePlan && <Crown className="w-3 h-3 text-amber-400" />}
+                  Anneal {isProPlan ? "OFF" : autoImproveEnabled ? "ON" : "OFF"}
+                  {isProPlan && <Crown className="w-3 h-3 text-amber-400" />}
                 </button>
 
                 {/* Search Button */}
                 <button
-                  onClick={isFreePlan ? undefined : () => setIsLogSearchOpen(true)}
-                  disabled={isFreePlan}
+                  onClick={isProPlan ? undefined : () => setIsLogSearchOpen(true)}
+                  disabled={isProPlan}
                   className={`flex items-center gap-2 px-3 py-1.5 bg-background border border-border/50 rounded-lg text-sm transition-colors ${
-                    isFreePlan
+                    isProPlan
                       ? "text-muted-foreground/50 cursor-not-allowed"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                   }`}
-                  title={isFreePlan ? "Search requires Pro plan" : "Search all task logs"}
+                  title={isProPlan ? "Search requires Max plan" : "Search all task logs"}
                 >
                   <Search className="w-4 h-4" />
                   <span>Search tasks and logs...</span>
-                  {isFreePlan && <Crown className="w-3 h-3 text-amber-400" />}
+                  {isProPlan && <Crown className="w-3 h-3 text-amber-400" />}
                 </button>
               </div>
             </div>

@@ -18,11 +18,11 @@ import {
 } from "../../services/external-id.js";
 import { getOrgSecret, saveOrgSecret, secretsClient } from "./helpers.js";
 
-/** Middleware: reject if org's plan doesn't include multiProvider (free = Anthropic only) */
+/** Middleware: reject if org's plan doesn't include multiProvider (Pro = Anthropic only) */
 function requireMultiProvider(req: Request, res: Response, next: () => void) {
-  const features = PLAN_FEATURES[req.organization!.plan as OrganizationPlan] ?? PLAN_FEATURES.free;
+  const features = PLAN_FEATURES[req.organization!.plan as OrganizationPlan] ?? PLAN_FEATURES.pro;
   if (!features.multiProvider) {
-    res.status(403).json({ error: "This integration requires Pro plan or higher." });
+    res.status(403).json({ error: "This integration requires Max plan or higher." });
     return;
   }
   next();
@@ -30,9 +30,9 @@ function requireMultiProvider(req: Request, res: Response, next: () => void) {
 
 /** Middleware: reject if org's plan doesn't include cloudExecution */
 function requireCloudExecution(req: Request, res: Response, next: () => void) {
-  const features = PLAN_FEATURES[req.organization!.plan as OrganizationPlan] ?? PLAN_FEATURES.free;
+  const features = PLAN_FEATURES[req.organization!.plan as OrganizationPlan] ?? PLAN_FEATURES.pro;
   if (!features.cloudExecution) {
-    res.status(403).json({ error: "Cloud provider integrations require Pro plan or higher." });
+    res.status(403).json({ error: "Cloud provider integrations require Max plan or higher." });
     return;
   }
   next();

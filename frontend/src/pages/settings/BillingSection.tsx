@@ -64,7 +64,7 @@ export function BillingSection({
                   </div>
                   <div>
                     <h3 className="font-semibold text-foreground">Current Plan</h3>
-                    <p className="text-sm text-muted-foreground capitalize">{organization?.plan || "Free"} Plan</p>
+                    <p className="text-sm text-muted-foreground capitalize">{organization?.plan || "Pro"} Plan</p>
                   </div>
                 </div>
                 <Link
@@ -313,11 +313,11 @@ export function BillingSection({
                 </div>
                 <div>
                   <h3 className="font-semibold text-foreground">
-                    {(!organization?.plan || organization.plan === "free") ? "Upgrade to Pro" : "Need More Capacity?"}
+                    {(!organization?.plan || organization.plan === "pro") ? "Upgrade to Max" : "Need More Capacity?"}
                   </h3>
                   <p className="text-sm text-muted-foreground">
-                    {(!organization?.plan || organization.plan === "free")
-                      ? "Upgrade to Pro for 5x parallel workers, cloud execution, and team features"
+                    {(!organization?.plan || organization.plan === "pro")
+                      ? "Upgrade to Max for 3x parallel workers, cloud execution, and team features"
                       : "View all plans and upgrade options"}
                   </p>
                 </div>
@@ -326,7 +326,7 @@ export function BillingSection({
                 onClick={handleOpenBillingPortal}
                 className="px-4 py-2 border border-primary text-primary rounded-lg hover:bg-primary/10 inline-flex items-center gap-2 font-medium text-sm"
               >
-                {(!organization?.plan || organization.plan === "free") ? "Upgrade to Pro" : "Manage Plan"}
+                {(!organization?.plan || organization.plan === "pro") ? "Upgrade to Max" : "Manage Plan"}
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>

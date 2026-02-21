@@ -249,7 +249,7 @@ function InstallSection() {
 
         {/* Platform note */}
         <p className="mt-6 text-center text-sm text-slate-500">
-          Runs on macOS, Linux, and Windows &mdash; Free tier requires an{" "}
+          Runs on macOS, Linux, and Windows &mdash; Pro trial requires an{" "}
           <a
             href="https://www.anthropic.com"
             target="_blank"

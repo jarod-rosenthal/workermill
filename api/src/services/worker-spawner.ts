@@ -331,12 +331,12 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
     const orgRepo = AppDataSource.getRepository(Organization);
     const org = await orgRepo.findOne({ where: { id: settingsOrgId } });
 
-    // Enforce plan limits: free plan cannot use cloud execution (ECS)
+    // Enforce plan limits: Pro plan cannot use cloud execution (ECS)
     if (org) {
       const planFeatures =
-        PLAN_FEATURES[org.plan as OrganizationPlan] ?? PLAN_FEATURES.free;
+        PLAN_FEATURES[org.plan as OrganizationPlan] ?? PLAN_FEATURES.pro;
       if (!planFeatures.cloudExecution) {
-        logger.warn("Cloud execution blocked for free plan org", {
+        logger.warn("Cloud execution blocked for plan without cloud access", {
           taskId: task.id,
           orgId: org.id,
           plan: org.plan,

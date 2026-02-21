@@ -417,9 +417,9 @@ router.post(
     });
 
     // Pre-flight: Verify the org has a way to execute tasks
-    const planFeats = PLAN_FEATURES[(org.plan as OrganizationPlan)] ?? PLAN_FEATURES.free;
+    const planFeats = PLAN_FEATURES[(org.plan as OrganizationPlan)] ?? PLAN_FEATURES.pro;
     if (!planFeats.cloudExecution) {
-      // Free tier can only execute via remote agent — check if one is registered
+      // Pro tier can only execute via remote agent — check if one is registered
       const agentRepo = AppDataSource.getRepository(RemoteAgent);
       const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
       const onlineAgent = await agentRepo

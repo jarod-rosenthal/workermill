@@ -9,11 +9,11 @@ interface QualitySectionProps {
   orgPlan?: string;
 }
 
-function ProBadge() {
+function MaxBadge() {
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 rounded-full border border-amber-500/30">
       <Crown className="w-3 h-3" />
-      Pro
+      Max
     </span>
   );
 }
@@ -27,7 +27,7 @@ function LockedOverlay() {
       <div className="flex flex-col items-center gap-1.5">
         <Lock className="w-5 h-5 text-muted-foreground/60 group-hover:text-amber-400 transition-colors" />
         <span className="text-xs text-muted-foreground/80 font-medium group-hover:text-amber-400 transition-colors">
-          Upgrade to Pro
+          Upgrade to Max
         </span>
       </div>
     </Link>
@@ -40,13 +40,13 @@ export function QualitySection({
   validationErrors,
   orgPlan,
 }: QualitySectionProps) {
-  const isFreePlan = !orgPlan || orgPlan === "free";
+  const isProPlan = !orgPlan || orgPlan === "pro";
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <div>
           <h2 className="text-xl font-semibold text-foreground mb-1 flex items-center gap-2">
-            Quality Gates {isFreePlan && <ProBadge />}
+            Quality Gates {isProPlan && <MaxBadge />}
           </h2>
           <p className="text-sm text-muted-foreground">
             Configure quality thresholds to enforce standards before PRs are created
@@ -56,7 +56,7 @@ export function QualitySection({
 
       {/* Master Toggle */}
       <div className="relative">
-        {isFreePlan && <LockedOverlay />}
+        {isProPlan && <LockedOverlay />}
       <div className="bg-card rounded-lg border border-border p-6">
         <div className="flex items-center justify-between">
           <div>
@@ -65,12 +65,12 @@ export function QualitySection({
               Block PR creation when quality thresholds are not met
             </p>
           </div>
-          <label className={`relative inline-flex items-center ${isFreePlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
+          <label className={`relative inline-flex items-center ${isProPlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
             <input
               type="checkbox"
               checked={settings.qualityGateEnabled}
-              onChange={(e) => { if (!isFreePlan) updateSetting("qualityGateEnabled", e.target.checked); }}
-              disabled={isFreePlan}
+              onChange={(e) => { if (!isProPlan) updateSetting("qualityGateEnabled", e.target.checked); }}
+              disabled={isProPlan}
               className="sr-only peer"
             />
             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
@@ -311,21 +311,21 @@ export function QualitySection({
               <div>
                 <span className="text-sm text-foreground">
                   Self-Review
-                  {isFreePlan && (
+                  {isProPlan && (
                     <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 rounded-full border border-amber-500/30">
                       <Crown className="w-3 h-3" />
-                      Pro
+                      Max
                     </span>
                   )}
                 </span>
                 <p className="text-xs text-muted-foreground">Run an extra Claude CLI pass to review each story before merging (adds latency and cost)</p>
               </div>
-              <label className={`relative inline-flex items-center ${isFreePlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
+              <label className={`relative inline-flex items-center ${isProPlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
                 <input
                   type="checkbox"
                   checked={settings.selfReviewEnabled}
-                  onChange={(e) => { if (!isFreePlan) updateSetting("selfReviewEnabled", e.target.checked); }}
-                  disabled={isFreePlan}
+                  onChange={(e) => { if (!isProPlan) updateSetting("selfReviewEnabled", e.target.checked); }}
+                  disabled={isProPlan}
                   className="sr-only peer"
                 />
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>

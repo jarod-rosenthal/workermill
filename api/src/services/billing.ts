@@ -32,8 +32,8 @@ export function isStripeConfigured(): boolean {
 // Price IDs for each plan (configured in Stripe Dashboard)
 // These should be set in environment variables
 const PRICE_IDS: Record<OrganizationPlan, string | null> = {
-  free: null,
-  pro: config.stripe?.prices?.pro || "",
+  pro: null,
+  max: config.stripe?.prices?.max || "",
   enterprise: config.stripe?.prices?.enterprise || null,
 };
 
@@ -198,13 +198,14 @@ export async function handleSubscriptionCreated(
 
   // Map legacy plan names to new tiers
   const legacyPlanMap: Record<string, OrganizationPlan> = {
-    starter: "pro",
-    team: "pro",
-    business: "pro",
+    starter: "max",
+    team: "max",
+    business: "max",
+    free: "pro",
   };
   const newPlan: OrganizationPlan = plan
     ? (legacyPlanMap[plan] || plan) as OrganizationPlan
-    : "pro";
+    : "max";
 
   // Update organization with subscription details — atomic update
   await orgRepo
@@ -354,19 +355,19 @@ export async function handleSubscriptionDeleted(
     return;
   }
 
-  // Downgrade to free plan — atomic update
+  // Downgrade to pro plan — atomic update
   await orgRepo
     .createQueryBuilder()
     .update(Organization)
     .set({
       stripeSubscriptionId: null,
       stripeSubscriptionStatus: null,
-      plan: "free",
+      plan: "pro",
     } as Record<string, unknown>)
     .where("id = :id", { id: org.id })
     .execute();
 
-  logger.info("Subscription deleted, organization downgraded to free", {
+  logger.info("Subscription deleted, organization downgraded to pro", {
     orgId: org.id,
     subscriptionId: subscription.id,
   });
@@ -509,14 +510,15 @@ export async function handleCheckoutSessionCompleted(
 
   // Map legacy plan names to new tiers and set plan
   const legacyPlanMap: Record<string, OrganizationPlan> = {
-    starter: "pro",
-    team: "pro",
-    business: "pro",
+    starter: "max",
+    team: "max",
+    business: "max",
+    free: "pro",
   };
   if (plan) {
     org.plan = (legacyPlanMap[plan] || plan) as OrganizationPlan;
   } else {
-    org.plan = "pro";
+    org.plan = "max";
   }
 
   // Reset usage for new subscription
@@ -580,8 +582,8 @@ export async function canCreateTask(org: Organization): Promise<{
     };
   }
 
-  // Check subscription status for paid plans
-  if (org.plan !== "free" && org.stripeSubscriptionStatus !== "active") {
+  // Check subscription status for paid plans (Max and Enterprise require active subscription)
+  if (org.plan !== "pro" && org.stripeSubscriptionStatus !== "active") {
     return {
       allowed: false,
       reason: "Subscription is not active. Please update your payment method.",

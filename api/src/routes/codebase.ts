@@ -18,12 +18,12 @@ const router = Router();
 router.use(authenticateRequest);
 router.use(requireCurrentTos);
 
-// Block codebase RAG for free plan
+// Block codebase RAG for Pro plan (requires Max or higher)
 router.use((req: Request, res: Response, next) => {
   const plan = req.organization?.plan;
-  if (!plan || plan === "free") {
+  if (!plan || plan === "pro") {
     res.status(403).json({
-      error: "Codebase RAG requires Pro plan or higher.",
+      error: "Codebase RAG requires Max plan or higher.",
     });
     return;
   }

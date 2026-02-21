@@ -51,7 +51,7 @@ async function main() {
   console.log(`Name:      ${org.name}`);
   console.log(`Slug:      ${org.slug || "(not set)"}`);
   console.log(`Created:   ${org.createdAt}`);
-  console.log(`Plan:      ${org.plan || "free"}`);
+  console.log(`Plan:      ${org.plan || "pro"}`);
   console.log(`SCM:       ${org.scmProvider || "github"}`);
 
   // List team members (using legacy orgId field)

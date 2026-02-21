@@ -417,12 +417,12 @@ export default function Settings() {
       if (!response.ok) throw new Error("Failed to load settings");
       const data = await response.json();
       // Clamp values to plan limits (existing DB values may exceed current plan)
-      const orgPlan = organization?.plan || "free";
-      const isOrgFree = orgPlan === "free";
-      const logRetMax = isOrgFree ? 7 : 90;
-      const taskRetMax = isOrgFree ? 7 : 90;
-      const workersMax = isOrgFree ? 1 : 14;
-      const expertsMax = isOrgFree ? 3 : 14;
+      const orgPlan = organization?.plan || "pro";
+      const isProPlan = orgPlan === "pro";
+      const logRetMax = isProPlan ? 14 : 90;
+      const taskRetMax = isProPlan ? 14 : 90;
+      const workersMax = isProPlan ? 1 : 3;
+      const expertsMax = isProPlan ? 3 : 7;
       const loadedSettings: Settings = {
         logRetentionDays: Math.min(data.logRetentionDays ?? 7, logRetMax),
         taskRetentionDays: Math.min(data.taskRetentionDays ?? 7, taskRetMax),
@@ -436,13 +436,13 @@ export default function Settings() {
         providerRouting: data.providerRouting ?? {},
         ollamaBaseUrl: data.ollamaBaseUrl ?? null,
         ollamaContextWindow: data.ollamaContextWindow ?? 65536,
-        managerProvider: isOrgFree ? "anthropic" : (data.managerProvider || "anthropic"),
+        managerProvider: isProPlan ? "anthropic" : (data.managerProvider || "anthropic"),
         managerModelId: data.managerModelId || "claude-opus-4-6",
         maxReviewRevisions: data.maxReviewRevisions ?? 3,
         maxPerStoryRevisions: data.maxPerStoryRevisions ?? 2,
-        planningAgentProvider: isOrgFree ? "anthropic" : (data.planningAgentProvider || "anthropic"),
+        planningAgentProvider: isProPlan ? "anthropic" : (data.planningAgentProvider || "anthropic"),
         planningAgentModel: data.planningAgentModel || "claude-opus-4-6",
-        planningMode: isOrgFree ? "simplified" : (data.planningMode || "simplified"),
+        planningMode: isProPlan ? "simplified" : (data.planningMode || "simplified"),
         storyCalibrationMultiplier: data.storyCalibrationMultiplier ?? 0.4,
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
         dailyBudgetLimitUsd: data.dailyBudgetLimitUsd ?? null,
@@ -466,15 +466,15 @@ export default function Settings() {
         issueTrackerProvider: data.issueTrackerProvider || "internal",
         autoReviewEnabled: data.autoReviewEnabled ?? false,
         autoDeployEnabled: data.autoDeployEnabled ?? false,
-        autoSkillExtraction: isOrgFree ? false : (data.autoSkillExtraction ?? true),
-        prdAutoRun: isOrgFree ? true : (data.prdAutoRun ?? true),
+        autoSkillExtraction: isProPlan ? false : (data.autoSkillExtraction ?? true),
+        prdAutoRun: isProPlan ? true : (data.prdAutoRun ?? true),
         remoteAgentOnly: data.remoteAgentOnly ?? false,
         warmPoolSize: data.warmPoolSize ?? 0,
         warmPoolHoursStart: data.warmPoolHoursStart ?? 9,
         warmPoolHoursEnd: data.warmPoolHoursEnd ?? 18,
         warmPoolTimezone: data.warmPoolTimezone || "America/New_York",
         // Quality Gate settings
-        qualityGateEnabled: isOrgFree ? false : (data.qualityGateEnabled ?? false),
+        qualityGateEnabled: isProPlan ? false : (data.qualityGateEnabled ?? false),
         minQualityScore: data.minQualityScore ?? null,
         minTestCoveragePercent: data.minTestCoveragePercent ?? null,
         maxSecurityHighVulns: data.maxSecurityHighVulns ?? null,
@@ -729,7 +729,7 @@ export default function Settings() {
             percent: data.usage?.percent ?? 0,
             isUnlimited: data.usage?.isUnlimited ?? false,
           },
-          plan: data.plan?.id ?? data.plan ?? "free",
+          plan: data.plan?.id ?? data.plan ?? "pro",
           billingPeriod: {
             start: data.billing?.periodStart ?? null,
             daysUntilReset: data.billing?.daysRemaining ?? 0,
@@ -845,12 +845,12 @@ export default function Settings() {
   // Validation
   const validateSettings = (): boolean => {
     const errors: ValidationErrors = {};
-    const valPlan = organization?.plan || "free";
-    const valFree = valPlan === "free";
-    const valLogMax = valFree ? 7 : 90;
-    const valTaskMax = valFree ? 7 : 90;
-    const valWorkersMax = valFree ? 1 : 14;
-    const valExpertsMax = valFree ? 3 : 14;
+    const valPlan = organization?.plan || "pro";
+    const valProPlan = valPlan === "pro";
+    const valLogMax = valProPlan ? 14 : 90;
+    const valTaskMax = valProPlan ? 14 : 90;
+    const valWorkersMax = valProPlan ? 1 : 3;
+    const valExpertsMax = valProPlan ? 3 : 7;
     if (settings.logRetentionDays !== -1 && (settings.logRetentionDays < 1 || settings.logRetentionDays > valLogMax)) {
       errors.logRetentionDays = `Must be between 1 and ${valLogMax} days`;
     }

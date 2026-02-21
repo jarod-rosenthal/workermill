@@ -15,6 +15,61 @@
 
 ---
 
+## ⛔ Global Worker Constraints — EVERY Card MUST Follow These
+
+**These rules apply to EVERY card in this PRD. Workers MUST follow them on every commit, no exceptions.**
+
+### Pre-Commit Quality Gate (MANDATORY)
+
+Before EVERY `git commit`, workers MUST run the following commands **in this exact order** and fix ALL errors before committing:
+
+```bash
+# Step 1: Auto-fix formatting
+uv run ruff format .
+
+# Step 2: Auto-fix lint errors where possible
+uv run ruff check . --fix
+
+# Step 3: Verify zero lint errors remain
+uv run ruff check .
+
+# Step 4: Verify formatting is clean
+uv run ruff format --check .
+
+# Step 5: Type check (if src/ files were modified)
+uv run mypy src --strict
+```
+
+**If ANY of steps 3-5 produce errors, DO NOT commit.** Fix the errors and re-run from step 1.
+
+**Why this matters:** CI enforces `ruff check .` and `ruff format --check .`. If a worker commits code that violates these checks, CI will fail, the deploy workflow will not run, and the live demo will go down or stay stale. **A broken CI pipeline means a broken showcase.**
+
+### Import Ordering (Critical — Ruff Rule I001)
+
+The `pyproject.toml` enables Ruff rule `I` (isort-compatible import sorting). This means:
+
+- Standard library imports come first (`import os`, `from datetime import datetime`)
+- Third-party imports come second (`import pytest`, `from fastapi import FastAPI`)
+- Local imports come third (`from src.config import settings`)
+- Each group is separated by a blank line
+- Within each group, imports are sorted alphabetically
+
+`ruff format .` does NOT fix import ordering — only `ruff check . --fix` fixes it. **Always run both.**
+
+### Post-Push Verification (MANDATORY)
+
+After every `git push`, workers MUST:
+
+1. Check GitHub Actions CI status (wait for it to complete)
+2. If CI fails: read the failure log, fix the issue, run the pre-commit quality gate again, push the fix
+3. Do NOT move on to the next task until CI is green
+
+### Test File Quality Gate
+
+When creating or modifying test files (`tests/*.py`), the same pre-commit quality gate applies. Test files are linted and format-checked by CI just like source files.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology | Rationale |
@@ -26,7 +81,7 @@
 | Database | PostgreSQL 16 (Neon) | Serverless, full-text search, JSON support |
 | Validation | Pydantic V2 | Fast validation, OpenAPI schema generation |
 | Settings | pydantic-settings | Type-safe env var loading |
-| Auth | python-jose (JWT) + passlib (bcrypt) | Standard JWT implementation |
+| Auth | python-jose (JWT) + bcrypt (direct) | JWT tokens + bcrypt password hashing (do NOT use passlib — incompatible with bcrypt 4+) |
 | Rate Limiting | slowapi | FastAPI-native rate limiting |
 | Testing | pytest + pytest-asyncio + httpx | Async test client for FastAPI |
 | Linting | Ruff | Fast Python linter + formatter |
@@ -233,7 +288,7 @@ dependencies = [
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
     "python-jose[cryptography]>=3.3",
-    "passlib[bcrypt]>=1.7",
+    "bcrypt>=4.0",
     "slowapi>=0.1",
     "python-multipart>=0.0.18",
 ]
@@ -262,6 +317,8 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 
 [tool.coverage.run]
@@ -737,7 +794,7 @@ Still return HTTP 200 — Railway's healthcheck only checks status code. A non-2
 **JWT Implementation Details:**
 - Access token: 30-minute expiry, contains `sub` (user_id), `email`, `role`
 - Refresh token: 7-day expiry, single-use (rotated on refresh)
-- Password hashing: bcrypt with 12 rounds
+- Password hashing: bcrypt directly (`bcrypt.hashpw`/`bcrypt.checkpw`/`bcrypt.gensalt`, do NOT use passlib)
 - API key: 64-char random string with `sk_` prefix, stored as SHA-256 hash
 - Algorithm: HS256
 
@@ -1231,50 +1288,36 @@ jobs:
 
 ### Deploy Pipeline — `.github/workflows/deploy.yml`
 
-Runs on merge to main. Deploys to Railway.
+**CRITICAL: Deploy MUST only run after CI passes.** Uses `workflow_run` trigger to wait for the CI workflow to complete successfully. This prevents deploying broken code that would take the demo offline.
 
 ```yaml
 name: Deploy
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
     branches: [main]
+    types: [completed]
 
 jobs:
   deploy:
-    name: Deploy to Railway
     runs-on: ubuntu-latest
+    # CRITICAL: Only deploy if CI workflow succeeded
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     container: ghcr.io/railwayapp/cli:latest
-
-    env:
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Deploy to Railway
-        run: railway up --service ${{ secrets.RAILWAY_SVC_ID }}
-
-      - name: Wait for deployment
-        run: sleep 60
-
-      - name: Smoke test
-        run: |
-          # Retry health check (Railway deploy takes 1-3 min)
-          for i in 1 2 3 4 5; do
-            curl -f https://shipapi.workermill.com/api/v1/health && break
-            echo "Attempt $i failed, retrying in 30s..."
-            sleep 30
-          done
-
-          # OpenAPI docs accessible
-          curl -f https://shipapi.workermill.com/docs
-          curl -f https://shipapi.workermill.com/redoc
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service shipapi --detach
 ```
 
-> **NOTE**: Railway's `preDeployCommand` in `railway.toml` handles Alembic migrations automatically before the app starts. No separate migration step needed in the deploy workflow.
+> **CRITICAL**: The `workflow_run` trigger with `if: conclusion == 'success'` ensures deploys NEVER happen when CI fails. If CI has ANY failure (lint, format, type check, tests), the deploy job is skipped and the demo stays on the last working version. **This is the deploy's only protection — there are no branch protection rules configured.** If CI is broken, the demo cannot be updated until CI is fixed.
 
-> **NOTE**: The smoke test may need retries because Railway deployments take 1-3 minutes. The `sleep 60` provides buffer. If more sophisticated retry logic is needed, use a loop with `curl --retry`.
+> **NOTE**: Railway's `preDeployCommand` in `railway.toml` handles Alembic migrations automatically before the app starts. No separate migration step needed in the deploy workflow.
 
 ---
 
@@ -1289,6 +1332,128 @@ jobs:
 | Build | Successful Docker build | `docker build .` |
 | Health | Returns 200 | `curl -f https://shipapi.workermill.com/api/v1/health` |
 | Docs | Swagger + ReDoc accessible | `curl -f https://shipapi.workermill.com/docs` |
+
+---
+
+## Known Issues from Build Logs (Post-Mortem)
+
+> **This section documents actual problems encountered during the initial build. Workers executing follow-up cards MUST check for and fix these issues.**
+
+### Issue 1: mypy Errors in `src/database.py` — BLOCKING CI
+
+**Status: UNRESOLVED — currently breaking CI**
+
+After PR #9 merged (CI/CD Pipelines, last successful deploy at 2026-02-20T00:37Z), a subsequent commit introduced 2 mypy errors in `src/database.py`:
+
+```
+src/database.py:10: error: Missing type parameters for generic type "dict"  [type-arg]
+src/database.py:20: error: Missing type parameters for generic type "dict"  [type-arg]
+Found 2 errors in 1 file (checked 43 source files)
+```
+
+These are `dict` type annotations missing type parameters (e.g., `dict` should be `dict[str, Any]`). Since CI runs `mypy src --strict`, these cause the entire CI pipeline to fail, which blocks all deployments.
+
+**Fix:** Change bare `dict` to `dict[str, Any]` (or the appropriate type parameters) in `src/database.py` lines 10 and 20.
+
+### Issue 2: Unsorted Imports in `tests/test_showcase.py` — BLOCKING CI
+
+**Status: UNRESOLVED — currently breaking CI**
+
+PR #11 (Interactive Demo Experience) introduced `tests/test_showcase.py` with an import sorting violation:
+
+```
+tests/test_showcase.py:13: I001 [*] Import block is un-sorted or un-formatted
+  11 |   """
+  12 |
+  13 | / import pytest
+  14 | | from httpx import AsyncClient
+```
+
+The QA engineer who wrote the test file ran ruff only on `src/` files, NOT on `tests/`. CI checks ALL files with `ruff check .`.
+
+**Fix:** Run `uv run ruff check --fix tests/test_showcase.py` to auto-sort the imports.
+
+### Issue 3: passlib/bcrypt 5.x Incompatibility
+
+**Status: RESOLVED in PR #3 — documented for prevention**
+
+`passlib 1.7.4` is incompatible with `bcrypt >= 4.1.0`. The `detect_wrap_bug` test in passlib sends passwords > 72 bytes, which bcrypt 4+ rejects with `ValueError`. This was the single most time-consuming issue across the entire build.
+
+**Resolution:** passlib was replaced entirely with direct `bcrypt` usage (`bcrypt.hashpw`/`checkpw`/`gensalt`).
+
+**PRD Prevention:** The `pyproject.toml` in this PRD specifies `passlib[bcrypt]>=1.7` — this MUST be changed. Use `bcrypt>=4.0` directly instead:
+
+```toml
+# WRONG — causes runtime ValueError
+"passlib[bcrypt]>=1.7",
+
+# RIGHT — direct bcrypt usage
+"bcrypt>=4.0",
+```
+
+### Issue 4: Pre-Existing mypy Errors Accumulated Across Tasks
+
+**Status: PARTIALLY RESOLVED**
+
+From PR #2 onwards, mypy errors in model files (SQLAlchemy forward reference strings, missing `jose` type stubs) accumulated. By PR #4, there were 11 pre-existing errors that every worker documented as "not my code" and left unfixed.
+
+Key error sources:
+- Model files: Forward reference F821 errors in `warehouse.py`, `stock_transfer.py`, `stock_level.py`, `category.py`, `product.py`, `audit_log.py`
+- `src/api/auth.py`: Missing `jose` type stubs (fixed by adding `types-python-jose` to dev deps)
+- FastAPI router decorators: "Untyped decorator" warnings
+
+**PRD Prevention:** The CI pipeline MUST enforce `mypy src --strict` with 0 errors from the FIRST card. Each card must fix any mypy errors it introduces before merging.
+
+### Issue 5: `record_audit` vs `record_audit_log` Naming Mismatch
+
+**Status: FRAGILE WORKAROUND IN PLACE**
+
+`src/services/__init__.py` exports `record_audit`, but the actual function in `src/services/audit.py` is named `record_audit_log`. A QA engineer added an alias (`record_audit = record_audit_log`) as a workaround.
+
+**Fix:** Rename the function to `record_audit` consistently, or update all consumers to use `record_audit_log`.
+
+### Issue 6: Warehouse/Stock Routers Not Mounted
+
+**Status: RESOLVED in PR #8**
+
+PR #5 created `src/api/warehouses.py` and `src/api/stock.py` but did NOT mount them in `src/api/router.py`. This was only discovered in PR #8 when tests needed the endpoints. The test suite worker had to add the 4-line router registration.
+
+**PRD Prevention:** Any card that creates a new router file MUST also update `src/api/router.py` to mount it. The card spec should explicitly list `src/api/router.py` as a target file.
+
+### Issue 7: Event Loop Issues in Test Suite (pytest-asyncio)
+
+**Status: RESOLVED**
+
+Tests using `pytest-asyncio` had event loop lifecycle issues. The fix required setting BOTH config options in `pyproject.toml`:
+
+```toml
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+```
+
+### Issue 8: Coverage.py Underreports Async Code
+
+**Status: KNOWN LIMITATION**
+
+Without `concurrency = ["asyncio"]` in coverage config, per-file coverage for async service functions is misleadingly low (e.g., `src/services/stock.py` shows 27% when tests clearly execute all paths). The overall 88% exceeds the 80% threshold.
+
+**Optional fix:** Add to `pyproject.toml`:
+
+```toml
+[tool.coverage.run]
+source = ["src"]
+concurrency = ["asyncio"]
+```
+
+### Issue 9: Deploy.yml Has No Smoke Test
+
+**Status: GAP**
+
+The actual deployed `deploy.yml` (from PR #9) does NOT include smoke tests. It just runs `railway up --service shipapi --detach` and exits. The PRD specifies smoke tests but the worker didn't implement them.
+
+**Fix:** Add smoke test step after deploy (curl health check + docs endpoints with retry loop).
 
 ---
 
@@ -1452,12 +1617,17 @@ When all work is complete, the following MUST be true:
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
+| **Workers skip `ruff check` on test files** | CI fails, deploy blocked, demo goes down | Global constraint: always run `ruff check .` and `ruff format .` on ALL files (not just `src/`) before every commit |
+| **mypy errors accumulate across multi-card builds** | Later cards inherit unfixed errors; CI fails | Each card MUST leave `mypy src --strict` at 0 errors — fix pre-existing errors if touched |
+| **passlib + bcrypt 4+/5.x incompatibility** | `ValueError` at runtime, auth completely broken | Use `bcrypt` directly (`bcrypt.hashpw`/`checkpw`), NEVER use passlib |
+| **Cross-story naming mismatches** | `ImportError` or fragile aliases | Workers must read sibling files before defining exports; use exact names from existing code |
+| **New routers not mounted in `router.py`** | Endpoints return 404, features silently missing | Any card creating a new router MUST also update `src/api/router.py` |
+| **CI broken = deploy blocked indefinitely** | Demo stays on last working version (or goes down) | deploy.yml uses `workflow_run` with `if: conclusion == 'success'` — fix CI ASAP |
 | Neon free tier compute limit (100 CU-hours/month) | DB goes to sleep, cold start on first request | `pool_pre_ping=True` handles reconnection; health check returns 200 even if DB disconnected |
 | Neon 0.5 GB storage limit | Can't seed if data exceeds limit | 50 products + audit logs is well under 0.5 GB |
 | Railway Hobby plan: 2 custom domain limit | Can't add more subdomains | Only need 1 domain for this project |
 | slowapi in-memory rate limiting | State lost on container restart | Acceptable for single-instance showcase |
 | Railway cold start after inactivity | First request slow (~2-5s) | Health check warms container; Railway keeps containers alive on Hobby plan |
-| No Terraform state to manage | Less infrastructure-as-code showcase value | Trade-off is worth it — dramatically simpler, cheaper, faster to deploy |
 | GitHub Actions CI needs PostgreSQL service | Slower CI (container startup) | PostgreSQL service container starts in ~5s, negligible impact |
 | Neon connection pooling (PgBouncer) + DDL | Migrations fail over pooled connection | Use `DATABASE_URL_DIRECT` for Alembic, `DATABASE_URL` (pooled) for app |
 
@@ -1501,23 +1671,43 @@ The seed script needs to run once against the Neon database after the first depl
 
 Recommended: Make the seed idempotent and run it via a one-time GitHub Actions workflow dispatch, or include it as part of the first deploy's `preDeployCommand` with a guard (e.g., check if admin user exists before seeding).
 
-### CI/CD Iteration Pattern
+### CI/CD Iteration Pattern (MANDATORY)
+
+**Before pushing, workers MUST run the full quality gate locally:**
+
+```
+BEFORE git push:
+  1. uv run ruff format .                    ← Auto-fix formatting
+  2. uv run ruff check . --fix               ← Auto-fix lint errors
+  3. uv run ruff check .                     ← Verify 0 remaining errors
+  4. uv run ruff format --check .            ← Verify formatting is clean
+  5. uv run mypy src --strict                ← Verify 0 type errors
+  6. uv run pytest tests/ -v                 ← Verify tests pass
+  If ANY of steps 3-6 fail, fix and restart from step 1.
+  Only push when ALL 6 steps pass.
+```
+
+**After pushing:**
 
 ```
 Worker pushes code to main branch
   → GitHub Actions triggers CI (ci.yml)
+  → Worker MUST wait for CI to complete (check via GitHub Actions API)
   → If ANY step fails (lint, typecheck, test):
       Worker reads failure output via GitHub Actions API
-      Worker fixes the root cause
-      Worker pushes again
+      Worker fixes the root cause locally
+      Worker runs full quality gate again (steps 1-6 above)
+      Worker pushes fix
       CI loop repeats
   → When CI passes:
-      Deploy workflow (deploy.yml) triggers
+      Deploy workflow (deploy.yml) auto-triggers via workflow_run
       railway up deploys to Railway
       preDeployCommand runs migrations
-      Smoke test verifies health + docs
-  → If smoke test fails:
-      Worker reads failure, fixes, pushes again
-  → When smoke test passes:
-      Deployment complete
+  → Worker verifies deployment:
+      curl -f https://shipapi.workermill.com/api/v1/health
+      curl -f https://shipapi.workermill.com/docs
+  → If health check fails: investigate, fix, push again
+  → When health check passes: Deployment complete
 ```
+
+**CRITICAL:** Workers MUST NOT move on to the next task until CI is green and (if this is the final card) the live URL returns 200. A broken CI blocks ALL future deployments.

@@ -1006,16 +1006,6 @@ router.get(
       return;
     }
 
-    // Reject tasks with empty or trivially short descriptions — planner cannot produce a meaningful plan
-    const descriptionText = (task.description || "").trim();
-    if (descriptionText.length < 20) {
-      res.status(422).json({
-        error: "Task has no requirements. Add a description with acceptance criteria before running.",
-        detail: `Description is ${descriptionText.length === 0 ? "empty" : `only ${descriptionText.length} characters`}. The planner needs a meaningful description to create an execution plan.`,
-      });
-      return;
-    }
-
     // Build planning input from task
     const jiraFields = (task.jiraFields ?? {}) as Record<string, unknown>;
     const isBuildPageTask = jiraFields.buildPage === true;

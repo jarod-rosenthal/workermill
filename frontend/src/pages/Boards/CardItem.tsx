@@ -170,16 +170,16 @@ export default function CardItem({
       {...attributes}
       {...listeners}
       onClick={onClick}
-      className={`group relative rounded-lg border bg-card p-3 cursor-pointer transition-all hover:border-primary/50 hover:shadow-md ${
+      className={`group relative rounded-lg border bg-card p-3 cursor-pointer transition-all duration-150 hover:border-primary/40 hover:shadow-[0_2px_8px_rgba(0,0,0,0.12)] ${
         isDragging
-          ? "opacity-50 shadow-lg border-primary/50 rotate-2"
-          : "border-border"
+          ? "opacity-50 shadow-lg border-primary/50 rotate-2 scale-[1.02]"
+          : "border-border/60 shadow-sm"
       } ${isBlocked ? "opacity-50" : ""}`}
     >
       {/* Blocked indicator */}
       {isBlocked && (
         <div
-          className="absolute top-1 right-1 text-gray-400"
+          className="absolute top-1 right-1 text-muted-foreground"
           title="Blocked by dependencies"
         >
           <Lock className="w-3.5 h-3.5" />
@@ -194,15 +194,25 @@ export default function CardItem({
         />
       )}
 
+      {/* Issue key */}
+      {card.issueKey && (
+        <p className="text-[10px] text-muted-foreground/50 font-mono font-medium mb-1">
+          {card.issueKey}
+        </p>
+      )}
+
+      {/* Title */}
+      <p className="text-[13px] font-medium leading-snug mb-2">{card.title}</p>
+
       {/* Labels */}
       {card.labels && card.labels.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
           {card.labels.map((label) => (
             <span
               key={label.id}
-              className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+              className="text-[11px] font-medium px-1.5 py-0.5 rounded-md"
               style={{
-                backgroundColor: label.color + "30",
+                backgroundColor: label.color + "25",
                 color: label.color,
               }}
             >
@@ -212,15 +222,12 @@ export default function CardItem({
         </div>
       )}
 
-      {/* Title */}
-      <p className="text-sm font-medium leading-snug mb-2">{card.title}</p>
-
       {/* Metadata row */}
       <div className="flex items-center gap-2 flex-wrap">
         {/* Priority */}
         {priority && (
           <span
-            className={`flex items-center gap-0.5 text-[10px] font-medium ${priority.color}`}
+            className={`flex items-center gap-0.5 text-[11px] font-medium ${priority.color}`}
             title={priority.label}
           >
             {priority.icon}
@@ -230,7 +237,7 @@ export default function CardItem({
         {/* Due date */}
         {card.dueDate && (
           <span
-            className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded ${
+            className={`flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded ${
               overdue
                 ? "bg-red-500/15 text-red-400"
                 : "bg-muted text-muted-foreground"
@@ -244,7 +251,7 @@ export default function CardItem({
         {/* Checklist progress */}
         {checklistTotal > 0 && (
           <span
-            className={`flex items-center gap-1 text-[10px] font-medium ${
+            className={`flex items-center gap-1 text-[11px] font-medium ${
               checklistDone === checklistTotal
                 ? "text-green-500"
                 : "text-muted-foreground"
@@ -257,7 +264,7 @@ export default function CardItem({
 
         {/* Comment count */}
         {card.commentCount > 0 && (
-          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <MessageSquare className="w-3 h-3" />
             {card.commentCount}
           </span>
@@ -266,7 +273,7 @@ export default function CardItem({
         {/* Worker status indicator */}
         {card.workerTaskId && (
           <span
-            className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded ${getCardWorkerStatusStyle(card.workerStatus)}`}
+            className={`flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded ${getCardWorkerStatusStyle(card.workerStatus)}`}
           >
             <span
               className={`w-1.5 h-1.5 rounded-full ${getCardWorkerDotStyle(card.workerStatus)}`}
@@ -278,11 +285,29 @@ export default function CardItem({
         {/* Dependency count */}
         {dependencyCount != null && dependencyCount > 0 && (
           <span
-            className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground"
+            className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground"
             title={`${dependencyCount} ${dependencyCount === 1 ? "dependency" : "dependencies"}`}
           >
             <Lock className="w-3 h-3" />
             {dependencyCount}
+          </span>
+        )}
+
+        {/* Spacer to push assignee right */}
+        <span className="flex-1" />
+
+        {/* Assignee avatar */}
+        {card.assigneeName && (
+          <span
+            className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-semibold text-primary flex-shrink-0"
+            title={card.assigneeName}
+          >
+            {card.assigneeName
+              .split(" ")
+              .map((n) => n[0])
+              .join("")
+              .slice(0, 2)
+              .toUpperCase()}
           </span>
         )}
       </div>

@@ -9,7 +9,7 @@ import {
 import { User } from "./User.js";
 import { WorkerTask } from "./WorkerTask.js";
 
-export type OrganizationPlan = "free" | "pro" | "enterprise";
+export type OrganizationPlan = "pro" | "max" | "enterprise";
 
 /**
  * Feature flags for gradual rollout of new features.
@@ -24,36 +24,36 @@ export interface OrganizationFeatureFlags {
 
 // Plan user limits
 export const PLAN_USER_LIMITS: Record<OrganizationPlan, number> = {
-  free: 1,
   pro: 5,
+  max: 25,
   enterprise: -1,  // Unlimited
 };
 
 // Plan prices (monthly, in dollars)
 export const PLAN_PRICES: Record<OrganizationPlan, number> = {
-  free: 0,
-  pro: 29,
+  pro: 19,
+  max: 39,
   enterprise: 0,  // Custom pricing
 };
 
 // Max concurrent worker containers
 export const PLAN_MAX_WORKERS: Record<OrganizationPlan, number> = {
-  free: 1,
-  pro: 5,
+  pro: 1,
+  max: 3,
   enterprise: -1,  // Unlimited
 };
 
 // Max parallel expert personas per task
 export const PLAN_MAX_EXPERTS: Record<OrganizationPlan, number> = {
-  free: 3,
-  pro: -1,   // Unlimited
+  pro: 3,
+  max: 7,
   enterprise: -1,
 };
 
 // Log retention in days (-1 = unlimited)
 export const PLAN_LOG_RETENTION: Record<OrganizationPlan, number> = {
-  free: 7,
-  pro: 90,
+  pro: 14,
+  max: 90,
   enterprise: -1,
 };
 
@@ -72,7 +72,7 @@ export const PLAN_FEATURES: Record<OrganizationPlan, {
   multiProvider: boolean;
   qualityGates: boolean;
 }> = {
-  free: {
+  pro: {
     cloudExecution: false,
     warmPool: false,
     advancedAnalytics: false,
@@ -86,7 +86,7 @@ export const PLAN_FEATURES: Record<OrganizationPlan, {
     multiProvider: false,
     qualityGates: false,
   },
-  pro: {
+  max: {
     cloudExecution: true,
     warmPool: true,
     advancedAnalytics: true,
@@ -127,7 +127,7 @@ export class Organization {
   @Column({ type: "varchar", length: 100, nullable: true, unique: true })
   slug: string | null;
 
-  @Column({ type: "varchar", length: 50, default: "free" })
+  @Column({ type: "varchar", length: 50, default: "pro" })
   plan: OrganizationPlan;
 
   // Stripe Billing
@@ -229,14 +229,14 @@ export class Organization {
   @Column({ name: "cost_reset_at", type: "timestamp", nullable: true })
   costResetAt: Date | null;
 
-  // Data Management Settings (defaults match free tier limits)
+  // Data Management Settings (defaults match Pro tier limits)
   @Column({ name: "log_retention_days", type: "int", default: 7 })
   logRetentionDays: number;
 
   @Column({ name: "task_retention_days", type: "int", default: 7 })
   taskRetentionDays: number;
 
-  // Worker Settings (defaults match free tier limits)
+  // Worker Settings (defaults match Pro tier limits)
   @Column({ name: "max_concurrent_workers", type: "int", default: 1 })
   maxConcurrentWorkers: number;
 

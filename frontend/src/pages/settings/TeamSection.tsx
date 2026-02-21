@@ -55,7 +55,7 @@ export function TeamSection({
   revokingInviteId,
   setShowInviteModal,
 }: TeamSectionProps) {
-  const isFreePlan = !orgPlan || orgPlan === "free";
+  const isProPlan = !orgPlan || orgPlan === "pro";
 
   return (
     <div className="space-y-6">
@@ -64,10 +64,10 @@ export function TeamSection({
           <h2 className="text-xl font-semibold text-foreground mb-1">Team</h2>
           <p className="text-sm text-muted-foreground">Manage your organization&apos;s members</p>
         </div>
-        {isFreePlan ? (
+        {isProPlan ? (
           <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 text-amber-400 text-sm font-medium rounded-lg border border-amber-500/30">
             <Crown className="w-4 h-4" />
-            Upgrade to Pro for up to 15 seats
+            Upgrade to Max for up to 15 seats
           </div>
         ) : (
           <button

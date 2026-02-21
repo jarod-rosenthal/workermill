@@ -76,7 +76,7 @@ export const strictLimiter = rateLimit({
 });
 
 /**
- * Rate limiter for task creation — prevents abuse of the free tier
+ * Rate limiter for task creation — prevents abuse of the Pro tier
  * 20 tasks per hour per user/org
  */
 export const taskCreationLimiter = rateLimit({

@@ -223,13 +223,13 @@ export default function ManagementDashboard() {
 
   const getPlanBadge = (plan: string) => {
     const planColors: Record<string, string> = {
-      free: "bg-gray-500/10 text-gray-500",
-      pro: "bg-purple-500/10 text-purple-500",
+      pro: "bg-gray-500/10 text-gray-500",
+      max: "bg-purple-500/10 text-purple-500",
       enterprise: "bg-amber-500/10 text-amber-500",
     };
 
     return (
-      <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${planColors[plan] || planColors.free}`}>
+      <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${planColors[plan] || planColors.pro}`}>
         {plan}
       </span>
     );

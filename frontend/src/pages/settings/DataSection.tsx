@@ -22,9 +22,9 @@ export function DataSection({
   validationErrors,
   orgPlan,
 }: DataSectionProps) {
-  const isFreePlan = !orgPlan || orgPlan === "free";
-  const logRetentionMax = isFreePlan ? 7 : 90;
-  const taskRetentionMax = isFreePlan ? 7 : 90;
+  const isProPlan = !orgPlan || orgPlan === "pro";
+  const logRetentionMax = isProPlan ? 14 : 90;
+  const taskRetentionMax = isProPlan ? 14 : 90;
   return (
     <div className="space-y-6">
       <div>
@@ -79,7 +79,7 @@ export function DataSection({
                 )}
                 <p className="text-xs text-muted-foreground mt-1">
                   Worker logs older than this are deleted (1-{logRetentionMax})
-                  {isFreePlan && <span className="text-amber-400 ml-1">(max 7 days on Free)</span>}
+                  {isProPlan && <span className="text-amber-400 ml-1">(max 14 days on Pro)</span>}
                 </p>
               </div>
 
@@ -114,7 +114,7 @@ export function DataSection({
                 )}
                 <p className="text-xs text-muted-foreground mt-1">
                   Task records older than this are archived (1-{taskRetentionMax})
-                  {isFreePlan && <span className="text-amber-400 ml-1">(max 7 days on Free)</span>}
+                  {isProPlan && <span className="text-amber-400 ml-1">(max 14 days on Pro)</span>}
                 </p>
               </div>
             </div>

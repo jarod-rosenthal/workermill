@@ -15,13 +15,14 @@ interface FeatureRow {
 
 const features: FeatureRow[] = [
   {
-    feature: "Free tier with local execution",
-    description: "Get started at $0 — bring your own Claude Max and run workers locally",
+    feature: "90-day free trial with local execution",
+    description:
+      "Get started free — bring your own Claude Max and run workers locally",
     workermill: "yes",
     devin: "no",
     copilot: "no",
     cursor: "partial",
-    workermill_note: "$0 forever",
+    workermill_note: "90-day trial",
     devin_note: "$500/seat/mo",
     cursor_note: "Free limited",
   },
@@ -47,11 +48,13 @@ const features: FeatureRow[] = [
   },
   {
     feature: "Multi-provider LLMs",
-    description: "Choose between Claude, GPT, Gemini, Ollama, or bring your own key",
-    workermill: "yes",
+    description:
+      "Choose between Claude, GPT, Gemini, Ollama, or bring your own key",
+    workermill: "partial",
     devin: "no",
     copilot: "yes",
     cursor: "yes",
+    workermill_note: "Max plan",
     devin_note: "Claude only",
   },
   {

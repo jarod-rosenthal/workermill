@@ -334,9 +334,9 @@ export default function Billing() {
     }
   };
 
-  // Get next plan for upgrade prompt (free → pro; enterprise is contact-sales)
+  // Get next plan for upgrade prompt (pro → max; enterprise is contact-sales)
   const _nextPlan =
-    subscription?.plan.id === "free" ? plans.find((p) => p.id === "pro") : null;
+    subscription?.plan.id === "pro" ? plans.find((p) => p.id === "max") : null;
 
   // Format date for display
   const formatDate = (dateString: string) => {

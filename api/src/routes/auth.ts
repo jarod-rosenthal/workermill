@@ -470,7 +470,7 @@ router.post(
         org = orgRepo.create({
           name: organizationName,
           slug,
-          plan: "free",
+          plan: "pro",
           taskQuota: 0, // Unlimited tasks (feature-gated, not quota-based)
 
           apiKeyHash: await bcrypt.hash(signupRawKey, 10),
@@ -942,7 +942,7 @@ router.post(
         const org = orgRepo.create({
           name: organizationName,
           slug,
-          plan: "free",
+          plan: "pro",
           taskQuota: 0, // Unlimited tasks (feature-gated, not quota-based)
 
           apiKeyHash: await bcrypt.hash(setupRawKey, 10),
@@ -1524,7 +1524,7 @@ router.post(
           name: orgName,
           slug,
           azureTenantId: tenantId,
-          plan: "free",
+          plan: "pro",
           taskQuota: 0, // Unlimited tasks (feature-gated, not quota-based)
 
           apiKeyHash: await bcrypt.hash(msRawKey, 10),
@@ -2000,7 +2000,7 @@ router.post(
           org = orgRepo.create({
             name: `${login}'s org`,
             slug,
-            plan: "free",
+            plan: "pro",
             taskQuota: 0,
             scmProvider: "github",
             apiKeyHash: await bcrypt.hash(rawKey, 10),
@@ -2200,7 +2200,7 @@ router.post(
       const org = orgRepo.create({
         name: `${login}'s org`,
         slug,
-        plan: "free",
+        plan: "pro",
         taskQuota: 0,
         scmProvider: "github",
         apiKeyHash: await bcrypt.hash(rawKey, 10),

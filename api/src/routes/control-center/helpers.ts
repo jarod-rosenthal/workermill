@@ -347,6 +347,7 @@ export function formatTaskData(
     id: task.id,
     jiraIssueKey: task.jiraIssueKey,
     summary: task.summary,
+    description: task.description || null,
     status: task.status,
     workerName: task.workerPersona || "Unknown",
     workerPersona: task.workerPersona || "backend_developer",

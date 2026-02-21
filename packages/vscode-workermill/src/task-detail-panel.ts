@@ -349,10 +349,14 @@ export class TaskDetailPanel {
     color: var(--text);
     white-space: pre-wrap;
     word-break: break-word;
-    max-height: 200px;
     overflow-y: auto;
     margin-bottom: 10px;
+    padding: 10px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
   }
+  .detail-description:empty, .detail-description.empty { display: none; }
   .detail-links {
     display: flex;
     flex-direction: column;
@@ -458,7 +462,7 @@ export class TaskDetailPanel {
 
 <div class="detail-section" id="detailSection">
   <h2>Task Details</h2>
-  <div class="detail-description" id="taskDescription">—</div>
+  <div class="detail-description" id="taskDescription"></div>
   <div class="detail-links">
     <div class="detail-link" id="ticketRow" style="display:none">
       <span class="detail-link-label">Ticket</span>
@@ -569,9 +573,16 @@ window.addEventListener("message", (event) => {
       document.getElementById("durationValue").textContent = mins < 60 ? mins + " min" : Math.floor(mins / 60) + "h " + (mins % 60) + "m";
     }
 
-    // Task details (summary, ticket, branch, PR, repo)
-    if (d.summary) {
-      document.getElementById("taskDescription").textContent = d.summary;
+    // Task details (description, ticket, branch, PR, repo)
+    const descEl = document.getElementById("taskDescription");
+    if (d.description) {
+      descEl.textContent = d.description;
+      descEl.classList.remove("empty");
+    } else if (d.summary) {
+      descEl.textContent = d.summary;
+      descEl.classList.remove("empty");
+    } else {
+      descEl.classList.add("empty");
     }
     if (d.jiraIssueKey) {
       document.getElementById("ticketRow").style.display = "";

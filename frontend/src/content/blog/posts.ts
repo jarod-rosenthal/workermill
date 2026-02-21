@@ -13,6 +13,28 @@ const authors: Record<string, Author> = {
 
 export const blogPosts: BlogPost[] = [
   {
+    slug: "anatomy-of-a-one-shot-spec",
+    title:
+      "Anatomy of a One-Shot Spec: Designing Software That AI Agents Build Right the First Time",
+    excerpt:
+      "What does it take to write a specification so complete that an AI team builds an entire platform from it — no back-and-forth, no clarification rounds, no do-overs? We break down the science of one-shot specs using our next showcase project, FlagDeck, as a case study.",
+    date: "2026-02-21",
+    category: "engineering",
+    author: authors.jarod,
+    thumbnail:
+      "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=1200&h=600&fit=crop&q=80",
+    featured: true,
+    readingTime: 14,
+    tags: [
+      "spec-driven-development",
+      "ai-agents",
+      "planning",
+      "testing",
+      "showcase",
+      "flagdeck",
+    ],
+  },
+  {
     slug: "dark-factory-level-5-agentic-coding",
     title: "Dark Factory: The Rise of Level 5 Agentic Coding",
     excerpt:
@@ -22,7 +44,6 @@ export const blogPosts: BlogPost[] = [
     author: authors.jarod,
     thumbnail:
       "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=1200&h=600&fit=crop&q=80",
-    featured: true,
     readingTime: 10,
     tags: ["dark-factory", "agentic-coding", "autonomous", "future", "ai-agents"],
   },

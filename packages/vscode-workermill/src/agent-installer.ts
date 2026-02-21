@@ -33,6 +33,12 @@ export function findGit(): string | null {
     if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
   } catch { /* not on PATH */ }
 
+  // On Windows, re-read PATH from registry to detect post-startup installs
+  if (isWin) {
+    const freshResult = findOnFreshWindowsPath(name);
+    if (freshResult) return freshResult;
+  }
+
   // Check known install locations on Windows
   if (isWin) {
     const candidates = [
@@ -131,6 +137,33 @@ export async function promptInstallGit(
 }
 
 /**
+ * On Windows, read the current user PATH from the registry so we can detect
+ * binaries installed after the extension host started (e.g. winget installs).
+ * Returns the resolved path if found on the fresh PATH, null otherwise.
+ */
+function findOnFreshWindowsPath(name: string): string | null {
+  try {
+    // Read current user PATH from registry (picks up winget/installer PATH changes)
+    const userPath = execFileSync(
+      "reg",
+      ["query", "HKCU\\Environment", "/v", "Path"],
+      { encoding: "utf-8", timeout: 5000 },
+    );
+    const match = userPath.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
+    if (!match) return null;
+
+    const dirs = match[1].trim().split(";").filter(Boolean);
+    for (const dir of dirs) {
+      // Expand %LOCALAPPDATA% etc.
+      const expanded = dir.replace(/%([^%]+)%/g, (_, v) => process.env[v] || "");
+      const candidate = path.join(expanded, name);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  } catch { /* registry read failed */ }
+  return null;
+}
+
+/**
  * Check if Claude Code CLI is installed. Mirrors the agent's findClaudePath() logic.
  * Returns the path if found, null if not.
  */
@@ -138,13 +171,19 @@ export function findClaudeCli(): string | null {
   const isWin = process.platform === "win32";
   const name = isWin ? "claude.exe" : "claude";
 
-  // Check PATH first
+  // Check PATH first (uses extension host's cached PATH)
   try {
     const cmd = isWin ? "where.exe" : "which";
     const result = execFileSync(cmd, [name], { encoding: "utf-8", timeout: 5000 }).trim();
     const firstMatch = result.split("\n")[0];
     if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
   } catch { /* not on PATH */ }
+
+  // On Windows, re-read PATH from registry to detect post-startup installs
+  if (isWin) {
+    const freshResult = findOnFreshWindowsPath(name);
+    if (freshResult) return freshResult;
+  }
 
   // Check via login shell (nvm, brew, etc.)
   if (!isWin) {
@@ -162,10 +201,20 @@ export function findClaudeCli(): string | null {
   // Check known install locations
   const candidates: string[] = [];
   if (isWin) {
+    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    const appData = process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming");
     candidates.push(
+      // winget install locations
+      path.join(localAppData, "Microsoft", "WinGet", "Links", "claude.exe"),
+      path.join(localAppData, "Microsoft", "WindowsApps", "claude.exe"),
+      // Standard install locations
       path.join(process.env.ProgramFiles || "C:\\Program Files", "ClaudeCode", "claude.exe"),
-      path.join(process.env.LOCALAPPDATA || "", "Programs", "ClaudeCode", "claude.exe"),
-      path.join(os.homedir(), "AppData", "Local", "Programs", "ClaudeCode", "claude.exe"),
+      path.join(localAppData, "Programs", "ClaudeCode", "claude.exe"),
+      path.join(localAppData, "Programs", "claude-code", "claude.exe"),
+      // npm global
+      path.join(appData, "npm", "claude.cmd"),
+      path.join(localAppData, "npm", "claude.cmd"),
+      // Other
       path.join(os.homedir(), ".local", "bin", "claude.exe"),
       path.join(os.homedir(), ".claude", "bin", "claude.exe"),
     );

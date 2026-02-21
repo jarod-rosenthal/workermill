@@ -814,7 +814,7 @@ deploy_frontend() {
     fi
 
     echo -e "${YELLOW}Syncing to S3...${NC}"
-    aws s3 sync dist/ s3://$S3_BUCKET/ --delete --region $AWS_REGION
+    aws s3 sync dist/ s3://$S3_BUCKET/ --delete --exclude "agent/*" --exclude "install.sh" --exclude "install.ps1" --region $AWS_REGION
 
     echo -e "${YELLOW}Invalidating CloudFront cache...${NC}"
     INVALIDATION_ID=$(aws cloudfront create-invalidation \

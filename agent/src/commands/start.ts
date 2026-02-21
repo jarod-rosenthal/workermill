@@ -36,10 +36,9 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
   const prereqs = checkPrerequisites();
   const failing = prereqs.filter((p) => !p.ok);
 
-  // Soft prerequisites — agent can start without them, but tasks will fail.
-  // Git: only needed when cloning repos / running tasks
-  // Claude CLI + auth: only needed for Anthropic provider
-  const softPrereqs = new Set(["Git", "Claude CLI", "Claude auth"]);
+  // Claude CLI and auth are soft prerequisites — only needed for Anthropic provider.
+  // Non-Anthropic orgs can plan+execute without Claude CLI.
+  const softPrereqs = new Set(["Claude CLI", "Claude auth"]);
   const hardFailing = failing.filter((p) => !softPrereqs.has(p.name));
   const softFailing = failing.filter((p) => softPrereqs.has(p.name));
 
@@ -53,11 +52,7 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
 
   if (softFailing.length > 0) {
     for (const p of softFailing) {
-      if (p.name === "Git") {
-        console.log(chalk.yellow(`  ⚠ ${p.name}: ${p.detail} (required to run tasks — install from https://git-scm.com)`));
-      } else {
-        console.log(chalk.yellow(`  ⚠ ${p.name}: ${p.detail} (required for Anthropic provider)`));
-      }
+      console.log(chalk.yellow(`  ⚠ ${p.name}: ${p.detail} (required for Anthropic provider)`));
     }
   }
 

@@ -386,8 +386,8 @@ export default function PersonaStudio() {
     }
   };
 
-  // Hide support_agent — internal persona not shown to users
-  const hiddenSlugs = ["support_agent"];
+  // Hide internal system personas not shown to users
+  const hiddenSlugs = ["support_agent", "manager"];
   const filteredPersonas = personas.filter((p) => {
     if (hiddenSlugs.includes(p.slug)) return false;
     const query = searchQuery.toLowerCase();

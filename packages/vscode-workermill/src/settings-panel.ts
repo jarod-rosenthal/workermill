@@ -238,13 +238,13 @@ export class SettingsPanel {
     let dockerAvailable = false;
     let dockerInstalled = false;
     try {
-      execFileSync("docker", ["version"], { timeout: 5000, stdio: "ignore" });
+      execFileSync("docker", ["version"], { timeout: 5000, stdio: "ignore", windowsHide: true });
       dockerAvailable = true;
       dockerInstalled = true;
     } catch {
       // Docker daemon not running — check if CLI is installed
       try {
-        execFileSync("docker", ["--version"], { timeout: 5000, stdio: "ignore" });
+        execFileSync("docker", ["--version"], { timeout: 5000, stdio: "ignore", windowsHide: true });
         dockerInstalled = true;
       } catch {
         /* Docker not installed */
@@ -262,11 +262,11 @@ export class SettingsPanel {
   private async toggleSandbox(enabled: boolean): Promise<void> {
     if (enabled) {
       try {
-        execFileSync("docker", ["version"], { timeout: 5000, stdio: "ignore" });
+        execFileSync("docker", ["version"], { timeout: 5000, stdio: "ignore", windowsHide: true });
       } catch {
         let dockerInstalled = false;
         try {
-          execFileSync("docker", ["--version"], { timeout: 5000, stdio: "ignore" });
+          execFileSync("docker", ["--version"], { timeout: 5000, stdio: "ignore", windowsHide: true });
           dockerInstalled = true;
         } catch { /* not installed */ }
         this.postMessage({

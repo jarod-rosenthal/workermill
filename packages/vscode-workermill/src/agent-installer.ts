@@ -28,7 +28,7 @@ export function findGit(): string | null {
 
   try {
     const cmd = isWin ? "where.exe" : "which";
-    const result = execFileSync(cmd, [name], { encoding: "utf-8", timeout: 5000 }).trim();
+    const result = execFileSync(cmd, [name], { encoding: "utf-8", timeout: 5000, windowsHide: true }).trim();
     const firstMatch = result.split("\n")[0];
     if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
   } catch { /* not on PATH */ }
@@ -152,7 +152,7 @@ function findOnFreshWindowsPath(name: string): string | null {
     const sysOut = execFileSync(
       "reg",
       ["query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment", "/v", "Path"],
-      { encoding: "utf-8", timeout: 5000 },
+      { encoding: "utf-8", timeout: 5000, windowsHide: true },
     );
     const match = sysOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
     if (match) {
@@ -165,7 +165,7 @@ function findOnFreshWindowsPath(name: string): string | null {
     const userOut = execFileSync(
       "reg",
       ["query", "HKCU\\Environment", "/v", "Path"],
-      { encoding: "utf-8", timeout: 5000 },
+      { encoding: "utf-8", timeout: 5000, windowsHide: true },
     );
     const match = userOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
     if (match) {
@@ -190,7 +190,7 @@ function getFreshWindowsPath(): string {
     const sysOut = execFileSync(
       "reg",
       ["query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment", "/v", "Path"],
-      { encoding: "utf-8", timeout: 5000 },
+      { encoding: "utf-8", timeout: 5000, windowsHide: true },
     );
     const match = sysOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
     if (match) parts.push(match[1].trim().replace(/%([^%]+)%/g, (_, v) => process.env[v] || ""));
@@ -200,7 +200,7 @@ function getFreshWindowsPath(): string {
     const userOut = execFileSync(
       "reg",
       ["query", "HKCU\\Environment", "/v", "Path"],
-      { encoding: "utf-8", timeout: 5000 },
+      { encoding: "utf-8", timeout: 5000, windowsHide: true },
     );
     const match = userOut.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
     if (match) parts.push(match[1].trim().replace(/%([^%]+)%/g, (_, v) => process.env[v] || ""));
@@ -220,7 +220,7 @@ export function findClaudeCli(): string | null {
   // Check PATH first (uses extension host's cached PATH)
   try {
     const cmd = isWin ? "where.exe" : "which";
-    const result = execFileSync(cmd, [name], { encoding: "utf-8", timeout: 5000 }).trim();
+    const result = execFileSync(cmd, [name], { encoding: "utf-8", timeout: 5000, windowsHide: true }).trim();
     const firstMatch = result.split("\n")[0];
     if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
   } catch { /* not on PATH */ }
@@ -384,7 +384,7 @@ export function getAgentBinaryPath(): string {
   // Check direct PATH (works if nvm/etc is already in extension host PATH)
   try {
     const cmd = process.platform === "win32" ? "where.exe" : "which";
-    const result = execFileSync(cmd, [name], { encoding: "utf-8", timeout: 5000 }).trim();
+    const result = execFileSync(cmd, [name], { encoding: "utf-8", timeout: 5000, windowsHide: true }).trim();
     const firstMatch = result.split("\n")[0];
     if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
   } catch { /* not on PATH */ }

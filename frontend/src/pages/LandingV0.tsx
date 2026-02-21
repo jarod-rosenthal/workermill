@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { Home, Search, FolderOpen, Sparkles, Lock, Copy, CheckCircle, Terminal, Monitor, ArrowRight } from "lucide-react";
+import { Home, Search, FolderOpen, Sparkles, Lock, Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
@@ -7,6 +7,83 @@ import ShowcaseGallery from "../components/ShowcaseGallery";
 import TrustCallout from "../components/TrustCallout";
 import ExecutionShowcase from "../components/ExecutionShowcase";
 import { Pricing } from "./Home/Pricing";
+import { getFeaturedPost } from "../content/blog/posts";
+
+// ─── Featured Article ────────────────────────────────────────────────────────
+
+function FeaturedArticle() {
+  const post = getFeaturedPost();
+  if (!post) return null;
+
+  return (
+    <section className="relative py-20">
+      <div className="container mx-auto px-6 lg:px-8 max-w-5xl">
+        <div className="text-center mb-10">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-widest text-teal-400 mb-3">
+            <BookOpen className="w-3.5 h-3.5" />
+            From Our Blog
+          </span>
+          <h2 className="text-2xl md:text-3xl font-bold text-foreground">
+            Latest Thinking
+          </h2>
+        </div>
+
+        <Link
+          to={`/blog/${post.slug}`}
+          className="group block rounded-2xl border border-border/50 bg-card/50 backdrop-blur-sm overflow-hidden hover:border-teal-500/30 transition-all duration-300"
+        >
+          <div className="grid md:grid-cols-[1fr,1.2fr] gap-0">
+            {/* Thumbnail */}
+            <div className="aspect-[16/9] md:aspect-auto overflow-hidden">
+              <img
+                src={post.thumbnail}
+                alt={post.title}
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+              />
+            </div>
+
+            {/* Content */}
+            <div className="p-8 md:p-10 flex flex-col justify-center">
+              <div className="flex items-center gap-3 text-xs text-muted-foreground mb-4">
+                <span className="px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-400 font-medium uppercase tracking-wide">
+                  {post.category.replace("-", " ")}
+                </span>
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  {post.readingTime} min read
+                </span>
+              </div>
+
+              <h3 className="text-xl md:text-2xl font-bold text-foreground mb-3 group-hover:text-teal-400 transition-colors leading-tight">
+                {post.title}
+              </h3>
+
+              <p className="text-sm text-muted-foreground leading-relaxed mb-6 line-clamp-3">
+                {post.excerpt}
+              </p>
+
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-muted-foreground">
+                  <span className="text-foreground/80 font-medium">{post.author.name}</span>
+                  {" · "}
+                  {new Date(post.date).toLocaleDateString("en-US", {
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                </div>
+                <span className="flex items-center gap-1 text-sm font-medium text-teal-400 group-hover:gap-2 transition-all">
+                  Read article
+                  <ArrowRight className="w-4 h-4" />
+                </span>
+              </div>
+            </div>
+          </div>
+        </Link>
+      </div>
+    </section>
+  );
+}
 
 // ─── Install Section ─────────────────────────────────────────────────────────
 
@@ -291,6 +368,9 @@ export default function LandingV0() {
           <div id="showcase" ref={showcaseRef}>
             <ShowcaseGallery />
           </div>
+
+          {/* Featured Article */}
+          <FeaturedArticle />
 
           {/* Trust & Security */}
           <TrustCallout />

@@ -148,6 +148,8 @@ export class SettingsPanel {
         await this.saveTracker(config, msg.tracker);
       } else if (msg.type === "open-dashboard") {
         vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/dashboard`));
+      } else if (msg.type === "save-repo") {
+        await this.saveRepo(config, msg.defaultRepo);
       } else if (msg.type === "open-web-settings") {
         vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/settings`));
       } else if (msg.type === "open-pricing") {
@@ -225,6 +227,34 @@ export class SettingsPanel {
       }
     } catch (err) {
       this.postMessage({ type: "error", message: `Could not save tracker: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+
+  private async saveRepo(
+    config: { apiUrl: string; apiKey: string },
+    defaultRepo: string,
+  ): Promise<void> {
+    try {
+      const { status, data } = await apiRequest<{ success?: boolean; error?: string }>(
+        "PUT",
+        `${config.apiUrl}/api/settings/integrations/github`,
+        config.apiKey,
+        { defaultRepo },
+      );
+      if (status >= 200 && status < 300) {
+        this.postMessage({ type: "repo-saved", message: "Target repository saved" });
+        await this.loadIntegrations(config);
+      } else {
+        this.postMessage({
+          type: "repo-save-error",
+          message: (data as { error?: string }).error || `HTTP ${status}`,
+        });
+      }
+    } catch (err) {
+      this.postMessage({
+        type: "repo-save-error",
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -581,6 +611,21 @@ export class SettingsPanel {
       <div class="hint" style="margin-top: 8px;">Manage SCM tokens in <button class="btn-link" id="btn-web-settings-scm">web settings</button>.</div>
     </div>
 
+    <!-- Target Repository -->
+    <div class="section">
+      <h2>Target Repository</h2>
+      <p>The repository AI workers will target when running tasks.</p>
+      <div class="field">
+        <label>Default Repository</label>
+        <input type="text" id="default-repo" placeholder="owner/repo" />
+        <div class="hint">Format: <code>owner/repo</code> (e.g. workermill-examples/flagdeck)</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" id="btn-save-repo">Save</button>
+      </div>
+      <div id="repo-status" class="status"></div>
+    </div>
+
     <!-- Docker Sandbox -->
     <div class="section">
       <h2>Docker Sandbox</h2>
@@ -729,6 +774,9 @@ export class SettingsPanel {
     document.getElementById("btn-sign-out").addEventListener("click", () => {
       vscode.postMessage({ type: "sign-out" });
     });
+    document.getElementById("btn-save-repo").addEventListener("click", () => {
+      vscode.postMessage({ type: "save-repo", defaultRepo: document.getElementById("default-repo").value.trim() });
+    });
 
     // Sandbox toggle
     const sandboxToggle = document.getElementById("sandbox-toggle");
@@ -791,6 +839,15 @@ export class SettingsPanel {
         document.getElementById("scm-bitbucket-badge").innerHTML = badge(d.bitbucket?.configured);
         document.getElementById("scm-gitlab-badge").innerHTML = badge(d.gitlab?.configured);
 
+        // Populate target repo from SCM-specific default
+        const scm = d.scmProvider || "github";
+        let defaultRepo = "";
+        if (scm === "github" && d.github?.defaultRepo) defaultRepo = d.github.defaultRepo;
+        else if (scm === "bitbucket" && d.bitbucket?.defaultRepo) defaultRepo = d.bitbucket.defaultRepo;
+        else if (scm === "gitlab" && d.gitlab?.defaultRepo) defaultRepo = d.gitlab.defaultRepo;
+        const repoInput = document.getElementById("default-repo");
+        if (repoInput) repoInput.value = defaultRepo;
+
         // Show plan in Account section
         const planInfo = document.getElementById("plan-info");
         const planName = document.getElementById("plan-name");
@@ -827,6 +884,17 @@ export class SettingsPanel {
       }
       if (msg.type === "test-error") {
         showStatus(jiraStatus, "error", msg.message);
+      }
+
+      // Repo messages
+      if (msg.type === "repo-saved") {
+        const repoStatus = document.getElementById("repo-status");
+        showStatus(repoStatus, "success", msg.message || "Repository saved");
+        setTimeout(() => repoStatus.classList.remove("visible"), 3000);
+      }
+      if (msg.type === "repo-save-error") {
+        const repoStatus = document.getElementById("repo-status");
+        showStatus(repoStatus, "error", msg.message || "Failed to save repository");
       }
 
       // Sandbox messages

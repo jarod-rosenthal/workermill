@@ -198,8 +198,8 @@ function readOAuthToken(): string {
   const credPath = path.join(home, ".claude", ".credentials.json");
   try {
     const data = JSON.parse(fs.readFileSync(credPath, "utf-8"));
-    // credentials.json has { claudeAiOauth: { token: "..." } } or { oauthToken: "..." }
-    return data?.claudeAiOauth?.token || data?.oauthToken || "";
+    // credentials.json has { claudeAiOauth: { accessToken: "..." } }
+    return data?.claudeAiOauth?.accessToken || data?.oauthToken || "";
   } catch {
     return "";
   }

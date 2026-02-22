@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.2.26",
+  "version": "0.2.27",
   "publisher": "workermill",
   "license": "MIT",
   "icon": "media/icon.png",

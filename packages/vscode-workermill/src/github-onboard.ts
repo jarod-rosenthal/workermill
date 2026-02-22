@@ -430,12 +430,55 @@ export async function signInWithGitHub(
   log: (msg: string) => void,
 ): Promise<boolean> {
   try {
-    log("GitHub sign-in: requesting GitHub session...");
-    const session = await vscode.authentication.getSession(
+    log("GitHub sign-in: checking for existing GitHub session...");
+
+    // Check if there's already a cached GitHub session
+    let session = await vscode.authentication.getSession(
       "github",
       ["repo", "read:user", "user:email"],
-      { createIfNone: true },
+      { createIfNone: false },
     );
+
+    if (session) {
+      // Session exists — let user confirm or switch accounts
+      const choice = await vscode.window.showQuickPick(
+        [
+          {
+            label: `Sign in as ${session.account.label}`,
+            description: "Use your current GitHub account",
+            action: "use" as const,
+          },
+          {
+            label: "Use a different GitHub account",
+            description: "Sign out and authenticate with another account",
+            action: "switch" as const,
+          },
+        ],
+        {
+          placeHolder: `Signed into GitHub as ${session.account.label}`,
+          title: "GitHub Account",
+        },
+      );
+
+      if (!choice) return false; // cancelled
+
+      if (choice.action === "switch") {
+        log("User requested different GitHub account — forcing new session");
+        session = await vscode.authentication.getSession(
+          "github",
+          ["repo", "read:user", "user:email"],
+          { forceNewSession: true },
+        );
+      }
+    } else {
+      // No session — prompt to authenticate
+      log("No GitHub session found — requesting authentication...");
+      session = await vscode.authentication.getSession(
+        "github",
+        ["repo", "read:user", "user:email"],
+        { createIfNone: true },
+      );
+    }
 
     log(`GitHub session obtained for ${session.account.label}`);
 

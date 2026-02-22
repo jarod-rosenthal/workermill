@@ -105,33 +105,41 @@ After every `git push`, workers MUST:
 
 ## Pre-Provisioned Resources
 
-These resources are set up **before any worker starts**. Workers do NOT create accounts or sign up for services — they use what is already provisioned.
+All resources are **provisioned and ready**. Workers do NOT create accounts or sign up for services — they use what is already provisioned.
 
 ### GitHub Repository
 
 | Resource | Details |
 |----------|---------|
 | Repository | `workermill-examples/flagdeck` (private, empty) |
-| Status | **Pre-created by human** |
+| URL | https://github.com/workermill-examples/flagdeck |
 | Agent access | Push via GitHub PAT (already configured in WorkerMill org settings) |
+| Repo secret | `RAILWAY_TOKEN` — configured for GitHub Actions deployment |
+| Status | **Ready** |
 
 ### Railway (Compute)
 
 | Resource | Details |
 |----------|---------|
 | Plan | Hobby ($5/month, includes $5 usage credit) |
-| Project | *(to be provisioned before build — human creates Railway project)* |
-| Services | `flagdeck-api` (Go backend), `flagdeck-web` (SvelteKit frontend) |
-| Custom domain | `flagdeck.workermill.com` (API), `flagdeck-app.workermill.com` (frontend) |
-| Status | **To be provisioned** |
+| Project | `FlagDeck` (ID: `64bd7465-cc4d-410e-8083-10021053680e`) |
+| Environment | `production` (ID: `7d7b9b5e-6b6c-4b41-afec-2364c7d23758`) |
+| Status | **Ready** |
 
-**Railway environment variables (to be set on the API service):**
+**Services:**
+
+| Service | ID | Root Dir | Railway Domain | Custom Domain |
+|---------|----|----------|---------------|---------------|
+| `flagdeck-api` | `af0a26b1-0c55-4548-91cf-fa055a9c1e71` | `api` | `flagdeck-api-production.up.railway.app` | `flagdeck.workermill.com` |
+| `flagdeck-web` | `3a82f27a-2cda-420a-a100-38efc2970da5` | `web` | `flagdeck-web-production.up.railway.app` | `flagdeck-app.workermill.com` |
+
+**Railway environment variables (set on `flagdeck-api` service):**
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
-| `MONGODB_URI` | Atlas connection string | Database connection |
-| `REDIS_URL` | Upstash Redis URL | Cache connection |
-| `JWT_SECRET` | 64-char random hex string | JWT token signing |
+| `MONGODB_URI` | *(configured — Atlas connection string)* | Database connection |
+| `REDIS_URL` | *(configured — Upstash Redis TLS URL)* | Cache connection |
+| `JWT_SECRET` | *(configured — 64-char random hex)* | JWT token signing |
 | `PORT` | `8080` | Railway injects PORT; set explicitly |
 | `ENVIRONMENT` | `production` | Runtime environment flag |
 | `CORS_ORIGINS` | `https://flagdeck-app.workermill.com,https://flagdeck.workermill.com` | Allowed CORS origins |
@@ -141,14 +149,16 @@ These resources are set up **before any worker starts**. Workers do NOT create a
 | Resource | Details |
 |----------|---------|
 | Plan | M0 free tier (512 MB storage, shared cluster) |
+| Cluster | `flagdeck` (Atlas project: Flagdeck) |
 | Region | `us-east-1` (AWS) |
 | Database | `flagdeck` |
+| DB user | `rosenthaljarod_db_user` |
 | Collections | `flags`, `environments`, `segments`, `experiments`, `audit_log`, `users`, `api_keys` |
-| Status | **To be provisioned** |
+| Status | **Ready** |
 
-**Connection string format:**
+**Connection string format (password in Railway env vars):**
 ```
-mongodb+srv://flagdeck:<password>@cluster0.xxxxx.mongodb.net/flagdeck?retryWrites=true&w=majority
+mongodb+srv://rosenthaljarod_db_user:<password>@flagdeck.rakqc31.mongodb.net/flagdeck?retryWrites=true&w=majority&appName=Flagdeck
 ```
 
 ### Upstash Redis (Cache)
@@ -156,22 +166,27 @@ mongodb+srv://flagdeck:<password>@cluster0.xxxxx.mongodb.net/flagdeck?retryWrite
 | Resource | Details |
 |----------|---------|
 | Plan | Free tier (10K commands/day, 256 MB) |
+| Instance | `credible-falcon-44150` |
+| Host | `credible-falcon-44150.upstash.io` |
 | Region | `us-east-1` (AWS) |
-| Status | **To be provisioned** |
+| Port | `6379` (TLS) |
+| Status | **Ready** |
 
-**Connection string format:**
+**Connection string format (password in Railway env vars):**
 ```
-rediss://default:<password>@us1-xxxxx.upstash.io:6379
+rediss://default:<password>@credible-falcon-44150.upstash.io:6379
 ```
 
-> **NOTE**: Upstash uses `rediss://` (TLS). The `go-redis` client handles TLS automatically when the URL scheme is `rediss`.
+> **NOTE**: Upstash uses `rediss://` (double-s, TLS). The `go-redis` client handles TLS automatically when the URL scheme is `rediss`.
 
 ### DNS (Custom Domains)
 
 | Record | Type | Value | Status |
 |--------|------|-------|--------|
-| `flagdeck.workermill.com` | CNAME | *(Railway-assigned)* | **To be provisioned** |
-| `flagdeck-app.workermill.com` | CNAME | *(Railway-assigned)* | **To be provisioned** |
+| `flagdeck.workermill.com` | CNAME | `flagdeck-api-production.up.railway.app` | **Ready** (Route53) |
+| `flagdeck-app.workermill.com` | CNAME | `flagdeck-web-production.up.railway.app` | **Ready** (Route53) |
+
+Custom domains are also registered in Railway for automatic TLS certificate provisioning.
 
 ---
 
@@ -1494,17 +1509,20 @@ Workers MUST create a `README.md` covering:
 | Read CI failure logs | GitHub Actions API |
 | Verify deployment | `curl` against live URL |
 
-### What Workers CANNOT Do (Already Done)
+### What Workers CANNOT Do (Already Provisioned)
 
-| Action | Status |
-|--------|--------|
-| Create Railway account/project/services | **Done by human** |
-| Create MongoDB Atlas cluster | **Done by human** |
-| Create Upstash Redis instance | **Done by human** |
-| Create GitHub repo | **Done by human** |
-| Set Railway environment variables | **Done by human** |
-| Set GitHub repo secrets | **Done by human** |
-| Add DNS CNAME records | **Done by human** |
+All infrastructure is provisioned. Workers MUST NOT attempt to create or modify these resources.
+
+| Action | Status | Details |
+|--------|--------|---------|
+| Create Railway account/project/services | **Done** | Project `FlagDeck`, services `flagdeck-api` + `flagdeck-web` |
+| Create MongoDB Atlas cluster | **Done** | M0 free tier, cluster `flagdeck`, region us-east-1 |
+| Create Upstash Redis instance | **Done** | Free tier, `credible-falcon-44150`, region us-east-1 |
+| Create GitHub repo | **Done** | `workermill-examples/flagdeck` (private) |
+| Set Railway environment variables | **Done** | 6 vars on `flagdeck-api` (MONGODB_URI, REDIS_URL, JWT_SECRET, PORT, ENVIRONMENT, CORS_ORIGINS) |
+| Set GitHub repo secrets | **Done** | `RAILWAY_TOKEN` configured |
+| Add DNS CNAME records | **Done** | `flagdeck.workermill.com` + `flagdeck-app.workermill.com` via Route53 |
+| Register custom domains in Railway | **Done** | Both services have custom domains with auto-TLS |
 
 ### CI/CD Iteration Pattern (MANDATORY)
 

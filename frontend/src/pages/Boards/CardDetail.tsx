@@ -785,7 +785,7 @@ export default function CardDetail({
             {/* Sidebar */}
             <div className="space-y-3">
               {/* Priority */}
-              <div className="relative" ref={priorityPickerRef}
+              <div className="relative" ref={priorityPickerRef}>
                 <button
                   onClick={() => setShowPriorityPicker(!showPriorityPicker)}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors text-sm"
@@ -834,7 +834,7 @@ export default function CardDetail({
               </div>
 
               {/* Labels */}
-              <div className="relative" ref={labelPickerRef}
+              <div className="relative" ref={labelPickerRef}>
                 <button
                   onClick={() => {
                     setShowLabelPicker(!showLabelPicker);
@@ -945,7 +945,7 @@ export default function CardDetail({
               </div>
 
               {/* Cover color */}
-              <div className="relative" ref={coverPickerRef}
+              <div className="relative" ref={coverPickerRef}>
                 <button
                   onClick={() => setShowCoverPicker(!showCoverPicker)}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors text-sm"
@@ -1007,7 +1007,7 @@ export default function CardDetail({
               </div>
 
               {/* Assignee (clickable dropdown) */}
-              <div className="relative" ref={assigneePickerRef}
+              <div className="relative" ref={assigneePickerRef}>
                 <label className="block text-xs text-muted-foreground mb-1">
                   <User className="w-3.5 h-3.5 inline mr-1" />
                   Assignee

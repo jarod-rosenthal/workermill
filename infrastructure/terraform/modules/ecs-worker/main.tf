@@ -24,11 +24,11 @@ resource "aws_ecs_task_definition" "worker" {
   family                   = "workermill-${var.environment}-worker"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "2048"  # 2 vCPU for Claude Code
-  memory                   = "4096"  # 4 GB RAM
+  cpu                      = "2048" # 2 vCPU for Claude Code
+  memory                   = "4096" # 4 GB RAM
   execution_role_arn       = var.ecs_execution_role_arn
   # Use minimal worker role if provided, fall back to legacy role for backwards compatibility
-  task_role_arn            = coalesce(var.ecs_worker_task_role_arn, var.ecs_task_role_arn)
+  task_role_arn = coalesce(var.ecs_worker_task_role_arn, var.ecs_task_role_arn)
 
   container_definitions = jsonencode([
     {

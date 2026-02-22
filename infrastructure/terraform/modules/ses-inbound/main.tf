@@ -15,7 +15,7 @@ resource "aws_ses_domain_identity" "main" {
 locals {
   bucket_name = var.s3_bucket_name != "" ? var.s3_bucket_name : "workermill-${var.environment}-email-${data.aws_caller_identity.current.account_id}"
   tags = merge(var.tags, {
-    Module = "ses-inbound"
+    Module      = "ses-inbound"
     Environment = var.environment
   })
 }
@@ -68,8 +68,8 @@ resource "aws_s3_bucket_policy" "ses_write" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid       = "AllowSESPut"
-        Effect    = "Allow"
+        Sid    = "AllowSESPut"
+        Effect = "Allow"
         Principal = {
           Service = "ses.amazonaws.com"
         }
@@ -100,8 +100,8 @@ resource "aws_sns_topic_policy" "email_notifications" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid       = "AllowSESPublish"
-        Effect    = "Allow"
+        Sid    = "AllowSESPublish"
+        Effect = "Allow"
         Principal = {
           Service = "ses.amazonaws.com"
         }

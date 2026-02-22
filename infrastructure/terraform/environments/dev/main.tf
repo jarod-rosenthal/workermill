@@ -154,7 +154,7 @@ module "ecs_service" {
   jira_credentials_secret_arn  = module.secrets.jira_credentials_arn
   stripe_secret_key_arn        = module.secrets.stripe_secret_key_arn
   stripe_webhook_secret_arn    = module.secrets.stripe_webhook_secret_arn
-  platform_api_key_secret_arn  = module.secrets.stripe_secret_key_arn  # Placeholder - secret doesn't exist
+  platform_api_key_secret_arn  = module.secrets.stripe_secret_key_arn # Placeholder - secret doesn't exist
   domain_name                  = var.domain_name
   worker_task_definition       = module.ecs_worker.task_definition_family
   worker_log_group             = module.ecs_worker.log_group_name

@@ -126,7 +126,7 @@ resource "aws_cognito_user_pool_domain" "custom" {
 
 # Local to get the active domain
 locals {
-  domain_name = var.custom_domain != "" ? var.custom_domain : "workermill-${var.environment}-${random_string.domain_suffix.result}"
+  domain_name        = var.custom_domain != "" ? var.custom_domain : "workermill-${var.environment}-${random_string.domain_suffix.result}"
   hosted_ui_base_url = var.custom_domain != "" ? "https://${var.custom_domain}" : "https://${local.domain_name}.auth.${data.aws_region.current.name}.amazoncognito.com"
 }
 
@@ -167,15 +167,15 @@ resource "aws_cognito_identity_provider" "microsoft" {
   provider_type = "OIDC"
 
   provider_details = {
-    client_id                     = var.microsoft_client_id
-    client_secret                 = var.microsoft_client_secret
-    authorize_scopes              = "openid profile email"
-    oidc_issuer                   = "https://login.microsoftonline.com/${var.microsoft_tenant_id}/v2.0"
-    attributes_request_method     = "GET"
-    authorize_url                 = "https://login.microsoftonline.com/${var.microsoft_tenant_id}/oauth2/v2.0/authorize"
-    token_url                     = "https://login.microsoftonline.com/${var.microsoft_tenant_id}/oauth2/v2.0/token"
-    attributes_url                = "https://graph.microsoft.com/oidc/userinfo"
-    jwks_uri                      = "https://login.microsoftonline.com/${var.microsoft_tenant_id}/discovery/v2.0/keys"
+    client_id                 = var.microsoft_client_id
+    client_secret             = var.microsoft_client_secret
+    authorize_scopes          = "openid profile email"
+    oidc_issuer               = "https://login.microsoftonline.com/${var.microsoft_tenant_id}/v2.0"
+    attributes_request_method = "GET"
+    authorize_url             = "https://login.microsoftonline.com/${var.microsoft_tenant_id}/oauth2/v2.0/authorize"
+    token_url                 = "https://login.microsoftonline.com/${var.microsoft_tenant_id}/oauth2/v2.0/token"
+    attributes_url            = "https://graph.microsoft.com/oidc/userinfo"
+    jwks_uri                  = "https://login.microsoftonline.com/${var.microsoft_tenant_id}/discovery/v2.0/keys"
   }
 
   # Map Microsoft attributes to Cognito attributes
@@ -204,9 +204,9 @@ resource "aws_cognito_user_pool_client" "web" {
   user_pool_id = aws_cognito_user_pool.main.id
 
   # Token validity - extended for better UX
-  access_token_validity  = 24   # hours (max allowed)
-  id_token_validity      = 24   # hours (max allowed)
-  refresh_token_validity = 365  # days (1 year)
+  access_token_validity  = 24  # hours (max allowed)
+  id_token_validity      = 24  # hours (max allowed)
+  refresh_token_validity = 365 # days (1 year)
 
   token_validity_units {
     access_token  = "hours"
@@ -241,9 +241,9 @@ resource "aws_cognito_user_pool_client" "web" {
   ]
 
   # Security settings
-  generate_secret                      = false # Public client (SPA)
-  prevent_user_existence_errors        = "ENABLED"
-  enable_token_revocation              = true
+  generate_secret                               = false # Public client (SPA)
+  prevent_user_existence_errors                 = "ENABLED"
+  enable_token_revocation                       = true
   enable_propagate_additional_user_context_data = false
 
   # Auth flows
@@ -264,9 +264,9 @@ resource "aws_cognito_user_pool_client" "api" {
   user_pool_id = aws_cognito_user_pool.main.id
 
   # Token validity - extended for better UX
-  access_token_validity  = 24   # hours (max allowed)
-  id_token_validity      = 24   # hours (max allowed)
-  refresh_token_validity = 365  # days (1 year)
+  access_token_validity  = 24  # hours (max allowed)
+  id_token_validity      = 24  # hours (max allowed)
+  refresh_token_validity = 365 # days (1 year)
 
   token_validity_units {
     access_token  = "hours"

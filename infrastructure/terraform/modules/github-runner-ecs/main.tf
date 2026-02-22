@@ -134,8 +134,8 @@ resource "aws_iam_role" "execution" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
       Principal = { Service = "ecs-tasks.amazonaws.com" }
     }]
   })
@@ -169,8 +169,8 @@ resource "aws_iam_role" "task" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
       Principal = { Service = "ecs-tasks.amazonaws.com" }
     }]
   })
@@ -192,8 +192,8 @@ resource "aws_iam_role_policy" "task" {
         Resource = ["${aws_cloudwatch_log_group.runner.arn}:*"]
       },
       {
-        Effect = "Allow"
-        Action = ["ssmmessages:*"]
+        Effect   = "Allow"
+        Action   = ["ssmmessages:*"]
         Resource = "*"
       }
     ]

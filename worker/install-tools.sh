@@ -11,6 +11,11 @@
 REPO_DIR="${1:-}"
 INSTALLED=""
 
+# Pre-extend PATH for cached tool installations.
+# Docker volume mounts may already contain tools from previous runs —
+# this ensures `command -v` finds them without re-installation.
+export PATH="/usr/local/go/bin:$HOME/.cargo/bin:$HOME/.deno/bin:$HOME/.bun/bin:${PATH}"
+
 log() { echo "[install-tools] $*"; }
 
 # ── Detection Helpers ────────────────────────────────────────────────────────

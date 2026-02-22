@@ -28,7 +28,7 @@ import type { EvaluateQualityResponse } from "../epic/dist/decision-client.js";
 import { createAIClient, type AIClient, type AIClientConfig } from "../epic/dist/ai-client-types.js";
 import { DecisionClient, createDecisionClient, type WorkerConfigResponse } from "../epic/dist/decision-client.js";
 // GitOps for worktree-based parallel execution (shared with Epic mode)
-import { GitOps, type StoryBranchResult } from "../epic/git-ops.js";
+import { GitOps, type StoryBranchResult } from "../epic/dist/git-ops.js";
 
 /**
  * Provider routing configuration.

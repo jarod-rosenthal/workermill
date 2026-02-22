@@ -230,17 +230,46 @@ async function finishSetup(
       "Continue Without Docker",
     );
     if (action === "Open Docker Desktop") {
+      let launched = false;
       try {
         if (process.platform === "darwin") {
           execFileSync("open", ["-a", "Docker"], { timeout: 5000, stdio: "pipe", windowsHide: true });
+          launched = true;
         } else {
-          // Windows and WSL — try to launch Docker Desktop
-          execFileSync("cmd.exe", ["/c", "start", "", "Docker Desktop"], { timeout: 5000, stdio: "pipe", windowsHide: true });
+          // Windows — try common Docker Desktop executable paths
+          const dockerPaths = [
+            "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe",
+            `${process.env.LOCALAPPDATA || ""}\\Docker\\Docker Desktop.exe`,
+            `${process.env.PROGRAMFILES || ""}\\Docker\\Docker\\Docker Desktop.exe`,
+          ];
+          for (const p of dockerPaths) {
+            try {
+              if (fs.existsSync(p)) {
+                execFileSync("cmd.exe", ["/c", "start", "", p], {
+                  timeout: 5000,
+                  stdio: "pipe",
+                  windowsHide: true,
+                });
+                launched = true;
+                break;
+              }
+            } catch {
+              /* try next path */
+            }
+          }
         }
-      } catch {
-        // If launch fails, open the download page as fallback
-        vscode.env.openExternal(
-          vscode.Uri.parse("https://www.docker.com/products/docker-desktop/"),
+      } catch (err) {
+        log(`Failed to launch Docker Desktop: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      if (launched) {
+        vscode.window.showInformationMessage(
+          "Docker Desktop is starting. WorkerMill will use it automatically once it's ready.",
+        );
+      } else {
+        log("Could not find Docker Desktop executable — prompting manual start");
+        vscode.window.showWarningMessage(
+          "Could not launch Docker Desktop automatically. Please start it manually, then WorkerMill will use it automatically.",
         );
       }
     }

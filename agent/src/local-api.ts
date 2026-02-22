@@ -25,7 +25,7 @@ export interface LocalTaskInfo {
   parentTaskId?: string;
   summary: string;
   description?: string;
-  status: "planning" | "running" | "completed" | "failed";
+  status: "planning" | "running" | "completed" | "failed" | "cancelled";
   persona?: string;
   model?: string;
   repo?: string;

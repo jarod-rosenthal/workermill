@@ -375,6 +375,8 @@ router.get("/", async (req: Request, res: Response) => {
     const countMap = new Map(cardCounts.map((c: { boardId: string; count: string }) => [c.boardId, parseInt(c.count)]));
 
     res.json({
+      orgId: org.id,
+      orgName: org.name,
       boards: boards.map((board) => ({
         id: board.id,
         name: board.name,

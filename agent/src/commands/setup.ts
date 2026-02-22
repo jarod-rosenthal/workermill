@@ -339,7 +339,7 @@ export async function setupCommand(): Promise<void> {
       type: "input",
       name: "agentId",
       message: "Agent name:",
-      default: `agent-${hostname()}`,
+      default: hostname(),
     },
   ]);
 

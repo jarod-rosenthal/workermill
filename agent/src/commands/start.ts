@@ -10,7 +10,7 @@
 import chalk from "chalk";
 import { totalmem } from "os";
 import { spawn } from "child_process";
-import { writeFileSync, existsSync, unlinkSync, openSync, createWriteStream } from "fs";
+import { writeFileSync, readFileSync, existsSync, unlinkSync, openSync, createWriteStream } from "fs";
 import { AGENT_VERSION } from "../version.js";
 import {
   loadConfigFromFile,
@@ -29,6 +29,29 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     console.log(chalk.red("No configuration found."));
     console.log(`Run ${chalk.cyan("workermill-agent setup")} first.`);
     process.exit(1);
+  }
+
+  // Single-instance guard: refuse to start if another agent process is alive.
+  // Prevents the double-planning bug where two agent processes poll and both
+  // claim the same task (each has its own planningInProgress set in memory).
+  const pidFile = getPidFile();
+  if (existsSync(pidFile)) {
+    try {
+      const existingPid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
+      if (existingPid && existingPid !== process.pid) {
+        try {
+          process.kill(existingPid, 0); // signal 0 = check if alive
+          console.log(chalk.yellow(`Agent is already running (PID ${existingPid}).`));
+          console.log(`Stop it first with: ${chalk.cyan("workermill-agent stop")}`);
+          process.exit(1);
+        } catch {
+          // Process is dead — clean up stale PID file and continue
+          unlinkSync(pidFile);
+        }
+      }
+    } catch {
+      // Can't read PID file — ignore and continue
+    }
   }
 
   const config = loadConfigFromFile();

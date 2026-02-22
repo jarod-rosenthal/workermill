@@ -424,6 +424,15 @@ export function getSystemInfo(): {
 
 let _dockerBin: string | null = null;
 
+function isWSL(): boolean {
+  if (process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP) return true;
+  try {
+    return readFileSync("/proc/version", "utf-8").toLowerCase().includes("microsoft");
+  } catch {
+    return false;
+  }
+}
+
 export function findDockerBin(): string {
   if (_dockerBin) return _dockerBin;
 
@@ -434,6 +443,33 @@ export function findDockerBin(): string {
     return _dockerBin;
   } catch {
     // Not in PATH
+  }
+
+  // WSL: Docker Desktop exposes docker.exe via /mnt/c/... when WSL integration is off
+  if (isWSL()) {
+    const wslCandidates = [
+      "/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe",
+      "/mnt/c/ProgramData/DockerDesktop/version-bin/docker.exe",
+    ];
+    for (const candidate of wslCandidates) {
+      if (existsSync(candidate)) {
+        _dockerBin = candidate;
+        return _dockerBin;
+      }
+    }
+    // Also try which/command -v in case it's in a non-standard PATH location
+    try {
+      const resolved = execSync("which docker 2>/dev/null || command -v docker 2>/dev/null", {
+        encoding: "utf-8",
+        timeout: 5_000,
+      }).trim();
+      if (resolved) {
+        _dockerBin = resolved;
+        return _dockerBin;
+      }
+    } catch {
+      // Not found
+    }
   }
 
   // Windows: check known Docker Desktop install locations

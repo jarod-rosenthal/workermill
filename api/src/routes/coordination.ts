@@ -472,6 +472,7 @@ router.get(
     query("messageType").optional().isIn(VALID_MESSAGE_TYPES),
     query("since").optional().isISO8601(),
     query("limit").optional().isInt({ min: 1, max: 1000 }),
+    query("offset").optional().isInt({ min: 0 }),
     query("includeArchived").optional().isBoolean(),
   ],
   validateRequest,
@@ -479,7 +480,8 @@ router.get(
     const parentTaskId = req.params.parentTaskId as string;
     const messageType = req.query.messageType as ContextMessageType | undefined;
     const since = req.query.since as string | undefined;
-    const limit = parseInt(req.query.limit as string) || 1000;
+    const limit = parseInt(req.query.limit as string) || 200;
+    const offset = parseInt(req.query.offset as string) || 0;
     const includeArchived = req.query.includeArchived === "true";
     const orgId = req.organization!.id;
 
@@ -500,6 +502,7 @@ router.get(
       .where("context.parent_task_id = :parentTaskId", { parentTaskId })
       .andWhere("context.org_id = :orgId", { orgId })
       .orderBy("context.created_at", "ASC")
+      .skip(offset)
       .take(limit);
 
     // Filter out archived messages by default (active workers shouldn't see stale coordination)
@@ -519,7 +522,68 @@ router.get(
       });
     }
 
-    const contexts = await queryBuilder.getMany();
+    const [contexts, total] = await queryBuilder.getManyAndCount();
+
+    res.json({
+      parentTaskId,
+      count: contexts.length,
+      total,
+      offset,
+      limit,
+      contexts: contexts.map((c) => ({
+        id: c.id,
+        taskId: c.taskId,
+        persona: c.persona,
+        messageType: c.messageType,
+        content: c.content,
+        metadata: c.metadata,
+        createdAt: c.createdAt,
+        archived: c.archived,
+        archivedAt: c.archivedAt,
+      })),
+    });
+  })
+);
+
+/**
+ * GET /api/coordination/blockers/:parentTaskId
+ *
+ * Lightweight endpoint for blocker checks — returns only blocker-related messages.
+ * Hits the (parent_task_id, message_type) composite index, returning typically 0-5 rows
+ * instead of the full context feed (which can be 1000+ rows for large epics).
+ */
+router.get(
+  "/blockers/:parentTaskId",
+  authenticateRequest,
+  [
+    param("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
+  ],
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const parentTaskId = req.params.parentTaskId as string;
+    const orgId = req.organization!.id;
+
+    // Validate org owns this parent task
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const parentTask = await taskRepo.findOne({
+      where: { id: parentTaskId, orgId },
+    });
+
+    if (!parentTask) {
+      throw new NotFoundError("Parent task not found");
+    }
+
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+    const contexts = await contextRepo
+      .createQueryBuilder("context")
+      .where("context.parent_task_id = :parentTaskId", { parentTaskId })
+      .andWhere("context.org_id = :orgId", { orgId })
+      .andWhere("context.archived = :archived", { archived: false })
+      .andWhere("context.message_type IN (:...types)", {
+        types: ["blocker", "blocker_detected", "blocker_resolved", "answer"],
+      })
+      .orderBy("context.created_at", "ASC")
+      .getMany();
 
     res.json({
       parentTaskId,

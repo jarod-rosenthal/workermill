@@ -159,6 +159,11 @@ export class AgentClient extends EventEmitter {
     await this.post(`/api/tasks/${taskId}/cancel`, {});
   }
 
+  /** Retry a failed or cancelled task */
+  async retryTask(taskId: string): Promise<void> {
+    await this.post(`/api/tasks/${taskId}/retry`, {});
+  }
+
   /** Get coordination feed for a task (proxied from cloud API) */
   async getCoordinationFeed(taskId: string): Promise<unknown> {
     return this.get(`/api/tasks/${taskId}/coordination`);

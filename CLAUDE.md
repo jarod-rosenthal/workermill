@@ -141,9 +141,19 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 
 ## Recent Changes (keep updated)
 
-- 2026-02-15: Worker Decision Service extracted from worker to API (`api/src/services/worker-decision-engine.ts`). Workers call via `DecisionClient` (`worker/epic/decision-client.ts`).
-- 2026-02-16: v0.8.0 planner — single-agent planning + repo clone replaced 3-analyst team planning. Critic threshold 85/100.
-- 2026-02-16: `error-classifier.ts` and `quality-gate.ts` removed from worker — logic moved to decision service and `auto-fix-agent.ts`.
+- 2026-02-22: Multi-org support — VS Code extension + web dashboard org switcher (`dc82abc`).
+- 2026-02-21: Billing tiers renamed: Free/Pro/Enterprise → **Pro/Max/Enterprise** (`e8928aa`).
+- 2026-02-21: Docker sandbox mode for remote agent workers (`agent/src/docker-spawner.ts`). Opt-in via VS Code settings. Four spawners now (see Agent Pitfalls).
+- 2026-02-20: Full Build (formerly "PRD") decomposition — `POST /api/prd/decompose` creates boards with dependency-ordered cards. Board execution engine (`api/src/services/board-execution.ts`) cascade-triggers dependent cards on completion.
+- 2026-02-20: Card dependencies (`KbCardDependency` model), run-all/cancel-all endpoints, external tracker sync (Jira/GitHub/Linear).
+- 2026-02-19: Rate limit detection — agent detects rate limits → blocker escalation → dashboard banner + VS Code notification.
+- 2026-02-19: Personas consolidated from 16 to 12. Persona Studio is single source of truth for all persona data.
+- 2026-02-19: Anthropic models upgraded to `claude-sonnet-4-6` across codebase.
+- 2026-02-18: Agent binaries distributed via S3/CDN (`workermill.com/agent/latest/`) instead of GitHub Releases.
+- 2026-02-18: VS Code GitHub SSO onboarding, TOS acceptance, settings panel, sign-out.
+- 2026-02-17: Board issue keys — sequential `PREFIX-NUMBER` per board (`KbBoard.prefix`, `KbCard.card_number`).
+- 2026-02-17: Go language support added to worker pipeline.
+- 2026-02-16: StatusSnapshot model for uptime history (`status.workermill.com`).
 
 ---
 
@@ -313,8 +323,8 @@ await repo.update({ id, status: "queued" }, { status: "running" });
 
 - **Editing `agent/src/` locally does NOTHING to remote agents** — release a new binary. For local development: `cd agent && npm run build && npm link` then restart the agent.
 - **Polyglot binary:** Single binary serves CLI/worker/manager via `__WORKERMILL_MODE` env var
-- **Remote agent does NOT use Docker** — workers are native process self-invocations of the agent binary
-- **Three spawners:** `agent/src/spawner.ts` (remote agent), `api/src/services/local-epic-spawner.ts` (local Docker), `api/src/services/ecs-task-runner.ts` (cloud ECS) — always ask which environment before changes
+- **Remote agent workers** run as native process self-invocations by default, OR inside Docker sandbox (`agent/src/docker-spawner.ts`) when enabled in VS Code settings
+- **Four spawners:** `agent/src/spawner.ts` (remote agent native), `agent/src/docker-spawner.ts` (remote agent Docker sandbox), `api/src/services/local-epic-spawner.ts` (local Docker), `api/src/services/ecs-task-runner.ts` (cloud ECS) — always ask which environment before changes
 - **VS Code extension REQUIRES the remote agent** — it cannot connect to the local WorkerMill API directly
 - **Planning runs ONLY in the remote agent** — local WorkerMill Docker mode and cloud ECS skip planning
 - **`dotenv/config` type error is intentional** — optional dependency, do not "fix" by removing or adding to deps

@@ -376,15 +376,16 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
     const totalTests = metrics.testsPassed + metrics.testsFailed + metrics.testsSkipped;
     metrics.testScore = totalTests > 0 ? Math.round((metrics.testsPassed / totalTests) * 100) : 100;
     console.log(`[quality-runner] Tests: ${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped)`);
+
+    // Extract coverage if available (Jest/Vitest format)
+    const coverageMatch = testResult.stdout.match(/All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/);
+    if (coverageMatch) {
+      metrics.coverageLines = parseFloat(coverageMatch[1]) || 0;
+      metrics.coverageBranches = parseFloat(coverageMatch[2]) || 0;
+      metrics.coverageScore = Math.round(metrics.coverageLines);
+    }
   }
 
-  // Extract coverage if available
-  const coverageMatch = testResult.stdout.match(/All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/);
-  if (coverageMatch) {
-    metrics.coverageLines = parseFloat(coverageMatch[1]) || 0;
-    metrics.coverageBranches = parseFloat(coverageMatch[2]) || 0;
-    metrics.coverageScore = Math.round(metrics.coverageLines);
-  }
   console.log(`[quality-runner] Coverage: ${metrics.coverageScore}/100 (${metrics.coverageLines}% lines)`);
 
   // Track coverage for changed files specifically

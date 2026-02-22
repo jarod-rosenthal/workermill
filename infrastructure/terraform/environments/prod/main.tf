@@ -272,6 +272,9 @@ module "cdn" {
   certificate_arn = module.dns.certificate_arn
   alb_dns_name    = module.ecs_service.alb_dns_name
 
+  # Include status subdomain — wildcard ACM cert (*.workermill.com) already covers it
+  domain_aliases = [var.domain_name, "www.${var.domain_name}", "status.${var.domain_name}"]
+
   # Use api.workermill.com for API origin - enables HTTPS since cert (*.workermill.com) matches
   # Without this, CloudFront would use raw ALB DNS which doesn't match the cert
   api_origin_domain = "api.${var.domain_name}"
@@ -369,6 +372,18 @@ resource "aws_route53_record" "root" {
 resource "aws_route53_record" "www" {
   zone_id = module.dns.zone_id
   name    = "www.${var.domain_name}"
+  type    = "A"
+
+  alias {
+    name                   = module.cdn.distribution_domain_name
+    zone_id                = module.cdn.distribution_hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "status" {
+  zone_id = module.dns.zone_id
+  name    = "status.${var.domain_name}"
   type    = "A"
 
   alias {

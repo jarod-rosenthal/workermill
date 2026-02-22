@@ -23,7 +23,7 @@ const footerColumns: FooterColumn[] = [
   {
     title: "Resources",
     links: [
-      { label: "Status", href: "https://status.workermill.com", external: true },
+      { label: "Status", href: "/status" },
     ],
   },
   {

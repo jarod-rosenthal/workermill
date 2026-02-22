@@ -84,6 +84,16 @@ function handler(event) {
   var request = event.request;
   var uri = request.uri;
 
+  // Redirect status.workermill.com to workermill.com/status
+  var host = request.headers.host && request.headers.host.value;
+  if (host && host.startsWith('status.')) {
+    return {
+      statusCode: 301,
+      statusDescription: 'Moved Permanently',
+      headers: { location: { value: 'https://workermill.com/status' } }
+    };
+  }
+
   // Don't rewrite API, health, or webhook paths
   if (uri.startsWith('/api/') || uri === '/health' || uri === '/jira') {
     return request;

@@ -211,12 +211,14 @@ RUN chown -R worker:worker /app /workspace /kaniko /app/epic /app/multi-expert /
 RUN mkdir -p /home/worker/go/pkg/mod /home/worker/go/bin \
     && chown -R worker:worker /home/worker/go
 
-# Allow worker user to run Kaniko and AWS CLI as root without password
-# This is safe because the container is ephemeral and network-isolated
-# Note: We include /usr/bin/env because build_container.ts uses "sudo env PATH=... /kaniko/executor"
-# to ensure the ECR credential helper is in PATH when running as root
-# Note: update-ca-certificates is needed to restore SSL certs after Kaniko potentially corrupts them
-RUN echo 'worker ALL=(ALL) NOPASSWD: /kaniko/executor, /usr/local/bin/aws, /usr/bin/env, /usr/sbin/update-ca-certificates' > /etc/sudoers.d/worker \
+# Create Kaniko wrapper that accepts VAR=value env args and execs /kaniko/executor.
+# Replaces "sudo env PATH=... /kaniko/executor" — scoped to Kaniko only, no generic env.
+RUN printf '#!/bin/bash\nfor arg in "$@"; do\n  if [[ "$arg" =~ ^[A-Z_]+=.* ]]; then\n    export "$arg"\n    shift\n  else\n    break\n  fi\ndone\nexec /kaniko/executor "$@"\n' > /usr/local/bin/kaniko-run \
+    && chmod 755 /usr/local/bin/kaniko-run
+
+# Allow worker user to run Kaniko (via wrapper), AWS CLI, and cert updates as root.
+# /usr/bin/env is NOT in this list — prevents "sudo env ... arbitrary-command" escalation.
+RUN echo 'worker ALL=(ALL) NOPASSWD: /usr/local/bin/kaniko-run, /kaniko/executor, /usr/local/bin/aws, /usr/sbin/update-ca-certificates' > /etc/sudoers.d/worker \
     && chmod 440 /etc/sudoers.d/worker
 
 # Switch to worker user for Claude Code CLI compatibility

@@ -382,8 +382,8 @@ export async function spawnDockerWorker(
     "--name", containerName,
 
     // Security hardening: resource limits and privilege restrictions
-    "--memory", "4g",
-    "--memory-swap", "6g",
+    "--memory", `${config.dockerMemoryGb}g`,
+    "--memory-swap", `${config.dockerMemoryGb + 2}g`,
     "--cpus", "2",
     "--pids-limit", "512",
     "--cap-drop", "ALL",

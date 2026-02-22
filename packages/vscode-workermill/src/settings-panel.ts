@@ -140,6 +140,9 @@ export class SettingsPanel {
       } else if (msg.type === "toggle-sandbox") {
         await this.toggleSandbox(msg.enabled);
         return;
+      } else if (msg.type === "set-docker-memory") {
+        await this.setDockerMemory(msg.dockerMemoryGb);
+        return;
       } else if (msg.type === "pull-sandbox-image") {
         this.pullSandboxImage();
         return;
@@ -355,9 +358,15 @@ export class SettingsPanel {
   private async loadSandbox(): Promise<void> {
     const configPath = path.join(os.homedir(), ".workermill", "config.json");
     let sandbox: string = "none";
+    let dockerMemoryGb: number = 4;
+    const totalRamGb = Math.round(os.totalmem() / (1024 * 1024 * 1024));
+    const maxDockerMemoryGb = Math.max(4, totalRamGb - 4); // leave 4 GB for OS
     try {
       const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
       if (raw.sandbox === "docker") sandbox = "docker";
+      if (raw.dockerMemoryGb && raw.dockerMemoryGb >= 4 && raw.dockerMemoryGb <= maxDockerMemoryGb) {
+        dockerMemoryGb = raw.dockerMemoryGb;
+      }
     } catch {
       /* no config */
     }
@@ -383,6 +392,9 @@ export class SettingsPanel {
       sandbox,
       dockerAvailable,
       dockerInstalled,
+      dockerMemoryGb,
+      maxDockerMemoryGb,
+      totalRamGb,
     });
   }
 
@@ -447,6 +459,32 @@ export class SettingsPanel {
         error: `Agent restart failed: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
+  }
+
+  private async setDockerMemory(gb: number): Promise<void> {
+    const configPath = path.join(os.homedir(), ".workermill", "config.json");
+    let config: Record<string, unknown> = {};
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    } catch {
+      /* no config */
+    }
+
+    config.dockerMemoryGb = gb;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+
+    // Restart agent if sandbox is active so the new limit takes effect
+    if (config.sandbox === "docker") {
+      try {
+        await stopAgentProcess();
+        startAgentProcess();
+        await waitForAgentReady(undefined, 20_000);
+      } catch {
+        // Non-fatal — setting is saved, agent will pick it up on next start
+      }
+    }
+
+    this.postMessage({ type: "docker-memory-saved", dockerMemoryGb: gb });
   }
 
   private pullSandboxImage(): void {
@@ -821,6 +859,14 @@ export class SettingsPanel {
         </label>
         <div class="hint">Requires Docker installed and running. Workers will run in containers instead of native processes.</div>
       </div>
+      <div class="field" id="docker-memory-field" style="display:none">
+        <label>Container Memory Limit</label>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="range" id="docker-memory-slider" min="4" max="12" step="1" value="4" style="flex:1" />
+          <span id="docker-memory-value" style="min-width:40px;text-align:right;font-weight:600;">4 GB</span>
+        </div>
+        <div class="hint" id="docker-memory-hint">Min 4 GB. Swap adds 2 GB on top.</div>
+      </div>
       <div class="btn-row">
         <button class="btn-secondary" id="btn-pull-image">Pull Latest Image</button>
       </div>
@@ -1033,6 +1079,22 @@ export class SettingsPanel {
       vscode.postMessage({ type: "pull-sandbox-image" });
     });
 
+    // Docker memory slider
+    const memorySlider = document.getElementById("docker-memory-slider");
+    const memoryValue = document.getElementById("docker-memory-value");
+    const memoryField = document.getElementById("docker-memory-field");
+    const memoryHint = document.getElementById("docker-memory-hint");
+    let memoryDebounce = null;
+    memorySlider.addEventListener("input", () => {
+      memoryValue.textContent = memorySlider.value + " GB";
+    });
+    memorySlider.addEventListener("change", () => {
+      clearTimeout(memoryDebounce);
+      memoryDebounce = setTimeout(() => {
+        vscode.postMessage({ type: "set-docker-memory", dockerMemoryGb: parseInt(memorySlider.value) });
+      }, 300);
+    });
+
     function badge(configured) {
       return configured
         ? '<span class="badge configured">Connected</span>'
@@ -1213,6 +1275,18 @@ export class SettingsPanel {
           sandboxToggle.disabled = true;
           showStatus(sandboxStatus, "error", "Docker not detected — install Docker to enable sandbox mode");
         }
+        // Populate memory slider
+        if (msg.dockerAvailable || msg.dockerInstalled) {
+          memoryField.style.display = "block";
+          memorySlider.min = "4";
+          memorySlider.max = String(msg.maxDockerMemoryGb || 12);
+          memorySlider.value = String(msg.dockerMemoryGb || 4);
+          memoryValue.textContent = (msg.dockerMemoryGb || 4) + " GB";
+          memoryHint.textContent = "Min 4 GB, max " + (msg.maxDockerMemoryGb || 12) + " GB (system has " + (msg.totalRamGb || "?") + " GB). Swap adds 2 GB on top.";
+        }
+      }
+      if (msg.type === "docker-memory-saved") {
+        memoryValue.textContent = msg.dockerMemoryGb + " GB";
       }
       if (msg.type === "sandbox-restarting") {
         sandboxToggle.disabled = true;

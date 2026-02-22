@@ -192,14 +192,32 @@ function hasOAuthCredentials(): boolean {
 /**
  * Read the OAuth token from ~/.claude/.credentials.json.
  * Returns the token string or "" if not available.
+ *
+ * Known credential file formats:
+ *   { claudeAiOauth: { accessToken: "..." } }   — Claude CLI OAuth (primary)
+ *   { oauthToken: "..." }                        — legacy format
  */
 function readOAuthToken(): string {
   const home = process.env.HOME || process.env.USERPROFILE || "";
   const credPath = path.join(home, ".claude", ".credentials.json");
   try {
-    const data = JSON.parse(fs.readFileSync(credPath, "utf-8"));
-    // credentials.json has { claudeAiOauth: { accessToken: "..." } }
-    return data?.claudeAiOauth?.accessToken || data?.oauthToken || "";
+    const raw = fs.readFileSync(credPath, "utf-8");
+    const data = JSON.parse(raw);
+    const token =
+      data?.claudeAiOauth?.accessToken ||
+      data?.claudeAiOauth?.token ||
+      data?.oauthToken ||
+      "";
+    if (!token) {
+      // Log structure for debugging (keys only, no values)
+      const keys = Object.keys(data || {});
+      const oauthKeys = data?.claudeAiOauth ? Object.keys(data.claudeAiOauth) : [];
+      console.log(
+        `${ts()} ${chalk.yellow("⚠")} OAuth token not found in credentials file. ` +
+        `Top-level keys: [${keys.join(", ")}], claudeAiOauth keys: [${oauthKeys.join(", ")}]`
+      );
+    }
+    return token;
   } catch {
     return "";
   }
@@ -488,12 +506,19 @@ export async function spawnDockerWorker(
     EXECUTION_MODE_SETTING:
       (task.jiraFields?.executionMode as string) || "autonomous",
 
-    ANTHROPIC_API_KEY: hasOAuthCredentials()
-      ? ""
-      : credentials?.anthropicApiKey || "",
-    CLAUDE_CODE_OAUTH_TOKEN: hasOAuthCredentials()
-      ? readOAuthToken()
-      : "",
+    // OAuth takes priority: if we can read the token, use it and skip API key.
+    // If OAuth credentials file exists but token extraction fails, fall back to
+    // API key from org settings so the worker isn't left with NO credentials.
+    ANTHROPIC_API_KEY: (() => {
+      if (hasOAuthCredentials()) {
+        const oauthToken = readOAuthToken();
+        // OAuth file exists but token extraction failed — fall back to API key
+        if (!oauthToken) return credentials?.anthropicApiKey || "";
+        return ""; // OAuth works, skip API key
+      }
+      return credentials?.anthropicApiKey || "";
+    })(),
+    CLAUDE_CODE_OAUTH_TOKEN: hasOAuthCredentials() ? readOAuthToken() : "",
     WORKER_PROVIDER: task.workerProvider || "anthropic",
     OPENAI_API_KEY: credentials?.openaiApiKey || "",
     GOOGLE_API_KEY: credentials?.googleApiKey || "",
@@ -534,6 +559,13 @@ export async function spawnDockerWorker(
   );
   console.log(
     `${ts()} ${taskLabel} ${chalk.dim(`  image=${imageTag} review=${reviewEnabled} model=${task.workerModel} repo=${task.githubRepo}`)}`,
+  );
+  // Log credential path for debugging auth failures
+  const hasOAuth = !!envVars.CLAUDE_CODE_OAUTH_TOKEN;
+  const hasApiKey = !!envVars.ANTHROPIC_API_KEY;
+  const hasMountedCreds = !!claudeConfigDir;
+  console.log(
+    `${ts()} ${taskLabel} ${chalk.dim(`  auth: oauth=${hasOAuth} apiKey=${hasApiKey} mount=${hasMountedCreds}${hasMountedCreds ? ` (${claudeConfigDir})` : ""}`)}`,
   );
 
   // Spawn container

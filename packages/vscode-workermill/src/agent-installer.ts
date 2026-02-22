@@ -637,6 +637,9 @@ export function startAgentProcess(log?: (msg: string) => void): void {
   fs.mkdirSync(wmDir, { recursive: true });
   const logFile = path.join(wmDir, "agent.log");
   const logFd = fs.openSync(logFile, "a");
+  // Open os.devNull with an absolute path (\\.\nul on Windows) to avoid
+  // Node resolving NUL relative to the extension host CWD (VS Code install dir).
+  const stdinFd = fs.openSync(os.devNull, "r");
 
   try {
     // Build a PATH that includes known binary locations so the agent's
@@ -678,14 +681,9 @@ export function startAgentProcess(log?: (msg: string) => void): void {
       env.PATH = `${extraDirs.join(sep)}${sep}${process.env.PATH || ""}`;
     }
 
-    // On Windows, the extension host CWD is the VS Code install dir. Using
-    // stdio: "ignore" can cause Node to open NUL relative to that CWD, which
-    // fails with "Access is denied" on newer Windows builds. Fix: set cwd to
-    // the user's home dir so NUL device resolution doesn't hit a protected path.
     const child = spawn(binary, ["start"], {
       detached: true,
-      stdio: ["ignore", logFd, logFd],
-      cwd: os.homedir(),
+      stdio: [stdinFd, logFd, logFd],
       env,
       windowsHide: true,
     });
@@ -699,6 +697,7 @@ export function startAgentProcess(log?: (msg: string) => void): void {
   } catch (err) {
     log?.(`Spawn failed: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
+    fs.closeSync(stdinFd);
     fs.closeSync(logFd);
   }
 }
@@ -736,7 +735,7 @@ export async function stopAgentProcess(): Promise<boolean> {
   const binary = getAgentBinaryPath();
   if (fs.existsSync(binary)) {
     const stopped = await new Promise<boolean>((resolve) => {
-      const child = spawn(binary, ["stop"], { stdio: "ignore", cwd: os.homedir(), windowsHide: true });
+      const child = spawn(binary, ["stop"], { stdio: "pipe", windowsHide: true });
       child.on("close", (code) => resolve(code === 0));
       child.on("error", () => resolve(false));
       setTimeout(() => {

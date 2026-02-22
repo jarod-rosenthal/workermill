@@ -237,7 +237,6 @@ export async function authenticateApiKey(
       // Find by prefix (indexed for fast lookup)
       const userApiKey = await userApiKeyRepo.findOne({
         where: { keyPrefix },
-        relations: ["organization"],
       });
 
       if (userApiKey) {
@@ -251,12 +250,20 @@ export async function authenticateApiKey(
             return;
           }
 
+          // Load org directly by ID (same as org key path) to ensure full entity
+          // — relation loading can miss columns in edge cases
+          const org = await orgRepo.findOneBy({ id: userApiKey.orgId });
+          if (!org) {
+            res.status(401).json({ error: "Organization not found for API key" });
+            return;
+          }
+
           // Update last used timestamp (fire and forget)
           userApiKeyRepo
             .update({ id: userApiKey.id }, { lastUsedAt: new Date() })
             .catch((err) => logger.warn("Failed to update API key lastUsedAt", { err }));
 
-          req.organization = userApiKey.organization;
+          req.organization = org;
           next();
           return;
         }

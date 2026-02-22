@@ -63,7 +63,6 @@ data/dumps/
 .mcp.json
 .terraform.lock.hcl
 __pycache__/
-.aider*
 
 # VSIX build artifacts
 *.vsix

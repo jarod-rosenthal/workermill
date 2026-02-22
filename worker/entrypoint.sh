@@ -2875,6 +2875,9 @@ export TICKET_SUMMARY="${JIRA_SUMMARY}"
 export REPO_PATH="/workspace/repo"
 # JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN are passed from the orchestrator
 
+# Pass 2: detect and install tools based on repo contents
+/app/install-tools.sh "/workspace/repo"
+
 # Transition Jira ticket to "In Progress"
 if [ -n "${JIRA_BASE_URL}" ] && [ -n "${JIRA_EMAIL}" ] && [ -n "${JIRA_API_TOKEN}" ]; then
     post_log "system" "Transitioning Jira ticket to In Progress..."
@@ -2967,60 +2970,21 @@ case "$WORKER_PROVIDER" in
             2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
         ;;
 
-    ollama|openai|gemini|google|groq|mistral|xai|grok|azure)
+    ollama|openai|gemini|google|groq|mistral|xai|grok|azure|ai-sdk)
         # =============================================================================
-        # Unified LangGraph ReAct Executor
+        # Vercel AI SDK Executor (all non-Anthropic providers)
         # =============================================================================
-        # All non-Anthropic providers use the unified langgraph-executor.py
-        # This provides consistent behavior across providers with:
-        # - Structured Thought -> Action -> Observation loop
-        # - State management for test result caching
-        # - Edit failure recovery and guidance
-        # - Bash command loop detection
+        # AI SDK provides a unified interface for multiple AI providers.
+        # For ai-sdk mode, AI_SDK_UNDERLYING_PROVIDER specifies the actual provider.
+        # For direct provider names, WORKER_PROVIDER is passed through.
         #
-        # Supported providers:
-        #   ollama   - Local models via Ollama (llama3.1, qwen2.5-coder, etc.)
-        #   openai   - OpenAI API (gpt-4o, gpt-4-turbo, etc.)
-        #   gemini   - Google Gemini (gemini-1.5-pro, etc.)
-        #   google   - Alias for gemini
-        #   groq     - Groq fast inference (llama-3.1-70b-versatile, etc.)
-        #   mistral  - Mistral AI (mistral-large-latest, etc.)
-        #   xai/grok - Elon Musk's Grok (grok-2, grok-2-mini, etc.)
-        #   azure    - Azure OpenAI (deployments)
-        #
-        post_log "system" "Invoking LangGraph ReAct executor..."
-        post_log "system" "Provider: ${WORKER_PROVIDER}"
-        post_log "system" "Model: ${WORKER_MODEL:-auto}"
+        local RESOLVED_PROVIDER="${WORKER_PROVIDER}"
+        if [ "${WORKER_PROVIDER}" = "ai-sdk" ]; then
+            RESOLVED_PROVIDER="${AI_SDK_UNDERLYING_PROVIDER:-anthropic}"
+        fi
 
-        # Write prompt to a temp file to avoid shell escaping issues
-        PROMPT_FILE="/tmp/agent_prompt.txt"
-        echo "${PROMPT}" > "${PROMPT_FILE}"
-
-        # -u flag disables Python stdout buffering for real-time log streaming
-        python3 -u /app/agents/langgraph-executor.py \
-            --provider "${WORKER_PROVIDER}" \
-            --model "${WORKER_MODEL:-}" \
-            --prompt-file "${PROMPT_FILE}" \
-            2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
-        ;;
-
-    ai-sdk)
-        # =============================================================================
-        # Vercel AI SDK Executor (Multi-Expert Mode)
-        # =============================================================================
-        # AI SDK provides a unified interface for multiple AI providers, enabling
-        # per-persona provider routing configured in org settings.
-        #
-        # Environment variables:
-        #   AI_SDK_UNDERLYING_PROVIDER - The actual AI provider to use (anthropic, openai, google, ollama)
-        #   WORKER_MODEL - Model name (provider-specific)
-        #   WORKER_PERSONA - Agent persona for directive loading
-        #
-        # The executor resolves provider routing from org settings and dispatches
-        # to the appropriate AI provider using the Vercel AI SDK generateText API.
-        #
-        post_log "system" "Invoking Vercel AI SDK executor (multi-expert mode)..."
-        post_log "system" "Underlying Provider: ${AI_SDK_UNDERLYING_PROVIDER:-anthropic}"
+        post_log "system" "Invoking Vercel AI SDK executor..."
+        post_log "system" "Provider: ${RESOLVED_PROVIDER}"
         post_log "system" "Model: ${WORKER_MODEL:-auto}"
         post_log "system" "Persona: ${WORKER_PERSONA}"
 
@@ -3034,7 +2998,7 @@ case "$WORKER_PROVIDER" in
 
         # Run the AI SDK executor
         node /app/agents/ai-sdk-executor.js \
-            --provider "${AI_SDK_UNDERLYING_PROVIDER:-anthropic}" \
+            --provider "${RESOLVED_PROVIDER}" \
             --model "${WORKER_MODEL:-}" \
             --persona "${WORKER_PERSONA}" \
             --prompt-file "${PROMPT_FILE}" \
@@ -3378,7 +3342,7 @@ if [ -f "${OUTPUT_FILE}" ] && [ -s "${OUTPUT_FILE}" ]; then
     fi
 
     # Fallback: Parse from text markers (::input_tokens::12345) if JSON parsing returned 0
-    # This handles universal-agent.js output format
+    # This handles ai-sdk-executor.js output format
     if [ "${INPUT_TOKENS}" = "0" ]; then
         MARKER_INPUT=$(grep -o '::input_tokens::[0-9]*' "${OUTPUT_FILE}" 2>/dev/null | tail -1 | sed 's/::input_tokens:://')
         if [ -n "${MARKER_INPUT}" ] && [ "${MARKER_INPUT}" != "0" ]; then

@@ -3,9 +3,9 @@
 
 FROM node:20.19-bookworm
 
-# Install system dependencies (including sudo for Kaniko privilege escalation)
-# ca-certificates is critical for SSL/TLS operations after Kaniko runs
-# python3 and pip are needed for Aider (Ollama agent)
+# System essentials only — all dev tools (Go, Terraform, AWS CLI, Kaniko, Rust,
+# Deno, etc.) are installed on-demand at runtime by /app/install-tools.sh.
+# python3 kept for target repos that need Python.
 RUN apt-get update && apt-get install -y \
     git \
     curl \
@@ -13,22 +13,7 @@ RUN apt-get update && apt-get install -y \
     sudo \
     ca-certificates \
     python3 \
-    python3-pip \
-    python3-venv \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Go 1.23.6 (for Go-based target repos like FlagDeck)
-RUN curl -fsSL https://go.dev/dl/go1.23.6.linux-amd64.tar.gz -o go.tar.gz \
-    && tar -C /usr/local -xzf go.tar.gz \
-    && rm go.tar.gz \
-    && /usr/local/go/bin/go version
-ENV PATH="/usr/local/go/bin:${PATH}"
-ENV GOPATH="/home/worker/go"
-ENV GOMODCACHE="/home/worker/go/pkg/mod"
-
-# Install golangci-lint (Go meta-linter for quality gates)
-RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b /usr/local/bin v1.63.4 \
-    && golangci-lint --version
 
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
@@ -38,46 +23,9 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && apt-get install -y gh unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install AWS CLI v2 for ECS deployments
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
-    && unzip awscliv2.zip \
-    && ./aws/install \
-    && rm -rf awscliv2.zip aws \
-    && aws --version
-
-# Install Terraform for infrastructure provisioning (devops_engineer persona)
-RUN curl -fsSL https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip -o terraform.zip \
-    && unzip terraform.zip -d /usr/local/bin \
-    && rm terraform.zip \
-    && terraform --version
-
-# Install Kaniko executor for Docker image builds (daemon-less, works in Fargate)
-# Using multi-stage copy from official Kaniko image
-COPY --from=gcr.io/kaniko-project/executor:latest /kaniko/executor /kaniko/executor
-COPY --from=gcr.io/kaniko-project/executor:latest /kaniko/docker-credential-gcr /kaniko/docker-credential-gcr
-COPY --from=gcr.io/kaniko-project/executor:latest /kaniko/docker-credential-ecr-login /kaniko/docker-credential-ecr-login
-ENV PATH="/kaniko:${PATH}"
-
-# Create Kaniko config directory
-RUN mkdir -p /kaniko/.docker
-
 # Install Claude Code CLI (pinned to prevent breaking changes)
 RUN npm install -g @anthropic-ai/claude-code@1
 
-# Install Aider for agentic coding with Ollama/OpenAI/other providers
-RUN pip3 install --break-system-packages --no-cache-dir aider-chat
-
-# Install LangGraph and multi-provider LangChain packages for unified ReAct agent.
-# Pinned versions prevent pip backtracking (saves ~5 min per build).
-RUN pip3 install --break-system-packages --no-cache-dir \
-    langgraph==1.0.8 \
-    langchain-core==1.2.9 \
-    langchain==1.2.9 \
-    langchain-ollama==1.0.1 \
-    langchain-openai==1.1.8 \
-    langchain-google-genai==4.2.0 \
-    langchain-groq==1.1.2 \
-    langchain-mistralai==1.1.1
 # Create app directory
 WORKDIR /app
 
@@ -188,7 +136,7 @@ RUN test -f /app/epic/dist/index.js && \
     test -f /app/lib/checkpoint.sh && \
     echo "Bundle verification passed"
 
-# Copy entrypoint scripts
+# Copy entrypoint scripts + runtime tool installer
 COPY entrypoint.sh /app/entrypoint.sh
 COPY manager-entrypoint.sh /app/manager-entrypoint.sh
 COPY epic-entrypoint.sh /app/epic-entrypoint.sh
@@ -196,30 +144,36 @@ COPY multi-expert-entrypoint.sh /app/multi-expert-entrypoint.sh
 COPY standard-entrypoint.sh /app/standard-entrypoint.sh
 COPY warm-wait.sh /app/warm-wait.sh
 COPY start.sh /app/start.sh
-RUN chmod +x /app/entrypoint.sh /app/manager-entrypoint.sh /app/epic-entrypoint.sh /app/multi-expert-entrypoint.sh /app/standard-entrypoint.sh /app/warm-wait.sh /app/start.sh
+COPY install-tools.sh /app/install-tools.sh
+RUN chmod +x /app/entrypoint.sh /app/manager-entrypoint.sh /app/epic-entrypoint.sh /app/multi-expert-entrypoint.sh /app/standard-entrypoint.sh /app/warm-wait.sh /app/start.sh /app/install-tools.sh
 
 # Create workspace for cloned repos
 RUN mkdir -p /workspace
 
-# Create worker user with sudo access for Kaniko
-# Claude Code CLI refuses to run as root, but Kaniko needs root for chown
-# Solution: Run as worker user, allow passwordless sudo for Kaniko
+# Create worker user with sudo for runtime tool installs
+# Claude Code CLI refuses to run as root
 RUN useradd -m -s /bin/bash worker
-RUN chown -R worker:worker /app /workspace /kaniko /app/epic /app/multi-expert /app/manager /app/standard
 
-# Create Go module cache directories owned by worker
-RUN mkdir -p /home/worker/go/pkg/mod /home/worker/go/bin \
-    && chown -R worker:worker /home/worker/go
+# Only chown directories the worker actually WRITES to at runtime.
+# /app is read-only (root-owned 644/755 is readable by worker) — no chown needed.
+# This avoids a ~370MB Docker layer from duplicating /app content.
+RUN mkdir -p /kaniko/.docker /usr/local/go /home/worker/go/pkg/mod /home/worker/go/bin \
+    && chown -R worker:worker /workspace /kaniko /usr/local/go /home/worker/go
 
 # Create Kaniko wrapper that accepts VAR=value env args and execs /kaniko/executor.
 # Replaces "sudo env PATH=... /kaniko/executor" — scoped to Kaniko only, no generic env.
 RUN printf '#!/bin/bash\nfor arg in "$@"; do\n  if [[ "$arg" =~ ^[A-Z_]+=.* ]]; then\n    export "$arg"\n    shift\n  else\n    break\n  fi\ndone\nexec /kaniko/executor "$@"\n' > /usr/local/bin/kaniko-run \
     && chmod 755 /usr/local/bin/kaniko-run
 
-# Allow worker user to run Kaniko (via wrapper), AWS CLI, and cert updates as root.
-# /usr/bin/env is NOT in this list — prevents "sudo env ... arbitrary-command" escalation.
-RUN echo 'worker ALL=(ALL) NOPASSWD: /usr/local/bin/kaniko-run, /kaniko/executor, /usr/local/bin/aws, /usr/sbin/update-ca-certificates' > /etc/sudoers.d/worker \
+# Allow worker user to install tools at runtime and run Kaniko/AWS/certs.
+# Scoped commands only — /usr/bin/env is NOT in this list.
+RUN echo 'worker ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/tar, /usr/bin/unzip, /usr/bin/install, /usr/bin/mv, /usr/bin/cp, /usr/bin/chmod, /usr/bin/chown, /usr/bin/tee, /usr/bin/dd, /usr/local/bin/kaniko-run, /kaniko/executor, /usr/sbin/update-ca-certificates, /tmp/aws/install' > /etc/sudoers.d/worker \
     && chmod 440 /etc/sudoers.d/worker
+
+# Set PATH for tools that may be installed at runtime
+ENV PATH="/usr/local/go/bin:/kaniko:${PATH}"
+ENV GOPATH="/home/worker/go"
+ENV GOMODCACHE="/home/worker/go/pkg/mod"
 
 # Switch to worker user for Claude Code CLI compatibility
 USER worker

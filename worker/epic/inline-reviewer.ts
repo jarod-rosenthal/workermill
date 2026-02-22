@@ -73,8 +73,10 @@ You have access to these tools:
 ## Pre-Review Setup
 
 Before reviewing code, ensure dependencies are installed so typechecking is accurate:
-1. Run \`npm install\` in the repo root (required for accurate type resolution — without node_modules, tsc reports false-positive errors)
-2. If \`npm install\` fails, note it but continue with the review (do not block on dependency issues)
+1. If \`package.json\` exists: run \`npm install\` in the repo root (required for accurate type resolution — without node_modules, tsc reports false-positive errors)
+2. If \`go.mod\` exists: run \`go mod download\` (required for Go import resolution)
+3. If both exist (polyglot repo): run both
+4. If dependency install fails, note it but continue with the review (do not block on dependency issues)
 
 ## Architecture Review Checklist
 
@@ -96,6 +98,16 @@ If the repo has E2E tests (\`npm run test:e2e\` script exists):
 - [ ] Playwright selectors use \`getByRole\` with \`{ name }\` for interactive elements, NOT \`getByText\`
 - [ ] ARIA attributes are valid for the target element's role (e.g., no \`aria-expanded\` on \`type="search"\` inputs)
 - [ ] Text queries use \`{ exact: true }\` to avoid substring matching issues
+
+## Go Project Verification
+
+If the repo has Go code (\`go.mod\` exists):
+- [ ] \`gofmt -d ./...\` produces no output (code is properly formatted)
+- [ ] \`go vet ./...\` passes with no warnings
+- [ ] \`go build ./...\` compiles without errors
+- [ ] \`go test ./... -count=1\` passes (all tests green)
+- [ ] \`golangci-lint run ./...\` passes if available (meta-linter)
+- [ ] Go import groups are properly ordered (stdlib, third-party, local)
 
 ## Feedback Guidelines
 

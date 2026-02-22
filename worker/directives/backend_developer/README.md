@@ -406,6 +406,137 @@ Before pushing:
 - [ ] Parameterized queries (no string interpolation in SQL)
 - [ ] Error responses don't leak internal details
 
+---
+
+## Go Backend Development
+
+When working on Go projects (detected by `go.mod`), follow these patterns:
+
+### Project Structure (Go + Fiber)
+
+```
+api/
+  cmd/server/main.go          # Entry point, app bootstrap, graceful shutdown
+  internal/
+    config/config.go           # Env var loading (envconfig)
+    database/mongodb.go        # MongoDB client, connection, indexes
+    database/redis.go          # Redis client, health check
+    models/                    # Document schemas
+    handlers/                  # HTTP route handlers
+    services/                  # Business logic
+    middleware/                # Auth, rate limiting, request ID
+    router/router.go           # Route registration
+  go.mod
+  go.sum
+```
+
+### Go Conventions
+
+- **Package names**: lowercase, single word, no underscores (`handlers`, not `http_handlers`)
+- **Import groups**: stdlib first, third-party second, local packages third (separated by blank lines)
+- **Error handling**: Always check returned errors — never use `_` for error values
+- **Interfaces**: Define interfaces where they are consumed, not where they are implemented
+- **Context**: Pass `context.Context` as the first parameter to functions that do I/O
+
+### Go + Fiber API Pattern
+
+```go
+func (h *FlagHandler) GetFlag(c *fiber.Ctx) error {
+    key := c.Params("key")
+    if key == "" {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+            "error": fiber.Map{"code": "VALIDATION_ERROR", "message": "flag key required"},
+        })
+    }
+
+    flag, err := h.service.GetByKey(c.Context(), key)
+    if err != nil {
+        if errors.Is(err, ErrNotFound) {
+            return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+                "error": fiber.Map{"code": "NOT_FOUND", "message": "flag not found"},
+            })
+        }
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+            "error": fiber.Map{"code": "INTERNAL_ERROR", "message": "internal server error"},
+        })
+    }
+
+    return c.JSON(flag)
+}
+```
+
+### MongoDB with Go (mongo-driver v2)
+
+```go
+// Connection
+client, err := mongo.Connect(options.Client().ApplyURI(cfg.MongoURI))
+if err != nil {
+    return fmt.Errorf("mongodb connect: %w", err)
+}
+defer client.Disconnect(context.Background())
+
+// CRUD
+collection := client.Database("flagdeck").Collection("flags")
+var flag Flag
+err = collection.FindOne(ctx, bson.M{"key": key}).Decode(&flag)
+
+// Indexes (create on startup)
+_, err = collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+    Keys:    bson.D{{Key: "key", Value: 1}},
+    Options: options.Index().SetUnique(true),
+})
+```
+
+### Redis Cache Pattern (go-redis v9)
+
+```go
+func (c *Cache) GetFlag(ctx context.Context, env, key string) (*Flag, error) {
+    cacheKey := fmt.Sprintf("flag:%s:%s", env, key)
+    data, err := c.rdb.Get(ctx, cacheKey).Bytes()
+    if err == redis.Nil {
+        return nil, nil // Cache miss
+    }
+    if err != nil {
+        slog.Warn("redis get failed, degrading gracefully", "error", err)
+        return nil, nil // Redis down — degrade, don't fail
+    }
+    var flag Flag
+    json.Unmarshal(data, &flag)
+    return &flag, nil
+}
+```
+
+**CRITICAL**: Redis failure MUST NOT cause request failure. Always degrade gracefully to MongoDB.
+
+### Go Quality Gate (before every commit)
+
+```bash
+gofmt -w ./...              # Format
+go vet ./...                # Static analysis
+golangci-lint run ./...     # Meta-linter (if available)
+go test ./... -v -count=1   # Tests
+go build -o /dev/null ./cmd/server  # Build verification
+```
+
+### Go Testing with testify
+
+```go
+func TestEvaluateFlag(t *testing.T) {
+    assert := assert.New(t)
+
+    result := evaluator.Evaluate(flag, context)
+    assert.Equal(true, result.Value)
+    assert.Equal("rule_match", result.Reason)
+}
+
+func TestRolloutDeterminism(t *testing.T) {
+    // Same inputs must always produce same output
+    for i := 0; i < 1000; i++ {
+        assert.Equal(t, isInRollout("flag-a", "user-1", 50), isInRollout("flag-a", "user-1", 50))
+    }
+}
+```
+
 ## Self-Annealing Notes
 
 *This section is updated by AI Workers with learned improvements*

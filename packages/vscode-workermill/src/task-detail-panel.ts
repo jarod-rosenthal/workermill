@@ -75,6 +75,22 @@ export class TaskDetailPanel {
             );
           }
         }
+      } else if (msg.type === "retry-task") {
+        const confirmRetry = await vscode.window.showWarningMessage(
+          "Retry this task?",
+          { modal: true },
+          "Retry",
+        );
+        if (confirmRetry === "Retry") {
+          try {
+            await this.client.retryTask(this.taskId);
+            vscode.window.showInformationMessage("Task queued for retry.");
+          } catch (err) {
+            vscode.window.showErrorMessage(
+              `Failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
       } else if (msg.type === "blocker-response") {
         try {
           await this.client.respondToBlocker(
@@ -409,6 +425,7 @@ export class TaskDetailPanel {
   .finished-banner.visible { display: block; }
   .finished-banner.completed { background: rgba(78,201,176,0.15); color: var(--green); }
   .finished-banner.failed { background: rgba(244,71,71,0.15); color: var(--red); }
+  .finished-banner.cancelled { background: rgba(244,71,71,0.15); color: var(--red); }
 
   ::-webkit-scrollbar { width: 8px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -473,6 +490,9 @@ export class TaskDetailPanel {
 <div class="actions-bar" id="actionsBar">
   <button class="action-btn danger" onclick="cancelTask()">Cancel Task</button>
 </div>
+<div class="actions-bar" id="retryBar" style="display:none">
+  <button class="action-btn primary" onclick="retryTask()">Retry Task</button>
+</div>
 
 <div class="detail-section" id="detailSection">
   <h2>Task Details</h2>
@@ -506,6 +526,7 @@ let currentBlockerId = null;
 let taskStatus = "${task.status}";
 
 function cancelTask() { vscode.postMessage({ type: "cancel-task" }); }
+function retryTask() { vscode.postMessage({ type: "retry-task" }); }
 
 function blockerAction(action) {
   if (!currentBlockerId) return;
@@ -536,11 +557,16 @@ function updateStatus(status) {
   badge.className = "badge badge-status " + status;
 
   // Show finished banner
-  if (status === "completed" || status === "failed") {
+  if (status === "completed" || status === "failed" || status === "cancelled") {
     const banner = document.getElementById("finishedBanner");
     banner.className = "finished-banner visible " + status;
-    banner.textContent = status === "completed" ? "\\u2705 Task completed successfully" : "\\u274C Task failed";
+    banner.textContent = status === "completed" ? "\\u2705 Task completed successfully"
+      : status === "cancelled" ? "\\u{1F6AB} Task cancelled"
+      : "\\u274C Task failed";
     document.getElementById("actionsBar").style.display = "none";
+    if (status === "failed" || status === "cancelled") {
+      document.getElementById("retryBar").style.display = "flex";
+    }
   }
 }
 

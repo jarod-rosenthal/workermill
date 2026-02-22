@@ -67,6 +67,8 @@ import { LogSearch } from "../../components/LogSearch";
 import { OrgSwitcher } from "../../components/OrgSwitcher";
 import { useAuthStore } from "../../store/auth-store";
 import { SetupBanner } from "../../components/SetupBanner";
+import { TrialBanner } from "../../components/TrialBanner";
+import { GettingStartedChecklist } from "../../components/GettingStartedChecklist";
 import { DashboardSkeleton } from "../../components/ui/skeleton";
 import {
   ErrorBoundaryWithRetry,
@@ -2408,6 +2410,16 @@ export default function Dashboard() {
       {/* Setup Incomplete Banner */}
       <div className="max-w-7xl mx-auto px-6 pt-4">
         <SetupBanner />
+      </div>
+
+      {/* Trial Expiry Banner */}
+      <div className="max-w-7xl mx-auto px-6">
+        <TrialBanner />
+      </div>
+
+      {/* Getting Started Checklist */}
+      <div className="max-w-7xl mx-auto px-6">
+        <GettingStartedChecklist />
       </div>
 
       {/* Success/Error Alerts */}

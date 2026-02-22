@@ -234,6 +234,8 @@ export function Login() {
       setShowSuccessMessage("Registration successful! Please check your email to verify your account.");
     } else if (searchParams.get("verified") === "true") {
       setShowSuccessMessage("Email verified successfully! You can now log in.");
+    } else if (searchParams.get("reset") === "true") {
+      setShowSuccessMessage("Password reset successfully. Please sign in with your new password.");
     }
 
     if (showSuccessMessage) {
@@ -559,10 +561,18 @@ export function Login() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <Lock className="w-4 h-4" />
-                  Password
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <Lock className="w-4 h-4" />
+                    Password
+                  </label>
+                  <Link
+                    to="/forgot-password"
+                    className="text-sm text-primary hover:underline font-medium"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
                 <input
                   type="password"
                   placeholder="Enter your password"

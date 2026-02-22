@@ -273,7 +273,11 @@ export async function processSignupDeposit(
   orgId: string,
   paymentMethodId: string,
   amountCents: number
-): Promise<{ paymentIntentId: string }> {
+): Promise<{
+  paymentIntentId: string;
+  requiresAction?: boolean;
+  clientSecret?: string;
+}> {
   if (!stripe) {
     throw new Error("Stripe is not configured");
   }
@@ -312,7 +316,8 @@ export async function processSignupDeposit(
     invoice_settings: { default_payment_method: paymentMethodId },
   });
 
-  // Create PaymentIntent
+  // Create PaymentIntent — allow_redirects: "always" supports 3D Secure (SCA)
+  // which is mandatory for EU/UK card payments.
   const paymentIntent = await stripe.paymentIntents.create({
     amount: amountCents,
     currency: "usd",
@@ -321,8 +326,9 @@ export async function processSignupDeposit(
     confirm: true,
     automatic_payment_methods: {
       enabled: true,
-      allow_redirects: "never",
+      allow_redirects: "always",
     },
+    return_url: `${config.apiBaseUrl || "https://workermill.com"}/billing?payment_status=complete`,
     metadata: {
       orgId,
       type: "signup_deposit",
@@ -360,6 +366,22 @@ export async function processSignupDeposit(
       bonusCents,
       paymentIntentId: paymentIntent.id,
     });
+  } else if (paymentIntent.status === "requires_action") {
+    // 3D Secure / SCA redirect required — return the URL for client to complete
+    logger.info("Signup deposit requires 3DS authentication", {
+      orgId,
+      amountCents,
+      paymentIntentId: paymentIntent.id,
+    });
+
+    // Save payment method ahead of time so it's available after redirect
+    await savePaymentMethod(orgId, paymentMethodId);
+
+    return {
+      paymentIntentId: paymentIntent.id,
+      requiresAction: true,
+      clientSecret: paymentIntent.client_secret || undefined,
+    };
   } else {
     throw new Error(`Payment failed with status: ${paymentIntent.status}`);
   }

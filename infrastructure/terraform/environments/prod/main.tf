@@ -449,6 +449,9 @@ module "monitoring" {
   enable_cost_alarms       = true
   enable_task_queue_alarms = true
 
+  # Slack integration (set var.slack_webhook_url to enable)
+  slack_webhook_url = var.slack_webhook_url
+
   depends_on = [module.ecs_service, module.database]
 }
 

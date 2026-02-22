@@ -144,46 +144,13 @@ export function IntegrationsSection({
         <p className="text-sm text-muted-foreground">Connect your development tools</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {/* Jira Card */}
-        <div className={`border rounded-xl p-6 bg-card transition-colors ${settings?.issueTrackerProvider === "jira" ? "border-blue-500 ring-1 ring-blue-500/30" : "border-border/50 hover:border-blue-500/50"}`}>
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center">
-              <svg viewBox="0 0 24 24" className="w-7 h-7 text-blue-500" fill="currentColor">
-                <path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.84a.84.84 0 0 0-.84-.84H11.53zM6.77 6.8a4.362 4.362 0 0 0 4.34 4.34h1.8v1.72a4.362 4.362 0 0 0 4.34 4.34V7.63a.84.84 0 0 0-.83-.83H6.77zM2 11.6c0 2.4 1.94 4.35 4.35 4.35h1.78v1.7c.01 2.39 1.95 4.34 4.34 4.35v-9.57a.84.84 0 0 0-.84-.83H2z" />
-              </svg>
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-foreground">Jira</h3>
-                {settings?.issueTrackerProvider === "jira" && (
-                  <span className="px-2 py-0.5 text-xs font-medium bg-blue-500/10 text-blue-500 rounded-full">
-                    Default
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">Issue tracking</p>
-            </div>
-          </div>
-          <div className="flex items-center justify-between">
-            {jiraStatus.connected ? (
-              <span className="flex items-center gap-1 text-green-500 text-sm">
-                <CheckCircle className="w-4 h-4" /> Connected
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 text-muted-foreground text-sm">
-                <XCircle className="w-4 h-4" /> Not connected
-              </span>
-            )}
-            <button
-              onClick={() => setJiraSlideOpen(true)}
-              className="text-sm text-primary hover:underline"
-            >
-              Configure
-            </button>
-          </div>
+      {/* Source Control — Required */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider">Source Control</h3>
+          <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-primary/10 text-primary rounded">Required</span>
         </div>
-
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* GitHub Card */}
         <div className={`border rounded-xl p-6 bg-card transition-colors ${settings.scmProvider === "github" ? "border-primary ring-1 ring-primary/30" : "border-border/50 hover:border-gray-500/50"}`}>
           <div className="flex items-center gap-3 mb-4">
@@ -294,23 +261,39 @@ export function IntegrationsSection({
             </button>
           </div>
         </div>
+        </div>
+      </div>
 
-        {/* Slack Card */}
-        <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isProPlan ? "opacity-60" : "hover:border-purple-500/50"}`}>
-          {isProPlan && <LockedOverlay />}
+      {/* Issue Tracking — Recommended */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider">Issue Tracking</h3>
+          <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground rounded">Optional</span>
+          <span className="text-xs text-muted-foreground">Built-in board available as default</span>
+        </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* Jira Card */}
+        <div className={`border rounded-xl p-6 bg-card transition-colors ${settings?.issueTrackerProvider === "jira" ? "border-blue-500 ring-1 ring-blue-500/30" : "border-border/50 hover:border-blue-500/50"}`}>
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center">
-              <svg viewBox="0 0 24 24" className="w-7 h-7 text-purple-500" fill="currentColor">
-                <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+            <div className="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" className="w-7 h-7 text-blue-500" fill="currentColor">
+                <path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.84a.84.84 0 0 0-.84-.84H11.53zM6.77 6.8a4.362 4.362 0 0 0 4.34 4.34h1.8v1.72a4.362 4.362 0 0 0 4.34 4.34V7.63a.84.84 0 0 0-.83-.83H6.77zM2 11.6c0 2.4 1.94 4.35 4.35 4.35h1.78v1.7c.01 2.39 1.95 4.34 4.34 4.35v-9.57a.84.84 0 0 0-.84-.83H2z" />
               </svg>
             </div>
             <div className="flex-1">
-              <h3 className="font-semibold text-foreground">Slack</h3>
-              <p className="text-xs text-muted-foreground">Notifications</p>
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-foreground">Jira</h3>
+                {settings?.issueTrackerProvider === "jira" && (
+                  <span className="px-2 py-0.5 text-xs font-medium bg-blue-500/10 text-blue-500 rounded-full">
+                    Default
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">Issue tracking</p>
             </div>
           </div>
           <div className="flex items-center justify-between">
-            {slackStatus.connected ? (
+            {jiraStatus.connected ? (
               <span className="flex items-center gap-1 text-green-500 text-sm">
                 <CheckCircle className="w-4 h-4" /> Connected
               </span>
@@ -320,7 +303,7 @@ export function IntegrationsSection({
               </span>
             )}
             <button
-              onClick={() => setSlackSlideOpen(true)}
+              onClick={() => setJiraSlideOpen(true)}
               className="text-sm text-primary hover:underline"
             >
               Configure
@@ -405,6 +388,48 @@ export function IntegrationsSection({
             )}
           </div>
         </div>
+      </div>
+      </div>
+
+      {/* Notifications — Optional */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider">Notifications</h3>
+          <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground rounded">Optional</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* Slack Card */}
+        <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isProPlan ? "opacity-60" : "hover:border-purple-500/50"}`}>
+          {isProPlan && <LockedOverlay />}
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" className="w-7 h-7 text-purple-500" fill="currentColor">
+                <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-foreground">Slack</h3>
+              <p className="text-xs text-muted-foreground">Notifications</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            {slackStatus.connected ? (
+              <span className="flex items-center gap-1 text-green-500 text-sm">
+                <CheckCircle className="w-4 h-4" /> Connected
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                <XCircle className="w-4 h-4" /> Not connected
+              </span>
+            )}
+            <button
+              onClick={() => setSlackSlideOpen(true)}
+              className="text-sm text-primary hover:underline"
+            >
+              Configure
+            </button>
+          </div>
+        </div>
 
         {/* Microsoft Teams Card */}
         <div className={`relative border border-border/50 rounded-xl p-6 bg-card transition-colors ${isProPlan ? "opacity-60" : "hover:border-violet-500/50"}`}>
@@ -438,13 +463,14 @@ export function IntegrationsSection({
             </button>
           </div>
         </div>
-
+        </div>
       </div>
 
       {/* Cloud Providers Section */}
       <div className="mt-8">
         <div className="flex items-center gap-2 mb-1">
           <h3 className="text-lg font-semibold text-foreground">Cloud Providers</h3>
+          <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground rounded">Optional</span>
           {isProPlan && <MaxBadge />}
         </div>
         <p className="text-sm text-muted-foreground mb-4">Configure cloud credentials for worker deployment</p>
@@ -557,9 +583,10 @@ export function IntegrationsSection({
       <div className="mt-8">
         <div className="flex items-center gap-2 mb-1">
           <h3 className="text-lg font-semibold text-foreground">AI Providers</h3>
+          <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-primary/10 text-primary rounded">Required</span>
           {isProPlan && <span className="text-xs text-muted-foreground">(Anthropic included on Pro)</span>}
         </div>
-        <p className="text-sm text-muted-foreground mb-4">Configure API keys for AI model providers</p>
+        <p className="text-sm text-muted-foreground mb-4">Configure at least one AI provider API key</p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* Anthropic Card */}

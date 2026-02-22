@@ -20,6 +20,8 @@ interface Organization {
   id: string;
   name: string;
   plan: string;
+  trialExpiresAt: string | null;
+  stripeSubscriptionStatus: string | null;
 }
 
 interface AuthState {

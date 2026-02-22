@@ -295,8 +295,8 @@ router.post(
   requireAdmin,
   body("plan")
     .isString()
-    .isIn(["max"])
-    .withMessage("plan must be: max (enterprise is contact-sales, pro needs no checkout)"),
+    .isIn(["pro", "max"])
+    .withMessage("plan must be: pro or max (enterprise is contact-sales)"),
   validateRequest,
   asyncHandler(async (req: Request, res: Response) => {
     if (!config.stripe?.secretKey) {
@@ -555,7 +555,11 @@ router.post(
     const org = req.organization!;
     const { paymentMethodId, amountCents, isSignup } = req.body;
 
-    let result;
+    let result: {
+      paymentIntentId: string;
+      requiresAction?: boolean;
+      clientSecret?: string;
+    };
     if (isSignup || !org.signupDepositCompleted) {
       result = await creditBilling.processSignupDeposit(
         org.id,
@@ -570,10 +574,20 @@ router.post(
       );
     }
 
-    res.json({
-      success: true,
-      paymentIntentId: result.paymentIntentId,
-    });
+    if (result.requiresAction) {
+      // 3D Secure / SCA redirect required
+      res.json({
+        success: false,
+        requiresAction: true,
+        paymentIntentId: result.paymentIntentId,
+        clientSecret: result.clientSecret,
+      });
+    } else {
+      res.json({
+        success: true,
+        paymentIntentId: result.paymentIntentId,
+      });
+    }
   })
 );
 

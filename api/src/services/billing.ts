@@ -13,6 +13,9 @@ import {
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
 import { markReferralQualified, recordDiscountUsed, getReferralDiscount } from "./referral.js";
+import { UserOrganization } from "../models/UserOrganization.js";
+import { sendPaymentFailedEmail } from "./email/billing-emails.js";
+import { In } from "typeorm";
 
 // Initialize Stripe client (only if secret key is configured)
 const stripeSecretKey = config.stripe?.secretKey;
@@ -32,7 +35,7 @@ export function isStripeConfigured(): boolean {
 // Price IDs for each plan (configured in Stripe Dashboard)
 // These should be set in environment variables
 const PRICE_IDS: Record<OrganizationPlan, string | null> = {
-  pro: null,
+  pro: config.stripe?.prices?.pro || null,
   max: config.stripe?.prices?.max || "",
   enterprise: config.stripe?.prices?.enterprise || null,
 };
@@ -469,7 +472,51 @@ export async function handleInvoicePaymentFailed(
     currency: invoice.currency,
   });
 
-  // TODO: Send notification to org admins about failed payment
+  // Send notification to org admins about the failed payment
+  const failureReason =
+    (invoice as { last_payment_error?: { message?: string } }).last_payment_error?.message ||
+    "Payment was declined by your card issuer";
+
+  try {
+    const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+    const adminMemberships = await userOrgRepo.find({
+      where: {
+        orgId: org.id,
+        role: In(["admin", "owner"]),
+      },
+      relations: ["user"],
+    });
+
+    for (const membership of adminMemberships) {
+      const user = membership.user;
+      if (!user?.email) continue;
+
+      await sendPaymentFailedEmail(user, org, failureReason).catch(
+        (emailError) => {
+          logger.error("Failed to send payment failed email", {
+            orgId: org.id,
+            userId: user.id,
+            error:
+              emailError instanceof Error
+                ? emailError.message
+                : String(emailError),
+          });
+        },
+      );
+    }
+
+    logger.info("Payment failure notifications sent to org admins", {
+      orgId: org.id,
+      invoiceId: invoice.id,
+      adminCount: adminMemberships.length,
+    });
+  } catch (error) {
+    logger.error("Failed to send payment failure notifications", {
+      orgId: org.id,
+      invoiceId: invoice.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /**
@@ -580,6 +627,28 @@ export async function canCreateTask(org: Organization): Promise<{
       reason: org.billingPausedReason || "Billing is paused. Please contact support.",
       usage: { used: org.taskUsageThisMonth, quota: -1 },
     };
+  }
+
+  // Pro plan: allow during active trial OR with active Stripe subscription
+  if (org.plan === "pro") {
+    // Active Stripe subscription — always allow
+    if (
+      org.stripeSubscriptionStatus === "active" ||
+      org.stripeSubscriptionStatus === "trialing"
+    ) {
+      // Fall through to quota check below
+    } else if (org.trialExpiresAt && new Date() < org.trialExpiresAt) {
+      // Active trial — allow (fall through to quota check)
+    } else if (org.trialExpiresAt) {
+      // Trial expired, no subscription
+      return {
+        allowed: false,
+        reason:
+          "Your Pro trial has expired. Subscribe to continue using WorkerMill.",
+        usage: { used: org.taskUsageThisMonth, quota: -1 },
+      };
+    }
+    // If trialExpiresAt is null and no subscription, allow (legacy orgs / backward compat)
   }
 
   // Check subscription status for paid plans (Max and Enterprise require active subscription)

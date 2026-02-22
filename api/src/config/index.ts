@@ -140,6 +140,7 @@ export const config = {
     secretKey: process.env.STRIPE_SECRET_KEY || "",
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
     prices: {
+      pro: process.env.STRIPE_PRICE_PRO || "",
       max: process.env.STRIPE_PRICE_MAX || "",
       enterprise: process.env.STRIPE_PRICE_ENTERPRISE || "",
     },
@@ -153,6 +154,10 @@ export const config = {
     defaultRechargeThresholdCents: 1000, // $10
     defaultRechargeAmountCents: 5000, // $50
   },
+
+  // Encryption at rest for sensitive fields (Organization tokens, webhook secrets)
+  // 32-byte hex string (64 characters). If not set, encryption is disabled (plaintext).
+  encryptionKey: process.env.ENCRYPTION_KEY || "",
 
   // AI Support Agent
   supportAgent: {

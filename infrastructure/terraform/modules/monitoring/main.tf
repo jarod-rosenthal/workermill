@@ -537,6 +537,239 @@ resource "aws_cloudwatch_metric_alarm" "task_failure_rate" {
 }
 
 # =============================================================================
+# Slack Alarm Notifications (Optional — enabled when slack_webhook_url is set)
+# =============================================================================
+
+resource "aws_iam_role" "slack_notifier" {
+  count = var.slack_webhook_url != "" ? 1 : 0
+
+  name = "${local.alarm_prefix}-slack-notifier"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name = "${local.alarm_prefix}-slack-notifier"
+  }
+}
+
+resource "aws_iam_role_policy" "slack_notifier" {
+  count = var.slack_webhook_url != "" ? 1 : 0
+
+  name = "${local.alarm_prefix}-slack-notifier"
+  role = aws_iam_role.slack_notifier[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "${aws_cloudwatch_log_group.slack_notifier[0].arn}:*"
+      }
+    ]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "slack_notifier" {
+  count = var.slack_webhook_url != "" ? 1 : 0
+
+  name              = "/aws/lambda/${local.alarm_prefix}-slack-notifier"
+  retention_in_days = 14
+
+  tags = {
+    Name = "${local.alarm_prefix}-slack-notifier"
+  }
+}
+
+data "archive_file" "slack_notifier" {
+  count = var.slack_webhook_url != "" ? 1 : 0
+
+  type        = "zip"
+  output_path = "${path.module}/lambda/slack_notifier.zip"
+
+  source {
+    content  = <<-PYTHON
+import json
+import os
+import urllib.request
+import urllib.error
+
+def lambda_handler(event, context):
+    """
+    Receive SNS alarm notifications and post formatted messages to Slack.
+    """
+    webhook_url = os.environ.get('SLACK_WEBHOOK_URL', '')
+    if not webhook_url:
+        print('SLACK_WEBHOOK_URL not configured')
+        return {'statusCode': 400, 'body': 'No webhook URL'}
+
+    for record in event.get('Records', []):
+        sns_message = record.get('Sns', {}).get('Message', '{}')
+
+        try:
+            alarm = json.loads(sns_message)
+        except json.JSONDecodeError:
+            # Not a CloudWatch Alarm JSON — post raw text
+            post_to_slack(webhook_url, format_raw_message(sns_message))
+            continue
+
+        # CloudWatch Alarm message
+        alarm_name = alarm.get('AlarmName', 'Unknown Alarm')
+        new_state = alarm.get('NewStateValue', 'UNKNOWN')
+        reason = alarm.get('NewStateReason', 'No reason provided')
+        description = alarm.get('AlarmDescription', '')
+        region = alarm.get('Region', 'us-east-1')
+        timestamp = alarm.get('StateChangeTime', '')
+
+        # Choose color and emoji based on alarm state
+        if new_state == 'ALARM':
+            color = '#d62728'
+            emoji = ':rotating_light:'
+            status = 'FIRING'
+        elif new_state == 'OK':
+            color = '#2ca02c'
+            emoji = ':white_check_mark:'
+            status = 'RESOLVED'
+        else:
+            color = '#ff7f0e'
+            emoji = ':warning:'
+            status = new_state
+
+        # Build Slack message with attachment
+        slack_message = {
+            'text': f'{emoji} *WorkerMill Alert — {status}*',
+            'attachments': [
+                {
+                    'color': color,
+                    'blocks': [
+                        {
+                            'type': 'section',
+                            'fields': [
+                                {'type': 'mrkdwn', 'text': f'*Alarm:*\n{alarm_name}'},
+                                {'type': 'mrkdwn', 'text': f'*Status:*\n{status}'},
+                            ]
+                        },
+                        {
+                            'type': 'section',
+                            'text': {
+                                'type': 'mrkdwn',
+                                'text': f'*Description:*\n{description}'
+                            }
+                        },
+                        {
+                            'type': 'section',
+                            'text': {
+                                'type': 'mrkdwn',
+                                'text': f'*Reason:*\n{reason}'
+                            }
+                        },
+                        {
+                            'type': 'context',
+                            'elements': [
+                                {'type': 'mrkdwn', 'text': f'Region: {region} | {timestamp}'}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+
+        post_to_slack(webhook_url, slack_message)
+
+    return {'statusCode': 200, 'body': 'OK'}
+
+
+def format_raw_message(text):
+    """Format a non-JSON SNS message for Slack."""
+    return {
+        'text': ':bell: *WorkerMill SNS Notification*',
+        'attachments': [
+            {
+                'color': '#ff7f0e',
+                'text': text[:3000],
+            }
+        ]
+    }
+
+
+def post_to_slack(webhook_url, payload):
+    """Send a message to the Slack webhook."""
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(
+        webhook_url,
+        data=data,
+        headers={'Content-Type': 'application/json'},
+        method='POST'
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            print(f'Slack response: {resp.status}')
+    except urllib.error.URLError as e:
+        print(f'Error posting to Slack: {e}')
+PYTHON
+    filename = "index.py"
+  }
+}
+
+resource "aws_lambda_function" "slack_notifier" {
+  count = var.slack_webhook_url != "" ? 1 : 0
+
+  filename         = data.archive_file.slack_notifier[0].output_path
+  function_name    = "${local.alarm_prefix}-slack-notifier"
+  role             = aws_iam_role.slack_notifier[0].arn
+  handler          = "index.lambda_handler"
+  source_code_hash = data.archive_file.slack_notifier[0].output_base64sha256
+  runtime          = "python3.11"
+  timeout          = 30
+  memory_size      = 128
+
+  environment {
+    variables = {
+      SLACK_WEBHOOK_URL = var.slack_webhook_url
+    }
+  }
+
+  tags = {
+    Name = "${local.alarm_prefix}-slack-notifier"
+  }
+
+  depends_on = [aws_cloudwatch_log_group.slack_notifier]
+}
+
+resource "aws_lambda_permission" "sns_invoke_slack" {
+  count = var.slack_webhook_url != "" ? 1 : 0
+
+  statement_id  = "AllowSNSInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.slack_notifier[0].function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = local.sns_topic_arn
+}
+
+resource "aws_sns_topic_subscription" "slack" {
+  count = var.slack_webhook_url != "" ? 1 : 0
+
+  topic_arn = local.sns_topic_arn
+  protocol  = "lambda"
+  endpoint  = aws_lambda_function.slack_notifier[0].arn
+}
+
+# =============================================================================
 # CloudWatch Dashboard for Monitoring Overview
 # =============================================================================
 

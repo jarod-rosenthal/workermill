@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "../store/auth-store";
 import { BillingSkeleton } from "../components/ui/skeleton";
 import {
@@ -25,6 +25,8 @@ import {
   Cpu,
   Brain,
   Archive,
+  Clock,
+  Loader2,
 } from "lucide-react";
 
 interface SubscriptionData {
@@ -114,7 +116,8 @@ interface ReferralDiscount {
 
 export default function Billing() {
   const tokens = useAuthStore((state) => state.tokens);
-  const _organization = useAuthStore((state) => state.organization);
+  const organization = useAuthStore((state) => state.organization);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
   const [creditStatus, setCreditStatus] = useState<CreditStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -126,6 +129,7 @@ export default function Billing() {
   const [referralStats, setReferralStats] = useState<ReferralStats | null>(null);
   const [referralDiscount, setReferralDiscount] = useState<ReferralDiscount | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   // Modal states
   const [showAddCard, setShowAddCard] = useState(false);
@@ -246,6 +250,53 @@ export default function Billing() {
   useEffect(() => {
     fetchTransactions(transactionsPage);
   }, [transactionsPage, fetchTransactions]);
+
+  // Handle ?success=true from Stripe checkout redirect
+  useEffect(() => {
+    if (searchParams.get("success") === "true") {
+      setSuccessMessage("Subscription activated! Welcome to WorkerMill Pro.");
+      setSearchParams({}, { replace: true });
+      fetchSubscription();
+      setTimeout(() => setSuccessMessage(null), 8000);
+    }
+  }, [searchParams, setSearchParams, fetchSubscription]);
+
+  // Trial info derived from org state
+  const trialExpiresAt = organization?.trialExpiresAt;
+  const stripeSubscriptionStatus = organization?.stripeSubscriptionStatus;
+  const isTrialActive =
+    organization?.plan === "pro" &&
+    stripeSubscriptionStatus !== "active" &&
+    trialExpiresAt != null;
+  const trialDaysRemaining = trialExpiresAt
+    ? Math.ceil((new Date(trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    : null;
+
+  const handleCheckout = async (plan: string) => {
+    if (!tokens?.accessToken) return;
+    setCheckoutLoading(true);
+    try {
+      const res = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${tokens.accessToken}`,
+        },
+        body: JSON.stringify({ plan }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        alert(error.error || "Failed to start checkout");
+        return;
+      }
+      const { url } = await res.json();
+      window.location.href = url;
+    } catch {
+      alert("Failed to start checkout. Please try again.");
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
 
   // API handlers
   const handleDeletePaymentMethod = async (id: string) => {
@@ -515,9 +566,79 @@ export default function Billing() {
               </div>
             </div>
 
+            {/* Trial Status */}
+            {isTrialActive && trialDaysRemaining != null && (
+              <div
+                className={`p-4 rounded-lg border mb-6 ${
+                  trialDaysRemaining <= 0
+                    ? "bg-red-500/10 border-red-500/20"
+                    : trialDaysRemaining <= 3
+                      ? "bg-red-500/10 border-red-500/20"
+                      : trialDaysRemaining <= 7
+                        ? "bg-amber-500/10 border-amber-500/20"
+                        : "bg-blue-500/10 border-blue-500/20"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Clock
+                      className={`w-5 h-5 ${
+                        trialDaysRemaining <= 3 ? "text-red-500" : trialDaysRemaining <= 7 ? "text-amber-500" : "text-blue-500"
+                      }`}
+                    />
+                    <div>
+                      <p
+                        className={`font-medium ${
+                          trialDaysRemaining <= 3 ? "text-red-400" : trialDaysRemaining <= 7 ? "text-amber-400" : "text-blue-400"
+                        }`}
+                      >
+                        {trialDaysRemaining <= 0
+                          ? "Your Pro trial has expired"
+                          : `Trial ends in ${trialDaysRemaining} day${trialDaysRemaining !== 1 ? "s" : ""}`}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {trialExpiresAt && `Expires on ${formatDate(trialExpiresAt)}`}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleCheckout("pro")}
+                    disabled={checkoutLoading}
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 inline-flex items-center gap-2 text-sm font-medium disabled:opacity-50"
+                  >
+                    {checkoutLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <CreditCard className="w-4 h-4" />
+                    )}
+                    Subscribe — $19/mo
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-between">
               <div className="flex gap-3">
-                {creditStatus.stripeConfigured && (
+                {isTrialActive && !checkoutLoading && (
+                  <button
+                    onClick={() => handleCheckout("pro")}
+                    disabled={checkoutLoading}
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 inline-flex items-center gap-2 text-sm font-medium"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    Subscribe — $19/mo
+                  </button>
+                )}
+                {creditStatus.stripeConfigured && stripeSubscriptionStatus === "active" && (
+                  <button
+                    onClick={handleManageSubscription}
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 inline-flex items-center gap-2 text-sm font-medium"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    Manage Subscription
+                  </button>
+                )}
+                {creditStatus.stripeConfigured && !isTrialActive && stripeSubscriptionStatus !== "active" && (
                   <button
                     onClick={handleManageSubscription}
                     className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 inline-flex items-center gap-2 text-sm font-medium"

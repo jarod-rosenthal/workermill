@@ -166,7 +166,7 @@ export const authAPI = {
         tosVersion: string | null;
       };
       currentTosVersion: string;
-      organization: { id: string; name: string; plan: string } | null;
+      organization: { id: string; name: string; plan: string; trialExpiresAt: string | null; stripeSubscriptionStatus: string | null } | null;
       needsSetup: boolean;
     };
   },
@@ -190,7 +190,7 @@ export const authAPI = {
     const response = await apiClient.post("/auth/complete-setup", data);
     return response.data as {
       message: string;
-      organization: { id: string; name: string; plan: string };
+      organization: { id: string; name: string; plan: string; trialExpiresAt: string | null; stripeSubscriptionStatus: string | null };
     };
   },
 
@@ -207,6 +207,16 @@ export const authAPI = {
 
   resendCode: async (data: { email: string }) => {
     const response = await apiClient.post("/auth/resend-code", data);
+    return response.data as { message: string };
+  },
+
+  forgotPassword: async (data: { email: string }) => {
+    const response = await apiClient.post("/auth/forgot-password", data);
+    return response.data as { message: string };
+  },
+
+  resetPassword: async (data: { email: string; code: string; newPassword: string }) => {
+    const response = await apiClient.post("/auth/reset-password", data);
     return response.data as { message: string };
   },
 
@@ -267,6 +277,8 @@ export const authAPI = {
         id: string;
         name: string;
         plan: string;
+        trialExpiresAt: string | null;
+        stripeSubscriptionStatus: string | null;
       } | null;
       isNewUser: boolean;
       isNewOrg: boolean;
@@ -295,6 +307,8 @@ export const authAPI = {
         id: string;
         name: string;
         plan: string;
+        trialExpiresAt: string | null;
+        stripeSubscriptionStatus: string | null;
       } | null;
       isNewUser: boolean;
       isNewOrg: boolean;

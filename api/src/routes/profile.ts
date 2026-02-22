@@ -3,20 +3,29 @@ import {
   CognitoIdentityProviderClient,
   ChangePasswordCommand,
   GlobalSignOutCommand,
-  AdminDisableUserCommand,
+  AdminDeleteUserCommand,
   GetUserCommand,
   AssociateSoftwareTokenCommand,
   VerifySoftwareTokenCommand,
   SetUserMFAPreferenceCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { authenticateUser } from "../middleware/auth.js";
 import { requireCurrentTos } from "../middleware/tos.js";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { AppDataSource } from "../db/connection.js";
-import { User, UserApiKey, type UserPreferences } from "../models/index.js";
+import {
+  User,
+  UserApiKey,
+  UserOrganization,
+  WorkerTask,
+  WorkerTaskLog,
+  AuditLog,
+  type UserPreferences,
+} from "../models/index.js";
 
 const router = Router();
 
@@ -455,8 +464,135 @@ router.post("/sign-out-all", async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/profile/export-data
+ * Export all user data as JSON (GDPR Right of Access / Data Portability)
+ */
+router.get("/export-data", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+
+    const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const taskLogRepo = AppDataSource.getRepository(WorkerTaskLog);
+    const auditLogRepo = AppDataSource.getRepository(AuditLog);
+    const apiKeyRepo = AppDataSource.getRepository(UserApiKey);
+
+    // Gather all user data
+    const organizations = await userOrgRepo.find({
+      where: { userId: user.id },
+    });
+
+    const orgIds = organizations.map((o) => o.orgId);
+
+    // Get tasks from all user's organizations
+    const tasks = orgIds.length
+      ? await taskRepo
+          .createQueryBuilder("task")
+          .where("task.org_id IN (:...orgIds)", { orgIds })
+          .orderBy("task.created_at", "DESC")
+          .getMany()
+      : [];
+
+    const taskIds = tasks.map((t) => t.id);
+
+    // Get task logs for user's tasks
+    const taskLogs = taskIds.length
+      ? await taskLogRepo
+          .createQueryBuilder("log")
+          .where("log.task_id IN (:...taskIds)", { taskIds })
+          .orderBy("log.created_at", "DESC")
+          .limit(10000) // Cap to prevent enormous exports
+          .getMany()
+      : [];
+
+    // Get audit logs for the user
+    const auditLogs = await auditLogRepo.find({
+      where: { userId: user.id },
+      order: { createdAt: "DESC" },
+      take: 10000,
+    });
+
+    // Get API keys (metadata only, no hashes)
+    const apiKeys = await apiKeyRepo.find({
+      where: { userId: user.id },
+    });
+
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      profile: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        status: user.status,
+        preferences: user.preferences,
+        referralCode: user.referralCode,
+        referredByCode: user.referredByCode,
+        tosAcceptedAt: user.tosAcceptedAt,
+        tosVersion: user.tosVersion,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      },
+      organizations: organizations.map((o) => ({
+        orgId: o.orgId,
+        role: o.role,
+        isDefault: o.isDefault,
+        joinedAt: o.joinedAt,
+      })),
+      apiKeys: apiKeys.map((k) => ({
+        id: k.id,
+        name: k.name,
+        keyPrefix: k.keyPrefix,
+        scopes: k.scopes,
+        lastUsedAt: k.lastUsedAt,
+        expiresAt: k.expiresAt,
+        createdAt: k.createdAt,
+      })),
+      tasks: tasks.map((t) => ({
+        id: t.id,
+        summary: t.summary,
+        description: t.description,
+        status: t.status,
+        workerPersona: t.workerPersona,
+        workerModel: t.workerModel,
+        githubRepo: t.githubRepo,
+        githubBranch: t.githubBranch,
+        githubPrUrl: t.githubPrUrl,
+        estimatedCostUsd: t.estimatedCostUsd,
+        createdAt: t.createdAt,
+        completedAt: t.completedAt,
+      })),
+      taskLogs: taskLogs.map((l) => ({
+        id: l.id,
+        taskId: l.taskId,
+        type: l.type,
+        message: l.message,
+        severity: l.severity,
+        createdAt: l.createdAt,
+      })),
+      auditLogs: auditLogs.map((a) => ({
+        id: a.id,
+        action: a.action,
+        resourceType: a.resourceType,
+        resourceId: a.resourceId,
+        description: a.description,
+        createdAt: a.createdAt,
+      })),
+    };
+
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename="workermill-data-export-${user.id}.json"`);
+    res.json(exportData);
+  } catch (error) {
+    logger.error("Error exporting user data", { error });
+    res.status(500).json({ error: "Failed to export user data" });
+  }
+});
+
+/**
  * POST /api/profile/delete-account
- * Delete user account (soft delete + Cognito disable)
+ * Hard delete user account and all associated data (GDPR Right to Erasure)
+ * Uses a database transaction for atomicity.
  */
 router.post("/delete-account", async (req: Request, res: Response) => {
   try {
@@ -473,38 +609,101 @@ router.post("/delete-account", async (req: Request, res: Response) => {
     // Note: We don't verify the password - user is already authenticated
     // The confirmation is just to prevent accidental deletion
 
-    const userRepo = AppDataSource.getRepository(User);
-    const apiKeyRepo = AppDataSource.getRepository(UserApiKey);
+    const userId = user.id;
+    const userEmail = user.email;
 
-    // Delete all API keys for this user
-    await apiKeyRepo.delete({ userId: user.id });
+    // Use a transaction to ensure atomicity
+    await AppDataSource.transaction(async (manager) => {
+      // 1. Find all tasks belonging to user's organizations
+      const userOrgs = await manager.getRepository(UserOrganization).find({
+        where: { userId },
+      });
+      const orgIds = userOrgs.map((o) => o.orgId);
 
-    // Soft delete: set status to inactive
-    user.status = "inactive";
-    await userRepo.save(user);
+      // 2. Delete task logs for tasks in user's organizations
+      if (orgIds.length > 0) {
+        const taskIds = await manager
+          .getRepository(WorkerTask)
+          .createQueryBuilder("task")
+          .select("task.id")
+          .where("task.org_id IN (:...orgIds)", { orgIds })
+          .getMany();
 
-    // Disable user in Cognito
+        const ids = taskIds.map((t) => t.id);
+
+        if (ids.length > 0) {
+          await manager
+            .createQueryBuilder()
+            .delete()
+            .from(WorkerTaskLog)
+            .where("task_id IN (:...ids)", { ids })
+            .execute();
+
+          // 3. Delete tasks
+          await manager
+            .createQueryBuilder()
+            .delete()
+            .from(WorkerTask)
+            .where("org_id IN (:...orgIds)", { orgIds })
+            .execute();
+        }
+      }
+
+      // 4. Delete audit logs for the user
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(AuditLog)
+        .where("user_id = :userId", { userId })
+        .execute();
+
+      // 5. Delete API keys
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(UserApiKey)
+        .where("user_id = :userId", { userId })
+        .execute();
+
+      // 6. Delete user-organization memberships
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(UserOrganization)
+        .where("user_id = :userId", { userId })
+        .execute();
+
+      // 7. Delete the user record
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(User)
+        .where("id = :userId", { userId })
+        .execute();
+    });
+
+    // Delete user from Cognito (outside transaction - best effort)
     try {
-      const command = new AdminDisableUserCommand({
+      const command = new AdminDeleteUserCommand({
         UserPoolId: config.cognito.userPoolId,
-        Username: user.email,
+        Username: userEmail,
       });
 
       await cognitoClient.send(command);
-      logger.info("User disabled in Cognito", { userId: user.id, email: user.email });
+      logger.info("User deleted from Cognito", { userId, email: userEmail });
     } catch (cognitoError: any) {
-      // Log but don't fail - the DB soft delete is the important part
-      logger.warn("Failed to disable user in Cognito", {
-        userId: user.id,
+      // Log but don't fail - the DB deletion is the important part
+      logger.warn("Failed to delete user from Cognito", {
+        userId,
         error: cognitoError.message,
       });
     }
 
-    logger.info("Account deleted", { userId: user.id });
+    logger.info("Account hard-deleted (GDPR erasure)", { userId, email: userEmail });
 
     res.json({
       success: true,
-      message: "Your account has been deleted. You will be logged out.",
+      message: "Your account and all associated data have been permanently deleted. You will be logged out.",
     });
   } catch (error) {
     logger.error("Error deleting account", { error });
@@ -644,11 +843,27 @@ router.post("/mfa/verify", async (req: Request, res: Response) => {
 
     await cognitoClient.send(setMfaCommand);
 
-    logger.info("MFA enabled successfully", { userId: user.id });
+    // Generate 10 backup recovery codes
+    const plainBackupCodes: string[] = [];
+    const hashedBackupCodes: string[] = [];
+
+    for (let i = 0; i < 10; i++) {
+      const backupCode = crypto.randomBytes(4).toString("hex"); // 8-character alphanumeric
+      plainBackupCodes.push(backupCode);
+      const hashed = await bcrypt.hash(backupCode, 10);
+      hashedBackupCodes.push(hashed);
+    }
+
+    // Store hashed backup codes on the user
+    const userRepo = AppDataSource.getRepository(User);
+    await userRepo.update({ id: user.id }, { mfaBackupCodes: hashedBackupCodes });
+
+    logger.info("MFA enabled successfully with backup codes", { userId: user.id });
 
     res.json({
       success: true,
-      message: "MFA has been enabled successfully.",
+      message: "MFA has been enabled successfully. Save your backup codes in a safe place.",
+      backupCodes: plainBackupCodes,
     });
   } catch (error: any) {
     logger.error("Error verifying MFA", { error: error.message });

@@ -121,8 +121,8 @@ resource "aws_ecs_task_definition" "api" {
   family                   = "workermill-${var.environment}-api"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "256"
-  memory                   = "512"
+  cpu                      = "512"
+  memory                   = "1024"
   execution_role_arn       = var.ecs_execution_role_arn
   task_role_arn            = var.ecs_task_role_arn
 
@@ -204,9 +204,15 @@ resource "aws_ecs_service" "api" {
   name            = "workermill-${var.environment}-api"
   cluster         = var.ecs_cluster_id
   task_definition = aws_ecs_task_definition.api.arn
-  desired_count   = 1
+  desired_count   = 2
 
   enable_execute_command = true
+
+  capacity_provider_strategy {
+    capacity_provider = "FARGATE"
+    base              = 1
+    weight            = 0
+  }
 
   capacity_provider_strategy {
     capacity_provider = "FARGATE_SPOT"

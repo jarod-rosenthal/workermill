@@ -74,6 +74,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Manually modify ECS task definitions
 - Push Docker images without using `deploy.sh`
 - Change security groups, IAM roles, or networking outside Terraform
+- Use `terraform apply -target` without **explicit user approval** — targeted applies cause state drift that compounds over time and creates dangerous surprises on the next full apply
 
 ### DO NOT Add Labels When Creating Jira Tickets
 

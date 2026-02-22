@@ -142,3 +142,13 @@ variable "bastion_allowed_ssh_cidrs" {
   type        = list(string)
   default     = []
 }
+
+# -----------------------------------------------------------------------------
+# Slack Alerting (Optional - for on-call notifications)
+# -----------------------------------------------------------------------------
+variable "slack_webhook_url" {
+  description = "Slack Incoming Webhook URL for alarm notifications. Leave empty to disable."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

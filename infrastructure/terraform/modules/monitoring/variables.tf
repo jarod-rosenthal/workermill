@@ -153,3 +153,14 @@ variable "task_queue_threshold" {
   type        = number
   default     = 10
 }
+
+# =============================================================================
+# Slack Integration
+# =============================================================================
+
+variable "slack_webhook_url" {
+  description = "Slack Incoming Webhook URL for alarm notifications. When non-empty, creates a Lambda that forwards SNS alarm messages to Slack."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

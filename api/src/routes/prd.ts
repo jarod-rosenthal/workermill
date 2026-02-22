@@ -23,6 +23,7 @@ import { body, validateRequest } from "../middleware/validation.js";
 import { decomposePrd } from "../services/prd-decomposer.js";
 import { getOrgCredentials } from "../services/org-credentials.js";
 import { logger } from "../utils/logger.js";
+import { validateExternalUrl } from "../utils/url-validator.js";
 
 const router = Router();
 
@@ -137,6 +138,11 @@ async function fetchFileFromRepo(
       const filePathEncoded = encodeURIComponent(repoPath);
       const baseUrl = org.scmBaseUrl || "https://gitlab.com";
       url = `${baseUrl}/api/v4/projects/${projectEncoded}/repository/files/${filePathEncoded}/raw?ref=HEAD`;
+      // Validate GitLab URL against SSRF (self-hosted instances use user-supplied base URL)
+      const gitlabUrlCheck = await validateExternalUrl(url);
+      if (!gitlabUrlCheck.valid) {
+        throw new Error(`Invalid GitLab URL: ${gitlabUrlCheck.reason}`);
+      }
       headers["PRIVATE-TOKEN"] = token;
       break;
     }
@@ -287,6 +293,12 @@ router.post(
         case "url": {
           if (!fileUrl) {
             res.status(400).json({ error: "fileUrl is required for url source" });
+            return;
+          }
+          // Validate URL against SSRF before fetching
+          const fileUrlCheck = await validateExternalUrl(fileUrl);
+          if (!fileUrlCheck.valid) {
+            res.status(400).json({ error: `Invalid URL: ${fileUrlCheck.reason}` });
             return;
           }
           try {

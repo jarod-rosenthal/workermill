@@ -19,6 +19,7 @@ export {
   sendLowBalanceEmail,
   sendAutoRechargeSuccessEmail,
 } from "./billing-emails.js";
+export { sendTrialReminderEmail } from "./trial-emails.js";
 export { sendSupportTicketEmail } from "./support-emails.js";
 export {
   verifySESConfiguration,

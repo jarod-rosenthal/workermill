@@ -51,7 +51,7 @@ function isDockerDesktop(): boolean {
 function getWSLHostIP(): string | null {
   if (!isWSL()) return null;
   try {
-    const ip = execSync("hostname -I", { encoding: "utf-8" })
+    const ip = execSync("hostname -I", { encoding: "utf-8", windowsHide: true })
       .trim()
       .split(/\s+/)[0];
     if (ip && /^\d+\.\d+\.\d+\.\d+$/.test(ip)) {
@@ -147,7 +147,7 @@ export async function ensureImage(config: AgentConfig): Promise<string> {
 
   // Check if versioned image exists locally
   try {
-    execSync(`docker image inspect ${versionTag}`, { stdio: "ignore" });
+    execSync(`docker image inspect ${versionTag}`, { stdio: "ignore", windowsHide: true });
     return versionTag;
   } catch {
     // Not found locally
@@ -156,7 +156,7 @@ export async function ensureImage(config: AgentConfig): Promise<string> {
   // Pull versioned tag
   console.log(`${ts()} ${chalk.dim(`Pulling Docker sandbox image ${versionTag}...`)}`);
   try {
-    execSync(`docker pull ${versionTag}`, { stdio: "inherit", timeout: 300_000 });
+    execSync(`docker pull ${versionTag}`, { stdio: "inherit", timeout: 300_000, windowsHide: true });
     return versionTag;
   } catch {
     // Versioned tag not available — try latest
@@ -164,7 +164,7 @@ export async function ensureImage(config: AgentConfig): Promise<string> {
 
   // Check if :latest exists locally
   try {
-    execSync(`docker image inspect ${latestTag}`, { stdio: "ignore" });
+    execSync(`docker image inspect ${latestTag}`, { stdio: "ignore", windowsHide: true });
     console.log(`${ts()} ${chalk.yellow("⚠")} Versioned image not found, using ${latestTag}`);
     return latestTag;
   } catch {
@@ -174,7 +174,7 @@ export async function ensureImage(config: AgentConfig): Promise<string> {
   // Pull :latest
   console.log(`${ts()} ${chalk.dim(`Pulling ${latestTag}...`)}`);
   try {
-    execSync(`docker pull ${latestTag}`, { stdio: "inherit", timeout: 300_000 });
+    execSync(`docker pull ${latestTag}`, { stdio: "inherit", timeout: 300_000, windowsHide: true });
     return latestTag;
   } catch {
     throw new Error(
@@ -257,7 +257,7 @@ export async function spawnDockerWorker(
 
   // Pre-flight: verify Docker is running
   try {
-    execSync("docker version", { stdio: "ignore", timeout: 10000 });
+    execSync("docker version", { stdio: "ignore", timeout: 10000, windowsHide: true });
   } catch {
     console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Docker is not running`);
     throw new Error("Docker is not running. Start Docker and try again.");
@@ -277,7 +277,7 @@ export async function spawnDockerWorker(
 
   // Clean dead container with same name
   try {
-    execSync(`docker rm -f ${containerName}`, { stdio: "ignore" });
+    execSync(`docker rm -f ${containerName}`, { stdio: "ignore", windowsHide: true });
   } catch {
     // Container doesn't exist — fine
   }
@@ -644,7 +644,7 @@ export async function spawnDockerWorker(
       activeProcesses.delete(task.id);
       // Remove dead container
       try {
-        execSync(`docker rm -f ${containerName}`, { stdio: "ignore" });
+        execSync(`docker rm -f ${containerName}`, { stdio: "ignore", windowsHide: true });
       } catch {
         /* best effort cleanup */
       }
@@ -670,6 +670,7 @@ export function stopDockerTask(taskId: string): boolean {
     execSync(`docker stop ${containerName}`, {
       stdio: "ignore",
       timeout: 15_000,
+      windowsHide: true,
     });
     return true;
   } catch {
@@ -684,7 +685,7 @@ export function stopAllDocker(): void {
   try {
     execSync(
       'docker ps -q --filter "name=wm-" | xargs -r docker stop',
-      { stdio: "ignore", timeout: 30_000 },
+      { stdio: "ignore", timeout: 30_000, windowsHide: true },
     );
   } catch {
     // No containers to stop

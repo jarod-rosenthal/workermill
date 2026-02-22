@@ -315,8 +315,10 @@ EOF
 | `./bin/local-workermill status` | Show status of all services |
 | `./bin/local-workermill create-task "title"` | Create a test task |
 | `./bin/local-workermill logs` | Tail logs from all services |
+| `./bin/local-workermill reset` | Reset local environment |
 | `./bin/local-workermill sync-data` | Sync data from production (requires bastion) |
 | `./bin/local-workermill build-worker` | Build the worker Docker image |
+| `./bin/local-workermill add-account` | Save current Claude credentials to rotation pool |
 
 ***REMOVED******REMOVED******REMOVED*** Start Options
 
@@ -328,6 +330,8 @@ EOF
 | `--skip-fe` | false | Don't start frontend |
 | `--no-critic` | false | Disable critic agent review |
 | `--no-tech-lead` | false | Disable tech lead review |
+| `--local-auth` | false | Skip Cognito, auto-login as local user |
+| `--mock-workers` | false | Use fast mock workers instead of Claude CLI (for E2E tests) |
 
 ***REMOVED******REMOVED******REMOVED*** Local Development Filesystem (CRITICAL — READ THIS)
 
@@ -394,7 +398,7 @@ workermill-agent update   ***REMOVED*** self-updates from CDN
 
 **CDN distribution:** Agent binaries are hosted on S3/CloudFront at `https://workermill.com/agent/latest/`:
 - `workermill-agent-linux-x64`, `workermill-agent-darwin-arm64`, `workermill-agent-darwin-x64`, `workermill-agent-win-x64.exe`
-- Version manifest: `https://workermill.com/agent/latest.json` (e.g. `{"version":"0.10.8","tag":"agent-v0.10.8"}`)
+- Version manifest: `https://workermill.com/agent/latest.json` (e.g. `{"version":"0.10.24","tag":"agent-v0.10.24"}`)
 - CI workflow (`agent-release.yml`) builds binaries on `agent-v*` tags, uploads to S3, invalidates CloudFront
 
 **Using with local WorkerMill (development):**
@@ -471,6 +475,8 @@ API (`tsx watch`) and Frontend (Vite) auto-reload. PostgreSQL and Worker run as 
 
 **ALWAYS use `deploy.sh` for ALL deployments.** Never manually build/push Docker images. Commands are in the Quick Reference table above. Run `./deploy.sh --frontend` after UI changes.
 
+**Additional deploy.sh flags:** `--skip-build` (skip Docker build), `--db-check` (pre-deploy DB health check), `--check-migrations` (show pending migrations), `--snapshot` (create RDS snapshot before deploy), `--wait` (wait for ECS stability + health check), `--no-bastion-stop` (keep bastion running after checks), `--publish-agent` (publish agent to npm).
+
 ***REMOVED******REMOVED******REMOVED*** Worker Image Registry
 
 Worker Docker images are used ONLY by **cloud ECS tasks** and **local WorkerMill Docker mode**. The **remote agent does NOT use Docker** — worker code is bundled into the agent binary at build time.
@@ -535,8 +541,13 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 | `haiku` / `sonnet` / `opus` | Model override (default: org's `defaultWorkerModel`) |
 | `deploy` | Auto-merge PR and deploy without human approval |
 | `review` | Require manager review before merge |
-| `sdk` | Standard SDK Mode (single-task, no story decomposition) |
+| `sdk` / `standard` / `v1` | Standard SDK Mode (single-task, no story decomposition) |
 | `critic` | Enable Planner-Critic validation |
+| `manager` | Enable manager workflow |
+| `improve` | Self-improvement analysis |
+| `prd` / `epic` / `multi-story` / `orchestration` | PRD decomposition triggers |
+| `multi-provider` | Force Vercel AI SDK execution path |
+| `bypass-quality-gate` / `force-merge` | Skip quality gate checks |
 
 ***REMOVED******REMOVED******REMOVED*** Jira Projects
 
@@ -551,7 +562,7 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 
 **Auto-deploy (with `deploy` label):** Worker creates PR → immediately merges → deploys → outputs `::result::deployed`.
 
-**Webhooks:** All at `https://workermill.com/api/webhooks/{jira,linear,github-issues,github,gitlab,bitbucket}`. Route files in `api/src/routes/webhooks/`.
+**Webhooks:** All at `https://workermill.com/api/webhooks/{jira,linear,github-issues,github,gitlab,bitbucket}`. Route files in `api/src/routes/webhooks/` (directory with per-provider sub-routes: `jira.ts`, `linear.ts`, `github.ts`, `github-issues.ts`, `gitlab.ts`, `bitbucket.ts`, `email.ts`, `support.ts`, `github-runner.ts`).
 
 ---
 
@@ -689,9 +700,11 @@ Task created (status: planning) → Remote agent plans → status: queued
 
 ***REMOVED******REMOVED******REMOVED*** Worker System
 
-Directives in `worker/directives/` define role-specific behavior:
-- `backend_developer/`, `frontend_developer/`, `devops_engineer/`
-- `security_engineer/`, `qa_engineer/`, `tech_writer/`, `project_manager/`
+Directives in `worker/directives/` define role-specific behavior (14 roles):
+- `architect/`, `backend_developer/`, `frontend_developer/`, `mobile_developer/`
+- `devops_engineer/`, `data_ml_engineer/`, `security_engineer/`, `qa_engineer/`
+- `tech_writer/`, `tech_lead/`, `project_manager/`, `manager/`, `support_agent/`
+- `common/` (shared directives used across roles)
 
 See `worker/AGENTS.md` for comprehensive worker instructions.
 
@@ -703,7 +716,7 @@ Worker decision logic (error classification, quality gates, review parsing, ques
 
 ***REMOVED******REMOVED******REMOVED*** Frontend Architecture
 
-React 19 + Vite + TailwindCSS + Zustand. Routing via React Router v7 (`App.tsx`). Auth via Cognito (token in localStorage). Forms via React Hook Form + Zod.
+React 19 + Vite + TailwindCSS + Zustand. Routing via React Router v7 (`App.tsx`). Auth via `useAuthStore` (Zustand) — backend uses Cognito, frontend stores JWT in localStorage. Forms via React Hook Form + Zod.
 
 ***REMOVED******REMOVED******REMOVED*** Multi-Provider Support
 
@@ -727,7 +740,7 @@ There are three ways tasks are executed, depending on where the worker runs:
 
 Planning Agent decomposes task → Epic Coordinator runs → Claude CLI expert subprocesses work in parallel via git worktrees → Coordination feed for collaboration → Consolidated PR.
 
-**Components:** `worker/epic/coordinator.ts`, `executor.ts`, `experts.ts`, `coordination-client.ts`
+**Components:** `worker/epic/coordinator.ts`, `executor.ts`, `experts.ts`, `coordination-client.ts`, `decision-client.ts`, `blocker-manager.ts`, `auto-fix-agent.ts`, `inline-reviewer.ts`, `inline-deployer.ts`, `inline-improver.ts`, `git-ops.ts`, `memory-client.ts`, `ticket-ops.ts`
 - In remote agent: compiled into the agent binary at build time (esbuild bundles from TS source)
 - In Docker/ECS: compiled by `tsc` during Docker build
 
@@ -743,7 +756,7 @@ Single-task execution via Claude Agent SDK (no story decomposition).
 
 ***REMOVED******REMOVED******REMOVED*** Blocker Handling & Task Communication
 
-Errors auto-retry (up to `blockerMaxAutoRetries`), then escalate to the dashboard (`BlockerAlert` component) with retry/skip/abort options. Key files: `worker/epic/blocker-manager.ts`, `worker/epic/error-classifier.ts`, `api/src/routes/coordination.ts`.
+Errors auto-retry (up to `blockerMaxAutoRetries`), then escalate to the dashboard (`BlockerAlert` component) with retry/skip/abort options. Key files: `worker/epic/blocker-manager.ts`, `worker/epic/auto-fix-agent.ts`, `api/src/routes/coordination.ts`. Error classification and quality gates are now served by the Worker Decision Service (`api/src/services/worker-decision-engine.ts`).
 
 **Task-Scoped Communication:** Talk button sends messages via `POST /api/coordination/commands`. Worker polls `/api/coordination/commands/:taskId/pending`.
 
@@ -780,7 +793,7 @@ await repo.update({ id, status: "queued" }, { status: "running" });
 - **Editing `agent/src/` locally does NOTHING to remote agents** — release a new binary. For local development: `cd agent && npm run build && npm link` then restart the agent.
 - **Polyglot binary:** Single binary serves CLI/worker/manager via `__WORKERMILL_MODE` env var
 - **Remote agent does NOT use Docker** — workers are native process self-invocations of the agent binary
-- **Three spawners:** `agent/src/spawner.ts` (remote agent), `api/src/services/local-epic-spawner.ts` (local Docker), ECS (cloud) — always ask which environment before changes
+- **Three spawners:** `agent/src/spawner.ts` (remote agent), `api/src/services/local-epic-spawner.ts` (local Docker), `api/src/services/ecs-task-runner.ts` (cloud ECS) — always ask which environment before changes
 - **VS Code extension REQUIRES the remote agent** — it cannot connect to the local WorkerMill API directly
 - **Planning runs ONLY in the remote agent** — local WorkerMill Docker mode and cloud ECS skip planning
 - **`dotenv/config` type error is intentional** — optional dependency, do not "fix" by removing or adding to deps
@@ -855,7 +868,7 @@ MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-
 | Worker not posting logs | Verify org `apiKey` set, check worker logs for POST errors |
 | Task not claimed | `GET /api/orchestrator/status`, verify task status is `queued` |
 | PR not created | Branch conflicts, token permissions, rate limits |
-| Epic not progressing | `GET /api/coordination/feed/:taskId`, verify planning agent completed |
+| Epic not progressing | Check coordination commands and worker check-ins, verify planning agent completed |
 | Bastion SSH timeout | Run `./bin/bastion whitelist` to update SG with current IP |
 | Bastion can't reach RDS | Check RDS SG includes bastion SG: `aws ec2 describe-security-groups --group-ids sg-0c7c9a0e3e60d8cab` |
 | psql not found on bastion | User data may have failed; run `sudo dnf install -y postgresql16` |
@@ -888,6 +901,7 @@ Location: `api/src/__tests__/integration/`. Each test runs in a transaction that
 | `ci-cd.yml` | Manual (workflow_dispatch) | both | Main pipeline — lint, test, deploy |
 | `agent-release.yml` | `agent-v*` tags | **`workermill/workermill` ONLY** | Build 4 platform binaries → upload to S3 CDN + GitHub Release |
 | `vscode-release.yml` | `vscode-v*` tags | **`jarod-rosenthal/workermill` ONLY** | Package → publish to VS Code Marketplace |
+| `e2e-local.yml` | Manual (workflow_dispatch) | both | E2E test runner (local or production target) |
 
 No automatic triggers on push/PR.
 

@@ -27,9 +27,9 @@ done
 
 ***REMOVED*** Anthropic auth check: ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or mounted credentials
 if [ -z "${ANTHROPIC_API_KEY}" ] && [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
-    ***REMOVED*** In local mode, Claude CLI uses mounted ~/.claude credentials (OAuth refresh token)
-    if [ "${EXECUTION_MODE}" = "local" ] && [ -f "/home/worker/.claude/.credentials.json" ]; then
-        echo "[Epic] Using mounted Claude credentials for local mode auth"
+    ***REMOVED*** Claude CLI can use mounted ~/.claude credentials (OAuth refresh token) in any mode
+    if [ -f "/home/worker/.claude/.credentials.json" ]; then
+        echo "[Epic] Using mounted Claude credentials for auth"
     else
         missing_vars+=("ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN")
     fi

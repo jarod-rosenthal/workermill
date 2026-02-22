@@ -243,6 +243,7 @@ import { ChangeIssueTrackerDefaultToInternal1739750400008 } from "./migrations/1
 import { AddTrialExpiresAt1740200000000 } from "./migrations/1740200000000-AddTrialExpiresAt.js";
 import { AddMfaBackupCodes1740200000001 } from "./migrations/1740200000001-AddMfaBackupCodes.js";
 import { EncryptExistingTokens1740200000002 } from "./migrations/1740200000002-EncryptExistingTokens.js";
+import { ChangeMaxPerStoryRevisionsDefault1740200000003 } from "./migrations/1740200000003-ChangeMaxPerStoryRevisionsDefault.js";
 import { logger } from "../utils/logger.js";
 import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
@@ -510,6 +511,7 @@ export const AppDataSource = new DataSource({
     AddTrialExpiresAt1740200000000,
     AddMfaBackupCodes1740200000001,
     EncryptExistingTokens1740200000002,
+    ChangeMaxPerStoryRevisionsDefault1740200000003,
   ],
   subscribers: [
     OrganizationEncryptionSubscriber,

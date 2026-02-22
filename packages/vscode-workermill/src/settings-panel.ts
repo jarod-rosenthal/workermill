@@ -187,6 +187,8 @@ export class SettingsPanel {
       if (intResult.status >= 200 && intResult.status < 300) {
         const merged = {
           ...intResult.data,
+          orgName: settingsResult.data?.name,
+          orgSlug: settingsResult.data?.slug,
           defaultWorkerModel: settingsResult.data?.defaultWorkerModel,
           managerModelId: settingsResult.data?.managerModelId,
           planningAgentModel: settingsResult.data?.planningAgentModel,
@@ -251,7 +253,7 @@ export class SettingsPanel {
   ): Promise<void> {
     try {
       this.postMessage({ type: "models-saving" });
-      const { status } = await apiRequest<{ error?: string }>(
+      const { status, data } = await apiRequest<{ success?: boolean; error?: string; settings?: Record<string, unknown> }>(
         "PUT",
         `${config.apiUrl}/api/settings`,
         config.apiKey,
@@ -261,10 +263,22 @@ export class SettingsPanel {
           planningAgentModel: msg.plannerModel,
         },
       );
-      if (status >= 200 && status < 300) {
-        this.postMessage({ type: "models-saved" });
+      if (status >= 200 && status < 300 && data?.success) {
+        // Verify the API echoed back the correct values
+        const saved = data.settings;
+        const workerOk = !saved || saved.defaultWorkerModel === msg.workerModel;
+        const reviewerOk = !saved || saved.managerModelId === msg.reviewerModel;
+        const plannerOk = !saved || saved.planningAgentModel === msg.plannerModel;
+        if (workerOk && reviewerOk && plannerOk) {
+          this.postMessage({ type: "models-saved" });
+        } else {
+          this.postMessage({ type: "models-save-error", message: `Save confirmed but values differ — got worker=${saved?.defaultWorkerModel}, reviewer=${saved?.managerModelId}, planner=${saved?.planningAgentModel}` });
+        }
+      } else if (status >= 200 && status < 300) {
+        // 2xx but no success flag — might be a different response shape
+        this.postMessage({ type: "models-save-error", message: `Unexpected response: ${JSON.stringify(data).substring(0, 200)}` });
       } else {
-        this.postMessage({ type: "models-save-error", message: `HTTP ${status}` });
+        this.postMessage({ type: "models-save-error", message: `HTTP ${status}: ${data?.error || JSON.stringify(data).substring(0, 200)}` });
       }
     } catch (err) {
       this.postMessage({ type: "models-save-error", message: err instanceof Error ? err.message : String(err) });
@@ -579,7 +593,7 @@ export class SettingsPanel {
 </head>
 <body>
   <h1>Settings</h1>
-  <p class="subtitle">Configure integrations for your WorkerMill workspace</p>
+  <p class="subtitle">Configure integrations for your WorkerMill workspace <span id="org-label"></span></p>
 
   <div id="loading" class="loading">Loading settings...</div>
 
@@ -598,9 +612,9 @@ export class SettingsPanel {
         <div class="hint">Model used for code review</div>
       </div>
       <div class="field">
-        <label>Project Manager</label>
+        <label>Planning Agent</label>
         <select id="model-planner"></select>
-        <div class="hint">Model used for planning</div>
+        <div class="hint">Model used by the planning agent</div>
       </div>
       <div class="btn-row">
         <button class="btn-primary" id="btn-save-models">Save</button>
@@ -919,6 +933,11 @@ export class SettingsPanel {
         loadingEl.classList.add("hidden");
         contentEl.classList.remove("hidden");
         const d = msg.data;
+
+        // Show org name so user can verify which org the API key resolves to
+        if (d.orgName) {
+          document.getElementById("org-label").textContent = "— " + d.orgName;
+        }
 
         // Apply plan restrictions before selecting radios
         applyPlanRestrictions(d.plan || "pro");

@@ -6,6 +6,7 @@
  * Includes inline Tech Lead review with revision loop and DevOps deployment.
  */
 
+import * as path from "path";
 import axios from "axios";
 import type {
   ExpertPersona,
@@ -140,7 +141,7 @@ export class EpicCoordinator {
 
     if (repoPath) {
       // Repo already cloned by entrypoint - use its parent as workDir
-      workDir = repoPath.replace(/\/repo$/, "") || "/workspace";
+      workDir = path.dirname(repoPath);
       console.log("[Epic] Using pre-cloned repo at:", repoPath);
     } else {
       // Legacy mode: coordinator handles cloning

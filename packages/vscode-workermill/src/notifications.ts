@@ -13,7 +13,7 @@ import { AgentClient, type TaskInfo } from "./agent-client";
 export class NotificationManager {
   constructor(private client: AgentClient) {
     client.on("task:completed", (info: { id: string }) => this.onTaskCompleted(info));
-    client.on("task:failed", (info: { id: string }) => this.onTaskFailed(info));
+    client.on("task:failed", (info: { id: string; error?: string }) => this.onTaskFailed(info));
     client.on("task:rate_limited", (info: { id: string }) => this.onTaskRateLimited(info));
   }
 
@@ -32,12 +32,13 @@ export class NotificationManager {
     } catch { /* ignore */ }
   }
 
-  private async onTaskFailed(info: { id: string }): Promise<void> {
+  private async onTaskFailed(info: { id: string; error?: string }): Promise<void> {
     try {
       const task = await this.client.getTask(info.id);
       const short = task.summary.length > 40 ? task.summary.substring(0, 40) + "..." : task.summary;
+      const errorDetail = info.error ? `: ${info.error}` : "";
       vscode.window.showWarningMessage(
-        `WorkerMill: "${short}" failed`,
+        `WorkerMill: "${short}" failed${errorDetail}`,
         "Show Logs",
         "Retry",
       ).then((action) => {

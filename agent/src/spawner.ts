@@ -368,6 +368,9 @@ export async function spawnWorker(
   };
   activeProcesses.set(task.id, active);
 
+  // Track last meaningful error line for surfacing to VS Code on failure
+  let lastErrorLine = "";
+
   // Notify local API clients
   agentEvents.emit("task:started", {
     id: task.id,
@@ -388,6 +391,10 @@ export async function spawnWorker(
       if (line.includes("::result::")) {
         active.resultEmitted = true;
       }
+      // Capture fatal error messages from worker stdout for surfacing to VS Code
+      if (/Epic failed:|Fatal error:|REPO_PATH set but/i.test(line)) {
+        lastErrorLine = redactSecrets(line);
+      }
     }
   });
 
@@ -396,6 +403,7 @@ export async function spawnWorker(
     for (const line of lines) {
       console.log(`${ts()} ${taskLabel} ${chalk.red(redactSecrets(line))}`);
       agentEvents.emit("task:log", { id: task.id, line: redactSecrets(line), severity: "error" });
+      lastErrorLine = redactSecrets(line);
 
       // Detect rate limiting from Claude CLI stderr
       if (/rate.limit|429|too many requests|over_quota|overloaded|capacity/i.test(line)) {
@@ -417,7 +425,7 @@ export async function spawnWorker(
     if (code === 0) {
       agentEvents.emit("task:completed", { id: task.id, exitCode: code, duration });
     } else {
-      agentEvents.emit("task:failed", { id: task.id, exitCode: code, duration });
+      agentEvents.emit("task:failed", { id: task.id, exitCode: code, duration, error: lastErrorLine || undefined });
     }
 
     // Safety net: post fallback completion if no ::result:: marker

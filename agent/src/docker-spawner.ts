@@ -145,31 +145,51 @@ function redactSecrets(text: string): string {
 
 // ── Image Management ───────────────────────────────────
 
+/** Track when we last pulled the image to avoid re-pulling on every spawn. */
+let lastPullTimestamp = 0;
+const PULL_INTERVAL_MS = 4 * 60 * 60 * 1000; // Re-pull :latest every 4 hours
+
 /**
- * Ensure the Docker image is available locally.
- * Pulls versioned tag first, falls back to :latest.
+ * Ensure the Docker image is available and up-to-date.
+ * For :latest tags, periodically re-pulls to pick up entrypoint and worker fixes.
  */
 export async function ensureImage(config: AgentConfig): Promise<string> {
   const imageTag = `${config.dockerImage}:latest`;
+  const docker = findDockerBin();
 
   // Check if image exists locally
+  let imageExists = false;
   try {
-    execFileSync(findDockerBin(), ["image", "inspect", imageTag], { stdio: "pipe", windowsHide: true });
-    return imageTag;
+    execFileSync(docker, ["image", "inspect", imageTag], { stdio: "pipe", windowsHide: true });
+    imageExists = true;
   } catch {
-    // Not found locally — pull it
+    // Not found locally
   }
 
-  console.log(`${ts()} ${chalk.dim(`Pulling Docker sandbox image ${imageTag}...`)}`);
-  try {
-    execFileSync(findDockerBin(), ["pull", imageTag], { stdio: "pipe", timeout: 300_000, windowsHide: true });
-    return imageTag;
-  } catch {
-    throw new Error(
-      `Failed to pull Docker sandbox image ${imageTag}.\n` +
-        `Ensure Docker is running and you have access to the image registry.`,
-    );
+  // Re-pull if image is missing OR if we haven't pulled recently (picks up :latest updates)
+  const needsPull = !imageExists || (Date.now() - lastPullTimestamp > PULL_INTERVAL_MS);
+
+  if (needsPull) {
+    const reason = imageExists ? "checking for updates" : "not found locally";
+    console.log(`${ts()} ${chalk.dim(`Pulling Docker sandbox image ${imageTag} (${reason})...`)}`);
+    try {
+      execFileSync(docker, ["pull", imageTag], { stdio: "pipe", timeout: 300_000, windowsHide: true });
+      lastPullTimestamp = Date.now();
+      return imageTag;
+    } catch {
+      if (imageExists) {
+        // Pull failed but we have a cached image — use it with a warning
+        console.log(`${ts()} ${chalk.yellow("⚠")} Pull failed, using cached image`);
+        return imageTag;
+      }
+      throw new Error(
+        `Failed to pull Docker sandbox image ${imageTag}.\n` +
+          `Ensure Docker is running and you have access to the image registry.`,
+      );
+    }
   }
+
+  return imageTag;
 }
 
 // ── Helper: self-review label detection ────────────────
@@ -191,22 +211,40 @@ function hasSelfReviewLabel(task: SpawnableTask): boolean {
 
 // ── Helper: OAuth detection ────────────────────────────
 
+/**
+ * Find the credentials file, using the same search logic as findClaudeConfigDir().
+ * Returns the absolute path to .credentials.json or null.
+ */
+function findCredentialsFile(): string | null {
+  const configDir = findClaudeConfigDir();
+  if (configDir) {
+    const credFile = path.join(configDir, ".credentials.json");
+    if (fs.existsSync(credFile)) return credFile;
+  }
+  return null;
+}
+
 function hasOAuthCredentials(): boolean {
-  const home = process.env.HOME || process.env.USERPROFILE || "";
-  return fs.existsSync(path.join(home, ".claude", ".credentials.json"));
+  return findCredentialsFile() !== null;
 }
 
 /**
  * Read the OAuth token from ~/.claude/.credentials.json.
  * Returns the token string or "" if not available.
  *
+ * Uses findClaudeConfigDir() to search multiple locations (WSL Windows paths, etc.)
+ * so the token is found regardless of where Claude CLI stored it.
+ *
  * Known credential file formats:
  *   { claudeAiOauth: { accessToken: "..." } }   — Claude CLI OAuth (primary)
  *   { oauthToken: "..." }                        — legacy format
  */
 function readOAuthToken(): string {
-  const home = process.env.HOME || process.env.USERPROFILE || "";
-  const credPath = path.join(home, ".claude", ".credentials.json");
+  const credPath = findCredentialsFile();
+  if (!credPath) {
+    console.log(`${ts()} ${chalk.yellow("⚠")} No Claude credentials file found`);
+    return "";
+  }
   try {
     const raw = fs.readFileSync(credPath, "utf-8");
     const data = JSON.parse(raw);
@@ -219,7 +257,7 @@ function readOAuthToken(): string {
       const keys = Object.keys(data || {});
       const oauthKeys = data?.claudeAiOauth ? Object.keys(data.claudeAiOauth) : [];
       console.log(
-        `${ts()} ${chalk.yellow("⚠")} OAuth token not found in credentials file. ` +
+        `${ts()} ${chalk.yellow("⚠")} OAuth token not found in credentials file (${credPath}). ` +
         `Top-level keys: [${keys.join(", ")}], claudeAiOauth keys: [${oauthKeys.join(", ")}]`
       );
     }

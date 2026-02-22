@@ -74,12 +74,12 @@ const showcaseProjects: ShowcaseProject[] = [
     name: "TeamBoard",
     tagline: "Multi-tenant SaaS project management with Kanban boards.",
     description:
-      "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time updates, workspace dashboards, and activity feeds. 5 stories, all approved. Deployed to Vercel.",
+      "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time updates, workspace dashboards, activity feeds, and a polished showcase landing page. 6 stories, all approved. Deployed to Vercel.",
     stack: "Next.js 15 + Prisma + TailwindCSS + Neon PostgreSQL",
-    storyCount: 5,
-    cost: "$241",
-    duration: "~8 hrs",
-    linesOfCode: "28,000",
+    storyCount: 6,
+    cost: "$247",
+    duration: "~9 hrs",
+    linesOfCode: "29,000",
     repoUrl: "https://github.com/workermill-examples/teamboard",
     liveUrl: "https://teamboard.workermill.com",
     category: "saas",
@@ -171,7 +171,7 @@ export default function ShowcaseGallery() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            281K lines of production code across 5 projects, deployed to AWS,
+            282K lines of production code across 5 projects, deployed to AWS,
             Vercel, and Railway. Every project built from tickets — planned,
             coded, tested, reviewed, and deployed autonomously.
           </p>
@@ -198,7 +198,7 @@ export default function ShowcaseGallery() {
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <GitPullRequest className="w-4 h-4 text-teal-400" />
-              <span className="text-2xl font-bold text-white">53</span>
+              <span className="text-2xl font-bold text-white">54</span>
             </div>
             <p className="text-xs text-slate-400">PRs shipped across builds</p>
           </div>
@@ -360,7 +360,7 @@ export default function ShowcaseGallery() {
                 Real metrics, not cherry-picked
               </h3>
               <p className="text-sm text-slate-400 leading-relaxed">
-                Autonomous coding is hard. Across the 53 showcase tasks above, 2
+                Autonomous coding is hard. Across the 54 showcase tasks above, 2
                 failed — a planning agent that returned malformed JSON and a
                 manager review that caught inaccuracies the worker
                 couldn&apos;t fix in its allowed retries. That&apos;s a 96%

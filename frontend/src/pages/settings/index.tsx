@@ -103,7 +103,7 @@ export default function Settings() {
     managerProvider: "anthropic",
     managerModelId: "claude-opus-4-6",
     maxReviewRevisions: 3,
-    maxPerStoryRevisions: 2,
+    maxPerStoryRevisions: 1,
     planningAgentProvider: "anthropic",
     planningAgentModel: "claude-opus-4-6",
     planningMode: "simplified",
@@ -230,7 +230,6 @@ export default function Settings() {
   const [githubWebhookVisible, setGithubWebhookVisible] = useState(false);
   const [githubTesting, setGithubTesting] = useState(false);
   const [githubSaving, setGithubSaving] = useState(false);
-  const [githubMigrating, setGithubMigrating] = useState(false);
 
   // GitLab integration state
   const [gitlabToken, setGitlabToken] = useState("");
@@ -1259,33 +1258,6 @@ export default function Settings() {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to set default issue tracker" });
     } finally {
       setSettingsSaving(false);
-    }
-  };
-
-  const handleMigrateReviewerToken = async (cleanupLegacy: boolean = false) => {
-    setGithubMigrating(true);
-    setMessage(null);
-    try {
-      const response = await fetch(`${API_BASE}/api/settings/integrations/github/migrate-reviewer-token`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${tokens?.accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ cleanupLegacy }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Failed to migrate reviewer token");
-      if (data.migrated) {
-        setMessage({ type: "success", text: data.message });
-        fetchIntegrations();
-      } else {
-        setMessage({ type: "success", text: data.message });
-      }
-    } catch (err) {
-      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to migrate reviewer token" });
-    } finally {
-      setGithubMigrating(false);
     }
   };
 
@@ -2657,16 +2629,6 @@ export default function Settings() {
               <p className="text-xs text-muted-foreground mt-1">
                 Required for PR approvals. Must be from a different GitHub account than the worker token to avoid GitHub&apos;s self-approval restriction.
               </p>
-              {!githubStatus.reviewerTokenConfigured && (
-                <button
-                  onClick={() => handleMigrateReviewerToken(false)}
-                  disabled={githubMigrating}
-                  className="mt-2 flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-                >
-                  {githubMigrating ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                  Migrate from Legacy Location
-                </button>
-              )}
             </div>
 
             <div>

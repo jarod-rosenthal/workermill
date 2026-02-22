@@ -416,7 +416,7 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
   // Initial fetch
   await sendLogs();
 
-  // Poll every 1 second for new logs (matches OnCallShift)
+  // Poll every 2 seconds for new logs (reduced from 1s to cut per-client DB load)
   let inFlight = false;
   const logInterval = setInterval(async () => {
     if (inFlight) return;
@@ -426,7 +426,7 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
     } finally {
       inFlight = false;
     }
-  }, 1000);
+  }, 2000);
 
   // Ping every 20 seconds to keep connection alive
   const pingInterval = setInterval(sendPing, 20000);
@@ -879,14 +879,14 @@ router.get("/logs/:taskId/cloudwatch", authenticateSSE, async (req: Request, res
   // Initial fetch
   await fetchAndSendLogs();
 
-  // Poll every 1 second for new logs
+  // Poll every 2 seconds for new logs (reduced from 1s to cut per-client DB load)
   const logInterval = setInterval(async () => {
     if (!isConnected) {
       clearInterval(logInterval);
       return;
     }
     await fetchAndSendLogs();
-  }, 1000);
+  }, 2000);
 
   // Ping every 20 seconds
   const pingInterval = setInterval(() => {

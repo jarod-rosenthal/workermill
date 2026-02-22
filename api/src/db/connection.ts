@@ -252,10 +252,10 @@ export const AppDataSource = new DataSource({
   database: config.database.url ? undefined : config.database.name,
   // Connection pool configuration for optimal performance
   extra: {
-    max: 10, // Maximum connections in pool (db.t4g.micro supports ~22 total; keep headroom for rolling deploys)
-    min: 2, // Minimum connections to maintain
+    max: 15, // Maximum connections in pool (db.t4g.micro supports ~22 total; keep headroom for rolling deploys)
+    min: 1, // Minimum connections to maintain (low to ease rolling deploy overlap)
     idleTimeoutMillis: 30000, // Close idle connections after 30s
-    connectionTimeoutMillis: 10000, // Timeout for acquiring connection
+    connectionTimeoutMillis: 15000, // Timeout for acquiring connection
   },
   entities: [
     Organization,

@@ -637,9 +637,9 @@ export function startAgentProcess(log?: (msg: string) => void): void {
   fs.mkdirSync(wmDir, { recursive: true });
   const logFile = path.join(wmDir, "agent.log");
   const logFd = fs.openSync(logFile, "a");
-  // Open os.devNull with an absolute path (\\.\nul on Windows) to avoid
-  // Node resolving NUL relative to the extension host CWD (VS Code install dir).
-  const stdinFd = fs.openSync(os.devNull, "r");
+  // Use "ignore" for stdin — opening os.devNull on Windows can fail because
+  // VS Code's extension host resolves "nul" relative to its CWD (the VS Code
+  // install dir), producing "C:\...\Microsoft VS Code\nul" → "Access is denied".
 
   try {
     // Build a PATH that includes known binary locations so the agent's
@@ -683,7 +683,7 @@ export function startAgentProcess(log?: (msg: string) => void): void {
 
     const child = spawn(binary, ["start"], {
       detached: true,
-      stdio: [stdinFd, logFd, logFd],
+      stdio: ["ignore", logFd, logFd],
       env,
       cwd: wmDir,
       windowsHide: true,
@@ -698,7 +698,6 @@ export function startAgentProcess(log?: (msg: string) => void): void {
   } catch (err) {
     log?.(`Spawn failed: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
-    fs.closeSync(stdinFd);
     fs.closeSync(logFd);
   }
 }

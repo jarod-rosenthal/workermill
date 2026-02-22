@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.2.20",
+  "version": "0.2.21",
   "publisher": "workermill",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -97,6 +97,11 @@
         "icon": "$(search)"
       },
       {
+        "command": "workermill.filterBacklog",
+        "title": "WorkerMill: Filter Backlog...",
+        "icon": "$(filter)"
+      },
+      {
         "command": "workermill.installAgent",
         "title": "WorkerMill: Install/Update Agent"
       },
@@ -165,14 +170,19 @@
     "menus": {
       "view/title": [
         {
-          "command": "workermill.searchIssues",
+          "command": "workermill.filterBacklog",
           "when": "view == workermill.teamPanel && workermill.agentConfigured",
           "group": "navigation@1"
         },
         {
-          "command": "workermill.refreshTasks",
+          "command": "workermill.searchIssues",
           "when": "view == workermill.teamPanel && workermill.agentConfigured",
           "group": "navigation@2"
+        },
+        {
+          "command": "workermill.refreshTasks",
+          "when": "view == workermill.teamPanel && workermill.agentConfigured",
+          "group": "navigation@3"
         },
         {
           "command": "workermill.openSettings",
@@ -239,7 +249,7 @@
       "properties": {
         "workermill.issueStatusFilter": {
           "type": "string",
-          "default": "To Do",
+          "default": "",
           "description": "Only show issues with this status in the Backlog. Leave empty to show all open issues."
         }
       }

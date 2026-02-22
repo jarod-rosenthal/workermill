@@ -343,23 +343,16 @@ export async function setupCommand(): Promise<void> {
     },
   ]);
 
-  // ── Docker sandbox: auto-detect, no prompt ────────────────────────────────
-  let sandboxMode: "docker" | undefined;
+  // ── Docker sandbox: opt-in only ─────────────────────────────────────────────
+  // Sandbox mode is NOT auto-enabled. Users can opt in by adding "sandbox": "docker"
+  // to ~/.workermill/config.json after setup.
+  const sandboxMode: "docker" | undefined = undefined;
 
-  if (checkDockerAvailable() && totalRamGB >= 8) {
-    sandboxMode = "docker";
-    console.log(chalk.green("  ✓") + " Docker detected — sandbox mode enabled automatically");
-  } else if (isDockerInstalled() && totalRamGB >= 8) {
-    console.log();
-    console.log(chalk.yellow("  ⚠ Docker Desktop is installed but not running."));
-    console.log(chalk.yellow("    Start Docker Desktop and re-run setup to enable sandbox mode."));
-    console.log(chalk.dim("    Continuing without sandbox — AI workers will run with full system access."));
+  if (checkDockerAvailable()) {
+    console.log(chalk.green("  ✓") + " Docker detected");
+    console.log(chalk.dim("    To enable sandboxed execution, add \"sandbox\": \"docker\" to ~/.workermill/config.json"));
   } else {
-    console.log();
-    console.log(chalk.yellow("  ⚠ No Docker sandbox — AI workers will run with full access to your system."));
-    console.log(chalk.yellow("    For isolated execution, install Docker Desktop:"));
-    console.log(chalk.cyan("    https://www.docker.com/products/docker-desktop/"));
-    console.log(chalk.dim("    WorkerMill will detect Docker and enable sandboxing automatically."));
+    console.log(chalk.dim("  Docker not detected — workers will run as native processes"));
   }
   console.log();
 

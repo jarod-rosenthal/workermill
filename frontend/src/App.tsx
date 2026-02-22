@@ -11,6 +11,7 @@ import LandingV0 from "./pages/LandingV0";
 import StatusPage from "./pages/StatusPage";
 import Signup from "./pages/Signup";
 import VerifyEmail from "./pages/VerifyEmail";
+import ForgotPassword from "./pages/ForgotPassword";
 import Billing from "./pages/Billing";
 import SignupDeposit from "./pages/SignupDeposit";
 import Analytics from "./pages/Analytics";
@@ -212,6 +213,14 @@ function App() {
             element={
               <LoginRoute>
                 <VerifyEmail />
+              </LoginRoute>
+            }
+          />
+          <Route
+            path="/forgot-password"
+            element={
+              <LoginRoute>
+                <ForgotPassword />
               </LoginRoute>
             }
           />

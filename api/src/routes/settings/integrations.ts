@@ -8,7 +8,9 @@ import { Organization, PLAN_FEATURES, type OrganizationPlan } from "../../models
 import { requireAdmin } from "../../middleware/auth.js";
 import { body, validateRequest } from "../../middleware/validation.js";
 import { logger } from "../../utils/logger.js";
+import { validateExternalUrl } from "../../utils/url-validator.js";
 import { config } from "../../config/index.js";
+import { encrypt } from "../../utils/encryption.js";
 import {
   getOrCreateExternalId,
   getAwsRoleConfig,
@@ -337,7 +339,7 @@ router.put(
       // Save webhook secret to organization table if provided
       if (webhookSecret) {
         const orgRepo = AppDataSource.getRepository(Organization);
-        await orgRepo.update(org.id, { jiraWebhookSecret: webhookSecret });
+        await orgRepo.update(org.id, { jiraWebhookSecret: encrypt(webhookSecret) });
         logger.info("Jira webhook secret updated", { orgId: org.id });
       }
 
@@ -587,6 +589,13 @@ router.post("/gitlab/test", async (req: Request, res: Response) => {
     const baseUrl = org.scmBaseUrl && org.scmProvider === "gitlab"
       ? `${org.scmBaseUrl.replace(/\/$/, "")}/api/v4`
       : "https://gitlab.com/api/v4";
+
+    // Validate the base URL against SSRF (self-hosted GitLab instances use user-supplied URLs)
+    const urlCheck = await validateExternalUrl(`${baseUrl}/user`);
+    if (!urlCheck.valid) {
+      res.status(400).json({ error: `Invalid GitLab URL: ${urlCheck.reason}` });
+      return;
+    }
 
     // Test by fetching current user
     const response = await fetch(`${baseUrl}/user`, {
@@ -1220,6 +1229,13 @@ router.post("/teams/test", async (req: Request, res: Response) => {
       return;
     }
 
+    // Validate webhook URL against SSRF
+    const teamsUrlCheck = await validateExternalUrl(webhookUrl);
+    if (!teamsUrlCheck.valid) {
+      res.status(400).json({ error: `Invalid Teams webhook URL: ${teamsUrlCheck.reason}` });
+      return;
+    }
+
     // Send test message to Teams
     const response = await fetch(webhookUrl, {
       method: "POST",
@@ -1313,6 +1329,13 @@ router.post("/slack/test", async (req: Request, res: Response) => {
 
     if (!webhookUrl) {
       res.status(400).json({ error: "Slack webhook not configured" });
+      return;
+    }
+
+    // Validate webhook URL against SSRF
+    const slackUrlCheck = await validateExternalUrl(webhookUrl);
+    if (!slackUrlCheck.valid) {
+      res.status(400).json({ error: `Invalid Slack webhook URL: ${slackUrlCheck.reason}` });
       return;
     }
 

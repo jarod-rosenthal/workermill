@@ -9,6 +9,7 @@
 
 import { logger } from "../utils/logger.js";
 import { cleanupStaleCoordination } from "./coordination.js";
+import { checkTrialReminders } from "./trial-reminder.js";
 // ensureValidOAuthToken removed — refresh moved to local-epic-spawner.ts pre-spawn
 import { findV2PipelineTasks, runSequentialPipeline } from "./pipeline-executor.js";
 import { maintainAllWarmPools } from "./warm-pool.js";
@@ -33,7 +34,8 @@ import {
   type OrchestratorState,
 } from "./orchestrator-utils.js";
 
-
+// Timestamp for hourly trial reminder checks
+let lastTrialReminderCheck = 0;
 
 /**
  * Main polling loop
@@ -257,6 +259,17 @@ async function pollLoop(): Promise<void> {
             error: error instanceof Error ? error.message : String(error),
           });
         });
+      }
+
+      // Check trial reminders — once per hour
+      const now = Date.now();
+      if (now - lastTrialReminderCheck > 60 * 60 * 1000) {
+        lastTrialReminderCheck = now;
+        checkTrialReminders().catch((err) =>
+          logger.error("Trial reminder check failed", {
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
       }
 
       // Sleep between polls

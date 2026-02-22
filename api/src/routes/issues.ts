@@ -96,7 +96,7 @@ async function searchBoardCards(
   const cardIds = cards.map((c) => c.id);
   // Statuses that count as "done" for dependency resolution
   const DONE_STATUSES = ["completed", "deployed", "pr_approved", "review_approved"];
-  let depsMap = new Map<string, { total: number; unmet: number }>();
+  const depsMap = new Map<string, { total: number; unmet: number }>();
 
   if (cardIds.length > 0) {
     const depRepo = AppDataSource.getRepository(KbCardDependency);

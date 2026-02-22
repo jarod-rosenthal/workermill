@@ -240,7 +240,12 @@ import { AddCardCreatedBy1739750400005 } from "./migrations/1739750400005-AddCar
 import { RenamePlansToProMaxEnterprise1739750400006 } from "./migrations/1739750400006-RenamePlansToProMaxEnterprise.js";
 import { CreateStatusSnapshots1739750400007 } from "./migrations/1739750400007-CreateStatusSnapshots.js";
 import { ChangeIssueTrackerDefaultToInternal1739750400008 } from "./migrations/1739750400008-ChangeIssueTrackerDefaultToInternal.js";
+import { AddTrialExpiresAt1740200000000 } from "./migrations/1740200000000-AddTrialExpiresAt.js";
+import { AddMfaBackupCodes1740200000001 } from "./migrations/1740200000001-AddMfaBackupCodes.js";
+import { EncryptExistingTokens1740200000002 } from "./migrations/1740200000002-EncryptExistingTokens.js";
 import { logger } from "../utils/logger.js";
+import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
+import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
 
 export const AppDataSource = new DataSource({
   type: "postgres",
@@ -250,9 +255,14 @@ export const AppDataSource = new DataSource({
   username: config.database.url ? undefined : config.database.username,
   password: config.database.url ? undefined : config.database.password,
   database: config.database.url ? undefined : config.database.name,
-  // Connection pool configuration for optimal performance
+  // Connection pool configuration for db.t4g.micro (~22 max connections).
+  // Pool set to 10 to leave headroom for direct connections (bastion/psql),
+  // rolling deploys (brief overlap of old + new task), and monitoring.
+  // WARNING: The remote agent planner batches log POSTs sequentially to avoid
+  // saturating this pool — see agent/src/planner.ts logQueue. Do not raise
+  // this limit without also raising the RDS instance class.
   extra: {
-    max: 15, // Maximum connections in pool (db.t4g.micro supports ~22 total; keep headroom for rolling deploys)
+    max: 10, // Maximum connections in pool (reduced from 15 to prevent pool exhaustion)
     min: 1, // Minimum connections to maintain (low to ease rolling deploy overlap)
     idleTimeoutMillis: 30000, // Close idle connections after 30s
     connectionTimeoutMillis: 15000, // Timeout for acquiring connection
@@ -497,6 +507,13 @@ export const AppDataSource = new DataSource({
     RenamePlansToProMaxEnterprise1739750400006,
     CreateStatusSnapshots1739750400007,
     ChangeIssueTrackerDefaultToInternal1739750400008,
+    AddTrialExpiresAt1740200000000,
+    AddMfaBackupCodes1740200000001,
+    EncryptExistingTokens1740200000002,
+  ],
+  subscribers: [
+    OrganizationEncryptionSubscriber,
+    WebhookEndpointEncryptionSubscriber,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",
@@ -514,6 +531,53 @@ export const AppDataSource = new DataSource({
         }
       : false,
 });
+
+/** Interval handle for pool monitoring — cleared on shutdown. */
+let poolMonitorInterval: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Log a warning when the connection pool is over 80% utilized.
+ * Uses the underlying pg Pool stats (totalCount, idleCount, waitingCount).
+ */
+function startPoolMonitor(): void {
+  const POOL_MAX = 10;
+  const WARN_THRESHOLD = 0.8; // 80%
+  const CHECK_INTERVAL_MS = 30_000; // every 30s
+
+  poolMonitorInterval = setInterval(() => {
+    try {
+      // TypeORM exposes the pg Pool via driver.master
+      const pool = (AppDataSource.driver as any).master;
+      if (!pool) return;
+
+      const total: number = pool.totalCount ?? 0;
+      const idle: number = pool.idleCount ?? 0;
+      const waiting: number = pool.waitingCount ?? 0;
+      const active = total - idle;
+      const utilization = total > 0 ? active / POOL_MAX : 0;
+
+      if (utilization >= WARN_THRESHOLD || waiting > 0) {
+        logger.warn("DB connection pool utilization high", {
+          active,
+          idle,
+          total,
+          waiting,
+          poolMax: POOL_MAX,
+          utilizationPct: Math.round(utilization * 100),
+        });
+      }
+    } catch {
+      // Best-effort monitoring — never crash the app
+    }
+  }, CHECK_INTERVAL_MS);
+}
+
+export function stopPoolMonitor(): void {
+  if (poolMonitorInterval) {
+    clearInterval(poolMonitorInterval);
+    poolMonitorInterval = null;
+  }
+}
 
 export async function initializeDatabase(): Promise<DataSource> {
   try {
@@ -534,6 +598,9 @@ export async function initializeDatabase(): Promise<DataSource> {
     } else {
       logger.info("Database schema is up to date");
     }
+
+    // Start periodic pool utilization monitoring
+    startPoolMonitor();
 
     return AppDataSource;
   } catch (error) {

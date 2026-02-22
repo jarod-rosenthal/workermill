@@ -11,6 +11,8 @@ import { requireCurrentTos } from "../middleware/tos.js";
 import { AppDataSource } from "../db/connection.js";
 import { AuditLog, type AuditAction, WorkerTask } from "../models/index.js";
 import { logger } from "../utils/logger.js";
+import { validateExternalUrl } from "../utils/url-validator.js";
+import { encrypt } from "../utils/encryption.js";
 import { Between, In } from "typeorm";
 
 const router = Router();
@@ -747,12 +749,14 @@ router.put("/siem/config", async (req: Request, res: Response) => {
     }
 
     // Update organization
+    // Note: orgRepo.update() bypasses TypeORM subscribers, so we must encrypt manually.
+    const siemSecretValue = webhookSecret ?? org.siemWebhookSecret;
     const orgRepo = AppDataSource.getRepository("Organization");
     await orgRepo.update(org.id, {
       siemEnabled: enabled ?? org.siemEnabled,
       siemProvider: provider ?? org.siemProvider,
       siemWebhookUrl: webhookUrl ?? org.siemWebhookUrl,
-      siemWebhookSecret: webhookSecret ?? org.siemWebhookSecret,
+      siemWebhookSecret: siemSecretValue ? encrypt(siemSecretValue) : siemSecretValue,
       siemEventFilters: eventFilters ?? org.siemEventFilters,
     });
 
@@ -830,6 +834,13 @@ router.post("/siem/test", async (req: Request, res: Response) => {
         .update(body)
         .digest("hex");
       headers["X-WorkerMill-Signature"] = `sha256=${signature}`;
+    }
+
+    // Validate webhook URL against SSRF
+    const urlCheck = await validateExternalUrl(org.siemWebhookUrl);
+    if (!urlCheck.valid) {
+      res.status(400).json({ error: `Invalid SIEM webhook URL: ${urlCheck.reason}` });
+      return;
     }
 
     // Send test event
@@ -991,6 +1002,13 @@ router.post("/siem/forward", async (req: Request, res: Response) => {
 
     if (!org.siemEnabled || !org.siemWebhookUrl) {
       res.status(400).json({ error: "SIEM integration not enabled or configured" });
+      return;
+    }
+
+    // Validate webhook URL against SSRF
+    const urlCheck = await validateExternalUrl(org.siemWebhookUrl);
+    if (!urlCheck.valid) {
+      res.status(400).json({ error: `Invalid SIEM webhook URL: ${urlCheck.reason}` });
       return;
     }
 

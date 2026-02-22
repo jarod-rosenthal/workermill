@@ -104,7 +104,7 @@ jobs:
       - name: Build and push Docker sandbox image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./worker
           file: worker/Dockerfile
           push: true
           tags: |

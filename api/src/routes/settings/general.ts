@@ -115,7 +115,7 @@ router.get("/", async (req: Request, res: Response) => {
       scmBaseUrl: org.scmBaseUrl || null,
 
       // Issue Tracker Provider Settings
-      issueTrackerProvider: org.issueTrackerProvider || "jira",
+      issueTrackerProvider: org.issueTrackerProvider,
 
       // Auto-Workflow Settings
       autoReviewEnabled: org.autoReviewEnabled ?? false,

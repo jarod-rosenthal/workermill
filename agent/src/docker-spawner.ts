@@ -385,7 +385,7 @@ export async function spawnDockerWorker(
     JIRA_EMAIL: credentials?.jiraEmail || "",
     JIRA_API_TOKEN: credentials?.jiraApiToken || "",
 
-    TICKET_SYSTEM: credentials?.issueTrackerProvider || "jira",
+    TICKET_SYSTEM: credentials?.issueTrackerProvider || "internal",
     LINEAR_API_KEY: credentials?.linearApiKey || "",
 
     AWS_ACCESS_KEY_ID: credentials?.customerAwsAccessKeyId || "",

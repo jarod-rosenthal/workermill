@@ -199,7 +199,7 @@ router.get("/", async (req: Request, res: Response) => {
 
     res.json({
       plan: org.plan || "free",
-      defaultIssueTracker: org.issueTrackerProvider || "jira",
+      defaultIssueTracker: org.issueTrackerProvider,
       jira: {
         configured: jiraConfigured,
         baseUrl: jiraBaseUrl,

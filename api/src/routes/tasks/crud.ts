@@ -187,7 +187,7 @@ router.post(
     let boardCardId: string | null = null;
 
     // Determine which issue tracker to use based on org settings
-    const issueTrackerProvider = org.issueTrackerProvider || "jira";
+    const issueTrackerProvider = org.issueTrackerProvider;
 
     let issueData: { summary: string; description: string; labels: string[] } | null = null;
 

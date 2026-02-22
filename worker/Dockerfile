@@ -23,6 +23,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && apt-get install -y gh unzip \
     && rm -rf /var/lib/apt/lists/*
 
+***REMOVED*** Kaniko executor for Docker image builds (daemon-less, works in Fargate).
+***REMOVED*** Only tool that MUST be baked in — no standalone binary download exists.
+COPY --from=gcr.io/kaniko-project/executor:latest /kaniko/executor /kaniko/executor
+COPY --from=gcr.io/kaniko-project/executor:latest /kaniko/docker-credential-ecr-login /kaniko/docker-credential-ecr-login
+
 ***REMOVED*** Install Claude Code CLI (pinned to prevent breaking changes)
 RUN npm install -g @anthropic-ai/claude-code@1
 

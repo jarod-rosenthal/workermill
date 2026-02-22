@@ -171,6 +171,9 @@ echo "[Epic] Main branch: ${MAIN_BRANCH}"
 export REPO_PATH="${REPO_DIR}"
 export MAIN_BRANCH="${MAIN_BRANCH}"
 
+***REMOVED*** Pass 2: detect and install tools based on repo contents
+/app/install-tools.sh "${REPO_DIR}"
+
 ***REMOVED*** =============================================================================
 ***REMOVED*** Heartbeat Loop - sends heartbeats every 30 seconds to prevent timeout
 ***REMOVED*** =============================================================================

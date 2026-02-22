@@ -268,8 +268,8 @@ router.post(
         agentHeartbeatAt: new Date(),
       })
       .where(
-        "id = :id AND org_id = :orgId AND status IN (:...statuses) AND claimed_by_agent IS NULL",
-        { id: taskId, orgId: org.id, statuses: ["planning", "queued"] },
+        "id = :id AND org_id = :orgId AND status IN (:...statuses) AND (claimed_by_agent IS NULL OR claimed_by_agent = :agentId)",
+        { id: taskId, orgId: org.id, statuses: ["planning", "queued"], agentId },
       )
       .execute();
 

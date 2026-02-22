@@ -598,6 +598,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return json(res, { success: true, message: "Task cancelled" });
   }
 
+  // POST /api/tasks/:id/retry — proxy retry to cloud API
+  const retryMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/retry$/);
+  if (req.method === "POST" && retryMatch) {
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("POST", `/api/tasks/${retryMatch[1]}/retry`, {});
+      triggerPoll();
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
   // GET /api/issues — search Jira issues (proxied from cloud API)
   if (req.method === "GET" && path === "/api/issues") {
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);

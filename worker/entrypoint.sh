@@ -1221,7 +1221,7 @@ case "$WORKER_PROVIDER" in
             echo "::result::error_missing_env"
             exit 1
         fi
-        # Universal agent uses GEMINI_API_KEY
+        # AI SDK executor uses GEMINI_API_KEY
         export GEMINI_API_KEY="${GEMINI_API_KEY:-${GOOGLE_API_KEY}}"
         ;;
     groq)
@@ -2970,15 +2970,15 @@ case "$WORKER_PROVIDER" in
             2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
         ;;
 
-    ollama|openai|gemini|google|groq|mistral|xai|grok|azure|ai-sdk)
+    ollama|openai|gemini|google|ai-sdk)
         # =============================================================================
-        # Vercel AI SDK Executor (all non-Anthropic providers)
+        # Vercel AI SDK Executor
         # =============================================================================
-        # AI SDK provides a unified interface for multiple AI providers.
+        # Supports: anthropic, openai, google, gemini, ollama (via ai-sdk-executor.js)
         # For ai-sdk mode, AI_SDK_UNDERLYING_PROVIDER specifies the actual provider.
         # For direct provider names, WORKER_PROVIDER is passed through.
         #
-        local RESOLVED_PROVIDER="${WORKER_PROVIDER}"
+        RESOLVED_PROVIDER="${WORKER_PROVIDER}"
         if [ "${WORKER_PROVIDER}" = "ai-sdk" ]; then
             RESOLVED_PROVIDER="${AI_SDK_UNDERLYING_PROVIDER:-anthropic}"
         fi
@@ -3007,7 +3007,7 @@ case "$WORKER_PROVIDER" in
 
     *)
         post_log "error" "ERROR: Unknown provider: ${WORKER_PROVIDER}" "error"
-        post_log "error" "Supported providers: anthropic, ollama, openai, gemini, groq, mistral, azure, ai-sdk" "error"
+        post_log "error" "Supported providers: anthropic, ollama, openai, gemini, google, ai-sdk" "error"
         echo "::result::error_unknown_provider"
         EXIT_CODE=1
         ;;

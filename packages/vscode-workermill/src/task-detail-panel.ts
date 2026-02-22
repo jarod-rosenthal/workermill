@@ -18,6 +18,8 @@ export class TaskDetailPanel {
   private readonly taskId: string;
   private pollTimer: NodeJS.Timeout | null = null;
   private disposed = false;
+  private consecutiveErrors = 0;
+  private currentInterval = 5_000;
 
   static createOrShow(client: AgentClient, task: TaskInfo): void {
     const existing = TaskDetailPanel.currentPanels.get(task.id);
@@ -93,26 +95,38 @@ export class TaskDetailPanel {
     setTimeout(() => {
       if (!this.disposed) {
         this.poll();
-        this.pollTimer = setInterval(() => this.poll(), 3000);
+        this.pollTimer = setInterval(() => this.poll(), this.currentInterval);
       }
     }, 500);
   }
 
+  private resetInterval(ms: number): void {
+    this.currentInterval = ms;
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = setInterval(() => this.poll(), ms);
+  }
+
   private async poll(): Promise<void> {
     if (this.disposed) return;
+    if (!this.client.isConnected()) return;
 
     try {
       const detail = await this.client.getTaskDetail(this.taskId);
       this.panel.webview.postMessage({ type: "taskDetail", data: detail });
-    } catch {
-      /* ignore */
-    }
 
-    try {
       const coord = await this.client.getCoordinationFeed(this.taskId);
       this.panel.webview.postMessage({ type: "coordination", data: coord });
+
+      this.consecutiveErrors = 0;
+      if (this.currentInterval !== 5_000) {
+        this.resetInterval(5_000);
+      }
     } catch {
-      /* ignore */
+      this.consecutiveErrors++;
+      if (this.consecutiveErrors >= 3) {
+        const backed = Math.min(this.currentInterval * 2, 30_000);
+        this.resetInterval(backed);
+      }
     }
   }
 

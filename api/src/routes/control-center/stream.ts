@@ -275,7 +275,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
   await sendUpdate();
 
   // Send updates every 5 seconds
-  const interval = setInterval(sendUpdate, 5000);
+  const interval = setInterval(sendUpdate, 8000);
 
   // Subscribe to real-time cost events for immediate updates
   const unsubscribeCost = costEvents.subscribeToCostUpdates(org.id, (event: CostUpdateEvent) => {

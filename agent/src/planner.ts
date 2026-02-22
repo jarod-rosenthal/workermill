@@ -309,14 +309,14 @@ function runClaudeCli(
     }
 
     // Flush buffered LLM text to dashboard every 1s (complete lines only)
-    const textFlushInterval = setInterval(() => flushTextBuffer(), 500);
+    const textFlushInterval = setInterval(() => flushTextBuffer(), 2_000);
 
     // SSE progress updates every 2s — drives PlanningTerminalBar in dashboard
     // (same cadence as local dev's progressInterval in planning-agent-local.ts)
     const sseProgressInterval = setInterval(() => {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       postProgress(taskId, currentPhase, elapsed, phaseLabel(currentPhase, elapsed), charsReceived, toolCallCount);
-    }, 2_000);
+    }, 10_000);
 
     // Phase transition logs + periodic DB logs (every 30s during generation)
     let lastProgressLogAt = 0;

@@ -256,13 +256,31 @@ export async function spawnDockerWorker(
     return;
   }
 
-  // Pre-flight: verify Docker is running
+  // Pre-flight: verify Docker is running (retry once after 3s — daemon can be slow on Windows)
   const dockerBin = findDockerBin();
-  try {
-    execFileSync(dockerBin, ["version"], { stdio: "pipe", timeout: 10_000, windowsHide: true });
-  } catch {
-    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Docker is not running (tried: ${dockerBin})`);
-    throw new Error("Docker is not running. Start Docker and try again.");
+  let dockerOk = false;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      execFileSync(dockerBin, ["version"], { stdio: "pipe", timeout: 10_000, windowsHide: true });
+      dockerOk = true;
+      break;
+    } catch (err: unknown) {
+      lastErr = err;
+      if (attempt === 0) {
+        console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Docker pre-flight failed, retrying in 3s...`);
+        await new Promise((r) => setTimeout(r, 3_000));
+      }
+    }
+  }
+  if (!dockerOk) {
+    const msg = lastErr instanceof Error ? (lastErr as Error).message : String(lastErr);
+    const stderr = (lastErr as { stderr?: Buffer })?.stderr?.toString?.() || "";
+    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Docker pre-flight failed (bin: ${dockerBin})`);
+    console.error(`${ts()} ${taskLabel}   error: ${msg}`);
+    if (stderr) console.error(`${ts()} ${taskLabel}   stderr: ${stderr.trim()}`);
+    console.error(`${ts()} ${taskLabel}   PATH: ${process.env.PATH || "(empty)"}`);
+    throw new Error(`Docker is not running or not accessible. Start Docker and try again. (${msg})`);
   }
 
   // Ensure image is available

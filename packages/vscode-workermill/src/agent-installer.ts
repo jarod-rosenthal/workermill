@@ -698,11 +698,37 @@ export function startAgentProcess(log?: (msg: string) => void): void {
   }
 }
 
-/** Stop a running agent — tries graceful stop, then falls back to SIGTERM + cleanup. */
+/**
+ * Stop a running agent — SIGTERM via PID first (fast), then CLI fallback.
+ * VS Code's deactivate() has a tight time budget, so we skip the slow CLI
+ * "stop" command and go straight to SIGTERM. The agent handles SIGTERM
+ * gracefully (deregisters, cleans up workers, removes PID file).
+ */
 export async function stopAgentProcess(): Promise<boolean> {
-  const binary = getAgentBinaryPath();
+  // Fast path: SIGTERM via PID (completes in <1s typically)
+  const pid = readAgentPid();
+  if (pid && isProcessAlive(pid)) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      /* ignore */
+    }
+    // Brief wait for graceful exit
+    await new Promise((r) => setTimeout(r, 2000));
+    if (isProcessAlive(pid)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* ignore */
+      }
+    }
+    cleanAgentState();
+    return true;
+  }
 
-  // Try graceful stop via CLI command
+  // No PID or process already dead — try CLI stop as fallback
+  // (handles edge case where PID file was deleted but process is alive)
+  const binary = getAgentBinaryPath();
   if (fs.existsSync(binary)) {
     const stopped = await new Promise<boolean>((resolve) => {
       const child = spawn(binary, ["stop"], { stdio: "ignore", windowsHide: true });
@@ -715,30 +741,11 @@ export async function stopAgentProcess(): Promise<boolean> {
           /* ignore */
         }
         resolve(false);
-      }, 10_000);
+      }, 5_000);
     });
     if (stopped) {
       cleanAgentState();
       return true;
-    }
-  }
-
-  // Graceful stop failed — kill process directly via PID
-  const pid = readAgentPid();
-  if (pid && isProcessAlive(pid)) {
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      /* ignore */
-    }
-    // Wait briefly for it to die
-    await new Promise((r) => setTimeout(r, 1000));
-    if (isProcessAlive(pid)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        /* ignore */
-      }
     }
   }
 

@@ -445,13 +445,13 @@ export async function enterApiKey(
   log: (msg: string) => void,
 ): Promise<boolean> {
   const apiKey = await vscode.window.showInputBox({
-    prompt: "Paste your WorkerMill API key (from Settings > Remote Agent)",
-    placeHolder: "org_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    prompt: "Paste your WorkerMill API key (from Settings > Integrations)",
+    placeHolder: "usr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     password: false,
     ignoreFocusOut: true,
     validateInput: (value) => {
       if (!value.trim()) return "API key is required";
-      if (!value.startsWith("org_")) return "API key should start with org_";
+      if (!value.startsWith("usr_") && !value.startsWith("org_")) return "API key should start with usr_ or org_";
       return null;
     },
   });

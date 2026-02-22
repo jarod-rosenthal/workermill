@@ -268,6 +268,7 @@ function runClaudeCli(
     let stderrOutput = "";
     let charsReceived = 0;
     let toolCallCount = 0;
+    let lastToolLogAt = 0;
 
     // Token usage accumulator — extract from stream events using Math.max
     const tokenUsage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
@@ -318,10 +319,11 @@ function runClaudeCli(
     const sseProgressInterval = setInterval(() => {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       postProgress(taskId, currentPhase, elapsed, phaseLabel(currentPhase, elapsed), charsReceived, toolCallCount);
-    }, 10_000);
+    }, 3_000);
 
     // Phase transition logs + periodic DB logs (every 30s during generation)
     let lastProgressLogAt = 0;
+    let lastHeartbeatAt = 0;
     const progressInterval = setInterval(() => {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
 
@@ -330,6 +332,20 @@ function runClaudeCli(
         transitionPhase("reading_repo");
       } else if (currentPhase === "reading_repo" && elapsed >= 15 && !firstTextSeen) {
         transitionPhase("analyzing");
+      }
+
+      // Heartbeat during silent phases so the dashboard shows life
+      if (currentPhase === "reading_repo" && elapsed - lastHeartbeatAt >= 15) {
+        lastHeartbeatAt = elapsed;
+        const msg = `${PREFIX} Exploring codebase (${toolCallCount} files examined, ${formatElapsed(elapsed)})`;
+        postLog(taskId, msg);
+        console.log(`${ts()} ${taskLabel} ${chalk.dim(msg)}`);
+      }
+      if (currentPhase === "analyzing" && elapsed - lastHeartbeatAt >= 15) {
+        lastHeartbeatAt = elapsed;
+        const msg = `${PREFIX} Analyzing architecture and dependencies (${formatElapsed(elapsed)})`;
+        postLog(taskId, msg);
+        console.log(`${ts()} ${taskLabel} ${chalk.dim(msg)}`);
       }
 
       // Periodic progress during generation
@@ -386,6 +402,20 @@ function runClaudeCli(
                     transitionPhase("reading_repo");
                     milestoneSent.reading = true;
                   }
+                  // Surface tool call names so the dashboard shows what the planner is doing
+                  const toolName = block.name || "";
+                  const now = Date.now();
+                  if (now - lastToolLogAt >= 15_000) {
+                    lastToolLogAt = now;
+                    const toolMsg = toolName === "Read" ? "Reading file..."
+                      : toolName === "Glob" ? "Searching files..."
+                      : toolName === "Grep" || toolName === "Search" ? "Searching codebase..."
+                      : toolName === "LS" || toolName === "ListDirectory" ? "Listing directory..."
+                      : toolName === "Bash" ? "Running command..."
+                      : `Exploring codebase (tool #${toolCallCount})...`;
+                    postLog(taskId, `${PREFIX} ${toolMsg}`);
+                    console.log(`${ts()} ${taskLabel} ${chalk.dim(`🔍 ${toolMsg}`)}`);
+                  }
                 }
               }
             } else if (typeof content === "string" && content) {
@@ -417,6 +447,20 @@ function runClaudeCli(
             if (!milestoneSent.reading) {
               transitionPhase("reading_repo");
               milestoneSent.reading = true;
+            }
+            // Surface tool call names so the dashboard shows what the planner is doing
+            const toolName = event.content_block?.name || event.content_block?.tool_name || "";
+            const now = Date.now();
+            if (now - lastToolLogAt >= 15_000) {
+              lastToolLogAt = now;
+              const toolMsg = toolName === "Read" ? "Reading file..."
+                : toolName === "Glob" ? "Searching files..."
+                : toolName === "Grep" || toolName === "Search" ? "Searching codebase..."
+                : toolName === "LS" || toolName === "ListDirectory" ? "Listing directory..."
+                : toolName === "Bash" ? "Running command..."
+                : `Exploring codebase (tool #${toolCallCount})...`;
+              postLog(taskId, `${PREFIX} ${toolMsg}`);
+              console.log(`${ts()} ${taskLabel} ${chalk.dim(`🔍 ${toolMsg}`)}`);
             }
           } else if (event.type === "result" && event.result) {
             resultText = typeof event.result === "string" ? event.result : "";

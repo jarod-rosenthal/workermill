@@ -154,6 +154,8 @@ export class SettingsPanel {
         vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/settings`));
       } else if (msg.type === "open-pricing") {
         vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/pricing`));
+      } else if (msg.type === "save-models") {
+        await this.saveModels(config, msg);
       }
     });
 
@@ -170,15 +172,28 @@ export class SettingsPanel {
 
   private async loadIntegrations(config: { apiUrl: string; apiKey: string }): Promise<void> {
     try {
-      const { status, data } = await apiRequest<Record<string, unknown>>(
-        "GET",
-        `${config.apiUrl}/api/settings/integrations`,
-        config.apiKey,
-      );
-      if (status >= 200 && status < 300) {
-        this.postMessage({ type: "integrations-loaded", data });
+      const [intResult, settingsResult] = await Promise.all([
+        apiRequest<Record<string, unknown>>(
+          "GET",
+          `${config.apiUrl}/api/settings/integrations`,
+          config.apiKey,
+        ),
+        apiRequest<Record<string, unknown>>(
+          "GET",
+          `${config.apiUrl}/api/settings`,
+          config.apiKey,
+        ),
+      ]);
+      if (intResult.status >= 200 && intResult.status < 300) {
+        const merged = {
+          ...intResult.data,
+          defaultWorkerModel: settingsResult.data?.defaultWorkerModel,
+          managerModelId: settingsResult.data?.managerModelId,
+          planningAgentModel: settingsResult.data?.planningAgentModel,
+        };
+        this.postMessage({ type: "integrations-loaded", data: merged });
       } else {
-        this.postMessage({ type: "error", message: `Failed to load settings (HTTP ${status})` });
+        this.postMessage({ type: "error", message: `Failed to load settings (HTTP ${intResult.status})` });
       }
     } catch (err) {
       this.postMessage({ type: "error", message: `Could not reach API: ${err instanceof Error ? err.message : String(err)}` });
@@ -227,6 +242,32 @@ export class SettingsPanel {
       }
     } catch (err) {
       this.postMessage({ type: "error", message: `Could not save tracker: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+
+  private async saveModels(
+    config: { apiUrl: string; apiKey: string },
+    msg: { workerModel: string; reviewerModel: string; plannerModel: string },
+  ): Promise<void> {
+    try {
+      this.postMessage({ type: "models-saving" });
+      const { status } = await apiRequest<{ error?: string }>(
+        "PUT",
+        `${config.apiUrl}/api/settings`,
+        config.apiKey,
+        {
+          defaultWorkerModel: msg.workerModel,
+          managerModelId: msg.reviewerModel,
+          planningAgentModel: msg.plannerModel,
+        },
+      );
+      if (status >= 200 && status < 300) {
+        this.postMessage({ type: "models-saved" });
+      } else {
+        this.postMessage({ type: "models-save-error", message: `HTTP ${status}` });
+      }
+    } catch (err) {
+      this.postMessage({ type: "models-save-error", message: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -524,7 +565,6 @@ export class SettingsPanel {
     }
     .locked-option input { pointer-events: none; }
     .scm-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-    .scm-row.locked { opacity: 0.55; }
     .upgrade-hint {
       font-size: 0.85em;
       color: var(--vscode-textLink-foreground);
@@ -544,6 +584,30 @@ export class SettingsPanel {
   <div id="loading" class="loading">Loading settings...</div>
 
   <div id="content" class="hidden">
+    <!-- AI Models -->
+    <div class="section">
+      <h2>AI Models</h2>
+      <div class="field">
+        <label>Expert Workers</label>
+        <select id="model-worker"></select>
+        <div class="hint">Model used for coding workers</div>
+      </div>
+      <div class="field">
+        <label>Tech Lead</label>
+        <select id="model-reviewer"></select>
+        <div class="hint">Model used for code review</div>
+      </div>
+      <div class="field">
+        <label>Project Manager</label>
+        <select id="model-planner"></select>
+        <div class="hint">Model used for planning</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" id="btn-save-models">Save</button>
+      </div>
+      <div id="models-status" class="status"></div>
+    </div>
+
     <!-- Issue Tracker -->
     <div class="section">
       <h2>Issue Tracker</h2>
@@ -602,12 +666,7 @@ export class SettingsPanel {
     <!-- SCM Status -->
     <div class="section">
       <h2>Source Control</h2>
-      <div id="scm-status">
-        <div class="scm-row"><span>GitHub:</span> <span id="scm-github-badge"></span></div>
-        <div class="scm-row locked" id="scm-bitbucket-row"><span>Bitbucket:</span> <span id="scm-bitbucket-badge"></span> <span class="pro-badge">PRO</span></div>
-        <div class="scm-row locked" id="scm-gitlab-row"><span>GitLab:</span> <span id="scm-gitlab-badge"></span> <span class="pro-badge">PRO</span></div>
-      </div>
-      <div id="scm-upgrade" class="upgrade-hint hidden">Upgrade to Max to connect Bitbucket and GitLab. <a id="btn-upgrade-scm" href="#">View plans</a></div>
+      <div id="scm-status"></div>
       <div class="hint" style="margin-top: 8px;">Manage SCM tokens in <button class="btn-link" id="btn-web-settings-scm">web settings</button>.</div>
     </div>
 
@@ -678,6 +737,72 @@ export class SettingsPanel {
 
     let orgPlan = "pro";
 
+    // Model options by provider
+    const ANTHROPIC_MODELS = [
+      { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
+      { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+      { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
+      { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+    ];
+    const OPENAI_MODELS = [
+      { value: "gpt-5.1-codex", label: "GPT-5.1 Codex" },
+      { value: "gpt-4o", label: "GPT-4o" },
+      { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+      { value: "o1", label: "o1 (Reasoning)" },
+      { value: "o1-mini", label: "o1 Mini" },
+    ];
+    const GOOGLE_MODELS = [
+      { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+      { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+      { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+    ];
+
+    function populateModelSelect(selectId, currentValue) {
+      const sel = document.getElementById(selectId);
+      sel.innerHTML = "";
+      const isPaid = orgPlan === "max" || orgPlan === "enterprise";
+
+      // Anthropic group
+      if (isPaid) {
+        const ag = document.createElement("optgroup");
+        ag.label = "Anthropic";
+        ANTHROPIC_MODELS.forEach(m => {
+          const o = document.createElement("option");
+          o.value = m.value; o.textContent = m.label;
+          if (m.value === currentValue) o.selected = true;
+          ag.appendChild(o);
+        });
+        sel.appendChild(ag);
+
+        const og = document.createElement("optgroup");
+        og.label = "OpenAI";
+        OPENAI_MODELS.forEach(m => {
+          const o = document.createElement("option");
+          o.value = m.value; o.textContent = m.label;
+          if (m.value === currentValue) o.selected = true;
+          og.appendChild(o);
+        });
+        sel.appendChild(og);
+
+        const gg = document.createElement("optgroup");
+        gg.label = "Google";
+        GOOGLE_MODELS.forEach(m => {
+          const o = document.createElement("option");
+          o.value = m.value; o.textContent = m.label;
+          if (m.value === currentValue) o.selected = true;
+          gg.appendChild(o);
+        });
+        sel.appendChild(gg);
+      } else {
+        ANTHROPIC_MODELS.forEach(m => {
+          const o = document.createElement("option");
+          o.value = m.value; o.textContent = m.label;
+          if (m.value === currentValue) o.selected = true;
+          sel.appendChild(o);
+        });
+      }
+    }
+
     // Radio toggle — skip save during initial load
     let initialLoad = true;
     radios.forEach(r => r.addEventListener("change", () => {
@@ -717,23 +842,6 @@ export class SettingsPanel {
         linearRadio.disabled = true;
         trackerUpgrade.classList.remove("hidden");
       }
-
-      // SCM: GitHub = free, Bitbucket + GitLab = Pro
-      const bbRow = document.getElementById("scm-bitbucket-row");
-      const glRow = document.getElementById("scm-gitlab-row");
-      const scmUpgrade = document.getElementById("scm-upgrade");
-
-      if (isPaid) {
-        bbRow.classList.remove("locked");
-        glRow.classList.remove("locked");
-        bbRow.querySelectorAll(".pro-badge").forEach(b => b.classList.add("hidden"));
-        glRow.querySelectorAll(".pro-badge").forEach(b => b.classList.add("hidden"));
-        scmUpgrade.classList.add("hidden");
-      } else {
-        bbRow.classList.add("locked");
-        glRow.classList.add("locked");
-        scmUpgrade.classList.remove("hidden");
-      }
     }
 
     // Buttons
@@ -767,9 +875,13 @@ export class SettingsPanel {
       e.preventDefault();
       vscode.postMessage({ type: "open-pricing" });
     });
-    document.getElementById("btn-upgrade-scm").addEventListener("click", (e) => {
-      e.preventDefault();
-      vscode.postMessage({ type: "open-pricing" });
+    document.getElementById("btn-save-models").addEventListener("click", () => {
+      vscode.postMessage({
+        type: "save-models",
+        workerModel: document.getElementById("model-worker").value,
+        reviewerModel: document.getElementById("model-reviewer").value,
+        plannerModel: document.getElementById("model-planner").value,
+      });
     });
     document.getElementById("btn-sign-out").addEventListener("click", () => {
       vscode.postMessage({ type: "sign-out" });
@@ -811,6 +923,11 @@ export class SettingsPanel {
         // Apply plan restrictions before selecting radios
         applyPlanRestrictions(d.plan || "pro");
 
+        // Populate model dropdowns
+        populateModelSelect("model-worker", d.defaultWorkerModel || "claude-sonnet-4-6");
+        populateModelSelect("model-reviewer", d.managerModelId || "claude-opus-4-6");
+        populateModelSelect("model-planner", d.planningAgentModel || "claude-opus-4-6");
+
         // Select current tracker radio (fall back to "internal" if selected tracker is locked)
         let tracker = d.defaultIssueTracker || "internal";
         const isPaid = orgPlan === "max" || orgPlan === "enterprise";
@@ -832,12 +949,27 @@ export class SettingsPanel {
           if (d.jira.configured) showStatus(jiraStatus, "success", "Jira is configured");
         }
 
-        // Badges
+        // Badges (issue tracker)
         document.getElementById("github-badge").innerHTML = badge(d.github?.configured);
         document.getElementById("linear-badge").innerHTML = badge(d.linear?.configured);
-        document.getElementById("scm-github-badge").innerHTML = badge(d.github?.configured);
-        document.getElementById("scm-bitbucket-badge").innerHTML = badge(d.bitbucket?.configured);
-        document.getElementById("scm-gitlab-badge").innerHTML = badge(d.gitlab?.configured);
+
+        // Dynamic SCM rows — only show configured providers
+        const scmContainer = document.getElementById("scm-status");
+        const scmProviders = [
+          { key: "github", label: "GitHub" },
+          { key: "bitbucket", label: "Bitbucket" },
+          { key: "gitlab", label: "GitLab" },
+        ];
+        const configuredScm = scmProviders.filter(p => d[p.key]?.configured);
+        if (configuredScm.length > 0) {
+          scmContainer.innerHTML = configuredScm.map(p =>
+            '<div class="scm-row"><span>' + p.label + ':</span> ' + badge(true) + '</div>'
+          ).join("");
+        } else {
+          scmContainer.innerHTML = '<p style="color:var(--muted)">No source control connected. Configure in <a href="#" id="btn-scm-web-link" style="color:var(--vscode-textLink-foreground)">web settings</a>.</p>';
+          const scmLink = document.getElementById("btn-scm-web-link");
+          if (scmLink) scmLink.addEventListener("click", (e) => { e.preventDefault(); vscode.postMessage({ type: "open-web-settings" }); });
+        }
 
         // Populate target repo from SCM-specific default
         const scm = d.scmProvider || "github";
@@ -855,6 +987,21 @@ export class SettingsPanel {
         const planLabel = (d.plan || "pro").charAt(0).toUpperCase() + (d.plan || "pro").slice(1);
         planName.textContent = planLabel;
         planName.className = "badge " + ((d.plan === "max" || d.plan === "enterprise") ? "configured" : "not-configured");
+      }
+
+      // Model messages
+      if (msg.type === "models-saving") {
+        const ms = document.getElementById("models-status");
+        showStatus(ms, "info", "Saving...");
+      }
+      if (msg.type === "models-saved") {
+        const ms = document.getElementById("models-status");
+        showStatus(ms, "success", "Models updated");
+        setTimeout(() => ms.classList.remove("visible"), 3000);
+      }
+      if (msg.type === "models-save-error") {
+        const ms = document.getElementById("models-status");
+        showStatus(ms, "error", msg.message || "Failed to save models");
       }
 
       if (msg.type === "tracker-saved") {

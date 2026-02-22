@@ -206,16 +206,20 @@ export async function runAgent(
     TASK_ID: genericConfig.taskId,
   };
 
-  // Authentication: Claude CLI manages its own auth via ~/.claude credentials file.
-  // In local mode, the credentials file is mounted into the container, so Claude CLI
-  // can auto-refresh expired OAuth tokens mid-run. We don't pass CLAUDE_CODE_OAUTH_TOKEN
-  // as an env var because that bypasses the CLI's refresh logic.
-  // In production, ANTHROPIC_API_KEY is set in the ECS task definition.
+  // Authentication priority:
+  // 1. ANTHROPIC_API_KEY (production — ECS task definition or org settings)
+  // 2. CLAUDE_CODE_OAUTH_TOKEN (Docker sandbox — extracted from host credentials)
+  // 3. ~/.claude/.credentials.json (mounted credentials file — Claude CLI reads directly)
   if (genericConfig.anthropicApiKey) {
     agentEnv.ANTHROPIC_API_KEY = genericConfig.anthropicApiKey;
     console.log(`${logPrefix} Using API key authentication`);
+  } else if (genericConfig.oauthToken || process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    // Explicitly pass OAuth token so Claude CLI can authenticate even if the
+    // mounted credentials file is stale or the mount failed.
+    agentEnv.CLAUDE_CODE_OAUTH_TOKEN = genericConfig.oauthToken || process.env.CLAUDE_CODE_OAUTH_TOKEN || "";
+    console.log(`${logPrefix} Using OAuth token authentication`);
   } else {
-    // Local mode: Claude CLI will use ~/.claude/.credentials.json
+    // Fall back to mounted credentials file — Claude CLI reads ~/.claude/.credentials.json
     console.log(`${logPrefix} Using Claude credentials file authentication (local mode)`);
   }
 

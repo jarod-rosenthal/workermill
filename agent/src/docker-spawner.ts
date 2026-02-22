@@ -406,13 +406,15 @@ export async function spawnDockerWorker(
     dockerArgs.push("--network", "host");
   }
 
-  // Mount Claude credentials (read-only — token refreshed pre-spawn, lasts 8+ hours)
+  // Mount Claude credentials — read-write so Claude CLI can refresh expired OAuth tokens.
+  // The credentials file contains a refresh token (long-lived) that Claude CLI exchanges
+  // for a short-lived access token, writing the result back to the file.
   const oauthToken = readOAuthToken();
   if (claudeConfigDir) {
     const credFile = path.join(claudeConfigDir, ".credentials.json");
     const credExists = fs.existsSync(credFile);
     const dockerClaudeDir = toDockerPath(claudeConfigDir);
-    dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude:ro`);
+    dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude`);
     console.log(
       `${ts()} ${taskLabel} ${chalk.dim(`Credentials: mount=${dockerClaudeDir} file=${credExists ? "yes" : "MISSING"} oauth=${oauthToken ? "yes" : "no"}`)}`,
     );

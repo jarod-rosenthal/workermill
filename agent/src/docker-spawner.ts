@@ -143,44 +143,23 @@ function redactSecrets(text: string): string {
  * Pulls versioned tag first, falls back to :latest.
  */
 export async function ensureImage(config: AgentConfig): Promise<string> {
-  const versionTag = `${config.dockerImage}:${AGENT_VERSION}`;
-  const latestTag = `${config.dockerImage}:latest`;
+  const imageTag = `${config.dockerImage}:latest`;
 
-  // Check if versioned image exists locally
+  // Check if image exists locally
   try {
-    execFileSync(findDockerBin(), ["image", "inspect", versionTag], { stdio: "pipe", windowsHide: true });
-    return versionTag;
+    execFileSync(findDockerBin(), ["image", "inspect", imageTag], { stdio: "pipe", windowsHide: true });
+    return imageTag;
   } catch {
-    // Not found locally
+    // Not found locally — pull it
   }
 
-  // Pull versioned tag
-  console.log(`${ts()} ${chalk.dim(`Pulling Docker sandbox image ${versionTag}...`)}`);
+  console.log(`${ts()} ${chalk.dim(`Pulling Docker sandbox image ${imageTag}...`)}`);
   try {
-    execFileSync(findDockerBin(), ["pull", versionTag], { stdio: "pipe", timeout: 300_000, windowsHide: true });
-    return versionTag;
-  } catch {
-    // Versioned tag not available — try latest
-  }
-
-  // Check if :latest exists locally
-  try {
-    execFileSync(findDockerBin(), ["image", "inspect", latestTag], { stdio: "pipe", windowsHide: true });
-    console.log(`${ts()} ${chalk.yellow("⚠")} Versioned image not found, using ${latestTag}`);
-    return latestTag;
-  } catch {
-    // Not found locally
-  }
-
-  // Pull :latest
-  console.log(`${ts()} ${chalk.dim(`Pulling ${latestTag}...`)}`);
-  try {
-    execFileSync(findDockerBin(), ["pull", latestTag], { stdio: "pipe", timeout: 300_000, windowsHide: true });
-    return latestTag;
+    execFileSync(findDockerBin(), ["pull", imageTag], { stdio: "pipe", timeout: 300_000, windowsHide: true });
+    return imageTag;
   } catch {
     throw new Error(
-      `Failed to pull Docker sandbox image.\n` +
-        `Tried: ${versionTag} and ${latestTag}\n` +
+      `Failed to pull Docker sandbox image ${imageTag}.\n` +
         `Ensure Docker is running and you have access to the image registry.`,
     );
   }

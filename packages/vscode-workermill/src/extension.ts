@@ -121,6 +121,30 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // ── Task lifecycle auto-sync ──
 
+  // Show feed and terminal as soon as planning begins (immediate feedback)
+  client.on(
+    "task:planning",
+    (info: { id: string; summary: string; description?: string }) => {
+      if (
+        !currentFeedTaskId ||
+        currentFeedTaskStatus === "completed" ||
+        currentFeedTaskStatus === "failed"
+      ) {
+        const taskInfo: TaskInfo = {
+          ...info,
+          status: "planning",
+          startedAt: new Date().toISOString(),
+        };
+        feedView.showTask(taskInfo);
+        currentFeedTaskId = info.id;
+        currentFeedTaskStatus = "planning";
+      }
+      // Open log terminal early so user sees planning output
+      logManager.openLogs(info.id, info.summary);
+      vscode.commands.executeCommand("workermill.feedPanel.focus");
+    },
+  );
+
   // Auto-switch feed to new task when it starts (only if feed is idle or showing finished task)
   client.on(
     "task:started",
@@ -128,7 +152,8 @@ export function activate(context: vscode.ExtensionContext): void {
       if (
         !currentFeedTaskId ||
         currentFeedTaskStatus === "completed" ||
-        currentFeedTaskStatus === "failed"
+        currentFeedTaskStatus === "failed" ||
+        currentFeedTaskStatus === "planning"
       ) {
         const taskInfo: TaskInfo = {
           ...info,

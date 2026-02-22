@@ -15,6 +15,7 @@ import { homedir } from "os";
 import { EventEmitter } from "events";
 import { AGENT_VERSION } from "./version.js";
 import { findClaudePath, type AgentConfig } from "./config.js";
+import { triggerPoll } from "./poller.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -380,6 +381,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     try {
       const body = JSON.parse(await readBody(req));
       const result = await cloudProxy("POST", "/api/tasks", body);
+      // Trigger immediate poll so agent discovers the new task right away
+      triggerPoll();
       return json(res, result, 201);
     } catch (err: unknown) {
       const e = err as { status?: number; data?: unknown; message?: string };
@@ -395,6 +398,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     try {
       const body = JSON.parse(await readBody(req));
       const result = await cloudProxy("POST", "/api/tasks/run-file", body);
+      triggerPoll();
       return json(res, result, 201);
     } catch (err: unknown) {
       const e = err as { status?: number; data?: unknown; message?: string };

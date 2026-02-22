@@ -57,6 +57,17 @@ async function getOrgConfig(): Promise<Record<string, unknown>> {
   }
 }
 
+// Saved config for triggerPoll()
+let savedConfig: AgentConfig | null = null;
+
+/**
+ * Trigger an immediate poll (e.g., after creating a task via the local API).
+ * Non-blocking — fires and forgets.
+ */
+export function triggerPoll(): void {
+  if (savedConfig) pollOnce(savedConfig).catch(() => {});
+}
+
 /**
  * Run a single poll iteration.
  */
@@ -416,6 +427,7 @@ export function stopPolling(): void {
  * Start the poll loop.
  */
 export function startPolling(config: AgentConfig): void {
+  savedConfig = config;
   console.log(`  ${chalk.dim("Polling every")} ${config.pollIntervalMs / 1000}s ${chalk.dim("· waiting for tasks...")}`);
 
   // Initial poll

@@ -31,13 +31,23 @@ import {
 
 const API_BASE = "https://workermill.com";
 
+interface OrgInfo {
+  id: string;
+  name: string;
+  slug: string | null;
+  role: string;
+}
+
 interface OnboardResponse {
   apiKey: string;
   apiUrl: string;
   orgSlug: string;
+  orgId?: string;
+  orgName?: string;
   userId: string;
   email: string;
   name: string;
+  organizations?: OrgInfo[];
 }
 
 /** POST JSON to an HTTPS URL and return the parsed response. */
@@ -135,9 +145,13 @@ function httpsGetJson<T>(
  * Install agent binary if needed, start it, and set context.
  * Shared by both SSO and API key flows.
  */
-async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<boolean> {
+async function finishSetup(
+  apiKey: string,
+  log: (msg: string) => void,
+  orgInfo?: { orgId?: string; orgName?: string; orgSlug?: string },
+): Promise<boolean> {
   log("Writing agent config...");
-  writeAgentConfig({ apiUrl: API_BASE, apiKey });
+  writeAgentConfig({ apiUrl: API_BASE, apiKey, ...orgInfo });
 
   // Set context key immediately so welcome view switches from "Create Account" to "Connect"
   // even if the install step below fails
@@ -353,7 +367,11 @@ export async function signUpWithGitHub(
     }
 
     log("Sign-up successful");
-    const success = await finishSetup(data.apiKey, log);
+    const success = await finishSetup(data.apiKey, log, {
+      orgId: data.orgId,
+      orgName: data.orgName,
+      orgSlug: data.orgSlug,
+    });
     if (!success) return false;
 
     // Fire-and-forget — don't block client.connect() in extension.ts
@@ -392,7 +410,7 @@ export async function signInWithGitHub(
 
     log(`GitHub session obtained for ${session.account.label}`);
 
-    const { status, data } = await httpsPostJson<OnboardResponse>(
+    let { status, data } = await httpsPostJson<OnboardResponse>(
       `${API_BASE}/api/auth/github-signin`,
       { githubToken: session.accessToken },
     );
@@ -413,8 +431,43 @@ export async function signInWithGitHub(
       return false;
     }
 
+    // If user belongs to multiple orgs, let them pick which one
+    if (data.organizations && data.organizations.length > 1) {
+      const items = data.organizations.map((org) => ({
+        label: org.name,
+        description: `${org.role}${org.id === data.orgId ? " (default)" : ""}`,
+        orgId: org.id,
+      }));
+
+      const picked = await vscode.window.showQuickPick(items, {
+        placeHolder: "Select an organization",
+        title: "Which organization do you want to use?",
+      });
+
+      if (!picked) {
+        // User cancelled — use the default org
+        log("Org picker cancelled — using default org");
+      } else if (picked.orgId !== data.orgId) {
+        // User picked a different org — re-sign-in with that org
+        log(`Switching to org: ${picked.label}`);
+        const retry = await httpsPostJson<OnboardResponse>(
+          `${API_BASE}/api/auth/github-signin`,
+          { githubToken: session.accessToken, orgId: picked.orgId },
+        );
+        if (retry.status >= 200 && retry.status < 300) {
+          data = retry.data;
+        } else {
+          log(`Failed to switch org (HTTP ${retry.status}) — using default`);
+        }
+      }
+    }
+
     log("Sign-in successful");
-    const success = await finishSetup(data.apiKey, log);
+    const success = await finishSetup(data.apiKey, log, {
+      orgId: data.orgId,
+      orgName: data.orgName,
+      orgSlug: data.orgSlug,
+    });
     if (!success) return false;
 
     // Fire-and-forget — don't block client.connect() in extension.ts

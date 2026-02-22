@@ -18,14 +18,30 @@ import {
   startAgentProcess,
   waitForAgentReady,
   getAgentBinaryPath,
+  writeAgentConfig,
 } from "./agent-installer";
 
-function readAgentConfig(): { apiUrl: string; apiKey: string } | null {
+function readAgentConfig(): {
+  apiUrl: string;
+  apiKey: string;
+  orgId?: string;
+  orgName?: string;
+  orgSlug?: string;
+} | null {
   try {
     const configPath = path.join(os.homedir(), ".workermill", "config.json");
     const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    if (raw.apiUrl && raw.apiKey) return { apiUrl: raw.apiUrl, apiKey: raw.apiKey };
-  } catch { /* no config */ }
+    if (raw.apiUrl && raw.apiKey)
+      return {
+        apiUrl: raw.apiUrl,
+        apiKey: raw.apiKey,
+        orgId: raw.orgId,
+        orgName: raw.orgName,
+        orgSlug: raw.orgSlug,
+      };
+  } catch {
+    /* no config */
+  }
   return null;
 }
 
@@ -156,6 +172,8 @@ export class SettingsPanel {
         vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/pricing`));
       } else if (msg.type === "save-models") {
         await this.saveModels(config, msg);
+      } else if (msg.type === "switch-org") {
+        await this.switchOrg(config, msg.orgId);
       }
     });
 
@@ -170,9 +188,13 @@ export class SettingsPanel {
     if (!this.disposed) this.panel.webview.postMessage(msg);
   }
 
-  private async loadIntegrations(config: { apiUrl: string; apiKey: string }): Promise<void> {
+  private async loadIntegrations(config: {
+    apiUrl: string;
+    apiKey: string;
+    orgId?: string;
+  }): Promise<void> {
     try {
-      const [intResult, settingsResult] = await Promise.all([
+      const [intResult, settingsResult, orgsResult] = await Promise.all([
         apiRequest<Record<string, unknown>>(
           "GET",
           `${config.apiUrl}/api/settings/integrations`,
@@ -183,22 +205,39 @@ export class SettingsPanel {
           `${config.apiUrl}/api/settings`,
           config.apiKey,
         ),
+        apiRequest<Array<{ id: string; name: string; slug: string; role: string }>>(
+          "GET",
+          `${config.apiUrl}/api/settings/organizations`,
+          config.apiKey,
+        ),
       ]);
       if (intResult.status >= 200 && intResult.status < 300) {
+        const orgs =
+          orgsResult.status >= 200 && orgsResult.status < 300
+            ? orgsResult.data
+            : [];
         const merged = {
           ...intResult.data,
           orgName: settingsResult.data?.name,
           orgSlug: settingsResult.data?.slug,
+          orgId: settingsResult.data?.id || config.orgId,
           defaultWorkerModel: settingsResult.data?.defaultWorkerModel,
           managerModelId: settingsResult.data?.managerModelId,
           planningAgentModel: settingsResult.data?.planningAgentModel,
+          organizations: orgs,
         };
         this.postMessage({ type: "integrations-loaded", data: merged });
       } else {
-        this.postMessage({ type: "error", message: `Failed to load settings (HTTP ${intResult.status})` });
+        this.postMessage({
+          type: "error",
+          message: `Failed to load settings (HTTP ${intResult.status})`,
+        });
       }
     } catch (err) {
-      this.postMessage({ type: "error", message: `Could not reach API: ${err instanceof Error ? err.message : String(err)}` });
+      this.postMessage({
+        type: "error",
+        message: `Could not reach API: ${err instanceof Error ? err.message : String(err)}`,
+      });
     }
   }
 
@@ -439,6 +478,66 @@ export class SettingsPanel {
     }
   }
 
+  private async switchOrg(
+    config: { apiUrl: string; apiKey: string },
+    orgId: string,
+  ): Promise<void> {
+    try {
+      this.postMessage({ type: "org-switching" });
+
+      const { status, data } = await apiRequest<{
+        apiKey: string;
+        orgId: string;
+        orgName: string;
+        orgSlug: string;
+      }>("POST", `${config.apiUrl}/api/auth/switch-org-key`, config.apiKey, {
+        orgId,
+      });
+
+      if (status < 200 || status >= 300) {
+        this.postMessage({
+          type: "org-switch-error",
+          message: `Failed to switch org (HTTP ${status})`,
+        });
+        return;
+      }
+
+      // Write new API key + org info to config
+      writeAgentConfig({
+        apiUrl: config.apiUrl,
+        apiKey: data.apiKey,
+        orgId: data.orgId,
+        orgName: data.orgName,
+        orgSlug: data.orgSlug,
+      });
+
+      // Restart agent with new config (same pattern as sandbox toggle)
+      this.postMessage({ type: "org-switching" });
+      await stopAgentProcess();
+      startAgentProcess();
+      const port = await waitForAgentReady(undefined, 20_000);
+
+      if (port) {
+        // Reload settings panel data with new org context
+        const newConfig = readAgentConfig();
+        if (newConfig) {
+          await this.loadIntegrations(newConfig);
+        }
+        this.postMessage({ type: "org-switched", orgName: data.orgName });
+      } else {
+        this.postMessage({
+          type: "org-switch-error",
+          message: "Agent restarted but did not become ready. Check agent logs.",
+        });
+      }
+    } catch (err) {
+      this.postMessage({
+        type: "org-switch-error",
+        message: `Switch failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
   private dispose(): void {
     this.disposed = true;
     SettingsPanel.instance = undefined;
@@ -598,6 +697,17 @@ export class SettingsPanel {
   <div id="loading" class="loading">Loading settings...</div>
 
   <div id="content" class="hidden">
+    <!-- Organization (only visible for multi-org users) -->
+    <div id="org-section" class="section hidden">
+      <h2>Organization</h2>
+      <div class="field">
+        <label>Active Organization</label>
+        <select id="org-select"></select>
+        <div class="hint">Switch your workspace to a different organization</div>
+      </div>
+      <div id="org-status" class="status"></div>
+    </div>
+
     <!-- AI Models -->
     <div class="section">
       <h2>AI Models</h2>
@@ -755,7 +865,6 @@ export class SettingsPanel {
     const ANTHROPIC_MODELS = [
       { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
       { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-      { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
       { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
     ];
     const OPENAI_MODELS = [
@@ -904,6 +1013,16 @@ export class SettingsPanel {
       vscode.postMessage({ type: "save-repo", defaultRepo: document.getElementById("default-repo").value.trim() });
     });
 
+    // Org switcher
+    const orgSelect = document.getElementById("org-select");
+    let currentOrgId = "";
+    orgSelect.addEventListener("change", () => {
+      const newOrgId = orgSelect.value;
+      if (newOrgId && newOrgId !== currentOrgId) {
+        vscode.postMessage({ type: "switch-org", orgId: newOrgId });
+      }
+    });
+
     // Sandbox toggle
     const sandboxToggle = document.getElementById("sandbox-toggle");
     const sandboxStatus = document.getElementById("sandbox-status");
@@ -937,6 +1056,24 @@ export class SettingsPanel {
         // Show org name so user can verify which org the API key resolves to
         if (d.orgName) {
           document.getElementById("org-label").textContent = "— " + d.orgName;
+        }
+
+        // Populate org switcher if user has multiple orgs
+        const orgs = d.organizations || [];
+        const orgSection = document.getElementById("org-section");
+        if (orgs.length > 1) {
+          orgSection.classList.remove("hidden");
+          orgSelect.innerHTML = "";
+          currentOrgId = d.orgId || "";
+          orgs.forEach(function(org) {
+            const opt = document.createElement("option");
+            opt.value = org.id;
+            opt.textContent = org.name + " (" + org.role + ")";
+            if (org.id === currentOrgId) opt.selected = true;
+            orgSelect.appendChild(opt);
+          });
+        } else {
+          orgSection.classList.add("hidden");
         }
 
         // Apply plan restrictions before selecting radios
@@ -1090,6 +1227,23 @@ export class SettingsPanel {
           showStatus(sandboxStatus, "success", msg.sandbox === "docker" ? "Docker sandbox enabled — agent restarted" : "Docker sandbox disabled — agent restarted");
           setTimeout(() => { sandboxStatus.className = "status"; }, 5000);
         }
+      }
+      // Org switch messages
+      if (msg.type === "org-switching") {
+        const os = document.getElementById("org-status");
+        orgSelect.disabled = true;
+        showStatus(os, "info", "Switching organization...");
+      }
+      if (msg.type === "org-switched") {
+        const os = document.getElementById("org-status");
+        orgSelect.disabled = false;
+        showStatus(os, "success", "Switched to " + msg.orgName);
+        setTimeout(() => os.classList.remove("visible"), 3000);
+      }
+      if (msg.type === "org-switch-error") {
+        const os = document.getElementById("org-status");
+        orgSelect.disabled = false;
+        showStatus(os, "error", msg.message || "Failed to switch organization");
       }
     });
 

@@ -324,7 +324,10 @@ export async function spawnDockerWorker(
     "--pids-limit", "512",
     "--cap-drop", "ALL",
     "--cap-add", "NET_RAW",       // DNS resolution
-    "--cap-add", "DAC_OVERRIDE",  // File permission overrides needed by sudo for Kaniko
+    "--cap-add", "DAC_OVERRIDE",  // File permission overrides needed by sudo
+    "--cap-add", "SETUID",        // Required by sudo to switch user ID
+    "--cap-add", "SETGID",        // Required by sudo to switch group ID
+    "--cap-add", "FOWNER",        // Required by sudo audit plugin
   ];
 
   // Network mode

@@ -85,6 +85,13 @@ function findClaudeConfigDir(): string | null {
   const standardDir = path.join(os.homedir(), ".claude");
   if (fs.existsSync(standardDir)) return standardDir;
 
+  // os.homedir() and process.env.HOME can differ — check both
+  const envHome = process.env.HOME || process.env.USERPROFILE || "";
+  if (envHome) {
+    const envDir = path.join(envHome, ".claude");
+    if (envDir !== standardDir && fs.existsSync(envDir)) return envDir;
+  }
+
   if (isWSL()) {
     const userProfile = process.env.USERPROFILE;
     if (userProfile) {
@@ -209,7 +216,6 @@ function readOAuthToken(): string {
       data?.oauthToken ||
       "";
     if (!token) {
-      // Log structure for debugging (keys only, no values)
       const keys = Object.keys(data || {});
       const oauthKeys = data?.claudeAiOauth ? Object.keys(data.claudeAiOauth) : [];
       console.log(
@@ -218,7 +224,10 @@ function readOAuthToken(): string {
       );
     }
     return token;
-  } catch {
+  } catch (err) {
+    console.log(
+      `${ts()} ${chalk.yellow("⚠")} Could not read OAuth credentials: ${err instanceof Error ? err.message : String(err)} (path: ${credPath})`,
+    );
     return "";
   }
 }
@@ -318,12 +327,15 @@ export async function spawnDockerWorker(
   // Ensure Claude credentials are readable inside container
   const claudeConfigDir = findClaudeConfigDir();
   if (claudeConfigDir) {
+    console.log(`${ts()} ${taskLabel} ${chalk.dim(`Claude config dir: ${claudeConfigDir}`)}`);
     const credFile = path.join(claudeConfigDir, ".credentials.json");
     try {
       fs.chmodSync(credFile, 0o666);
     } catch {
       // File may not exist
     }
+  } else {
+    console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Claude config dir not found — credentials will NOT be mounted into container`);
   }
 
   // Build docker args
@@ -357,9 +369,19 @@ export async function spawnDockerWorker(
   }
 
   // Mount Claude credentials (read-only — token refreshed pre-spawn, lasts 8+ hours)
+  const oauthToken = readOAuthToken();
   if (claudeConfigDir) {
+    const credFile = path.join(claudeConfigDir, ".credentials.json");
+    const credExists = fs.existsSync(credFile);
     const dockerClaudeDir = toDockerPath(claudeConfigDir);
     dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude:ro`);
+    console.log(
+      `${ts()} ${taskLabel} ${chalk.dim(`Credentials: mount=${dockerClaudeDir} file=${credExists ? "yes" : "MISSING"} oauth=${oauthToken ? "yes" : "no"}`)}`,
+    );
+  } else {
+    console.log(
+      `${ts()} ${taskLabel} ${chalk.yellow("⚠")} No Claude config dir found — container needs ANTHROPIC_API_KEY`,
+    );
   }
 
   // Tool cache volumes — persist installed tools across container runs.
@@ -506,19 +528,13 @@ export async function spawnDockerWorker(
     EXECUTION_MODE_SETTING:
       (task.jiraFields?.executionMode as string) || "autonomous",
 
-    // OAuth takes priority: if we can read the token, use it and skip API key.
-    // If OAuth credentials file exists but token extraction fails, fall back to
-    // API key from org settings so the worker isn't left with NO credentials.
-    ANTHROPIC_API_KEY: (() => {
-      if (hasOAuthCredentials()) {
-        const oauthToken = readOAuthToken();
-        // OAuth file exists but token extraction failed — fall back to API key
-        if (!oauthToken) return credentials?.anthropicApiKey || "";
-        return ""; // OAuth works, skip API key
-      }
-      return credentials?.anthropicApiKey || "";
-    })(),
-    CLAUDE_CODE_OAUTH_TOKEN: hasOAuthCredentials() ? readOAuthToken() : "",
+    // OAuth takes priority: if we have a token, pass it and skip API key.
+    // If OAuth credentials exist but token read failed, fall back to API key
+    // so the worker isn't left with NO credentials.
+    ANTHROPIC_API_KEY: oauthToken
+      ? ""
+      : credentials?.anthropicApiKey || "",
+    CLAUDE_CODE_OAUTH_TOKEN: oauthToken,
     WORKER_PROVIDER: task.workerProvider || "anthropic",
     OPENAI_API_KEY: credentials?.openaiApiKey || "",
     GOOGLE_API_KEY: credentials?.googleApiKey || "",
@@ -567,6 +583,14 @@ export async function spawnDockerWorker(
   console.log(
     `${ts()} ${taskLabel} ${chalk.dim(`  auth: oauth=${hasOAuth} apiKey=${hasApiKey} mount=${hasMountedCreds}${hasMountedCreds ? ` (${claudeConfigDir})` : ""}`)}`,
   );
+  if (!hasOAuth && !hasApiKey && !hasMountedCreds) {
+    console.error(
+      `${ts()} ${taskLabel} ${chalk.red("✗")} No credentials will reach worker! ` +
+      `OAuth token extraction failed, no API key, and no config dir to mount. ` +
+      `Checked: os.homedir()=${os.homedir()}, HOME=${process.env.HOME || "(unset)"}, ` +
+      `hasOAuthFile=${hasOAuthCredentials()}`,
+    );
+  }
 
   // Spawn container
   const dockerStdinFd = fs.openSync(os.devNull, "r");

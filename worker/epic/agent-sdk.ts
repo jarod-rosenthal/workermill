@@ -573,7 +573,7 @@ async function reportPartialTokenUsage(
  * Filter to only built-in tools that the Claude CLI supports.
  */
 function filterBuiltinTools(tools: string[]): string[] {
-  const builtins = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"];
+  const builtins = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "TodoWrite", "TodoRead"];
   return tools.filter((t) => builtins.includes(t));
 }
 

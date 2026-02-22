@@ -346,7 +346,7 @@ export async function getOrgCredentials(
       bitbucketUsername,
       bitbucketEmail,
       // Issue tracker provider
-      issueTrackerProvider: org.issueTrackerProvider || "jira",
+      issueTrackerProvider: org.issueTrackerProvider,
     };
 
     // Fetch GitHub reviewer token (separate account for PR approvals)

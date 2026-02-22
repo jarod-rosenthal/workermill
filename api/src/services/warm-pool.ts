@@ -513,7 +513,7 @@ export function buildTaskEnvironment(
     JIRA_EMAIL: credentials.jiraEmail || "",
     JIRA_API_TOKEN: credentials.jiraApiToken || "",
     TICKET_KEY: task.jiraIssueKey || "",
-    TICKET_SYSTEM: credentials.issueTrackerProvider || "jira",
+    TICKET_SYSTEM: credentials.issueTrackerProvider || "internal",
     LINEAR_API_KEY: credentials.linearApiKey || "",
     DEPLOYMENT_ENABLED: task.deploymentEnabled || task.parentTaskId ? "true" : "false",
     PRD_CHILD_TASK: task.parentTaskId ? "true" : "false",

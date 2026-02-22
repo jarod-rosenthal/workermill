@@ -239,6 +239,7 @@ import { ConsolidatePersonas1739750400004 } from "./migrations/1739750400004-Con
 import { AddCardCreatedBy1739750400005 } from "./migrations/1739750400005-AddCardCreatedBy.js";
 import { RenamePlansToProMaxEnterprise1739750400006 } from "./migrations/1739750400006-RenamePlansToProMaxEnterprise.js";
 import { CreateStatusSnapshots1739750400007 } from "./migrations/1739750400007-CreateStatusSnapshots.js";
+import { ChangeIssueTrackerDefaultToInternal1739750400008 } from "./migrations/1739750400008-ChangeIssueTrackerDefaultToInternal.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -495,6 +496,7 @@ export const AppDataSource = new DataSource({
     AddCardCreatedBy1739750400005,
     RenamePlansToProMaxEnterprise1739750400006,
     CreateStatusSnapshots1739750400007,
+    ChangeIssueTrackerDefaultToInternal1739750400008,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

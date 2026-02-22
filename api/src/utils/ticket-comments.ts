@@ -20,7 +20,7 @@ export async function postTicketComment(
     where: { id: orgId },
     select: ["issueTrackerProvider"],
   });
-  const system = org?.issueTrackerProvider || "jira";
+  const system = org?.issueTrackerProvider || "internal";
 
   switch (system) {
     case "linear":

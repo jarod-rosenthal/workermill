@@ -844,6 +844,9 @@ export function isAgentConfigured(): boolean {
 export function writeAgentConfig(opts: {
   apiUrl: string;
   apiKey: string;
+  orgId?: string;
+  orgName?: string;
+  orgSlug?: string;
 }): void {
   const wmDir = path.join(os.homedir(), ".workermill");
   fs.mkdirSync(wmDir, { recursive: true });
@@ -857,7 +860,7 @@ export function writeAgentConfig(opts: {
     /* no existing config */
   }
 
-  const config = {
+  const config: Record<string, unknown> = {
     ...existing,
     apiUrl: opts.apiUrl,
     apiKey: opts.apiKey,
@@ -867,6 +870,11 @@ export function writeAgentConfig(opts: {
     heartbeatIntervalMs: (existing.heartbeatIntervalMs as number) || 30000,
     setupCompletedAt: new Date().toISOString(),
   };
+
+  if (opts.orgId) config.orgId = opts.orgId;
+  if (opts.orgName) config.orgName = opts.orgName;
+  if (opts.orgSlug) config.orgSlug = opts.orgSlug;
+
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), {
     mode: 0o600,
   });

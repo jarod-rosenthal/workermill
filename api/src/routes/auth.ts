@@ -12,7 +12,7 @@ import {
   RespondToAuthChallengeCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { body, validationResult } from "express-validator";
-import { authenticateUser } from "../middleware/auth.js";
+import { authenticateUser, authenticateApiKey } from "../middleware/auth.js";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { AppDataSource } from "../db/connection.js";
@@ -20,7 +20,11 @@ import { User, Organization, OrgInvite, UserOrganization, UserApiKey } from "../
 import { applyReferralCode, validateReferralCode } from "../services/referral.js";
 import { notifyNewSignup } from "../services/admin-notifications.js";
 import { sendWelcomeEmail } from "../services/email/index.js";
-import { getDefaultOrganization } from "../services/user-organizations.js";
+import {
+  getDefaultOrganization,
+  getUserOrganizations,
+  hasOrgAccess,
+} from "../services/user-organizations.js";
 import { randomBytes, randomUUID } from "crypto";
 import bcrypt from "bcrypt";
 import { authenticateUserAllowNoOrg } from "../middleware/auth.js";
@@ -2482,9 +2486,12 @@ router.post(
         apiKey: userToken,
         apiUrl: config.apiBaseUrl,
         orgSlug: slug,
+        orgId: org.id,
+        orgName: org.name,
         userId: user.id,
         email: primaryEmail,
         name,
+        organizations: [{ id: org.id, name: org.name, slug, role: "admin" }],
       });
     } catch (error) {
       logger.error("GitHub onboard failed", { error });
@@ -2508,7 +2515,7 @@ router.post(
         return res.status(400).json({ error: errors.array()[0].msg });
       }
 
-      const { githubToken } = req.body;
+      const { githubToken, orgId: requestedOrgId } = req.body;
 
       // Validate GitHub token and get user info
       let primaryEmail: string;
@@ -2542,8 +2549,21 @@ router.post(
         return res.status(404).json({ error: "No account found with this email. Use /github-onboard to create one." });
       }
 
-      // Get default org
-      const org = await getDefaultOrganization(user.id);
+      // Get all user organizations
+      const userOrgs = await getUserOrganizations(user.id);
+
+      // Determine target org: use requested orgId if provided and user is a member, else default
+      let org: Organization | null;
+      if (requestedOrgId) {
+        const isMember = await hasOrgAccess(user.id, requestedOrgId);
+        if (!isMember) {
+          return res.status(403).json({ error: "You are not a member of the requested organization" });
+        }
+        const orgRepo = AppDataSource.getRepository(Organization);
+        org = await orgRepo.findOneBy({ id: requestedOrgId });
+      } else {
+        org = await getDefaultOrganization(user.id);
+      }
       if (!org) {
         return res.status(404).json({ error: "No organization found for this account" });
       }
@@ -2581,13 +2601,82 @@ router.post(
         apiKey: userToken,
         apiUrl: config.apiBaseUrl,
         orgSlug: org.slug,
+        orgId: org.id,
+        orgName: org.name,
         userId: user.id,
         email: primaryEmail,
         name,
+        organizations: userOrgs.map((o) => ({ id: o.id, name: o.name, slug: o.slug, role: o.role })),
       });
     } catch (error) {
       logger.error("GitHub signin failed", { error });
       res.status(500).json({ error: "GitHub signin failed" });
+    }
+  },
+);
+
+/**
+ * POST /api/auth/switch-org-key
+ * Generate a new API key for a different organization (VS Code org switching)
+ */
+router.post(
+  "/switch-org-key",
+  githubOnboardLimiter,
+  authenticateApiKey,
+  [body("orgId").isUUID().withMessage("orgId must be a valid UUID")],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ error: errors.array()[0].msg });
+      }
+
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({ error: "User API key required (not org key)" });
+      }
+
+      const { orgId } = req.body;
+
+      // Verify user is a member of the target org
+      const isMember = await hasOrgAccess(user.id, orgId);
+      if (!isMember) {
+        return res.status(403).json({ error: "You are not a member of the requested organization" });
+      }
+
+      // Load the target org
+      const orgRepo = AppDataSource.getRepository(Organization);
+      const org = await orgRepo.findOneBy({ id: orgId });
+      if (!org) {
+        return res.status(404).json({ error: "Organization not found" });
+      }
+
+      // Create a new user API key for the target org
+      const userApiKeyRepo = AppDataSource.getRepository(UserApiKey);
+      const userToken = `usr_${randomUUID().replace(/-/g, "")}`;
+      const userKeyPrefix = userToken.substring(0, 12);
+      const userKeyHash = await bcrypt.hash(userToken, 10);
+      const userApiKey = userApiKeyRepo.create({
+        userId: user.id,
+        orgId: org.id,
+        name: "VS Code Extension",
+        keyHash: userKeyHash,
+        keyPrefix: userKeyPrefix,
+        scopes: ["*"],
+      });
+      await userApiKeyRepo.save(userApiKey);
+
+      logger.info("Org switch key created", { userId: user.id, orgId: org.id });
+
+      res.json({
+        apiKey: userToken,
+        orgId: org.id,
+        orgName: org.name,
+        orgSlug: org.slug,
+      });
+    } catch (error) {
+      logger.error("Switch org key failed", { error });
+      res.status(500).json({ error: "Failed to switch organization" });
     }
   },
 );

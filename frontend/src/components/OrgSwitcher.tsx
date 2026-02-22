@@ -73,9 +73,18 @@ export function OrgSwitcher({ className = "" }: OrgSwitcherProps) {
 
   const currentOrg = organizations.find((o) => o.id === organization?.id) || organizations[0];
 
-  // Don't show if only one org
-  if (isLoading || organizations.length <= 1) {
-    return null;
+  if (isLoading) return null;
+
+  // Single org — show non-interactive label
+  if (organizations.length <= 1) {
+    const name = currentOrg?.name || organization?.name;
+    if (!name) return null;
+    return (
+      <div className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-muted-foreground ${className}`}>
+        <Building2 className="w-4 h-4" />
+        <span className="max-w-[150px] truncate">{name}</span>
+      </div>
+    );
   }
 
   return (

@@ -33,6 +33,9 @@ echo "Target Repo: ${TARGET_REPO:-bitbucket.org/oncallshift/oncallshift-api}"
 export WORKER_PERSONA="${WORKER_PERSONA:-backend_developer}"
 export WORKER_MODEL="${WORKER_MODEL:-sonnet}"
 
+# Pass 2: detect and install tools based on repo contents
+/app/install-tools.sh "${REPO_DIR:-}"
+
 # Run the standard SDK executor
 cd /app/standard
 exec node dist/index.js

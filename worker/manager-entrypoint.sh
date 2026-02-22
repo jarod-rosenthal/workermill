@@ -119,6 +119,9 @@ case "${MANAGER_ACTION}" in
         fi
         cd "${REPO_DIR}"
 
+        # Pass 2: detect and install tools based on repo contents
+        /app/install-tools.sh "${REPO_DIR}"
+
         post_log "system" "Clone successful"
 
         cat >> "${INSTRUCTIONS_FILE}" << EOF

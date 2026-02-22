@@ -711,6 +711,20 @@ export async function planTask(
         scmProvider,
         task.id,
       );
+      if (!repoPath) {
+        // Clone failed — treat as planning failure instead of producing a low-quality plan
+        const failMsg = `Failed to clone repository ${task.githubRepo} (${scmProvider}). Cannot plan without repo access.`;
+        console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} ${failMsg}`);
+        await postLog(task.id, `${PREFIX} ${failMsg}`, "error", "error");
+        try {
+          await api.post("/api/agent/plan-failed", {
+            taskId: task.id,
+            agentId: config.agentId,
+            reason: failMsg,
+          });
+        } catch { /* best effort */ }
+        return false;
+      }
     } else {
       console.log(
         `${ts()} ${taskLabel} ${chalk.yellow("⚠")} No SCM token for ${scmProvider}, planner will run without repo access`,
@@ -802,6 +816,14 @@ export async function planTask(
         "error",
         "error",
       );
+      // Report failure to server so the task doesn't stay stuck in "planning"
+      try {
+        await api.post("/api/agent/plan-failed", {
+          taskId: task.id,
+          agentId: config.agentId,
+          reason: `Planning CLI/API error after ${formatElapsed(elapsed)}: ${errMsg.substring(0, 300)}`,
+        });
+      } catch { /* best effort */ }
       return false;
     }
 
@@ -823,7 +845,18 @@ export async function planTask(
         "error",
       );
       // If we can't parse the plan, post raw output and let server-side try
-      return await postRawPlan(task.id, rawOutput, config.agentId, taskLabel, elapsed);
+      const rawPosted = await postRawPlan(task.id, rawOutput, config.agentId, taskLabel, elapsed);
+      if (!rawPosted) {
+        // Both local and server-side parsing failed — report plan-failed
+        try {
+          await api.post("/api/agent/plan-failed", {
+            taskId: task.id,
+            agentId: config.agentId,
+            reason: `Plan parse failed locally and on server: ${errMsg.substring(0, 300)}`,
+          });
+        } catch { /* best effort */ }
+      }
+      return rawPosted;
     }
 
     // 2c. Apply file cap (max 5 files per story)
@@ -952,10 +985,13 @@ export async function planTask(
         await postLog(task.id, sugMsg);
       }
 
-      // Refinement pass: send critic feedback back to the planner to incorporate suggestions
-      const hasFeedback = (criticResult.risks.length > 0) ||
+      // Refinement pass: send critic feedback back to the planner to incorporate suggestions.
+      // Skip in simplified mode — the whole point is speed, and the plan is already approved.
+      const hasFeedback = !isSimplifiedMode && (
+        (criticResult.risks.length > 0) ||
         (criticResult.suggestions && criticResult.suggestions.length > 0) ||
-        (criticResult.storyFeedback && criticResult.storyFeedback.length > 0);
+        (criticResult.storyFeedback && criticResult.storyFeedback.length > 0)
+      );
 
       let finalPlan = plan;
       if (hasFeedback) {

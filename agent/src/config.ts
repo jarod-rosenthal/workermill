@@ -418,12 +418,50 @@ export function getSystemInfo(): {
   };
 }
 
+// ── Docker Binary Resolution ──────────────────────────
+// On Windows, the agent background process may not have Docker Desktop in PATH.
+// Resolve the full path to docker.exe once and cache it.
+
+let _dockerBin: string | null = null;
+
+export function findDockerBin(): string {
+  if (_dockerBin) return _dockerBin;
+
+  // Try bare "docker" first (works on Linux/Mac and Windows if PATH is correct)
+  try {
+    execFileSync("docker", ["--version"], { stdio: "pipe", timeout: 10_000, windowsHide: true });
+    _dockerBin = "docker";
+    return _dockerBin;
+  } catch {
+    // Not in PATH
+  }
+
+  // Windows: check known Docker Desktop install locations
+  if (process.platform === "win32") {
+    const candidates = [
+      join(process.env.ProgramFiles || "C:\\Program Files", "Docker", "Docker", "resources", "bin", "docker.exe"),
+      join(process.env.LOCALAPPDATA || "", "Docker", "resources", "bin", "docker.exe"),
+      join(process.env.ProgramFiles || "C:\\Program Files", "Docker", "Docker", "resources", "docker.exe"),
+    ];
+    for (const candidate of candidates) {
+      if (candidate && existsSync(candidate)) {
+        _dockerBin = candidate;
+        return _dockerBin;
+      }
+    }
+  }
+
+  // Fall through — return "docker" and let it fail with a clear error
+  _dockerBin = "docker";
+  return _dockerBin;
+}
+
 /**
  * Check if Docker is available and running.
  */
 export function checkDockerAvailable(): boolean {
   try {
-    execFileSync("docker", ["version"], { stdio: "pipe", timeout: 10000, windowsHide: true });
+    execFileSync(findDockerBin(), ["version"], { stdio: "pipe", timeout: 10_000, windowsHide: true });
     return true;
   } catch {
     return false;
@@ -436,7 +474,7 @@ export function checkDockerAvailable(): boolean {
  */
 export function isDockerInstalled(): boolean {
   try {
-    execFileSync("docker", ["--version"], { stdio: "pipe", timeout: 5000, windowsHide: true });
+    execFileSync(findDockerBin(), ["--version"], { stdio: "pipe", timeout: 5_000, windowsHide: true });
     return true;
   } catch {
     return false;

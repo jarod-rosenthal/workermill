@@ -332,7 +332,8 @@ export class SettingsPanel {
       iconPath: new vscode.ThemeIcon("cloud-download"),
     });
     terminal.show();
-    terminal.sendText(`"${binary}" pull`);
+    const cmd = os.platform() === "win32" ? `& "${binary}" pull` : `"${binary}" pull`;
+    terminal.sendText(cmd);
   }
 
   private async testJira(config: { apiUrl: string; apiKey: string }): Promise<void> {

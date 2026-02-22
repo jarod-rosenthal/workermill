@@ -155,7 +155,7 @@ export class ECSTaskRunner {
       { name: "JIRA_API_TOKEN", value: credentials.jiraApiToken || "" },
       { name: "TICKET_KEY", value: task.jiraIssueKey || "" },
       // Issue tracker system (jira, linear, github-issues)
-      { name: "TICKET_SYSTEM", value: credentials.issueTrackerProvider || "jira" },
+      { name: "TICKET_SYSTEM", value: credentials.issueTrackerProvider || "internal" },
       { name: "LINEAR_API_KEY", value: credentials.linearApiKey || "" },
       // Workflow control flags
       // PRD child tasks auto-deploy (no human PR review for individual stories)
@@ -699,7 +699,7 @@ export class ECSTaskRunner {
       { name: "JIRA_EMAIL", value: credentials.jiraEmail || "" },
       { name: "JIRA_API_TOKEN", value: credentials.jiraApiToken || "" },
       // Issue tracker system
-      { name: "TICKET_SYSTEM", value: credentials.issueTrackerProvider || "jira" },
+      { name: "TICKET_SYSTEM", value: credentials.issueTrackerProvider || "internal" },
       { name: "LINEAR_API_KEY", value: credentials.linearApiKey || "" },
     ].filter((env) => env.value !== "");
 

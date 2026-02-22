@@ -192,7 +192,7 @@ export class Organization {
   scmBaseUrl: string | null;
 
   // Issue Tracker Provider Configuration
-  @Column({ name: "issue_tracker_provider", type: "varchar", length: 20, default: "jira" })
+  @Column({ name: "issue_tracker_provider", type: "varchar", length: 20, default: "internal" })
   issueTrackerProvider: "jira" | "linear" | "github-issues" | "internal";
 
   @Column({ name: "system_enabled", type: "boolean", default: true })

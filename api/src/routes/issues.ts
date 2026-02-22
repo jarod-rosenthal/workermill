@@ -439,17 +439,12 @@ router.get(
       maxResults: Math.min(Number(req.query.maxResults) || 20, 50),
     };
 
-    const provider = req.organization?.issueTrackerProvider || "jira";
+    const provider = req.organization?.issueTrackerProvider;
 
     try {
       let issues: IssueInfo[];
 
       switch (provider) {
-        case "internal": {
-          issues = await searchBoardCards(orgId, filters);
-          break;
-        }
-
         case "linear": {
           const creds = await getOrgCredentials(orgId);
           if (!creds.linearApiKey) {
@@ -462,19 +457,25 @@ router.get(
           break;
         }
 
-        case "jira":
-        default: {
+        case "jira": {
           const creds = await getOrgCredentials(orgId);
           if (!creds.jiraBaseUrl || !creds.jiraEmail || !creds.jiraApiToken) {
-            // Fallback: if Jira isn't configured, try internal boards
-            issues = await searchBoardCards(orgId, filters);
-            break;
+            res.status(400).json({
+              error: "Jira credentials not configured. Please configure Jira in Settings > Integrations.",
+            });
+            return;
           }
           issues = await searchJiraIssues(
             orgId,
             { jiraBaseUrl: creds.jiraBaseUrl, jiraEmail: creds.jiraEmail, jiraApiToken: creds.jiraApiToken },
             filters,
           );
+          break;
+        }
+
+        case "internal":
+        default: {
+          issues = await searchBoardCards(orgId, filters);
           break;
         }
       }
@@ -501,22 +502,12 @@ router.get("/projects", async (req: Request, res: Response) => {
     return;
   }
 
-  const provider = req.organization?.issueTrackerProvider || "jira";
+  const provider = req.organization?.issueTrackerProvider;
 
   try {
     let projects: { key: string; name: string }[];
 
     switch (provider) {
-      case "internal": {
-        const boardRepo = AppDataSource.getRepository(KbBoard);
-        const boards = await boardRepo.find({
-          where: { orgId },
-          order: { name: "ASC" },
-        });
-        projects = boards.map((b) => ({ key: b.prefix, name: b.name }));
-        break;
-      }
-
       case "linear": {
         const teams = await getLinearTeams(orgId);
         if (!teams) {
@@ -529,23 +520,29 @@ router.get("/projects", async (req: Request, res: Response) => {
         break;
       }
 
-      case "jira":
-      default: {
+      case "jira": {
         const creds = await getOrgCredentials(orgId);
         if (!creds.jiraBaseUrl || !creds.jiraEmail || !creds.jiraApiToken) {
-          // Fallback: if Jira isn't configured, try internal boards
-          const boardRepo = AppDataSource.getRepository(KbBoard);
-          const boards = await boardRepo.find({
-            where: { orgId },
-            order: { name: "ASC" },
+          res.status(400).json({
+            error: "Jira credentials not configured. Please configure Jira in Settings > Integrations.",
           });
-          projects = boards.map((b) => ({ key: b.prefix, name: b.name }));
-          break;
+          return;
         }
         projects = await listJiraProjects(
           { jiraBaseUrl: creds.jiraBaseUrl, jiraEmail: creds.jiraEmail, jiraApiToken: creds.jiraApiToken },
           orgId,
         );
+        break;
+      }
+
+      case "internal":
+      default: {
+        const boardRepo = AppDataSource.getRepository(KbBoard);
+        const boards = await boardRepo.find({
+          where: { orgId },
+          order: { name: "ASC" },
+        });
+        projects = boards.map((b) => ({ key: b.prefix, name: b.name }));
         break;
       }
     }

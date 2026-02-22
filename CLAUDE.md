@@ -152,7 +152,7 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 | Deploy worker | `./deploy.sh --worker` |
 | Create migration | `cd api && npm run migrate:create NAME` |
 | Tail API logs | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1` |
-| Build worker scripts | `cd worker/execution && npm run build` |
+| Build worker code | `cd worker && npm run build` |
 | Build workermill-mcp | `cd packages/workermill-mcp && npm run build` |
 | Build oncallshift-mcp | `cd packages/oncallshift-mcp && npm run build` |
 | Lint API | `cd api && npm run lint` |
@@ -499,10 +499,10 @@ Worker Docker images are used ONLY by **cloud ECS tasks** and **local WorkerMill
 
 ### Worker Execution Scripts
 
-Worker scripts in `worker/execution/` (TypeScript) compile to `worker/execution-compiled/` (JavaScript).
+Worker scripts in `worker/execution/` (TypeScript) compile to `worker/execution-compiled/` (JavaScript) via the worker-level build.
 
 ```bash
-cd worker/execution && npm run build   # Rebuild and commit compiled output
+cd worker && npm run build   # Rebuild TypeScript (compiles execution/ → execution-compiled/)
 ```
 
 ---
@@ -568,13 +568,27 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 | `AuditLog` | Security and compliance audit trail |
 | `WorkerFileLock` | Multi-worker file locking |
 | `WorkerCheckIn` | Worker heartbeat and health tracking |
-| `CoordinationFeedItem` | Expert collaboration messages |
+| `WorkerCommand` | Worker-to-worker and user-to-worker messaging |
+| `WorkerContext` | Worker context messages |
+| `WorkerTaskTokenUsage` | Per-task token usage tracking |
+| `WorkerTaskError` | Worker error tracking |
+| `WorkerResourceReservation` | Multi-worker resource coordination |
 | `RemoteAgent` | Remote agent registration and heartbeat tracking |
 | `Persona`, `PersonaDirective` | Worker personas and their role-specific directives |
 | `ProceduralMemory`, `EpisodicMemory`, `SemanticMemory` | Worker memory systems (skills, experiences, concepts) |
 | `CodebaseIndex`, `CodebaseIndexStatus` | RAG codebase indexing state and vectors |
 | `KbBoard`, `KbColumn`, `KbCard` | Kanban board system (Trello-like boards visible on dashboard) |
 | `KbComment`, `KbChecklist`, `KbActivity`, `KbLabel` | Board card details — comments, checklists, activity log, labels |
+| `KbCardDependency`, `KbCardLabel`, `KbStarredBoard` | Board card dependencies, label associations, starred boards |
+| `DirectiveExperiment`, `PersonaScript` | Directive variant testing, persona scripts |
+| `Project`, `BoardColumn`, `InternalTask` | Jira-like project system (separate from Kanban boards) |
+| `EmailLog`, `InboundEmailMapping`, `AuthorizedEmailSender` | Email system tracking |
+| `WebhookEndpoint` | Custom webhook configuration |
+| `PaymentMethod` | Payment method storage |
+| `WarmContainer` | Warm container pool management |
+| `PrFeedback` | PR feedback tracking |
+| `TaskRelationship`, `StatusSnapshot` | Task dependencies, status history |
+| `OrgInvite`, `UserApiKey`, `UserOrganization` | Org invites, API keys, user-org mapping |
 | `ShowcaseProject` | Public showcase projects on landing page |
 | `SupportTicket`, `SupportTicketMessage` | In-app support system |
 | `Referral` | User referral tracking |
@@ -582,14 +596,18 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 
 ### Key API Routes (`api/src/routes/`)
 
+Some routes are directories with sub-route files (marked with `/`).
+
 | Route | Purpose |
 |-------|---------|
 | `auth.ts` | Authentication — Cognito, GitHub/Google/Microsoft OAuth, SSO config |
-| `webhooks.ts` | Jira, GitHub, GitLab, BitBucket, Linear receivers |
-| `control-center.ts` | Task management and log streaming SSE |
-| `tasks.ts`, `tasks-v2.ts` | Worker log ingestion, V2 task operations |
+| `webhooks/` | Jira, GitHub, GitLab, BitBucket, Linear, email, support receivers |
+| `control-center/` | Task management, log streaming SSE, dashboard, search, code events |
+| `tasks/` | Task CRUD, worker log ingestion (directory with sub-routes) |
+| `tasks-v2.ts` | V2 task operations |
 | `orchestrator.ts` | Poll loop, system control (start/stop/status) |
-| `settings.ts` | Organization settings CRUD |
+| `settings/` | Organization settings CRUD (general, integrations, models, org, webhooks) |
+| `analytics/` | Task analytics — complexity, costs, efficiency, quality, tasks |
 | `organizations.ts` | Org management (create, list, switch) |
 | `billing.ts` | Stripe billing (Pro/Max/Enterprise plans) |
 | `coordination.ts` | Multi-worker file locking and task communication |
@@ -597,18 +615,29 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 | `boards.ts` | Kanban boards CRUD — cards, columns, labels, checklists |
 | `remote-agent.ts` | Remote agent registration, heartbeat, task claim/result |
 | `worker-decisions.ts` | Worker decision engine API (error classification, quality gates) |
+| `worker-api.ts` | Worker-facing API endpoints |
 | `personas.ts` | Persona CRUD and directive management |
 | `directives.ts` | Worker directive experiments and templates |
 | `memory.ts` | Procedural/episodic/semantic memory endpoints |
 | `codebase.ts` | RAG codebase search, indexing, symbol lookup |
 | `manager.ts` | Manager workflow — review/approval of worker output |
 | `prd.ts` | PRD decomposition into board cards |
+| `projects.ts` | Jira-like project system (separate from boards) |
 | `support.ts` | In-app support ticket system |
 | `compliance.ts` | Compliance and audit endpoints |
+| `audit.ts` | Audit log endpoints |
 | `showcase.ts` | Public showcase projects |
 | `referrals.ts` | User referral program |
 | `profile.ts` | User profile management |
 | `email.ts` | Email sending and inbound mapping |
+| `build.ts` | Build/deployment tracking |
+| `health.ts` | Health check endpoint |
+| `management.ts` | Management dashboard |
+| `status.ts` | System status |
+| `warm-pool.ts` | Warm container pool management |
+| `watcher.ts` | File/repo watcher |
+| `system.ts` | System operations |
+| `quality-backfill.ts` | Quality metric backfill |
 
 ### Task Flow (Three Execution Paths)
 

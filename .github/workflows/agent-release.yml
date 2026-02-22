@@ -26,6 +26,9 @@ jobs:
           cd agent && npm ci
           cd ../worker && npm ci --ignore-scripts
 
+      - name: Compile worker dependencies
+        run: cd worker && npx tsc -p epic/tsconfig.json --rootDir . || true
+
       - name: Build bundles
         run: cd agent && npm run build
 

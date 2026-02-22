@@ -26,9 +26,6 @@ jobs:
           cd agent && npm ci
           cd ../worker && npm ci --ignore-scripts
 
-      - name: Compile worker dependencies
-        run: cd worker/epic && npx tsc
-
       - name: Build bundles
         run: cd agent && npm run build
 

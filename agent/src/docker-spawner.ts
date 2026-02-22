@@ -14,6 +14,7 @@ import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import type { AgentConfig } from "./config.js";
+import { findDockerBin } from "./config.js";
 import type { SpawnableTask, ClaimCredentials } from "./spawner.js";
 import { activeProcesses, type ActiveProcess } from "./active-processes.js";
 import { agentEvents } from "./local-api.js";
@@ -147,7 +148,7 @@ export async function ensureImage(config: AgentConfig): Promise<string> {
 
   // Check if versioned image exists locally
   try {
-    execFileSync("docker", ["image", "inspect", versionTag], { stdio: "pipe", windowsHide: true });
+    execFileSync(findDockerBin(), ["image", "inspect", versionTag], { stdio: "pipe", windowsHide: true });
     return versionTag;
   } catch {
     // Not found locally
@@ -156,7 +157,7 @@ export async function ensureImage(config: AgentConfig): Promise<string> {
   // Pull versioned tag
   console.log(`${ts()} ${chalk.dim(`Pulling Docker sandbox image ${versionTag}...`)}`);
   try {
-    execFileSync("docker", ["pull", versionTag], { stdio: "pipe", timeout: 300_000, windowsHide: true });
+    execFileSync(findDockerBin(), ["pull", versionTag], { stdio: "pipe", timeout: 300_000, windowsHide: true });
     return versionTag;
   } catch {
     // Versioned tag not available — try latest
@@ -164,7 +165,7 @@ export async function ensureImage(config: AgentConfig): Promise<string> {
 
   // Check if :latest exists locally
   try {
-    execFileSync("docker", ["image", "inspect", latestTag], { stdio: "pipe", windowsHide: true });
+    execFileSync(findDockerBin(), ["image", "inspect", latestTag], { stdio: "pipe", windowsHide: true });
     console.log(`${ts()} ${chalk.yellow("⚠")} Versioned image not found, using ${latestTag}`);
     return latestTag;
   } catch {
@@ -174,7 +175,7 @@ export async function ensureImage(config: AgentConfig): Promise<string> {
   // Pull :latest
   console.log(`${ts()} ${chalk.dim(`Pulling ${latestTag}...`)}`);
   try {
-    execFileSync("docker", ["pull", latestTag], { stdio: "pipe", timeout: 300_000, windowsHide: true });
+    execFileSync(findDockerBin(), ["pull", latestTag], { stdio: "pipe", timeout: 300_000, windowsHide: true });
     return latestTag;
   } catch {
     throw new Error(
@@ -256,10 +257,11 @@ export async function spawnDockerWorker(
   }
 
   // Pre-flight: verify Docker is running
+  const dockerBin = findDockerBin();
   try {
-    execFileSync("docker", ["version"], { stdio: "pipe", timeout: 10000, windowsHide: true });
+    execFileSync(dockerBin, ["version"], { stdio: "pipe", timeout: 10_000, windowsHide: true });
   } catch {
-    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Docker is not running`);
+    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Docker is not running (tried: ${dockerBin})`);
     throw new Error("Docker is not running. Start Docker and try again.");
   }
 
@@ -277,7 +279,7 @@ export async function spawnDockerWorker(
 
   // Clean dead container with same name
   try {
-    execFileSync("docker", ["rm", "-f", containerName], { stdio: "pipe", windowsHide: true });
+    execFileSync(dockerBin, ["rm", "-f", containerName], { stdio: "pipe", windowsHide: true });
   } catch {
     // Container doesn't exist — fine
   }
@@ -502,7 +504,7 @@ export async function spawnDockerWorker(
 
   // Spawn container
   const dockerStdinFd = fs.openSync(os.devNull, "r");
-  const proc = spawn("docker", dockerArgs, {
+  const proc = spawn(dockerBin, dockerArgs, {
     stdio: [dockerStdinFd, "pipe", "pipe"],
     detached: false,
     windowsHide: true,
@@ -665,7 +667,7 @@ export async function spawnDockerWorker(
       activeProcesses.delete(task.id);
       // Remove dead container
       try {
-        execFileSync("docker", ["rm", "-f", containerName], { stdio: "pipe", windowsHide: true });
+        execFileSync(findDockerBin(), ["rm", "-f", containerName], { stdio: "pipe", windowsHide: true });
       } catch {
         /* best effort cleanup */
       }
@@ -688,7 +690,7 @@ export async function spawnDockerWorker(
 export function stopDockerTask(taskId: string): boolean {
   const containerName = `wm-${taskId.slice(0, 8)}`;
   try {
-    execFileSync("docker", ["stop", containerName], {
+    execFileSync(findDockerBin(), ["stop", containerName], {
       stdio: "pipe",
       timeout: 15_000,
       windowsHide: true,
@@ -705,12 +707,13 @@ export function stopDockerTask(taskId: string): boolean {
 export function stopAllDocker(): void {
   try {
     // On Windows, pipe commands don't work with execFileSync, so list then stop individually
-    const ids = execFileSync("docker", ["ps", "-q", "--filter", "name=wm-"], {
+    const docker = findDockerBin();
+    const ids = execFileSync(docker, ["ps", "-q", "--filter", "name=wm-"], {
       encoding: "utf-8", stdio: "pipe", timeout: 10_000, windowsHide: true,
     }).trim();
     if (ids) {
       for (const id of ids.split("\n").filter(Boolean)) {
-        try { execFileSync("docker", ["stop", id], { stdio: "pipe", timeout: 15_000, windowsHide: true }); } catch { /* best effort */ }
+        try { execFileSync(docker, ["stop", id], { stdio: "pipe", timeout: 15_000, windowsHide: true }); } catch { /* best effort */ }
       }
     }
   } catch {

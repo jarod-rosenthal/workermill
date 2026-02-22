@@ -13,6 +13,7 @@ import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import type { AgentConfig } from "./config.js";
+import { findDockerBin } from "./config.js";
 import { activeProcesses, type ActiveProcess } from "./active-processes.js";
 import { agentEvents } from "./local-api.js";
 import { fileURLToPath } from "url";
@@ -525,7 +526,7 @@ export function stopTask(taskId: string): void {
 
   // Fallback: try stopping a Docker container (may exist if sandbox mode)
   try {
-    execFileSync("docker", ["stop", `wm-${taskId.slice(0, 12)}`], { stdio: "pipe", timeout: 15_000, windowsHide: true });
+    execFileSync(findDockerBin(), ["stop", `wm-${taskId.slice(0, 12)}`], { stdio: "pipe", timeout: 15_000, windowsHide: true });
   } catch {
     // Container doesn't exist or Docker not available
   }

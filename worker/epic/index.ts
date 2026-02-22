@@ -8,6 +8,8 @@
  */
 
 import "dotenv/config";
+import { existsSync } from "fs";
+import { join } from "path";
 import { EpicCoordinator } from "./coordinator.js";
 import { DecisionClient } from "./decision-client.js";
 import type { EpicConfig, ResilienceConfig } from "./types.js";
@@ -27,14 +29,16 @@ function loadConfig(): EpicConfig {
     "TARGET_REPO",
   ];
 
-  // Only require ANTHROPIC_API_KEY and GITHUB_TOKEN for cloud mode
-  // Local mode uses Claude CLI OAuth and env GITHUB_TOKEN
-  if (!isLocalMode) {
+  // Require ANTHROPIC_API_KEY unless we have OAuth credentials (local mode or Docker sandbox)
+  // Docker sandbox mounts ~/.claude/.credentials.json — Claude CLI reads it directly
+  const hasOAuth = !!process.env.CLAUDE_CODE_OAUTH_TOKEN ||
+    existsSync(join(process.env.HOME || process.env.USERPROFILE || "~", ".claude", ".credentials.json"));
+  if (!isLocalMode && !hasOAuth) {
     required.push("ANTHROPIC_API_KEY");
-    // GITHUB_TOKEN may come from env in local mode
-    if (!process.env.GITHUB_TOKEN && !process.env.GH_TOKEN) {
-      required.push("GITHUB_TOKEN");
-    }
+  }
+  // GITHUB_TOKEN may come from env in local mode
+  if (!isLocalMode && !process.env.GITHUB_TOKEN && !process.env.GH_TOKEN) {
+    required.push("GITHUB_TOKEN");
   }
 
   const missing = required.filter((key) => !process.env[key]);

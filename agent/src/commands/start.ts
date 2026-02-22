@@ -8,7 +8,8 @@
  */
 
 import chalk from "chalk";
-import { totalmem, devNull } from "os";
+import { totalmem, devNull, homedir } from "os";
+import { join } from "path";
 import { spawn } from "child_process";
 import { writeFileSync, readFileSync, existsSync, unlinkSync, openSync, closeSync, createWriteStream } from "fs";
 import { AGENT_VERSION } from "../version.js";
@@ -114,9 +115,11 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     // Spawn the CLI with "start" (no --detach) as a detached child, redirecting output to log file
     const logFd = openSync(logFile, "a");
     const stdinFd = openSync(devNull, "r");
+    const wmDir = join(homedir(), ".workermill");
     const child = spawn(process.execPath, ["start"], {
       detached: true,
       stdio: [stdinFd, logFd, logFd],
+      cwd: wmDir,
       windowsHide: true,
     });
 

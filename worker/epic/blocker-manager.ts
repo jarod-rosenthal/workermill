@@ -46,7 +46,7 @@ export class BlockerManager {
    * Returns the first unresolved blocker, or null if none exist.
    */
   async checkForBlockers(): Promise<BlockerInfo | null> {
-    const contexts = await this.coordination.getAllContexts();
+    const contexts = await this.coordination.getBlockerContexts();
 
     // Find blocker messages that haven't been resolved
     const blockerMessages = contexts.filter(
@@ -208,7 +208,7 @@ export class BlockerManager {
     );
 
     while (Date.now() - startTime < timeoutMs) {
-      const contexts = await this.coordination.getAllContexts();
+      const contexts = await this.coordination.getBlockerContexts();
 
       // Look for a resolution answer to this blocker
       // Accept both "answer" type (from worker) and "blocker_resolved" type (from API)

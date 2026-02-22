@@ -118,7 +118,7 @@ agentEvents.on("task:plan_done", (info: { id: string; success: boolean }) => {
 });
 
 // Clean up old completed/failed tasks after 10 minutes
-setInterval(() => {
+let cleanupInterval: ReturnType<typeof setInterval> | null = setInterval(() => {
   const cutoff = Date.now() - 10 * 60 * 1000;
   let didDelete = false;
   for (const [id, task] of localTasks) {
@@ -1040,6 +1040,9 @@ export function startLocalApi(config: AgentConfig): Promise<number> {
  * Stop the local API server and clean up the port file.
  */
 export function stopLocalApi(): Promise<void> {
+  // Clear cleanup interval
+  if (cleanupInterval) { clearInterval(cleanupInterval); cleanupInterval = null; }
+
   // Clean up port file
   try {
     if (existsSync(PORT_FILE)) unlinkSync(PORT_FILE);

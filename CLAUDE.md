@@ -138,6 +138,14 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 
 ---
 
+***REMOVED******REMOVED*** Recent Changes (keep updated)
+
+- 2026-02-15: Worker Decision Service extracted from worker to API (`api/src/services/worker-decision-engine.ts`). Workers call via `DecisionClient` (`worker/epic/decision-client.ts`).
+- 2026-02-16: v0.8.0 planner — single-agent planning + repo clone replaced 3-analyst team planning. Critic threshold 85/100.
+- 2026-02-16: `error-classifier.ts` and `quality-gate.ts` removed from worker — logic moved to decision service and `auto-fix-agent.ts`.
+
+---
+
 ***REMOVED******REMOVED*** Quick Reference
 
 **Ports:** API: 3001, Frontend: 5173, Local DB: 5433
@@ -167,6 +175,7 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 | Run E2E tests (Playwright) | `cd frontend && npm run test:e2e` |
 | Run E2E tests (headed) | `cd frontend && npm run test:e2e:headed` |
 | Run E2E tests (UI mode) | `cd frontend && npm run test:e2e:ui` |
+| Run single E2E test | `cd frontend && npx playwright test e2e/some-test.spec.ts` |
 | Seed database | `cd api && npm run seed` |
 | Run frontend dev | `cd frontend && npm run dev` |
 | Run API dev | `cd api && npm run dev` |
@@ -473,21 +482,16 @@ API (`tsx watch`) and Frontend (Vite) auto-reload. PostgreSQL and Worker run as 
 
 ***REMOVED******REMOVED*** Deployment
 
-**ALWAYS use `deploy.sh` for ALL deployments.** Never manually build/push Docker images. Commands are in the Quick Reference table above. Run `./deploy.sh --frontend` after UI changes.
+**ALWAYS use `deploy.sh` for ALL deployments.** Never manually build/push Docker images. Run `./deploy.sh --frontend` after UI changes.
 
-**Additional deploy.sh flags:** `--skip-build` (skip Docker build), `--db-check` (pre-deploy DB health check), `--check-migrations` (show pending migrations), `--snapshot` (create RDS snapshot before deploy), `--wait` (wait for ECS stability + health check), `--no-bastion-stop` (keep bastion running after checks), `--publish-agent` (publish agent to npm).
+**Additional deploy.sh flags:** `--skip-build`, `--db-check`, `--check-migrations`, `--snapshot` (RDS snapshot before deploy), `--wait` (wait for ECS stability), `--no-bastion-stop`, `--publish-agent`.
 
 ***REMOVED******REMOVED******REMOVED*** Worker Image Registry
 
-Worker Docker images are used ONLY by **cloud ECS tasks** and **local WorkerMill Docker mode**. The **remote agent does NOT use Docker** — worker code is bundled into the agent binary at build time.
+Worker Docker images are used ONLY by **cloud ECS tasks** and **local WorkerMill Docker mode**. The **remote agent does NOT use Docker** — worker code is bundled into the agent binary.
 
-| Registry | URL | Consumer |
-|----------|-----|----------|
-| **Private ECR** | `AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest` | Cloud ECS tasks |
-| **Local image** | `workermill-worker:local` | Local WorkerMill Docker mode |
-
-- `--worker` pushes to private ECR and updates the ECS task definition
-- To update **remote agent** workers: release a new agent binary (the worker code is compiled into it)
+- `--worker` pushes to private ECR (`AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest`)
+- To update **remote agent** workers: release a new agent binary
 - To update **local WorkerMill** workers: `./bin/local-workermill build-worker`
 
 ***REMOVED******REMOVED******REMOVED*** Database Migrations
@@ -502,14 +506,6 @@ Worker Docker images are used ONLY by **cloud ECS tasks** and **local WorkerMill
 **Rules:**
 - Always use `IF NOT EXISTS` / `IF EXISTS` for idempotency
 - Deploy script validates all migrations are registered
-
-***REMOVED******REMOVED******REMOVED*** Worker Execution Scripts
-
-Worker scripts in `worker/execution/` (TypeScript) compile to `worker/execution-compiled/` (JavaScript) via the worker-level build.
-
-```bash
-cd worker && npm run build   ***REMOVED*** Rebuild TypeScript (compiles execution/ → execution-compiled/)
-```
 
 ---
 
@@ -526,6 +522,8 @@ cd worker && npm run build   ***REMOVED*** Rebuild TypeScript (compiles executio
 
 **Before changes:** `git pull`
 **After changes:** Commit and push promptly
+
+**Note:** AI workers use git worktrees for parallel expert execution (`worker/epic/git-ops.ts`). This is separate from the development workflow — workers create temporary worktrees within the target repo clone, not within this repository.
 
 ---
 
@@ -570,85 +568,35 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 
 ***REMOVED******REMOVED******REMOVED*** Key Models (`api/src/models/`)
 
-| Model | Purpose |
-|-------|---------|
-| `WorkerTask` | Task state, cost tracking, git info |
-| `WorkerTaskLog` | Terminal log storage for SSE streaming |
-| `Organization` | Multi-tenant org support (settings, API keys, billing) |
-| `User` | User accounts linked to Cognito |
-| `AuditLog` | Security and compliance audit trail |
-| `WorkerFileLock` | Multi-worker file locking |
-| `WorkerCheckIn` | Worker heartbeat and health tracking |
-| `WorkerCommand` | Worker-to-worker and user-to-worker messaging |
-| `WorkerContext` | Worker context messages |
-| `WorkerTaskTokenUsage` | Per-task token usage tracking |
-| `WorkerTaskError` | Worker error tracking |
-| `WorkerResourceReservation` | Multi-worker resource coordination |
-| `RemoteAgent` | Remote agent registration and heartbeat tracking |
-| `Persona`, `PersonaDirective` | Worker personas and their role-specific directives |
-| `ProceduralMemory`, `EpisodicMemory`, `SemanticMemory` | Worker memory systems (skills, experiences, concepts) |
-| `CodebaseIndex`, `CodebaseIndexStatus` | RAG codebase indexing state and vectors |
-| `KbBoard`, `KbColumn`, `KbCard` | Kanban board system (Trello-like boards visible on dashboard) |
-| `KbComment`, `KbChecklist`, `KbActivity`, `KbLabel` | Board card details — comments, checklists, activity log, labels |
-| `KbCardDependency`, `KbCardLabel`, `KbStarredBoard` | Board card dependencies, label associations, starred boards |
-| `DirectiveExperiment`, `PersonaScript` | Directive variant testing, persona scripts |
-| `Project`, `BoardColumn`, `InternalTask` | Jira-like project system (separate from Kanban boards) |
-| `EmailLog`, `InboundEmailMapping`, `AuthorizedEmailSender` | Email system tracking |
-| `WebhookEndpoint` | Custom webhook configuration |
-| `PaymentMethod` | Payment method storage |
-| `WarmContainer` | Warm container pool management |
-| `PrFeedback` | PR feedback tracking |
-| `TaskRelationship`, `StatusSnapshot` | Task dependencies, status history |
-| `OrgInvite`, `UserApiKey`, `UserOrganization` | Org invites, API keys, user-org mapping |
-| `ShowcaseProject` | Public showcase projects on landing page |
-| `SupportTicket`, `SupportTicketMessage` | In-app support system |
-| `Referral` | User referral tracking |
-| `CreditTransaction` | Usage credit tracking and billing |
+Core models that require context to use correctly. Discover others by browsing the directory.
+
+| Model | Purpose | Notes |
+|-------|---------|-------|
+| `WorkerTask` | Task state, cost tracking, git info | Central entity — use atomic `UPDATE...WHERE` for status changes (see Common Pitfalls) |
+| `WorkerTaskLog` | Terminal log storage for SSE streaming | Worker POSTs to `/api/tasks/:taskId/logs`, SSE streams from DB every 500ms |
+| `Organization` | Multi-tenant org (settings, API keys, billing) | All settings keyed per-org; `apiKey` used by workers |
+| `RemoteAgent` | Agent registration and heartbeat | `last_heartbeat_at` MUST always update (see Heartbeat pitfall) |
+| `KbBoard`, `KbColumn`, `KbCard` | Kanban boards (Trello-like, visible on dashboard) | **This is the user-facing board system** |
+| `Project`, `BoardColumn`, `InternalTask` | Jira-like project system | **Separate from Kanban boards** — NOT visible in Boards UI. See "Two Board Systems" pitfall below |
+| `Persona`, `PersonaDirective` | Worker personas and role-specific directives | 14 roles in `worker/directives/` |
+| `WorkerCommand` | Worker-to-worker and user-to-worker messaging | Talk button → `POST /api/coordination/commands` |
 
 ***REMOVED******REMOVED******REMOVED*** Key API Routes (`api/src/routes/`)
 
-Some routes are directories with sub-route files (marked with `/`).
+Core routes that you'll touch most often. Some are directories with sub-route files (marked with `/`). Discover others by browsing the directory.
 
-| Route | Purpose |
-|-------|---------|
-| `auth.ts` | Authentication — Cognito, GitHub/Google/Microsoft OAuth, SSO config |
-| `webhooks/` | Jira, GitHub, GitLab, BitBucket, Linear, email, support receivers |
-| `control-center/` | Task management, log streaming SSE, dashboard, search, code events |
-| `tasks/` | Task CRUD, worker log ingestion (directory with sub-routes) |
-| `tasks-v2.ts` | V2 task operations |
-| `orchestrator.ts` | Poll loop, system control (start/stop/status) |
-| `settings/` | Organization settings CRUD (general, integrations, models, org, webhooks) |
-| `analytics/` | Task analytics — complexity, costs, efficiency, quality, tasks |
-| `organizations.ts` | Org management (create, list, switch) |
-| `billing.ts` | Stripe billing (Pro/Max/Enterprise plans) |
-| `coordination.ts` | Multi-worker file locking and task communication |
-| `issues.ts` | Jira issue search and project listing (used by VS Code extension) |
-| `boards.ts` | Kanban boards CRUD — cards, columns, labels, checklists |
-| `remote-agent.ts` | Remote agent registration, heartbeat, task claim/result |
-| `worker-decisions.ts` | Worker decision engine API (error classification, quality gates) |
-| `worker-api.ts` | Worker-facing API endpoints |
-| `personas.ts` | Persona CRUD and directive management |
-| `directives.ts` | Worker directive experiments and templates |
-| `memory.ts` | Procedural/episodic/semantic memory endpoints |
-| `codebase.ts` | RAG codebase search, indexing, symbol lookup |
-| `manager.ts` | Manager workflow — review/approval of worker output |
-| `prd.ts` | PRD decomposition into board cards |
-| `projects.ts` | Jira-like project system (separate from boards) |
-| `support.ts` | In-app support ticket system |
-| `compliance.ts` | Compliance and audit endpoints |
-| `audit.ts` | Audit log endpoints |
-| `showcase.ts` | Public showcase projects |
-| `referrals.ts` | User referral program |
-| `profile.ts` | User profile management |
-| `email.ts` | Email sending and inbound mapping |
-| `build.ts` | Build/deployment tracking |
-| `health.ts` | Health check endpoint |
-| `management.ts` | Management dashboard |
-| `status.ts` | System status |
-| `warm-pool.ts` | Warm container pool management |
-| `watcher.ts` | File/repo watcher |
-| `system.ts` | System operations |
-| `quality-backfill.ts` | Quality metric backfill |
+| Route | Purpose | Auth |
+|-------|---------|------|
+| `webhooks/` | Jira, GitHub, GitLab, BitBucket, Linear, email receivers | API key / webhook secret |
+| `control-center/` | Task management, log streaming SSE, dashboard, search | JWT (dashboard) |
+| `tasks/` | Task CRUD, worker log ingestion (directory with sub-routes) | Mixed (JWT + API key) |
+| `orchestrator.ts` | Poll loop, system control (start/stop/status) | JWT |
+| `boards.ts` | Kanban boards CRUD — cards, columns, labels, checklists | JWT |
+| `remote-agent.ts` | Agent registration, heartbeat, task claim/result | API key |
+| `worker-decisions.ts` | Worker decision engine (error classification, quality gates) | API key |
+| `coordination.ts` | Multi-worker file locking and task communication | API key |
+| `auth.ts` | Cognito, GitHub/Google/Microsoft OAuth, SSO config | Public + JWT |
+| `settings/` | Organization settings CRUD (general, integrations, models) | JWT |
 
 ***REMOVED******REMOVED******REMOVED*** Task Flow (Three Execution Paths)
 
@@ -798,6 +746,14 @@ await repo.update({ id, status: "queued" }, { status: "running" });
 - **Planning runs ONLY in the remote agent** — local WorkerMill Docker mode and cloud ECS skip planning
 - **`dotenv/config` type error is intentional** — optional dependency, do not "fix" by removing or adding to deps
 
+***REMOVED******REMOVED******REMOVED*** Two Board Systems (CRITICAL)
+
+There are TWO separate board/project systems — do NOT confuse them:
+- **Boards** (`/api/boards`, `KbBoard`/`KbCard`) = Trello-like Kanban. **This is what the user sees** on the dashboard at `/boards`.
+- **Projects** (`/api/projects`, `Project`/`InternalTask`) = Jira-like epic/story system. Frontend redirects `/projects` → `/boards` — **Projects are NOT visible in the Boards UI.**
+
+**ALWAYS use `/api/boards` to create items the user will see.**
+
 ***REMOVED******REMOVED******REMOVED*** Orchestrator Module Architecture
 
 The orchestrator is decomposed into focused modules in `api/src/services/`: `orchestrator.ts` (entry point — poll loop + lifecycle), `task-claimer.ts`, `worker-spawner.ts`, `task-dispatch.ts`, `task-monitor.ts`, `task-cleanup.ts`, `planning-workflow.ts`, `manager-workflow.ts`, `orchestrator-utils.ts`. Edit the relevant module — `orchestrator.ts` is just the coordination hub.
@@ -888,11 +844,14 @@ MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-
 
 ***REMOVED******REMOVED******REMOVED*** E2E Tests (Playwright)
 
-E2E tests run on ephemeral ECS Fargate Spot runners. Location: `frontend/e2e/`. Triggered via GitHub Actions → CI/CD Pipeline → Run workflow (manual checkbox).
+Location: `frontend/e2e/`. Run on ephemeral ECS Fargate Spot runners via GitHub Actions (manual checkbox).
+- Run single test: `cd frontend && npx playwright test e2e/some-test.spec.ts`
+- Debug mode: `cd frontend && npx playwright test e2e/some-test.spec.ts --debug`
 
 ***REMOVED******REMOVED******REMOVED*** Integration Tests (Vitest)
 
-Location: `api/src/__tests__/integration/`. Each test runs in a transaction that rolls back after completion. Triggered via GitHub Actions (manual checkbox).
+Location: `api/src/__tests__/integration/`. Each test runs in a transaction that rolls back after completion.
+- Coverage generates lcov output: `cd api && npm run test:coverage`
 
 ***REMOVED******REMOVED******REMOVED*** CI/CD Workflows
 

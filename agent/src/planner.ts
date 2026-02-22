@@ -17,7 +17,9 @@
 
 import chalk from "chalk";
 
-import { spawn, execSync } from "child_process";
+import { spawn, execFileSync } from "child_process";
+import { tmpdir } from "os";
+import { rmSync } from "fs";
 import { findClaudePath, type AgentConfig } from "./config.js";
 import { api } from "./api.js";
 import {
@@ -570,7 +572,7 @@ async function cloneTargetRepo(
   taskId: string,
 ): Promise<string | null> {
   const taskLabel = chalk.cyan(taskId.slice(0, 8));
-  const tmpDir = `/tmp/workermill-planning-${taskId.slice(0, 8)}-${Date.now()}`;
+  const tmpDir = `${tmpdir()}/workermill-planning-${taskId.slice(0, 8)}-${Date.now()}`;
 
   try {
     const cloneUrl = buildCloneUrl(repo, token, scmProvider);
@@ -579,7 +581,7 @@ async function cloneTargetRepo(
     console.log(
       `${ts()} ${taskLabel} ${chalk.dim(`Cloning repo for planner: ${safeUrl}`)}`,
     );
-    execSync(`git clone --depth 1 --single-branch "${cloneUrl}" "${tmpDir}"`, {
+    execFileSync("git", ["clone", "--depth", "1", "--single-branch", cloneUrl, tmpDir], {
       stdio: ["ignore", "ignore", "pipe"],
       timeout: 60_000,
       windowsHide: true,
@@ -600,7 +602,7 @@ async function cloneTargetRepo(
     );
     // Cleanup partial clone
     try {
-      execSync(`rm -rf "${tmpDir}"`, { stdio: "ignore", windowsHide: true });
+      rmSync(tmpDir, { recursive: true, force: true });
     } catch {
       /* ignore */
     }
@@ -1098,7 +1100,7 @@ export async function planTask(
     // Cleanup temp clone
     if (repoPath) {
       try {
-        execSync(`rm -rf "${repoPath}"`, { stdio: "ignore", windowsHide: true });
+        rmSync(repoPath, { recursive: true, force: true });
       } catch {
         /* ignore */
       }

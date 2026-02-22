@@ -426,7 +426,7 @@ export default function Settings() {
         logRetentionDays: Math.min(data.logRetentionDays ?? 7, logRetMax),
         taskRetentionDays: Math.min(data.taskRetentionDays ?? 7, taskRetMax),
         maxConcurrentWorkers: Math.min(data.maxConcurrentWorkers ?? 1, workersMax),
-        maxParallelExperts: Math.min(data.maxParallelExperts ?? 3, expertsMax),
+        maxParallelExperts: Math.min(data.maxParallelExperts, expertsMax),
         defaultMaxRetries: Math.min(data.defaultMaxRetries ?? 3, 5),
         taskCooldownSeconds: data.taskCooldownSeconds ?? 0,
         defaultWorkerModel: data.defaultWorkerModel || "claude-sonnet-4-6",

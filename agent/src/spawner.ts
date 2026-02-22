@@ -325,7 +325,7 @@ export async function spawnWorker(
     BLOCKER_AUTO_RETRY_ENABLED: orgConfig.blockerAutoRetryEnabled !== false ? "true" : "false",
     PUSH_AFTER_COMMIT: orgConfig.pushAfterCommit !== false ? "true" : "false",
     GRACEFUL_SHUTDOWN_ENABLED: orgConfig.gracefulShutdownEnabled !== false ? "true" : "false",
-    MAX_PARALLEL_EXPERTS: String(orgConfig.maxParallelExperts ?? 4),
+    MAX_PARALLEL_EXPERTS: String(orgConfig.maxParallelExperts),
     REVIEW_ENABLED: task.skipManagerReview === false ? "true" : "false",
     SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (orgConfig.selfReviewEnabled !== false) ? "true" : "false",
   };

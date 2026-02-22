@@ -361,7 +361,7 @@ function loadConfig(repoDir: string, mainBranch: string): EpicConfig {
     improvementEnabled: process.env.IMPROVEMENT_ENABLED === "true",
     reviewFeedback: process.env.REVIEW_FEEDBACK || undefined,
     qualityGateBypass: process.env.QUALITY_GATE_BYPASS === "true",
-    maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "4", 10),
+    maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10),
     qualityThresholds: process.env.QUALITY_THRESHOLDS
       ? JSON.parse(process.env.QUALITY_THRESHOLDS)
       : undefined,

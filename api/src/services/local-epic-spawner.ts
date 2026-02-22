@@ -328,7 +328,8 @@ class LocalEpicSpawner {
       "--name", containerName,
 
       // Security hardening: resource limits and privilege restrictions
-      "--memory", "8g",
+      "--memory", "4g",
+      "--memory-swap", "6g",
       "--cpus", "2",
       "--pids-limit", "512",
       "--cap-drop", "ALL",
@@ -797,7 +798,7 @@ class LocalEpicSpawner {
       PUSH_AFTER_COMMIT: task.organization?.pushAfterCommit !== false ? "true" : "false",
       GRACEFUL_SHUTDOWN_ENABLED: task.organization?.gracefulShutdownEnabled !== false ? "true" : "false",
       SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (task.organization?.selfReviewEnabled === true) ? "true" : "false",
-      MAX_PARALLEL_EXPERTS: String(task.organization?.maxParallelExperts ?? 4),
+      MAX_PARALLEL_EXPERTS: String(task.organization?.maxParallelExperts),
       CODEBASE_INDEXING_ENABLED: task.organization?.codebaseIndexingEnabled === true ? "true" : "false",
     };
 

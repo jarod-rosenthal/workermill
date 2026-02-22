@@ -350,6 +350,48 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
+    // Filter backlog by status — quick pick with current statuses
+    vscode.commands.registerCommand("workermill.filterBacklog", async () => {
+      if (!client.isConnected()) {
+        vscode.window.showErrorMessage("WorkerMill agent is not running.");
+        return;
+      }
+
+      const current = vscode.workspace.getConfiguration("workermill").get<string>("issueStatusFilter") || "";
+
+      // Fetch all issues (unfiltered) to discover available statuses
+      let statuses: string[] = [];
+      try {
+        const result = await client.searchIssues();
+        const statusSet = new Set<string>();
+        for (const issue of result.issues || []) {
+          if (issue.status) statusSet.add(issue.status);
+        }
+        statuses = Array.from(statusSet).sort();
+      } catch {
+        // If fetch fails, still show the basic options
+      }
+
+      const items: vscode.QuickPickItem[] = [
+        { label: "Show All", description: current === "" ? "(current)" : "", detail: "Show all open issues" },
+        ...statuses.map((s) => ({
+          label: s,
+          description: s.toLowerCase() === current.toLowerCase() ? "(current)" : "",
+        })),
+      ];
+
+      const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: current ? `Filtered by: ${current}` : "Showing all issues",
+        title: "Filter Backlog by Status",
+      });
+
+      if (!selected) return;
+
+      const newFilter = selected.label === "Show All" ? "" : selected.label;
+      await vscode.workspace.getConfiguration("workermill").update("issueStatusFilter", newFilter, vscode.ConfigurationTarget.Global);
+      treeProvider.refresh();
+    }),
+
     vscode.commands.registerCommand("workermill.talkToWorker", async () => {
       if (!client.isConnected()) {
         vscode.window.showErrorMessage("WorkerMill agent is not running.");

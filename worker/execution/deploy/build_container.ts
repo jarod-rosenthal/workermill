@@ -162,10 +162,10 @@ async function main(): Promise<void> {
 
     // Run Kaniko with sudo (needed for chown operations when unpacking base images)
     // The worker user has passwordless sudo access to /kaniko/executor
-    // Note: We use "sudo env VAR=..." instead of "sudo -E" because sudoers may not allow -E
+    // Use kaniko-run wrapper: accepts VAR=value args, sets them as env, execs /kaniko/executor.
+    // This avoids "sudo env" which grants arbitrary command execution via /usr/bin/env.
     // We must pass:
     // - PATH: Include /kaniko for the ECR credential helper (docker-credential-ecr-login)
-    // - AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: ECS task role credentials endpoint
     // - AWS_REGION: AWS region for API calls
     // - HOME: Some tools need this for caching
     const kanikoPath = `/kaniko:${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`;
@@ -200,7 +200,7 @@ async function main(): Promise<void> {
       console.error(`[build_container] Running with AWS credentials: ${process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI ? 'ECS task role' : 'default'}`);
     }
 
-    const result = spawnSync("sudo", ["env", ...envArgs, "/kaniko/executor", ...kanikoArgs], {
+    const result = spawnSync("sudo", ["kaniko-run", ...envArgs, ...kanikoArgs], {
       cwd: contextDir,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],

@@ -5,13 +5,14 @@
  * (VS Code extension, CLI tools, etc). Binds to localhost only.
  *
  * Discovery: writes port to ~/.workermill/agent.port
- * Auth: none (localhost-only, user-scoped)
+ * Auth: Bearer token from ~/.workermill/agent.token (0o600 permissions)
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
-import { writeFileSync, unlinkSync, existsSync } from "fs";
+import { writeFileSync, unlinkSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { randomBytes } from "crypto";
 import { EventEmitter } from "events";
 import { AGENT_VERSION } from "./version.js";
 import { findClaudePath, type AgentConfig } from "./config.js";
@@ -185,7 +186,6 @@ function parseUrl(url: string): { path: string; params: Record<string, string> }
 function json(res: ServerResponse, data: unknown, status = 200): void {
   res.writeHead(status, {
     "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
   });
   res.end(JSON.stringify(data));
 }
@@ -195,7 +195,6 @@ function sseHeaders(res: ServerResponse): void {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
-    "Access-Control-Allow-Origin": "*",
   });
   res.flushHeaders();
 }
@@ -228,15 +227,20 @@ export function setCloudProxy(fn: (method: string, path: string, body?: unknown)
 // ── Request Handler ────────────────────────────────────
 
 async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  // CORS preflight
+  // No CORS — local API is accessed via Node.js http (VS Code extension), not browsers.
+  // Reject preflight requests to prevent browser-based attacks.
   if (req.method === "OPTIONS") {
-    res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    });
+    res.writeHead(403);
     res.end();
     return;
+  }
+
+  // Authenticate: require Bearer token from ~/.workermill/agent.token
+  if (authToken) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || authHeader !== `Bearer ${authToken}`) {
+      return json(res, { error: "Unauthorized" }, 401);
+    }
   }
 
   const { path } = parseUrl(req.url || "/");
@@ -968,6 +972,8 @@ function flushJsonLine(line: string, onProgress?: (message: string) => void): vo
 // ── Server Lifecycle ───────────────────────────────────
 
 const PORT_FILE = join(homedir(), ".workermill", "agent.port");
+const TOKEN_FILE = join(homedir(), ".workermill", "agent.token");
+let authToken: string | null = null;
 let server: ReturnType<typeof createServer> | null = null;
 
 /**
@@ -1029,6 +1035,16 @@ export function startLocalApi(config: AgentConfig): Promise<number> {
         // Non-fatal — clients can still connect if they know the port
       }
 
+      // Generate auth token for local IPC — clients read from TOKEN_FILE
+      try {
+        authToken = randomBytes(32).toString("hex");
+        const tokenDir = join(homedir(), ".workermill");
+        if (!existsSync(tokenDir)) mkdirSync(tokenDir, { recursive: true });
+        writeFileSync(TOKEN_FILE, authToken, { mode: 0o600 });
+      } catch {
+        // Non-fatal — if token file write fails, auth is still enforced via in-memory token
+      }
+
       resolve(port);
     });
 
@@ -1043,10 +1059,14 @@ export function stopLocalApi(): Promise<void> {
   // Clear cleanup interval
   if (cleanupInterval) { clearInterval(cleanupInterval); cleanupInterval = null; }
 
-  // Clean up port file
+  // Clean up port file and token file
   try {
     if (existsSync(PORT_FILE)) unlinkSync(PORT_FILE);
   } catch { /* best effort */ }
+  try {
+    if (existsSync(TOKEN_FILE)) unlinkSync(TOKEN_FILE);
+  } catch { /* best effort */ }
+  authToken = null;
 
   // Close all SSE connections
   for (const client of sseClients) {

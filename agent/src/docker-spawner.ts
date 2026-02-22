@@ -294,7 +294,18 @@ export async function spawnDockerWorker(
   }
 
   // Build docker args
-  const dockerArgs: string[] = ["run", "--name", containerName];
+  const dockerArgs: string[] = [
+    "run",
+    "--name", containerName,
+
+    // Security hardening: resource limits and privilege restrictions
+    "--memory", "8g",
+    "--cpus", "2",
+    "--pids-limit", "512",
+    "--cap-drop", "ALL",
+    "--cap-add", "NET_RAW",       // DNS resolution
+    "--cap-add", "DAC_OVERRIDE",  // File permission overrides needed by sudo for Kaniko
+  ];
 
   // Network mode
   const dockerDesktop = isDockerDesktop();
@@ -309,10 +320,10 @@ export async function spawnDockerWorker(
     dockerArgs.push("--network", "host");
   }
 
-  // Mount Claude credentials
+  // Mount Claude credentials (read-only — token refreshed pre-spawn, lasts 8+ hours)
   if (claudeConfigDir) {
     const dockerClaudeDir = toDockerPath(claudeConfigDir);
-    dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude`);
+    dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude:ro`);
   }
 
   // Mount AWS credentials (read-only)
@@ -639,6 +650,14 @@ export async function spawnDockerWorker(
           );
         }
       }, 15_000);
+    }
+
+    // Restore host credential file permissions (we set 0o666 pre-spawn)
+    if (claudeConfigDir) {
+      try {
+        const credFile = path.join(claudeConfigDir, ".credentials.json");
+        if (fs.existsSync(credFile)) fs.chmodSync(credFile, 0o600);
+      } catch { /* best effort */ }
     }
 
     // Clean up container and process reference after delay

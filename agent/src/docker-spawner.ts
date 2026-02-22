@@ -210,6 +210,22 @@ function hasOAuthCredentials(): boolean {
   return fs.existsSync(path.join(home, ".claude", ".credentials.json"));
 }
 
+/**
+ * Read the OAuth token from ~/.claude/.credentials.json.
+ * Returns the token string or "" if not available.
+ */
+function readOAuthToken(): string {
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  const credPath = path.join(home, ".claude", ".credentials.json");
+  try {
+    const data = JSON.parse(fs.readFileSync(credPath, "utf-8"));
+    // credentials.json has { claudeAiOauth: { token: "..." } } or { oauthToken: "..." }
+    return data?.claudeAiOauth?.token || data?.oauthToken || "";
+  } catch {
+    return "";
+  }
+}
+
 // ── Helper: SCM token ──────────────────────────────────
 
 function getScmToken(
@@ -496,6 +512,9 @@ export async function spawnDockerWorker(
     ANTHROPIC_API_KEY: hasOAuthCredentials()
       ? ""
       : credentials?.anthropicApiKey || "",
+    CLAUDE_CODE_OAUTH_TOKEN: hasOAuthCredentials()
+      ? readOAuthToken()
+      : "",
     WORKER_PROVIDER: task.workerProvider || "anthropic",
     OPENAI_API_KEY: credentials?.openaiApiKey || "",
     GOOGLE_API_KEY: credentials?.googleApiKey || "",

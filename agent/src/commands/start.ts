@@ -8,9 +8,9 @@
  */
 
 import chalk from "chalk";
-import { totalmem } from "os";
+import { totalmem, devNull } from "os";
 import { spawn } from "child_process";
-import { writeFileSync, readFileSync, existsSync, unlinkSync, openSync, createWriteStream } from "fs";
+import { writeFileSync, readFileSync, existsSync, unlinkSync, openSync, closeSync, createWriteStream } from "fs";
 import { AGENT_VERSION } from "../version.js";
 import {
   loadConfigFromFile,
@@ -113,11 +113,15 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
 
     // Spawn the CLI with "start" (no --detach) as a detached child, redirecting output to log file
     const logFd = openSync(logFile, "a");
+    const stdinFd = openSync(devNull, "r");
     const child = spawn(process.execPath, ["start"], {
       detached: true,
-      stdio: ["ignore", logFd, logFd],
+      stdio: [stdinFd, logFd, logFd],
       windowsHide: true,
     });
+
+    // Close fds after spawn inherits them
+    try { closeSync(stdinFd); closeSync(logFd); } catch { /* ignore */ }
 
     if (child.pid) {
       writeFileSync(pidFile, String(child.pid), "utf-8");

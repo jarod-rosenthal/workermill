@@ -368,7 +368,7 @@ router.post(
  */
 router.post(
   "/blocker-response",
-  authenticateUser,
+  authenticateRequest,
   [
     body("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
     body("blockerId").isString().notEmpty().withMessage("blockerId is required"),

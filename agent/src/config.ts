@@ -219,7 +219,7 @@ export function findGitPath(): string | null {
   // Check PATH first (use execFileSync to avoid spawning cmd.exe shell on Windows)
   try {
     const cmd = isWin ? "where.exe" : "which";
-    const resolved = execFileSync(cmd, [name], { encoding: "utf-8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim().split("\n")[0];
+    const resolved = execFileSync(cmd, [name], { encoding: "utf-8", timeout: 10000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true }).trim().split("\n")[0];
     if (resolved && existsSync(resolved)) return resolved;
   } catch { /* not on PATH */ }
 
@@ -423,7 +423,7 @@ export function getSystemInfo(): {
  */
 export function checkDockerAvailable(): boolean {
   try {
-    execFileSync("docker", ["version"], { stdio: "ignore", timeout: 10000, windowsHide: true });
+    execFileSync("docker", ["version"], { stdio: "pipe", timeout: 10000, windowsHide: true });
     return true;
   } catch {
     return false;
@@ -436,7 +436,7 @@ export function checkDockerAvailable(): boolean {
  */
 export function isDockerInstalled(): boolean {
   try {
-    execFileSync("docker", ["--version"], { stdio: "ignore", timeout: 5000, windowsHide: true });
+    execFileSync("docker", ["--version"], { stdio: "pipe", timeout: 5000, windowsHide: true });
     return true;
   } catch {
     return false;

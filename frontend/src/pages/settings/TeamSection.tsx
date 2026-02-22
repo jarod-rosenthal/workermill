@@ -55,29 +55,39 @@ export function TeamSection({
   revokingInviteId,
   setShowInviteModal,
 }: TeamSectionProps) {
-  const isProPlan = !orgPlan || orgPlan === "pro";
+  const planSeatLimits: Record<string, number> = { pro: 5, max: 25, enterprise: -1 };
+  const seatLimit = planSeatLimits[orgPlan || "pro"] ?? 5;
+  const currentSeats = teamMembers.length;
+  const atCapacity = seatLimit !== -1 && currentSeats >= seatLimit;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold text-foreground mb-1">Team</h2>
-          <p className="text-sm text-muted-foreground">Manage your organization&apos;s members</p>
+          <p className="text-sm text-muted-foreground">
+            Manage your organization&apos;s members
+            {seatLimit !== -1 && (
+              <span className="ml-2 text-xs text-muted-foreground/70">({currentSeats}/{seatLimit} seats)</span>
+            )}
+          </p>
         </div>
-        {isProPlan ? (
-          <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 text-amber-400 text-sm font-medium rounded-lg border border-amber-500/30">
-            <Crown className="w-4 h-4" />
-            Upgrade to Max for up to 15 seats
-          </div>
-        ) : (
+        <div className="flex items-center gap-2">
+          {atCapacity && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 text-amber-400 text-sm font-medium rounded-lg border border-amber-500/30">
+              <Crown className="w-4 h-4" />
+              Upgrade for more seats
+            </div>
+          )}
           <button
             onClick={() => setShowInviteModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white text-sm font-semibold rounded-lg hover:bg-indigo-600 transition-all"
+            disabled={atCapacity}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white text-sm font-semibold rounded-lg hover:bg-indigo-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <UserPlus className="w-4 h-4" />
             Invite Member
           </button>
-        )}
+        </div>
       </div>
 
       {/* Current Members */}

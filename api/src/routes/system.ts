@@ -99,14 +99,14 @@ router.post("/fix-task", async (req: Request, res: Response) => {
     }
 
     const oldStatus = task.status;
-    task.status = status;
-    if (prUrl) task.githubPrUrl = prUrl;
-    if (prNumber) task.githubPrNumber = Number(prNumber);
+    const updates: Record<string, unknown> = { status };
+    if (prUrl) updates.githubPrUrl = prUrl;
+    if (prNumber) updates.githubPrNumber = Number(prNumber);
     if (!task.completedAt && ["completed", "deployed", "failed", "review_requested"].includes(status)) {
-      task.completedAt = new Date();
+      updates.completedAt = new Date();
     }
 
-    await taskRepo.save(task);
+    await taskRepo.update({ id: taskId, orgId: org.id }, updates);
 
     logger.info("Task manually fixed", {
       taskId,

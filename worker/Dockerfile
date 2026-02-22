@@ -137,14 +137,18 @@ RUN echo "Verifying compiled files..." && \
 
 WORKDIR /app
 
+# Copy multi-expert source BEFORE building epic — remote-bootstrap.ts imports
+# types from ../multi-expert/index.js, so tsc needs the source present for
+# type resolution even though multi-expert is built separately below.
+COPY multi-expert /app/multi-expert
+
 # Copy and build Epic executor (multi-agent collaboration with Agent SDK)
 COPY epic /app/epic
 WORKDIR /app/epic
 RUN npm install && npm run build
 RUN echo "Epic executor compiled successfully!" && ls -la /app/epic/dist/
 
-# Multi-Expert Coordinator (uses AI SDK for multi-provider execution)
-COPY multi-expert /app/multi-expert
+# Build Multi-Expert Coordinator (source already copied above)
 WORKDIR /app/multi-expert
 RUN npm install && npm run build
 RUN echo "Multi-Expert coordinator compiled successfully!" && ls -la /app/multi-expert/dist/

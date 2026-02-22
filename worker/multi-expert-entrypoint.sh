@@ -86,6 +86,9 @@ trap cleanup EXIT
 # Start heartbeat loop
 start_heartbeat_loop
 
+# Pass 2: detect and install tools based on repo contents
+/app/install-tools.sh "${REPO_DIR:-}"
+
 echo "[Multi-Expert] Starting Multi-Expert executor..."
 echo ""
 

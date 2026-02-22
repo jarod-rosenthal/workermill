@@ -9,6 +9,9 @@ if [ "${WARM_POOL_MODE}" = "true" ]; then
     exec /app/warm-wait.sh
 fi
 
+# Pass 1: detect tools needed from env vars (before repo clone)
+/app/install-tools.sh
+
 # Check for Epic mode (multi-agent collaboration with Claude CLI)
 if [ "${EPIC_MODE}" = "true" ]; then
     echo "[Worker] EPIC_MODE=true - Starting Epic executor..."

@@ -24,6 +24,7 @@ export interface AgentConfig {
   githubReviewerToken: string;
   sandbox: "none" | "docker";
   dockerImage: string;
+  dockerMemoryGb: number;
 }
 
 export interface FileConfig {
@@ -41,6 +42,7 @@ export interface FileConfig {
   };
   sandbox?: "docker";
   dockerImage?: string;
+  dockerMemoryGb?: number;
   setupCompletedAt: string;
 }
 
@@ -108,6 +110,7 @@ export function loadConfigFromFile(): AgentConfig {
     githubReviewerToken: fc.tokens?.githubReviewer || "",
     sandbox: fc.sandbox || "none",
     dockerImage: fc.dockerImage || "ghcr.io/workermill/worker",
+    dockerMemoryGb: fc.dockerMemoryGb || 4,
   };
 }
 
@@ -161,6 +164,7 @@ export function loadConfig(): AgentConfig {
     githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN || "",
     sandbox: sandboxEnv === "docker" ? "docker" : "none",
     dockerImage: process.env.WORKERMILL_DOCKER_IMAGE || "ghcr.io/workermill/worker",
+    dockerMemoryGb: parseInt(process.env.WORKERMILL_DOCKER_MEMORY_GB || "4", 10),
   };
 }
 

@@ -1270,9 +1270,11 @@ Begin creating the workflow and deploying now.`;
    */
   private parseDecision(): DeploymentDecision {
     // Look for DEPLOYMENT_DECISION: marker
-    const decisionMatch = this.allOutput.match(/\*{0,2}DEPLOYMENT_DECISION\*{0,2}:\s*(deployed|failed|blocked|escalated)/i);
+    const decisionMatch = this.allOutput.match(/\*{0,2}DEPLOYMENT_DECISION\*{0,2}:\s*(deployed|failed|failure|blocked|escalated)/i);
     if (decisionMatch) {
-      return decisionMatch[1].toLowerCase() as DeploymentDecision;
+      const raw = decisionMatch[1].toLowerCase();
+      // Normalize "failure" → "failed" (prompts sometimes say FAILURE instead of failed)
+      return (raw === "failure" ? "failed" : raw) as DeploymentDecision;
     }
 
     // Check for merge success indicators
@@ -1282,8 +1284,9 @@ Begin creating the workflow and deploying now.`;
       return "deployed";
     }
 
-    // Default to failed if no explicit decision
-    console.log("[devops_engineer] No explicit decision found, defaulting to failed");
+    // Default to failed if no explicit decision — log output tail for debugging
+    const outputTail = this.allOutput.slice(-500).replace(/\n/g, " ").trim();
+    console.log(`[devops_engineer] No explicit DEPLOYMENT_DECISION found in output, defaulting to failed. Output tail: ${outputTail}`);
     return "failed";
   }
 

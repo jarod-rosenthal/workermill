@@ -328,6 +328,21 @@ export async function spawnDockerWorker(
     dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude:ro`);
   }
 
+  // Tool cache volumes — persist installed tools across container runs.
+  // install-tools.sh checks `command -v <tool>` before installing, so cached
+  // tools in these volumes are found immediately and installation is skipped.
+  const toolVolumes: Array<[string, string]> = [
+    ["wm-tools-go", "/usr/local/go"],
+    ["wm-tools-gomod", "/home/worker/go"],
+    ["wm-tools-cargo", "/home/worker/.cargo"],
+    ["wm-tools-rustup", "/home/worker/.rustup"],
+    ["wm-tools-deno", "/home/worker/.deno"],
+    ["wm-tools-bun", "/home/worker/.bun"],
+  ];
+  for (const [volumeName, containerPath] of toolVolumes) {
+    dockerArgs.push("-v", `${volumeName}:${containerPath}`);
+  }
+
   // Mount AWS credentials (read-only)
   const awsDir = path.join(os.homedir(), ".aws");
   if (fs.existsSync(awsDir)) {

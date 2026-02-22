@@ -296,10 +296,24 @@ function preInstallDeps(repoDir: string): void {
     }
   };
 
-  // Root
+  // Go module download helper (non-fatal, mirrors installAt pattern)
+  const goModDownload = (dir: string, label: string) => {
+    try {
+      if (existsSync(join(dir, "go.mod"))) {
+        console.log(`[Bootstrap]   ${label}: go mod download`);
+        spawnSync("go", ["mod", "download"], { cwd: dir, stdio: "pipe", timeout: 300_000 });
+      }
+    } catch {
+      console.log(`[Bootstrap]   ${label}: go mod download failed (non-fatal)`);
+    }
+  };
+
+  // Root — Node.js
   if (existsSync(join(repoDir, "package.json"))) {
     installAt(repoDir, "root");
   }
+  // Root — Go
+  goModDownload(repoDir, "root");
 
   // Monorepo subprojects (one level deep)
   try {
@@ -312,6 +326,8 @@ function preInstallDeps(repoDir: string): void {
         existsSync(join(sub, "yarn.lock")) ||
         existsSync(join(sub, "pnpm-lock.yaml"));
       if (hasLock) installAt(sub, entry);
+      // Go subprojects
+      goModDownload(sub, entry);
     }
   } catch {
     // Non-fatal

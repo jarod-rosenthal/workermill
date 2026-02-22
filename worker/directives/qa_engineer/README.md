@@ -352,6 +352,102 @@ Before marking a feature complete:
 - [ ] Test data uses factories, not hardcoded values
 - [ ] No real user data in test fixtures
 
+---
+
+## Go Testing
+
+When working on Go projects (detected by `go.mod`), follow these patterns:
+
+### Running Go Tests
+
+```bash
+# All tests with verbose output
+go test ./... -v -count=1
+
+# With race detector (catches concurrent access bugs)
+go test ./... -v -count=1 -race
+
+# With coverage
+go test ./... -coverprofile=coverage.out -covermode=atomic
+go tool cover -func=coverage.out
+
+# Specific package
+go test ./internal/services/... -v -run TestEvaluation
+```
+
+### Go Test Patterns with testify
+
+```go
+func TestCreateFlag(t *testing.T) {
+    assert := assert.New(t)
+    require := require.New(t)
+
+    flag, err := service.Create(ctx, CreateFlagInput{
+        Key:  "dark-mode",
+        Name: "Dark Mode",
+        Type: "boolean",
+    })
+
+    require.NoError(err)  // Stops test immediately if nil
+    assert.Equal("dark-mode", flag.Key)
+    assert.Equal("boolean", flag.Type)
+    assert.NotZero(flag.CreatedAt)
+}
+```
+
+### Table-Driven Tests (Go idiom)
+
+```go
+func TestTargetingOperator(t *testing.T) {
+    tests := []struct {
+        name     string
+        op       string
+        value    interface{}
+        target   interface{}
+        expected bool
+    }{
+        {"eq match", "eq", "US", "US", true},
+        {"eq no match", "eq", "US", "CA", false},
+        {"contains match", "contains", "@beta", "user@beta.com", true},
+        {"gt match", "gt", 18, 21, true},
+        {"in match", "in", []string{"US", "CA"}, "US", true},
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result := evaluateCondition(tt.op, tt.value, tt.target)
+            assert.Equal(t, tt.expected, result)
+        })
+    }
+}
+```
+
+### Statistical Tests (Rollout Uniformity)
+
+```go
+func TestRolloutUniformity(t *testing.T) {
+    inBucket := 0
+    total := 10000
+    for i := 0; i < total; i++ {
+        if isInRollout("test-flag", fmt.Sprintf("user-%d", i), 50) {
+            inBucket++
+        }
+    }
+    // 50% ± 2% tolerance
+    assert.InDelta(t, float64(total)/2, float64(inBucket), float64(total)*0.02)
+}
+```
+
+### Go Test Quality Checklist
+
+- [ ] `go test ./... -race` passes (race detector finds no issues)
+- [ ] `go test ./... -count=1` passes (no cached results)
+- [ ] Table-driven tests used for multiple similar cases
+- [ ] Test helpers use `t.Helper()` for clean stack traces
+- [ ] Subtests use `t.Run()` for clear naming
+- [ ] No test pollution — each test sets up its own data
+- [ ] Mock external services (MongoDB, Redis) using interfaces
+
 ## Self-Annealing Notes
 
 *This section is updated by AI Workers with learned improvements*

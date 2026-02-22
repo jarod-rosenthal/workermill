@@ -553,6 +553,80 @@ Identify and automate repetitive operational tasks:
 - **Set billing alarms** at 80% and 100% of budget
 - **Clean up unused resources** — unattached EBS volumes, old snapshots, idle load balancers
 
+---
+
+## Go Project CI/CD & Docker
+
+### Go Docker Multi-Stage Build (scratch-based)
+
+```dockerfile
+# Stage 1: Build
+FROM golang:1.22-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /server ./cmd/server
+
+# Stage 2: Runtime (minimal — ~10-15 MB)
+FROM scratch
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /server /server
+EXPOSE 8080
+ENTRYPOINT ["/server"]
+```
+
+**CRITICAL**: `scratch` base has no shell, no certs, no users. Copy `ca-certificates.crt` for TLS connections (MongoDB Atlas, Redis over TLS). The binary must be statically linked (`CGO_ENABLED=0`).
+
+### Go GitHub Actions CI
+
+```yaml
+jobs:
+  api:
+    name: Go — Lint, Test, Build
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        ports: ["27017:27017"]
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: api
+      - name: Test
+        working-directory: api
+        run: go test ./... -v -count=1 -race
+      - name: Build
+        working-directory: api
+        run: CGO_ENABLED=0 go build -o /dev/null ./cmd/server
+```
+
+### Go .gitignore Additions
+
+```gitignore
+# Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/api/server
+/api/tmp/
+
+# Go test output
+*.test
+*.out
+coverage.out
+```
+
 ## Self-Annealing Notes
 
 *This section is updated by AI Workers with learned improvements*

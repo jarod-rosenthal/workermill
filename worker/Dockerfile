@@ -17,6 +17,19 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Go 1.23.6 (for Go-based target repos like FlagDeck)
+RUN curl -fsSL https://go.dev/dl/go1.23.6.linux-amd64.tar.gz -o go.tar.gz \
+    && tar -C /usr/local -xzf go.tar.gz \
+    && rm go.tar.gz \
+    && /usr/local/go/bin/go version
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOPATH="/home/worker/go"
+ENV GOMODCACHE="/home/worker/go/pkg/mod"
+
+# Install golangci-lint (Go meta-linter for quality gates)
+RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b /usr/local/bin v1.63.4 \
+    && golangci-lint --version
+
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
@@ -186,6 +199,10 @@ RUN mkdir -p /workspace
 # Solution: Run as worker user, allow passwordless sudo for Kaniko
 RUN useradd -m -s /bin/bash worker
 RUN chown -R worker:worker /app /workspace /kaniko /app/epic /app/multi-expert /app/manager /app/standard
+
+# Create Go module cache directories owned by worker
+RUN mkdir -p /home/worker/go/pkg/mod /home/worker/go/bin \
+    && chown -R worker:worker /home/worker/go
 
 # Allow worker user to run Kaniko and AWS CLI as root without password
 # This is safe because the container is ephemeral and network-isolated

@@ -87,10 +87,8 @@ export async function executeSupportAgentTask(
   try {
     await postLog(`Starting support agent for ${task.jiraIssueKey}`);
 
-    // Update task status to executing
-    task.status = "executing";
-    task.startedAt = new Date();
-    await taskRepo.save(task);
+    // Atomic update to avoid clobbering concurrent changes
+    await taskRepo.update({ id: task.id }, { status: "executing", startedAt: new Date() });
 
     // Get ticket details from jiraFields
     const jiraFields = task.jiraFields as Record<string, unknown> | null;
@@ -139,11 +137,12 @@ export async function executeSupportAgentTask(
         0
       );
 
-      // Update task as completed
-      task.status = "completed";
-      task.completedAt = new Date();
-      task.planningNotes = `Escalated: ${autoEscalation.reason}`;
-      await taskRepo.save(task);
+      // Atomic update to avoid clobbering concurrent changes
+      await taskRepo.update({ id: task.id }, {
+        status: "completed",
+        completedAt: new Date(),
+        planningNotes: `Escalated: ${autoEscalation.reason}`,
+      });
 
       return {
         success: true,
@@ -194,10 +193,11 @@ export async function executeSupportAgentTask(
         aiResult.confidenceScore
       );
 
-      task.status = "completed";
-      task.completedAt = new Date();
-      task.planningNotes = `Escalated: ${aiResult.escalationReason}`;
-      await taskRepo.save(task);
+      await taskRepo.update({ id: task.id }, {
+        status: "completed",
+        completedAt: new Date(),
+        planningNotes: `Escalated: ${aiResult.escalationReason}`,
+      });
 
       return {
         success: true,
@@ -221,11 +221,12 @@ export async function executeSupportAgentTask(
 
     await postLog(`Response posted successfully`);
 
-    // Update task as completed
-    task.status = "completed";
-    task.completedAt = new Date();
-    task.planningNotes = `Responded with ${aiResult.confidenceScore}% confidence`;
-    await taskRepo.save(task);
+    // Atomic update to avoid clobbering concurrent changes
+    await taskRepo.update({ id: task.id }, {
+      status: "completed",
+      completedAt: new Date(),
+      planningNotes: `Responded with ${aiResult.confidenceScore}% confidence`,
+    });
 
     return {
       success: true,
@@ -238,10 +239,11 @@ export async function executeSupportAgentTask(
     const errorMessage = error instanceof Error ? error.message : String(error);
     await postLog(`Error: ${errorMessage}`, "error");
 
-    task.status = "failed";
-    task.completedAt = new Date();
-    task.planningNotes = `Error: ${errorMessage}`;
-    await taskRepo.save(task);
+    await taskRepo.update({ id: task.id }, {
+      status: "failed",
+      completedAt: new Date(),
+      planningNotes: `Error: ${errorMessage}`,
+    });
 
     return {
       success: false,

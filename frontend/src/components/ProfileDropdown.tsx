@@ -59,7 +59,7 @@ export function ProfileDropdown({ className = "", onShowQuickStart }: ProfileDro
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const { user, tokens, logout } = useAuthStore();
+  const { user, tokens, logout, organization } = useAuthStore();
   const { theme, setTheme } = useThemeStore();
 
   // Check if user has support admin access (from database flag)
@@ -159,6 +159,11 @@ export function ProfileDropdown({ className = "", onShowQuickStart }: ProfileDro
                 <p className="text-xs text-muted-foreground truncate" data-testid="user-email">
                   {user?.email}
                 </p>
+                {organization?.name && (
+                  <p className="text-[11px] text-muted-foreground/70 truncate">
+                    {organization.name}
+                  </p>
+                )}
               </div>
             </div>
           </div>

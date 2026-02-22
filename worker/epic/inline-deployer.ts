@@ -737,7 +737,7 @@ export class InlineDeployer {
       persona: "devops_engineer" as const,
       description: "DevOps specialist - CI/CD assessment",
       systemPrompt: DEVOPS_SYSTEM_PROMPT_PHASE1,
-      tools: ["Read", "Glob", "Grep", "Bash"],
+      tools: ["Read", "Glob", "Grep", "Bash", "TodoWrite"],
       model: this.model,
       specialties: ["deployment", "cicd", "github-actions"],
     };
@@ -771,7 +771,7 @@ export class InlineDeployer {
       persona: "devops_engineer" as const,
       description: "DevOps specialist - deployment execution (auto-trigger)",
       systemPrompt: DEVOPS_SYSTEM_PROMPT_DEPLOY_AUTO,
-      tools: ["Read", "Glob", "Grep", "Bash"],
+      tools: ["Read", "Glob", "Grep", "Bash", "TodoWrite"],
       model: this.model,
       specialties: ["deployment", "cicd", "github-actions"],
     };
@@ -826,7 +826,7 @@ export class InlineDeployer {
       persona: "devops_engineer" as const,
       description: "DevOps specialist - deployment execution (manual-trigger)",
       systemPrompt: DEVOPS_SYSTEM_PROMPT_DEPLOY_MANUAL,
-      tools: ["Read", "Glob", "Grep", "Bash"],
+      tools: ["Read", "Glob", "Grep", "Bash", "TodoWrite"],
       model: this.model,
       specialties: ["deployment", "cicd", "github-actions"],
     };

@@ -248,7 +248,7 @@ router.post(
       },
     });
 
-    if (activeCount >= (org.maxConcurrentWorkers ?? 4)) {
+    if (activeCount >= org.maxConcurrentWorkers) {
       logger.debug("Agent claim rejected: at max concurrent workers", {
         taskId,
         agentId,
@@ -953,8 +953,8 @@ router.get(
     const org = req.organization!;
 
     res.json({
-      maxConcurrentWorkers: org.maxConcurrentWorkers ?? 4,
-      maxParallelExperts: org.maxParallelExperts ?? 4,
+      maxConcurrentWorkers: org.maxConcurrentWorkers,
+      maxParallelExperts: org.maxParallelExperts,
       defaultWorkerModel: org.defaultWorkerModel ?? "",
       scmProvider: org.scmProvider ?? "github",
       defaultGithubRepo: org.defaultGithubRepo ?? null,
@@ -1035,7 +1035,7 @@ router.get(
       labels: jiraFields.labels as string[] | undefined,
       stackTemplate: (jiraFields.stackTemplate as string) || undefined,
       taskNotes: task.taskNotes || undefined,
-      maxParallelExperts: org.maxParallelExperts ?? 4,
+      maxParallelExperts: org.maxParallelExperts,
       maxStories,
       availablePersonas,
     };

@@ -285,7 +285,7 @@ export class MultiExpertCoordinator {
   // Expert state tracking for parallel execution (mirrors Epic coordinator pattern)
   private expertStates: Map<string, { persona: string; status: "idle" | "working" | "completed" | "blocked"; currentStoryIndex?: number }> = new Map();
   // Max parallel experts (from env or default)
-  private maxParallelExperts: number = parseInt(process.env.MAX_PARALLEL_EXPERTS || "4", 10);
+  private maxParallelExperts: number = parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10);
   // Track active worktrees for cleanup
   private activeWorktrees: Map<number, string> = new Map();
   // Track story branch names for consolidated PR

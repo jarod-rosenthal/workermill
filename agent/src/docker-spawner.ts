@@ -382,7 +382,8 @@ export async function spawnDockerWorker(
     "--name", containerName,
 
     // Security hardening: resource limits and privilege restrictions
-    "--memory", "8g",
+    "--memory", "4g",
+    "--memory-swap", "6g",
     "--cpus", "2",
     "--pids-limit", "512",
     "--cap-drop", "ALL",
@@ -592,7 +593,7 @@ export async function spawnDockerWorker(
       orgConfig.pushAfterCommit !== false ? "true" : "false",
     GRACEFUL_SHUTDOWN_ENABLED:
       orgConfig.gracefulShutdownEnabled !== false ? "true" : "false",
-    MAX_PARALLEL_EXPERTS: String(orgConfig.maxParallelExperts ?? 4),
+    MAX_PARALLEL_EXPERTS: String(orgConfig.maxParallelExperts),
     REVIEW_ENABLED:
       task.skipManagerReview === false ? "true" : "false",
     SELF_REVIEW_ENABLED:

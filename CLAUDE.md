@@ -59,6 +59,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `Resource: "*"` with destructive IAM actions
 - 0.0.0.0/0 security groups for non-public services
 
+***REMOVED******REMOVED******REMOVED*** DO NOT Add Hardcoded Fallbacks for Org Settings
+
+**The Organization model in the database is the SINGLE SOURCE OF TRUTH for all org settings.** Every column has a DB-level default. NEVER add `?? <value>` or `|| "<value>"` fallbacks in spawners, API routes, workers, or frontend code when passing org settings through.
+
+- **WRONG:** `String(org.maxParallelExperts ?? 4)` — silently overrides the DB default and masks bugs
+- **RIGHT:** `String(org.maxParallelExperts)` — uses whatever the DB has
+- **Worker env fallbacks** (`process.env.X || "3"`) are acceptable ONLY because the env var might not be set in local dev; the fallback MUST match the DB column default exactly
+- When adding a new org setting: add the column with a DEFAULT in the migration, and pass the value through without fallbacks
+
 ***REMOVED******REMOVED******REMOVED*** DO NOT Expose Authenticated Features on Public Pages
 
 **The landing/home page (`LandingV0.tsx`, `Home/v0/Header.tsx`) is PUBLIC — visible to unauthenticated users.** NEVER add links to authenticated features (Docs, Dashboard, Settings, etc.) on public pages.

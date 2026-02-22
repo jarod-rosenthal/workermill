@@ -13,6 +13,7 @@ import {
   CreditCard,
 } from "lucide-react";
 import { useBoardsStore } from "../../store/boards-store";
+import { useAuthStore } from "../../store/auth-store";
 import CreateBoardDialog from "./CreateBoardDialog";
 
 export default function BoardsList() {
@@ -26,6 +27,7 @@ export default function BoardsList() {
     deleteBoard,
     starBoard,
   } = useBoardsStore();
+  const organization = useAuthStore((state) => state.organization);
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(
@@ -81,6 +83,11 @@ export default function BoardsList() {
             <h1 className="text-xl font-semibold flex items-center gap-2">
               <LayoutGrid className="h-5 w-5" />
               Boards
+              {organization?.name && (
+                <span className="text-sm font-normal text-muted-foreground">
+                  — {organization.name}
+                </span>
+              )}
             </h1>
           </div>
           <div className="flex items-center gap-3">

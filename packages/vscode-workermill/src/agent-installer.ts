@@ -678,9 +678,14 @@ export function startAgentProcess(log?: (msg: string) => void): void {
       env.PATH = `${extraDirs.join(sep)}${sep}${process.env.PATH || ""}`;
     }
 
+    // On Windows, the extension host CWD is the VS Code install dir. Using
+    // stdio: "ignore" can cause Node to open NUL relative to that CWD, which
+    // fails with "Access is denied" on newer Windows builds. Fix: set cwd to
+    // the user's home dir so NUL device resolution doesn't hit a protected path.
     const child = spawn(binary, ["start"], {
       detached: true,
       stdio: ["ignore", logFd, logFd],
+      cwd: os.homedir(),
       env,
       windowsHide: true,
     });
@@ -731,7 +736,7 @@ export async function stopAgentProcess(): Promise<boolean> {
   const binary = getAgentBinaryPath();
   if (fs.existsSync(binary)) {
     const stopped = await new Promise<boolean>((resolve) => {
-      const child = spawn(binary, ["stop"], { stdio: "ignore", windowsHide: true });
+      const child = spawn(binary, ["stop"], { stdio: "ignore", cwd: os.homedir(), windowsHide: true });
       child.on("close", (code) => resolve(code === 0));
       child.on("error", () => resolve(false));
       setTimeout(() => {

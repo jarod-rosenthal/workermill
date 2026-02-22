@@ -218,10 +218,10 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
     if (action === "Open Docker Desktop") {
       try {
         if (process.platform === "darwin") {
-          execFileSync("open", ["-a", "Docker"], { timeout: 5000, stdio: "ignore", windowsHide: true });
+          execFileSync("open", ["-a", "Docker"], { timeout: 5000, stdio: "ignore", cwd: os.homedir(), windowsHide: true });
         } else {
           // Windows and WSL — try to launch Docker Desktop
-          execFileSync("cmd.exe", ["/c", "start", "", "Docker Desktop"], { timeout: 5000, stdio: "ignore", windowsHide: true });
+          execFileSync("cmd.exe", ["/c", "start", "", "Docker Desktop"], { timeout: 5000, stdio: "ignore", cwd: os.homedir(), windowsHide: true });
         }
       } catch {
         // If launch fails, open the download page as fallback
@@ -250,7 +250,7 @@ async function finishSetup(apiKey: string, log: (msg: string) => void): Promise<
 
 function checkDockerAvailable(): boolean {
   try {
-    execFileSync("docker", ["version"], { timeout: 5000, stdio: "ignore", windowsHide: true });
+    execFileSync("docker", ["version"], { timeout: 5000, stdio: "ignore", cwd: os.homedir(), windowsHide: true });
     return true;
   } catch {
     return false;
@@ -259,7 +259,7 @@ function checkDockerAvailable(): boolean {
 
 function isDockerInstalled(): boolean {
   try {
-    execFileSync("docker", ["--version"], { timeout: 5000, stdio: "ignore", windowsHide: true });
+    execFileSync("docker", ["--version"], { timeout: 5000, stdio: "ignore", cwd: os.homedir(), windowsHide: true });
     return true;
   } catch {
     return false;

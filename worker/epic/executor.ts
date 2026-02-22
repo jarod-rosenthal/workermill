@@ -507,6 +507,80 @@ export class StoryExecutor {
       }
     }
 
+    // 1d. Go build gate — run go build/vet/test if the project has a go.mod
+    if (changedFiles.some((f) => f.endsWith(".go"))) {
+      try {
+        const { existsSync } = await import("fs");
+        const goModPath = `${worktreePath}/go.mod`;
+        if (existsSync(goModPath)) {
+          // Find the Go module root (may be in a subdirectory like api/)
+          const goModDir = (() => {
+            // Check if a changed .go file is in a subdirectory that has its own go.mod
+            for (const f of changedFiles.filter((cf) => cf.endsWith(".go"))) {
+              const parts = f.split("/");
+              for (let i = parts.length - 1; i > 0; i--) {
+                const sub = parts.slice(0, i).join("/");
+                const subGoMod = `${worktreePath}/${sub}/go.mod`;
+                if (existsSync(subGoMod)) return `${worktreePath}/${sub}`;
+              }
+            }
+            return worktreePath;
+          })();
+
+          const goGate = (cmd: string, label: string, timeout = 120_000) => {
+            try {
+              execSync(`${cmd} 2>&1`, {
+                cwd: goModDir,
+                timeout,
+                encoding: "utf-8",
+              });
+              return null;
+            } catch (err: unknown) {
+              const output =
+                (err as { stdout?: string }).stdout ||
+                (err as Error).message ||
+                `Unknown ${label} error`;
+              return output.length > 500 ? output.slice(0, 500) + "..." : output;
+            }
+          };
+
+          // gofmt check (formatting)
+          const fmtErr = goGate("gofmt -l .", "gofmt", 30_000);
+          if (fmtErr && fmtErr.trim().length > 0) {
+            issues.push(`Go formatting issues (gofmt): ${fmtErr}`);
+          }
+
+          // go vet (static analysis)
+          const vetErr = goGate("go vet ./...", "go vet");
+          if (vetErr) {
+            issues.push(`Go vet failed: ${vetErr}`);
+          }
+
+          // go build (compilation)
+          const buildErr = goGate("go build ./...", "go build");
+          if (buildErr) {
+            issues.push(`Go build failed: ${buildErr}`);
+          }
+
+          // go test (unit tests — longer timeout)
+          const testErr = goGate("go test ./... -count=1", "go test", 300_000);
+          if (testErr) {
+            issues.push(`Go tests failed: ${testErr}`);
+          }
+
+          if (!fmtErr && !vetErr && !buildErr && !testErr) {
+            await this.postLog(
+              `${story.title} — Go quality gates passed (fmt, vet, build, test)`,
+              expert,
+              "system",
+            );
+          }
+        }
+      } catch {
+        // If go is not available or any other issue, skip Go gates silently
+      }
+    }
+
     // 2. Basic acceptance criteria validation
     // For each criterion, do a simple keyword check against the changed files and story output
     for (const criterion of acceptanceCriteria) {

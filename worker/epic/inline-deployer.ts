@@ -53,7 +53,7 @@ cat .github/workflows/*.yml 2>/dev/null
 
 \`\`\`bash
 ***REMOVED*** Check project structure
-ls package.json pyproject.toml requirements.txt Dockerfile docker-compose.yml 2>/dev/null
+ls package.json pyproject.toml requirements.txt go.mod Dockerfile docker-compose.yml 2>/dev/null
 
 ***REMOVED*** Check what directories exist (to understand component structure)
 ls -d */ 2>/dev/null
@@ -94,7 +94,7 @@ DEPLOYMENT_SUMMARY: Found manual-triggered workflow: <workflow file>. Components
 **If NO deployment workflows exist:**
 \`\`\`
 WORKFLOW_CREATION_NEEDED: true
-DETECTED_STACK: <node|python|docker|unknown>
+DETECTED_STACK: <node|python|go|docker|unknown>
 PROPOSED_WORKFLOW: <brief description of what workflow you would create>
 \`\`\`
 
@@ -128,12 +128,19 @@ CI may only run AFTER merge (on push to main). You MUST validate locally BEFORE 
 \`\`\`bash
 ***REMOVED*** Install dependencies (if not already done)
 npm install --ignore-scripts 2>/dev/null || yarn install 2>/dev/null || true
+***REMOVED*** Go dependencies (if go.mod exists)
+test -f go.mod && go mod download 2>/dev/null || true
 
 ***REMOVED*** 1. Build check — does the code compile?
 npm run build 2>&1 || echo "BUILD_FAILED"
+***REMOVED*** Go build (if go.mod exists)
+test -f go.mod && go build ./... 2>&1 || true
 
 ***REMOVED*** 2. Lint check
 npm run lint 2>&1 || echo "LINT_FAILED"
+***REMOVED*** Go lint (if go.mod exists)
+test -f go.mod && go vet ./... 2>&1 || true
+test -f go.mod && golangci-lint run ./... 2>&1 || true
 
 ***REMOVED*** 3. Security audit — check for critical/high vulnerabilities
 npm audit --audit-level=critical 2>&1 || echo "AUDIT_CRITICAL_FOUND"
@@ -143,9 +150,13 @@ npx prisma validate 2>/dev/null || true
 
 ***REMOVED*** 5. Type check (if separate from build)
 npx tsc --noEmit 2>/dev/null || true
+***REMOVED*** Go format check
+test -f go.mod && gofmt -l . 2>&1 || true
 
 ***REMOVED*** 6. Tests (if fast enough — skip if > 5 minutes)
 npm test 2>&1 || echo "TESTS_FAILED"
+***REMOVED*** Go tests
+test -f go.mod && go test ./... -count=1 2>&1 || true
 \`\`\`
 
 **If ANY check fails, DO NOT merge.** Report \`DEPLOYMENT_DECISION: FAILURE\` with the failing check names and output.
@@ -235,12 +246,18 @@ You MUST validate locally BEFORE merging to catch issues early.
 
 \`\`\`bash
 npm install --ignore-scripts 2>/dev/null || yarn install 2>/dev/null || true
+test -f go.mod && go mod download 2>/dev/null || true
 npm run build 2>&1 || echo "BUILD_FAILED"
+test -f go.mod && go build ./... 2>&1 || true
 npm run lint 2>&1 || echo "LINT_FAILED"
+test -f go.mod && go vet ./... 2>&1 || true
+test -f go.mod && golangci-lint run ./... 2>&1 || true
 npm audit --audit-level=critical 2>&1 || echo "AUDIT_CRITICAL_FOUND"
 npx prisma validate 2>/dev/null || true
 npx tsc --noEmit 2>/dev/null || true
+test -f go.mod && gofmt -l . 2>&1 || true
 npm test 2>&1 || echo "TESTS_FAILED"
+test -f go.mod && go test ./... -count=1 2>&1 || true
 \`\`\`
 
 **If ANY check fails, DO NOT merge.** Report \`DEPLOYMENT_DECISION: FAILURE\` with details.
@@ -358,6 +375,37 @@ jobs:
       - run: npm test --if-present
 \`\`\`
 
+**For Go projects**, create \`.github/workflows/deploy.yml\`:
+\`\`\`yaml
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  api:
+    name: Go — Lint, Test, Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: api
+      - name: Test
+        working-directory: api
+        run: go test ./... -v -count=1 -race
+      - name: Build
+        working-directory: api
+        run: CGO_ENABLED=0 go build -o /dev/null ./cmd/server
+\`\`\`
+
 **For Python projects**, create appropriate workflow with pip/pytest.
 
 **For Docker projects**, create workflow with docker build/push.
@@ -376,11 +424,17 @@ Before merging, validate the code locally to catch failures before they reach ma
 
 \`\`\`bash
 npm install --ignore-scripts 2>/dev/null || yarn install 2>/dev/null || true
+test -f go.mod && go mod download 2>/dev/null || true
 npm run build 2>&1 || echo "BUILD_FAILED"
+test -f go.mod && go build ./... 2>&1 || true
 npm run lint 2>&1 || echo "LINT_FAILED"
+test -f go.mod && go vet ./... 2>&1 || true
+test -f go.mod && golangci-lint run ./... 2>&1 || true
 npm audit --audit-level=critical 2>&1 || echo "AUDIT_CRITICAL_FOUND"
 npx prisma validate 2>/dev/null || true
+test -f go.mod && gofmt -l . 2>&1 || true
 npm test 2>&1 || echo "TESTS_FAILED"
+test -f go.mod && go test ./... -count=1 2>&1 || true
 \`\`\`
 
 **If ANY check fails, DO NOT merge.** Report \`DEPLOYMENT_DECISION: FAILURE\` with details.

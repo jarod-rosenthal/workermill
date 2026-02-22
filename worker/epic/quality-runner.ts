@@ -260,57 +260,123 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
     securityLow: 0,
   };
 
+  // Detect project language(s)
+  const hasGoMod = fs.existsSync(path.join(repoPath, "go.mod"));
+  const hasPackageJson = fs.existsSync(path.join(repoPath, "package.json"));
+  // Also check common subdirectories for Go modules (e.g. api/go.mod)
+  const goModDirs: string[] = [];
+  if (hasGoMod) goModDirs.push(repoPath);
+  try {
+    for (const entry of fs.readdirSync(repoPath)) {
+      if (entry === "node_modules" || entry === "vendor" || entry.startsWith(".")) continue;
+      const sub = path.join(repoPath, entry);
+      if (fs.statSync(sub).isDirectory() && fs.existsSync(path.join(sub, "go.mod"))) {
+        goModDirs.push(sub);
+      }
+    }
+  } catch { /* ignore */ }
+
   // Run TypeCheck
   console.log("[quality-runner] Running typecheck...");
-  const typecheckResult = runCommand("npm run typecheck 2>&1 || npx tsc --noEmit 2>&1 || echo 'no typecheck'", repoPath);
-  const typeErrors = (typecheckResult.stdout.match(/error TS\d+/g) || []).length;
-  metrics.typeErrors = typeErrors;
-  metrics.typecheckScore = typeErrors === 0 && typecheckResult.exitCode === 0 ? 100 : 0;
-  console.log(`[quality-runner] Typecheck: ${metrics.typecheckScore}/100 (${typeErrors} errors)`);
+  if (hasGoMod || goModDirs.length > 0) {
+    // Go: use go build as typecheck equivalent
+    const goDir = goModDirs[0] || repoPath;
+    const typecheckResult = runCommand("go build ./... 2>&1", goDir);
+    const goErrors = typecheckResult.exitCode !== 0 ? 1 : 0;
+    metrics.typeErrors = goErrors;
+    metrics.typecheckScore = goErrors === 0 ? 100 : 0;
+    console.log(`[quality-runner] Typecheck (go build): ${metrics.typecheckScore}/100`);
+  } else {
+    const typecheckResult = runCommand("npm run typecheck 2>&1 || npx tsc --noEmit 2>&1 || echo 'no typecheck'", repoPath);
+    const typeErrors = (typecheckResult.stdout.match(/error TS\d+/g) || []).length;
+    metrics.typeErrors = typeErrors;
+    metrics.typecheckScore = typeErrors === 0 && typecheckResult.exitCode === 0 ? 100 : 0;
+    console.log(`[quality-runner] Typecheck: ${metrics.typecheckScore}/100 (${typeErrors} errors)`);
+  }
 
   // Run Lint
   console.log("[quality-runner] Running lint...");
-  const lintResult = runCommand("npm run lint 2>&1 || echo 'no lint script'", repoPath);
-
-  // Parse ESLint output for error/warning counts
-  const problemsMatch = lintResult.stdout.match(/(\d+)\s+problems?\s*\((\d+)\s+errors?,\s*(\d+)\s+warnings?\)/i);
-  if (problemsMatch) {
-    metrics.lintErrors = parseInt(problemsMatch[2]) || 0;
-    metrics.lintWarnings = parseInt(problemsMatch[3]) || 0;
+  if (hasGoMod || goModDirs.length > 0) {
+    // Go: use go vet + golangci-lint
+    const goDir = goModDirs[0] || repoPath;
+    const vetResult = runCommand("go vet ./... 2>&1", goDir);
+    const lintResult = runCommand("golangci-lint run ./... 2>&1 || echo 'golangci-lint not available'", goDir);
+    const fmtResult = runCommand("gofmt -l . 2>&1", goDir);
+    // Count vet errors
+    const vetErrors = vetResult.exitCode !== 0 ? 1 : 0;
+    // Count golangci-lint issues
+    const golintIssues = (lintResult.stdout.match(/\.\w+:\d+:\d+:/g) || []).length;
+    // Count unformatted files
+    const fmtFiles = fmtResult.stdout.trim().split("\n").filter((l: string) => l.trim().length > 0 && !l.includes("not available")).length;
+    metrics.lintErrors = vetErrors + golintIssues + fmtFiles;
+    metrics.lintWarnings = 0;
+    metrics.lintScore = Math.max(0, 100 - metrics.lintErrors);
+    console.log(`[quality-runner] Lint (Go): ${metrics.lintScore}/100 (vet: ${vetErrors}, lint: ${golintIssues}, fmt: ${fmtFiles} unformatted files)`);
   } else {
-    // Try alternate format
-    const errorMatch = lintResult.stdout.match(/(\d+)\s+errors?/i);
-    const warnMatch = lintResult.stdout.match(/(\d+)\s+warnings?/i);
-    if (errorMatch) metrics.lintErrors = parseInt(errorMatch[1]) || 0;
-    if (warnMatch) metrics.lintWarnings = parseInt(warnMatch[1]) || 0;
+    const lintResult = runCommand("npm run lint 2>&1 || echo 'no lint script'", repoPath);
+
+    // Parse ESLint output for error/warning counts
+    const problemsMatch = lintResult.stdout.match(/(\d+)\s+problems?\s*\((\d+)\s+errors?,\s*(\d+)\s+warnings?\)/i);
+    if (problemsMatch) {
+      metrics.lintErrors = parseInt(problemsMatch[2]) || 0;
+      metrics.lintWarnings = parseInt(problemsMatch[3]) || 0;
+    } else {
+      // Try alternate format
+      const errorMatch = lintResult.stdout.match(/(\d+)\s+errors?/i);
+      const warnMatch = lintResult.stdout.match(/(\d+)\s+warnings?/i);
+      if (errorMatch) metrics.lintErrors = parseInt(errorMatch[1]) || 0;
+      if (warnMatch) metrics.lintWarnings = parseInt(warnMatch[1]) || 0;
+    }
+    metrics.lintScore = Math.max(0, 100 - metrics.lintErrors);
+    console.log(`[quality-runner] Lint: ${metrics.lintScore}/100 (${metrics.lintErrors} errors, ${metrics.lintWarnings} warnings)`);
   }
-  metrics.lintScore = Math.max(0, 100 - metrics.lintErrors);
-  console.log(`[quality-runner] Lint: ${metrics.lintScore}/100 (${metrics.lintErrors} errors, ${metrics.lintWarnings} warnings)`);
 
   // Run Tests
   console.log("[quality-runner] Running tests...");
-  const testResult = runCommand("npm test 2>&1 || echo 'no test script'", repoPath, 300000); // 5 min timeout for tests
+  if (hasGoMod || goModDirs.length > 0) {
+    // Go: run go test and parse output
+    const goDir = goModDirs[0] || repoPath;
+    const testResult = runCommand("go test ./... -v -count=1 2>&1", goDir, 300000);
 
-  // Parse test output (Jest/Vitest format)
-  // Look for patterns like "Tests: 5 passed, 2 failed, 1 skipped"
-  const testsLineMatch = testResult.stdout.match(/Tests:\s*(\d+)\s*passed(?:,\s*(\d+)\s*failed)?(?:,\s*(\d+)\s*(?:skipped|todo))?/i);
-  if (testsLineMatch) {
-    metrics.testsPassed = parseInt(testsLineMatch[1]) || 0;
-    metrics.testsFailed = parseInt(testsLineMatch[2]) || 0;
-    metrics.testsSkipped = parseInt(testsLineMatch[3]) || 0;
+    // Parse Go test output: "--- PASS:", "--- FAIL:", "--- SKIP:"
+    const goPassCount = (testResult.stdout.match(/--- PASS:/g) || []).length;
+    const goFailCount = (testResult.stdout.match(/--- FAIL:/g) || []).length;
+    const goSkipCount = (testResult.stdout.match(/--- SKIP:/g) || []).length;
+    // Also check for "ok" lines (package-level pass) and "FAIL" lines (package-level fail)
+    const pkgPass = (testResult.stdout.match(/^ok\s+/gm) || []).length;
+    const pkgFail = (testResult.stdout.match(/^FAIL\s+/gm) || []).length;
+
+    metrics.testsPassed = goPassCount || pkgPass;
+    metrics.testsFailed = goFailCount || pkgFail;
+    metrics.testsSkipped = goSkipCount;
+
+    const totalTests = metrics.testsPassed + metrics.testsFailed + metrics.testsSkipped;
+    metrics.testScore = totalTests > 0 ? Math.round((metrics.testsPassed / totalTests) * 100) : (testResult.exitCode === 0 ? 100 : 0);
+    console.log(`[quality-runner] Tests (Go): ${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped)`);
   } else {
-    // Try alternate format: "X passing", "X failing"
-    const passMatch = testResult.stdout.match(/(\d+)\s+pass(?:ing|ed)?/i);
-    const failMatch = testResult.stdout.match(/(\d+)\s+fail(?:ing|ed)?/i);
-    const skipMatch = testResult.stdout.match(/(\d+)\s+(?:skipped|pending)/i);
-    if (passMatch) metrics.testsPassed = parseInt(passMatch[1]) || 0;
-    if (failMatch) metrics.testsFailed = parseInt(failMatch[1]) || 0;
-    if (skipMatch) metrics.testsSkipped = parseInt(skipMatch[1]) || 0;
-  }
+    const testResult = runCommand("npm test 2>&1 || echo 'no test script'", repoPath, 300000); // 5 min timeout for tests
 
-  const totalTests = metrics.testsPassed + metrics.testsFailed + metrics.testsSkipped;
-  metrics.testScore = totalTests > 0 ? Math.round((metrics.testsPassed / totalTests) * 100) : 100;
-  console.log(`[quality-runner] Tests: ${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped)`);
+    // Parse test output (Jest/Vitest format)
+    // Look for patterns like "Tests: 5 passed, 2 failed, 1 skipped"
+    const testsLineMatch = testResult.stdout.match(/Tests:\s*(\d+)\s*passed(?:,\s*(\d+)\s*failed)?(?:,\s*(\d+)\s*(?:skipped|todo))?/i);
+    if (testsLineMatch) {
+      metrics.testsPassed = parseInt(testsLineMatch[1]) || 0;
+      metrics.testsFailed = parseInt(testsLineMatch[2]) || 0;
+      metrics.testsSkipped = parseInt(testsLineMatch[3]) || 0;
+    } else {
+      // Try alternate format: "X passing", "X failing"
+      const passMatch = testResult.stdout.match(/(\d+)\s+pass(?:ing|ed)?/i);
+      const failMatch = testResult.stdout.match(/(\d+)\s+fail(?:ing|ed)?/i);
+      const skipMatch = testResult.stdout.match(/(\d+)\s+(?:skipped|pending)/i);
+      if (passMatch) metrics.testsPassed = parseInt(passMatch[1]) || 0;
+      if (failMatch) metrics.testsFailed = parseInt(failMatch[1]) || 0;
+      if (skipMatch) metrics.testsSkipped = parseInt(skipMatch[1]) || 0;
+    }
+
+    const totalTests = metrics.testsPassed + metrics.testsFailed + metrics.testsSkipped;
+    metrics.testScore = totalTests > 0 ? Math.round((metrics.testsPassed / totalTests) * 100) : 100;
+    console.log(`[quality-runner] Tests: ${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped)`);
+  }
 
   // Extract coverage if available
   const coverageMatch = testResult.stdout.match(/All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/);
@@ -334,6 +400,18 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
 
   // Run Security Audit
   console.log("[quality-runner] Running security audit...");
+  if (hasGoMod || goModDirs.length > 0) {
+    // Go: use go vet as a basic security check (catches suspicious constructs)
+    const goDir = goModDirs[0] || repoPath;
+    const goVetResult = runCommand("go vet ./... 2>&1", goDir);
+    if (goVetResult.exitCode !== 0) {
+      metrics.securityHigh = 1;
+      metrics.securityScore = 0;
+    } else {
+      metrics.securityScore = 100;
+    }
+    console.log(`[quality-runner] Security (go vet): ${metrics.securityScore}/100`);
+  }
   const auditResult = runCommand("npm audit --json 2>/dev/null || echo '{}'", repoPath);
   try {
     const audit = JSON.parse(auditResult.stdout || "{}");

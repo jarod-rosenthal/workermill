@@ -18,6 +18,8 @@ export class LiveDiffPanel {
   private pollTimer: NodeJS.Timeout | null = null;
   private lastTimestamp: string | null = null;
   private disposed = false;
+  private consecutiveErrors = 0;
+  private currentInterval = 5_000;
 
   static createOrShow(client: AgentClient, task: TaskInfo): void {
     const existing = LiveDiffPanel.currentPanels.get(task.id);
@@ -53,20 +55,37 @@ export class LiveDiffPanel {
     setTimeout(() => {
       if (!this.disposed) {
         this.poll();
-        this.pollTimer = setInterval(() => this.poll(), 2000);
+        this.pollTimer = setInterval(() => this.poll(), this.currentInterval);
       }
     }, 1000);
   }
 
+  private resetInterval(ms: number): void {
+    this.currentInterval = ms;
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = setInterval(() => this.poll(), ms);
+  }
+
   private async poll(): Promise<void> {
     if (this.disposed) return;
+    if (!this.client.isConnected()) return;
     try {
       const events = await this.client.getCodeEvents(this.taskId, this.lastTimestamp || undefined);
       if (events.length > 0) {
         this.lastTimestamp = events[events.length - 1].createdAt;
         this.panel.webview.postMessage({ type: "append", events });
       }
-    } catch (_) { /* retry */ }
+      this.consecutiveErrors = 0;
+      if (this.currentInterval !== 5_000) {
+        this.resetInterval(5_000);
+      }
+    } catch {
+      this.consecutiveErrors++;
+      if (this.consecutiveErrors >= 3) {
+        const backed = Math.min(this.currentInterval * 2, 30_000);
+        this.resetInterval(backed);
+      }
+    }
   }
 
   private dispose(): void {

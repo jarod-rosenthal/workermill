@@ -204,6 +204,8 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
   private seenLogIds = new Set<string>();
   private lastLogTimestamp: string | null = null;
   private disposed = false;
+  private consecutiveErrors = 0;
+  private currentInterval = 4_000;
 
   constructor(client: AgentClient, taskId: string) {
     this.client = client;
@@ -217,7 +219,9 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
     this.writeLine("");
 
     // Poll cloud logs — curated postLog() messages only (same as dashboard)
-    this.pollTimer = setInterval(() => this.pollCloudLogs(), 2000);
+    this.consecutiveErrors = 0;
+    this.currentInterval = 4_000;
+    this.pollTimer = setInterval(() => this.pollCloudLogs(), this.currentInterval);
     this.pollCloudLogs();
   }
 
@@ -255,8 +259,15 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
     }
   }
 
+  private resetInterval(ms: number): void {
+    this.currentInterval = ms;
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = setInterval(() => this.pollCloudLogs(), ms);
+  }
+
   private async pollCloudLogs(): Promise<void> {
     if (this.disposed) return;
+    if (!this.client.isConnected()) return;
     try {
       const raw = await this.client.getCloudLogs(
         this.taskId,
@@ -312,8 +323,17 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
 
         this.lastLogTimestamp = log.createdAt;
       }
+
+      this.consecutiveErrors = 0;
+      if (this.currentInterval !== 4_000) {
+        this.resetInterval(4_000);
+      }
     } catch {
-      /* ignore */
+      this.consecutiveErrors++;
+      if (this.consecutiveErrors >= 3) {
+        const backed = Math.min(this.currentInterval * 2, 30_000);
+        this.resetInterval(backed);
+      }
     }
   }
 }

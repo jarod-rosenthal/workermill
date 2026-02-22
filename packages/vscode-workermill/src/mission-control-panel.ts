@@ -22,6 +22,8 @@ export class MissionControlPanel {
   private disposed = false;
   private lastLogTimestamp: string | null = null;
   private seenLogIds = new Set<string>();
+  private consecutiveErrors = 0;
+  private currentInterval = 5_000;
 
   private constructor(panel: vscode.WebviewPanel, client: AgentClient, task: TaskInfo) {
     this.panel = panel;
@@ -54,8 +56,10 @@ export class MissionControlPanel {
       }
     });
 
-    // Poll for coordination feed + task detail every 3 seconds
-    this.pollTimer = setInterval(() => this.pollUpdates(), 3000);
+    // Poll for coordination feed + task detail
+    this.consecutiveErrors = 0;
+    this.currentInterval = 5_000;
+    this.pollTimer = setInterval(() => this.pollUpdates(), this.currentInterval);
     this.pollUpdates(); // Initial fetch
 
     this.panel.onDidDispose(() => this.dispose());
@@ -82,8 +86,15 @@ export class MissionControlPanel {
     MissionControlPanel.currentPanel = new MissionControlPanel(panel, client, task);
   }
 
+  private resetInterval(ms: number): void {
+    this.currentInterval = ms;
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = setInterval(() => this.pollUpdates(), ms);
+  }
+
   private async pollUpdates(): Promise<void> {
     if (this.disposed) return;
+    if (!this.client.isConnected()) return;
 
     try {
       // Fetch cloud-stored logs (works for all phases: planning + execution)
@@ -113,19 +124,26 @@ export class MissionControlPanel {
           this.lastLogTimestamp = log.createdAt;
         }
       }
-    } catch { /* ignore — cloud may not be reachable */ }
 
-    try {
       // Fetch coordination feed
       const coordData = await this.client.getCoordinationFeed(this.taskId);
       this.panel.webview.postMessage({ type: "coordination", data: coordData });
-    } catch { /* ignore — cloud may not be reachable */ }
 
-    try {
       // Fetch rich task detail (story progress, etc.)
       const detail = await this.client.getTaskDetail(this.taskId);
       this.panel.webview.postMessage({ type: "taskDetail", data: detail });
-    } catch { /* ignore */ }
+
+      this.consecutiveErrors = 0;
+      if (this.currentInterval !== 5_000) {
+        this.resetInterval(5_000);
+      }
+    } catch {
+      this.consecutiveErrors++;
+      if (this.consecutiveErrors >= 3) {
+        const backed = Math.min(this.currentInterval * 2, 30_000);
+        this.resetInterval(backed);
+      }
+    }
   }
 
   dispose(): void {

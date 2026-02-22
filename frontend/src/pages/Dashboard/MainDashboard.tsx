@@ -186,6 +186,7 @@ export default function Dashboard() {
   const prevErrorCountsRef = useRef<Record<string, number>>({});
   // Track previous comms message counts to detect new messages (mirrors error auto-expand pattern)
   const prevCommsCountsRef = useRef<Record<string, number>>({});
+  const mainEventSourceRef = useRef<EventSource | null>(null);
   const logEventSources = useRef<Record<string, EventSource>>({});
   const terminalRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Cursor tracking for SSE resume (using refs to avoid re-renders)
@@ -684,6 +685,7 @@ export default function Dashboard() {
     const eventSource = new EventSource(
       `${API_BASE}/api/control-center/stream?token=${encodeURIComponent(token)}`
     );
+    mainEventSourceRef.current = eventSource;
 
     eventSource.onopen = () => {
       setSseConnected(true);
@@ -794,6 +796,7 @@ export default function Dashboard() {
 
     return () => {
       eventSource.close();
+      mainEventSourceRef.current = null;
     };
   }, [fetchData, fetchOrgSettings]);
 
@@ -1285,6 +1288,28 @@ export default function Dashboard() {
       terminalSeenEventIdsRef.current = {};
     };
   }, []);
+
+  // Pause SSE streams when tab is hidden to avoid wasting DB connections on background tabs
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden) {
+        // Close main SSE stream
+        mainEventSourceRef.current?.close();
+        mainEventSourceRef.current = null;
+        // Close all log SSE streams
+        Object.keys(logEventSources.current).forEach((taskId) => {
+          logEventSources.current[taskId].close();
+        });
+        logEventSources.current = {};
+        setSseConnected(false);
+      } else {
+        // Tab became visible — refetch data and let existing useEffects reconnect SSE
+        fetchData();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [fetchData]);
 
   // Worker offline detection: check if executing tasks haven't received logs for 60s
   // Only applies to "executing" status — planning runs in-process (no worker container)

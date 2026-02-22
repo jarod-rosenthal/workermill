@@ -17,6 +17,8 @@ export class FeedViewProvider implements vscode.WebviewViewProvider {
   private currentTaskId: string | null = null;
   private pollTimer: NodeJS.Timeout | null = null;
   private seenFeedIds = new Set<string>();
+  private consecutiveErrors = 0;
+  private currentInterval = 5_000;
 
   constructor(client: AgentClient) {
     this.client = client;
@@ -64,7 +66,9 @@ export class FeedViewProvider implements vscode.WebviewViewProvider {
     this.view.webview.html = getFeedHtml(task);
 
     // Start polling
-    this.pollTimer = setInterval(() => this.pollUpdates(), 3000);
+    this.consecutiveErrors = 0;
+    this.currentInterval = 5_000;
+    this.pollTimer = setInterval(() => this.pollUpdates(), this.currentInterval);
     this.pollUpdates();
   }
 
@@ -105,18 +109,34 @@ export class FeedViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private resetInterval(ms: number): void {
+    this.currentInterval = ms;
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = setInterval(() => this.pollUpdates(), ms);
+  }
+
   private async pollUpdates(): Promise<void> {
     if (!this.view || !this.currentTaskId) return;
+    if (!this.client.isConnected()) return;
 
     try {
       const coordData = await this.client.getCoordinationFeed(this.currentTaskId);
       this.view.webview.postMessage({ type: "coordination", data: coordData });
-    } catch { /* ignore */ }
 
-    try {
       const detail = await this.client.getTaskDetail(this.currentTaskId);
       this.view.webview.postMessage({ type: "taskDetail", data: detail });
-    } catch { /* ignore */ }
+
+      this.consecutiveErrors = 0;
+      if (this.currentInterval !== 5_000) {
+        this.resetInterval(5_000);
+      }
+    } catch {
+      this.consecutiveErrors++;
+      if (this.consecutiveErrors >= 3) {
+        const backed = Math.min(this.currentInterval * 2, 30_000);
+        this.resetInterval(backed);
+      }
+    }
   }
 }
 

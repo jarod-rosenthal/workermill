@@ -487,7 +487,7 @@ function processLine(line) {
       bufferLog(readable);
     }
   } catch {
-    // Not JSON - plain text output from universal-agent or other sources
+    // Not JSON - plain text output from ai-sdk-executor or other sources
     // Only send to stderr (via bufferLog) to avoid duplicate CloudWatch logs
     // DO NOT console.log() here - that would duplicate with bufferLog's console.error()
     if (line.trim()) {

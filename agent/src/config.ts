@@ -151,7 +151,7 @@ export function loadConfig(): AgentConfig {
   return {
     apiUrl: apiUrl.replace(/\/$/, ""), // Strip trailing slash
     apiKey,
-    agentId: process.env.AGENT_ID || `agent-${hostname()}`,
+    agentId: process.env.AGENT_ID || hostname(),
     maxWorkers: parseInt(process.env.MAX_WORKERS || "4", 10),
     pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "5000", 10),
     heartbeatIntervalMs: parseInt(process.env.HEARTBEAT_INTERVAL_MS || "30000", 10),

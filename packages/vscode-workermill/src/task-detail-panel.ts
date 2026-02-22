@@ -84,12 +84,19 @@ export class TaskDetailPanel {
         if (confirmRetry === "Retry") {
           try {
             await this.client.retryTask(this.taskId);
+            // Immediately update webview — hide retry bar and banner
+            this.panel.webview.postMessage({ type: "retrySuccess" });
             vscode.window.showInformationMessage("Task queued for retry.");
           } catch (err) {
+            // Re-enable the retry button so user can try again
+            this.panel.webview.postMessage({ type: "retryFailed" });
             vscode.window.showErrorMessage(
               `Failed: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
+        } else {
+          // User cancelled the confirmation — re-enable the button
+          this.panel.webview.postMessage({ type: "retryFailed" });
         }
       } else if (msg.type === "blocker-response") {
         try {
@@ -216,6 +223,7 @@ export class TaskDetailPanel {
   .badge-status.planning { background: var(--yellow); }
   .badge-status.completed { background: var(--green); }
   .badge-status.failed { background: var(--red); }
+  .badge-status.cancelled { background: var(--red); }
   .badge-status.escalated { background: var(--orange); }
   .badge-info {
     background: var(--bg-tertiary);
@@ -361,6 +369,7 @@ export class TaskDetailPanel {
     color: var(--green);
   }
   .action-btn.success:hover { background: rgba(78,201,176,0.15); }
+  .action-btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
 
   /* Task details section */
   .detail-section {
@@ -487,11 +496,11 @@ export class TaskDetailPanel {
   </div>
 </div>
 
-<div class="actions-bar" id="actionsBar">
+<div class="actions-bar" id="actionsBar"${task.status === "failed" || task.status === "cancelled" || task.status === "completed" ? ` style="display:none"` : ""}>
   <button class="action-btn danger" onclick="cancelTask()">Cancel Task</button>
 </div>
-<div class="actions-bar" id="retryBar" style="display:none">
-  <button class="action-btn primary" onclick="retryTask()">Retry Task</button>
+<div class="actions-bar" id="retryBar"${task.status === "failed" || task.status === "cancelled" ? ` style="display:flex"` : ` style="display:none"`}>
+  <button class="action-btn primary" id="retryBtn" onclick="retryTask()">Retry Task</button>
 </div>
 
 <div class="detail-section" id="detailSection">
@@ -517,7 +526,7 @@ export class TaskDetailPanel {
   </div>
 </div>
 
-<div class="finished-banner" id="finishedBanner"></div>
+<div class="finished-banner${task.status === "completed" ? " visible completed" : task.status === "failed" ? " visible failed" : task.status === "cancelled" ? " visible cancelled" : ""}" id="finishedBanner">${task.status === "completed" ? "&***REMOVED***x2705; Task completed successfully" : task.status === "failed" ? "&***REMOVED***x274C; Task failed" : task.status === "cancelled" ? "&***REMOVED***x274C; Task cancelled" : ""}</div>
 
 
 <script>
@@ -526,7 +535,11 @@ let currentBlockerId = null;
 let taskStatus = "${task.status}";
 
 function cancelTask() { vscode.postMessage({ type: "cancel-task" }); }
-function retryTask() { vscode.postMessage({ type: "retry-task" }); }
+function retryTask() {
+  var btn = document.getElementById("retryBtn");
+  if (btn) btn.disabled = true;
+  vscode.postMessage({ type: "retry-task" });
+}
 
 function blockerAction(action) {
   if (!currentBlockerId) return;
@@ -556,22 +569,44 @@ function updateStatus(status) {
   badge.textContent = status;
   badge.className = "badge badge-status " + status;
 
-  // Show finished banner
+  // Show finished banner for terminal states
   if (status === "completed" || status === "failed" || status === "cancelled") {
     const banner = document.getElementById("finishedBanner");
     banner.className = "finished-banner visible " + status;
     banner.textContent = status === "completed" ? "\\u2705 Task completed successfully"
-      : status === "cancelled" ? "\\u{1F6AB} Task cancelled"
+      : status === "cancelled" ? "\\u274C Task cancelled"
       : "\\u274C Task failed";
     document.getElementById("actionsBar").style.display = "none";
-    if (status === "failed" || status === "cancelled") {
-      document.getElementById("retryBar").style.display = "flex";
-    }
+    document.getElementById("retryBar").style.display = (status === "failed" || status === "cancelled") ? "flex" : "none";
+    var retryBtn = document.getElementById("retryBtn");
+    if (retryBtn) retryBtn.disabled = false;
+  } else {
+    // Non-terminal: show cancel bar, hide retry bar and banner
+    document.getElementById("actionsBar").style.display = "";
+    document.getElementById("retryBar").style.display = "none";
+    document.getElementById("finishedBanner").className = "finished-banner";
   }
 }
 
 window.addEventListener("message", (event) => {
   const msg = event.data;
+
+  if (msg.type === "retrySuccess") {
+    document.getElementById("retryBar").style.display = "none";
+    document.getElementById("finishedBanner").className = "finished-banner";
+    document.getElementById("finishedBanner").textContent = "";
+    var badge = document.getElementById("statusBadge");
+    badge.textContent = "queued";
+    badge.className = "badge badge-status planning";
+    taskStatus = "queued";
+    return;
+  }
+
+  if (msg.type === "retryFailed") {
+    var retryBtn = document.getElementById("retryBtn");
+    if (retryBtn) retryBtn.disabled = false;
+    return;
+  }
 
   if (msg.type === "coordination") {
     const items = msg.data?.contexts || msg.data || [];

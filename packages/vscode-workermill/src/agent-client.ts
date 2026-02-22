@@ -30,7 +30,7 @@ export interface TaskInfo {
   id: string;
   summary: string;
   description?: string;
-  status: "planning" | "running" | "completed" | "failed";
+  status: "planning" | "running" | "completed" | "failed" | "cancelled";
   persona?: string;
   model?: string;
   repo?: string;

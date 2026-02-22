@@ -8,7 +8,7 @@
  */
 
 import chalk from "chalk";
-import { spawn, execSync, type ChildProcess } from "child_process";
+import { spawn, execSync, execFileSync, type ChildProcess } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -525,7 +525,7 @@ export function stopTask(taskId: string): void {
 
   // Fallback: try stopping a Docker container (may exist if sandbox mode)
   try {
-    execSync(`docker stop wm-${taskId.slice(0, 12)}`, { stdio: "pipe", timeout: 15_000, windowsHide: true });
+    execFileSync("docker", ["stop", `wm-${taskId.slice(0, 12)}`], { stdio: "pipe", timeout: 15_000, windowsHide: true });
   } catch {
     // Container doesn't exist or Docker not available
   }

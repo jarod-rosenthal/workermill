@@ -451,7 +451,6 @@ export async function enterApiKey(
     ignoreFocusOut: true,
     validateInput: (value) => {
       if (!value.trim()) return "API key is required";
-      if (!value.startsWith("usr_") && !value.startsWith("org_")) return "API key should start with usr_ or org_";
       return null;
     },
   });

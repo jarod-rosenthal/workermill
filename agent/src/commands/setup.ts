@@ -33,7 +33,7 @@ const isWindows = process.platform === "win32";
 function commandExists(cmd: string): boolean {
   try {
     const which = isWindows ? "where" : "which";
-    execSync(`${which} ${cmd}`, { stdio: "ignore", timeout: 10000 });
+    execSync(`${which} ${cmd}`, { stdio: "ignore", timeout: 10000, windowsHide: true });
     return true;
   } catch {
     return false;
@@ -45,7 +45,7 @@ function commandExists(cmd: string): boolean {
  */
 function getVersion(cmd: string): string | null {
   try {
-    return execSync(`"${cmd}" --version`, { encoding: "utf-8", timeout: 10000 }).trim();
+    return execSync(`"${cmd}" --version`, { encoding: "utf-8", timeout: 10000, windowsHide: true }).trim();
   } catch {
     return null;
   }
@@ -60,7 +60,7 @@ function findGitBash(): string | null {
   // Check if git is in PATH (Git for Windows adds it)
   if (commandExists("git")) {
     try {
-      const gitPath = execSync("where git", { encoding: "utf-8", timeout: 10000 }).trim().split("\n")[0];
+      const gitPath = execSync("where git", { encoding: "utf-8", timeout: 10000, windowsHide: true }).trim().split("\n")[0];
       // git.exe is at Git/cmd/git.exe, bash.exe is at Git/bin/bash.exe
       const gitDir = join(gitPath, "..", "..", "bin", "bash.exe");
       if (existsSync(gitDir)) return gitDir;
@@ -92,7 +92,7 @@ function installClaudeCli(): boolean {
     try {
       execSync(
         "winget install Anthropic.ClaudeCode --accept-package-agreements --accept-source-agreements",
-        { stdio: "inherit", timeout: 180_000 },
+        { stdio: "inherit", timeout: 180_000, windowsHide: true },
       );
       return true;
     } catch {
@@ -102,7 +102,7 @@ function installClaudeCli(): boolean {
     // macOS: try Homebrew first
     if (process.platform === "darwin") {
       try {
-        execSync("brew install --cask claude-code", { stdio: "inherit", timeout: 180_000 });
+        execSync("brew install --cask claude-code", { stdio: "inherit", timeout: 180_000, windowsHide: true });
         return true;
       } catch { /* fall through */ }
     }
@@ -110,7 +110,7 @@ function installClaudeCli(): boolean {
     try {
       execSync(
         "curl -fsSL https://claude.ai/install.sh | bash",
-        { stdio: "inherit", timeout: 120_000 },
+        { stdio: "inherit", timeout: 120_000, windowsHide: true },
       );
       return true;
     } catch {
@@ -247,6 +247,7 @@ export async function setupCommand(): Promise<void> {
       stdio: "inherit",
       timeout: 300_000,
       env,
+      windowsHide: true,
     });
 
     if (existsSync(credsPath)) {

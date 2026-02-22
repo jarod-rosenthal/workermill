@@ -108,19 +108,23 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     return;
   }
 
-  // Foreground mode — tee stdout/stderr to log file so `workermill-agent logs` works
+  // Foreground mode — tee stdout/stderr to log file so `workermill-agent logs` works.
+  // Skip the tee if stdout is already redirected to a file (e.g. VS Code spawns us
+  // with stdio: ["ignore", logFd, logFd], so stdout IS agent.log — tee would double-write).
   const logFile = getLogFile();
-  const logStream = createWriteStream(logFile, { flags: "a" });
-  const origStdoutWrite = process.stdout.write.bind(process.stdout);
-  const origStderrWrite = process.stderr.write.bind(process.stderr);
-  process.stdout.write = (chunk: string | Uint8Array, ...args: unknown[]): boolean => {
-    logStream.write(chunk);
-    return (origStdoutWrite as Function)(chunk, ...args);
-  };
-  process.stderr.write = (chunk: string | Uint8Array, ...args: unknown[]): boolean => {
-    logStream.write(chunk);
-    return (origStderrWrite as Function)(chunk, ...args);
-  };
+  if (process.stdout.isTTY) {
+    const logStream = createWriteStream(logFile, { flags: "a" });
+    const origStdoutWrite = process.stdout.write.bind(process.stdout);
+    const origStderrWrite = process.stderr.write.bind(process.stderr);
+    process.stdout.write = (chunk: string | Uint8Array, ...args: unknown[]): boolean => {
+      logStream.write(chunk);
+      return (origStdoutWrite as Function)(chunk, ...args);
+    };
+    process.stderr.write = (chunk: string | Uint8Array, ...args: unknown[]): boolean => {
+      logStream.write(chunk);
+      return (origStderrWrite as Function)(chunk, ...args);
+    };
+  }
 
   console.log();
   console.log(chalk.bold.cyan("  WorkerMill Remote Agent"));

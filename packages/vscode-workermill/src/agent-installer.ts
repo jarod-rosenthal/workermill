@@ -685,6 +685,7 @@ export function startAgentProcess(log?: (msg: string) => void): void {
       detached: true,
       stdio: [stdinFd, logFd, logFd],
       env,
+      cwd: wmDir,
       windowsHide: true,
     });
 
@@ -735,7 +736,7 @@ export async function stopAgentProcess(): Promise<boolean> {
   const binary = getAgentBinaryPath();
   if (fs.existsSync(binary)) {
     const stopped = await new Promise<boolean>((resolve) => {
-      const child = spawn(binary, ["stop"], { stdio: "pipe", windowsHide: true });
+      const child = spawn(binary, ["stop"], { stdio: "pipe", cwd: os.homedir(), windowsHide: true });
       child.on("close", (code) => resolve(code === 0));
       child.on("error", () => resolve(false));
       setTimeout(() => {

@@ -1,6 +1,6 @@
 import { execSync } from "child_process";
 import { createWriteStream, chmodSync, renameSync, unlinkSync } from "fs";
-import { tmpdir, platform, arch } from "os";
+import { tmpdir, platform, arch, homedir } from "os";
 import { join } from "path";
 import chalk from "chalk";
 import { AGENT_VERSION } from "./version.js";
@@ -130,6 +130,7 @@ export function restartAgent(): never {
   const child = spawn(process.execPath, process.argv.slice(1), {
     stdio: "inherit",
     detached: true,
+    cwd: join(homedir(), ".workermill"),
     windowsHide: true,
   });
 

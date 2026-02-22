@@ -236,6 +236,27 @@ export class CoordinationClient {
   }
 
   /**
+   * Get only blocker-related context messages for this parent task.
+   * Much lighter than getAllContexts() — typically returns 0-5 rows.
+   * Uses request coalescing - concurrent calls share a single API request.
+   */
+  async getBlockerContexts(): Promise<ContextMessage[]> {
+    return this.coalescer.execute(
+      `getBlockerContexts:${this.parentTaskId}`,
+      async () => {
+        const response = await withRetry(
+          () =>
+            this.api.get<{ contexts: ContextMessage[] }>(
+              `/api/coordination/blockers/${this.parentTaskId}`
+            ),
+          { logger: (msg) => console.log(msg) }
+        );
+        return response.data.contexts;
+      }
+    );
+  }
+
+  /**
    * Post a context message to the coordination feed.
    * Invalidates relevant caches after posting.
    */

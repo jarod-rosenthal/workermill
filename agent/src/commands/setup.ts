@@ -11,7 +11,7 @@
 import chalk from "chalk";
 import ora from "ora";
 import inquirer from "inquirer";
-import { execSync, spawnSync } from "child_process";
+import { execSync, execFileSync, spawnSync } from "child_process";
 import { existsSync } from "fs";
 import { hostname, homedir, totalmem, cpus } from "os";
 import { join } from "path";
@@ -32,8 +32,9 @@ const isWindows = process.platform === "win32";
  */
 function commandExists(cmd: string): boolean {
   try {
-    const which = isWindows ? "where" : "which";
-    execSync(`${which} ${cmd}`, { stdio: "ignore", timeout: 10000, windowsHide: true });
+    // Use execFileSync to avoid cmd.exe shell flash on Windows
+    const which = isWindows ? "where.exe" : "which";
+    execFileSync(which, [cmd], { stdio: "ignore", timeout: 10000, windowsHide: true });
     return true;
   } catch {
     return false;
@@ -45,7 +46,11 @@ function commandExists(cmd: string): boolean {
  */
 function getVersion(cmd: string): string | null {
   try {
-    return execSync(`"${cmd}" --version`, { encoding: "utf-8", timeout: 10000, windowsHide: true }).trim();
+    // .cmd files (npm global) need shell — .exe files use execFileSync to avoid terminal flash
+    if (cmd.endsWith(".cmd")) {
+      return execSync(`"${cmd}" --version`, { encoding: "utf-8", timeout: 10000, windowsHide: true }).trim();
+    }
+    return execFileSync(cmd, ["--version"], { encoding: "utf-8", timeout: 10000, windowsHide: true }).trim();
   } catch {
     return null;
   }
@@ -60,7 +65,7 @@ function findGitBash(): string | null {
   // Check if git is in PATH (Git for Windows adds it)
   if (commandExists("git")) {
     try {
-      const gitPath = execSync("where git", { encoding: "utf-8", timeout: 10000, windowsHide: true }).trim().split("\n")[0];
+      const gitPath = execFileSync("where.exe", ["git.exe"], { encoding: "utf-8", timeout: 10000, windowsHide: true }).trim().split("\n")[0];
       // git.exe is at Git/cmd/git.exe, bash.exe is at Git/bin/bash.exe
       const gitDir = join(gitPath, "..", "..", "bin", "bash.exe");
       if (existsSync(gitDir)) return gitDir;

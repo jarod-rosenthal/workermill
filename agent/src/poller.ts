@@ -167,6 +167,11 @@ async function handlePlanningTask(
   },
   config: AgentConfig,
 ): Promise<void> {
+  // Guard against concurrent pollOnce() calls dispatching the same task twice.
+  // Add to planningInProgress BEFORE the async claim call so overlapping polls
+  // see it immediately. Remove if the claim fails or is rejected.
+  planningInProgress.add(task.id);
+
   // Claim the task (also returns org credentials for provider API keys)
   let credentials: ClaimCredentials | undefined;
   let claimedTask: { retryCount?: number; executionPlanV2?: unknown } | undefined;
@@ -177,11 +182,13 @@ async function handlePlanningTask(
     });
 
     if (!claimResponse.data.claimed) {
+      planningInProgress.delete(task.id);
       return; // Another agent or cloud orchestrator claimed it
     }
     credentials = claimResponse.data.credentials;
     claimedTask = claimResponse.data.task;
   } catch {
+    planningInProgress.delete(task.id);
     return;
   }
 
@@ -198,7 +205,6 @@ async function handlePlanningTask(
     console.log();
     console.log(`${ts()} ${chalk.magenta("◆ RESUME")} ${taskLabel} ${task.summary.substring(0, 60)}`);
     console.log(`${ts()} ${taskLabel} Retry ***REMOVED***${claimedTask!.retryCount} with existing plan — skipping planning`);
-    planningInProgress.add(task.id);
 
     // Tell the API to resume with the existing plan (planning → queued)
     try {
@@ -218,7 +224,6 @@ async function handlePlanningTask(
 
   console.log();
   console.log(`${ts()} ${chalk.magenta("◆ PLANNING")} ${taskLabel} ${task.summary.substring(0, 60)}`);
-  planningInProgress.add(task.id);
   agentEvents.emit("task:planning", { id: task.id, summary: task.summary, description: task.description });
 
   // Run planning asynchronously (don't block the poll loop)

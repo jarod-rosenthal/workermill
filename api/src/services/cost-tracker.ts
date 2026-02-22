@@ -49,18 +49,58 @@ export class CostTracker {
       });
     }
 
-    // Idempotency: skip org update if already reported
+    // Idempotency: skip org update if already reported with non-zero usage.
+    // If usageReportedAt is set but cost/tokens were zero (premature call before
+    // token finalization), allow re-reporting so real costs aren't lost.
     if (task.usageReportedAt) {
-      logger.info("Cost already reported for task, skipping org update", {
-        taskId,
-        usageReportedAt: task.usageReportedAt,
-        existingCost: task.estimatedCostUsd,
-      });
+      const previousCostWasZero =
+        (Number(task.estimatedCostUsd) || 0) === 0 &&
+        (task.inputTokens || 0) === 0 &&
+        (task.outputTokens || 0) === 0;
+
+      if (!previousCostWasZero) {
+        logger.info("Cost already reported for task, skipping org update", {
+          taskId,
+          usageReportedAt: task.usageReportedAt,
+          existingCost: task.estimatedCostUsd,
+        });
+        const org = await orgRepo.findOne({ where: { id: task.orgId } });
+        return {
+          taskCost: Number(task.estimatedCostUsd) || taskCost,
+          newCumulativeCost: Number(org?.cumulativeCostUsd || 0),
+          warningFlags,
+        };
+      }
+
+      // Previous report recorded $0 with 0 tokens — allow re-reporting
+      logger.info(
+        "Previous cost report was $0 with 0 tokens, allowing re-report",
+        {
+          taskId,
+          usageReportedAt: task.usageReportedAt,
+          newCost: taskCost,
+          inputTokens: task.inputTokens,
+          outputTokens: task.outputTokens,
+        },
+      );
+    }
+
+    // If current cost is $0 and tokens are 0, don't mark as reported yet —
+    // wait for token finalization so the real cost can be recorded later.
+    if (
+      taskCost === 0 &&
+      (task.inputTokens || 0) === 0 &&
+      (task.outputTokens || 0) === 0
+    ) {
+      logger.info(
+        "Skipping usageReportedAt — $0 cost with 0 tokens, waiting for finalization",
+        { taskId },
+      );
       const org = await orgRepo.findOne({ where: { id: task.orgId } });
       return {
-        taskCost: Number(task.estimatedCostUsd) || taskCost,
+        taskCost: 0,
         newCumulativeCost: Number(org?.cumulativeCostUsd || 0),
-        warningFlags,
+        warningFlags: [...warningFlags, "ZERO_COST_DEFERRED"],
       };
     }
 

@@ -23,7 +23,6 @@ const tiers: PricingTier[] = [
       "For developers and small teams getting started with autonomous AI coding",
     highlight_line: "90-day free trial — no credit card required",
     icon: <Sparkles className="w-5 h-5" />,
-    badge: "Coming Soon",
     features: [
       "1 concurrent workload",
       "Up to 3 experts per task",
@@ -38,8 +37,7 @@ const tiers: PricingTier[] = [
       "14-day log retention",
       "Email support",
     ],
-    cta: "Coming Soon",
-    disabled: true,
+    cta: "Start Free Trial",
   },
   {
     name: "Max",

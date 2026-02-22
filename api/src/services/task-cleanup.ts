@@ -670,26 +670,57 @@ async function releaseStaleAgentTasks(): Promise<void> {
       });
 
       if (task.status === "executing") {
-        // Fail executing tasks — can't safely resume mid-execution
-        const errorMessage = `Remote agent lost (no heartbeat for ${minutesSinceHeartbeat} minutes). Task was mid-execution and cannot be safely resumed.`;
-        await taskRepo
-          .createQueryBuilder()
-          .update(WorkerTask)
-          .set({
-            claimedByAgent: null as unknown as string,
-            agentHeartbeatAt: null as unknown as Date,
-            status: "failed" as WorkerTask["status"],
-            errorMessage,
-            completedAt: new Date(),
-          })
-          .where("id = :id AND claimed_by_agent = :agent", {
-            id: task.id,
-            agent: task.claimedByAgent,
-          })
-          .execute();
+        // Requeue executing tasks if under retry limit, otherwise fail permanently
+        const MAX_AGENT_RETRIES = 3;
+        const currentRetries = task.retryCount ?? 0;
 
-        await notifyTaskFailed(task);
-        await logTaskEvent(task.id, "error", errorMessage, { severity: "error" });
+        if (currentRetries < MAX_AGENT_RETRIES) {
+          // Requeue for retry — clear agent claim, bump retry counter, reset to queued
+          const retryMsg = `Remote agent lost (no heartbeat for ${minutesSinceHeartbeat} minutes). Re-queuing task (retry ${currentRetries + 1}/${MAX_AGENT_RETRIES}).`;
+          await taskRepo
+            .createQueryBuilder()
+            .update(WorkerTask)
+            .set({
+              claimedByAgent: null as unknown as string,
+              agentHeartbeatAt: null as unknown as Date,
+              status: "queued" as WorkerTask["status"],
+              retryCount: currentRetries + 1,
+            })
+            .where("id = :id AND claimed_by_agent = :agent", {
+              id: task.id,
+              agent: task.claimedByAgent,
+            })
+            .execute();
+
+          await logTaskEvent(task.id, "system", retryMsg, { severity: "warning" });
+          logger.warn("Re-queued executing task from dead agent", {
+            taskId: task.id,
+            retryCount: currentRetries + 1,
+            maxRetries: MAX_AGENT_RETRIES,
+            minutesSinceHeartbeat,
+          });
+        } else {
+          // Max retries exceeded — fail permanently
+          const errorMessage = `Remote agent lost (no heartbeat for ${minutesSinceHeartbeat} minutes). Task failed after ${MAX_AGENT_RETRIES} retries.`;
+          await taskRepo
+            .createQueryBuilder()
+            .update(WorkerTask)
+            .set({
+              claimedByAgent: null as unknown as string,
+              agentHeartbeatAt: null as unknown as Date,
+              status: "failed" as WorkerTask["status"],
+              errorMessage,
+              completedAt: new Date(),
+            })
+            .where("id = :id AND claimed_by_agent = :agent", {
+              id: task.id,
+              agent: task.claimedByAgent,
+            })
+            .execute();
+
+          await notifyTaskFailed(task);
+          await logTaskEvent(task.id, "error", errorMessage, { severity: "error" });
+        }
       } else {
         // Release pre-execution tasks back to their appropriate state
         const resetStatus = task.executionPlanV2 ? "queued" : "planning";

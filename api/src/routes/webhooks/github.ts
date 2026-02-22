@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { AppDataSource } from "../../db/connection.js";
-import { WorkerTask, Organization } from "../../models/index.js";
+import { WorkerTask } from "../../models/index.js";
 import {
   verifyWebhookBySlug,
   getSignatureFromHeaders,
@@ -13,311 +13,33 @@ import {
   header,
   validateRequest,
 } from "../../middleware/validation.js";
-import { isDuplicateWebhook, verifyGitHubSignature } from "./helpers.js";
+import { isDuplicateWebhook } from "./helpers.js";
 
 const router = Router();
 
 /**
  * POST /api/webhooks/github
- * Handle GitHub webhook events (PR approvals)
+ * REMOVED: Legacy GitHub webhook endpoint had an org routing vulnerability.
+ * It looked up the org by finding the first matching task, which meant tasks
+ * from multiple orgs referencing the same PR number could cause the wrong
+ * org's webhook secret to be used for signature verification.
  *
- * GitHub webhooks cannot send custom headers, so we find the task
- * by PR number directly (matching Jira webhook pattern).
- * Signature verification is done per-org if webhook secret is configured.
+ * Use the org-scoped endpoint instead: POST /api/webhooks/:orgSlug/github
  */
 router.post(
   "/github",
-  // Validate GitHub webhook headers
-  header("x-github-event")
-    .optional()
-    .isString()
-    .withMessage("x-github-event must be a string"),
-  // Validate payload structure
-  body("action")
-    .optional()
-    .isString()
-    .withMessage("action must be a string"),
-  body("review")
-    .optional()
-    .isObject()
-    .withMessage("review must be an object"),
-  body("pull_request")
-    .optional()
-    .isObject()
-    .withMessage("pull_request must be an object"),
-  validateRequest,
-  async (req: Request, res: Response) => {
-    try {
-    const signature = req.headers["x-hub-signature-256"] as string;
-    const event = req.headers["x-github-event"] as string;
-    const deliveryId = req.headers["x-github-delivery"] as string;
-    const rawBody = JSON.stringify(req.body);
-
-    logger.info("GitHub webhook received", { event, hasSignature: !!signature, deliveryId });
-
-    // Handle pull_request events (PR merged) - for unblocking dependent tasks
-    if (event === "pull_request") {
-      const { action, pull_request } = req.body;
-
-      // Only process closed PRs that were merged
-      if (action !== "closed" || !pull_request?.merged) {
-        res.json({ status: "ignored", reason: "Not a merged PR" });
-        return;
-      }
-
-      const prUrl = pull_request.html_url;
-      const prNumber = pull_request.number;
-      const repoFullName = pull_request.base?.repo?.full_name;
-      const mergedBy = pull_request.merged_by?.login;
-
-      logger.info("GitHub PR merged", { prNumber, prUrl, repoFullName, mergedBy });
-
-      // Find any tasks that have this PR URL and may have dependents waiting
-      const taskRepo = AppDataSource.getRepository(WorkerTask);
-      const orgRepo = AppDataSource.getRepository(Organization);
-
-      // Look for tasks with this PR URL that are in a completed-like state
-      const tasksWithPr = await taskRepo
-        .createQueryBuilder("task")
-        .where("task.prUrl = :prUrl", { prUrl })
-        .getMany();
-
-      if (tasksWithPr.length === 0) {
-        logger.info("No matching tasks for merged PR", { prNumber, prUrl });
-        res.json({ status: "ignored", reason: "No matching tasks for this PR" });
-        return;
-      }
-
-      // Verify signature - secret configuration is REQUIRED for security
-      // Get the first task's org for signature verification
-      const firstTask = tasksWithPr[0];
-      const org = await orgRepo.findOne({ where: { id: firstTask.orgId } });
-
-      if (!org) {
-        logger.error("Organization not found for task", { taskId: firstTask.id });
-        res.status(500).json({ error: "Organization not found" });
-        return;
-      }
-      if (!org.githubWebhookSecret) {
-        logger.error("GitHub webhook secret not configured", { orgId: org.id });
-        res.status(500).json({ error: "Webhook not configured" });
-        return;
-      }
-      if (!verifyGitHubSignature(rawBody, signature, org.githubWebhookSecret)) {
-        logger.warn("Invalid GitHub webhook signature for PR merge", { orgId: org.id, prNumber });
-        res.status(401).json({ error: "Invalid signature" });
-        return;
-      }
-
-      // Idempotency check - prevent duplicate processing
-      if (await isDuplicateWebhook(deliveryId, "github", org.id, `pull_request.${action}`)) {
-        res.json({ status: "duplicate", reason: "Webhook already processed" });
-        return;
-      }
-
-      // Check and unblock dependent tasks for each task with this PR
-      let unblocked = 0;
-      for (const task of tasksWithPr) {
-        try {
-          await checkAndUnblockDependentTasks(task);
-          unblocked++;
-          logger.info("Checked dependent tasks for merged PR", {
-            taskId: task.id,
-            prUrl,
-            jiraIssueKey: task.jiraIssueKey,
-          });
-        } catch (error) {
-          logger.warn("Failed to unblock dependent tasks for merged PR", {
-            taskId: task.id,
-            prUrl,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-
-      res.json({
-        status: "processed",
-        message: `Checked ${tasksWithPr.length} task(s) for dependent unblocking`,
-        prUrl,
-        prNumber,
-        tasksChecked: tasksWithPr.map(t => t.id),
-      });
-      return;
-    }
-
-    // Only process pull_request_review events (for PR approvals)
-    if (event !== "pull_request_review") {
-      res.json({ status: "ignored", reason: "Not a PR review or merged PR event" });
-      return;
-    }
-
-    const { action, review, pull_request } = req.body;
-
-    // Only process approved reviews
-    if (action !== "submitted" || review?.state !== "approved") {
-      res.json({ status: "ignored", reason: "Not an approval" });
-      return;
-    }
-
-    const prNumber = pull_request?.number;
-    const repoFullName = pull_request?.base?.repo?.full_name;
-    const approvedBy = review?.user?.login;
-
-    if (!prNumber) {
-      res.json({ status: "ignored", reason: "No PR number" });
-      return;
-    }
-
-    logger.info("GitHub PR approved", { prNumber, repoFullName, approvedBy });
-
-    // Find task by PR number across all orgs (we'll verify signature per-org if secret exists)
-    const taskRepo = AppDataSource.getRepository(WorkerTask);
-    const orgRepo = AppDataSource.getRepository(Organization);
-
-    // Look for task in any status that could receive approval
-    // pr_created: waiting for GitHub review
-    // review_requested: waiting for review (legacy status)
-    // pr_approved: inline Tech Lead already approved, waiting for GitHub human approval to trigger deployment
-    const task = await taskRepo
-      .createQueryBuilder("task")
-      .where("task.githubPrNumber = :prNumber", { prNumber })
-      .andWhere("task.status IN (:...statuses)", { statuses: ["pr_created", "review_requested", "pr_approved"] })
-      .getOne();
-
-    if (!task) {
-      logger.info("No matching task for PR", { prNumber });
-      res.json({ status: "ignored", reason: "No matching task for this PR" });
-      return;
-    }
-
-    // Get the org to verify signature if secret is configured
-    const org = await orgRepo.findOne({ where: { id: task.orgId } });
-
-    if (!org) {
-      logger.error("Organization not found for task", { taskId: task.id, orgId: task.orgId });
-      res.status(500).json({ error: "Organization not found" });
-      return;
-    }
-
-    // Verify webhook signature - secret configuration is REQUIRED for security
-    if (!org.githubWebhookSecret) {
-      logger.error("GitHub webhook secret not configured", { orgId: org.id });
-      res.status(500).json({ error: "Webhook not configured" });
-      return;
-    }
-    if (!verifyGitHubSignature(rawBody, signature, org.githubWebhookSecret)) {
-      logger.warn("Invalid GitHub webhook signature", { orgId: org.id, prNumber });
-      res.status(401).json({ error: "Invalid signature" });
-      return;
-    }
-
-    // Idempotency check - prevent duplicate processing
-    if (await isDuplicateWebhook(deliveryId, "github", org.id, `pull_request_review.${action}`)) {
-      res.json({ status: "duplicate", reason: "Webhook already processed" });
-      return;
-    }
-
-    // Check if task already went through inline review (Epic + review label)
-    // If task is already pr_approved, inline Tech Lead review completed - now trigger deployment
-    const alreadyInlineReviewed = task.status === "pr_approved";
-
-    // Check if task needs manager review (review label present) AND hasn't been inline reviewed yet
-    if (task.skipManagerReview === false && !alreadyInlineReviewed) {
-      // Task has 'review' label but inline review hasn't run yet
-      // Atomic update — guard against concurrent webhook deliveries
-      const approveResult = await taskRepo
-        .createQueryBuilder()
-        .update(WorkerTask)
-        .set({
-          status: "pr_approved",
-          githubApprovedBy: approvedBy || null,
-        } as Record<string, unknown>)
-        .where("id = :id AND status IN (:...statuses)", {
-          id: task.id,
-          statuses: ["pr_created", "review_requested"],
-        })
-        .execute();
-
-      if (approveResult.affected === 0) {
-        res.json({ status: "ignored", reason: "Task status already changed" });
-        return;
-      }
-
-      // Sync KbCard column to "Approved"
-      syncKbCardColumn(task.id, "pr_approved").catch((err) => {
-        logger.warn("Failed to sync KbCard column from GitHub webhook", { taskId: task.id, error: err instanceof Error ? err.message : String(err) });
-      });
-
-      logger.info("PR approved, awaiting manager review", {
-        taskId: task.id,
-        prNumber,
-        approvedBy,
-        jiraIssueKey: task.jiraIssueKey,
-        skipManagerReview: task.skipManagerReview,
-      });
-
-      res.json({
-        status: "processed",
-        taskId: task.id,
-        newStatus: "pr_approved",
-        message: "PR approved, awaiting manager review before deployment",
-      });
-      return;
-    }
-
-    // If task was already pr_approved (inline review completed), log that we're proceeding to deployment
-    if (alreadyInlineReviewed) {
-      logger.info("Inline review already completed, GitHub approval triggers deployment", {
-        taskId: task.id,
-        prNumber,
-        approvedBy,
-        jiraIssueKey: task.jiraIssueKey,
-      });
-    }
-
-    // No review label - re-queue for deployment directly
-    // Atomic update — guard against concurrent webhook deliveries
-    const requeueResult = await taskRepo
-      .createQueryBuilder()
-      .update(WorkerTask)
-      .set({
-        status: "queued",
-        githubApprovedBy: approvedBy || null,
-        taskNotes: `DEPLOYMENT_RUN: PR #${prNumber} approved by ${approvedBy}. Deploy and merge.`,
-        completedAt: null,
-        ecsTaskArn: null,
-        ecsTaskId: null,
-        startedAt: null,
-      } as Record<string, unknown>)
-      .where("id = :id AND status IN (:...statuses)", {
-        id: task.id,
-        statuses: ["pr_created", "review_requested", "pr_approved"],
-      })
-      .execute();
-
-    if (requeueResult.affected === 0) {
-      res.json({ status: "ignored", reason: "Task status already changed" });
-      return;
-    }
-
-    logger.info("PR approved, task re-queued for deployment run", {
-      taskId: task.id,
-      prNumber,
-      approvedBy,
-      jiraIssueKey: task.jiraIssueKey,
+  async (_req: Request, res: Response) => {
+    logger.warn(
+      "Legacy /github webhook endpoint called - endpoint removed for security (org routing vulnerability)",
+    );
+    res.status(410).json({
+      error:
+        "This endpoint has been removed due to an org routing security vulnerability",
+      migration:
+        "Update your GitHub webhook URL to: /api/webhooks/{your-org-slug}/github",
+      docs: "https://workermill.com/docs/integrations",
     });
-
-    res.json({
-      status: "processed",
-      taskId: task.id,
-      newStatus: "queued",
-      message: "Task re-queued for deployment run",
-    });
-    } catch (error) {
-      logger.error("Error processing GitHub webhook", { error });
-      res.status(500).json({ error: "Failed to process webhook" });
-    }
-  }
+  },
 );
 
 /**

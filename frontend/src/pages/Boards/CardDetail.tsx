@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   X,
@@ -203,14 +203,67 @@ export default function CardDetail({
     boardsApi.getOrgMembers().then(setOrgMembers).catch(() => {});
   }, []);
 
-  // Close on Escape
+  // Close pickers on Escape (only close modal if no picker is open)
+  const closeAllPickers = useCallback(() => {
+    const wasOpen =
+      showLabelPicker || showPriorityPicker || showCoverPicker || showAssigneePicker;
+    setShowLabelPicker(false);
+    setShowPriorityPicker(false);
+    setShowCoverPicker(false);
+    setShowAssigneePicker(false);
+    return wasOpen;
+  }, [showLabelPicker, showPriorityPicker, showCoverPicker, showAssigneePicker]);
+
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (!closeAllPickers()) onClose();
+      }
     };
     document.addEventListener("keydown", handleEsc);
     return () => document.removeEventListener("keydown", handleEsc);
-  }, [onClose]);
+  }, [onClose, closeAllPickers]);
+
+  // Close pickers on click outside
+  const labelPickerRef = useRef<HTMLDivElement>(null);
+  const priorityPickerRef = useRef<HTMLDivElement>(null);
+  const coverPickerRef = useRef<HTMLDivElement>(null);
+  const assigneePickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        showLabelPicker &&
+        labelPickerRef.current &&
+        !labelPickerRef.current.contains(e.target as Node)
+      ) {
+        setShowLabelPicker(false);
+      }
+      if (
+        showPriorityPicker &&
+        priorityPickerRef.current &&
+        !priorityPickerRef.current.contains(e.target as Node)
+      ) {
+        setShowPriorityPicker(false);
+      }
+      if (
+        showCoverPicker &&
+        coverPickerRef.current &&
+        !coverPickerRef.current.contains(e.target as Node)
+      ) {
+        setShowCoverPicker(false);
+      }
+      if (
+        showAssigneePicker &&
+        assigneePickerRef.current &&
+        !assigneePickerRef.current.contains(e.target as Node)
+      ) {
+        setShowAssigneePicker(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showLabelPicker, showPriorityPicker, showCoverPicker, showAssigneePicker]);
 
   const handleTitleSave = async () => {
     setIsEditingTitle(false);
@@ -732,7 +785,7 @@ export default function CardDetail({
             {/* Sidebar */}
             <div className="space-y-3">
               {/* Priority */}
-              <div className="relative">
+              <div className="relative" ref={priorityPickerRef}
                 <button
                   onClick={() => setShowPriorityPicker(!showPriorityPicker)}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors text-sm"
@@ -781,7 +834,7 @@ export default function CardDetail({
               </div>
 
               {/* Labels */}
-              <div className="relative">
+              <div className="relative" ref={labelPickerRef}
                 <button
                   onClick={() => {
                     setShowLabelPicker(!showLabelPicker);
@@ -892,7 +945,7 @@ export default function CardDetail({
               </div>
 
               {/* Cover color */}
-              <div className="relative">
+              <div className="relative" ref={coverPickerRef}
                 <button
                   onClick={() => setShowCoverPicker(!showCoverPicker)}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors text-sm"
@@ -954,7 +1007,7 @@ export default function CardDetail({
               </div>
 
               {/* Assignee (clickable dropdown) */}
-              <div className="relative">
+              <div className="relative" ref={assigneePickerRef}
                 <label className="block text-xs text-muted-foreground mb-1">
                   <User className="w-3.5 h-3.5 inline mr-1" />
                   Assignee

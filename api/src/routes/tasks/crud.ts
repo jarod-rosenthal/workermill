@@ -18,6 +18,7 @@ import { normalizeRepoWithOwner } from "./helpers.js";
 import { resetCancelledTask } from "./lifecycle.js";
 import { runCardAsWorkerTask } from "../boards.js";
 import { taskCreationLimiter } from "../../middleware/rate-limit.js";
+import { canCreateTask } from "../../services/billing.js";
 
 const router = Router();
 
@@ -174,6 +175,13 @@ router.post(
       await resetCancelledTask(existingTask);
       syncKbCardColumn(existingTask.id, (existingTask.status as string) === "planning" ? "planning" : "claimed").catch(() => {});
       res.status(200).json(existingTask);
+      return;
+    }
+
+    // Check billing/trial status before creating task
+    const billingCheck = await canCreateTask(org);
+    if (!billingCheck.allowed) {
+      res.status(402).json({ error: billingCheck.reason });
       return;
     }
 

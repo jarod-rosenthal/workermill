@@ -77,6 +77,10 @@ export class User {
   @Column({ name: "tos_version", type: "varchar", length: 20, nullable: true })
   tosVersion: string | null;
 
+  // MFA backup recovery codes (hashed with bcrypt)
+  @Column({ name: "mfa_backup_codes", type: "jsonb", default: () => "'[]'" })
+  mfaBackupCodes: string[];
+
   // Support admin flag - grants access to support admin dashboard
   @Column({ name: "support_admin", type: "boolean", default: false })
   supportAdmin: boolean;

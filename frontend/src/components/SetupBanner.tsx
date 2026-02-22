@@ -90,7 +90,7 @@ export function SetupBanner() {
       // Max tier: SCM + AI Provider required
       // Issue tracker is always optional (internal board is the fallback)
       let completedSteps = 0;
-      let totalSteps = isProPlan ? 1 : 2;
+      const totalSteps = isProPlan ? 1 : 2;
       if (scmConfigured) completedSteps++;
       if (!isProPlan && aiProviderConfigured) completedSteps++;
 

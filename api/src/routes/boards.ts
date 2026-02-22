@@ -28,6 +28,7 @@ import { RemoteAgent } from "../models/RemoteAgent.js";
 import type { WorkerPersona } from "../models/WorkerTask.js";
 import { syncKbCardColumn } from "../services/task-monitor.js";
 import { resetCancelledTask } from "./tasks/lifecycle.js";
+import { canCreateTask } from "../services/billing.js";
 import { authenticateUser } from "../middleware/auth.js";
 import { requireCurrentTos } from "../middleware/tos.js";
 import { logger } from "../utils/logger.js";
@@ -156,6 +157,12 @@ export async function runCardAsWorkerTask(
 
   const org = await orgRepo.findOne({ where: { id: orgId } });
   if (!org) throw new Error("Organization not found");
+
+  // Check billing/trial status before creating task
+  const billingCheck = await canCreateTask(org);
+  if (!billingCheck.allowed) {
+    throw new Error(billingCheck.reason || "Billing check failed");
+  }
 
   // Parse card labels for workflow flags (same logic as projects.ts assign)
   const labelNames = (card.cardLabels || []).map((cl) => cl.label?.name?.toLowerCase() || "");

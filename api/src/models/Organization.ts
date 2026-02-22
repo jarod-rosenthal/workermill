@@ -416,6 +416,13 @@ export class Organization {
     frequency?: string;
   };
 
+  // Pro Plan Trial
+  @Column({ name: "trial_expires_at", type: "timestamp", nullable: true })
+  trialExpiresAt: Date | null;
+
+  @Column({ name: "trial_reminders_sent", type: "jsonb", default: {} })
+  trialRemindersSent: Record<string, boolean>;
+
   // Credit-Based Billing
   @Column({ name: "credit_balance_cents", type: "int", default: 0 })
   creditBalanceCents: number;

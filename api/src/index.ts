@@ -86,6 +86,7 @@ import {
 import { startOrchestrator, stopOrchestrator } from "./services/orchestrator.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { seedDirectivesIfMissing } from "./db/seed-directives-startup.js";
+import { initializeEncryption } from "./utils/encryption.js";
 
 const app = express();
 
@@ -338,6 +339,9 @@ async function start() {
   try {
     // Validate environment variables (fails fast in production if missing)
     validateEnvironment();
+
+    // Initialize encryption for sensitive fields at rest
+    initializeEncryption();
 
     // Initialize database connection
     await AppDataSource.initialize();

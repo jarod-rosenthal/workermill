@@ -582,7 +582,7 @@ async function cloneTargetRepo(
       `${ts()} ${taskLabel} ${chalk.dim(`Cloning repo for planner: ${safeUrl}`)}`,
     );
     execFileSync("git", ["clone", "--depth", "1", "--single-branch", cloneUrl, tmpDir], {
-      stdio: ["ignore", "ignore", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       timeout: 60_000,
       windowsHide: true,
     });

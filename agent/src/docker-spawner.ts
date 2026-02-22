@@ -147,7 +147,7 @@ export async function ensureImage(config: AgentConfig): Promise<string> {
 
   // Check if versioned image exists locally
   try {
-    execSync(`docker image inspect ${versionTag}`, { stdio: "ignore", windowsHide: true });
+    execSync(`docker image inspect ${versionTag}`, { stdio: "pipe", windowsHide: true });
     return versionTag;
   } catch {
     // Not found locally
@@ -164,7 +164,7 @@ export async function ensureImage(config: AgentConfig): Promise<string> {
 
   // Check if :latest exists locally
   try {
-    execSync(`docker image inspect ${latestTag}`, { stdio: "ignore", windowsHide: true });
+    execSync(`docker image inspect ${latestTag}`, { stdio: "pipe", windowsHide: true });
     console.log(`${ts()} ${chalk.yellow("⚠")} Versioned image not found, using ${latestTag}`);
     return latestTag;
   } catch {
@@ -257,7 +257,7 @@ export async function spawnDockerWorker(
 
   // Pre-flight: verify Docker is running
   try {
-    execSync("docker version", { stdio: "ignore", timeout: 10000, windowsHide: true });
+    execSync("docker version", { stdio: "pipe", timeout: 10000, windowsHide: true });
   } catch {
     console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Docker is not running`);
     throw new Error("Docker is not running. Start Docker and try again.");
@@ -277,7 +277,7 @@ export async function spawnDockerWorker(
 
   // Clean dead container with same name
   try {
-    execSync(`docker rm -f ${containerName}`, { stdio: "ignore", windowsHide: true });
+    execSync(`docker rm -f ${containerName}`, { stdio: "pipe", windowsHide: true });
   } catch {
     // Container doesn't exist — fine
   }
@@ -490,11 +490,13 @@ export async function spawnDockerWorker(
   );
 
   // Spawn container
+  const dockerStdinFd = fs.openSync(os.devNull, "r");
   const proc = spawn("docker", dockerArgs, {
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [dockerStdinFd, "pipe", "pipe"],
     detached: false,
     windowsHide: true,
   });
+  fs.closeSync(dockerStdinFd);
 
   if (!proc.pid) {
     console.error(
@@ -644,7 +646,7 @@ export async function spawnDockerWorker(
       activeProcesses.delete(task.id);
       // Remove dead container
       try {
-        execSync(`docker rm -f ${containerName}`, { stdio: "ignore", windowsHide: true });
+        execSync(`docker rm -f ${containerName}`, { stdio: "pipe", windowsHide: true });
       } catch {
         /* best effort cleanup */
       }
@@ -668,7 +670,7 @@ export function stopDockerTask(taskId: string): boolean {
   const containerName = `wm-${taskId.slice(0, 8)}`;
   try {
     execSync(`docker stop ${containerName}`, {
-      stdio: "ignore",
+      stdio: "pipe",
       timeout: 15_000,
       windowsHide: true,
     });
@@ -685,7 +687,7 @@ export function stopAllDocker(): void {
   try {
     execSync(
       'docker ps -q --filter "name=wm-" | xargs -r docker stop',
-      { stdio: "ignore", timeout: 30_000, windowsHide: true },
+      { stdio: "pipe", timeout: 30_000, windowsHide: true },
     );
   } catch {
     // No containers to stop

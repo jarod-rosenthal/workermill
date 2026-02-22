@@ -104,7 +104,7 @@ export async function selfUpdate(): Promise<boolean> {
     } catch {
       // Fallback: on Windows, can't rename running exe
       try {
-        execSync(`copy /Y "${tmpFile}" "${selfPath}"`, { stdio: "ignore", windowsHide: true });
+        execSync(`copy /Y "${tmpFile}" "${selfPath}"`, { stdio: "pipe", windowsHide: true });
       } catch {
         console.error(chalk.red("  Could not replace binary. Download manually from:"));
         console.error(chalk.cyan("  https://workermill.com/docs/agent"));

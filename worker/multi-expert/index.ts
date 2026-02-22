@@ -786,7 +786,7 @@ export class MultiExpertCoordinator {
         cloneUrl = `https://x-access-token:${this.config.githubToken}@github.com/${this.config.targetRepo}.git`;
       }
       const child = spawn("git", ["clone", cloneUrl, this.repoPath], {
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       });
 
       child.on("close", (code) => {

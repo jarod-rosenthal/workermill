@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -182,7 +182,7 @@ export default function BoardView() {
     return () => clearCurrentBoard();
   }, [boardId, fetchBoardDetail, fetchLabels, clearCurrentBoard]);
 
-  // Poll board when active worker cards exist
+  // Poll board when active worker cards exist (or recently had active cards)
   const hasActiveWorkerCards = useMemo(() => {
     if (!currentBoard) return false;
     const activeStatuses = [
@@ -206,13 +206,31 @@ export default function BoardView() {
     );
   }, [currentBoard]);
 
+  // Keep polling briefly after active cards disappear so we catch the final
+  // column move (server moves cards on status change, client needs another
+  // fetch to see the card in its new column).
+  const [pollCooldown, setPollCooldown] = useState(false);
+  const prevActive = useRef(false);
+
   useEffect(() => {
-    if (!hasActiveWorkerCards || !boardId) return;
+    // When active cards disappear, start a 30s cooldown poll
+    if (prevActive.current && !hasActiveWorkerCards) {
+      setPollCooldown(true);
+      const timer = setTimeout(() => setPollCooldown(false), 30_000);
+      return () => clearTimeout(timer);
+    }
+    prevActive.current = hasActiveWorkerCards;
+  }, [hasActiveWorkerCards]);
+
+  const shouldPoll = hasActiveWorkerCards || pollCooldown;
+
+  useEffect(() => {
+    if (!shouldPoll || !boardId) return;
     const interval = setInterval(() => {
       fetchBoardDetail(boardId);
-    }, 10_000);
+    }, 5_000);
     return () => clearInterval(interval);
-  }, [hasActiveWorkerCards, boardId, fetchBoardDetail]);
+  }, [shouldPoll, boardId, fetchBoardDetail]);
 
   // Compute blocked card IDs: a card is blocked if it has dependencies
   // and any dependency card's workerStatus is not in a terminal state

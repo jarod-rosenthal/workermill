@@ -746,7 +746,7 @@ describe("getWorkerConfig", () => {
     expect(config.personaIcons.frontend_developer).toBe("\uD83C\uDFA8");
     expect(config.personaIcons.backend_developer).toBe("\uD83D\uDCBB");
     expect(config.personaIcons.devops_engineer).toBe("\uD83D\uDD27");
-    expect(config.personaIcons.security_engineer).toBe("\uD83D\uDD12");
+    expect(config.personaIcons.security_engineer).toBe("🛡️");
     expect(config.personaIcons.qa_engineer).toBe("\uD83E\uDDEA");
   });
 

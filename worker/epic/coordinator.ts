@@ -110,6 +110,8 @@ export class EpicCoordinator {
   private inFlightQuickAnswers: Set<string> = new Set();
   // Track story branch names (set by executor, used by PR creation and shutdown)
   private storyBranchNames: Map<number, string> = new Map();
+  // Track whether any story has successfully committed and pushed code
+  private hasAnyCommittedCode: boolean = false;
   // Track dependency merge conflicts per story (skip per-story review when present)
   private storyDepConflicts: Map<number, string[]> = new Map();
   // Track post-rebase baseline SHAs per story (for scoped review diffs)
@@ -709,7 +711,19 @@ export class EpicCoordinator {
             continue;
           }
 
-          // Non-transient or too many consecutive failures — propagate to fatal handler
+          // Non-transient or too many consecutive failures
+          if (transient && this.hasAnyCommittedCode) {
+            // Code is already committed and pushed — don't kill the task over transient API errors
+            console.warn(
+              `[Epic] ${MAX_CONSECUTIVE_ERRORS} consecutive transient errors, but code is committed on remote branches. Exiting gracefully.`
+            );
+            this.postDashboardLog(
+              `⚠️ Coordination API unreachable after ${MAX_CONSECUTIVE_ERRORS} attempts, but all committed code is safely on remote branches. Stopping gracefully.`
+            );
+            this.missionActive = false;
+            continue;
+          }
+
           if (transient) {
             console.error(`[Epic] ${MAX_CONSECUTIVE_ERRORS} consecutive transient errors — giving up`);
           }
@@ -723,13 +737,23 @@ export class EpicCoordinator {
 
       // Post failure comment to Jira
       try {
-        await this.ticketOps.postComment(`Epic failed: ${errorMessage}`);
+        await this.ticketOps.postComment(
+          this.hasAnyCommittedCode
+            ? `Epic failed: ${errorMessage} — committed code is on remote branches`
+            : `Epic failed: ${errorMessage}`
+        );
       } catch {
         // Don't let comment failure mask the real error
       }
 
       try {
-        await this.updateTaskStatus("failed", undefined, `Epic failed: ${errorMessage}`);
+        await this.updateTaskStatus(
+          "failed",
+          undefined,
+          this.hasAnyCommittedCode
+            ? `Epic failed: ${errorMessage} — committed code is on remote branches`
+            : `Epic failed: ${errorMessage}`
+        );
       } catch {
         // Don't let status update failure mask the real error
       }
@@ -1999,6 +2023,9 @@ export class EpicCoordinator {
       this.cleanupMessageFiles(story.storyIndex);
 
       if (result.success) {
+        // Mark that we have committed code on a remote branch
+        this.hasAnyCommittedCode = true;
+
         // Update expert state to completed
         this.expertStates.set(expert, {
           persona: expert,

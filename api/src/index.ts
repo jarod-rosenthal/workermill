@@ -90,8 +90,8 @@ import { initializeEncryption } from "./utils/encryption.js";
 
 const app = express();
 
-// Request timeout middleware - prevents stuck requests (30 second timeout)
-app.use(timeout("30s"));
+// Request timeout middleware - prevents stuck requests (60 second timeout)
+app.use(timeout("60s"));
 
 // Response compression middleware - reduces payload sizes
 app.use(

@@ -12,6 +12,7 @@ import * as path from "path";
 import * as os from "os";
 
 const PORT_FILE = path.join(os.homedir(), ".workermill", "agent.port");
+const TOKEN_FILE = path.join(os.homedir(), ".workermill", "agent.token");
 const INITIAL_RECONNECT_MS = 2_000;
 const MAX_RECONNECT_MS = 30_000;
 const MAX_RECONNECT_ATTEMPTS = 20;
@@ -75,6 +76,7 @@ export interface CodeEventRecord {
 
 export class AgentClient extends EventEmitter {
   private port: number | null = null;
+  private token: string | null = null;
   private connected = false;
   private taskStream: http.ClientRequest | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
@@ -89,6 +91,7 @@ export class AgentClient extends EventEmitter {
   /** Try to discover and connect to the agent */
   async connect(): Promise<boolean> {
     this.port = this.discoverPort();
+    this.token = this.discoverToken();
     if (!this.port) {
       this.connected = false;
       this.emit("disconnected");
@@ -215,17 +218,19 @@ export class AgentClient extends EventEmitter {
     return new Promise((resolve, reject) => {
       if (!this.port) return reject(new Error("Not connected"));
       const body = JSON.stringify(payload);
+      const prdHeaders: Record<string, string | number> = {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+        Accept: "text/event-stream",
+      };
+      if (this.token) prdHeaders["Authorization"] = `Bearer ${this.token}`;
       const req = http.request(
         {
           hostname: "127.0.0.1",
           port: this.port,
           path: "/api/prd/build",
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Content-Length": Buffer.byteLength(body),
-            Accept: "text/event-stream",
-          },
+          headers: prdHeaders,
         },
         (res) => {
           let buffer = "";
@@ -301,11 +306,13 @@ export class AgentClient extends EventEmitter {
   subscribeToLogs(taskId: string, callback: (log: LogLine) => void): () => void {
     if (!this.port) return () => {};
 
+    const logHeaders: Record<string, string> = { Accept: "text/event-stream" };
+    if (this.token) logHeaders["Authorization"] = `Bearer ${this.token}`;
     const req = http.get({
       hostname: "127.0.0.1",
       port: this.port,
       path: `/api/stream/logs/${taskId}`,
-      headers: { Accept: "text/event-stream" },
+      headers: logHeaders,
     }, (res) => {
       let buffer = "";
       res.on("data", (chunk: Buffer) => {
@@ -342,6 +349,7 @@ export class AgentClient extends EventEmitter {
       this.taskStream = null;
     }
     this.port = null;
+    this.token = null;
     this.connected = false;
     this.reconnectAttempts = 0;
     this.emit("disconnected");
@@ -364,6 +372,15 @@ export class AgentClient extends EventEmitter {
       if (fs.existsSync(PORT_FILE)) {
         const port = parseInt(fs.readFileSync(PORT_FILE, "utf-8").trim(), 10);
         return isNaN(port) ? null : port;
+      }
+    } catch { /* ignore */ }
+    return null;
+  }
+
+  private discoverToken(): string | null {
+    try {
+      if (fs.existsSync(TOKEN_FILE)) {
+        return fs.readFileSync(TOKEN_FILE, "utf-8").trim();
       }
     } catch { /* ignore */ }
     return null;
@@ -397,11 +414,13 @@ export class AgentClient extends EventEmitter {
   private startTaskStream(): void {
     if (!this.port || this.disposed) return;
 
+    const headers: Record<string, string> = { Accept: "text/event-stream" };
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
     this.taskStream = http.get({
       hostname: "127.0.0.1",
       port: this.port,
       path: "/api/stream/tasks",
-      headers: { Accept: "text/event-stream" },
+      headers,
     }, (res) => {
       let buffer = "";
       res.on("data", (chunk: Buffer) => {
@@ -438,11 +457,13 @@ export class AgentClient extends EventEmitter {
   private get<T>(urlPath: string): Promise<T> {
     return new Promise((resolve, reject) => {
       if (!this.port) return reject(new Error("Not connected"));
+      const headers: Record<string, string> = { Accept: "application/json" };
+      if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
       const req = http.get({
         hostname: "127.0.0.1",
         port: this.port,
         path: urlPath,
-        headers: { Accept: "application/json" },
+        headers,
       }, (res) => {
         let body = "";
         res.on("data", (c) => body += c);
@@ -468,15 +489,17 @@ export class AgentClient extends EventEmitter {
     return new Promise((resolve, reject) => {
       if (!this.port) return reject(new Error("Not connected"));
       const body = JSON.stringify(data);
+      const headers: Record<string, string | number> = {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      };
+      if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
       const req = http.request({
         hostname: "127.0.0.1",
         port: this.port,
         path: urlPath,
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(body),
-        },
+        headers,
       }, (res) => {
         let respBody = "";
         res.on("data", (c) => respBody += c);

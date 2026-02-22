@@ -326,6 +326,14 @@ class LocalEpicSpawner {
     const dockerArgs = [
       "run",
       "--name", containerName,
+
+      // Security hardening: resource limits and privilege restrictions
+      "--memory", "8g",
+      "--cpus", "2",
+      "--pids-limit", "512",
+      "--cap-drop", "ALL",
+      "--cap-add", "NET_RAW",       // DNS resolution
+      "--cap-add", "DAC_OVERRIDE",  // File permission overrides needed by sudo for Kaniko
     ];
 
     // Only use --user when mounting external worktree (to match host file ownership)
@@ -381,8 +389,8 @@ class LocalEpicSpawner {
       }
 
       const dockerClaudeDir = this.toDockerPath(claudeConfigDir);
-      dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude`);
-      logger.info("Mounting Claude credentials for in-container auth", {
+      dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude:ro`);
+      logger.info("Mounting Claude credentials for in-container auth (read-only)", {
         hostPath: claudeConfigDir,
         dockerPath: dockerClaudeDir,
       });
@@ -568,6 +576,16 @@ class LocalEpicSpawner {
 
     // Update status
     epicProcess.status = code === 0 ? "completed" : "failed";
+
+    // Restore credential file permissions to 0o600 after container exits
+    // (we set 0o666 pre-spawn so the container could read it)
+    try {
+      const claudeDir = this.findClaudeConfigDir();
+      if (claudeDir) {
+        const credFile = path.join(claudeDir, ".credentials.json");
+        if (fs.existsSync(credFile)) fs.chmodSync(credFile, 0o600);
+      }
+    } catch { /* best effort */ }
 
     // Release worktree
     if (epicProcess.worktreePath) {

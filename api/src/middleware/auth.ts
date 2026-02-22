@@ -3,7 +3,7 @@ import { CognitoJwtVerifier } from "aws-jwt-verify";
 import bcrypt from "bcrypt";
 import { config } from "../config/index.js";
 import { AppDataSource } from "../db/connection.js";
-import { User, Organization, UserApiKey } from "../models/index.js";
+import { User, Organization, UserApiKey, UserOrganization } from "../models/index.js";
 import { type OrgMemberRole } from "../models/UserOrganization.js";
 import { logger } from "../utils/logger.js";
 import { getDefaultOrganizationWithRole } from "../services/user-organizations.js";
@@ -264,6 +264,22 @@ export async function authenticateApiKey(
             .catch((err) => logger.warn("Failed to update API key lastUsedAt", { err }));
 
           req.organization = org;
+
+          // Load user + org role so requireAdmin works for user API keys
+          const userRepo = AppDataSource.getRepository(User);
+          const user = await userRepo.findOneBy({ id: userApiKey.userId });
+          if (user) {
+            req.user = user;
+            const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+            const membership = await userOrgRepo.findOneBy({
+              userId: user.id,
+              orgId: org.id,
+            });
+            if (membership) {
+              req.orgRole = membership.role;
+            }
+          }
+
           next();
           return;
         }

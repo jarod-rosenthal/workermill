@@ -168,6 +168,11 @@ router.get("/", async (req: Request, res: Response) => {
       // Repository List
       repositories: org.repositories || [],
 
+      // Default repos per SCM provider (used by agent /api/repos endpoint)
+      defaultGithubRepo: org.defaultGithubRepo ?? null,
+      defaultBitbucketRepo: org.defaultBitbucketRepo ?? null,
+      defaultGitlabRepo: org.defaultGitlabRepo ?? null,
+
       // Codebase RAG Settings
       codebaseIndexingEnabled: org.codebaseIndexingEnabled ?? false,
       codebaseMaxFilesPerRepo: org.codebaseMaxFilesPerRepo ?? 500,

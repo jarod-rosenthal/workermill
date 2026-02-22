@@ -14,7 +14,7 @@ import { authenticateUser } from "../middleware/auth.js";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { AppDataSource } from "../db/connection.js";
-import { User, Organization, OrgInvite, UserOrganization } from "../models/index.js";
+import { User, Organization, OrgInvite, UserOrganization, UserApiKey } from "../models/index.js";
 import { applyReferralCode, validateReferralCode } from "../services/referral.js";
 import { notifyNewSignup } from "../services/admin-notifications.js";
 import { sendWelcomeEmail } from "../services/email/index.js";
@@ -2235,6 +2235,21 @@ router.post(
       const secretPrefix = `workermill/${config.environment}`;
       await saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via extension onboarding)");
 
+      // Create a user API key (per-user, auditable) instead of exposing the org key
+      const userApiKeyRepo = AppDataSource.getRepository(UserApiKey);
+      const userToken = `usr_${randomUUID().replace(/-/g, "")}`;
+      const userKeyPrefix = userToken.substring(0, 12);
+      const userKeyHash = await bcrypt.hash(userToken, 10);
+      const userApiKey = userApiKeyRepo.create({
+        userId: user.id,
+        orgId: org.id,
+        name: "VS Code Extension",
+        keyHash: userKeyHash,
+        keyPrefix: userKeyPrefix,
+        scopes: ["*"],
+      });
+      await userApiKeyRepo.save(userApiKey);
+
       // Fire notifications (non-blocking)
       notifyNewSignup({ email: primaryEmail, fullName: name, organizationName: org.name }).catch(() => {});
       sendWelcomeEmail(user, org, false).catch(() => {});
@@ -2250,7 +2265,7 @@ router.post(
       logger.info("GitHub onboard completed", { userId: user.id, orgId: org.id, email: primaryEmail });
 
       res.status(201).json({
-        apiKey: rawKey,
+        apiKey: userToken,
         apiUrl: config.apiBaseUrl,
         orgSlug: slug,
         userId: user.id,
@@ -2319,17 +2334,20 @@ router.post(
         return res.status(404).json({ error: "No organization found for this account" });
       }
 
-      // Regenerate API key — necessary because bcrypt-hashed keys can't be recovered.
-      // Note: this invalidates any existing API key for the org.
-      const rawKey = `org_${randomUUID().replace(/-/g, "")}`;
-      const orgRepo = AppDataSource.getRepository(Organization);
-      await orgRepo.update(
-        { id: org.id },
-        {
-          apiKeyHash: await bcrypt.hash(rawKey, 10),
-          apiKeyPrefix: rawKey.substring(0, 12),
-        },
-      );
+      // Create a user API key (per-user, auditable) instead of rotating the shared org key
+      const userApiKeyRepo = AppDataSource.getRepository(UserApiKey);
+      const userToken = `usr_${randomUUID().replace(/-/g, "")}`;
+      const userKeyPrefix = userToken.substring(0, 12);
+      const userKeyHash = await bcrypt.hash(userToken, 10);
+      const userApiKey = userApiKeyRepo.create({
+        userId: user.id,
+        orgId: org.id,
+        name: "VS Code Extension",
+        keyHash: userKeyHash,
+        keyPrefix: userKeyPrefix,
+        scopes: ["*"],
+      });
+      await userApiKeyRepo.save(userApiKey);
 
       // Update GitHub tokens in Secrets Manager
       const secretPrefix = `workermill/${config.environment}`;
@@ -2346,7 +2364,7 @@ router.post(
       logger.info("GitHub signin completed", { userId: user.id, orgId: org.id, email: primaryEmail });
 
       res.json({
-        apiKey: rawKey,
+        apiKey: userToken,
         apiUrl: config.apiBaseUrl,
         orgSlug: org.slug,
         userId: user.id,

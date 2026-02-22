@@ -34,7 +34,7 @@ function commandExists(cmd: string): boolean {
   try {
     // Use execFileSync to avoid cmd.exe shell flash on Windows
     const which = isWindows ? "where.exe" : "which";
-    execFileSync(which, [cmd], { stdio: "ignore", timeout: 10000, windowsHide: true });
+    execFileSync(which, [cmd], { stdio: "pipe", timeout: 10000, windowsHide: true });
     return true;
   } catch {
     return false;

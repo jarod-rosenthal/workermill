@@ -344,14 +344,18 @@ export async function spawnWorker(
   console.log(`${ts()} ${taskLabel} ${chalk.dim(`  review=${reviewEnabled} model=${task.workerModel} repo=${task.githubRepo}`)}`);
 
   // Spawn worker process (re-invokes self with __WORKERMILL_MODE)
+  // Use explicit os.devNull for stdin instead of "ignore" — on Windows,
+  // "ignore" opens NUL relative to CWD, creating a literal NUL file in the repo.
   const { command: spawnCmd, args: spawnArgs } = getSpawnArgs();
+  const stdinFd = fs.openSync(os.devNull, "r");
   const proc = spawn(spawnCmd, spawnArgs, {
     env: { ...childEnv, __WORKERMILL_MODE: "worker" },
     cwd: workDir,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [stdinFd, "pipe", "pipe"],
     detached: false,
     windowsHide: true,
   });
+  fs.closeSync(stdinFd);
 
   if (!proc.pid) {
     console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Failed to spawn worker process`);
@@ -432,29 +436,41 @@ export async function spawnWorker(
     if (!active.resultEmitted) {
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} No ::result:: marker — posting fallback completion in 15s`);
       setTimeout(async () => {
-        try {
-          const fallbackResult = code === 0 ? "completed" : "failed";
-          const errorMsg = code !== 0 ? `Worker process exited with code ${code} without reporting completion` : undefined;
-          const resp = await fetch(`${config.apiUrl}/api/tasks/${task.id}/worker-complete`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-api-key": config.apiKey,
-            },
-            body: JSON.stringify({
-              exitCode: code ?? 1,
-              result: fallbackResult,
-              errorMessage: errorMsg,
-            }),
-          });
-          const respData = await resp.json() as Record<string, unknown>;
-          if (respData.status === "ignored") {
-            console.log(`${ts()} ${taskLabel} ${chalk.dim("Fallback completion ignored (task already transitioned)")}`);
-          } else {
-            console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Fallback completion applied: ${fallbackResult}`);
+        const fallbackResult = code === 0 ? "completed" : "failed";
+        const errorMsg = code !== 0 ? `Worker process exited with code ${code} without reporting completion` : undefined;
+        const MAX_FALLBACK_RETRIES = 3;
+        const RETRY_DELAY_MS = 5_000;
+
+        for (let attempt = 1; attempt <= MAX_FALLBACK_RETRIES; attempt++) {
+          try {
+            const resp = await fetch(`${config.apiUrl}/api/tasks/${task.id}/worker-complete`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-api-key": config.apiKey,
+              },
+              body: JSON.stringify({
+                exitCode: code ?? 1,
+                result: fallbackResult,
+                errorMessage: errorMsg,
+              }),
+            });
+            const respData = await resp.json() as Record<string, unknown>;
+            if (respData.status === "ignored") {
+              console.log(`${ts()} ${taskLabel} ${chalk.dim("Fallback completion ignored (task already transitioned)")}`);
+            } else {
+              console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Fallback completion applied: ${fallbackResult}`);
+            }
+            break; // Success — exit retry loop
+          } catch (err) {
+            const errDetail = err instanceof Error ? err.message : String(err);
+            if (attempt < MAX_FALLBACK_RETRIES) {
+              console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Fallback completion failed (attempt ${attempt}/${MAX_FALLBACK_RETRIES}): ${errDetail}`);
+              await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+            } else {
+              console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Fallback completion failed after ${MAX_FALLBACK_RETRIES} attempts: ${errDetail}. Task ${task.id} may be stuck in 'executing' status.`);
+            }
           }
-        } catch (err) {
-          console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Fallback completion failed:`, err instanceof Error ? err.message : err);
         }
       }, 15_000);
     }
@@ -509,7 +525,7 @@ export function stopTask(taskId: string): void {
 
   // Fallback: try stopping a Docker container (may exist if sandbox mode)
   try {
-    execSync(`docker stop wm-${taskId.slice(0, 12)}`, { stdio: "ignore", timeout: 15_000, windowsHide: true });
+    execSync(`docker stop wm-${taskId.slice(0, 12)}`, { stdio: "pipe", timeout: 15_000, windowsHide: true });
   } catch {
     // Container doesn't exist or Docker not available
   }
@@ -648,13 +664,15 @@ export async function spawnManagerWorker(
   console.log(`${ts()} ${taskLabel} ${chalk.magenta("◆ MANAGER")} Starting ${task.managerAction}`);
 
   const { command: mgrCmd, args: mgrArgs } = getSpawnArgs();
+  const mgrStdinFd = fs.openSync(os.devNull, "r");
   const proc = spawn(mgrCmd, mgrArgs, {
     env: { ...childEnv, __WORKERMILL_MODE: "manager" },
     cwd: workDir,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [mgrStdinFd, "pipe", "pipe"],
     detached: false,
     windowsHide: true,
   });
+  fs.closeSync(mgrStdinFd);
 
   if (!proc.pid) {
     console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Failed to spawn manager process`);

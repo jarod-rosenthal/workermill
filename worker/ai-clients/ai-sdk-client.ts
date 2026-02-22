@@ -271,7 +271,7 @@ export class AISdkClient implements AIClient {
       const process: ChildProcess = spawn("node", args, {
         env,
         cwd: options.workingDir,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       });
 
       // Set timeout

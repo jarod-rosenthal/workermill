@@ -651,10 +651,11 @@ router.post(
         error: errorMessage,
       });
 
-      // Mark task as failed if plan parsing fails
-      task.status = "failed";
-      task.errorMessage = `Plan validation failed: ${errorMessage}`;
-      await taskRepo.save(task);
+      // Mark task as failed if plan parsing fails (atomic to avoid clobbering concurrent changes)
+      await taskRepo.update(
+        { id: taskId, orgId: org.id },
+        { status: "failed", errorMessage: `Plan validation failed: ${errorMessage}` },
+      );
 
       res.status(422).json({
         error: "Plan validation failed",

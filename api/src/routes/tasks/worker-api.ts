@@ -177,59 +177,56 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
         break;
     }
 
-    // Update task
-    task.status = newStatus;
+    // Build atomic update to avoid clobbering concurrent changes (no .save())
+    const updates: Record<string, unknown> = { status: newStatus };
     if (result === "running") {
       // Resuming from escalated — worker is still active, clear premature completedAt
-      task.completedAt = null as unknown as Date;
-      task.errorMessage = "";
+      updates.completedAt = null;
+      updates.errorMessage = "";
     } else {
-      task.completedAt = new Date();
+      updates.completedAt = new Date();
     }
-
-    if (prUrl) {
-      task.githubPrUrl = prUrl;
-    }
-    if (prNumber) {
-      task.githubPrNumber = Number(prNumber);
-    }
-    if (branch) {
-      task.githubBranch = branch;
-    }
-    if (errorMessage) {
-      task.errorMessage = errorMessage;
-    }
-    if (typeof revisionCount === "number" && revisionCount >= 0) {
-      task.revisionCount = revisionCount;
-    }
+    if (prUrl) updates.githubPrUrl = prUrl;
+    if (prNumber) updates.githubPrNumber = Number(prNumber);
+    if (branch) updates.githubBranch = branch;
+    if (errorMessage) updates.errorMessage = errorMessage;
+    if (typeof revisionCount === "number" && revisionCount >= 0) updates.revisionCount = revisionCount;
 
     // Calculate ECS task duration
     if (task.startedAt) {
-      task.ecsTaskSeconds = Math.floor((new Date().getTime() - task.startedAt.getTime()) / 1000);
+      updates.ecsTaskSeconds = Math.floor((new Date().getTime() - task.startedAt.getTime()) / 1000);
     }
 
     // Token usage and cost are handled by the /usage endpoint (called by log-parser.cjs)
     // Only calculate cost here if usage wasn't already reported
     if (!task.usageReportedAt) {
-      // Fallback: update tokens if provided in payload (backward compatibility)
       if (inputTokens !== undefined) {
-        task.inputTokens = (task.inputTokens || 0) + Number(inputTokens);
+        const newInput = (task.inputTokens || 0) + Number(inputTokens);
+        updates.inputTokens = newInput;
+        task.inputTokens = newInput; // for calculateCost below
       }
       if (outputTokens !== undefined) {
-        task.outputTokens = (task.outputTokens || 0) + Number(outputTokens);
+        const newOutput = (task.outputTokens || 0) + Number(outputTokens);
+        updates.outputTokens = newOutput;
+        task.outputTokens = newOutput;
       }
       if (cacheCreationTokens !== undefined) {
-        task.cacheCreationTokens = (task.cacheCreationTokens || 0) + Number(cacheCreationTokens);
+        const newCC = (task.cacheCreationTokens || 0) + Number(cacheCreationTokens);
+        updates.cacheCreationTokens = newCC;
+        task.cacheCreationTokens = newCC;
       }
       if (cacheReadTokens !== undefined) {
-        task.cacheReadTokens = (task.cacheReadTokens || 0) + Number(cacheReadTokens);
+        const newCR = (task.cacheReadTokens || 0) + Number(cacheReadTokens);
+        updates.cacheReadTokens = newCR;
+        task.cacheReadTokens = newCR;
       }
-
-      // Calculate cost
-      task.estimatedCostUsd = task.calculateCost();
+      // Calculate cost from accumulated token values
+      task.status = newStatus; // needed for calculateCost
+      updates.estimatedCostUsd = task.calculateCost();
     }
 
-    await taskRepo.save(task);
+    // Atomic update — only writes the fields we changed, won't clobber concurrent updates
+    await taskRepo.update({ id: taskId, orgId: org.id }, updates);
 
     // Sync InternalTask status and board column when worker completes
     if (task.internalTaskId && ["review_requested", "pr_created", "pr_approved", "completed", "deployed", "failed", "escalated"].includes(newStatus)) {

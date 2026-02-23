@@ -138,10 +138,12 @@ resource "aws_cloudfront_distribution" "frontend" {
     origin_id   = "api"
 
     custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = local.api_origin_protocol_policy
-      origin_ssl_protocols   = ["TLSv1.2"]
+      http_port                = 80
+      https_port               = 443
+      origin_protocol_policy   = local.api_origin_protocol_policy
+      origin_ssl_protocols     = ["TLSv1.2"]
+      origin_read_timeout      = 60 # Must exceed worker coordination client timeout (60s)
+      origin_keepalive_timeout = 30 # Reuse connections between polling cycles (was 5s default)
     }
   }
 

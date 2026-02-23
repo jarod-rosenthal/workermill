@@ -470,6 +470,7 @@ router.get(
   [
     param("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
     query("messageType").optional().isIn(VALID_MESSAGE_TYPES),
+    query("messageTypes").optional().isString(),
     query("since").optional().isISO8601(),
     query("limit").optional().isInt({ min: 1, max: 1000 }),
     query("offset").optional().isInt({ min: 0 }),
@@ -479,6 +480,11 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const parentTaskId = req.params.parentTaskId as string;
     const messageType = req.query.messageType as ContextMessageType | undefined;
+    const messageTypes = req.query.messageTypes
+      ? (req.query.messageTypes as string)
+          .split(",")
+          .filter((t) => VALID_MESSAGE_TYPES.includes(t as ContextMessageType))
+      : undefined;
     const since = req.query.since as string | undefined;
     const limit = parseInt(req.query.limit as string) || 200;
     const offset = parseInt(req.query.offset as string) || 0;
@@ -514,6 +520,13 @@ router.get(
       queryBuilder = queryBuilder.andWhere("context.message_type = :messageType", {
         messageType,
       });
+    }
+
+    if (!messageType && messageTypes && messageTypes.length > 0) {
+      queryBuilder = queryBuilder.andWhere(
+        "context.message_type IN (:...messageTypes)",
+        { messageTypes }
+      );
     }
 
     if (since) {

@@ -73,7 +73,7 @@ export class SupportAgentExecutor {
         "Content-Type": "application/json",
         "x-api-key": config.orgApiKey,
       },
-      timeout: 30000,
+      timeout: 60000,
     });
 
     // Create Anthropic client

@@ -9,7 +9,7 @@ import { readdir, readFile } from "fs/promises";
 import { join, resolve } from "path";
 import { IsNull } from "typeorm";
 import { AppDataSource } from "../connection.js";
-import { Persona, PersonaDirective } from "../../models/index.js";
+import { Organization, Persona, PersonaDirective } from "../../models/index.js";
 import { logger } from "../../utils/logger.js";
 
 // Persona metadata configuration
@@ -441,6 +441,97 @@ async function seedPersonas() {
       } else {
         logger.info(`Common directive already exists: ${filename}`);
       }
+    }
+
+    // Seed platform-org-only personas
+    const platformOrg = await Organization.getPlatformOrg();
+    if (platformOrg) {
+      const marketingAgentSlug = "marketing_agent";
+      let marketingPersona = await personaRepo.findOne({
+        where: { slug: marketingAgentSlug, orgId: platformOrg.id },
+      });
+
+      if (!marketingPersona) {
+        marketingPersona = personaRepo.create({
+          orgId: platformOrg.id,
+          slug: marketingAgentSlug,
+          name: "Marketing Agent",
+          emoji: "📣",
+          color: "#F59E0B",
+          shortLabel: "Marketing",
+          description:
+            "Autonomous marketing agent — manages ad campaigns, publishes content, tracks brand awareness across developer-focused platforms.",
+          enabled: true,
+          isSystem: false,
+          priority: 16,
+          skills: [
+            "content-marketing",
+            "paid-ads",
+            "analytics",
+            "social-media",
+            "seo",
+            "copywriting",
+          ],
+          riskLevel: "medium",
+          keywordPattern: null,
+          labelShortcuts: null,
+        });
+        await personaRepo.save(marketingPersona);
+        personasCreated++;
+        logger.info(`Seeded marketing_agent persona for platform org`);
+      }
+
+      // Seed default directive
+      const existingMarketingDirective = await directiveRepo.findOne({
+        where: { personaId: marketingPersona.id, type: "readme" },
+      });
+
+      if (!existingMarketingDirective) {
+        await directiveRepo.save(
+          directiveRepo.create({
+            personaId: marketingPersona.id,
+            orgId: platformOrg.id,
+            type: "readme",
+            filename: null,
+            content: `# Marketing Agent
+
+You are WorkerMill's autonomous marketing agent. Your mission is to grow brand awareness among developers and engineering teams.
+
+## Core Responsibilities
+- Publish engaging content about WorkerMill's capabilities on developer platforms
+- Manage paid advertising campaigns with strict budget discipline
+- Monitor campaign performance and optimize spend allocation
+- Communicate build progress, solved challenges, and product updates
+
+## Content Guidelines
+- Write for developers — technical, honest, no marketing fluff
+- Highlight real problems WorkerMill solves (AI agent orchestration, real-time monitoring, autonomous coding)
+- Share genuine build progress and engineering challenges
+- Use data and specifics, not vague claims
+
+## Budget Discipline
+- Never exceed the monthly budget cap
+- Pause campaigns that exceed CPA ceilings
+- Prioritize high-ROI channels based on data
+- Report all spend decisions with clear reasoning
+
+## Platform-Specific Rules
+- **X/Twitter**: Short, punchy, technical. Link to blog posts or demos. 2-3 tweets/day max.
+- **Reddit**: Genuine engagement in r/programming, r/devops, r/ExperiencedDevs. No spam. Value-first.
+- **Dev.to**: Technical articles about AI coding agents, development workflows, engineering challenges.
+- **Hacker News**: Only submit genuinely interesting technical content. No marketing fluff.
+- **Google Ads**: Target developer-related search terms. Tight keyword groups.`,
+            version: 1,
+            isActive: true,
+          }),
+        );
+        directivesCreated++;
+        logger.info(`Seeded marketing_agent default directive`);
+      }
+    } else {
+      logger.warn(
+        "Platform org not found — skipping marketing_agent persona seed",
+      );
     }
 
     console.log("\n=== Persona Seed Complete ===");

@@ -17,7 +17,7 @@ import { FeedViewProvider } from "./feed-view";
 import { StatusBar } from "./status-bar";
 import { NotificationManager } from "./notifications";
 import { LogTerminalManager } from "./log-terminal";
-import { LiveDiffPanel } from "./live-diff-panel";
+import { LiveDiffManager } from "./live-diff-manager";
 import { TaskDetailPanel } from "./task-detail-panel";
 import { SettingsPanel } from "./settings-panel";
 import {
@@ -122,6 +122,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Terminal log manager
   logManager = new LogTerminalManager(client);
+
+  // Live diff: register virtual document content providers
+  LiveDiffManager.register(context);
 
   // ── Task lifecycle auto-sync ──
 
@@ -599,9 +602,13 @@ export function activate(context: vscode.ExtensionContext): void {
       (treeItem?: { task?: { id: string; summary: string; status: string } }) => {
         const task = treeItem?.task;
         if (!task?.id || !client.isConnected()) return;
-        LiveDiffPanel.createOrShow(client, task as any);
+        LiveDiffManager.createOrShow(client, task);
       },
     ),
+
+    vscode.commands.registerCommand("workermill.liveDiffPicker", () => {
+      LiveDiffManager.showActiveFilePicker();
+    }),
 
     // Cancel a running/planning task (stop button in tree)
     vscode.commands.registerCommand(
@@ -1145,7 +1152,7 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export async function deactivate(): Promise<void> {
-  LiveDiffPanel.disposeAll();
+  LiveDiffManager.disposeAll();
   TaskDetailPanel.disposeAll();
   SettingsPanel.dispose();
   if (logManager) logManager.dispose();

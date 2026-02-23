@@ -1,6 +1,19 @@
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-  <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-  <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-  <circle cx="12" cy="12" r="2" fill="currentColor"/>
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2dd4bf"/>
+      <stop offset="100%" stop-color="#0d9488"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square background -->
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <!-- Stacked layers icon -->
+  <g transform="translate(64,64)" stroke="white" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Top layer (filled) -->
+    <path d="M0-30 L-35-10 L0 10 L35-10 Z" fill="white" fill-opacity="0.25" stroke="white"/>
+    <!-- Middle layer -->
+    <path d="M-35 5 L0 25 L35 5"/>
+    <!-- Bottom layer -->
+    <path d="M-35 20 L0 40 L35 20"/>
+  </g>
 </svg>

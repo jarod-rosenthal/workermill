@@ -287,6 +287,9 @@ export class WorkerTask {
   @Column({ name: "parent_task_id", type: "uuid", nullable: true })
   parentTaskId: string | null;
 
+  @Column({ name: "board_execution_id", type: "varchar", length: 36, nullable: true })
+  boardExecutionId: string | null;
+
   @Column({ name: "story_index", type: "int", nullable: true })
   storyIndex: number | null;
 

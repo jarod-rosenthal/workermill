@@ -21,6 +21,14 @@ import { agentEvents } from "./local-api.js";
 import { AGENT_VERSION } from "./version.js";
 import { getGpuInfo } from "./gpu-detector.js";
 import { getOllamaStatus } from "./ollama-manager.js";
+import {
+  getOrCreateWorkspace,
+  releaseWorkspace,
+  discoverRepoPath,
+  hasClonedRepo,
+  getDockerVolumeName,
+  cleanupDockerVolume,
+} from "./workspace-manager.js";
 
 // ── Platform Detection ─────────────────────────────────
 
@@ -448,6 +456,16 @@ export async function spawnDockerWorker(
     dockerArgs.push("-v", `${volumeName}:${containerPath}`);
   }
 
+  // Persistent workspace volume for batch board executions
+  let persistentWorkspace = false;
+  if (task.boardExecutionId) {
+    const volumeName = getDockerVolumeName(task.boardExecutionId);
+    dockerArgs.push("-v", `${volumeName}:/app/workspace`);
+    persistentWorkspace = true;
+    // Track workspace in the manager (for first-task discovery)
+    getOrCreateWorkspace(task.boardExecutionId);
+  }
+
   // Mount Ollama models cache (read-only) if local RAG is enabled
   let localOllamaHost = "";
   if (config.localRag) {
@@ -625,6 +643,12 @@ export async function spawnDockerWorker(
       task.skipManagerReview === false ? "true" : "false",
     SELF_REVIEW_ENABLED:
       hasSelfReviewLabel(task) || (orgConfig.selfReviewEnabled !== false) ? "true" : "false",
+
+    // Persistent workspace for batch board executions
+    ...(task.boardExecutionId ? { PERSISTENT_WORKSPACE: "/app/workspace" } : {}),
+    ...(task.boardExecutionId && hasClonedRepo(task.boardExecutionId)
+      ? { REPO_PATH: "/app/workspace/repo" }
+      : {}),
   };
 
   // Add env vars as -e flags, filtering empty values
@@ -828,6 +852,11 @@ export async function spawnDockerWorker(
         execFileSync(findDockerBin(), ["rm", "-f", containerName], { stdio: "pipe", windowsHide: true });
       } catch {
         /* best effort cleanup */
+      }
+      // Manage persistent workspace lifecycle
+      if (persistentWorkspace && task.boardExecutionId) {
+        discoverRepoPath(task.boardExecutionId);
+        releaseWorkspace(task.boardExecutionId);
       }
     }, 90_000);
   });

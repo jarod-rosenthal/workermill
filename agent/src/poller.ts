@@ -105,6 +105,7 @@ async function pollOnce(config: AgentConfig): Promise<void> {
       githubPrNumber?: number;
       executionPlanV2?: unknown;
       jiraFields?: Record<string, unknown>;
+      boardExecutionId?: string;
     }>;
 
     if (tasks.length === 0) return;
@@ -269,6 +270,7 @@ async function handleQueuedTask(
     githubPrNumber?: number;
     executionPlanV2?: unknown;
     jiraFields?: Record<string, unknown>;
+    boardExecutionId?: string;
   },
   config: AgentConfig,
 ): Promise<void> {
@@ -330,6 +332,7 @@ async function handleQueuedTask(
     githubPrNumber: task.githubPrNumber,
     executionPlanV2: task.executionPlanV2,
     jiraFields: task.jiraFields || {},
+    boardExecutionId: task.boardExecutionId,
   };
 
   // Pass org credentials from the claim response to the container

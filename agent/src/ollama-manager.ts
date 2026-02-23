@@ -261,22 +261,149 @@ export async function ensureOllamaRunning(port: number = 11434): Promise<boolean
   return false;
 }
 
+// ── Install ───────────────────────────────────────────
+
+/**
+ * Install Ollama using the official install script.
+ * Linux/macOS: runs `curl -fsSL https://ollama.com/install.sh | sh`
+ * Windows: opens the download page (automated install not supported).
+ * Returns true on success.
+ */
+export async function installOllama(
+  onProgress?: (message: string) => void,
+): Promise<boolean> {
+  if (process.platform === "win32") {
+    onProgress?.("Windows detected — please download Ollama from https://ollama.com/download");
+    return false;
+  }
+
+  onProgress?.("Installing Ollama via official install script...");
+
+  return new Promise((resolve) => {
+    const child = spawn("sh", ["-c", "curl -fsSL https://ollama.com/install.sh | sh"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 120_000,
+    });
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      const line = chunk.toString("utf-8").trim();
+      if (line) onProgress?.(line);
+    });
+
+    child.stderr?.on("data", (chunk: Buffer) => {
+      const line = chunk.toString("utf-8").trim();
+      if (line) onProgress?.(line);
+    });
+
+    child.on("close", (code) => {
+      if (code === 0) {
+        onProgress?.("Ollama installed successfully");
+        resolve(true);
+      } else {
+        onProgress?.(`Ollama install failed (exit code ${code})`);
+        resolve(false);
+      }
+    });
+
+    child.on("error", (err) => {
+      onProgress?.(`Ollama install error: ${err.message}`);
+      resolve(false);
+    });
+  });
+}
+
 // ── Model management ─────────────────────────────────
 
 /**
- * Pull (download) a model. Returns true on success.
+ * Pull (download) a model. Handles Ollama's streaming NDJSON response
+ * (each line is a separate JSON object like `{"status":"pulling manifest"}\n`).
+ * Returns true when final line contains `{"status":"success"}`.
  */
-export async function pullModel(model: string, port: number = 11434): Promise<boolean> {
-  try {
-    const resp = await httpRequest(`http://localhost:${port}/api/pull`, {
-      method: "POST",
-      body: { name: model },
-      timeout: 300_000, // 5 minutes — models can be large
+export async function pullModel(
+  model: string,
+  port: number = 11434,
+  onProgress?: (message: string, completed?: number, total?: number) => void,
+): Promise<boolean> {
+  const bodyStr = JSON.stringify({ name: model });
+
+  return new Promise((resolve) => {
+    const req = http.request(
+      `http://localhost:${port}/api/pull`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(bodyStr),
+        },
+        timeout: 600_000, // 10 minutes — models can be large
+      },
+      (res) => {
+        let success = false;
+        let buffer = "";
+
+        res.on("data", (chunk: Buffer) => {
+          buffer += chunk.toString("utf-8");
+          // Split on newlines — each line is a JSON object
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || ""; // Keep incomplete last line in buffer
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              const parsed = JSON.parse(trimmed) as {
+                status?: string;
+                digest?: string;
+                total?: number;
+                completed?: number;
+                error?: string;
+              };
+              if (parsed.error) {
+                onProgress?.(`Error: ${parsed.error}`);
+                success = false;
+              } else if (parsed.status === "success") {
+                success = true;
+                onProgress?.("Model pulled successfully");
+              } else if (parsed.status && parsed.total && parsed.completed) {
+                const pct = Math.round((parsed.completed / parsed.total) * 100);
+                onProgress?.(`${parsed.status} ${pct}%`, parsed.completed, parsed.total);
+              } else if (parsed.status) {
+                onProgress?.(parsed.status);
+              }
+            } catch {
+              // Not valid JSON — skip
+            }
+          }
+        });
+
+        res.on("end", () => {
+          // Process any remaining buffer
+          if (buffer.trim()) {
+            try {
+              const parsed = JSON.parse(buffer.trim()) as { status?: string; error?: string };
+              if (parsed.status === "success") success = true;
+              if (parsed.error) onProgress?.(`Error: ${parsed.error}`);
+            } catch {
+              // Ignore
+            }
+          }
+          resolve(success);
+        });
+
+        res.on("error", () => resolve(false));
+      },
+    );
+
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => {
+      req.destroy();
+      onProgress?.("Model pull timed out");
+      resolve(false);
     });
-    return resp.status === 200;
-  } catch {
-    return false;
-  }
+
+    req.write(bodyStr);
+    req.end();
+  });
 }
 
 // ── Embeddings ───────────────────────────────────────

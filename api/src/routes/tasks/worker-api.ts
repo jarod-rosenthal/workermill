@@ -271,8 +271,9 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
           if (!org?.prdAutoRun) {
             logger.debug("PRD cascade: prdAutoRun disabled for org", { taskId, orgId: kbCard.board.orgId });
           } else {
+            const completedTask = await AppDataSource.getRepository(WorkerTask).findOne({ where: { id: taskId }, select: ["id", "boardExecutionId"] });
             const { processUnblockedCards } = await import("../../services/board-execution.js");
-            const cascadeResult = await processUnblockedCards(kbCard.board.id, kbCard.board.orgId);
+            const cascadeResult = await processUnblockedCards(kbCard.board.id, kbCard.board.orgId, completedTask?.boardExecutionId ?? undefined);
             logger.info("PRD cascade result", {
               taskId,
               boardId: kbCard.board.id,

@@ -441,16 +441,93 @@ async function main(): Promise<void> {
   // 3. Setup SCM credentials and get clone URL
   const repoUrl = setupCredentials();
 
-  // 4. Create isolated temp working directory
-  const taskId = process.env.PARENT_TASK_ID!;
-  const workDir = join(tmpdir(), `workermill-${taskId}`);
+  // 4. Check if a persistent workspace already has a cloned repo (batch execution reuse)
+  const existingRepoPath = process.env.REPO_PATH;
+  if (existingRepoPath && existsSync(join(existingRepoPath, ".git"))) {
+    console.log(`[Bootstrap] Reusing persistent workspace at ${existingRepoPath}`);
 
-  // Clean up any leftover from a previous attempt
-  if (existsSync(workDir)) {
+    // Reset to default branch and pull latest
+    const mainBranch = detectMainBranch(existingRepoPath);
+    try {
+      execSync(
+        `git checkout ${mainBranch} && git reset --hard origin/${mainBranch} && git pull --ff-only`,
+        { cwd: existingRepoPath, stdio: "pipe", timeout: 60_000 },
+      );
+      console.log(`[Bootstrap] Reset to ${mainBranch}, pulled latest`);
+    } catch (err) {
+      console.log(
+        `[Bootstrap] Git reset/pull warning: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    process.env.MAIN_BRANCH = mainBranch;
+
+    // Skip clone + dep install, go straight to heartbeat + coordinator
+    const heartbeatTimer = startHeartbeat();
+
+    const workerProvider = process.env.WORKER_PROVIDER || "anthropic";
+    let exitCode = 0;
+
+    try {
+      if (workerProvider === "anthropic") {
+        const config = loadConfig(existingRepoPath, mainBranch);
+        const resilience = loadResilienceConfig();
+        const decisionClient = new DecisionClient({
+          apiBaseUrl: config.apiBaseUrl,
+          orgApiKey: config.orgApiKey,
+          logger: (msg) => console.log(msg),
+        });
+        const coordinator = new EpicCoordinator(config, resilience, decisionClient);
+        let shutdownInProgress = false;
+        const shutdown = async () => {
+          if (shutdownInProgress) return;
+          shutdownInProgress = true;
+          console.log("\n[Bootstrap] Received shutdown signal");
+          await coordinator.gracefulShutdown();
+        };
+        process.on("SIGINT", shutdown);
+        process.on("SIGTERM", shutdown);
+        await coordinator.start();
+        console.log("[Bootstrap] Epic session ended (reused workspace)");
+      } else {
+        console.log(`[Bootstrap] Non-Anthropic provider: ${workerProvider}`);
+        const { MultiExpertCoordinator } = (await import(
+          "../multi-expert/index.js"
+        )) as {
+          MultiExpertCoordinator: new (
+            config: ReturnType<typeof loadMultiExpertConfig>,
+          ) => MultiExpertCoordinatorType;
+        };
+        const meConfig = loadMultiExpertConfig(existingRepoPath);
+        const coordinator = new MultiExpertCoordinator(meConfig);
+        process.on("SIGINT", () => coordinator.stop());
+        process.on("SIGTERM", () => coordinator.stop());
+        await coordinator.start();
+        console.log("[Bootstrap] Multi-Expert session ended (reused workspace)");
+      }
+    } catch (error) {
+      console.error("[Bootstrap] Fatal error:", error);
+      exitCode = 1;
+    } finally {
+      clearInterval(heartbeatTimer);
+      // Do NOT clean up persistent workspace — managed by agent workspace-manager
+    }
+
+    process.exit(exitCode);
+    return; // unreachable but makes TS happy
+  }
+
+  // 5. Create isolated working directory
+  const taskId = process.env.PARENT_TASK_ID!;
+  const persistentWorkspace = process.env.PERSISTENT_WORKSPACE;
+  const workDir = persistentWorkspace || join(tmpdir(), `workermill-${taskId}`);
+
+  // Only clean up temp dirs, not persistent workspaces
+  if (!persistentWorkspace && existsSync(workDir)) {
     rmSync(workDir, { recursive: true, force: true });
   }
 
-  // 5. Clone repository
+  // 6. Clone repository
   const repoDir = cloneRepo(repoUrl, workDir);
   const mainBranch = detectMainBranch(repoDir);
   console.log(`[Bootstrap] Main branch: ${mainBranch}`);
@@ -459,10 +536,10 @@ async function main(): Promise<void> {
   process.env.REPO_PATH = repoDir;
   process.env.MAIN_BRANCH = mainBranch;
 
-  // 6. Start heartbeat
+  // 7. Start heartbeat
   const heartbeatTimer = startHeartbeat();
 
-  // 7. Pre-install dependencies
+  // 8. Pre-install dependencies
   preInstallDeps(repoDir);
 
   // 8. Dispatch to correct coordinator based on provider
@@ -519,14 +596,16 @@ async function main(): Promise<void> {
     // 9. Cleanup
     clearInterval(heartbeatTimer);
 
-    // Remove temp working directory after a delay (let git processes finish)
-    setTimeout(() => {
-      try {
-        rmSync(workDir, { recursive: true, force: true });
-      } catch {
-        // Best effort cleanup
-      }
-    }, 5_000);
+    // Only remove temp working directory, not persistent workspaces
+    if (!persistentWorkspace) {
+      setTimeout(() => {
+        try {
+          rmSync(workDir, { recursive: true, force: true });
+        } catch {
+          // Best effort cleanup
+        }
+      }, 5_000);
+    }
   }
 
   process.exit(exitCode);

@@ -890,10 +890,20 @@ export class EpicCoordinator {
             // Deliver message file to all active expert worktrees for mid-execution visibility
             this.writeMessageToActiveWorktrees(cmd.content);
 
-            const hasRunningExperts = [...this.expertStates.values()].some((s) => s.status === "working");
-            if (hasRunningExperts) {
-              await this.postLog("Message delivered to running expert(s) — they will see it within seconds");
+            // Build rich acknowledgment with expert context
+            const runningExperts = [...this.expertStates.entries()]
+              .filter(([, s]) => s.status === "working" && s.currentStoryIndex !== undefined);
+
+            let ackMessage: string;
+            if (runningExperts.length > 0) {
+              const expertDetails = runningExperts.map(([persona, s]) => {
+                const storyLabel = `Story ${s.currentStoryIndex}`;
+                return `${persona} (${storyLabel})`;
+              }).join(", ");
+              ackMessage = `Message delivered to ${expertDetails}. Feedback will be applied.`;
+              await this.postLog(`Message delivered to running expert(s): ${expertDetails}`);
             } else {
+              ackMessage = "Message acknowledged — no experts currently running. Will apply to next story execution.";
               await this.postLog("Message acknowledged — will apply to next story execution");
             }
 
@@ -901,13 +911,13 @@ export class EpicCoordinator {
             try {
               await this.coordination.postContext(
                 "worker_ack",
-                `✅ Worker received message: "${cmd.content}"`,
+                ackMessage,
                 "coordinator",
                 undefined,
                 {
                   commandId: cmd.id,
                   commandType: cmd.type,
-                  feedbackWillBeAppliedTo: hasRunningExperts ? "running_experts_and_next_story" : "next_story",
+                  feedbackWillBeAppliedTo: runningExperts.length > 0 ? "running_experts_and_next_story" : "next_story",
                 }
               );
             } catch (ackError) {

@@ -338,9 +338,12 @@ export function formatTaskData(
   const steps = getTaskSteps(task.status, workflowMode, task.revisionCount || 0, task.executionMode);
 
   // Calculate Epic progress percentage
+  // Cap at 95% while the task is still running — only show 100% when truly complete
   const isEpicWorkflow = task.executionMode === "parallel" || task.executionMode === "multi-expert";
+  const isTerminal = ["completed", "deployed", "failed", "cancelled"].includes(task.status);
+  const maxProgress = isTerminal ? 100 : 95;
   const epicProgress = epicProgressData && epicProgressData.storiesTotal > 0
-    ? Math.round((epicProgressData.storiesCompleted / epicProgressData.storiesTotal) * 100)
+    ? Math.min(maxProgress, Math.round((epicProgressData.storiesCompleted / epicProgressData.storiesTotal) * 100))
     : 0;
 
   return {
@@ -405,7 +408,7 @@ export function formatTaskData(
     executionMode: task.executionMode || "single",
     isEpicWorkflow,
     epicProgress,
-    storiesCompleted: epicProgressData?.storiesCompleted ?? 0,
+    storiesCompleted: Math.min(epicProgressData?.storiesCompleted ?? 0, epicProgressData?.storiesTotal ?? 0),
     storiesTotal: epicProgressData?.storiesTotal ?? 0,
     storiesFailed: epicProgressData?.storiesFailed ?? 0,
     // Remote agent info
@@ -599,16 +602,28 @@ export async function fetchEpicProgressForTask(
       const taskRepo = AppDataSource.getRepository(WorkerTask);
       const childTasks = await taskRepo.find({
         where: { parentTaskId: task.id },
-        select: ["id", "status"],
+        select: ["id", "status", "storyIndex"],
       });
 
+      // Track unique story indices to avoid counting retries as extra completions
+      const completedStoryIndices = new Set<number>();
+      const failedStoryIndices = new Set<number>();
+
       for (const child of childTasks) {
+        const idx = child.storyIndex ?? -1;
         if (["completed", "deployed", "pr_approved", "review_approved"].includes(child.status)) {
-          storiesCompleted++;
+          completedStoryIndices.add(idx);
         } else if (child.status === "failed" || child.status === "cancelled") {
-          storiesFailed++;
+          failedStoryIndices.add(idx);
         }
       }
+
+      storiesCompleted = completedStoryIndices.size;
+      // Only count failed stories that don't also have a successful completion
+      for (const idx of completedStoryIndices) {
+        failedStoryIndices.delete(idx);
+      }
+      storiesFailed = failedStoryIndices.size;
     } else {
       // No child tasks yet - try to get progress from WorkerContext (coordination feed)
       // This handles Epic mode where stories are tracked in context, not as separate tasks

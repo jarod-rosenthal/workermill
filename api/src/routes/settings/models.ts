@@ -1,14 +1,7 @@
 import { Router, Request, Response } from "express";
-import {
-  GetSecretValueCommand,
-  PutSecretValueCommand,
-  CreateSecretCommand,
-  ResourceNotFoundException,
-} from "@aws-sdk/client-secrets-manager";
 import { requireAdmin } from "../../middleware/auth.js";
 import { logger } from "../../utils/logger.js";
 import {
-  config,
   hasProviderCredentials,
   clearProviderCredentialsCache,
 } from "../../config/index.js";
@@ -24,8 +17,10 @@ import {
 } from "../../models/index.js";
 import {
   getAvailableModels,
+  getOrgSecret,
+  saveOrgSecret,
+  deleteOrgSecret,
   modelCache,
-  secretsClient,
   testAnthropicApiKey,
   testOpenAIApiKey,
   testGoogleApiKey,
@@ -186,20 +181,7 @@ router.post("/providers/:providerId/test", async (req: Request, res: Response) =
     }
 
     // SECURITY: Only test org-specific credentials - NO platform fallback for multi-tenancy isolation
-    const secretPrefix = `workermill/${config.environment}`;
-    const orgSecretPath = `${secretPrefix}/orgs/${org.id}/providers/${providerId}`;
-
-    let apiKey: string | null = null;
-
-    // Only check org-specific credentials
-    try {
-      const orgSecret = await secretsClient.send(
-        new GetSecretValueCommand({ SecretId: orgSecretPath })
-      );
-      apiKey = orgSecret.SecretString || null;
-    } catch {
-      // Org-specific credentials not found - do NOT fall back to platform credentials
-    }
+    const apiKey = await getOrgSecret(org.id, `providers/${providerId}`);
 
     if (!apiKey) {
       res.status(400).json({
@@ -290,32 +272,8 @@ router.put(
         return;
       }
 
-      // Save to org-specific secret path
-      const secretPrefix = `workermill/${config.environment}`;
-      const secretPath = `${secretPrefix}/orgs/${org.id}/providers/${providerId}`;
-
-      try {
-        // Try to update existing secret
-        await secretsClient.send(
-          new PutSecretValueCommand({
-            SecretId: secretPath,
-            SecretString: apiKey,
-          })
-        );
-      } catch (error) {
-        // If secret doesn't exist, create it
-        if (error instanceof ResourceNotFoundException) {
-          await secretsClient.send(
-            new CreateSecretCommand({
-              Name: secretPath,
-              SecretString: apiKey,
-              Description: `${provider.name} API key for org ${org.id}`,
-            })
-          );
-        } else {
-          throw error;
-        }
-      }
+      // Save to org-specific secret store
+      await saveOrgSecret(org.id, `providers/${providerId}`, apiKey);
 
       // Clear the credentials cache for this org/provider
       clearProviderCredentialsCache(org.id, providerId as ProviderId);
@@ -361,24 +319,7 @@ router.delete(
         return;
       }
 
-      const secretPrefix = `workermill/${config.environment}`;
-      const secretPath = `${secretPrefix}/orgs/${org.id}/providers/${providerId}`;
-
-      // We don't actually delete the secret, just clear it (to keep the secret structure)
-      // This allows the secret to be re-used without needing create permissions
-      try {
-        await secretsClient.send(
-          new PutSecretValueCommand({
-            SecretId: secretPath,
-            SecretString: "", // Empty string to "delete" credentials
-          })
-        );
-      } catch (error) {
-        if (!(error instanceof ResourceNotFoundException)) {
-          throw error;
-        }
-        // Secret doesn't exist, that's fine
-      }
+      await deleteOrgSecret(org.id, `providers/${providerId}`);
 
       // Clear the credentials cache
       clearProviderCredentialsCache(org.id, providerId as ProviderId);

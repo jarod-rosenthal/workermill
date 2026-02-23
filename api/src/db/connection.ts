@@ -56,6 +56,7 @@ import {
   MarketingCampaign,
   MarketingContent,
   MarketingAction,
+  OrgCredential,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -250,9 +251,12 @@ import { ChangeMaxPerStoryRevisionsDefault1740200000003 } from "./migrations/174
 import { AddRemoteAgentGpuColumns1740200000004 } from "./migrations/1740200000004-AddRemoteAgentGpuColumns.js";
 import { AddBoardExecutionId1740300000000 } from "./migrations/1740300000000-AddBoardExecutionId.js";
 import { AddMarketingAgent1740400000000 } from "./migrations/1740400000000-AddMarketingAgent.js";
+import { CreateOrgCredentials1740500000000 } from "./migrations/1740500000000-CreateOrgCredentials.js";
+import { MigrateSecretsManagerToDb1740500000001 } from "./migrations/1740500000001-MigrateSecretsManagerToDb.js";
 import { logger } from "../utils/logger.js";
 import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
+import { OrgCredentialEncryptionSubscriber } from "./subscribers/OrgCredentialEncryptionSubscriber.js";
 
 export const AppDataSource = new DataSource({
   type: "postgres",
@@ -329,6 +333,7 @@ export const AppDataSource = new DataSource({
     MarketingCampaign,
     MarketingContent,
     MarketingAction,
+    OrgCredential,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -524,10 +529,13 @@ export const AppDataSource = new DataSource({
     AddRemoteAgentGpuColumns1740200000004,
     AddBoardExecutionId1740300000000,
     AddMarketingAgent1740400000000,
+    CreateOrgCredentials1740500000000,
+    MigrateSecretsManagerToDb1740500000001,
   ],
   subscribers: [
     OrganizationEncryptionSubscriber,
     WebhookEndpointEncryptionSubscriber,
+    OrgCredentialEncryptionSubscriber,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

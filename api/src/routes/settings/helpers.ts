@@ -1,96 +1,58 @@
-import {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-  PutSecretValueCommand,
-  CreateSecretCommand,
-  ResourceNotFoundException,
-} from "@aws-sdk/client-secrets-manager";
+import { SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import { config } from "../../config/index.js";
 import { logger } from "../../utils/logger.js";
+import {
+  getOrgSecretFromDb,
+  saveOrgSecretToDb,
+  deleteOrgSecretFromDb,
+} from "../../utils/org-secret-store.js";
 
 // =============================================================================
-// AWS Secrets Manager
+// AWS Secrets Manager (kept for ListSecretsCommand in org.ts diagnostic endpoint
+// and the reviewer-token migration endpoint in integrations.ts)
 // =============================================================================
 
-export const secretsClient = new SecretsManagerClient({ region: config.aws.region });
+export const secretsClient = new SecretsManagerClient({
+  region: config.aws.region,
+});
 
 /**
- * Get organization-specific secret from AWS Secrets Manager.
- * SECURITY: Only returns org-specific secrets - NO platform fallback for multi-tenancy isolation.
- * Each organization must configure their own credentials.
+ * Get organization-specific secret from encrypted DB (org_credentials table).
+ *
+ * @param secretPrefix - Kept for backward compat; ignored.
  */
 export async function getOrgSecret(
   orgId: string,
   secretName: string,
-  secretPrefix: string
+  secretPrefix?: string,
 ): Promise<string | null> {
-  // Only return org-specific secrets - no platform fallback for multi-tenancy security
-  try {
-    const orgSecret = await secretsClient.send(
-      new GetSecretValueCommand({
-        SecretId: `${secretPrefix}/orgs/${orgId}/${secretName}`,
-      })
-    );
-    if (orgSecret.SecretString) return orgSecret.SecretString;
-  } catch {
-    // Not found at org level - return null (no fallback to shared secrets)
-  }
-
-  return null;
+  return getOrgSecretFromDb(orgId, secretName);
 }
 
 /**
- * Helper to get platform-wide secret (for truly shared resources only)
- * Use sparingly - only for platform infrastructure, not tenant data
- */
-export async function getPlatformSecret(
-  secretName: string,
-  secretPrefix: string
-): Promise<string | null> {
-  try {
-    const platformSecret = await secretsClient.send(
-      new GetSecretValueCommand({
-        SecretId: `${secretPrefix}/${secretName}`,
-      })
-    );
-    return platformSecret.SecretString || null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Helper to save secret to org-specific path
+ * Save an organization secret — writes exclusively to the encrypted DB.
+ *
+ * @param secretPrefix - Kept for backward compat; ignored.
+ * @param description - Kept for backward compat; ignored.
  */
 export async function saveOrgSecret(
   orgId: string,
   secretName: string,
   secretValue: string,
-  secretPrefix: string,
-  description: string
+  secretPrefix?: string,
+  description?: string,
 ): Promise<void> {
-  const secretPath = `${secretPrefix}/orgs/${orgId}/${secretName}`;
+  await saveOrgSecretToDb(orgId, secretName, secretValue);
+}
 
-  try {
-    await secretsClient.send(
-      new PutSecretValueCommand({
-        SecretId: secretPath,
-        SecretString: secretValue,
-      })
-    );
-  } catch (error) {
-    if (error instanceof ResourceNotFoundException) {
-      await secretsClient.send(
-        new CreateSecretCommand({
-          Name: secretPath,
-          SecretString: secretValue,
-          Description: description,
-        })
-      );
-    } else {
-      throw error;
-    }
-  }
+/**
+ * Delete an organization secret from the encrypted DB.
+ */
+export async function deleteOrgSecret(
+  orgId: string,
+  secretName: string,
+): Promise<void> {
+  await deleteOrgSecretFromDb(orgId, secretName);
 }
 
 // =============================================================================

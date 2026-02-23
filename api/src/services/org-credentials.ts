@@ -10,14 +10,11 @@
  * maxReviewRevisions).
  */
 
-import {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} from "@aws-sdk/client-secrets-manager";
 import { AppDataSource } from "../db/connection.js";
 import { Organization } from "../models/index.js";
-import { config, getProviderCredentials } from "../config/index.js";
+import { getProviderCredentials } from "../config/index.js";
 import { logger } from "../utils/logger.js";
+import { getOrgSecretFromDb } from "../utils/org-secret-store.js";
 import type { ProviderId } from "../providers/types.js";
 
 export interface OrgCredentials {
@@ -61,9 +58,6 @@ export interface OrgCredentials {
   linearApiKey?: string;
   issueTrackerProvider?: string;
 }
-
-// AWS Secrets Manager client
-const secretsClient = new SecretsManagerClient({ region: config.aws.region });
 
 // Cache for org credentials (5 minute TTL)
 const credentialsCache = new Map<
@@ -109,24 +103,14 @@ export async function getReviewerGitHubToken(
     return cached.token;
   }
 
-  const secretPrefix = `workermill/${config.environment}`;
-
   // Only use org-specific github-reviewer-token (no platform fallback for multi-tenancy)
-  try {
-    const orgSecret = await secretsClient.send(
-      new GetSecretValueCommand({
-        SecretId: `${secretPrefix}/orgs/${orgId}/github-reviewer-token`,
-      }),
-    );
-    if (orgSecret.SecretString) {
-      reviewerTokenCache.set(orgId, {
-        token: orgSecret.SecretString,
-        expiresAt: now + 5 * 60 * 1000,
-      });
-      return orgSecret.SecretString;
-    }
-  } catch {
-    // Not found at org level - no fallback to platform secrets for security
+  const dbValue = await getOrgSecretFromDb(orgId, "github-reviewer-token");
+  if (dbValue) {
+    reviewerTokenCache.set(orgId, {
+      token: dbValue,
+      expiresAt: now + 5 * 60 * 1000,
+    });
+    return dbValue;
   }
 
   logger.warn("No GitHub reviewer token configured for org", { orgId });
@@ -134,24 +118,24 @@ export async function getReviewerGitHubToken(
 }
 
 /**
- * Backward compatibility alias — fetches legacy manager-github-token
- * for manager tasks that don't have orgId context.
+ * Fetch the platform-wide manager GitHub token from the DB.
+ * Stored under the platform org's ID in org_credentials with key "manager-github-token".
  */
 export async function getManagerGitHubToken(): Promise<string> {
   try {
-    const secret = await secretsClient.send(
-      new GetSecretValueCommand({
-        SecretId: `workermill/${config.environment}/manager-github-token`,
-      }),
-    );
-    return secret.SecretString || "";
+    const platformOrg = await Organization.getPlatformOrg();
+    if (!platformOrg) {
+      logger.warn("No platform org found — cannot fetch manager GitHub token");
+      return "";
+    }
+    return (await getOrgSecretFromDb(platformOrg.id, "manager-github-token")) || "";
   } catch {
     return "";
   }
 }
 
 /**
- * Get credentials for an organization from Secrets Manager
+ * Get credentials for an organization from the database.
  *
  * SECURITY: All credentials are org-specific. NO global/platform fallbacks.
  * Each tenant must configure their own API keys in Settings.
@@ -174,42 +158,14 @@ export async function getOrgCredentials(
       throw new Error(`Organization not found: ${orgId}`);
     }
 
-    const env = config.environment;
-    const basePath = `workermill/${env}/orgs/${orgId}`;
-
     /**
-     * Helper to fetch org-specific integration secrets
-     * Tries both integrations/ path and root path (legacy)
-     * NO platform fallback - returns null if not configured for this org
+     * Helper to fetch org-specific integration secrets from the database.
+     * NO platform fallback - returns null if not configured for this org.
      */
     const getOrgIntegrationSecret = async (
       secretName: string,
     ): Promise<string | null> => {
-      // Try integrations/ path first (new structure)
-      try {
-        const secret = await secretsClient.send(
-          new GetSecretValueCommand({
-            SecretId: `${basePath}/integrations/${secretName}`,
-          }),
-        );
-        if (secret.SecretString) return secret.SecretString;
-      } catch {
-        // Not found in integrations/
-      }
-
-      // Try root path (legacy structure)
-      try {
-        const secret = await secretsClient.send(
-          new GetSecretValueCommand({
-            SecretId: `${basePath}/${secretName}`,
-          }),
-        );
-        if (secret.SecretString) return secret.SecretString;
-      } catch {
-        // Not found at root either
-      }
-
-      return null; // Not configured for this org - NO platform fallback
+      return getOrgSecretFromDb(orgId, secretName);
     };
 
     // Fetch org-specific secrets (NO platform fallback for multi-tenancy security)
@@ -410,13 +366,12 @@ export async function getOrgCredentials(
 
     // Try to fetch customer AWS role configuration
     try {
-      const awsRoleSecret = await secretsClient.send(
-        new GetSecretValueCommand({
-          SecretId: `workermill/${config.environment}/orgs/${orgId}/aws-role-config`,
-        }),
+      const awsRoleSecretStr = await getOrgSecretFromDb(
+        orgId,
+        "aws-role-config",
       );
-      if (awsRoleSecret.SecretString) {
-        const awsRoleConfig = JSON.parse(awsRoleSecret.SecretString);
+      if (awsRoleSecretStr) {
+        const awsRoleConfig = JSON.parse(awsRoleSecretStr);
         if (awsRoleConfig.roleArn) {
           credentials.customerAwsRoleArn = awsRoleConfig.roleArn;
           credentials.customerAwsExternalId = awsRoleConfig.externalId;
@@ -437,7 +392,7 @@ export async function getOrgCredentials(
 
     return credentials;
   } catch (error) {
-    logger.error("Failed to fetch credentials from Secrets Manager", {
+    logger.error("Failed to fetch org credentials", {
       error,
       orgId,
     });

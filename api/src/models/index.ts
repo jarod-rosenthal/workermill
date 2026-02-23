@@ -113,3 +113,4 @@ export { KbStarredBoard } from "./KbStarredBoard.js";
 export { MarketingCampaign, type CampaignPlatform, type CampaignStatus } from "./MarketingCampaign.js";
 export { MarketingContent, type ContentPlatform, type ContentType, type ContentStatus } from "./MarketingContent.js";
 export { MarketingAction, type MarketingActionType } from "./MarketingAction.js";
+export { OrgCredential } from "./OrgCredential.js";

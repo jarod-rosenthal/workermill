@@ -70,13 +70,19 @@ router.post(
     // Persist to WorkerTaskLog for historical retrieval
     const logRepo = AppDataSource.getRepository(WorkerTaskLog);
     const action = toolName === "Write" ? "Wrote" : "Edited";
+    // For Write events, persist `content` as `newStr` so the Live Diff viewer can show it
+    const persistedNewStr = newStr
+      ? newStr.substring(0, 50_000)
+      : content
+        ? content.substring(0, 50_000)
+        : null;
     const logData = WorkerTaskLog.create(taskId, "code_event", `${action} ${filePath}`, {
       filePath,
       metadata: {
         toolName,
         expert: expert || null,
         oldStr: oldStr ? oldStr.substring(0, 50_000) : null,
-        newStr: newStr ? newStr.substring(0, 50_000) : null,
+        newStr: persistedNewStr,
         isWrite: toolName === "Write",
       },
     });

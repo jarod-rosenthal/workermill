@@ -23,6 +23,8 @@ interface CriticConfig {
   promptTemplate: string;
   approvalThreshold: number;
   maxTargetFiles: number;
+  criticFeedbackTemplate?: string;
+  refinementFeedbackTemplate?: string;
 }
 
 let cachedCriticConfig: CriticConfig | null = null;
@@ -45,6 +47,8 @@ export async function getCriticConfig(apiMaxTargetFiles?: number): Promise<Criti
       promptTemplate: data.promptTemplate,
       approvalThreshold: data.approvalThreshold ?? 85,
       maxTargetFiles: data.maxTargetFiles ?? apiMaxTargetFiles ?? 5,
+      criticFeedbackTemplate: data.criticFeedbackTemplate,
+      refinementFeedbackTemplate: data.refinementFeedbackTemplate,
     };
     // Sync module-level thresholds so applyFileCap and formatCriticFeedback use server values
     AUTO_APPROVAL_THRESHOLD = cachedCriticConfig.approvalThreshold;
@@ -502,9 +506,65 @@ export function runCriticCli(
 }
 
 /**
+ * Interpolate a server-side feedback template with critic result values.
+ * Replaces {{SCORE}}, {{THRESHOLD}}, {{MAX_TARGET_FILES}} with values,
+ * and builds {{RISKS_SECTION}}, {{SUGGESTIONS_SECTION}}, {{STORY_FEEDBACK_SECTION}}
+ * from critic arrays (same formatting as the hardcoded logic).
+ */
+function interpolateFeedbackTemplate(template: string, critic: CriticResult): string {
+  let result = template;
+  result = result.replace(/\{\{SCORE\}\}/g, String(critic.score));
+  result = result.replace(/\{\{THRESHOLD\}\}/g, String(AUTO_APPROVAL_THRESHOLD));
+  result = result.replace(/\{\{MAX_TARGET_FILES\}\}/g, String(MAX_TARGET_FILES));
+
+  // Build risks section
+  let risksSection = "";
+  if (critic.risks.length > 0) {
+    risksSection = "### Risks Identified:\n";
+    for (const risk of critic.risks) {
+      risksSection += `- ${risk}\n`;
+    }
+    risksSection += "\n";
+  }
+  result = result.replace(/\{\{RISKS_SECTION\}\}/g, risksSection);
+
+  // Build suggestions section
+  let suggestionsSection = "";
+  if (critic.suggestions && critic.suggestions.length > 0) {
+    suggestionsSection = "### Required Changes:\n";
+    for (const suggestion of critic.suggestions) {
+      suggestionsSection += `- ${suggestion}\n`;
+    }
+    suggestionsSection += "\n";
+  }
+  result = result.replace(/\{\{SUGGESTIONS_SECTION\}\}/g, suggestionsSection);
+
+  // Build story feedback section
+  let storyFeedbackSection = "";
+  if (critic.storyFeedback && critic.storyFeedback.length > 0) {
+    storyFeedbackSection = "### Per-Story Feedback:\n";
+    for (const fb of critic.storyFeedback) {
+      storyFeedbackSection += `- **${fb.storyId}**: ${fb.feedback}\n`;
+      if (fb.suggestedChanges) {
+        for (const change of fb.suggestedChanges) {
+          storyFeedbackSection += `  - ${change}\n`;
+        }
+      }
+    }
+    storyFeedbackSection += "\n";
+  }
+  result = result.replace(/\{\{STORY_FEEDBACK_SECTION\}\}/g, storyFeedbackSection);
+
+  return result;
+}
+
+/**
  * Format critic feedback for appending to the planner prompt on re-run.
  */
 export function formatCriticFeedback(critic: CriticResult): string {
+  if (cachedCriticConfig?.criticFeedbackTemplate) {
+    return interpolateFeedbackTemplate(cachedCriticConfig.criticFeedbackTemplate, critic);
+  }
   const lines: string[] = [
     "",
     "## CRITIC FEEDBACK — Your previous plan was REJECTED",
@@ -561,6 +621,9 @@ export function formatCriticFeedback(critic: CriticResult): string {
  * collaborative — the planner should consider suggestions, not blindly apply them.
  */
 export function formatRefinementFeedback(critic: CriticResult): string {
+  if (cachedCriticConfig?.refinementFeedbackTemplate) {
+    return interpolateFeedbackTemplate(cachedCriticConfig.refinementFeedbackTemplate, critic);
+  }
   const lines: string[] = [
     "",
     "## REVIEWER NOTES — Your plan was APPROVED, but the reviewer has suggestions",

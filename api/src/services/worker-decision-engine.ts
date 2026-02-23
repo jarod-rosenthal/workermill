@@ -12,6 +12,16 @@
 
 import { readFile } from "fs/promises";
 import { join } from "path";
+import {
+  COORDINATION_INSTRUCTIONS,
+  LEARNING_INSTRUCTIONS,
+  TECH_LEAD_REVIEW_PROMPT,
+  DEVOPS_PHASE1_PROMPT,
+  DEVOPS_DEPLOY_AUTO_PROMPT,
+  DEVOPS_DEPLOY_MANUAL_PROMPT,
+  DEVOPS_CREATE_PROMPT,
+  IMPROVER_PROMPT,
+} from "./prompt-templates.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -126,6 +136,16 @@ export interface WorkerConfig {
     blockerMaxAutoRetries: number;
     maxReviewRevisions: number;
     maxPerStoryRevisions: number;
+  };
+  promptTemplates?: {
+    coordinationInstructions: string;
+    learningInstructions: string;
+    techLeadReviewPrompt: string;
+    devopsPhase1Prompt: string;
+    devopsDeployAutoPrompt: string;
+    devopsDeployManualPrompt: string;
+    devopsCreatePrompt: string;
+    improverPrompt: string;
   };
 }
 
@@ -1016,6 +1036,16 @@ export async function getWorkerConfig(): Promise<WorkerConfig> {
       blockerMaxAutoRetries: 3,
       maxReviewRevisions: 3,
       maxPerStoryRevisions: 2,
+    },
+    promptTemplates: {
+      coordinationInstructions: COORDINATION_INSTRUCTIONS,
+      learningInstructions: LEARNING_INSTRUCTIONS,
+      techLeadReviewPrompt: TECH_LEAD_REVIEW_PROMPT,
+      devopsPhase1Prompt: DEVOPS_PHASE1_PROMPT,
+      devopsDeployAutoPrompt: DEVOPS_DEPLOY_AUTO_PROMPT,
+      devopsDeployManualPrompt: DEVOPS_DEPLOY_MANUAL_PROMPT,
+      devopsCreatePrompt: DEVOPS_CREATE_PROMPT,
+      improverPrompt: IMPROVER_PROMPT,
     },
   };
 }

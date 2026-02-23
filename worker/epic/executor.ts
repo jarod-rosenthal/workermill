@@ -143,6 +143,18 @@ export class StoryExecutor {
   }
 
   /**
+   * Set server-side prompt templates loaded from the Decision API.
+   * Called by the coordinator after getWorkerConfig().
+   */
+  private serverCoordinationInstructions: string | null = null;
+  private serverLearningInstructions: string | null = null;
+
+  setPromptTemplates(templates: { coordinationInstructions?: string; learningInstructions?: string }): void {
+    this.serverCoordinationInstructions = templates.coordinationInstructions ?? null;
+    this.serverLearningInstructions = templates.learningInstructions ?? null;
+  }
+
+  /**
    * Execute an agent using either the unified AIClient or legacy runAgent.
    * Routes based on the useUnifiedClient feature flag.
    */
@@ -368,13 +380,13 @@ export class StoryExecutor {
 
     // Only add coordination instructions for multi-story tasks (saves ~1K tokens for single-story)
     if (totalStories > 1) {
-      prompt += COORDINATION_INSTRUCTIONS;
+      prompt += this.serverCoordinationInstructions ?? COORDINATION_INSTRUCTIONS;
     } else {
       console.log(`[Epic] Skipping coordination instructions for single-story task`);
     }
 
     // Always add learning instructions so experts can report discoveries
-    prompt += LEARNING_INSTRUCTIONS;
+    prompt += this.serverLearningInstructions ?? LEARNING_INSTRUCTIONS;
 
     return prompt;
   }

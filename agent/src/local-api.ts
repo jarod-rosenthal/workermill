@@ -222,35 +222,27 @@ async function getMergedTasks(): Promise<LocalTaskInfo[]> {
   if (!cloudProxy) return localList;
 
   try {
+    type CloudTask = {
+        id: string;
+        summary?: string;
+        description?: string;
+        status?: string;
+        workerPersona?: string;
+        workerModel?: string;
+        githubRepo?: string;
+        startedAt?: string;
+        createdAt?: string;
+      };
     const dashboard = (await cloudProxy("GET", "/api/control-center")) as {
-      activeTasks?: Array<{
-        id: string;
-        summary?: string;
-        description?: string;
-        status?: string;
-        workerPersona?: string;
-        workerModel?: string;
-        githubRepo?: string;
-        startedAt?: string;
-        createdAt?: string;
-      }>;
-      queuedTasks?: Array<{
-        id: string;
-        summary?: string;
-        description?: string;
-        status?: string;
-        workerPersona?: string;
-        workerModel?: string;
-        githubRepo?: string;
-        startedAt?: string;
-        createdAt?: string;
-      }>;
+      activeTasks?: CloudTask[];
+      queuedTasks?: CloudTask[];
+      recentCompleted?: CloudTask[];
     };
 
     const localIds = new Set(localList.map((t) => t.id));
     const cloudTasks: LocalTaskInfo[] = [];
 
-    for (const list of [dashboard.activeTasks, dashboard.queuedTasks]) {
+    for (const list of [dashboard.activeTasks, dashboard.queuedTasks, dashboard.recentCompleted]) {
       if (!Array.isArray(list)) continue;
       for (const ct of list) {
         if (localIds.has(ct.id)) continue; // local takes priority
@@ -450,8 +442,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   if (req.method === "GET" && path === "/api/stream/tasks") {
     sseHeaders(res);
     addSSEClient(res, "tasks");
-    // Send initial state
-    res.write(`event: snapshot\ndata: ${JSON.stringify(Array.from(localTasks.values()))}\n\n`);
+    // Send initial state (merged with cloud tasks so completed/failed show up)
+    getMergedTasks().then((merged) => {
+      try { res.write(`event: snapshot\ndata: ${JSON.stringify(merged)}\n\n`); } catch { /* client gone */ }
+    }).catch(() => {
+      try { res.write(`event: snapshot\ndata: ${JSON.stringify(Array.from(localTasks.values()))}\n\n`); } catch { /* client gone */ }
+    });
     // Keep alive every 30s
     const keepAlive = setInterval(() => {
       try { res.write(": keepalive\n\n"); } catch { clearInterval(keepAlive); }

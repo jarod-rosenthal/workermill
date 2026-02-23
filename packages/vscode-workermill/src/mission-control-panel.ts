@@ -395,6 +395,21 @@ function getWebviewContent(task: TaskInfo): string {
   .feed-item.progress { border-left-color: var(--accent); }
   .feed-item.warning { border-left-color: var(--orange); }
   .feed-item.revision_requested { border-left-color: var(--orange); }
+  .feed-item.worker_ack {
+    border-left-color: var(--green);
+    background: rgba(78, 201, 176, 0.08);
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+  .feed-item.expert_response {
+    border-left-color: var(--purple);
+    background: rgba(197, 134, 192, 0.1);
+    border-radius: 8px;
+    border-left-width: 4px;
+  }
+  .feed-item.expert_response .feed-content {
+    font-style: italic;
+  }
 
   .feed-persona {
     font-size: 11px;
@@ -670,12 +685,29 @@ function addFeedItem(item) {
 
   const typeLabel = (item.messageType || '').replace(/_/g, ' ');
 
-  div.innerHTML =
-    '<div class="feed-persona">' +
-    getEmoji(item.persona) + ' ' + escapeHtml(item.persona || 'system') +
-    '<span class="type-badge">' + typeLabel + '</span></div>' +
-    '<div class="feed-content">' + escapeHtml(item.content || '') + '</div>' +
-    '<div class="feed-time">' + formatTime(item.createdAt) + '</div>';
+  if (item.messageType === 'worker_ack') {
+    // Compact system acknowledgment
+    div.innerHTML =
+      '<div class="feed-content">' +
+      '\\u2705 ' + escapeHtml(item.content || '') +
+      '</div>' +
+      '<div class="feed-time">' + formatTime(item.createdAt) + '</div>';
+  } else if (item.messageType === 'expert_response') {
+    // Chat-bubble style reply from expert
+    div.innerHTML =
+      '<div class="feed-persona">' +
+      getEmoji(item.persona) + ' ' + escapeHtml(item.persona || 'expert') +
+      '<span class="type-badge">reply</span></div>' +
+      '<div class="feed-content">' + escapeHtml(item.content || '') + '</div>' +
+      '<div class="feed-time">' + formatTime(item.createdAt) + '</div>';
+  } else {
+    div.innerHTML =
+      '<div class="feed-persona">' +
+      getEmoji(item.persona) + ' ' + escapeHtml(item.persona || 'system') +
+      '<span class="type-badge">' + typeLabel + '</span></div>' +
+      '<div class="feed-content">' + escapeHtml(item.content || '') + '</div>' +
+      '<div class="feed-time">' + formatTime(item.createdAt) + '</div>';
+  }
 
   feed.appendChild(div);
   feed.scrollTop = feed.scrollHeight;

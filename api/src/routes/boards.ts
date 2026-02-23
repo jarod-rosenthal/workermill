@@ -5,6 +5,7 @@
  * Provides CRUD for boards, columns, cards, labels, comments, checklists, and activity.
  */
 
+import crypto from "crypto";
 import { Router, Request, Response } from "express";
 import { AppDataSource } from "../db/connection.js";
 import {
@@ -131,6 +132,7 @@ async function logActivity(
 export async function runCardAsWorkerTask(
   cardId: string,
   orgId: string,
+  boardExecutionId?: string,
 ): Promise<WorkerTask> {
   const cardRepo = AppDataSource.getRepository(KbCard);
   const orgRepo = AppDataSource.getRepository(Organization);
@@ -288,6 +290,7 @@ export async function runCardAsWorkerTask(
     executionMode,
     criticEnabled: hasCriticLabel,
     ticketSystem: "internal",
+    boardExecutionId: boardExecutionId || null,
   });
 
   await workerTaskRepo.save(workerTask);
@@ -1814,9 +1817,12 @@ router.post(
         return;
       }
 
+      // Generate a batch ID so all cards in this run-all share a workspace
+      const boardExecutionId = crypto.randomUUID();
+
       // Dynamic import — board-execution service may be created by a parallel task
       const { processUnblockedCards } = await import("../services/board-execution.js");
-      const result = await processUnblockedCards(boardId, org.id);
+      const result = await processUnblockedCards(boardId, org.id, boardExecutionId);
 
       await logActivity(boardId, req.user!.id, "run_all", "board", boardId);
 

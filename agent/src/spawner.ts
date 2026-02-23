@@ -18,6 +18,13 @@ import { activeProcesses, type ActiveProcess } from "./active-processes.js";
 import { agentEvents } from "./local-api.js";
 import { fileURLToPath } from "url";
 import { getOllamaStatus } from "./ollama-manager.js";
+import {
+  getOrCreateWorkspace,
+  releaseWorkspace,
+  discoverRepoPath,
+  hasClonedRepo,
+  getRepoPath,
+} from "./workspace-manager.js";
 
 /**
  * Detect whether we're running as a compiled binary or via Node.js.
@@ -127,6 +134,7 @@ export interface SpawnableTask {
   githubPrNumber?: number;
   retryCount?: number;
   pipelineVersion?: string;
+  boardExecutionId?: string;
 }
 
 /** Org credentials returned by /api/agent/claim */
@@ -196,8 +204,17 @@ export async function spawnWorker(
     return;
   }
 
-  // Create isolated temp working directory for this task
-  const workDir = path.join(os.tmpdir(), `workermill-${task.id.slice(0, 8)}`);
+  // Create working directory — persistent for batch tasks, temp for singles
+  let workDir: string;
+  let persistentWorkspace = false;
+
+  if (task.boardExecutionId) {
+    const ws = getOrCreateWorkspace(task.boardExecutionId);
+    workDir = ws.workDir;
+    persistentWorkspace = true;
+  } else {
+    workDir = path.join(os.tmpdir(), `workermill-${task.id.slice(0, 8)}`);
+  }
   fs.mkdirSync(workDir, { recursive: true });
 
   // Check if local Ollama is running (for OLLAMA_HOST env var)
@@ -338,6 +355,12 @@ export async function spawnWorker(
     MAX_PARALLEL_EXPERTS: String(orgConfig.maxParallelExperts),
     REVIEW_ENABLED: task.skipManagerReview === false ? "true" : "false",
     SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (orgConfig.selfReviewEnabled !== false) ? "true" : "false",
+
+    // Persistent workspace for batch board executions
+    ...(task.boardExecutionId ? { PERSISTENT_WORKSPACE: workDir } : {}),
+    ...(task.boardExecutionId && hasClonedRepo(task.boardExecutionId)
+      ? { REPO_PATH: getRepoPath(task.boardExecutionId)! }
+      : {}),
   };
 
   // Build env object, filtering empty values and inheriting PATH
@@ -489,9 +512,14 @@ export async function spawnWorker(
     // Clean up working directory and process reference after delay
     setTimeout(() => {
       activeProcesses.delete(task.id);
-      try {
-        fs.rmSync(workDir, { recursive: true, force: true });
-      } catch { /* best effort cleanup */ }
+      if (persistentWorkspace && task.boardExecutionId) {
+        discoverRepoPath(task.boardExecutionId);
+        releaseWorkspace(task.boardExecutionId);
+      } else {
+        try {
+          fs.rmSync(workDir, { recursive: true, force: true });
+        } catch { /* best effort cleanup */ }
+      }
     }, 90_000);
   });
 

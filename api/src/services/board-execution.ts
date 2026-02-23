@@ -9,6 +9,7 @@ const DONE_STATUSES = ["completed", "deployed", "pr_approved", "review_approved"
 export async function processUnblockedCards(
   boardId: string,
   orgId: string,
+  boardExecutionId?: string,
 ): Promise<{ triggered: number; stillBlocked: number; alreadyComplete: number }> {
   const cardRepo = AppDataSource.getRepository(KbCard);
   const depRepo = AppDataSource.getRepository(KbCardDependency);
@@ -96,7 +97,7 @@ export async function processUnblockedCards(
 
     // Card is unblocked — trigger it
     try {
-      await runCardAsWorkerTask(card.id, orgId);
+      await runCardAsWorkerTask(card.id, orgId, boardExecutionId);
       triggered++;
       logger.info("PRD cascade: triggered card", {
         boardId,

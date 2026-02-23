@@ -1339,16 +1339,24 @@ You are part of a team of experts working in parallel on the SAME ticket. Each e
 These constraints are **mandatory** and override any defaults or assumptions. If the ticket says "use X v5", you must use v5 even if v4 is more common or easier.
 
 ***REMOVED******REMOVED******REMOVED*** 📬 Live Communication Channel
-You have a 2-way message channel with the user while you work.
+You have a 2-way message channel with the user while you work. **The user can see your responses in real-time on their dashboard.**
 
-**Receiving messages:** The user may send you messages at any time. When a message arrives, the file \`${repoPath}/.workermill-message.md\` will appear in your working directory. **Check for this file periodically** — especially:
+**Receiving messages:** The user may send you messages at any time. When a message arrives, the file \`${repoPath}/.workermill-message.md\` will appear in your working directory. **You MUST check for this file:**
+- After every file you write or edit
+- Before every git commit
 - When you finish a logical step or subtask
 - When you are about to make a significant decision
-- When you feel stuck or unsure about the approach
 
 If the file exists, read it immediately with the Read tool. It contains instructions or feedback from the user — typically arriving within 10 seconds of being sent.
 
+**IMPORTANT — Acknowledge receipt:** When you find and read a message from the user, **immediately** write an acknowledgment to \`${repoPath}/.workermill-response.md\`. Example:
+\`\`\`
+Got your message about [topic]. I'm currently [what you're doing] and will [how you'll incorporate the feedback]. Working on it now.
+\`\`\`
+This lets the user know you received their message. Then continue working.
+
 **Sending messages:** To send a message to the user, write to \`${repoPath}/.workermill-response.md\` using the Write tool. The system picks it up within seconds and delivers it to the user's dashboard. Use this to:
+- **Acknowledge user messages** (always do this first)
 - Ask the user a clarifying question when you're unsure
 - Report a problem you can't resolve on your own
 - Confirm an approach before investing significant effort

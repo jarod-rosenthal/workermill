@@ -161,6 +161,9 @@ export class SettingsPanel {
       } else if (msg.type === "index-repo") {
         await this.indexRepo(msg.repository);
         return;
+      } else if (msg.type === "setup-rag") {
+        await this.setupRag();
+        return;
       }
 
       const config = readAgentConfig();
@@ -635,6 +638,60 @@ export class SettingsPanel {
     }
   }
 
+  private async setupRag(): Promise<void> {
+    const agentPort = this.readAgentPort();
+    if (!agentPort) {
+      this.postMessage({ type: "rag-setup-error", error: "Agent not running" });
+      return;
+    }
+
+    // Subscribe to SSE for progress updates
+    const sseReq = http.get(
+      { hostname: "127.0.0.1", port: agentPort, path: "/api/stream/rag", headers: { Accept: "text/event-stream" } },
+      (res) => {
+        let buffer = "";
+        res.on("data", (chunk: Buffer) => {
+          buffer += chunk.toString("utf-8");
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() || "";
+          for (const part of parts) {
+            const eventMatch = part.match(/^event:\s*(.+)$/m);
+            const dataMatch = part.match(/^data:\s*(.+)$/m);
+            if (eventMatch && dataMatch) {
+              try {
+                const data = JSON.parse(dataMatch[1]);
+                if (eventMatch[1] === "rag:setup-progress") {
+                  this.postMessage({ type: "rag-setup-progress", message: data.message });
+                } else if (eventMatch[1] === "rag:setup-complete") {
+                  this.postMessage({ type: "rag-setup-complete" });
+                  this.loadRag(); // Refresh full status
+                } else if (eventMatch[1] === "rag:setup-error") {
+                  this.postMessage({ type: "rag-setup-error", error: data.error });
+                }
+              } catch { /* ignore parse errors */ }
+            }
+          }
+        });
+      },
+    );
+    sseReq.on("error", () => { /* SSE connection failed — progress won't show but setup still runs */ });
+
+    // Trigger setup
+    try {
+      const result = await this.agentApiPost(agentPort, "/api/rag/setup", {}) as { success?: boolean; error?: string };
+      if (!result.success) {
+        this.postMessage({ type: "rag-setup-error", error: result.error || "Setup failed" });
+      }
+    } catch (err) {
+      this.postMessage({
+        type: "rag-setup-error",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      sseReq.destroy();
+    }
+  }
+
   private readAgentPort(): number | null {
     try {
       const portFile = path.join(os.homedir(), ".workermill", "agent.port");
@@ -1100,11 +1157,15 @@ export class SettingsPanel {
           <span style="font-weight:600;font-size:0.9em;">GPU</span>
           <span id="gpu-status" style="font-size:0.9em;color:var(--muted);">Detecting...</span>
         </div>
-        <div style="display:flex;justify-content:space-between;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
           <span style="font-weight:600;font-size:0.9em;">Ollama</span>
-          <span id="ollama-status" style="font-size:0.9em;color:var(--muted);">Checking...</span>
+          <span style="display:flex;align-items:center;gap:8px;">
+            <span id="ollama-status" style="font-size:0.9em;color:var(--muted);">Checking...</span>
+            <button class="btn-primary hidden" id="btn-setup-rag" style="padding:3px 10px;font-size:0.85em;">Install Ollama</button>
+          </span>
         </div>
       </div>
+      <div id="rag-setup-status" class="status"></div>
       <div class="field">
         <label style="display:flex;align-items:center;gap:8px;">
           <input type="checkbox" id="local-rag-toggle" />
@@ -1365,6 +1426,14 @@ export class SettingsPanel {
     indexBtn.addEventListener("click", () => {
       vscode.postMessage({ type: "index-repo", repository: "" });
     });
+    const setupRagBtn = document.getElementById("btn-setup-rag");
+    const ragSetupStatus = document.getElementById("rag-setup-status");
+    setupRagBtn.addEventListener("click", () => {
+      setupRagBtn.disabled = true;
+      setupRagBtn.textContent = "Setting up...";
+      showStatus(ragSetupStatus, "info", "Starting Ollama setup...");
+      vscode.postMessage({ type: "setup-rag" });
+    });
 
     function badge(configured) {
       return configured
@@ -1601,19 +1670,49 @@ export class SettingsPanel {
           gpuEl.textContent = "None detected";
           gpuEl.style.color = "var(--muted)";
         }
-        if (msg.ollama && msg.ollama.running) {
-          ollamaEl.textContent = "Running (" + msg.ollama.models.length + " models)";
+
+        // Determine Ollama state and show appropriate button
+        const hasModel = msg.ollama && msg.ollama.models && msg.ollama.models.some(function(m) { return m.startsWith("nomic-embed-text"); });
+        if (msg.ollama && msg.ollama.running && hasModel) {
+          ollamaEl.textContent = "Ready";
           ollamaEl.style.color = "var(--success)";
+          setupRagBtn.classList.add("hidden");
+        } else if (msg.ollama && msg.ollama.running) {
+          ollamaEl.textContent = "Running (model missing)";
+          ollamaEl.style.color = "var(--error)";
+          setupRagBtn.textContent = "Pull Model";
+          setupRagBtn.disabled = false;
+          setupRagBtn.classList.remove("hidden");
         } else if (msg.ollama && msg.ollama.installed) {
           ollamaEl.textContent = "Installed but not running";
           ollamaEl.style.color = "var(--error)";
+          setupRagBtn.textContent = "Start Ollama";
+          setupRagBtn.disabled = false;
+          setupRagBtn.classList.remove("hidden");
         } else {
           ollamaEl.textContent = "Not installed";
           ollamaEl.style.color = "var(--error)";
+          setupRagBtn.textContent = "Install Ollama";
+          setupRagBtn.disabled = false;
+          setupRagBtn.classList.remove("hidden");
         }
         ragToggle.checked = !!msg.localRag;
         ollamaPortInput.value = msg.ollamaPort || 11434;
-        indexBtn.disabled = !msg.localRag || !(msg.ollama && msg.ollama.running);
+        indexBtn.disabled = !msg.localRag || !hasModel;
+      }
+      // RAG setup progress/completion/error
+      if (msg.type === "rag-setup-progress") {
+        showStatus(ragSetupStatus, "info", msg.message || "Setting up...");
+      }
+      if (msg.type === "rag-setup-complete") {
+        showStatus(ragSetupStatus, "success", "Ollama setup complete — ready for indexing");
+        setupRagBtn.classList.add("hidden");
+        setTimeout(function() { ragSetupStatus.className = "status"; }, 5000);
+      }
+      if (msg.type === "rag-setup-error") {
+        showStatus(ragSetupStatus, "error", msg.error || "Setup failed");
+        setupRagBtn.disabled = false;
+        setupRagBtn.textContent = "Retry Setup";
       }
       if (msg.type === "rag-restarting") {
         ragToggle.disabled = true;

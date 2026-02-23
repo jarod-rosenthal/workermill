@@ -199,6 +199,7 @@ router.get(
         taskNotes: t.taskNotes,
         githubPrUrl: t.githubPrUrl,
         githubPrNumber: t.githubPrNumber,
+        boardExecutionId: t.boardExecutionId,
         createdAt: t.createdAt,
       })),
       managerTasks: managerTasks.map((t) => ({
@@ -362,6 +363,7 @@ router.post(
             taskNotes: task.taskNotes,
             githubPrUrl: task.githubPrUrl,
             githubPrNumber: task.githubPrNumber,
+            boardExecutionId: task.boardExecutionId,
           }
         : null,
       credentials,

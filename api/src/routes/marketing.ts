@@ -149,6 +149,35 @@ router.get("/campaigns/:id", async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/marketing/campaigns
+ * Create a new campaign
+ */
+router.post("/campaigns", async (req: Request, res: Response) => {
+  try {
+    const platformOrg = await Organization.getPlatformOrg();
+    if (!platformOrg) {
+      res.status(404).json({ error: "Platform organization not found" });
+      return;
+    }
+
+    const repo = AppDataSource.getRepository(MarketingCampaign);
+    const campaign = repo.create({
+      orgId: platformOrg.id,
+      name: req.body.name,
+      platform: req.body.platform,
+      budgetCents: req.body.budgetCents || 0,
+      status: req.body.status || "pending_review",
+      targetingConfig: req.body.targetingConfig || {},
+    });
+    await repo.save(campaign);
+    res.status(201).json(campaign);
+  } catch (error) {
+    logger.error("Failed to create campaign", { error });
+    res.status(500).json({ error: "Failed to create campaign" });
+  }
+});
+
+/**
  * GET /api/marketing/content
  * List all content, optionally filtered by status
  */
@@ -176,6 +205,36 @@ router.get("/content", async (req: Request, res: Response) => {
   } catch (error) {
     logger.error("Failed to list marketing content", { error });
     res.status(500).json({ error: "Failed to retrieve content" });
+  }
+});
+
+/**
+ * POST /api/marketing/content
+ * Create content manually
+ */
+router.post("/content", async (req: Request, res: Response) => {
+  try {
+    const platformOrg = await Organization.getPlatformOrg();
+    if (!platformOrg) {
+      res.status(404).json({ error: "Platform organization not found" });
+      return;
+    }
+
+    const repo = AppDataSource.getRepository(MarketingContent);
+    const content = repo.create({
+      orgId: platformOrg.id,
+      platform: req.body.platform,
+      contentType: req.body.contentType,
+      title: req.body.title || null,
+      body: req.body.body,
+      status: req.body.status || "draft",
+      campaignId: req.body.campaignId || null,
+    });
+    await repo.save(content);
+    res.status(201).json(content);
+  } catch (error) {
+    logger.error("Failed to create content", { error });
+    res.status(500).json({ error: "Failed to create content" });
   }
 });
 

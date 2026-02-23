@@ -136,9 +136,12 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 
 | Execution path | Where worker code lives | How to rebuild |
 |----------------|------------------------|----------------|
-| **Remote agent** (production) | Bundled into agent binary at build time (esbuild) | Release new agent binary: bump version → `git tag agent-v<version>` → push |
+| **Remote agent native** (no sandbox) | Bundled into agent binary at build time (esbuild) | Release new agent binary: bump version → `git tag agent-v<version>` → push |
+| **Remote agent Docker sandbox** | GHCR image `ghcr.io/workermill/worker:latest` | Agent release CI pushes to GHCR automatically (same `agent-v*` tag trigger) |
 | **Local WorkerMill Docker** | Docker image compiled by `tsc` | `./bin/local-workermill build-worker` |
 | **Cloud ECS** | ECR Docker image | `./deploy.sh --worker` |
+
+**Docker sandbox image:** VS Code extension sandbox mode (`agent/src/docker-spawner.ts`) pulls `ghcr.io/workermill/worker:latest`. This image is built and pushed by the `agent-release.yml` CI workflow on `workermill/workermill` when an `agent-v*` tag is pushed. So releasing a new agent binary also updates the sandbox Docker image. The agent re-pulls `:latest` periodically (30-minute interval).
 
 | What you want to change | Where to edit | Then what |
 |--------------------------|---------------|-----------|
@@ -150,6 +153,7 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 
 ***REMOVED******REMOVED*** Recent Changes (keep updated)
 
+- 2026-02-22: Multi-type server-side filtering for coordination API (`messageTypes` query param) — root cause fix for poll timeouts on large epics.
 - 2026-02-22: Multi-org support — VS Code extension + web dashboard org switcher (`dc82abc`).
 - 2026-02-21: Billing tiers renamed: Free/Pro/Enterprise → **Pro/Max/Enterprise** (`e8928aa`).
 - 2026-02-21: Docker sandbox mode for remote agent workers (`agent/src/docker-spawner.ts`). Opt-in via VS Code settings. Four spawners now (see Agent Pitfalls).

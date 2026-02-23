@@ -49,7 +49,7 @@ export class CoordinationClient {
         "Content-Type": "application/json",
         "x-api-key": config.orgApiKey,
       },
-      timeout: 30000,
+      timeout: 60000,
     });
   }
 
@@ -153,6 +153,7 @@ export class CoordinationClient {
       // Invalidate caches since claim status changed
       if (response.data.success) {
         this.coalescer.invalidatePrefix(`getAllContexts:${this.parentTaskId}`);
+        this.coalescer.invalidatePrefix(`getContextsByTypes:${this.parentTaskId}`);
         this.coalescer.invalidatePrefix(`getReadyStories:${this.parentTaskId}`);
       }
 
@@ -195,9 +196,9 @@ export class CoordinationClient {
 
         // Filter to only questions without answers
         const answeredIds = new Set<string>();
-        const allContexts = await this.getAllContexts();
-        for (const ctx of allContexts) {
-          if (ctx.messageType === "answer" && ctx.metadata?.questionId) {
+        const answers = await this.getContextsByTypes(["answer"]);
+        for (const ctx of answers) {
+          if (ctx.metadata?.questionId) {
             answeredIds.add(ctx.metadata.questionId as string);
           }
         }
@@ -257,6 +258,29 @@ export class CoordinationClient {
   }
 
   /**
+   * Get context messages filtered by multiple types.
+   * Much lighter than getAllContexts() — only returns rows matching the given types.
+   * Uses request coalescing with a key based on sorted types.
+   */
+  async getContextsByTypes(types: ContextMessageType[]): Promise<ContextMessage[]> {
+    const sortedKey = types.slice().sort().join(",");
+    return this.coalescer.execute(
+      `getContextsByTypes:${this.parentTaskId}:${sortedKey}`,
+      async () => {
+        const response = await withRetry(
+          () =>
+            this.api.get<{ contexts: ContextMessage[] }>(
+              `/api/coordination/context/${this.parentTaskId}`,
+              { params: { messageTypes: types.join(",") } }
+            ),
+          { logger: (msg) => console.log(msg) }
+        );
+        return response.data.contexts;
+      }
+    );
+  }
+
+  /**
    * Post a context message to the coordination feed.
    * Invalidates relevant caches after posting.
    */
@@ -283,6 +307,7 @@ export class CoordinationClient {
 
     // Invalidate caches since context has changed
     this.coalescer.invalidatePrefix(`getAllContexts:${this.parentTaskId}`);
+    this.coalescer.invalidatePrefix(`getContextsByTypes:${this.parentTaskId}`);
     this.coalescer.invalidatePrefix(`getReadyStories:${this.parentTaskId}`);
     this.coalescer.invalidatePrefix(`getConstraints:${this.parentTaskId}`);
     this.coalescer.invalidatePrefix(`getUnansweredQuestions:${this.parentTaskId}`);
@@ -311,6 +336,7 @@ export class CoordinationClient {
 
     // Invalidate caches since answers affect question status
     this.coalescer.invalidatePrefix(`getAllContexts:${this.parentTaskId}`);
+    this.coalescer.invalidatePrefix(`getContextsByTypes:${this.parentTaskId}`);
     this.coalescer.invalidatePrefix(`getUnansweredQuestions:${this.parentTaskId}`);
 
     return response.data.context;
@@ -322,17 +348,17 @@ export class CoordinationClient {
    */
   async waitForAnswer(
     questionId: string,
-    timeoutMs: number = 30000
+    timeoutMs: number = 60000
   ): Promise<string | undefined> {
     const startTime = Date.now();
     const pollInterval = 2000;
 
     while (Date.now() - startTime < timeoutMs) {
-      const contexts = await this.getAllContexts();
-      const answer = contexts.find(
-        (ctx) =>
-          ctx.messageType === "answer" &&
-          ctx.metadata?.questionId === questionId
+      // Invalidate before each poll to get fresh data
+      this.coalescer.invalidatePrefix(`getContextsByTypes:${this.parentTaskId}`);
+      const answers = await this.getContextsByTypes(["answer"]);
+      const answer = answers.find(
+        (ctx) => ctx.metadata?.questionId === questionId
       );
 
       if (answer) {
@@ -455,11 +481,10 @@ export class CoordinationClient {
     const result = new Map<number, string>();
     if (dependencyIndices.length === 0) return result;
 
-    const contexts = await this.getAllContexts();
+    const completions = await this.getContextsByTypes(["completion"]);
 
     // Find completion messages with branchName metadata
-    for (const ctx of contexts) {
-      if (ctx.messageType !== "completion") continue;
+    for (const ctx of completions) {
 
       const storyIndex = ctx.metadata?.storyIndex as number | undefined;
       if (storyIndex === undefined) continue;
@@ -503,20 +528,14 @@ export class CoordinationClient {
    * Get sibling decisions for context building.
    */
   async getSiblingDecisions(): Promise<ContextMessage[]> {
-    const contexts = await this.getAllContexts();
-    return contexts.filter((ctx) => ctx.messageType === "decision");
+    return this.getContextsByTypes(["decision"]);
   }
 
   /**
    * Get all file changes from siblings for conflict awareness.
    */
   async getSiblingFileChanges(): Promise<ContextMessage[]> {
-    const contexts = await this.getAllContexts();
-    return contexts.filter(
-      (ctx) =>
-        ctx.messageType === "file_created" ||
-        ctx.messageType === "file_modified"
-    );
+    return this.getContextsByTypes(["file_created", "file_modified"]);
   }
 
   /**
@@ -554,12 +573,7 @@ export class CoordinationClient {
    * Returns questions and their answers sorted by time.
    */
   async getRecentQandA(limit: number = 20): Promise<ContextMessage[]> {
-    const contexts = await this.getAllContexts();
-
-    // Filter to questions and answers
-    const qAndA = contexts.filter(
-      (ctx) => ctx.messageType === "question" || ctx.messageType === "answer"
-    );
+    const qAndA = await this.getContextsByTypes(["question", "answer"]);
 
     // Sort by creation time and limit
     return qAndA
@@ -593,8 +607,7 @@ export class CoordinationClient {
    * Returns 0 if no revisions have been requested.
    */
   async getCurrentRevision(): Promise<number> {
-    const contexts = await this.getAllContexts();
-    const revisions = contexts.filter((c) => c.messageType === "revision_requested");
+    const revisions = await this.getContextsByTypes(["revision_requested"]);
 
     if (revisions.length === 0) return 0;
 
@@ -610,19 +623,18 @@ export class CoordinationClient {
    * For stories that were NOT revised, the original completion carries forward.
    */
   async getCurrentRevisionCompletions(): Promise<ContextMessage[]> {
-    const contexts = await this.getAllContexts();
+    const completions = await this.getContextsByTypes(["completion"]);
     const currentRevision = await this.getCurrentRevision();
 
     // If no revisions, all completions count
     if (currentRevision === 0) {
-      return contexts.filter((c) => c.messageType === "completion");
+      return completions;
     }
 
     // Build a map of storyIndex → latest completion
     // For each story, keep the completion with the highest revisionNumber
     const latestByStory = new Map<number, ContextMessage>();
-    for (const c of contexts) {
-      if (c.messageType !== "completion") continue;
+    for (const c of completions) {
       const storyIndex = (c.metadata?.storyIndex as number) ?? -1;
       const revNum = (c.metadata?.revisionNumber as number) || 0;
       const existing = latestByStory.get(storyIndex);
@@ -643,14 +655,14 @@ export class CoordinationClient {
    * A blocker is unresolved if it has isEscalated=true and no corresponding resolution.
    */
   async getBlockers(): Promise<ContextMessage[]> {
-    const contexts = await this.getAllContexts();
+    const contexts = await this.getContextsByTypes(["blocker", "answer"]);
 
     // Find all escalated blockers
     const blockers = contexts.filter(
       (c) => c.messageType === "blocker" && c.metadata?.isEscalated === true
     );
 
-    // Find resolved blocker IDs
+    // Find resolved blocker IDs (answers with blockerAction metadata)
     const resolvedIds = new Set<string>();
     for (const ctx of contexts) {
       if (ctx.metadata?.blockerId && ctx.metadata?.blockerAction) {

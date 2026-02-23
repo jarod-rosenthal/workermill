@@ -17,7 +17,7 @@ export function initApi(baseUrl: string, apiKey: string): void {
       "Content-Type": "application/json",
       "x-api-key": apiKey,
     },
-    timeout: 30_000,
+    timeout: 60_000,
   });
 }
 

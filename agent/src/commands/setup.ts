@@ -368,7 +368,7 @@ export async function setupCommand(): Promise<void> {
   if (keychainOk) {
     console.log(chalk.green("  ✓") + " API key stored in OS keychain");
   } else {
-    console.log(chalk.yellow("  ⚠") + " OS keychain not available — API key stored in config file");
+    console.log(chalk.yellow("  ⚠") + " OS keychain not available — API key in config file only");
   }
 
   const fileConfig: FileConfig = {

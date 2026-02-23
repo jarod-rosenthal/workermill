@@ -23,6 +23,7 @@ const tiers: PricingTier[] = [
       "For developers and small teams getting started with autonomous AI coding",
     highlight_line: "90-day free trial — no credit card required",
     icon: <Sparkles className="w-5 h-5" />,
+    badge: "Coming Soon",
     features: [
       "1 concurrent workload",
       "Up to 3 experts per task",
@@ -37,7 +38,8 @@ const tiers: PricingTier[] = [
       "14-day log retention",
       "Email support",
     ],
-    cta: "Start Free Trial",
+    cta: "Join Waitlist",
+    disabled: true,
   },
   {
     name: "Max",
@@ -64,7 +66,7 @@ const tiers: PricingTier[] = [
       "90-day log retention",
       "Priority support (< 4hr)",
     ],
-    cta: "Coming Soon",
+    cta: "Join Waitlist",
     disabled: true,
   },
   {
@@ -90,7 +92,7 @@ const tiers: PricingTier[] = [
       "Custom log retention",
       "Dedicated CSM",
     ],
-    cta: "Coming Soon",
+    cta: "Join Waitlist",
     disabled: true,
   },
 ];
@@ -183,12 +185,12 @@ export function Pricing() {
                 </ul>
 
                 {tier.disabled ? (
-                  <button
-                    disabled
-                    className="w-full py-2.5 rounded-lg font-medium text-sm text-center block bg-muted/50 text-muted-foreground border border-border cursor-not-allowed"
+                  <a
+                    href="mailto:waitlist@workermill.com"
+                    className="w-full py-2.5 rounded-lg font-medium text-sm transition-colors text-center block bg-muted text-foreground border border-border hover:bg-muted/80"
                   >
                     {tier.cta}
-                  </button>
+                  </a>
                 ) : tier.name === "Enterprise" ? (
                   <a
                     href="mailto:sales@workermill.com"

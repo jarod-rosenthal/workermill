@@ -1658,7 +1658,7 @@ export async function monitorExecutingTasks(): Promise<void> {
                 logger.debug("PRD cascade (monitor): prdAutoRun disabled", { taskId: task.id, orgId: kbCard.board.orgId });
               } else {
                 const { processUnblockedCards } = await import("./board-execution.js");
-                const cascadeResult = await processUnblockedCards(kbCard.board.id, kbCard.board.orgId);
+                const cascadeResult = await processUnblockedCards(kbCard.board.id, kbCard.board.orgId, task.boardExecutionId ?? undefined);
                 logger.info("PRD cascade (monitor) result", {
                   taskId: task.id,
                   boardId: kbCard.board.id,

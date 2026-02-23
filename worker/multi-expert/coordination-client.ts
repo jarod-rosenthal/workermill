@@ -77,7 +77,7 @@ export class CoordinationClient {
         "Content-Type": "application/json",
         "x-api-key": config.orgApiKey,
       },
-      timeout: 30000,
+      timeout: 60000,
     });
   }
 
@@ -121,6 +121,7 @@ export class CoordinationClient {
 
       // Invalidate caches since context has changed
       this.coalescer.invalidatePrefix(`getAllContexts:${this.parentTaskId}`);
+      this.coalescer.invalidatePrefix(`getContextsByTypes:${this.parentTaskId}`);
       this.coalescer.invalidatePrefix(`getConstraints:${this.parentTaskId}`);
 
       return response.data;
@@ -296,8 +297,37 @@ export class CoordinationClient {
   }
 
   /**
+   * Get context messages filtered by multiple types.
+   * Much lighter than getAllContexts() — only returns rows matching the given types.
+   * Uses request coalescing with a key based on sorted types.
+   */
+  async getContextsByTypes(types: ContextMessageType[]): Promise<ContextMessage[]> {
+    try {
+      const sortedKey = types.slice().sort().join(",");
+      return await this.coalescer.execute(
+        `getContextsByTypes:${this.parentTaskId}:${sortedKey}`,
+        async () => {
+          const response = await withRetry(
+            () =>
+              this.api.get<{ contexts: ContextMessage[] }>(
+                `/api/coordination/context/${this.parentTaskId}`,
+                { params: { messageTypes: types.join(",") } }
+              ),
+            { logger: (msg) => console.log(msg) }
+          );
+          return response.data.contexts;
+        }
+      );
+    } catch (error) {
+      console.warn("[CoordinationClient] Failed to get contexts by types:", error);
+      return [];
+    }
+  }
+
+  /**
    * Get all context messages for the parent task.
    * Uses request coalescing - concurrent calls share a single API request.
+   * Prefer getContextsByTypes() for better performance.
    */
   async getAllContexts(): Promise<ContextMessage[]> {
     try {
@@ -324,11 +354,11 @@ export class CoordinationClient {
    * Used for dependency checking.
    */
   async getCompletedStoryIndices(): Promise<Set<number>> {
-    const contexts = await this.getAllContexts();
+    const completions = await this.getContextsByTypes(["completion"]);
     const completedIndices = new Set<number>();
 
-    for (const ctx of contexts) {
-      if (ctx.messageType === "completion" && ctx.metadata?.success === true) {
+    for (const ctx of completions) {
+      if (ctx.metadata?.success === true) {
         const storyIndex = ctx.metadata?.storyIndex as number | undefined;
         if (storyIndex !== undefined) {
           completedIndices.add(storyIndex);
@@ -343,20 +373,14 @@ export class CoordinationClient {
    * Get sibling decisions for context building.
    */
   async getSiblingDecisions(): Promise<ContextMessage[]> {
-    const contexts = await this.getAllContexts();
-    return contexts.filter((ctx) => ctx.messageType === "decision");
+    return this.getContextsByTypes(["decision"]);
   }
 
   /**
    * Get all file changes from siblings for conflict awareness.
    */
   async getSiblingFileChanges(): Promise<ContextMessage[]> {
-    const contexts = await this.getAllContexts();
-    return contexts.filter(
-      (ctx) =>
-        ctx.messageType === "file_created" ||
-        ctx.messageType === "file_modified"
-    );
+    return this.getContextsByTypes(["file_created", "file_modified"]);
   }
 
   /**
@@ -449,16 +473,16 @@ export class CoordinationClient {
 
     while (pendingIds.size > 0 && Date.now() - startTime < timeoutMs) {
       try {
-        const contexts = await this.getAllContexts();
+        // Invalidate before each poll to get fresh data
+        this.coalescer.invalidatePrefix(`getContextsByTypes:${this.parentTaskId}`);
+        const answerContexts = await this.getContextsByTypes(["answer"]);
 
         // Look for answers that reference any of our question IDs
-        for (const ctx of contexts) {
-          if (ctx.messageType === "answer") {
-            const questionId = ctx.metadata?.questionId as string;
-            if (questionId && pendingIds.has(questionId)) {
-              answers.set(questionId, ctx);
-              pendingIds.delete(questionId);
-            }
+        for (const ctx of answerContexts) {
+          const questionId = ctx.metadata?.questionId as string;
+          if (questionId && pendingIds.has(questionId)) {
+            answers.set(questionId, ctx);
+            pendingIds.delete(questionId);
           }
         }
 
@@ -488,15 +512,7 @@ export class CoordinationClient {
    */
   async getRecentQandA(limit: number = 20): Promise<ContextMessage[]> {
     try {
-      const contexts = await this.getAllContexts();
-
-      // Filter to questions, answers, and consultations
-      const qAndA = contexts.filter(
-        (ctx) =>
-          ctx.messageType === "question" ||
-          ctx.messageType === "answer" ||
-          ctx.messageType === "consultation"
-      );
+      const qAndA = await this.getContextsByTypes(["question", "answer", "consultation"]);
 
       // Sort by creation time and limit
       return qAndA
@@ -517,7 +533,7 @@ export class CoordinationClient {
    */
   async getConsultationsForPersona(persona: string): Promise<ContextMessage[]> {
     try {
-      const contexts = await this.getAllContexts();
+      const contexts = await this.getContextsByTypes(["consultation", "answer"]);
 
       // Get all consultations targeting this persona
       const consultations = contexts.filter(
@@ -572,6 +588,7 @@ export class CoordinationClient {
 
       // Invalidate caches since answers affect question status
       this.coalescer.invalidatePrefix(`getAllContexts:${this.parentTaskId}`);
+      this.coalescer.invalidatePrefix(`getContextsByTypes:${this.parentTaskId}`);
 
       if (response.data.success) {
         return response.data.context;
@@ -589,7 +606,7 @@ export class CoordinationClient {
    */
   async getUnansweredQuestions(): Promise<ContextMessage[]> {
     try {
-      const contexts = await this.getAllContexts();
+      const contexts = await this.getContextsByTypes(["question", "consultation", "answer"]);
 
       // Get all questions and consultations
       const questions = contexts.filter(

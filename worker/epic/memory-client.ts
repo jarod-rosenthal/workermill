@@ -177,7 +177,7 @@ export class MemoryClient {
         "Content-Type": "application/json",
         "x-api-key": orgApiKey,
       },
-      timeout: 30000,
+      timeout: 60000,
     });
   }
 

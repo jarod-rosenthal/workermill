@@ -2356,20 +2356,16 @@ export class EpicCoordinator {
         const baselineSha = this.storyBaselineShas.get(storyIndex);
 
         // Gather expert's coordination feed messages for this story
-        const allContexts = await this.coordination.getAllContexts();
-        const storyMessages = allContexts
-          .filter(
-            (ctx) =>
-              (ctx.metadata?.storyIndex as number) === storyIndex &&
-              [
-                "decision",
-                "progress",
-                "completion",
-                "answer",
-                "file_created",
-                "file_modified",
-              ].includes(ctx.messageType)
-          )
+        const storyContexts = await this.coordination.getContextsByTypes([
+          "decision",
+          "progress",
+          "completion",
+          "answer",
+          "file_created",
+          "file_modified",
+        ]);
+        const storyMessages = storyContexts
+          .filter((ctx) => (ctx.metadata?.storyIndex as number) === storyIndex)
           .map((ctx) => `[${ctx.messageType}] ${ctx.persona}: ${ctx.content}`)
           .join("\n");
 
@@ -2467,7 +2463,10 @@ export class EpicCoordinator {
    * Check if all stories are done. Creates consolidated PR, runs review, and finalizes.
    */
   private async checkMissionComplete(): Promise<void> {
-    const contexts = await this.coordination.getAllContexts();
+    const contexts = await this.coordination.getContextsByTypes([
+      "story_ready",
+      "story_claimed",
+    ]);
 
     // Count story_ready vs completion
     // Use revision-aware completions to support the revision loop

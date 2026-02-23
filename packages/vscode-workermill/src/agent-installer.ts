@@ -637,9 +637,10 @@ export function startAgentProcess(log?: (msg: string) => void): void {
   fs.mkdirSync(wmDir, { recursive: true });
   const logFile = path.join(wmDir, "agent.log");
   const logFd = fs.openSync(logFile, "a");
-  // Use "ignore" for stdin — opening os.devNull on Windows can fail because
-  // VS Code's extension host resolves "nul" relative to its CWD (the VS Code
-  // install dir), producing "C:\...\Microsoft VS Code\nul" → "Access is denied".
+  // Open os.devNull for stdin BEFORE the try block so it's accessible in finally.
+  // Must use absolute path (os.devNull = \\.\nul on Windows) — "ignore" resolves
+  // NUL relative to extension host CWD (VS Code install dir) → "Access is denied".
+  let stdinFd: number | undefined;
 
   try {
     // Build a PATH that includes known binary locations so the agent's
@@ -681,9 +682,10 @@ export function startAgentProcess(log?: (msg: string) => void): void {
       env.PATH = `${extraDirs.join(sep)}${sep}${process.env.PATH || ""}`;
     }
 
+    stdinFd = fs.openSync(os.devNull, "r");
     const child = spawn(binary, ["start"], {
       detached: true,
-      stdio: ["ignore", logFd, logFd],
+      stdio: [stdinFd, logFd, logFd],
       env,
       cwd: wmDir,
       windowsHide: true,
@@ -699,6 +701,7 @@ export function startAgentProcess(log?: (msg: string) => void): void {
     log?.(`Spawn failed: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
     fs.closeSync(logFd);
+    if (stdinFd !== undefined) try { fs.closeSync(stdinFd); } catch { /* already closed by spawn */ }
   }
 }
 

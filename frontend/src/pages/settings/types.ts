@@ -245,39 +245,31 @@ export const MODEL_OPTIONS: Record<string, ModelOption[]> = {
       tier: "Balanced",
     },
     {
-      value: "claude-sonnet-4-5-20250929",
-      label: "Claude Sonnet 4.5",
-      tier: "Balanced",
-    },
-    {
       value: "claude-haiku-4-5-20251001",
       label: "Claude Haiku 4.5",
       tier: "Fast",
     },
   ],
   openai: [
-    { value: "gpt-5.1-codex", label: "GPT-5.1 Codex", tier: "Powerful" },
-    { value: "gpt-4o", label: "GPT-4o", tier: "Balanced" },
-    { value: "gpt-4o-mini", label: "GPT-4o Mini", tier: "Fast" },
-    { value: "o1", label: "o1 (Reasoning)", tier: "Powerful" },
-    { value: "o1-mini", label: "o1 Mini", tier: "Balanced" },
+    { value: "gpt-5.2", label: "GPT-5.2", tier: "Powerful" },
+    { value: "o3-pro", label: "o3 Pro (Reasoning)", tier: "Powerful" },
+    { value: "gpt-5-mini", label: "GPT-5 Mini", tier: "Fast" },
   ],
   google: [
-    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro", tier: "Powerful" },
     {
-      value: "gemini-2.5-flash",
-      label: "Gemini 2.5 Flash",
-      tier: "Balanced",
-    },
-    {
-      value: "gemini-2.0-flash",
-      label: "Gemini 2.0 Flash",
-      tier: "Balanced",
+      value: "gemini-3.1-pro-preview",
+      label: "Gemini 3.1 Pro",
+      tier: "Powerful",
     },
     {
       value: "gemini-3-pro-preview",
-      label: "Gemini 3 Pro Preview (Unstable)",
-      tier: "Experimental",
+      label: "Gemini 3 Pro",
+      tier: "Balanced",
+    },
+    {
+      value: "gemini-3-flash-preview",
+      label: "Gemini 3 Flash",
+      tier: "Fast",
     },
   ],
   openrouter: [

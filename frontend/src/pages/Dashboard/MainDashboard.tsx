@@ -32,7 +32,6 @@ import {
   Sliders,
   Star,
   RotateCcw,
-  LayoutDashboard,
   Send,
   FolderKanban,
   BarChart3,
@@ -47,9 +46,6 @@ import {
   TrendingUp,
   AlertTriangle,
   Target,
-  Router,
-  Library,
-  Palette,
   FileSearch,
   Monitor,
   LayoutGrid,
@@ -66,7 +62,6 @@ import { CheckpointStatus, CheckpointStatusBadge } from "../../components/Checkp
 import { LogSearch } from "../../components/LogSearch";
 import { OrgSwitcher } from "../../components/OrgSwitcher";
 import { useAuthStore } from "../../store/auth-store";
-import { SetupBanner } from "../../components/SetupBanner";
 import { TrialBanner } from "../../components/TrialBanner";
 import { GettingStartedChecklist } from "../../components/GettingStartedChecklist";
 import { DashboardSkeleton } from "../../components/ui/skeleton";
@@ -75,7 +70,7 @@ import {
   DashboardErrorFallback,
 } from "../../components/ErrorBoundary";
 import { EmbeddedDependencyGraph } from "../../components/DependencyGraph";
-import { useCoordinationStore, type ContextMessage, type ContextMessageType } from "../../store/coordination-store";
+import { useCoordinationStore, type ContextMessage } from "../../store/coordination-store";
 import { TokenBreakdown } from "../../components/TokenBreakdown";
 import { BlockerAlert } from "../../components/BlockerAlert";
 import {
@@ -175,7 +170,7 @@ export default function Dashboard() {
   }
 
   const [streamingLogs, setStreamingLogs] = useState<Record<string, StreamingLog[]>>({});
-  const [parsedErrors, setParsedErrors] = useState<Record<string, ParsedError[]>>({});
+  const [, setParsedErrors] = useState<Record<string, ParsedError[]>>({});
   // Persisted errors from database (survives client re-init)
   const [persistedErrors, setPersistedErrors] = useState<Record<string, ParsedError[]>>({});
   // Track which comms panels are expanded
@@ -719,13 +714,13 @@ export default function Dashboard() {
                 ...update.stats,
               },
               // Use task data directly from API - it includes steps based on workflow type
-              activeTasks: update.activeTasks.map((task: any) => ({
+              activeTasks: update.activeTasks.map((task: Record<string, unknown>) => ({
                 ...task,
                 workerName: task.workerPersona,
                 createdAt: task.startedAt || task.createdAt || new Date().toISOString(),
                 recentLogs: [],
               })),
-              queuedTasks: update.queuedTasks.map((task: any) => ({
+              queuedTasks: update.queuedTasks.map((task: Record<string, unknown>) => ({
                 ...task,
                 workerName: task.workerPersona,
                 recentLogs: [],
@@ -1544,7 +1539,7 @@ export default function Dashboard() {
 
 
   // Handle retrying PR creation for failed tasks
-  const handleRetryPR = async (taskId: string) => {
+  const _handleRetryPR = async (taskId: string) => {
     setActionLoading(taskId);
     try {
       const token = localStorage.getItem("accessToken");
@@ -2407,13 +2402,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Setup Incomplete Banner */}
-      <div className="max-w-7xl mx-auto px-6 pt-4">
-        <SetupBanner />
-      </div>
-
       {/* Trial Expiry Banner */}
-      <div className="max-w-7xl mx-auto px-6">
+      <div className="max-w-7xl mx-auto px-6 pt-4">
         <TrialBanner />
       </div>
 
@@ -2646,7 +2636,7 @@ export default function Dashboard() {
                     : isFirstActiveTask
                       ? !hiddenTerminals.has(task.id)  // First active: visible unless manually hidden
                       : !hiddenTerminals.has(task.id);  // Other active: visible unless manually hidden
-                  const workerId = task.id.slice(0, 8);
+                  const _workerId = task.id.slice(0, 8);
                   const isActivelyRunning = ["executing", "environment_setup", "dispatching", "planning"].includes(task.status);
                   return (
                     <div

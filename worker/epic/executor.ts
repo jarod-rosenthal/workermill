@@ -115,9 +115,9 @@ export class StoryExecutor {
       timeout: 5000,
     });
     this.logsApi = createRetryableApi(rawApi, {
-      maxRetries: 3,
+      maxRetries: 5,
       initialDelayMs: 500,
-      maxDelayMs: 5000,
+      maxDelayMs: 10000,
       logger: (msg) => console.log(`[Executor] ${msg}`),
     });
 

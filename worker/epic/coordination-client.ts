@@ -13,9 +13,11 @@
  * or multiple methods within the same worker request the same data.
  */
 
+import { EventEmitter } from "events";
 import axios, { AxiosInstance } from "axios";
 import { withRetry } from "../lib/dist/api-retry.js";
 import { RequestCoalescer, createCoordinationCoalescer } from "./request-coalescer.js";
+import { SseSubscriber } from "./sse-subscriber.js";
 import type {
   ContextMessage,
   ContextMessageType,
@@ -32,15 +34,20 @@ import type {
  * Client for the WorkerMill coordination API.
  * Implements request coalescing to minimize API calls.
  */
-export class CoordinationClient {
+export class CoordinationClient extends EventEmitter {
   private api: AxiosInstance;
   private parentTaskId: string;
   private orgApiKey: string;
+  private apiBaseUrl: string;
   private coalescer: RequestCoalescer;
+  private sse: SseSubscriber | null = null;
+  private sseConnected = false;
 
   constructor(config: EpicConfig) {
+    super();
     this.parentTaskId = config.parentTaskId;
     this.orgApiKey = config.orgApiKey;
+    this.apiBaseUrl = config.apiBaseUrl;
     this.coalescer = createCoordinationCoalescer();
 
     this.api = axios.create({
@@ -51,6 +58,52 @@ export class CoordinationClient {
       },
       timeout: 60000,
     });
+  }
+
+  /**
+   * Connect to the SSE stream for real-time coordination push.
+   * When connected, incoming messages invalidate the coalescer cache
+   * and emit "newData" to wake up the coordinator loop immediately.
+   */
+  connectSse(): void {
+    const url = `${this.apiBaseUrl}/api/coordination/context/${this.parentTaskId}/stream`;
+    this.sse = new SseSubscriber({
+      url,
+      headers: { "x-api-key": this.orgApiKey },
+      logger: (msg) => console.log(msg),
+    });
+
+    this.sse.on("context", () => {
+      // New data available — invalidate caches so next read gets fresh data
+      this.coalescer.invalidateAll();
+      this.emit("newData");
+    });
+
+    this.sse.on("connected", () => {
+      this.sseConnected = true;
+    });
+
+    this.sse.on("disconnected", () => {
+      this.sseConnected = false;
+    });
+
+    this.sse.connect();
+  }
+
+  /**
+   * Disconnect SSE subscriber. Call on shutdown.
+   */
+  disconnectSse(): void {
+    this.sse?.disconnect();
+    this.sse = null;
+    this.sseConnected = false;
+  }
+
+  /**
+   * Whether the SSE connection is active (instant push mode).
+   */
+  isSseConnected(): boolean {
+    return this.sseConnected;
   }
 
   /**

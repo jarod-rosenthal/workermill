@@ -211,6 +211,13 @@ variable "github_runner_webhook_secret_arn" {
   default     = ""
 }
 
+# Redis
+variable "redis_url" {
+  description = "Redis connection URL for coordination pub/sub (rediss://host:port)"
+  type        = string
+  default     = ""
+}
+
 # Monitoring
 variable "sentry_dsn" {
   description = "Sentry DSN for error tracking and performance monitoring"

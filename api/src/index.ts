@@ -85,6 +85,7 @@ import {
   handleChargeRefunded,
 } from "./services/credit-billing.js";
 import { startOrchestrator, stopOrchestrator } from "./services/orchestrator.js";
+import { redis } from "./services/redis-client.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { seedDirectivesIfMissing } from "./db/seed-directives-startup.js";
 import { initializeEncryption } from "./utils/encryption.js";
@@ -358,6 +359,13 @@ async function start() {
     // Seed system persona directives if missing
     await seedDirectivesIfMissing();
 
+    // Connect Redis for coordination pub/sub (optional — falls back to DB polling)
+    if (config.redisUrl) {
+      redis.connect(config.redisUrl);
+    } else {
+      logger.info("Redis not configured — SSE will use DB polling fallback");
+    }
+
     // Start orchestrator (unless disabled)
     if (process.env.ENABLE_ORCHESTRATOR !== "false") {
       startOrchestrator();
@@ -387,6 +395,7 @@ async function start() {
 process.on("SIGTERM", async () => {
   logger.info("SIGTERM received, shutting down gracefully");
   stopOrchestrator();
+  await redis.disconnect();
   await AppDataSource.destroy();
   process.exit(0);
 });
@@ -394,6 +403,7 @@ process.on("SIGTERM", async () => {
 process.on("SIGINT", async () => {
   logger.info("SIGINT received, shutting down gracefully");
   stopOrchestrator();
+  await redis.disconnect();
   await AppDataSource.destroy();
   process.exit(0);
 });

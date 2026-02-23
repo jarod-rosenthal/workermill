@@ -160,7 +160,8 @@ resource "aws_ecs_task_definition" "api" {
         { name = "COGNITO_DOMAIN", value = var.cognito_domain },
         { name = "SES_SOURCE_EMAIL", value = var.ses_source_email },
         { name = "SUPPORT_AGENT_ENABLED", value = var.support_agent_enabled },
-        { name = "SENTRY_DSN", value = var.sentry_dsn }
+        { name = "SENTRY_DSN", value = var.sentry_dsn },
+        { name = "REDIS_URL", value = var.redis_url }
       ]
 
       secrets = concat([

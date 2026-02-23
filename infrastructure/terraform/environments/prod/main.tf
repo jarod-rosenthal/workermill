@@ -164,6 +164,17 @@ module "bastion" {
 }
 
 # =============================================================================
+# Redis (ElastiCache for coordination pub/sub)
+# =============================================================================
+module "redis" {
+  source                = "../../modules/redis"
+  environment           = var.environment
+  vpc_id                = module.networking.vpc_id
+  private_subnet_ids    = module.networking.private_subnet_ids
+  api_security_group_id = module.ecs_cluster.tasks_security_group_id
+}
+
+# =============================================================================
 # Database
 # =============================================================================
 module "database" {
@@ -255,6 +266,9 @@ module "ecs_service" {
   # Admin notification secrets
   admin_phone_number_secret_arn = data.aws_secretsmanager_secret.admin_phone_number.arn
   admin_email_secret_arn        = data.aws_secretsmanager_secret.admin_email.arn
+
+  # Redis
+  redis_url = module.redis.redis_url
 
   # Monitoring
   sentry_dsn = "https://717d6ce618e5f3ea85e4aa14108823b2@o4510644063567872.ingest.us.sentry.io/4510791563476992"

@@ -246,6 +246,7 @@ import { EncryptExistingTokens1740200000002 } from "./migrations/1740200000002-E
 import { ChangeMaxPerStoryRevisionsDefault1740200000003 } from "./migrations/1740200000003-ChangeMaxPerStoryRevisionsDefault.js";
 import { AddRemoteAgentGpuColumns1740200000004 } from "./migrations/1740200000004-AddRemoteAgentGpuColumns.js";
 import { AddBoardExecutionId1740300000000 } from "./migrations/1740300000000-AddBoardExecutionId.js";
+import { AddMarketingAgent1740400000000 } from "./migrations/1740400000000-AddMarketingAgent.js";
 import { logger } from "../utils/logger.js";
 import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
@@ -516,6 +517,7 @@ export const AppDataSource = new DataSource({
     ChangeMaxPerStoryRevisionsDefault1740200000003,
     AddRemoteAgentGpuColumns1740200000004,
     AddBoardExecutionId1740300000000,
+    AddMarketingAgent1740400000000,
   ],
   subscribers: [
     OrganizationEncryptionSubscriber,

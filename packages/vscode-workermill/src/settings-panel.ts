@@ -658,8 +658,11 @@ export class SettingsPanel {
     }
 
     // Subscribe to SSE for progress updates
+    const sseHeaders: Record<string, string> = { Accept: "text/event-stream" };
+    const sseToken = this.readAgentToken();
+    if (sseToken) sseHeaders["Authorization"] = `Bearer ${sseToken}`;
     const sseReq = http.get(
-      { hostname: "127.0.0.1", port: agentPort, path: "/api/stream/rag", headers: { Accept: "text/event-stream" } },
+      { hostname: "127.0.0.1", port: agentPort, path: "/api/stream/rag", headers: sseHeaders },
       (res) => {
         let buffer = "";
         res.on("data", (chunk: Buffer) => {
@@ -717,10 +720,25 @@ export class SettingsPanel {
     return null;
   }
 
+  private readAgentToken(): string | null {
+    try {
+      const tokenFile = path.join(os.homedir(), ".workermill", "agent.token");
+      if (fs.existsSync(tokenFile)) {
+        return fs.readFileSync(tokenFile, "utf-8").trim() || null;
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
   private agentApiGet<T>(port: number, urlPath: string): Promise<T> {
     return new Promise((resolve, reject) => {
+      const headers: Record<string, string> = { Accept: "application/json" };
+      const token = this.readAgentToken();
+      if (token) headers["Authorization"] = `Bearer ${token}`;
       const req = http.get(
-        { hostname: "127.0.0.1", port, path: urlPath, headers: { Accept: "application/json" } },
+        { hostname: "127.0.0.1", port, path: urlPath, headers },
         (res) => {
           let body = "";
           res.on("data", (c) => (body += c));
@@ -744,16 +762,19 @@ export class SettingsPanel {
   private agentApiPost(port: number, urlPath: string, data: unknown): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const payload = JSON.stringify(data);
+      const postHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+        "Content-Length": String(Buffer.byteLength(payload)),
+      };
+      const token = this.readAgentToken();
+      if (token) postHeaders["Authorization"] = `Bearer ${token}`;
       const req = http.request(
         {
           hostname: "127.0.0.1",
           port,
           path: urlPath,
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Content-Length": Buffer.byteLength(payload),
-          },
+          headers: postHeaders,
         },
         (res) => {
           let body = "";

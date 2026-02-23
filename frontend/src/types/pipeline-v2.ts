@@ -206,7 +206,17 @@ export type StepStatus = "pending" | "in-progress" | "completed" | "failed";
  */
 export function calculateProgress(currentStepIndex: number, totalSteps: number): number {
   if (totalSteps === 0) return 0;
-  return Math.round((currentStepIndex / totalSteps) * 100);
+  return Math.min(100, Math.round((currentStepIndex / totalSteps) * 100));
+}
+
+/**
+ * Count unique completed step indices from commit history.
+ * Retries/revisions add duplicate stepIndex entries — this deduplicates.
+ */
+export function countUniqueCompletedSteps(commitHistory: StepCommit[]): number {
+  const seen = new Set<number>();
+  for (const c of commitHistory) seen.add(c.stepIndex);
+  return seen.size;
 }
 
 /**

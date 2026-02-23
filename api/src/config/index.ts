@@ -156,6 +156,9 @@ export const config = {
   // 32-byte hex string (64 characters). If not set, encryption is disabled (plaintext).
   encryptionKey: process.env.ENCRYPTION_KEY || "",
 
+  // Redis (coordination pub/sub)
+  redisUrl: process.env.REDIS_URL || "",
+
   // AI Support Agent
   supportAgent: {
     enabled: process.env.SUPPORT_AGENT_ENABLED === "true",

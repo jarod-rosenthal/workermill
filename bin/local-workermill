@@ -207,6 +207,25 @@ start_postgres() {
   exit 1
 }
 
+***REMOVED*** Start Redis via Docker
+start_redis() {
+  log "Starting Redis..."
+
+  docker compose -f "$PROJECT_ROOT/docker-compose.local.yml" up -d redis
+
+  local retries=15
+  while [ $retries -gt 0 ]; do
+    if docker exec workermill-local-redis redis-cli ping &> /dev/null; then
+      log "Redis is ready"
+      return 0
+    fi
+    retries=$((retries - 1))
+    sleep 1
+  done
+
+  warn "Redis failed to start — SSE will use DB polling fallback"
+}
+
 ***REMOVED*** Run database migrations
 run_migrations() {
   log "Running database migrations..."
@@ -331,6 +350,8 @@ start_api() {
   ***REMOVED*** which would mask "undefined" and break fallback detection in Node.js)
   [ -n "${GITHUB_TOKEN:-}" ] && export GITHUB_TOKEN
   [ -n "${BITBUCKET_TOKEN:-}" ] && export BITBUCKET_TOKEN
+  ***REMOVED*** Redis for real-time coordination pub/sub (no TLS locally)
+  export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
   ***REMOVED*** Ollama: resolve WSL2 gateway IP to reach Windows-hosted Ollama
   export OLLAMA_HOST="${OLLAMA_HOST:-http://$(ip route show default | awk '{print $3}'):11434}"
 
@@ -488,6 +509,7 @@ cmd_start() {
     run_migrations
   fi
 
+  start_redis
   init_worktrees
   start_api
 
@@ -504,6 +526,7 @@ cmd_start() {
   if [ "$skip_fe" = false ]; then
     log "  Frontend:     http://localhost:5173"
   fi
+  log "  Redis:        redis://localhost:6379"
   log ""
   log "  Auth:         $([ "$local_auth" = "true" ] && echo "local (auto-login)" || echo "Cognito")"
   log "  Mock Workers: $mock_workers"
@@ -536,8 +559,8 @@ kill_tree() {
 cmd_stop() {
   log "Stopping local WorkerMill..."
 
-  ***REMOVED*** Stop worker containers first (NOT the database)
-  local containers=$(docker ps --filter "name=workermill-" --format "{{.ID}} {{.Names}}" 2>/dev/null | grep -v workermill-local-db | awk '{print $1}')
+  ***REMOVED*** Stop worker containers first (NOT the database or Redis)
+  local containers=$(docker ps --filter "name=workermill-" --format "{{.ID}} {{.Names}}" 2>/dev/null | grep -v -e workermill-local-db -e workermill-local-redis | awk '{print $1}')
   if [ -n "$containers" ]; then
     log "Stopping worker containers..."
     docker stop $containers 2>/dev/null || true
@@ -569,11 +592,11 @@ cmd_stop() {
     rm -f "$RUNTIME_DIR/frontend.pid"
   fi
 
-  ***REMOVED*** PostgreSQL is LEFT RUNNING intentionally — restarting it is slow and
-  ***REMOVED*** loses session state.  Use "docker compose -f docker-compose.local.yml down"
-  ***REMOVED*** manually if you really need to stop the database.
+  ***REMOVED*** PostgreSQL and Redis are LEFT RUNNING intentionally — restarting them is
+  ***REMOVED*** slow and loses session state.  Use "docker compose -f docker-compose.local.yml down"
+  ***REMOVED*** manually if you really need to stop infrastructure services.
 
-  log "All services stopped (database left running)"
+  log "All services stopped (database + Redis left running)"
 }
 
 ***REMOVED*** Show status
@@ -589,6 +612,13 @@ cmd_status() {
     echo -e "PostgreSQL:    ${GREEN}running${NC}"
   else
     echo -e "PostgreSQL:    ${RED}stopped${NC}"
+  fi
+
+  ***REMOVED*** Redis status
+  if docker ps 2>/dev/null | grep -q workermill-local-redis; then
+    echo -e "Redis:         ${GREEN}running${NC}"
+  else
+    echo -e "Redis:         ${YELLOW}stopped${NC} (SSE will use DB polling fallback)"
   fi
 
   ***REMOVED*** API status

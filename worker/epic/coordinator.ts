@@ -695,6 +695,9 @@ export class EpicCoordinator {
       // Transition Jira to "In Progress"
       await this.ticketOps.transitionTo("In Progress");
 
+      // Connect SSE for real-time push (falls back to polling if unavailable)
+      this.coordination.connectSse();
+
       // Main coordination loop with transient error resilience
       // A single 5xx/network error should NOT kill a 50-minute epic.
       // Only fail after MAX_CONSECUTIVE_ERRORS consecutive transient failures.
@@ -740,7 +743,21 @@ export class EpicCoordinator {
           }
           throw loopError;
         }
-        await this.sleep(this.pollIntervalMs);
+
+        if (this.coordination.isSseConnected()) {
+          // Event-driven: wait for SSE push OR 30s safety timeout
+          let onNewData: (() => void) | undefined;
+          const newDataPromise = new Promise<void>((resolve) => {
+            onNewData = resolve;
+            this.coordination.once("newData", resolve);
+          });
+          await Promise.race([newDataPromise, this.sleep(30000)]);
+          // Clean up the listener if the sleep won the race
+          if (onNewData) this.coordination.removeListener("newData", onNewData);
+        } else {
+          // Fallback: poll every 5s (backward compatible with old API)
+          await this.sleep(this.pollIntervalMs);
+        }
       }
     } catch (error) {
       console.error("[Epic] Fatal error:", error);
@@ -778,6 +795,7 @@ export class EpicCoordinator {
   stop(): void {
     console.log("[Epic] Stopping Epic executor");
     this.missionActive = false;
+    this.coordination.disconnectSse();
   }
 
   /**

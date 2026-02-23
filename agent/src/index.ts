@@ -13,6 +13,8 @@ import { stopAll } from "./spawner.js";
 import { AGENT_VERSION } from "./version.js";
 import { selfUpdate, restartAgent } from "./updater.js";
 import { startLocalApi, stopLocalApi } from "./local-api.js";
+import { detectGpu } from "./gpu-detector.js";
+import { ensureOllamaRunning, pullModel, stopOllama } from "./ollama-manager.js";
 
 export { loadConfig, loadConfigFromFile, validatePrerequisites, getSystemInfo, findClaudePath } from "./config.js";
 export type { AgentConfig } from "./config.js";
@@ -48,6 +50,26 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
     if (config.sandbox === "docker") {
       console.log(`  ${chalk.dim("Sandbox:")}   ${chalk.blue("Docker")} (${config.dockerImage})`);
     }
+
+    // GPU detection
+    const gpu = detectGpu();
+    console.log(
+      `  ${chalk.dim("GPU:")}      ${gpu.available ? chalk.green("●") + ` ${gpu.vendor} ${gpu.model}` : chalk.yellow("None")}`,
+    );
+
+    // Local RAG: start Ollama and pull embedding model
+    if (config.localRag) {
+      const ollamaOk = await ensureOllamaRunning(config.ollamaPort);
+      if (ollamaOk) {
+        await pullModel("nomic-embed-text", config.ollamaPort);
+        console.log(
+          `  ${chalk.dim("Ollama:")}   ${chalk.green("●")} nomic-embed-text ready (port ${config.ollamaPort})`,
+        );
+      } else {
+        console.log(`  ${chalk.yellow("⚠")} Ollama failed to start — local RAG disabled`);
+      }
+    }
+
     console.log();
   } catch (error: unknown) {
     const err = error as { response?: { status?: number }; message?: string };
@@ -106,6 +128,8 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
     console.log(chalk.dim("  Shutting down..."));
     // Stop poll/heartbeat loops first so nothing re-fires during cleanup
     stopPolling();
+    // Stop Ollama if we started it
+    await stopOllama();
     // Stop local API server
     await stopLocalApi();
     try {

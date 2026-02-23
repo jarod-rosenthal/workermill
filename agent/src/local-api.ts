@@ -17,6 +17,9 @@ import { EventEmitter } from "events";
 import { AGENT_VERSION } from "./version.js";
 import { findClaudePath, type AgentConfig } from "./config.js";
 import { triggerPoll } from "./poller.js";
+import { detectGpu } from "./gpu-detector.js";
+import { getOllamaStatus, generateEmbeddings } from "./ollama-manager.js";
+import { indexRepositoryLocally } from "./local-indexer.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -25,7 +28,7 @@ export interface LocalTaskInfo {
   parentTaskId?: string;
   summary: string;
   description?: string;
-  status: "planning" | "running" | "completed" | "failed" | "cancelled";
+  status: "planning" | "running" | "completed" | "failed" | "cancelled" | "pr_approved" | "escalated";
   persona?: string;
   model?: string;
   repo?: string;
@@ -123,7 +126,7 @@ let cleanupInterval: ReturnType<typeof setInterval> | null = setInterval(() => {
   const cutoff = Date.now() - 10 * 60 * 1000;
   let didDelete = false;
   for (const [id, task] of localTasks) {
-    if ((task.status === "completed" || task.status === "failed") &&
+    if ((task.status === "completed" || task.status === "failed" || task.status === "pr_approved" || task.status === "cancelled") &&
         new Date(task.startedAt).getTime() < cutoff) {
       localTasks.delete(id);
       didDelete = true;
@@ -168,6 +171,108 @@ agentEvents.on("task:planning", (info) => broadcastSSE("tasks", "task:planning",
 agentEvents.on("task:plan_done", (info) => broadcastSSE("tasks", "task:plan_done", info));
 agentEvents.on("task:log", (info) => broadcastSSE(`logs:${info.id}`, "log", info));
 agentEvents.on("state:changed", () => broadcastSSE("tasks", "state:changed", {}));
+
+// ── Cloud Task Merging ─────────────────────────────────
+
+/**
+ * Map cloud task statuses (17+) to the 5 the extension understands.
+ */
+function mapCloudStatus(
+  cloudStatus: string,
+): LocalTaskInfo["status"] {
+  switch (cloudStatus) {
+    case "planning":
+    case "pending_plan_approval":
+      return "planning";
+    case "queued":
+    case "claimed":
+    case "environment_setup":
+    case "dispatching":
+    case "executing":
+    case "reviewing":
+    case "consolidating":
+    case "deploying":
+      return "running";
+    case "completed":
+    case "deployed":
+      return "completed";
+    case "pr_approved":
+    case "review_approved":
+      return "pr_approved";
+    case "escalated":
+      return "escalated";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "cancelled";
+    default:
+      return "running";
+  }
+}
+
+/**
+ * Merge local in-memory tasks with cloud tasks from the control center.
+ * Local tasks take priority (they have real-time status from event handlers).
+ * Cloud tasks fill in gaps — queued tasks, tasks where events were missed, etc.
+ * Falls back to local-only on any cloud fetch error.
+ */
+async function getMergedTasks(): Promise<LocalTaskInfo[]> {
+  const localList = Array.from(localTasks.values());
+
+  if (!cloudProxy) return localList;
+
+  try {
+    const dashboard = (await cloudProxy("GET", "/api/control-center")) as {
+      activeTasks?: Array<{
+        id: string;
+        summary?: string;
+        description?: string;
+        status?: string;
+        workerPersona?: string;
+        workerModel?: string;
+        githubRepo?: string;
+        startedAt?: string;
+        createdAt?: string;
+      }>;
+      queuedTasks?: Array<{
+        id: string;
+        summary?: string;
+        description?: string;
+        status?: string;
+        workerPersona?: string;
+        workerModel?: string;
+        githubRepo?: string;
+        startedAt?: string;
+        createdAt?: string;
+      }>;
+    };
+
+    const localIds = new Set(localList.map((t) => t.id));
+    const cloudTasks: LocalTaskInfo[] = [];
+
+    for (const list of [dashboard.activeTasks, dashboard.queuedTasks]) {
+      if (!Array.isArray(list)) continue;
+      for (const ct of list) {
+        if (localIds.has(ct.id)) continue; // local takes priority
+        cloudTasks.push({
+          id: ct.id,
+          summary: ct.summary || "Unknown task",
+          description: ct.description || undefined,
+          status: mapCloudStatus(ct.status || "queued"),
+          persona: ct.workerPersona || undefined,
+          model: ct.workerModel || undefined,
+          repo: ct.githubRepo || undefined,
+          startedAt: ct.startedAt || ct.createdAt || new Date().toISOString(),
+        });
+      }
+    }
+
+    return [...localList, ...cloudTasks];
+  } catch {
+    // Cloud fetch failed — fall back to local-only silently
+    return localList;
+  }
+}
 
 // ── HTTP Routing ───────────────────────────────────────
 
@@ -260,7 +365,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   if (req.method === "GET" && path === "/api/tasks") {
-    return json(res, Array.from(localTasks.values()));
+    // Merge local tasks (real-time) with cloud tasks (queued, missed events, etc.)
+    const merged = await getMergedTasks();
+    return json(res, merged);
   }
 
   // GET /api/tasks/:id
@@ -372,6 +479,21 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     addSSEClient(res, `coordination:${coordStreamMatch[1]}`);
     const keepAlive = setInterval(() => {
       try { res.write(": keepalive\n\n"); } catch { clearInterval(keepAlive); }
+    }, 30_000);
+    res.on("close", () => clearInterval(keepAlive));
+    return;
+  }
+
+  // SSE /api/stream/rag — indexing progress, completion, and error events
+  if (req.method === "GET" && path === "/api/stream/rag") {
+    sseHeaders(res);
+    addSSEClient(res, "rag");
+    const keepAlive = setInterval(() => {
+      try {
+        res.write(": keepalive\n\n");
+      } catch {
+        clearInterval(keepAlive);
+      }
     }, 30_000);
     res.on("close", () => clearInterval(keepAlive));
     return;
@@ -643,6 +765,107 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("GET", "/api/worker-decisions/worker-config", undefined);
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // ── RAG endpoints ──
+
+  // GET /api/rag/status — GPU, Ollama, and local RAG status
+  if (req.method === "GET" && path === "/api/rag/status") {
+    const gpu = detectGpu();
+    const ollamaPort = (agentConfig as AgentConfig & { ollamaPort?: number })?.ollamaPort ?? 11434;
+    const ollama = await getOllamaStatus(ollamaPort);
+    const localRagEnabled = (agentConfig as AgentConfig & { localRag?: boolean })?.localRag ?? false;
+    return json(res, { gpu, ollama, localRagEnabled });
+  }
+
+  // POST /api/rag/index — start background indexing of a repository
+  if (req.method === "POST" && path === "/api/rag/index") {
+    if (!agentConfig) return json(res, { error: "Agent not configured" }, 503);
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+
+    try {
+      const body = JSON.parse(await readBody(req));
+      const repository = body.repository;
+      if (!repository || typeof repository !== "string") {
+        return json(res, { error: "repository is required" }, 400);
+      }
+
+      // Fetch SCM token from cloud settings
+      const settings = (await cloudProxy("GET", "/api/settings")) as Record<string, unknown>;
+      const scmProvider = (settings?.scmProvider ?? "github") as string;
+      let scmToken = "";
+      if (scmProvider === "bitbucket") {
+        scmToken = (settings?.bitbucketToken as string) || "";
+      } else if (scmProvider === "gitlab") {
+        scmToken = (settings?.gitlabToken as string) || "";
+      } else {
+        scmToken = (settings?.githubToken as string) || "";
+      }
+
+      if (!scmToken) {
+        return json(res, { error: `No ${scmProvider} token configured in Settings` }, 400);
+      }
+
+      const ollamaPort = (agentConfig as AgentConfig & { ollamaPort?: number })?.ollamaPort ?? 11434;
+
+      // Run indexing in background — return 202 immediately
+      indexRepositoryLocally(agentConfig, {
+        repository,
+        branch: body.branch,
+        scmProvider,
+        scmToken,
+        ollamaPort,
+        onProgress: (msg, indexed, total) => {
+          agentEvents.emit("rag:progress", { repository, message: msg, indexed, total });
+          broadcastSSE("rag", "rag:progress", { repository, message: msg, indexed, total });
+        },
+      }).then((result) => {
+        agentEvents.emit("rag:complete", result);
+        broadcastSSE("rag", "rag:complete", result);
+      }).catch((err) => {
+        const error = err instanceof Error ? err.message : String(err);
+        agentEvents.emit("rag:error", { repository, error });
+        broadcastSSE("rag", "rag:error", { repository, error });
+      });
+
+      return json(res, { status: "indexing_started", repository }, 202);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // POST /api/rag/search — embed query locally, search via cloud API
+  if (req.method === "POST" && path === "/api/rag/search") {
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { repository, query: searchQuery, limit } = body as {
+        repository?: string;
+        query?: string;
+        limit?: number;
+      };
+      if (!repository || !searchQuery) {
+        return json(res, { error: "repository and query are required" }, 400);
+      }
+
+      const ollamaPort = (agentConfig as AgentConfig & { ollamaPort?: number })?.ollamaPort ?? 11434;
+
+      // Generate query embedding locally
+      const embeddings = await generateEmbeddings([searchQuery], "nomic-embed-text", ollamaPort);
+      const queryEmbedding = embeddings[0];
+
+      // Forward to cloud search endpoint
+      const result = await cloudProxy("POST", "/api/codebase/search-with-embedding", {
+        repository,
+        embedding: queryEmbedding,
+        limit: limit ?? 10,
+      });
+
       return json(res, result);
     } catch (err) {
       return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);

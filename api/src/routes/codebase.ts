@@ -8,13 +8,150 @@ import { Router, type Request, type Response } from "express";
 import { body, param, query, validationResult } from "express-validator";
 import { codebaseIndexer, IndexingOptions } from "../services/codebase-indexer.js";
 import { codebaseRetriever, CodeSearchOptions } from "../services/codebase-retriever.js";
-import { authenticateRequest } from "../middleware/auth.js";
+import { authenticateRequest, authenticateApiKey } from "../middleware/auth.js";
 import { requireCurrentTos } from "../middleware/tos.js";
+import { AppDataSource } from "../db/connection.js";
+import { CodebaseIndex } from "../models/CodebaseIndex.js";
+import { CodebaseIndexStatus } from "../models/CodebaseIndexStatus.js";
+import { formatEmbeddingForStorage } from "../services/embedding.js";
 import { logger } from "../utils/logger.js";
 
 const router = Router();
 
-// All routes require authentication
+// ─── POST /ingest ─────────────────────────────────────────────────────────────
+// Agent pushes pre-chunked + pre-embedded code for storage.
+// Uses API key auth (agent auth) — defined before the global JWT middleware.
+router.post(
+  "/ingest",
+  authenticateApiKey,
+  [
+    body("repository").isString().notEmpty(),
+    body("branch").optional().isString(),
+    body("chunks")
+      .isArray({ min: 1, max: 100 })
+      .withMessage("chunks must be an array of 1-100 items"),
+    body("chunks.*.filePath").isString().notEmpty(),
+    body("chunks.*.chunkIndex").isInt({ min: 0 }),
+    body("chunks.*.chunkType").isString().notEmpty(),
+    body("chunks.*.content").isString().notEmpty(),
+    body("chunks.*.embedding").isArray(),
+  ],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const orgId = req.organization?.id;
+    if (!orgId) {
+      return res.status(401).json({ error: "Organization context required" });
+    }
+
+    const { repository, branch = "main", chunks } = req.body;
+
+    // Validate all embeddings are exactly 768 dimensions
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      if (!Array.isArray(chunk.embedding) || chunk.embedding.length !== 768) {
+        return res.status(400).json({
+          error: `chunks[${i}].embedding must be an array of exactly 768 numbers`,
+        });
+      }
+    }
+
+    try {
+      const indexRepo = AppDataSource.getRepository(CodebaseIndex);
+      const statusRepo = AppDataSource.getRepository(CodebaseIndexStatus);
+
+      let ingested = 0;
+
+      for (const chunk of chunks) {
+        const embeddingStr = formatEmbeddingForStorage(chunk.embedding);
+
+        // Upsert: ON CONFLICT (org_id, repository, file_path, chunk_index) update
+        await AppDataSource.query(
+          `INSERT INTO codebase_index (
+            id, org_id, repository, branch, file_path, file_hash, chunk_index,
+            chunk_type, content, start_line, end_line, language,
+            symbol_name, symbol_type, embedding, indexed_at
+          ) VALUES (
+            gen_random_uuid(), $1, $2, $3, $4, $5, $6,
+            $7, $8, $9, $10, $11,
+            $12, $13, $14::vector, NOW()
+          )
+          ON CONFLICT (id) DO UPDATE SET
+            content = EXCLUDED.content,
+            embedding = EXCLUDED.embedding,
+            chunk_type = EXCLUDED.chunk_type,
+            file_hash = EXCLUDED.file_hash,
+            start_line = EXCLUDED.start_line,
+            end_line = EXCLUDED.end_line,
+            language = EXCLUDED.language,
+            symbol_name = EXCLUDED.symbol_name,
+            symbol_type = EXCLUDED.symbol_type,
+            indexed_at = NOW()`,
+          [
+            orgId,
+            repository,
+            branch,
+            chunk.filePath,
+            chunk.fileHash || "",
+            chunk.chunkIndex,
+            chunk.chunkType,
+            chunk.content,
+            chunk.startLine ?? null,
+            chunk.endLine ?? null,
+            chunk.language ?? null,
+            chunk.symbolName ?? null,
+            chunk.symbolType ?? null,
+            embeddingStr,
+          ],
+        );
+        ingested++;
+      }
+
+      // Update or create CodebaseIndexStatus
+      const existingStatus = await statusRepo.findOne({
+        where: { orgId, repository, branch },
+      });
+
+      if (existingStatus) {
+        existingStatus.totalChunks = (existingStatus.totalChunks || 0) + ingested;
+        existingStatus.status = "ready";
+        existingStatus.completedAt = new Date();
+        await statusRepo.save(existingStatus);
+      } else {
+        const newStatus = statusRepo.create({
+          orgId,
+          repository,
+          branch,
+          status: "ready",
+          totalChunks: ingested,
+          completedAt: new Date(),
+        });
+        await statusRepo.save(newStatus);
+      }
+
+      logger.info("Agent ingested codebase chunks", {
+        orgId,
+        repository,
+        branch,
+        ingested,
+      });
+
+      return res.json({ ingested, repository, branch });
+    } catch (error) {
+      logger.error("Error ingesting codebase chunks", {
+        orgId,
+        repository,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: "Failed to ingest chunks" });
+    }
+  },
+);
+
+// All routes below require authentication (JWT or API key)
 router.use(authenticateRequest);
 router.use(requireCurrentTos);
 
@@ -270,6 +407,139 @@ router.post(
       return res.status(500).json({ error: "Failed to search code" });
     }
   }
+);
+
+/**
+ * POST /api/codebase/search-with-embedding
+ * Search using a pre-computed embedding vector (skips server-side embedding generation).
+ * Used by the remote agent which generates embeddings locally via Ollama.
+ */
+router.post(
+  "/search-with-embedding",
+  [
+    body("repository").isString().notEmpty(),
+    body("embedding").isArray(),
+    body("limit").optional().isInt({ min: 1, max: 50 }),
+    body("minSimilarity").optional().isFloat({ min: 0, max: 1 }),
+    body("language").optional().isString(),
+    body("branch").optional().isString(),
+  ],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const orgId = req.organization?.id;
+    if (!orgId) {
+      return res.status(401).json({ error: "Organization context required" });
+    }
+
+    const {
+      repository,
+      embedding,
+      limit = 10,
+      minSimilarity = 0.4,
+      language,
+      branch,
+    } = req.body;
+
+    // Validate embedding dimensions
+    if (!Array.isArray(embedding) || embedding.length !== 768) {
+      return res.status(400).json({
+        error: "embedding must be an array of exactly 768 numbers",
+      });
+    }
+
+    try {
+      const embeddingStr = formatEmbeddingForStorage(embedding);
+      const maxDistance = 1 - minSimilarity;
+
+      let sql = `
+        SELECT
+          id,
+          repository,
+          branch,
+          file_path as "filePath",
+          content,
+          start_line as "startLine",
+          end_line as "endLine",
+          language,
+          symbol_name as "symbolName",
+          symbol_type as "symbolType",
+          chunk_type as "chunkType",
+          1 - (embedding <=> $1::vector) as similarity
+        FROM codebase_index
+        WHERE org_id = $2
+          AND repository = $3
+          AND embedding IS NOT NULL
+          AND (embedding <=> $1::vector) < $4
+      `;
+
+      const params: unknown[] = [embeddingStr, orgId, repository, maxDistance];
+      let paramIndex = 5;
+
+      if (branch) {
+        sql += ` AND branch = $${paramIndex}`;
+        params.push(branch);
+        paramIndex++;
+      }
+
+      if (language) {
+        sql += ` AND language = $${paramIndex}`;
+        params.push(language);
+        paramIndex++;
+      }
+
+      sql += `
+        ORDER BY embedding <=> $1::vector
+        LIMIT $${paramIndex}
+      `;
+      params.push(limit);
+
+      const results = await AppDataSource.query(sql, params);
+
+      // Update access counts
+      if (results.length > 0) {
+        const ids = results.map((r: { id: string }) => r.id);
+        await AppDataSource.query(
+          `UPDATE codebase_index
+           SET access_count = access_count + 1,
+               last_accessed_at = NOW()
+           WHERE id = ANY($1)`,
+          [ids],
+        );
+      }
+
+      const snippets = results.map((r: Record<string, unknown>) => ({
+        id: r.id as string,
+        repository: r.repository as string,
+        branch: r.branch as string,
+        filePath: r.filePath as string,
+        content: r.content as string,
+        startLine: r.startLine as number,
+        endLine: r.endLine as number,
+        language: r.language as string | null,
+        symbolName: r.symbolName as string | null,
+        symbolType: r.symbolType as string | null,
+        chunkType: r.chunkType as string,
+        similarity: Number(r.similarity),
+      }));
+
+      return res.json({
+        snippets,
+        formattedText: "",
+        totalSnippets: snippets.length,
+      });
+    } catch (error) {
+      logger.error("Error searching code with embedding", {
+        orgId,
+        repository,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: "Failed to search code" });
+    }
+  },
 );
 
 /**

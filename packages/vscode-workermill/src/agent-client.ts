@@ -17,6 +17,27 @@ const INITIAL_RECONNECT_MS = 2_000;
 const MAX_RECONNECT_MS = 30_000;
 const MAX_RECONNECT_ATTEMPTS = 20;
 
+export interface GpuStatus {
+  available: boolean;
+  vendor: "nvidia" | "apple" | "amd" | "none";
+  model: string | null;
+  memoryMb: number | null;
+}
+
+export interface OllamaStatus {
+  installed: boolean;
+  running: boolean;
+  version: string | null;
+  models: string[];
+  port: number;
+}
+
+export interface RagStatus {
+  gpu: GpuStatus;
+  ollama: OllamaStatus;
+  localRagEnabled: boolean;
+}
+
 export interface AgentStatus {
   version: string;
   agentId: string;
@@ -30,7 +51,7 @@ export interface TaskInfo {
   id: string;
   summary: string;
   description?: string;
-  status: "planning" | "running" | "completed" | "failed" | "cancelled";
+  status: "planning" | "running" | "completed" | "failed" | "cancelled" | "pr_approved" | "escalated";
   persona?: string;
   model?: string;
   repo?: string;
@@ -82,6 +103,7 @@ export class AgentClient extends EventEmitter {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private disposed = false;
   private reconnectAttempts = 0;
+  private ragOfferShown = false;
 
   constructor() {
     super();
@@ -105,6 +127,7 @@ export class AgentClient extends EventEmitter {
       this.reconnectAttempts = 0; // Reset on successful connection
       this.emit("connected", status);
       this.startTaskStream();
+      this.checkRagAutoOffer();
       return true;
     } catch {
       this.connected = false;
@@ -122,6 +145,11 @@ export class AgentClient extends EventEmitter {
   /** Get agent status */
   async getStatus(): Promise<AgentStatus> {
     return this.get<AgentStatus>("/api/status");
+  }
+
+  /** Get GPU, Ollama, and local RAG status */
+  async getRagStatus(): Promise<RagStatus> {
+    return this.get<RagStatus>("/api/rag/status");
   }
 
   /** Get all tasks */
@@ -371,6 +399,19 @@ export class AgentClient extends EventEmitter {
   }
 
   // ── Private ──
+
+  private async checkRagAutoOffer(): Promise<void> {
+    if (this.ragOfferShown || this.disposed) return;
+    try {
+      const ragStatus = await this.getRagStatus();
+      if (ragStatus.gpu?.available && !ragStatus.localRagEnabled) {
+        this.ragOfferShown = true;
+        this.emit("ragAutoOffer", ragStatus.gpu);
+      }
+    } catch {
+      // Agent doesn't support RAG endpoint yet or not reachable — ignore
+    }
+  }
 
   private discoverPort(): number | null {
     try {

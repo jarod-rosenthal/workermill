@@ -496,10 +496,10 @@ export class TaskDetailPanel {
   </div>
 </div>
 
-<div class="actions-bar" id="actionsBar"${task.status === "failed" || task.status === "cancelled" || task.status === "completed" ? ` style="display:none"` : ""}>
+<div class="actions-bar" id="actionsBar"${task.status === "failed" || task.status === "cancelled" || task.status === "completed" || task.status === "pr_approved" || task.status === "escalated" ? ` style="display:none"` : ""}>
   <button class="action-btn danger" onclick="cancelTask()">Cancel Task</button>
 </div>
-<div class="actions-bar" id="retryBar"${task.status === "failed" || task.status === "cancelled" ? ` style="display:flex"` : ` style="display:none"`}>
+<div class="actions-bar" id="retryBar"${task.status === "failed" || task.status === "cancelled" || task.status === "escalated" ? ` style="display:flex"` : ` style="display:none"`}>
   <button class="action-btn primary" id="retryBtn" onclick="retryTask()">Retry Task</button>
 </div>
 
@@ -526,7 +526,7 @@ export class TaskDetailPanel {
   </div>
 </div>
 
-<div class="finished-banner${task.status === "completed" ? " visible completed" : task.status === "failed" ? " visible failed" : task.status === "cancelled" ? " visible cancelled" : ""}" id="finishedBanner">${task.status === "completed" ? "&#x2705; Task completed successfully" : task.status === "failed" ? "&#x274C; Task failed" : task.status === "cancelled" ? "&#x274C; Task cancelled" : ""}</div>
+<div class="finished-banner${task.status === "completed" ? " visible completed" : task.status === "pr_approved" ? " visible completed" : task.status === "failed" ? " visible failed" : task.status === "escalated" ? " visible failed" : task.status === "cancelled" ? " visible cancelled" : ""}" id="finishedBanner">${task.status === "completed" ? "&#x2705; Task completed successfully" : task.status === "pr_approved" ? "&#x2705; PR approved" : task.status === "failed" ? "&#x274C; Task failed" : task.status === "escalated" ? "&#x26A0; Task escalated — needs attention" : task.status === "cancelled" ? "&#x274C; Task cancelled" : ""}</div>
 
 
 <script>
@@ -570,14 +570,17 @@ function updateStatus(status) {
   badge.className = "badge badge-status " + status;
 
   // Show finished banner for terminal states
-  if (status === "completed" || status === "failed" || status === "cancelled") {
+  if (status === "completed" || status === "pr_approved" || status === "failed" || status === "escalated" || status === "cancelled") {
     const banner = document.getElementById("finishedBanner");
-    banner.className = "finished-banner visible " + status;
+    const bannerClass = (status === "completed" || status === "pr_approved") ? "completed" : (status === "escalated") ? "failed" : status;
+    banner.className = "finished-banner visible " + bannerClass;
     banner.textContent = status === "completed" ? "\\u2705 Task completed successfully"
+      : status === "pr_approved" ? "\\u2705 PR approved"
+      : status === "escalated" ? "\\u26A0 Task escalated \\u2014 needs attention"
       : status === "cancelled" ? "\\u274C Task cancelled"
       : "\\u274C Task failed";
     document.getElementById("actionsBar").style.display = "none";
-    document.getElementById("retryBar").style.display = (status === "failed" || status === "cancelled") ? "flex" : "none";
+    document.getElementById("retryBar").style.display = (status === "failed" || status === "cancelled" || status === "escalated") ? "flex" : "none";
     var retryBtn = document.getElementById("retryBtn");
     if (retryBtn) retryBtn.disabled = false;
   } else {

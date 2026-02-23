@@ -19,6 +19,8 @@ import type { SpawnableTask, ClaimCredentials } from "./spawner.js";
 import { activeProcesses, type ActiveProcess } from "./active-processes.js";
 import { agentEvents } from "./local-api.js";
 import { AGENT_VERSION } from "./version.js";
+import { getGpuInfo } from "./gpu-detector.js";
+import { getOllamaStatus } from "./ollama-manager.js";
 
 // ── Platform Detection ─────────────────────────────────
 
@@ -394,6 +396,12 @@ export async function spawnDockerWorker(
     "--cap-add", "FOWNER",        // Required by sudo audit plugin
   ];
 
+  // GPU passthrough: add --gpus=all when NVIDIA is detected
+  const gpuInfo = getGpuInfo();
+  if (gpuInfo.available && gpuInfo.vendor === "nvidia") {
+    dockerArgs.push("--gpus=all");
+  }
+
   // Network mode
   const dockerDesktop = isDockerDesktop();
   if (dockerDesktop) {
@@ -438,6 +446,25 @@ export async function spawnDockerWorker(
   ];
   for (const [volumeName, containerPath] of toolVolumes) {
     dockerArgs.push("-v", `${volumeName}:${containerPath}`);
+  }
+
+  // Mount Ollama models cache (read-only) if local RAG is enabled
+  let localOllamaHost = "";
+  if (config.localRag) {
+    const ollamaStatus = await getOllamaStatus(config.ollamaPort);
+    if (ollamaStatus.running) {
+      // Docker Desktop uses host.docker.internal; Linux --network host uses localhost
+      localOllamaHost = dockerDesktop
+        ? `http://host.docker.internal:${config.ollamaPort}`
+        : `http://localhost:${config.ollamaPort}`;
+
+      // Mount Ollama models directory so the container doesn't re-download
+      const ollamaModelsDir = path.join(os.homedir(), ".ollama", "models");
+      if (fs.existsSync(ollamaModelsDir)) {
+        const dockerModelsDir = toDockerPath(ollamaModelsDir);
+        dockerArgs.push("-v", `${dockerModelsDir}:/home/worker/.ollama/models:ro`);
+      }
+    }
   }
 
   // Mount AWS credentials (read-only)
@@ -580,7 +607,7 @@ export async function spawnDockerWorker(
     OPENAI_API_KEY: credentials?.openaiApiKey || "",
     GOOGLE_API_KEY: credentials?.googleApiKey || "",
     GOOGLE_GENERATIVE_AI_API_KEY: credentials?.googleApiKey || "",
-    OLLAMA_HOST: credentials?.ollamaBaseUrl || "",
+    OLLAMA_HOST: localOllamaHost || credentials?.ollamaBaseUrl || "",
     OLLAMA_CONTEXT_WINDOW: credentials?.ollamaContextWindow
       ? String(credentials.ollamaContextWindow)
       : "",

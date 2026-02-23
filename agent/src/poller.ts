@@ -23,6 +23,8 @@ import {
 import { AGENT_VERSION } from "./version.js";
 import { selfUpdate, restartAgent } from "./updater.js";
 import { agentEvents } from "./local-api.js";
+import { getGpuInfo } from "./gpu-detector.js";
+import { getOllamaStatus } from "./ollama-manager.js";
 
 // Track tasks currently being planned (to avoid double-dispatching)
 const planningInProgress = new Set<string>();
@@ -454,10 +456,17 @@ export function startHeartbeat(config: AgentConfig): void {
     const activeTaskIds = [...containerTaskIds, ...planningTaskIds, ...managerTaskIds];
 
     try {
+      const gpuInfo = getGpuInfo();
+      const ollamaStatus = await getOllamaStatus(config.ollamaPort);
+
       const response = await api.post("/api/agent/heartbeat", {
         agentId: config.agentId,
         activeTasks: activeTaskIds,
         agentVersion: AGENT_VERSION,
+        gpuAvailable: gpuInfo.available,
+        gpuVendor: gpuInfo.vendor,
+        localRagEnabled: config.localRag,
+        ollamaRunning: ollamaStatus.running,
       });
 
       // Stop containers for tasks cancelled via the cloud dashboard

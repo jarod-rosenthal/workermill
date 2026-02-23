@@ -6,7 +6,7 @@
  */
 
 import { simpleGit, SimpleGit, SimpleGitOptions } from "simple-git";
-import { existsSync, mkdirSync, readdirSync, readFileSync, appendFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, appendFileSync, unlinkSync, lstatSync, rmSync } from "fs";
 import { execFile, execSync } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -919,6 +919,7 @@ export class GitOps {
 
     // Ensure node_modules is in .gitignore before staging (prevents 100MB+ binaries from being committed)
     this.ensureNodeModulesIgnored(worktreePath);
+    this.removeWindowsReservedFiles(worktreePath);
 
     // Stage all changes
     await worktreeGit.add(".");
@@ -1036,6 +1037,7 @@ export class GitOps {
 
     // Ensure node_modules is in .gitignore before staging (prevents 100MB+ binaries from being committed)
     this.ensureNodeModulesIgnored(worktreePath);
+    this.removeWindowsReservedFiles(worktreePath);
 
     // Stage all changes
     await worktreeGit.add(".");
@@ -1174,6 +1176,7 @@ export class GitOps {
 
     // Ensure node_modules is in .gitignore before staging (prevents 100MB+ binaries from being committed)
     this.ensureNodeModulesIgnored(this.repoPath);
+    this.removeWindowsReservedFiles(this.repoPath);
 
     // Stage all changes
     await this.git.add(".");
@@ -1243,6 +1246,41 @@ export class GitOps {
     } catch (e) {
       console.warn("[GitOps] Failed to ensure entries in .gitignore:", e);
     }
+  }
+
+  private removeWindowsReservedFiles(dirPath: string): void {
+    // Windows reserved device names — cannot exist as files on NTFS
+    const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..+)?$/i;
+    const walk = (dir: string) => {
+      let entries: string[];
+      try {
+        entries = readdirSync(dir);
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry);
+        if (RESERVED.test(entry)) {
+          try {
+            rmSync(full, { recursive: true, force: true });
+            console.log(`[GitOps] Removed Windows-reserved file: ${full}`);
+          } catch {
+            /* may already be gone */
+          }
+        } else {
+          try {
+            // lstatSync avoids following symlinks (prevents infinite loops)
+            const stat = lstatSync(full);
+            if (stat.isDirectory() && entry !== "node_modules" && entry !== ".git") {
+              walk(full);
+            }
+          } catch {
+            /* stat failure, skip */
+          }
+        }
+      }
+    };
+    walk(dirPath);
   }
 
   private formatPersonaForCommit(persona: string): string {
@@ -1784,7 +1822,16 @@ export class GitOps {
 
       // Second: force checkout to main (--force discards local changes)
       console.log("[GitOps] Force checkout to main branch...");
-      await this.git.checkout(["-f", this.mainBranch]);
+      try {
+        await this.git.checkout(["-f", this.mainBranch]);
+      } catch (checkoutErr) {
+        const msg = checkoutErr instanceof Error ? checkoutErr.message : String(checkoutErr);
+        console.warn(`[GitOps] Force checkout failed: ${msg} — cleaning and retrying`);
+        // Remove Windows-reserved files that git can't delete (e.g. nul, con, aux)
+        this.removeWindowsReservedFiles(this.repoPath);
+        await this.git.clean("f", ["-d", "-x"]);
+        await this.git.checkout(["-f", this.mainBranch]);
+      }
 
       // Third: reset to origin/main to get latest remote state
       await this.git.reset(["--hard", `origin/${this.mainBranch}`]);

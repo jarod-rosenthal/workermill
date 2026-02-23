@@ -98,7 +98,8 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
     if (!element) {
       // Root level — show categories
       const active = this.tasks.filter((t) => t.status === "running" || t.status === "planning");
-      const recent = this.tasks.filter((t) => t.status === "completed" || t.status === "failed");
+      const approved = this.tasks.filter((t) => t.status === "pr_approved" || t.status === "completed");
+      const needsAttention = this.tasks.filter((t) => t.status === "failed" || t.status === "escalated" || t.status === "cancelled");
 
       const items: TreeItem[] = [];
 
@@ -147,14 +148,25 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
         items.push(new InfoTreeItem("Backlog", "Connect a repo in Settings to see issues", "$(list-unordered)"));
       }
 
-      // Recent
-      if (recent.length > 0) {
+      // PR Approved — tasks that completed successfully
+      if (approved.length > 0) {
         items.push(new InfoTreeItem(
-          `Recent (${recent.length})`,
+          `PR Approved (${approved.length})`,
           undefined,
-          "$(history)",
+          "$(check-all)",
           vscode.TreeItemCollapsibleState.Collapsed,
-          recent.map((t) => new TaskTreeItem(t)),
+          approved.map((t) => new TaskTreeItem(t)),
+        ));
+      }
+
+      // Needs Attention — failed, escalated, or cancelled tasks
+      if (needsAttention.length > 0) {
+        items.push(new InfoTreeItem(
+          `Needs Attention (${needsAttention.length})`,
+          undefined,
+          "$(warning)",
+          vscode.TreeItemCollapsibleState.Expanded,
+          needsAttention.map((t) => new TaskTreeItem(t)),
         ));
       }
 
@@ -215,8 +227,17 @@ class TaskTreeItem extends vscode.TreeItem {
       case "completed":
         this.iconPath = new vscode.ThemeIcon("check", new vscode.ThemeColor("charts.green"));
         break;
+      case "pr_approved":
+        this.iconPath = new vscode.ThemeIcon("check-all", new vscode.ThemeColor("charts.green"));
+        break;
+      case "escalated":
+        this.iconPath = new vscode.ThemeIcon("megaphone", new vscode.ThemeColor("charts.orange"));
+        break;
       case "failed":
         this.iconPath = new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
+        break;
+      case "cancelled":
+        this.iconPath = new vscode.ThemeIcon("circle-slash", new vscode.ThemeColor("disabledForeground"));
         break;
     }
 

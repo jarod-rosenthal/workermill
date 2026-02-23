@@ -828,7 +828,7 @@ export class SettingsPanel {
         return;
       }
 
-      // Store new API key in secure storage
+      // Store new API key in secure storage + keychain
       await storeApiKey(data.apiKey);
       const keychainOk = writeApiKeyToKeychain(data.apiKey);
 

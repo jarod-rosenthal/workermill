@@ -28,7 +28,7 @@ import type {
   PlannedStepV2,
   StepCommit,
 } from "../types/pipeline-v2";
-import { calculateProgress, formatDuration } from "../types/pipeline-v2";
+import { calculateProgress, countUniqueCompletedSteps, formatDuration } from "../types/pipeline-v2";
 
 /**
  * WorkerTask interface subset for V2 pipeline fields
@@ -148,8 +148,9 @@ export function PipelineV2Panel({
   const commitHistory = task.commitHistory || [];
 
   // Calculate progress
+  const uniqueCompleted = countUniqueCompletedSteps(commitHistory);
   const progressPercent = steps.length > 0
-    ? calculateProgress(commitHistory.length, steps.length)
+    ? calculateProgress(uniqueCompleted, steps.length)
     : 0;
 
   // Status display
@@ -190,7 +191,7 @@ export function PipelineV2Panel({
           {/* Progress indicator */}
           {steps.length > 0 && (
             <span className="text-xs text-muted-foreground">
-              {progressPercent}% ({commitHistory.length}/{steps.length})
+              {progressPercent}% ({uniqueCompleted}/{steps.length})
             </span>
           )}
         </div>

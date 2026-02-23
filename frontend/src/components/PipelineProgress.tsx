@@ -29,6 +29,7 @@ import {
   truncateCommitHash,
   getComplexityLabel,
   getComplexityColor,
+  countUniqueCompletedSteps,
   VERIFICATION_COLORS,
 } from "../types/pipeline-v2";
 import { PERSONA_CONFIGS } from "../types/mission-control";
@@ -202,9 +203,9 @@ export function PipelineProgress({
     return null;
   }
 
-  const completedCount = commitHistory.length;
+  const completedCount = countUniqueCompletedSteps(commitHistory);
   const totalSteps = steps.length;
-  const progressPercent = Math.round((completedCount / totalSteps) * 100);
+  const progressPercent = Math.min(100, Math.round((completedCount / totalSteps) * 100));
 
   const selectedStep = selectedStepIndex !== null ? steps[selectedStepIndex] : null;
   const selectedCommit = selectedStepIndex !== null
@@ -371,7 +372,7 @@ export function PipelineProgressCompact({
   commitHistory: StepCommit[];
   taskStatus?: string;
 }) {
-  const completedCount = commitHistory.length;
+  const completedCount = countUniqueCompletedSteps(commitHistory);
   const totalSteps = steps.length;
 
   const statusColor =

@@ -51,6 +51,7 @@ import {
   codebaseRouter,
   directivesRouter,
   managementRouter,
+  marketingRouter,
   statusRouter,
   workerApiRouter,
   workerDecisionsRouter,
@@ -297,6 +298,9 @@ app.use("/api/build", authenticatedLimiter, buildRouter);
 
 // Management dashboard routes (platform admin only)
 app.use("/api/management", authenticatedLimiter, managementRouter);
+
+// Marketing content routes (authenticated)
+app.use("/api/marketing", authenticatedLimiter, marketingRouter);
 
 // Email routes (unsubscribe is public for CAN-SPAM compliance)
 app.use("/api/email", webhookLimiter, emailRouter);

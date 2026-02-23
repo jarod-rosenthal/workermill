@@ -14,7 +14,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as https from "https";
-import { spawn, execFileSync } from "child_process";
+import { spawn, execFileSync, execSync } from "child_process";
 
 const CDN_BASE = "https://workermill.com/agent/latest";
 
@@ -843,7 +843,7 @@ export function isAgentConfigured(): boolean {
   return fs.existsSync(configPath);
 }
 
-/** Write agent config file. SCM tokens come from the API at runtime, not from the extension. */
+/** Write agent config file. API key goes to keychain, NOT to disk. */
 export function writeAgentConfig(opts: {
   apiUrl: string;
   apiKey: string;
@@ -866,13 +866,20 @@ export function writeAgentConfig(opts: {
   const config: Record<string, unknown> = {
     ...existing,
     apiUrl: opts.apiUrl,
-    apiKey: opts.apiKey,
     agentId: (existing.agentId as string) || `agent-${os.hostname()}`,
     maxWorkers: (existing.maxWorkers as number) || 1,
     pollIntervalMs: (existing.pollIntervalMs as number) || 5000,
     heartbeatIntervalMs: (existing.heartbeatIntervalMs as number) || 30000,
     setupCompletedAt: new Date().toISOString(),
   };
+
+  // Only write apiKey to disk as fallback (e.g., headless Linux without secret-tool).
+  // If apiKey is empty, the caller stored it in the keychain — remove from disk.
+  if (opts.apiKey) {
+    config.apiKey = opts.apiKey;
+  } else {
+    delete config.apiKey;
+  }
 
   if (opts.orgId) config.orgId = opts.orgId;
   if (opts.orgName) config.orgName = opts.orgName;
@@ -881,4 +888,150 @@ export function writeAgentConfig(opts: {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), {
     mode: 0o600,
   });
+}
+
+// ── OS Keychain helpers (for agent binary consumption) ───────────────
+// These use the same platform CLI tools as agent/src/keychain.ts so both
+// the VS Code extension and the standalone binary can share credentials.
+
+const KC_SERVICE = "workermill";
+const KC_ACCOUNT = "workermill";
+const KC_LABEL = "WorkerMill API Key";
+const KC_TIMEOUT = 5_000;
+
+/**
+ * Store the API key in the OS keychain so the agent binary can read it.
+ * Returns true on success, false on failure (caller should NOT crash).
+ */
+export function writeApiKeyToKeychain(apiKey: string): boolean {
+  try {
+    switch (process.platform) {
+      case "darwin":
+        execFileSync(
+          "security",
+          ["add-generic-password", "-a", KC_ACCOUNT, "-s", KC_SERVICE, "-w", apiKey, "-U"],
+          { timeout: KC_TIMEOUT, stdio: "pipe" },
+        );
+        return true;
+
+      case "linux":
+        execSync(
+          `echo -n '${apiKey.replace(/'/g, "'\\''")}' | secret-tool store --label='${KC_LABEL}' service ${KC_SERVICE} account ${KC_ACCOUNT}`,
+          { timeout: KC_TIMEOUT, stdio: "pipe" },
+        );
+        return true;
+
+      case "win32":
+        execSync(
+          `cmdkey /generic:${KC_SERVICE} /user:${KC_ACCOUNT} /pass:"${apiKey.replace(/"/g, '\\"')}"`,
+          { timeout: KC_TIMEOUT, windowsHide: true, stdio: "pipe" },
+        );
+        return true;
+
+      default:
+        return false;
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read the API key from the OS keychain.
+ * Returns the key string, or null if not found / not available.
+ */
+export function readApiKeyFromKeychain(): string | null {
+  try {
+    switch (process.platform) {
+      case "darwin": {
+        const result = execFileSync(
+          "security",
+          ["find-generic-password", "-a", KC_ACCOUNT, "-s", KC_SERVICE, "-w"],
+          { encoding: "utf-8", timeout: KC_TIMEOUT, stdio: ["pipe", "pipe", "pipe"] },
+        ).trim();
+        return result || null;
+      }
+
+      case "linux": {
+        const result = execFileSync(
+          "secret-tool",
+          ["lookup", "service", KC_SERVICE, "account", KC_ACCOUNT],
+          { encoding: "utf-8", timeout: KC_TIMEOUT, stdio: ["pipe", "pipe", "pipe"] },
+        ).trim();
+        return result || null;
+      }
+
+      case "win32": {
+        const result = execSync(
+          `powershell.exe -NoProfile -NonInteractive -Command "` +
+            `try { ` +
+            `  Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class CredManager{[DllImport(\\\"advapi32.dll\\\",SetLastError=true,CharSet=CharSet.Unicode)]static extern bool CredRead(string target,int type,int flags,out IntPtr cred);[StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]struct CREDENTIAL{public int Flags;public int Type;public string TargetName;public string Comment;public long LastWritten;public int CredentialBlobSize;public IntPtr CredentialBlob;public int Persist;public int AttributeCount;public IntPtr Attributes;public string TargetAlias;public string UserName;}public static string Get(string target){IntPtr p;if(!CredRead(target,1,0,out p))return null;var c=Marshal.PtrToStructure<CREDENTIAL>(p);if(c.CredentialBlobSize>0){return Marshal.PtrToStringUni(c.CredentialBlob,c.CredentialBlobSize/2);}return null;}}'; ` +
+            `  [CredManager]::Get('${KC_SERVICE}') ` +
+            `} catch { $null }"`,
+          { encoding: "utf-8", timeout: KC_TIMEOUT, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
+        ).trim();
+        return result || null;
+      }
+
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Delete the API key from the OS keychain.
+ */
+export function deleteApiKeyFromKeychain(): boolean {
+  try {
+    switch (process.platform) {
+      case "darwin":
+        execFileSync(
+          "security",
+          ["delete-generic-password", "-a", KC_ACCOUNT, "-s", KC_SERVICE],
+          { timeout: KC_TIMEOUT, stdio: "pipe" },
+        );
+        return true;
+
+      case "linux":
+        execFileSync(
+          "secret-tool",
+          ["clear", "service", KC_SERVICE, "account", KC_ACCOUNT],
+          { timeout: KC_TIMEOUT, stdio: "pipe" },
+        );
+        return true;
+
+      case "win32":
+        execSync(`cmdkey /delete:${KC_SERVICE}`, {
+          timeout: KC_TIMEOUT,
+          windowsHide: true,
+          stdio: "pipe",
+        });
+        return true;
+
+      default:
+        return false;
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Remove the apiKey field from config.json (migration helper).
+ * Preserves all other fields.
+ */
+export function stripApiKeyFromConfig(): void {
+  const configPath = path.join(os.homedir(), ".workermill", "config.json");
+  try {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    if ("apiKey" in config) {
+      delete config.apiKey;
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+    }
+  } catch {
+    /* no config or parse error — nothing to strip */
+  }
 }

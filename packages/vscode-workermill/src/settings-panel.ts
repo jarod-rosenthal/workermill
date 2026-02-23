@@ -19,7 +19,11 @@ import {
   waitForAgentReady,
   getAgentBinaryPath,
   writeAgentConfig,
+  readApiKeyFromKeychain,
+  writeApiKeyToKeychain,
+  stripApiKeyFromConfig,
 } from "./agent-installer";
+import { getApiKey, storeApiKey } from "./secret-storage";
 
 function readAgentConfig(): {
   apiUrl: string;
@@ -31,14 +35,22 @@ function readAgentConfig(): {
   try {
     const configPath = path.join(os.homedir(), ".workermill", "config.json");
     const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    if (raw.apiUrl && raw.apiKey)
-      return {
-        apiUrl: raw.apiUrl,
-        apiKey: raw.apiKey,
-        orgId: raw.orgId,
-        orgName: raw.orgName,
-        orgSlug: raw.orgSlug,
-      };
+    if (!raw.apiUrl) return null;
+
+    // Try OS keychain first, fall back to config.json plaintext
+    let apiKey = readApiKeyFromKeychain();
+    if (!apiKey && raw.apiKey) {
+      apiKey = raw.apiKey;
+    }
+    if (!apiKey) return null;
+
+    return {
+      apiUrl: raw.apiUrl,
+      apiKey,
+      orgId: raw.orgId,
+      orgName: raw.orgName,
+      orgSlug: raw.orgSlug,
+    };
   } catch {
     /* no config */
   }
@@ -816,14 +828,21 @@ export class SettingsPanel {
         return;
       }
 
-      // Write new API key + org info to config
+      // Store new API key in secure storage
+      await storeApiKey(data.apiKey);
+      const keychainOk = writeApiKeyToKeychain(data.apiKey);
+
+      // Write config (apiKey only to disk as fallback if keychain failed)
       writeAgentConfig({
         apiUrl: config.apiUrl,
-        apiKey: data.apiKey,
+        apiKey: keychainOk ? "" : data.apiKey,
         orgId: data.orgId,
         orgName: data.orgName,
         orgSlug: data.orgSlug,
       });
+      if (keychainOk) {
+        stripApiKeyFromConfig();
+      }
 
       // Restart agent with new config (same pattern as sandbox toggle)
       this.postMessage({ type: "org-switching" });

@@ -30,8 +30,12 @@ import {
   waitForAgentReady,
   promptInstallGit,
   readAgentStartupError,
+  writeApiKeyToKeychain,
+  stripApiKeyFromConfig,
+  deleteApiKeyFromKeychain,
 } from "./agent-installer";
 import { signUpWithGitHub, signInWithGitHub, enterApiKey } from "./github-onboard";
+import { initSecretStorage, getApiKey, storeApiKey, deleteApiKey } from "./secret-storage";
 
 /**
  * Show a QuickPick for repository selection if multiple repos are configured.
@@ -210,6 +214,33 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(outputChannel);
   const log = (msg: string) => outputChannel.appendLine(msg);
   log("WorkerMill extension activated");
+
+  // Initialize secure secret storage (OS keychain via VS Code SecretStorage API)
+  initSecretStorage(context.secrets);
+
+  // Migrate existing plaintext API key from config.json → keychain + SecretStorage
+  (async () => {
+    try {
+      const existing = await getApiKey();
+      if (!existing) {
+        const configPath = path.join(os.homedir(), ".workermill", "config.json");
+        try {
+          const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+          if (raw.apiKey) {
+            log("Migrating API key from config.json to secure storage...");
+            await storeApiKey(raw.apiKey);
+            writeApiKeyToKeychain(raw.apiKey);
+            stripApiKeyFromConfig();
+            log("API key migrated successfully");
+          }
+        } catch {
+          /* no config or parse error */
+        }
+      }
+    } catch (err) {
+      log(`Secret storage migration error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  })();
 
   // Register commands
   context.subscriptions.push(
@@ -886,7 +917,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
-    // Sign out — stop agent, delete config, reset to welcome view
+    // Sign out — stop agent, delete config + keychain secrets, reset to welcome view
     vscode.commands.registerCommand("workermill.signOut", async () => {
       const confirm = await vscode.window.showWarningMessage(
         "Sign out of WorkerMill? This will stop the agent and remove your configuration.",
@@ -898,6 +929,11 @@ export function activate(context: vscode.ExtensionContext): void {
       log("Signing out...");
       client.disconnect();
       await stopAgentProcess();
+
+      // Clear API key from all storage locations
+      await deleteApiKey();           // VS Code SecretStorage
+      deleteApiKeyFromKeychain();     // OS keychain
+      log("API key cleared from secure storage");
 
       // Delete config file
       const configPath = path.join(os.homedir(), ".workermill", "config.json");

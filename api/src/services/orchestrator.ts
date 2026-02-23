@@ -28,6 +28,8 @@ import {
 import { dispatchMultiStoryPlan } from "./task-dispatch.js";
 import { monitorExecutingTasks, checkParentTaskCompletion } from "./task-monitor.js";
 import { spawnWorker } from "./worker-spawner.js";
+import { executeMarketingAgentMission } from "./marketing-agent-executor.js";
+import { Organization } from "../models/index.js";
 import {
   logTaskEvent,
   state,
@@ -36,6 +38,7 @@ import {
 
 // Timestamp for hourly trial reminder checks
 let lastTrialReminderCheck = 0;
+let lastMarketingAgentRun = 0;
 
 /**
  * Main polling loop
@@ -270,6 +273,35 @@ async function pollLoop(): Promise<void> {
             error: err instanceof Error ? err.message : String(err),
           }),
         );
+      }
+
+      // Marketing agent — configurable interval (default 2 hours)
+      try {
+        const platformOrg = await Organization.getPlatformOrg();
+        if (
+          platformOrg?.marketingAgentEnabled &&
+          now - lastMarketingAgentRun > platformOrg.marketingAgentIntervalMinutes * 60 * 1000
+        ) {
+          const config = platformOrg.marketingAgentConfig as Record<string, unknown>;
+          const timeWindow = (config.missionTimeWindow as string) || "06:00-22:00";
+          const [startStr, endStr] = timeWindow.split("-");
+          const startHour = parseInt(startStr.split(":")[0], 10);
+          const endHour = parseInt(endStr.split(":")[0], 10);
+          const currentHour = new Date().getUTCHours();
+
+          if (currentHour >= startHour && currentHour < endHour) {
+            lastMarketingAgentRun = now;
+            executeMarketingAgentMission(platformOrg).catch((err) =>
+              logger.error("Marketing agent mission failed", {
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            );
+          }
+        }
+      } catch (err) {
+        logger.error("Marketing agent cron check failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
 
       // Sleep between polls

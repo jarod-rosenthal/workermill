@@ -25,6 +25,8 @@ export interface AgentConfig {
   sandbox: "none" | "docker";
   dockerImage: string;
   dockerMemoryGb: number;
+  localRag: boolean;
+  ollamaPort: number;
 }
 
 export interface FileConfig {
@@ -43,6 +45,8 @@ export interface FileConfig {
   sandbox?: "docker";
   dockerImage?: string;
   dockerMemoryGb?: number;
+  localRag?: boolean;
+  ollamaPort?: number;
   setupCompletedAt: string;
 }
 
@@ -111,6 +115,8 @@ export function loadConfigFromFile(): AgentConfig {
     sandbox: fc.sandbox || "none",
     dockerImage: fc.dockerImage || "ghcr.io/workermill/worker",
     dockerMemoryGb: fc.dockerMemoryGb || 4,
+    localRag: fc.localRag ?? false,
+    ollamaPort: fc.ollamaPort ?? 11434,
   };
 }
 
@@ -165,6 +171,8 @@ export function loadConfig(): AgentConfig {
     sandbox: sandboxEnv === "docker" ? "docker" : "none",
     dockerImage: process.env.WORKERMILL_DOCKER_IMAGE || "ghcr.io/workermill/worker",
     dockerMemoryGb: parseInt(process.env.WORKERMILL_DOCKER_MEMORY_GB || "4", 10),
+    localRag: process.env.WORKERMILL_LOCAL_RAG === "true",
+    ollamaPort: parseInt(process.env.WORKERMILL_OLLAMA_PORT || "11434", 10),
   };
 }
 

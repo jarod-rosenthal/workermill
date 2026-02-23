@@ -149,6 +149,18 @@ export class SettingsPanel {
       } else if (msg.type === "sign-out") {
         vscode.commands.executeCommand("workermill.signOut");
         return;
+      } else if (msg.type === "load-rag") {
+        await this.loadRag();
+        return;
+      } else if (msg.type === "toggle-rag") {
+        await this.toggleRag(msg.enabled);
+        return;
+      } else if (msg.type === "set-ollama-port") {
+        await this.setOllamaPort(msg.port);
+        return;
+      } else if (msg.type === "index-repo") {
+        await this.indexRepo(msg.repository);
+        return;
       }
 
       const config = readAgentConfig();
@@ -496,6 +508,213 @@ export class SettingsPanel {
     terminal.show();
     const cmd = os.platform() === "win32" ? `& "${binary}" pull` : `"${binary}" pull`;
     terminal.sendText(cmd);
+  }
+
+  private async loadRag(): Promise<void> {
+    const configPath = path.join(os.homedir(), ".workermill", "config.json");
+    let localRag = false;
+    let ollamaPort = 11434;
+    try {
+      const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      if (raw.localRag === true) localRag = true;
+      if (raw.ollamaPort && typeof raw.ollamaPort === "number") ollamaPort = raw.ollamaPort;
+    } catch {
+      /* no config */
+    }
+
+    // Query agent local API for GPU/Ollama status
+    let gpu: { available: boolean; vendor: string; model: string | null; memoryMb: number | null } = {
+      available: false,
+      vendor: "none",
+      model: null,
+      memoryMb: null,
+    };
+    let ollama: { installed: boolean; running: boolean; models: string[] } = {
+      installed: false,
+      running: false,
+      models: [],
+    };
+
+    const agentPort = this.readAgentPort();
+    if (agentPort) {
+      try {
+        const ragStatus = await this.agentApiGet<{
+          gpu: typeof gpu;
+          ollama: typeof ollama;
+          localRagEnabled: boolean;
+        }>(agentPort, "/api/rag/status");
+        gpu = ragStatus.gpu;
+        ollama = ragStatus.ollama;
+      } catch {
+        // Agent not reachable — show config-only state
+      }
+    }
+
+    this.postMessage({ type: "rag-loaded", localRag, ollamaPort, gpu, ollama });
+  }
+
+  private async toggleRag(enabled: boolean): Promise<void> {
+    const configPath = path.join(os.homedir(), ".workermill", "config.json");
+    let config: Record<string, unknown> = {};
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    } catch {
+      /* no config */
+    }
+
+    config.localRag = enabled;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+
+    this.postMessage({ type: "rag-restarting" });
+
+    try {
+      await stopAgentProcess();
+      startAgentProcess();
+      const port = await waitForAgentReady(undefined, 20_000);
+      if (port) {
+        this.postMessage({ type: "rag-updated", localRag: enabled });
+        // Refresh full RAG status after restart
+        await this.loadRag();
+      } else {
+        this.postMessage({
+          type: "rag-updated",
+          localRag: enabled,
+          error: "Agent restarted but did not become ready. Check agent logs.",
+        });
+      }
+    } catch (err) {
+      this.postMessage({
+        type: "rag-updated",
+        localRag: enabled,
+        error: `Agent restart failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  private async setOllamaPort(port: number): Promise<void> {
+    const configPath = path.join(os.homedir(), ".workermill", "config.json");
+    let config: Record<string, unknown> = {};
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    } catch {
+      /* no config */
+    }
+
+    config.ollamaPort = port;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+
+    // Restart if local RAG is active so the port change takes effect
+    if (config.localRag === true) {
+      try {
+        await stopAgentProcess();
+        startAgentProcess();
+        await waitForAgentReady(undefined, 20_000);
+      } catch {
+        // Non-fatal — setting is saved
+      }
+    }
+
+    this.postMessage({ type: "ollama-port-saved", ollamaPort: port });
+  }
+
+  private async indexRepo(repository: string): Promise<void> {
+    const agentPort = this.readAgentPort();
+    if (!agentPort) {
+      this.postMessage({ type: "index-error", error: "Agent not running" });
+      return;
+    }
+
+    try {
+      await this.agentApiPost(agentPort, "/api/rag/index", { repository });
+      this.postMessage({ type: "indexing-started" });
+    } catch (err) {
+      this.postMessage({
+        type: "index-error",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private readAgentPort(): number | null {
+    try {
+      const portFile = path.join(os.homedir(), ".workermill", "agent.port");
+      if (fs.existsSync(portFile)) {
+        const port = parseInt(fs.readFileSync(portFile, "utf-8").trim(), 10);
+        return isNaN(port) ? null : port;
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
+  private agentApiGet<T>(port: number, urlPath: string): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const req = http.get(
+        { hostname: "127.0.0.1", port, path: urlPath, headers: { Accept: "application/json" } },
+        (res) => {
+          let body = "";
+          res.on("data", (c) => (body += c));
+          res.on("end", () => {
+            try {
+              resolve(JSON.parse(body) as T);
+            } catch {
+              reject(new Error("Invalid JSON"));
+            }
+          });
+        },
+      );
+      req.on("error", reject);
+      req.setTimeout(10_000, () => {
+        req.destroy();
+        reject(new Error("Timeout"));
+      });
+    });
+  }
+
+  private agentApiPost(port: number, urlPath: string, data: unknown): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      const payload = JSON.stringify(data);
+      const req = http.request(
+        {
+          hostname: "127.0.0.1",
+          port,
+          path: urlPath,
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(payload),
+          },
+        },
+        (res) => {
+          let body = "";
+          res.on("data", (c) => (body += c));
+          res.on("end", () => {
+            try {
+              const parsed = JSON.parse(body);
+              if (res.statusCode && res.statusCode >= 400) {
+                reject(
+                  new Error(
+                    (parsed as { error?: string })?.error || `HTTP ${res.statusCode}`,
+                  ),
+                );
+                return;
+              }
+              resolve(parsed);
+            } catch {
+              reject(new Error("Invalid JSON"));
+            }
+          });
+        },
+      );
+      req.on("error", reject);
+      req.setTimeout(30_000, () => {
+        req.destroy();
+        reject(new Error("Timeout"));
+      });
+      req.write(payload);
+      req.end();
+    });
   }
 
   private async testJira(config: { apiUrl: string; apiKey: string }): Promise<void> {
@@ -873,6 +1092,37 @@ export class SettingsPanel {
       <div id="sandbox-pull-status" class="status"></div>
     </div>
 
+    <!-- Local RAG -->
+    <div class="section">
+      <h2>Local RAG <span class="badge" style="background:color-mix(in srgb, var(--vscode-textLink-foreground) 15%, transparent);color:var(--vscode-textLink-foreground);">Experimental</span></h2>
+      <div class="field">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-weight:600;font-size:0.9em;">GPU</span>
+          <span id="gpu-status" style="font-size:0.9em;color:var(--muted);">Detecting...</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;">
+          <span style="font-weight:600;font-size:0.9em;">Ollama</span>
+          <span id="ollama-status" style="font-size:0.9em;color:var(--muted);">Checking...</span>
+        </div>
+      </div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="local-rag-toggle" />
+          Enable local codebase indexing
+        </label>
+        <div class="hint">Use your GPU to generate embeddings locally instead of cloud processing</div>
+      </div>
+      <div class="field">
+        <label>Ollama Port</label>
+        <input type="number" id="ollama-port" value="11434" min="1024" max="65535" />
+      </div>
+      <div class="field">
+        <button class="btn-primary" id="btn-index-repo" disabled>Index Repository</button>
+        <span id="index-status" class="hint" style="margin-left:8px;"></span>
+      </div>
+      <div id="rag-status" class="status"></div>
+    </div>
+
     <!-- Account -->
     <div class="section">
       <h2>Account</h2>
@@ -1093,6 +1343,27 @@ export class SettingsPanel {
       memoryDebounce = setTimeout(() => {
         vscode.postMessage({ type: "set-docker-memory", dockerMemoryGb: parseInt(memorySlider.value) });
       }, 300);
+    });
+
+    // Local RAG toggle
+    const ragToggle = document.getElementById("local-rag-toggle");
+    const ragStatus = document.getElementById("rag-status");
+    const ollamaPortInput = document.getElementById("ollama-port");
+    const indexBtn = document.getElementById("btn-index-repo");
+    const indexStatusEl = document.getElementById("index-status");
+    let ollamaPortDebounce = null;
+
+    ragToggle.addEventListener("change", () => {
+      vscode.postMessage({ type: "toggle-rag", enabled: ragToggle.checked });
+    });
+    ollamaPortInput.addEventListener("change", () => {
+      clearTimeout(ollamaPortDebounce);
+      ollamaPortDebounce = setTimeout(() => {
+        vscode.postMessage({ type: "set-ollama-port", port: parseInt(ollamaPortInput.value) || 11434 });
+      }, 300);
+    });
+    indexBtn.addEventListener("click", () => {
+      vscode.postMessage({ type: "index-repo", repository: "" });
     });
 
     function badge(configured) {
@@ -1319,11 +1590,62 @@ export class SettingsPanel {
         orgSelect.disabled = false;
         showStatus(os, "error", msg.message || "Failed to switch organization");
       }
+      // Local RAG messages
+      if (msg.type === "rag-loaded") {
+        const gpuEl = document.getElementById("gpu-status");
+        const ollamaEl = document.getElementById("ollama-status");
+        if (msg.gpu && msg.gpu.available) {
+          gpuEl.textContent = msg.gpu.vendor + " " + (msg.gpu.model || "") + (msg.gpu.memoryMb ? " (" + msg.gpu.memoryMb + " MB)" : "");
+          gpuEl.style.color = "var(--success)";
+        } else {
+          gpuEl.textContent = "None detected";
+          gpuEl.style.color = "var(--muted)";
+        }
+        if (msg.ollama && msg.ollama.running) {
+          ollamaEl.textContent = "Running (" + msg.ollama.models.length + " models)";
+          ollamaEl.style.color = "var(--success)";
+        } else if (msg.ollama && msg.ollama.installed) {
+          ollamaEl.textContent = "Installed but not running";
+          ollamaEl.style.color = "var(--error)";
+        } else {
+          ollamaEl.textContent = "Not installed";
+          ollamaEl.style.color = "var(--error)";
+        }
+        ragToggle.checked = !!msg.localRag;
+        ollamaPortInput.value = msg.ollamaPort || 11434;
+        indexBtn.disabled = !msg.localRag || !(msg.ollama && msg.ollama.running);
+      }
+      if (msg.type === "rag-restarting") {
+        ragToggle.disabled = true;
+        showStatus(ragStatus, "info", "Restarting agent...");
+      }
+      if (msg.type === "rag-updated") {
+        ragToggle.disabled = false;
+        ragToggle.checked = !!msg.localRag;
+        if (msg.error) {
+          showStatus(ragStatus, "error", msg.error);
+        } else {
+          showStatus(ragStatus, "success", msg.localRag ? "Local RAG enabled — agent restarted" : "Local RAG disabled — agent restarted");
+          setTimeout(() => { ragStatus.className = "status"; }, 5000);
+        }
+      }
+      if (msg.type === "ollama-port-saved") {
+        ollamaPortInput.value = msg.ollamaPort;
+      }
+      if (msg.type === "indexing-started") {
+        indexStatusEl.textContent = "Indexing started...";
+        indexBtn.disabled = true;
+      }
+      if (msg.type === "index-error") {
+        indexStatusEl.textContent = msg.error || "Indexing failed";
+        indexStatusEl.style.color = "var(--error)";
+      }
     });
 
     // Initial load
     vscode.postMessage({ type: "load-integrations" });
     vscode.postMessage({ type: "load-sandbox" });
+    vscode.postMessage({ type: "load-rag" });
   </script>
 </body>
 </html>`;

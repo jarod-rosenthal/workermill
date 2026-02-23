@@ -872,7 +872,7 @@ router.post(
 router.post(
   "/heartbeat",
   asyncHandler(async (req: Request, res: Response) => {
-    const { agentId, activeTasks, agentVersion } = req.body;
+    const { agentId, activeTasks, agentVersion, gpuAvailable, gpuVendor, localRagEnabled, ollamaRunning } = req.body;
     const org = req.organization!;
 
     if (!agentId || !Array.isArray(activeTasks)) {
@@ -891,6 +891,18 @@ router.post(
     };
     if (agentVersion) {
       setFields.agentVersion = agentVersion;
+    }
+    if (typeof gpuAvailable === "boolean") {
+      setFields.gpuAvailable = gpuAvailable;
+    }
+    if (typeof gpuVendor === "string") {
+      setFields.gpuVendor = gpuVendor || null;
+    }
+    if (typeof localRagEnabled === "boolean") {
+      setFields.localRagEnabled = localRagEnabled;
+    }
+    if (typeof ollamaRunning === "boolean") {
+      setFields.ollamaRunning = ollamaRunning;
     }
     await agentRepo
       .createQueryBuilder()
@@ -1072,7 +1084,7 @@ router.get(
 router.post(
   "/register",
   asyncHandler(async (req: Request, res: Response) => {
-    const { agentId, hostname, platform, nodeVersion, dockerVersion, claudeVersion, maxWorkers, agentVersion } =
+    const { agentId, hostname, platform, nodeVersion, dockerVersion, claudeVersion, maxWorkers, agentVersion, gpuAvailable, gpuVendor, localRagEnabled, ollamaRunning } =
       req.body;
     const org = req.organization!;
 
@@ -1097,6 +1109,10 @@ router.post(
         dockerVersion: dockerVersion || null,
         claudeVersion: claudeVersion || null,
         agentVersion: agentVersion || null,
+        gpuAvailable: gpuAvailable === true,
+        gpuVendor: gpuVendor || null,
+        localRagEnabled: localRagEnabled === true,
+        ollamaRunning: ollamaRunning === true,
         maxWorkers: maxWorkers || 2,
         activeTasks: 0,
         status: "online" as const,
@@ -1110,6 +1126,10 @@ router.post(
           "docker_version",
           "claude_version",
           "agent_version",
+          "gpu_available",
+          "gpu_vendor",
+          "local_rag_enabled",
+          "ollama_running",
           "max_workers",
           "active_tasks",
           "status",

@@ -128,7 +128,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (
         !currentFeedTaskId ||
         currentFeedTaskStatus === "completed" ||
-        currentFeedTaskStatus === "failed"
+        currentFeedTaskStatus === "pr_approved" ||
+        currentFeedTaskStatus === "failed" ||
+        currentFeedTaskStatus === "escalated"
       ) {
         const taskInfo: TaskInfo = {
           ...info,
@@ -152,7 +154,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (
         !currentFeedTaskId ||
         currentFeedTaskStatus === "completed" ||
+        currentFeedTaskStatus === "pr_approved" ||
         currentFeedTaskStatus === "failed" ||
+        currentFeedTaskStatus === "escalated" ||
         currentFeedTaskStatus === "planning"
       ) {
         const taskInfo: TaskInfo = {
@@ -1061,6 +1065,32 @@ export function activate(context: vscode.ExtensionContext): void {
   client.on("disconnected", () => {
     log("Agent disconnected — will retry with backoff");
     vscode.commands.executeCommand("setContext", "workermill.agentConnected", false);
+  });
+
+  client.on("ragAutoOffer", (gpu: { available: boolean; vendor: string; model: string | null }) => {
+    const gpuLabel = gpu.vendor + (gpu.model ? " " + gpu.model : "");
+    vscode.window
+      .showInformationMessage(
+        `GPU detected (${gpuLabel}). Enable local codebase indexing for faster, private RAG?`,
+        "Enable",
+        "Not Now",
+      )
+      .then((action) => {
+        if (action === "Enable") {
+          const configPath = path.join(os.homedir(), ".workermill", "config.json");
+          let config: Record<string, unknown> = {};
+          try {
+            config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+          } catch {
+            /* no config */
+          }
+          config.localRag = true;
+          fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+          vscode.window.showInformationMessage(
+            "Local RAG enabled. Restart the agent for changes to take effect.",
+          );
+        }
+      });
   });
 
   client.on("reconnectGaveUp", () => {

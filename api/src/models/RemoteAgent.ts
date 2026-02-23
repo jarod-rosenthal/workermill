@@ -46,6 +46,18 @@ export class RemoteAgent {
   @Column({ type: "varchar", length: 20, default: "online" })
   status: RemoteAgentStatus;
 
+  @Column({ name: "gpu_available", type: "boolean", default: false })
+  gpuAvailable: boolean;
+
+  @Column({ name: "gpu_vendor", type: "varchar", length: 20, nullable: true })
+  gpuVendor: string | null;
+
+  @Column({ name: "local_rag_enabled", type: "boolean", default: false })
+  localRagEnabled: boolean;
+
+  @Column({ name: "ollama_running", type: "boolean", default: false })
+  ollamaRunning: boolean;
+
   @Column({ name: "last_heartbeat_at", type: "timestamptz" })
   lastHeartbeatAt: Date;
 

@@ -17,6 +17,7 @@ import { findDockerBin } from "./config.js";
 import { activeProcesses, type ActiveProcess } from "./active-processes.js";
 import { agentEvents } from "./local-api.js";
 import { fileURLToPath } from "url";
+import { getOllamaStatus } from "./ollama-manager.js";
 
 /**
  * Detect whether we're running as a compiled binary or via Node.js.
@@ -199,6 +200,15 @@ export async function spawnWorker(
   const workDir = path.join(os.tmpdir(), `workermill-${task.id.slice(0, 8)}`);
   fs.mkdirSync(workDir, { recursive: true });
 
+  // Check if local Ollama is running (for OLLAMA_HOST env var)
+  let localOllamaHost = "";
+  if (config.localRag) {
+    const ollamaStatus = await getOllamaStatus(config.ollamaPort);
+    if (ollamaStatus.running) {
+      localOllamaHost = `http://localhost:${config.ollamaPort}`;
+    }
+  }
+
   // Build environment variables
   const scmProvider = (task.scmProvider || "github") as string;
   const scmToken = getScmToken(scmProvider, config, credentials);
@@ -316,7 +326,7 @@ export async function spawnWorker(
     OPENAI_API_KEY: credentials?.openaiApiKey || "",
     GOOGLE_API_KEY: credentials?.googleApiKey || "",
     GOOGLE_GENERATIVE_AI_API_KEY: credentials?.googleApiKey || "",
-    OLLAMA_HOST: credentials?.ollamaBaseUrl || "",
+    OLLAMA_HOST: localOllamaHost || credentials?.ollamaBaseUrl || "",
     OLLAMA_CONTEXT_WINDOW: credentials?.ollamaContextWindow ? String(credentials.ollamaContextWindow) : "",
     VLLM_BASE_URL: credentials?.vllmBaseUrl || "",
 

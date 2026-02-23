@@ -89,7 +89,7 @@ export class StatusBar {
     }
 
     const active = this.tasks.filter((t) => t.status === "running" || t.status === "planning");
-    const failed = this.tasks.filter((t) => t.status === "failed");
+    const attention = this.tasks.filter((t) => t.status === "failed" || t.status === "escalated");
 
     const sandboxTag = this.sandbox === "docker" ? " $(shield) Docker" : "";
     const orgTag = this.orgName ? ` [${this.orgName}]` : "";
@@ -103,8 +103,8 @@ export class StatusBar {
 
     const parts: string[] = [`${active.length} task${active.length !== 1 ? "s" : ""}`];
 
-    if (failed.length > 0) {
-      parts.push(`${failed.length} failed`);
+    if (attention.length > 0) {
+      parts.push(`${attention.length} need${attention.length === 1 ? "s" : ""} attention`);
       this.item.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
     } else {
       this.item.backgroundColor = undefined;

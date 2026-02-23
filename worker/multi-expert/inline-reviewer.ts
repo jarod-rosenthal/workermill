@@ -137,9 +137,12 @@ export class InlineReviewerAiSdk {
   private logsApi: AxiosInstance;
   private allOutput: string = "";
 
-  constructor(config: InlineReviewerConfig, repoPath: string) {
+  private techLeadPrompt: string;
+
+  constructor(config: InlineReviewerConfig, repoPath: string, serverReviewPrompt?: string) {
     this.config = config;
     this.repoPath = repoPath;
+    this.techLeadPrompt = serverReviewPrompt ?? TECH_LEAD_SYSTEM_PROMPT;
 
     // Create axios instance for posting logs
     this.logsApi = axios.create({
@@ -269,7 +272,7 @@ export class InlineReviewerAiSdk {
         AGENT_WORKING_DIR: this.repoPath,
         AGENT_MAX_STEPS: "50", // Reviews need fewer steps
         AGENT_VERBOSE: "false",
-        AGENT_SYSTEM_PROMPT: TECH_LEAD_SYSTEM_PROMPT,
+        AGENT_SYSTEM_PROMPT: this.techLeadPrompt,
       };
 
       // CRITICAL: Use reviewer token for PR approvals (avoids self-approval restriction)

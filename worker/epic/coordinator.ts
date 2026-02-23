@@ -118,6 +118,8 @@ export class EpicCoordinator {
   private storyBaselineShas: Map<number, string> = new Map();
   // Proactive conflict detection: scan worktrees every N iterations
   private loopIterationCount: number = 0;
+  // Server-side prompt templates (loaded from Decision API)
+  private serverPromptTemplates?: import("./decision-client.js").WorkerConfigResponse["promptTemplates"];
 
   constructor(config: EpicConfig, resilience?: ResilienceConfig, decisionClient?: DecisionClient) {
     this.config = config;
@@ -604,6 +606,15 @@ export class EpicCoordinator {
       // Load worker config from Decision API (icons, defaults)
       const workerConfig = await this.decisionClient.getWorkerConfig();
       this.executor.setIcons(workerConfig.personaIcons, workerConfig.providerIcons);
+
+      // Pass server-side prompt templates to executor
+      if (workerConfig.promptTemplates) {
+        this.executor.setPromptTemplates(workerConfig.promptTemplates);
+        console.log("[Epic] Loaded 8 server-side prompt templates");
+      }
+
+      // Store for later use by reviewer/deployer/improver
+      this.serverPromptTemplates = workerConfig.promptTemplates;
 
       // Detect and checkout existing branch for retry scenarios
       if (this.config.jiraIssueKey) {
@@ -2355,7 +2366,7 @@ export class EpicCoordinator {
       this.postDashboardLog(`Reviewing story ${storyIndex}: ${story.title}`);
 
       try {
-        const reviewer = new InlineReviewer(this.config, worktreePath);
+        const reviewer = new InlineReviewer(this.config, worktreePath, this.serverPromptTemplates?.techLeadReviewPrompt);
         const storyContext = {
           storyIndex: story.storyIndex,
           title: story.title,
@@ -2880,7 +2891,7 @@ export class EpicCoordinator {
       if (this.config.improvementEnabled) {
         console.log("[Epic] Running inline improvement analysis...");
         try {
-          const improver = new InlineImprover(this.config);
+          const improver = new InlineImprover(this.config, this.serverPromptTemplates?.improverPrompt);
           const improveResult = await improver.improve();
 
           if (improveResult.success && improveResult.improvementsApplied > 0) {
@@ -2939,7 +2950,7 @@ export class EpicCoordinator {
 
     if (managerProvider === "anthropic") {
       // Use Agent SDK reviewer for Anthropic
-      const reviewer = new InlineReviewer(this.config, this.gitOps.getRepoPath());
+      const reviewer = new InlineReviewer(this.config, this.gitOps.getRepoPath(), this.serverPromptTemplates?.techLeadReviewPrompt);
       reviewResult = await reviewer.review(
         prUrl,
         prNumber,
@@ -3467,7 +3478,12 @@ Begin your review now. Start by fetching the code changes.`;
     // Update status so dashboard progress bar advances to "Deployed" stage
     await this.postProgressUpdate("deploying", prUrl, prNumber);
 
-    const deployer = new InlineDeployer(this.config, this.gitOps.getRepoPath());
+    const deployer = new InlineDeployer(this.config, this.gitOps.getRepoPath(), this.serverPromptTemplates ? {
+      phase1: this.serverPromptTemplates.devopsPhase1Prompt,
+      deployAuto: this.serverPromptTemplates.devopsDeployAutoPrompt,
+      deployManual: this.serverPromptTemplates.devopsDeployManualPrompt,
+      create: this.serverPromptTemplates.devopsCreatePrompt,
+    } : undefined);
     const deployResult = await deployer.deploy(prUrl, prNumber);
 
     if (!deployResult.success) {
@@ -3549,7 +3565,7 @@ Begin your review now. Start by fetching the code changes.`;
     let reviewResult: InlineReviewResult;
 
     if (managerProvider === "anthropic") {
-      const reviewer = new InlineReviewer(this.config, this.gitOps.getRepoPath());
+      const reviewer = new InlineReviewer(this.config, this.gitOps.getRepoPath(), this.serverPromptTemplates?.techLeadReviewPrompt);
       reviewResult = await reviewer.review(prUrl, prNumber);
     } else {
       reviewResult = await this.runAiSdkReview(prUrl, prNumber, managerProvider, managerModel);

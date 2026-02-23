@@ -114,6 +114,16 @@ export interface WorkerConfigResponse {
     maxReviewRevisions: number;
     maxPerStoryRevisions: number;
   };
+  promptTemplates?: {
+    coordinationInstructions: string;
+    learningInstructions: string;
+    techLeadReviewPrompt: string;
+    devopsPhase1Prompt: string;
+    devopsDeployAutoPrompt: string;
+    devopsDeployManualPrompt: string;
+    devopsCreatePrompt: string;
+    improverPrompt: string;
+  };
 }
 
 // ============================================================================

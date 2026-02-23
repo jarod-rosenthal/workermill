@@ -39,6 +39,7 @@ import type { WorkerPersona } from "../models/WorkerTask.js";
 import type { ExecutionPlanV2 } from "../services/pipeline-v2-types.js";
 import { planningProgressEmitter } from "../services/planning-progress-events.js";
 import { getOrgCredentials } from "../services/org-credentials.js";
+import { CRITIC_FEEDBACK_TEMPLATE, REFINEMENT_FEEDBACK_TEMPLATE } from "../services/prompt-templates.js";
 
 const router = Router();
 
@@ -1279,6 +1280,8 @@ Rules:
       promptTemplate: CRITIC_PROMPT,
       approvalThreshold: 85,
       maxTargetFiles,
+      criticFeedbackTemplate: CRITIC_FEEDBACK_TEMPLATE,
+      refinementFeedbackTemplate: REFINEMENT_FEEDBACK_TEMPLATE,
     });
   }),
 );

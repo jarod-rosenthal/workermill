@@ -122,8 +122,11 @@ export class InlineImprover {
   private allOutput: string = "";
   private aiClient: AIClient | null = null;
 
-  constructor(config: EpicConfig) {
+  private improverPrompt: string;
+
+  constructor(config: EpicConfig, serverImproverPrompt?: string) {
     this.config = config;
+    this.improverPrompt = serverImproverPrompt ?? IMPROVER_SYSTEM_PROMPT;
 
     // Create axios instance for posting logs
     this.logsApi = axios.create({
@@ -272,7 +275,7 @@ export class InlineImprover {
       const improverConfig = {
         persona: "tech_lead" as const, // Reuse tech_lead persona type
         description: "WorkerMill improvement advisor - analyzes tasks and improves the platform",
-        systemPrompt: IMPROVER_SYSTEM_PROMPT,
+        systemPrompt: this.improverPrompt,
         tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
         model,
         specialties: ["analysis", "improvement", "devops"],

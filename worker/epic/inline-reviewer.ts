@@ -174,9 +174,12 @@ export class InlineReviewer {
   private allOutput: string = "";
   private aiClient: AIClient | null = null;
 
-  constructor(config: EpicConfig, repoPath: string) {
+  private techLeadPrompt: string;
+
+  constructor(config: EpicConfig, repoPath: string, serverReviewPrompt?: string) {
     this.config = config;
     this.repoPath = repoPath;
+    this.techLeadPrompt = serverReviewPrompt ?? TECH_LEAD_SYSTEM_PROMPT;
 
     // Create axios instance for posting logs
     this.logsApi = axios.create({
@@ -312,7 +315,7 @@ export class InlineReviewer {
       const techLeadConfig = {
         persona: "tech_lead" as const,
         description: "Technical leadership - code review, architecture, mentoring",
-        systemPrompt: TECH_LEAD_SYSTEM_PROMPT,
+        systemPrompt: this.techLeadPrompt,
         tools: ["Read", "Glob", "Grep", "Bash"],
         model,
         specialties: ["review", "architecture", "code quality"],
@@ -946,7 +949,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
         persona: "tech_lead" as const,
         description:
           "Technical leadership - code review, architecture, mentoring",
-        systemPrompt: TECH_LEAD_SYSTEM_PROMPT,
+        systemPrompt: this.techLeadPrompt,
         tools: ["Read", "Glob", "Grep", "Bash"],
         model,
         specialties: ["review", "architecture", "code quality"],

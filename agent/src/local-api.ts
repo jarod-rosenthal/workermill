@@ -779,6 +779,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   // POST /api/rag/setup — install Ollama, ensure running, pull nomic-embed-text
+  // Returns 202 immediately; progress streamed via SSE on "rag" channel.
   if (req.method === "POST" && path === "/api/rag/setup") {
     const ollamaPort = (agentConfig as AgentConfig & { ollamaPort?: number })?.ollamaPort ?? 11434;
 
@@ -786,53 +787,59 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       broadcastSSE("rag", "rag:setup-progress", { message });
     };
 
-    try {
-      // Step 1: Check if Ollama is installed
-      let installed = findOllamaPath() !== null;
-      if (!installed) {
-        sendProgress("Ollama not found — installing...");
-        const installOk = await installOllama((msg) => sendProgress(msg));
-        if (!installOk) {
-          return json(res, { success: false, error: "Failed to install Ollama" }, 500);
+    // Run setup in background — return 202 immediately
+    (async () => {
+      try {
+        // Step 1: Check if Ollama is installed
+        let installed = findOllamaPath() !== null;
+        if (!installed) {
+          sendProgress("Ollama not found — installing...");
+          const installOk = await installOllama((msg) => sendProgress(msg));
+          if (!installOk) {
+            broadcastSSE("rag", "rag:setup-error", { error: "Failed to install Ollama" });
+            return;
+          }
+          installed = true;
         }
-        installed = true;
-      }
-      sendProgress("Ollama is installed");
+        sendProgress("Ollama is installed");
 
-      // Step 2: Ensure Ollama is running
-      sendProgress("Ensuring Ollama is running...");
-      const running = await ensureOllamaRunning(ollamaPort);
-      if (!running) {
-        return json(res, { success: false, error: "Failed to start Ollama" }, 500);
-      }
-      sendProgress("Ollama is running");
+        // Step 2: Ensure Ollama is running
+        sendProgress("Ensuring Ollama is running...");
+        const running = await ensureOllamaRunning(ollamaPort);
+        if (!running) {
+          broadcastSSE("rag", "rag:setup-error", { error: "Failed to start Ollama" });
+          return;
+        }
+        sendProgress("Ollama is running");
 
-      // Step 3: Check if nomic-embed-text is already pulled
-      const status = await getOllamaStatus(ollamaPort);
-      const hasModel = status.models.some((m) => m.startsWith("nomic-embed-text"));
-      if (hasModel) {
-        sendProgress("nomic-embed-text model is already available");
+        // Step 3: Check if nomic-embed-text is already pulled
+        const status = await getOllamaStatus(ollamaPort);
+        const hasModel = status.models.some((m) => m.startsWith("nomic-embed-text"));
+        if (hasModel) {
+          sendProgress("nomic-embed-text model is already available");
+          broadcastSSE("rag", "rag:setup-complete", { success: true });
+          return;
+        }
+
+        // Step 4: Pull nomic-embed-text
+        sendProgress("Pulling nomic-embed-text model...");
+        const pullOk = await pullModel("nomic-embed-text", ollamaPort, (msg, completed, total) => {
+          broadcastSSE("rag", "rag:setup-progress", { message: msg, completed, total });
+        });
+
+        if (!pullOk) {
+          broadcastSSE("rag", "rag:setup-error", { error: "Failed to pull nomic-embed-text model" });
+          return;
+        }
+
         broadcastSSE("rag", "rag:setup-complete", { success: true });
-        return json(res, { success: true, message: "Ollama is ready" });
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        broadcastSSE("rag", "rag:setup-error", { error });
       }
+    })();
 
-      // Step 4: Pull nomic-embed-text
-      sendProgress("Pulling nomic-embed-text model...");
-      const pullOk = await pullModel("nomic-embed-text", ollamaPort, (msg, completed, total) => {
-        broadcastSSE("rag", "rag:setup-progress", { message: msg, completed, total });
-      });
-
-      if (!pullOk) {
-        return json(res, { success: false, error: "Failed to pull nomic-embed-text model" }, 500);
-      }
-
-      broadcastSSE("rag", "rag:setup-complete", { success: true });
-      return json(res, { success: true, message: "Ollama setup complete" });
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      broadcastSSE("rag", "rag:setup-error", { error });
-      return json(res, { success: false, error }, 500);
-    }
+    return json(res, { status: "setup_started" }, 202);
   }
 
   // POST /api/rag/index — start background indexing of a repository

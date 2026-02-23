@@ -639,6 +639,48 @@ export class SettingsPanel {
       return;
     }
 
+    // Subscribe to SSE for indexing progress
+    const sseHeaders: Record<string, string> = { Accept: "text/event-stream" };
+    const token = this.readAgentToken();
+    if (token) sseHeaders["Authorization"] = `Bearer ${token}`;
+    const sseReq = http.get(
+      { hostname: "127.0.0.1", port: agentPort, path: "/api/stream/rag", headers: sseHeaders },
+      (res) => {
+        let buffer = "";
+        res.on("data", (chunk: Buffer) => {
+          buffer += chunk.toString("utf-8");
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() || "";
+          for (const part of parts) {
+            const eventMatch = part.match(/^event:\s*(.+)$/m);
+            const dataMatch = part.match(/^data:\s*(.+)$/m);
+            if (eventMatch && dataMatch) {
+              try {
+                const data = JSON.parse(dataMatch[1]);
+                if (eventMatch[1] === "rag:progress") {
+                  const msg = data.indexed && data.total
+                    ? `${data.message} (${data.indexed}/${data.total})`
+                    : data.message;
+                  this.postMessage({ type: "index-progress", message: msg });
+                } else if (eventMatch[1] === "rag:complete") {
+                  const msg = data.indexedFiles != null
+                    ? `Done — ${data.indexedFiles} files, ${data.totalChunks} chunks indexed`
+                    : "Indexing complete";
+                  this.postMessage({ type: "index-complete", message: msg });
+                  sseReq.destroy();
+                } else if (eventMatch[1] === "rag:error") {
+                  this.postMessage({ type: "index-error", error: data.error });
+                  sseReq.destroy();
+                }
+              } catch { /* ignore parse errors */ }
+            }
+          }
+        });
+      },
+    );
+    sseReq.on("error", () => { /* SSE failed — indexing still runs */ });
+
+    // Trigger indexing — returns 202 immediately
     try {
       await this.agentApiPost(agentPort, "/api/rag/index", { repository });
       this.postMessage({ type: "indexing-started" });
@@ -647,6 +689,7 @@ export class SettingsPanel {
         type: "index-error",
         error: err instanceof Error ? err.message : String(err),
       });
+      sseReq.destroy();
     }
   }
 
@@ -680,8 +723,10 @@ export class SettingsPanel {
                 } else if (eventMatch[1] === "rag:setup-complete") {
                   this.postMessage({ type: "rag-setup-complete" });
                   this.loadRag(); // Refresh full status
+                  sseReq.destroy();
                 } else if (eventMatch[1] === "rag:setup-error") {
                   this.postMessage({ type: "rag-setup-error", error: data.error });
+                  sseReq.destroy();
                 }
               } catch { /* ignore parse errors */ }
             }
@@ -691,20 +736,17 @@ export class SettingsPanel {
     );
     sseReq.on("error", () => { /* SSE connection failed — progress won't show but setup still runs */ });
 
-    // Trigger setup
+    // Trigger setup — returns 202 immediately; progress/completion/error come via SSE
     try {
-      const result = await this.agentApiPost(agentPort, "/api/rag/setup", {}) as { success?: boolean; error?: string };
-      if (!result.success) {
-        this.postMessage({ type: "rag-setup-error", error: result.error || "Setup failed" });
-      }
+      await this.agentApiPost(agentPort, "/api/rag/setup", {});
     } catch (err) {
       this.postMessage({
         type: "rag-setup-error",
         error: err instanceof Error ? err.message : String(err),
       });
-    } finally {
       sseReq.destroy();
     }
+    // SSE stream stays open — destroyed when setup-complete or setup-error arrives
   }
 
   private readAgentPort(): number | null {
@@ -1218,6 +1260,12 @@ export class SettingsPanel {
         <input type="number" id="ollama-port" value="11434" min="1024" max="65535" />
       </div>
       <div class="field">
+        <label>Repository</label>
+        <select id="index-repo-select" style="width:100%;padding:4px 8px;margin-bottom:6px;">
+          <option value="">Loading repositories...</option>
+        </select>
+      </div>
+      <div class="field">
         <button class="btn-primary" id="btn-index-repo" disabled>Index Repository</button>
         <span id="index-status" class="hint" style="margin-left:8px;"></span>
       </div>
@@ -1463,8 +1511,14 @@ export class SettingsPanel {
         vscode.postMessage({ type: "set-ollama-port", port: parseInt(ollamaPortInput.value) || 11434 });
       }, 300);
     });
+    const indexRepoSelect = document.getElementById("index-repo-select");
     indexBtn.addEventListener("click", () => {
-      vscode.postMessage({ type: "index-repo", repository: "" });
+      const repo = indexRepoSelect.value;
+      if (!repo) return;
+      indexBtn.disabled = true;
+      indexStatusEl.textContent = "Indexing...";
+      indexStatusEl.style.color = "var(--muted)";
+      vscode.postMessage({ type: "index-repo", repository: repo });
     });
     const setupRagBtn = document.getElementById("btn-setup-rag");
     const ragSetupStatus = document.getElementById("rag-setup-status");
@@ -1577,6 +1631,13 @@ export class SettingsPanel {
         else if (scm === "gitlab" && d.gitlab?.defaultRepo) defaultRepo = d.gitlab.defaultRepo;
         const repoInput = document.getElementById("default-repo");
         if (repoInput) repoInput.value = defaultRepo;
+
+        // Populate RAG index repo selector
+        if (indexRepoSelect && defaultRepo) {
+          indexRepoSelect.innerHTML = '<option value="' + defaultRepo + '">' + defaultRepo + '</option>';
+        } else if (indexRepoSelect) {
+          indexRepoSelect.innerHTML = '<option value="">No repository configured</option>';
+        }
 
         // Show plan in Account section
         const planInfo = document.getElementById("plan-info");
@@ -1773,11 +1834,23 @@ export class SettingsPanel {
       }
       if (msg.type === "indexing-started") {
         indexStatusEl.textContent = "Indexing started...";
+        indexStatusEl.style.color = "var(--muted)";
         indexBtn.disabled = true;
+      }
+      if (msg.type === "index-progress") {
+        indexStatusEl.textContent = msg.message || "Indexing...";
+        indexStatusEl.style.color = "var(--muted)";
+      }
+      if (msg.type === "index-complete") {
+        indexStatusEl.textContent = msg.message || "Indexing complete";
+        indexStatusEl.style.color = "var(--success)";
+        indexBtn.disabled = false;
+        setTimeout(function() { indexStatusEl.textContent = ""; }, 8000);
       }
       if (msg.type === "index-error") {
         indexStatusEl.textContent = msg.error || "Indexing failed";
         indexStatusEl.style.color = "var(--error)";
+        indexBtn.disabled = false;
       }
     });
 

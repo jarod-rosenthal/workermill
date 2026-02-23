@@ -37,6 +37,7 @@ import {
   ConflictError,
 } from "../utils/errors.js";
 import { notifyBlockerDetected, type BlockerDetails } from "../services/notifications.js";
+import { redis } from "../services/redis-client.js";
 
 const router = Router();
 
@@ -107,57 +108,74 @@ router.get(
     // Send initial connection event
     res.write(`event: connected\ndata: ${JSON.stringify({ parentTaskId })}\n\n`);
 
-    let lastChecked = new Date();
-    const contextRepo = AppDataSource.getRepository(WorkerContext);
+    if (redis.isConnected) {
+      // REAL-TIME MODE: Subscribe to Redis channel, push instantly
+      const unsubscribe = redis.subscribe(parentTaskId, (msg) => {
+        const data = JSON.stringify(msg);
+        res.write(`event: context\ndata: ${data}\n\n`);
+      });
 
-    // Poll for new context messages every 5s (matches worker poll interval)
-    const pollInterval = setInterval(async () => {
-      try {
-        const newContexts = await contextRepo
-          .createQueryBuilder("context")
-          .where("context.parent_task_id = :parentTaskId", { parentTaskId })
-          .andWhere("context.org_id = :orgId", { orgId })
-          .andWhere("context.created_at > :lastChecked", { lastChecked })
-          .andWhere("context.archived = :archived", { archived: false }) // Only stream active (non-archived) messages
-          .orderBy("context.created_at", "ASC")
-          .getMany();
+      // Heartbeat keeps the connection alive through proxies (CloudFront, ALB)
+      const heartbeat = setInterval(() => {
+        res.write(`:heartbeat\n\n`);
+      }, 25000);
 
-        if (newContexts.length > 0) {
-          lastChecked = new Date();
+      req.on("close", () => {
+        unsubscribe();
+        clearInterval(heartbeat);
+        logger.info("Context stream disconnected (redis)", { parentTaskId });
+      });
+    } else {
+      // FALLBACK MODE: Poll DB every 5s (existing behavior when Redis is unavailable)
+      let lastChecked = new Date();
+      const contextRepo = AppDataSource.getRepository(WorkerContext);
 
-          for (const context of newContexts) {
-            const data = JSON.stringify({
-              id: context.id,
-              taskId: context.taskId,
-              parentTaskId: context.parentTaskId,
-              persona: context.persona,
-              messageType: context.messageType,
-              content: context.content,
-              metadata: context.metadata,
-              sessionId: context.sessionId,
-              createdAt: context.createdAt,
-            });
-            res.write(`event: context\ndata: ${data}\n\n`);
+      const pollInterval = setInterval(async () => {
+        try {
+          const newContexts = await contextRepo
+            .createQueryBuilder("context")
+            .where("context.parent_task_id = :parentTaskId", { parentTaskId })
+            .andWhere("context.org_id = :orgId", { orgId })
+            .andWhere("context.created_at > :lastChecked", { lastChecked })
+            .andWhere("context.archived = :archived", { archived: false })
+            .orderBy("context.created_at", "ASC")
+            .getMany();
+
+          if (newContexts.length > 0) {
+            lastChecked = new Date();
+
+            for (const context of newContexts) {
+              const data = JSON.stringify({
+                id: context.id,
+                taskId: context.taskId,
+                parentTaskId: context.parentTaskId,
+                persona: context.persona,
+                messageType: context.messageType,
+                content: context.content,
+                metadata: context.metadata,
+                sessionId: context.sessionId,
+                createdAt: context.createdAt,
+              });
+              res.write(`event: context\ndata: ${data}\n\n`);
+            }
           }
-        }
 
-        // Send heartbeat every 30 seconds to keep connection alive
-        if (Date.now() - lastChecked.getTime() > 25000) {
-          res.write(`:heartbeat\n\n`);
+          if (Date.now() - lastChecked.getTime() > 25000) {
+            res.write(`:heartbeat\n\n`);
+          }
+        } catch (error) {
+          logger.error("Error in context stream", {
+            error: error instanceof Error ? error.message : String(error),
+            parentTaskId,
+          });
         }
-      } catch (error) {
-        logger.error("Error in context stream", {
-          error: error instanceof Error ? error.message : String(error),
-          parentTaskId,
-        });
-      }
-    }, 5000);
+      }, 5000);
 
-    // Clean up on client disconnect
-    req.on("close", () => {
-      clearInterval(pollInterval);
-      logger.info("Context stream disconnected", { parentTaskId });
-    });
+      req.on("close", () => {
+        clearInterval(pollInterval);
+        logger.info("Context stream disconnected (polling)", { parentTaskId });
+      });
+    }
   }
 );
 
@@ -232,6 +250,18 @@ router.post(
     });
 
     const saved = await contextRepo.save(answerContext);
+
+    // Publish to Redis for real-time SSE push
+    redis.publishContext(question.parentTaskId, {
+      id: saved.id,
+      taskId: saved.taskId,
+      parentTaskId: saved.parentTaskId,
+      persona: saved.persona,
+      messageType: saved.messageType,
+      content: saved.content,
+      metadata: saved.metadata,
+      createdAt: saved.createdAt,
+    });
 
     logger.info("Answer submitted to worker question/consultation", {
       answerId: saved.id,
@@ -325,7 +355,20 @@ router.post(
           source: "dashboard",
         },
       });
-      await contextRepo.save(contextMessage);
+      const savedCtx = await contextRepo.save(contextMessage);
+
+      // Publish to Redis for real-time SSE push
+      const ctxParentTaskId = task.parentTaskId || taskId;
+      redis.publishContext(ctxParentTaskId, {
+        id: savedCtx.id,
+        taskId: savedCtx.taskId,
+        parentTaskId: savedCtx.parentTaskId,
+        persona: savedCtx.persona,
+        messageType: savedCtx.messageType,
+        content: savedCtx.content,
+        metadata: savedCtx.metadata,
+        createdAt: savedCtx.createdAt,
+      });
     }
 
     logger.info("Worker command created", {
@@ -428,7 +471,19 @@ router.post(
       },
     });
 
-    await contextRepo.save(resolvedMessage);
+    const savedResolved = await contextRepo.save(resolvedMessage);
+
+    // Publish to Redis for real-time SSE push
+    redis.publishContext(parentTaskId, {
+      id: savedResolved.id,
+      taskId: savedResolved.taskId,
+      parentTaskId: savedResolved.parentTaskId,
+      persona: savedResolved.persona,
+      messageType: savedResolved.messageType,
+      content: savedResolved.content,
+      metadata: savedResolved.metadata,
+      createdAt: savedResolved.createdAt,
+    });
 
     logger.info("Blocker response recorded", {
       orgId,
@@ -831,6 +886,19 @@ router.post(
 
     const saved = await contextRepo.save(context);
 
+    // Publish to Redis for real-time SSE push
+    redis.publishContext(parentTaskId, {
+      id: saved.id,
+      taskId: saved.taskId,
+      parentTaskId: saved.parentTaskId,
+      persona: saved.persona,
+      messageType: saved.messageType,
+      content: saved.content,
+      metadata: saved.metadata,
+      sessionId: saved.sessionId,
+      createdAt: saved.createdAt,
+    });
+
     logger.info("Worker context posted", {
       parentTaskId,
       taskId,
@@ -1013,6 +1081,18 @@ router.post(
         storyReadyContext,
         savedContext,
       };
+    });
+
+    // Publish to Redis AFTER transaction commits
+    redis.publishContext(parentTaskId, {
+      id: result.savedContext.id,
+      taskId: result.savedContext.taskId,
+      parentTaskId: result.savedContext.parentTaskId,
+      persona: result.savedContext.persona,
+      messageType: result.savedContext.messageType,
+      content: result.savedContext.content,
+      metadata: result.savedContext.metadata,
+      createdAt: result.savedContext.createdAt,
     });
 
     logger.info("Story claimed in Epic mode", {

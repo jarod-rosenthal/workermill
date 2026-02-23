@@ -286,6 +286,8 @@ export class MultiExpertCoordinator {
   private expertStates: Map<string, { persona: string; status: "idle" | "working" | "completed" | "blocked"; currentStoryIndex?: number }> = new Map();
   // Max parallel experts (from env or default)
   private maxParallelExperts: number = parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10);
+  // Server-side prompt templates (loaded from Decision API)
+  private serverPromptTemplates?: import("../epic/dist/decision-client.js").WorkerConfigResponse["promptTemplates"];
   // Track active worktrees for cleanup
   private activeWorktrees: Map<number, string> = new Map();
   // Track story branch names for consolidated PR
@@ -2646,6 +2648,12 @@ The repository is cloned at: **${promptRepoPath}**
     this.personaIcons = workerConfig.personaIcons;
     this.providerIcons = workerConfig.providerIcons;
 
+    // Store server-side prompt templates for reviewer
+    this.serverPromptTemplates = workerConfig.promptTemplates;
+    if (workerConfig.promptTemplates) {
+      console.log("[MultiExpert] Loaded server-side prompt templates");
+    }
+
     // Initialize GitOps for parallel worktree-based execution (remote mode only)
     // In Docker mode, repoPath is the default "/workspace/repo" — GitOps not needed
     const isRemoteMode = !!this.config.repoPath;
@@ -3179,7 +3187,7 @@ The repository is cloned at: **${promptRepoPath}**
       ollamaHost: this.config.ollamaHost,
     };
 
-    const reviewer = new InlineReviewerAiSdk(reviewerConfig, this.repoPath);
+    const reviewer = new InlineReviewerAiSdk(reviewerConfig, this.repoPath, this.serverPromptTemplates?.techLeadReviewPrompt);
     return await reviewer.review(
       this.currentPrUrl!,
       this.currentPrNumber!,

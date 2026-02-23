@@ -504,10 +504,20 @@ export class InlineDeployer {
   // 10 minute timeout for workflow creation approval
   private static readonly APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;
 
-  constructor(config: EpicConfig, repoPath: string) {
+  private prompts: { phase1: string; deployAuto: string; deployManual: string; create: string };
+
+  constructor(config: EpicConfig, repoPath: string, serverPrompts?: {
+    phase1?: string; deployAuto?: string; deployManual?: string; create?: string;
+  }) {
     this.config = config;
     this.repoPath = repoPath;
     this.model = process.env.MANAGER_MODEL || config.model || "";
+    this.prompts = {
+      phase1: serverPrompts?.phase1 ?? DEVOPS_SYSTEM_PROMPT_PHASE1,
+      deployAuto: serverPrompts?.deployAuto ?? DEVOPS_SYSTEM_PROMPT_DEPLOY_AUTO,
+      deployManual: serverPrompts?.deployManual ?? DEVOPS_SYSTEM_PROMPT_DEPLOY_MANUAL,
+      create: serverPrompts?.create ?? DEVOPS_SYSTEM_PROMPT_CREATE,
+    };
 
     // Create axios instance for posting logs
     this.logsApi = axios.create({
@@ -736,7 +746,7 @@ export class InlineDeployer {
     const devopsConfig = {
       persona: "devops_engineer" as const,
       description: "DevOps specialist - CI/CD assessment",
-      systemPrompt: DEVOPS_SYSTEM_PROMPT_PHASE1,
+      systemPrompt: this.prompts.phase1,
       tools: ["Read", "Glob", "Grep", "Bash", "TodoWrite"],
       model: this.model,
       specialties: ["deployment", "cicd", "github-actions"],
@@ -770,7 +780,7 @@ export class InlineDeployer {
     const devopsConfig = {
       persona: "devops_engineer" as const,
       description: "DevOps specialist - deployment execution (auto-trigger)",
-      systemPrompt: DEVOPS_SYSTEM_PROMPT_DEPLOY_AUTO,
+      systemPrompt: this.prompts.deployAuto,
       tools: ["Read", "Glob", "Grep", "Bash", "TodoWrite"],
       model: this.model,
       specialties: ["deployment", "cicd", "github-actions"],
@@ -825,7 +835,7 @@ export class InlineDeployer {
     const devopsConfig = {
       persona: "devops_engineer" as const,
       description: "DevOps specialist - deployment execution (manual-trigger)",
-      systemPrompt: DEVOPS_SYSTEM_PROMPT_DEPLOY_MANUAL,
+      systemPrompt: this.prompts.deployManual,
       tools: ["Read", "Glob", "Grep", "Bash", "TodoWrite"],
       model: this.model,
       specialties: ["deployment", "cicd", "github-actions"],
@@ -878,7 +888,7 @@ export class InlineDeployer {
     const devopsConfig = {
       persona: "devops_engineer" as const,
       description: "DevOps specialist - workflow creation and deployment",
-      systemPrompt: DEVOPS_SYSTEM_PROMPT_CREATE,
+      systemPrompt: this.prompts.create,
       tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
       model: this.model,
       specialties: ["deployment", "cicd", "github-actions"],

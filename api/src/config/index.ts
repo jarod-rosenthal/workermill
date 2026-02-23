@@ -3,14 +3,11 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} from "@aws-sdk/client-secrets-manager";
-import {
   S3Client,
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
 import type { ProviderId } from "../providers/types.js";
+import { getOrgSecretFromDb } from "../utils/org-secret-store.js";
 
 // Load .env.local first (for local development), then .env as fallback
 // Check both current dir and parent dir (API runs from api/ subdirectory)
@@ -171,15 +168,6 @@ export const config = {
   },
 };
 
-// Secrets Manager client (lazy initialized)
-let secretsClient: SecretsManagerClient | null = null;
-
-function getSecretsClient(): SecretsManagerClient {
-  if (!secretsClient) {
-    secretsClient = new SecretsManagerClient({ region: config.aws.region });
-  }
-  return secretsClient;
-}
 
 /**
  * Provider credentials cache
@@ -216,12 +204,10 @@ export function getProviderEnvVar(providerId: ProviderId): string {
 }
 
 /**
- * Get provider API credentials from AWS Secrets Manager
+ * Get provider API credentials from encrypted org_credentials table
  *
  * SECURITY: Only returns org-specific credentials - NO platform fallback for multi-tenancy isolation.
  * Each organization must configure their own API keys in Settings > AI Providers.
- *
- * Credential location: workermill/${env}/orgs/${orgId}/providers/${providerId}
  *
  * @param orgId - Organization ID
  * @param providerId - Provider identifier (anthropic, openai, google, ollama)
@@ -254,26 +240,14 @@ export async function getProviderCredentials(
     return cachedOrg.apiKey;
   }
 
-  const client = getSecretsClient();
-  const env = config.environment;
-
-  // SECURITY: Only check org-specific secret - NO platform fallback for multi-tenancy isolation
-  try {
-    const orgSecretPath = `workermill/${env}/orgs/${orgId}/providers/${providerId}`;
-    const orgSecret = await client.send(
-      new GetSecretValueCommand({ SecretId: orgSecretPath })
-    );
-
-    if (orgSecret.SecretString) {
-      // Cache the result
-      providerCredentialsCache.set(orgCacheKey, {
-        apiKey: orgSecret.SecretString,
-        expiresAt: now + CACHE_TTL_MS,
-      });
-      return orgSecret.SecretString;
-    }
-  } catch {
-    // Org-specific secret not found - do NOT fall back to platform secrets
+  // DB-first credential lookup (encrypted org_credentials table)
+  const dbValue = await getOrgSecretFromDb(orgId, `providers/${providerId}`);
+  if (dbValue) {
+    providerCredentialsCache.set(orgCacheKey, {
+      apiKey: dbValue,
+      expiresAt: now + CACHE_TTL_MS,
+    });
+    return dbValue;
   }
 
   // For ollama, check org-specific URL first, then return default local endpoint
@@ -304,19 +278,8 @@ export async function hasProviderCredentials(
     return true;
   }
 
-  const client = getSecretsClient();
-  const env = config.environment;
-
-  // Only check org-specific secret - no platform fallback for display purposes
-  try {
-    const orgSecretPath = `workermill/${env}/orgs/${orgId}/providers/${providerId}`;
-    const orgSecret = await client.send(
-      new GetSecretValueCommand({ SecretId: orgSecretPath })
-    );
-    return !!orgSecret.SecretString;
-  } catch {
-    return false;
-  }
+  const dbValue = await getOrgSecretFromDb(orgId, `providers/${providerId}`);
+  return !!dbValue;
 }
 
 /**

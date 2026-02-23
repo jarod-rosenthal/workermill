@@ -5,8 +5,7 @@
  * Subclasses implement provider-specific API calls.
  */
 
-import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
-import { config } from "../config/index.js";
+import { getOrgSecretFromDb } from "../utils/org-secret-store.js";
 import { logger } from "../utils/logger.js";
 import type {
   IScmProvider,
@@ -22,8 +21,6 @@ import type {
   CodebaseContext,
   WebhookEvent,
 } from "./types.js";
-
-const secretsClient = new SecretsManagerClient({ region: config.aws.region });
 
 /**
  * Token cache entry
@@ -71,36 +68,30 @@ export abstract class BaseScmProvider implements IScmProvider {
     }
 
     const now = Date.now();
-    const cached = this.tokenCache.get(secretPath);
+    const credentialKey = secretPath; // secretPath is now the credential key
+    const cached = this.tokenCache.get(credentialKey);
 
     if (cached && cached.expiresAt > now) {
       return cached.token;
     }
 
-    try {
-      const secret = await secretsClient.send(
-        new GetSecretValueCommand({ SecretId: secretPath })
-      );
-
-      const token = secret.SecretString;
-      if (!token) {
-        logger.warn("Token not found in Secrets Manager", { secretPath });
-        return null;
-      }
-
-      this.tokenCache.set(secretPath, {
-        token,
-        expiresAt: now + this.TOKEN_CACHE_TTL_MS,
-      });
-
-      return token;
-    } catch (error) {
-      logger.error("Failed to fetch token from Secrets Manager", {
-        error,
-        secretPath,
-      });
+    if (!this.orgId) {
+      logger.warn("No orgId set on provider, cannot fetch token from DB", { provider: this.id });
       return null;
     }
+
+    const token = await getOrgSecretFromDb(this.orgId, credentialKey);
+    if (!token) {
+      logger.warn("Token not found in org credentials", { credentialKey, orgId: this.orgId });
+      return null;
+    }
+
+    this.tokenCache.set(credentialKey, {
+      token,
+      expiresAt: now + this.TOKEN_CACHE_TTL_MS,
+    });
+
+    return token;
   }
 
   /**
@@ -140,11 +131,7 @@ export abstract class BaseScmProvider implements IScmProvider {
    * Can be overridden for org-specific secrets
    */
   protected getDefaultSecretPath(): string {
-    const base = `workermill/${config.environment}`;
-    if (this.orgId) {
-      return `${base}/orgs/${this.orgId}/${this.id}-token`;
-    }
-    return `${base}/${this.id}-token`;
+    return `${this.id}-token`;
   }
 
   /**

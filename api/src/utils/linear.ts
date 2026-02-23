@@ -1,8 +1,5 @@
-import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
-import { config } from "../config/index.js";
 import { logger } from "./logger.js";
-
-const secretsClient = new SecretsManagerClient({ region: config.aws.region });
+import { getOrgSecretFromDb } from "./org-secret-store.js";
 
 // Default timeout for external API calls (30 seconds)
 const LINEAR_API_TIMEOUT_MS = 30000;
@@ -29,31 +26,7 @@ async function getLinearCredentials(orgId: string): Promise<{
     return cached;
   }
 
-  const env = config.environment;
-  const basePath = `workermill/${env}/orgs/${orgId}`;
-
-  // Try integrations/ path first (new structure), then root path (legacy)
-  let secretString: string | null = null;
-  try {
-    const secret = await secretsClient.send(
-      new GetSecretValueCommand({ SecretId: `${basePath}/integrations/linear-credentials` })
-    );
-    secretString = secret.SecretString || null;
-  } catch {
-    // Not found in integrations/
-  }
-
-  // Try root path (legacy structure)
-  if (!secretString) {
-    try {
-      const secret = await secretsClient.send(
-        new GetSecretValueCommand({ SecretId: `${basePath}/linear-credentials` })
-      );
-      secretString = secret.SecretString || null;
-    } catch {
-      // Not found at root either
-    }
-  }
+  const secretString = await getOrgSecretFromDb(orgId, "linear-credentials");
 
   if (!secretString) {
     logger.warn("Linear credentials not configured for organization", { orgId });

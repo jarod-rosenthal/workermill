@@ -119,6 +119,10 @@ When fixing orchestrator bugs:
 - **Keep changes minimal**: Only do what was asked, nothing extra
 - **No silent deployments**: Always state what's being deployed
 
+### DO NOT Fail to Read Screenshots
+
+**This is a WSL2 environment. Windows paths work via `/mnt/c/`.** When the user shares a screenshot path like `C:\Users\jarod\Pictures\...\file.png`, ALWAYS translate it to `/mnt/c/Users/jarod/Pictures/.../file.png` and read it. NEVER say you can't access Windows paths or ask the user to copy the file. Try `/mnt/c/` first — it will work.
+
 ### DO NOT Deploy to Dev Environment
 
 **The dev environment (dev.workermill.com) is NOT RUNNING.** Always deploy to prod:

@@ -21,6 +21,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
+import { MarketingTab } from "../components/management/MarketingTab";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -113,6 +114,7 @@ export default function ManagementDashboard() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"overview" | "marketing">("overview");
 
   const fetchData = useCallback(async () => {
     if (!tokens?.accessToken) return;
@@ -299,7 +301,26 @@ export default function ManagementDashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {loading && !stats ? (
+        <div className="flex gap-1 mb-6 border-b border-border">
+          <button
+            onClick={() => setActiveTab("overview")}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "overview" ? "border-blue-500 text-blue-500" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          >
+            Overview
+          </button>
+          <button
+            onClick={() => setActiveTab("marketing")}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "marketing" ? "border-blue-500 text-blue-500" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          >
+            Marketing
+          </button>
+        </div>
+
+        {activeTab === "marketing" && tokens?.accessToken && (
+          <MarketingTab accessToken={tokens.accessToken} />
+        )}
+
+        {activeTab === "overview" && (loading && !stats ? (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
           </div>
@@ -625,7 +646,7 @@ export default function ManagementDashboard() {
               </div>
             )}
           </div>
-        )}
+        ))}
       </main>
     </div>
   );

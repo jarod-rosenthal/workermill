@@ -27,7 +27,9 @@ import {
   promptInstallGit,
   promptInstallClaudeCli,
   readAgentStartupError,
+  writeApiKeyToKeychain,
 } from "./agent-installer";
+import { storeApiKey } from "./secret-storage";
 
 const API_BASE = "https://workermill.com";
 
@@ -150,8 +152,18 @@ async function finishSetup(
   log: (msg: string) => void,
   orgInfo?: { orgId?: string; orgName?: string; orgSlug?: string },
 ): Promise<boolean> {
+  // Store API key securely — VS Code SecretStorage + OS keychain for agent binary
+  log("Storing API key securely...");
+  await storeApiKey(apiKey);
+  const keychainOk = writeApiKeyToKeychain(apiKey);
+  if (!keychainOk) {
+    log("Warning: OS keychain not available — API key will be stored in config.json as fallback");
+  }
+
+  // Write config.json WITHOUT apiKey (it's now in the keychain).
+  // If keychain write failed, include apiKey in config as fallback.
   log("Writing agent config...");
-  writeAgentConfig({ apiUrl: API_BASE, apiKey, ...orgInfo });
+  writeAgentConfig({ apiUrl: API_BASE, apiKey: keychainOk ? "" : apiKey, ...orgInfo });
 
   // Set context key immediately so welcome view switches from "Create Account" to "Connect"
   // even if the install step below fails

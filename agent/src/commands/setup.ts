@@ -24,6 +24,7 @@ import {
   isDockerInstalled,
   type FileConfig,
 } from "../config.js";
+import { writeApiKeyToKeychain } from "../keychain.js";
 
 const isWindows = process.platform === "win32";
 
@@ -362,10 +363,17 @@ export async function setupCommand(): Promise<void> {
   }
   console.log();
 
-  // ── Step 7: Save config ────────────────────────────────────────────────────
+  // ── Step 7: Store API key in OS keychain + save config ──────────────────
+  const keychainOk = writeApiKeyToKeychain(apiKey);
+  if (keychainOk) {
+    console.log(chalk.green("  ✓") + " API key stored in OS keychain");
+  } else {
+    console.log(chalk.yellow("  ⚠") + " OS keychain not available — API key stored in config file");
+  }
+
   const fileConfig: FileConfig = {
     apiUrl: apiUrl.replace(/\/$/, ""),
-    apiKey,
+    apiKey: keychainOk ? "" : apiKey, // Only write to disk if keychain failed
     agentId,
     maxWorkers: 1,
     pollIntervalMs: 5000,

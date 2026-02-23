@@ -10,6 +10,7 @@ import { existsSync, readFileSync, mkdirSync, writeFileSync, chmodSync } from "f
 import { execSync, execFileSync } from "child_process";
 import { hostname, homedir } from "os";
 import { join } from "path";
+import { readApiKeyFromKeychain } from "./keychain.js";
 
 export interface AgentConfig {
   apiUrl: string;
@@ -96,14 +97,24 @@ export function loadConfigFromFile(): AgentConfig {
     process.exit(1);
   }
 
-  if (!fc.apiUrl || !fc.apiKey) {
-    console.error("Config file is missing required fields (apiUrl, apiKey). Re-run 'workermill-agent setup'.");
+  if (!fc.apiUrl) {
+    console.error("Config file is missing required field (apiUrl). Re-run 'workermill-agent setup'.");
+    process.exit(1);
+  }
+
+  // Try OS keychain first, fall back to config.json plaintext
+  let apiKey = readApiKeyFromKeychain();
+  if (!apiKey && fc.apiKey) {
+    apiKey = fc.apiKey; // backward compat: old config.json still has plaintext key
+  }
+  if (!apiKey) {
+    console.error("No API key found. Run 'workermill-agent setup' or reconnect from VS Code.");
     process.exit(1);
   }
 
   return {
     apiUrl: fc.apiUrl,
-    apiKey: fc.apiKey,
+    apiKey,
     agentId: fc.agentId,
     maxWorkers: fc.maxWorkers || 4,
     pollIntervalMs: fc.pollIntervalMs || 5000,

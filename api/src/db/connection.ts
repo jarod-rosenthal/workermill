@@ -53,6 +53,9 @@ import {
   KbChecklist,
   KbActivity,
   KbStarredBoard,
+  MarketingCampaign,
+  MarketingContent,
+  MarketingAction,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -323,6 +326,9 @@ export const AppDataSource = new DataSource({
     KbChecklist,
     KbActivity,
     KbStarredBoard,
+    MarketingCampaign,
+    MarketingContent,
+    MarketingAction,
   ],
   migrations: [
     InitialSchema1704067200000,

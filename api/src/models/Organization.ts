@@ -659,6 +659,25 @@ export class Organization {
   @Column({ name: "repositories", type: "jsonb", default: [] })
   repositories: string[];
 
+  // Marketing Agent Settings
+  @Column({ name: "marketing_agent_enabled", type: "boolean", default: false })
+  marketingAgentEnabled: boolean;
+
+  @Column({ name: "marketing_agent_interval_minutes", type: "int", default: 120 })
+  marketingAgentIntervalMinutes: number;
+
+  @Column({ name: "marketing_agent_config", type: "jsonb", default: {} })
+  marketingAgentConfig: Record<string, unknown>;
+
+  @Column({ name: "marketing_channel_credentials", type: "jsonb", default: {} })
+  marketingChannelCredentials: Record<string, unknown>;
+
+  @Column({ name: "marketing_monthly_budget_cents", type: "int", default: 0 })
+  marketingMonthlyBudgetCents: number;
+
+  @Column({ name: "marketing_escalation_threshold_cents", type: "int", default: 10000 })
+  marketingEscalationThresholdCents: number;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

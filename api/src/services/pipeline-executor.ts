@@ -76,7 +76,7 @@ function inferProviderFromModel(modelId: string): string | null {
       modelId.includes("haiku") || modelId.includes("sonnet") || modelId.includes("opus")) {
     return "anthropic";
   }
-  if (modelId.startsWith("gpt-") || modelId.startsWith("o1") || modelId.includes("codex")) {
+  if (modelId.startsWith("gpt-") || modelId.startsWith("o1") || modelId.startsWith("o3") || modelId.includes("codex")) {
     return "openai";
   }
   if (modelId.startsWith("gemini-")) {

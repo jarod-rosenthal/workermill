@@ -1306,35 +1306,39 @@ export class SettingsPanel {
 
     let orgPlan = "pro";
 
-    // Model options by provider
+    // Model options by provider — top 3 per provider (Feb 2026)
     const ANTHROPIC_MODELS = [
       { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
       { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
       { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
     ];
     const OPENAI_MODELS = [
-      { value: "gpt-5.1-codex", label: "GPT-5.1 Codex" },
-      { value: "gpt-4o", label: "GPT-4o" },
-      { value: "gpt-4o-mini", label: "GPT-4o Mini" },
-      { value: "o1", label: "o1 (Reasoning)" },
-      { value: "o1-mini", label: "o1 Mini" },
+      { value: "gpt-5.2", label: "GPT-5.2" },
+      { value: "o3-pro", label: "o3 Pro (Reasoning)" },
+      { value: "gpt-5-mini", label: "GPT-5 Mini" },
     ];
     const GOOGLE_MODELS = [
-      { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-      { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-      { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+      { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
+      { value: "gemini-3-pro-preview", label: "Gemini 3 Pro" },
+      { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
     ];
+    // Premium-only models for tech lead and reviewer roles
+    const ANTHROPIC_PREMIUM = ANTHROPIC_MODELS.filter(m => m.value !== "claude-haiku-4-5-20251001");
+    const OPENAI_PREMIUM = OPENAI_MODELS.filter(m => m.value !== "gpt-5-mini");
+    const GOOGLE_PREMIUM = GOOGLE_MODELS.filter(m => !m.value.includes("flash"));
 
-    function populateModelSelect(selectId, currentValue) {
+    function populateModelSelect(selectId, currentValue, premiumOnly) {
       const sel = document.getElementById(selectId);
       sel.innerHTML = "";
       const isPaid = orgPlan === "max" || orgPlan === "enterprise";
+      const aModels = premiumOnly ? ANTHROPIC_PREMIUM : ANTHROPIC_MODELS;
+      const oModels = premiumOnly ? OPENAI_PREMIUM : OPENAI_MODELS;
+      const gModels = premiumOnly ? GOOGLE_PREMIUM : GOOGLE_MODELS;
 
-      // Anthropic group
       if (isPaid) {
         const ag = document.createElement("optgroup");
         ag.label = "Anthropic";
-        ANTHROPIC_MODELS.forEach(m => {
+        aModels.forEach(m => {
           const o = document.createElement("option");
           o.value = m.value; o.textContent = m.label;
           if (m.value === currentValue) o.selected = true;
@@ -1344,7 +1348,7 @@ export class SettingsPanel {
 
         const og = document.createElement("optgroup");
         og.label = "OpenAI";
-        OPENAI_MODELS.forEach(m => {
+        oModels.forEach(m => {
           const o = document.createElement("option");
           o.value = m.value; o.textContent = m.label;
           if (m.value === currentValue) o.selected = true;
@@ -1354,7 +1358,7 @@ export class SettingsPanel {
 
         const gg = document.createElement("optgroup");
         gg.label = "Google";
-        GOOGLE_MODELS.forEach(m => {
+        gModels.forEach(m => {
           const o = document.createElement("option");
           o.value = m.value; o.textContent = m.label;
           if (m.value === currentValue) o.selected = true;
@@ -1362,7 +1366,7 @@ export class SettingsPanel {
         });
         sel.appendChild(gg);
       } else {
-        ANTHROPIC_MODELS.forEach(m => {
+        aModels.forEach(m => {
           const o = document.createElement("option");
           o.value = m.value; o.textContent = m.label;
           if (m.value === currentValue) o.selected = true;
@@ -1576,9 +1580,9 @@ export class SettingsPanel {
         applyPlanRestrictions(d.plan || "pro");
 
         // Populate model dropdowns
-        populateModelSelect("model-worker", d.defaultWorkerModel || "claude-sonnet-4-6");
-        populateModelSelect("model-reviewer", d.managerModelId || "claude-opus-4-6");
-        populateModelSelect("model-planner", d.planningAgentModel || "claude-opus-4-6");
+        populateModelSelect("model-worker", d.defaultWorkerModel || "claude-sonnet-4-6", false);
+        populateModelSelect("model-reviewer", d.managerModelId || "claude-opus-4-6", true);
+        populateModelSelect("model-planner", d.planningAgentModel || "claude-opus-4-6", true);
 
         // Select current tracker radio (fall back to "internal" if selected tracker is locked)
         let tracker = d.defaultIssueTracker || "internal";

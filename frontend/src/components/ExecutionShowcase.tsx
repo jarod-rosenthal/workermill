@@ -11,6 +11,7 @@ import {
   Rocket,
   Zap,
   ChevronRight,
+  ChevronDown,
   Terminal,
 } from "lucide-react";
 
@@ -35,15 +36,22 @@ const STEPS = [
   { label: "Ship", icon: GitPullRequest },
 ] as const;
 
-// ─── Epic data (ShipAPI example) ────────────────────────────────────────────
+// ─── Epic data (FlagDeck showcase) ──────────────────────────────────────────
 
 const EPIC_NAMES = [
   { name: "Project Setup & Dev Environment", shortName: "Project Setup", persona: "devops_engineer" },
-  { name: "AWS Infrastructure via Terraform", shortName: "AWS Infra", persona: "devops_engineer" },
-  { name: "CI/CD Pipelines (GitHub Actions)", shortName: "CI/CD Pipelines", persona: "devops_engineer" },
-  { name: "Authentication System (JWT + API Key)", shortName: "Auth System", persona: "backend_developer" },
-  { name: "Category & Product CRUD", shortName: "Product CRUD", persona: "backend_developer" },
-  { name: "Stock Management & Audit Logging", shortName: "Stock & Audit", persona: "backend_developer" },
+  { name: "Database & Cache Connectivity Layer", shortName: "DB & Cache", persona: "backend_developer" },
+  { name: "Domain Models & Authentication System", shortName: "Models & Auth", persona: "backend_developer" },
+  { name: "Flag CRUD & Environment Management API", shortName: "Flag CRUD API", persona: "backend_developer" },
+  { name: "Flag Evaluation Engine & Targeting System", shortName: "Eval Engine", persona: "backend_developer" },
+  { name: "Segments, Experiments & Statistics API", shortName: "Segments & Exp", persona: "backend_developer" },
+  { name: "Seed Data & Backend Integration Verification", shortName: "Seed & Verify", persona: "backend_developer" },
+  { name: "Dashboard Layout, Auth UI & Navigation", shortName: "Dashboard UI", persona: "frontend_developer" },
+  { name: "Flag Management Dashboard Pages", shortName: "Flag Mgmt UI", persona: "frontend_developer" },
+  { name: "Experiments, Segments, Audit & Settings Pages", shortName: "Settings Pages", persona: "frontend_developer" },
+  { name: "Comprehensive Test Suite & Quality Assurance", shortName: "Test Suite", persona: "qa_engineer" },
+  { name: "Documentation: README, API Docs & CLAUDE.md", shortName: "Documentation", persona: "tech_writer" },
+  { name: "Production Deploy & Validation", shortName: "Deploy & Valid", persona: "devops_engineer" },
 ];
 
 // ─── Persona colors ─────────────────────────────────────────────────────────
@@ -51,74 +59,153 @@ const EPIC_NAMES = [
 const PERSONA_COLORS: Record<string, string> = {
   devops_engineer: "text-emerald-400",
   backend_developer: "text-blue-400",
+  frontend_developer: "text-purple-400",
+  qa_engineer: "text-amber-400",
+  tech_writer: "text-slate-400",
 };
 
 const PERSONA_BG: Record<string, string> = {
   devops_engineer: "bg-emerald-500/20",
   backend_developer: "bg-blue-500/20",
+  frontend_developer: "bg-purple-500/20",
+  qa_engineer: "bg-amber-500/20",
+  tech_writer: "bg-slate-500/20",
 };
 
 const PERSONA_BORDER: Record<string, string> = {
   devops_engineer: "border-emerald-500/30",
   backend_developer: "border-blue-500/30",
+  frontend_developer: "border-purple-500/30",
+  qa_engineer: "border-amber-500/30",
+  tech_writer: "border-slate-500/30",
 };
 
 // ─── Frame durations ────────────────────────────────────────────────────────
 
 const FRAME_DURATIONS = [3500, 4000, 3500, 4500, 3500, 3000, 5000];
 
-// ─── EpicSidebar ────────────────────────────────────────────────────────────
+// ─── VS Code Extension Sidebar ──────────────────────────────────────────────
 
-function EpicSidebar({ epics }: { epics: Epic[] }) {
+function VsCodeSidebar({ epics }: { epics: Epic[] }) {
+  const indexed = epics.map((e, i) => ({ ...e, idx: i }));
+  const active = indexed.filter((e) =>
+    ["planning", "executing", "review"].includes(e.status),
+  );
+  const backlog = indexed.filter((e) =>
+    ["locked", "active"].includes(e.status),
+  );
+  const recent = indexed.filter((e) => e.status === "done");
+  const maxBacklog = 8;
+  const maxRecent = 3;
+
   return (
-    <div className="w-[200px] min-w-[200px] bg-[***REMOVED***1a1a1c] border-r border-white/[0.06] py-4 px-2.5 flex flex-col gap-0.5 overflow-hidden">
-      <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-600 px-2 mb-2">
-        Epics
+    <div className="w-[220px] min-w-[220px] bg-[***REMOVED***1a1a1c] border-r border-white/[0.06] overflow-hidden flex flex-col">
+      {/* WORKERMILL section header */}
+      <div className="flex items-center gap-1.5 px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500 border-b border-white/[0.04]">
+        <div className="w-3 h-3 rounded-sm bg-teal-500/80" />
+        WorkerMill
       </div>
-      {epics.map((epic, i) => {
-        const isActive =
-          epic.status === "active" ||
-          epic.status === "planning" ||
-          epic.status === "executing" ||
-          epic.status === "review";
-        const isDone = epic.status === "done";
-        return (
-          <div
-            key={i}
-            className={`flex items-center gap-2.5 px-2 py-[7px] rounded-md text-[11px] leading-tight transition-all duration-500 ${
-              isActive
-                ? "bg-blue-500/10 text-white"
-                : isDone
-                  ? "text-slate-500"
-                  : "text-slate-600"
-            }`}
-          >
-            <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
-              {epic.status === "locked" && (
-                <Lock className="w-3 h-3 text-slate-600" />
-              )}
-              {isDone && (
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-              )}
-              {(epic.status === "active" || epic.status === "planning") && (
-                <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin" />
-              )}
-              {epic.status === "executing" && (
-                <Play className="w-3 h-3 text-blue-400 fill-blue-400" />
-              )}
-              {epic.status === "review" && (
-                <Shield className="w-3.5 h-3.5 text-violet-400" />
-              )}
+
+      <div className="flex-1 overflow-hidden py-1 text-[10px]">
+        {/* Active Tasks */}
+        {active.length > 0 ? (
+          <div className="mb-0.5">
+            <div className="px-2 py-1 text-slate-600 font-medium flex items-center gap-0.5">
+              <ChevronDown className="w-3 h-3" />
+              Active Tasks ({active.length})
             </div>
-            <span className="truncate">{epic.shortName}</span>
-            {isActive && (
-              <span
-                className={`ml-auto flex-shrink-0 w-1.5 h-1.5 rounded-full ${PERSONA_BG[epic.persona]?.replace("/20", "") || "bg-slate-400"}`}
-              />
+            {active.map((e) => (
+              <div
+                key={e.idx}
+                className="flex items-center gap-1.5 pl-5 pr-2 py-[3px] text-white transition-all duration-500"
+              >
+                {e.status === "planning" && (
+                  <Loader2 className="w-3 h-3 text-amber-400 animate-spin flex-shrink-0" />
+                )}
+                {e.status === "executing" && (
+                  <Loader2 className="w-3 h-3 text-blue-400 animate-spin flex-shrink-0" />
+                )}
+                {e.status === "review" && (
+                  <Shield className="w-3 h-3 text-violet-400 flex-shrink-0" />
+                )}
+                <span className="truncate">
+                  FDPFB-{e.idx + 1}: {e.shortName}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="pl-5 pr-2 py-1.5 text-slate-600 italic">
+            No active tasks
+          </div>
+        )}
+
+        {/* Backlog */}
+        {backlog.length > 0 && (
+          <div className="mb-0.5">
+            <div className="px-2 py-1 text-slate-600 font-medium flex items-center gap-0.5">
+              <ChevronDown className="w-3 h-3" />
+              Backlog ({backlog.length})
+            </div>
+            {backlog.slice(0, maxBacklog).map((e) => (
+              <div
+                key={e.idx}
+                className="flex items-center gap-1.5 pl-5 pr-2 py-[3px] text-slate-500 transition-all duration-500"
+              >
+                {e.status === "active" ? (
+                  <Play className="w-2.5 h-2.5 text-blue-400 flex-shrink-0" />
+                ) : (
+                  <Lock className="w-2.5 h-2.5 text-slate-700 flex-shrink-0" />
+                )}
+                <span className="truncate flex-1">
+                  FDPFB-{e.idx + 1}: {e.shortName}
+                </span>
+                {e.status === "locked" && (
+                  <span className="text-[8px] text-slate-700 flex-shrink-0">
+                    🔒
+                  </span>
+                )}
+                {e.status === "active" && (
+                  <span className="text-[8px] text-blue-400/60 flex-shrink-0">
+                    🔓
+                  </span>
+                )}
+              </div>
+            ))}
+            {backlog.length > maxBacklog && (
+              <div className="pl-5 pr-2 py-[2px] text-slate-700 text-[9px]">
+                ... {backlog.length - maxBacklog} more
+              </div>
             )}
           </div>
-        );
-      })}
+        )}
+
+        {/* Recent */}
+        {recent.length > 0 && (
+          <div>
+            <div className="px-2 py-1 text-slate-600 font-medium flex items-center gap-0.5">
+              <ChevronDown className="w-3 h-3" />
+              Recent ({recent.length})
+            </div>
+            {recent.slice(0, maxRecent).map((e) => (
+              <div
+                key={e.idx}
+                className="flex items-center gap-1.5 pl-5 pr-2 py-[3px] text-slate-500 transition-all duration-500"
+              >
+                <CheckCircle2 className="w-3 h-3 text-emerald-500 flex-shrink-0" />
+                <span className="truncate">
+                  FDPFB-{e.idx + 1}: {e.shortName}
+                </span>
+              </div>
+            ))}
+            {recent.length > maxRecent && (
+              <div className="pl-5 pr-2 py-[2px] text-slate-700 text-[9px]">
+                ... {recent.length - maxRecent} more
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -131,7 +218,7 @@ function ContextMenuContent() {
       {/* File tab bar */}
       <div className="flex items-center bg-[***REMOVED***1a1a1c] border-b border-white/[0.06]">
         <div className="px-4 py-2.5 text-[11px] text-blue-400 bg-[***REMOVED***1e1e1e] border-b-2 border-blue-400/60 font-medium">
-          SHIPAPI_PRD.md
+          FLAGDECK_PRD.md
         </div>
         <div className="px-4 py-2.5 text-[11px] text-slate-600">
           README.md
@@ -185,7 +272,7 @@ function ContextMenuContent() {
         </div>
 
         {/* Context menu */}
-        <div className="absolute top-14 left-[38%] bg-[***REMOVED***2d2d30] border border-white/10 rounded-lg shadow-2xl shadow-black/40 py-1.5 w-60 z-10">
+        <div className="absolute top-14 left-[38%] bg-[***REMOVED***2d2d30] border border-white/10 rounded-lg shadow-2xl shadow-black/40 py-1.5 w-64 z-10">
           {["Open Preview", "Copy Path", "Reveal in Explorer"].map((item) => (
             <div
               key={item}
@@ -196,8 +283,12 @@ function ContextMenuContent() {
           ))}
           <div className="border-t border-white/[0.08] my-1" />
           <div className="px-3 py-2 mx-1.5 text-[11px] text-blue-300 bg-blue-500/15 font-medium flex items-center gap-2 rounded-md">
-            <Play className="w-3 h-3 fill-blue-300" />
-            WorkerMill: Full Build
+            <Rocket className="w-3 h-3" />
+            WorkerMill: Product Build
+          </div>
+          <div className="px-3 py-2 mx-1.5 text-[11px] text-slate-300 flex items-center gap-2 rounded-md">
+            <Play className="w-3 h-3" />
+            WorkerMill: Run as Task
           </div>
           <div className="border-t border-white/[0.08] my-1" />
           <div className="px-4 py-1.5 text-[11px] text-slate-500">
@@ -212,46 +303,68 @@ function ContextMenuContent() {
 function DecomposingContent() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Terminal tab */}
+      {/* Terminal tab — matches real extension: "WM: Product Build" */}
       <div className="flex items-center bg-[***REMOVED***1a1a1c] border-b border-white/[0.06]">
         <div className="px-4 py-2.5 text-[11px] text-slate-300 bg-[***REMOVED***1e1e1e] border-b-2 border-blue-400/60 font-medium flex items-center gap-1.5">
-          <Terminal className="w-3 h-3" />
-          Terminal
+          <Rocket className="w-3 h-3 text-blue-400" />
+          WM: Product Build
         </div>
       </div>
 
-      <div className="flex-1 p-5 font-mono text-[11px] leading-[1.8] overflow-hidden">
+      <div className="flex-1 p-4 font-mono text-[10px] leading-[1.6] overflow-hidden">
+        <div className="text-white font-semibold">WorkerMill Product Build</div>
+        <div className="text-slate-500">Building product...</div>
+        <div className="h-1.5" />
+        <div className="text-slate-400">
+          &gt; Starting PRD decomposition...
+        </div>
         <div className="text-slate-500">
-          $ workermill build --from-prd SHIPAPI_PRD.md
+          &gt; Analyzing PRD and generating implementation cards — this
+          typically takes 1–3 minutes...
         </div>
-        <div className="h-3" />
-        <div className="text-blue-400">Decomposing spec into tasks...</div>
-        <div className="text-slate-600 pl-3">
-          Analyzing requirements and dependencies
-        </div>
-        <div className="text-slate-600 pl-3">
-          Identifying scope boundaries
-        </div>
-        <div className="h-3" />
         <div className="text-emerald-400">
-          Found 6 epics with sequential dependencies
+          &gt; ✅ Cards are being generated...
+        </div>
+        <div className="text-blue-400">
+          &gt; 📋 boardName: FlagDeck — Feature Flag &amp; Experimentation
+          Platform
         </div>
         <div className="h-1" />
-        {EPIC_NAMES.map((e, i) => (
-          <div key={i} className="flex items-center gap-2 text-slate-400 pl-3">
-            <span className="text-slate-600 w-3 text-right">{i + 1}.</span>
-            <span>{e.name}</span>
-          </div>
-        ))}
-        <div className="h-3" />
+        <div className="text-slate-300">
+          &gt; 📋 title: Project Setup &amp; Dev Environment
+        </div>
         <div className="text-slate-500">
-          Creating board:{" "}
-          <span className="text-blue-400">
-            ShipAPI &mdash; Full Build &amp; Deployment
-          </span>
+          &gt;&nbsp;&nbsp;&nbsp;description: Bootstrap the FlagDeck monorepo
+          with Go backend scaffolding...
+        </div>
+        <div className="text-slate-500">
+          &gt; 👤 persona: devops_engineer
+        </div>
+        <div className="text-slate-500">&gt; ⚡ priority: urgent</div>
+        <div className="text-slate-500">&gt; 🔗 deps: []</div>
+        <div className="text-slate-500">
+          &gt; 🏷️ labels: [&ldquo;setup&rdquo;, &ldquo;docker&rdquo;,
+          &ldquo;ci-cd&rdquo;, &ldquo;go&rdquo;, &ldquo;sveltekit&rdquo;]
+        </div>
+        <div className="text-slate-300">
+          &gt; 📋 title: Database &amp; Cache Connectivity Layer
+        </div>
+        <div className="text-slate-500">
+          &gt; 👤 persona: backend_developer
+        </div>
+        <div className="text-slate-500">&gt; ⚡ priority: high</div>
+        <div className="text-slate-500">&gt; 🔗 deps: [0]</div>
+        <div className="text-slate-600">&gt; ... 11 more cards</div>
+        <div className="h-1" />
+        <div className="text-emerald-400">
+          &gt; ✅ Generation complete. Finalizing board...
+        </div>
+        <div className="text-slate-400">
+          &gt; 📊 Parsed 13 cards for board &ldquo;FlagDeck&rdquo;
         </div>
         <div className="text-emerald-400">
-          Queued epic 1 of 6 &mdash; starting execution
+          ✓ Created board &ldquo;FlagDeck PRD — Full Build
+          Specification&rdquo; with 13 cards
           <span className="animate-pulse"> _</span>
         </div>
       </div>
@@ -262,59 +375,58 @@ function DecomposingContent() {
 function PlanningContent() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header bar */}
-      <div className="flex items-center justify-between bg-[***REMOVED***1a1a1c] border-b border-white/[0.06] px-5 py-2.5">
-        <div className="flex items-center gap-2 text-[11px] text-blue-400 font-medium">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          Planning: Project Setup &amp; Dev Environment
-        </div>
-        <div className="text-[10px] text-slate-600 font-mono">
-          Epic 1 of 6
+      {/* Terminal tab */}
+      <div className="flex items-center bg-[***REMOVED***1a1a1c] border-b border-white/[0.06]">
+        <div className="px-4 py-2.5 text-[11px] text-slate-300 bg-[***REMOVED***1e1e1e] border-b-2 border-blue-400/60 font-medium flex items-center gap-1.5">
+          <Terminal className="w-3 h-3" />
+          Terminal
         </div>
       </div>
 
-      <div className="flex-1 p-5 overflow-hidden flex flex-col gap-4">
-        {/* Stories */}
-        <div className="bg-white/[0.02] rounded-lg border border-white/[0.06] p-4 space-y-3">
-          <div className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold">
-            Stories
-          </div>
-          {[
-            { name: "Initialize FastAPI project with uv", files: 5 },
-            { name: "Docker Compose for PostgreSQL + Redis", files: 3 },
-            { name: "Alembic migration setup", files: 4 },
-            { name: "Health check + base config", files: 3 },
-          ].map((s, i) => (
-            <div key={i} className="flex items-center gap-3 text-xs">
-              <div className="w-5 h-5 rounded bg-blue-500/10 flex items-center justify-center text-[10px] text-blue-400 font-mono font-medium">
-                {i + 1}
-              </div>
-              <span className="text-slate-300 flex-1">{s.name}</span>
-              <span className="text-[10px] text-slate-600">
-                {s.files} files
-              </span>
-            </div>
-          ))}
+      <div className="flex-1 p-4 font-mono text-[10px] leading-[1.6] overflow-hidden">
+        <div className="text-slate-500">
+          WorkerMill — streaming logs for task de334c8f...
         </div>
-
-        {/* Critic result */}
-        <div className="bg-emerald-500/[0.04] border border-emerald-500/20 rounded-lg p-3.5 flex items-center justify-between">
-          <div className="flex items-center gap-2.5 text-xs">
-            <div className="w-6 h-6 rounded-full bg-emerald-500/15 flex items-center justify-center">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            </div>
-            <span className="text-emerald-400 font-medium">
-              Plan approved by critic agent
-            </span>
-          </div>
-          <div className="px-2.5 py-1 bg-emerald-500/10 rounded-full text-[10px] text-emerald-400 font-mono font-bold">
-            92/100
-          </div>
+        <div className="h-2" />
+        <div className="text-amber-300">
+          [💡 planning_agent 🤖] Fetching planning prompt from cloud API...
         </div>
-
-        <div className="text-xs text-blue-400 font-medium flex items-center gap-2">
-          <Play className="w-3 h-3 fill-blue-400" />
-          Starting parallel execution...
+        <div className="text-amber-300">
+          [💡 planning_agent 🤖] Planning mode: simplified — critic feedback
+          incorporated but never blocks
+        </div>
+        <div className="text-amber-300">
+          [💡 planning_agent 🤖] Starting planning agent using
+          anthropic/claude-opus-4-6
+        </div>
+        <div className="text-amber-300">
+          [💡 planning_agent 🤖] Reading repository structure...
+        </div>
+        <div className="text-slate-500">
+          [💡 planning_agent 🤖] Exploring codebase (4 files examined, 17s)
+        </div>
+        <div className="text-slate-500">
+          [💡 planning_agent 🤖] Exploring codebase (4 files examined, 32s)
+        </div>
+        <div className="text-slate-500">
+          [💡 planning_agent 🤖] Exploring codebase (4 files examined, 47s)
+        </div>
+        <div className="text-amber-300">
+          [💡 planning_agent 🤖] Plan generated: 7 stories (49s). Running
+          critic validation...
+        </div>
+        <div className="h-2" />
+        <div className="text-emerald-400">
+          [💡 planning_agent 🤖] Critic approved (score: 92/100)
+        </div>
+        <div className="text-slate-500">
+          [💡 planning_agent 🤖] Critic suggestions: Consider splitting
+          story-4...
+        </div>
+        <div className="text-emerald-400">
+          [💡 planning_agent 🤖] Plan validated: 7 stories. Task queued for
+          execution.
+          <span className="animate-pulse"> _</span>
         </div>
       </div>
     </div>
@@ -322,108 +434,80 @@ function PlanningContent() {
 }
 
 function ExecutingContent() {
-  const stories = [
-    {
-      name: "Initialize FastAPI project",
-      persona: "devops_engineer",
-      progress: 100,
-      done: true,
-    },
-    {
-      name: "Docker Compose setup",
-      persona: "devops_engineer",
-      progress: 85,
-      done: false,
-    },
-    {
-      name: "Alembic migration setup",
-      persona: "backend_developer",
-      progress: 55,
-      done: false,
-    },
-    {
-      name: "Health check + base config",
-      persona: "backend_developer",
-      progress: 20,
-      done: false,
-    },
-  ];
-
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header bar */}
-      <div className="flex items-center justify-between bg-[***REMOVED***1a1a1c] border-b border-white/[0.06] px-5 py-2.5">
-        <div className="flex items-center gap-2 text-[11px] text-blue-400 font-medium">
-          <Zap className="w-3.5 h-3.5" />
-          Parallel expert execution
-        </div>
-        <div className="text-[10px] text-slate-600 font-mono">
-          4 stories &middot; 2 experts
+      {/* Terminal tab */}
+      <div className="flex items-center bg-[***REMOVED***1a1a1c] border-b border-white/[0.06]">
+        <div className="px-4 py-2.5 text-[11px] text-slate-300 bg-[***REMOVED***1e1e1e] border-b-2 border-blue-400/60 font-medium flex items-center gap-1.5">
+          <Terminal className="w-3 h-3" />
+          Terminal
         </div>
       </div>
 
-      <div className="flex-1 p-5 overflow-hidden flex flex-col gap-3">
-        {/* Story cards */}
-        <div className="space-y-2.5 flex-1">
-          {stories.map((story, i) => (
-            <div
-              key={i}
-              className={`rounded-lg border p-3 transition-all ${
-                story.done
-                  ? "bg-emerald-500/[0.03] border-emerald-500/15"
-                  : `${PERSONA_BG[story.persona] || "bg-white/5"} ${PERSONA_BORDER[story.persona] || "border-white/10"}`
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2 text-xs">
-                  {story.done ? (
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                  ) : (
-                    <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin" />
-                  )}
-                  <span
-                    className={
-                      story.done ? "text-slate-500" : "text-slate-200"
-                    }
-                  >
-                    {story.name}
-                  </span>
-                </div>
-                <span
-                  className={`text-[10px] font-medium ${PERSONA_COLORS[story.persona] || "text-slate-400"}`}
-                >
-                  {story.persona.replace(/_/g, " ")}
-                </span>
-              </div>
-              <div className="h-1 bg-black/20 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-1000 ${
-                    story.done ? "bg-emerald-500/70" : "bg-blue-400/80"
-                  }`}
-                  style={{ width: `${story.progress}%` }}
-                />
-              </div>
-            </div>
-          ))}
+      <div className="flex-1 p-4 font-mono text-[10px] leading-[1.6] overflow-hidden">
+        <div className="text-emerald-400">
+          [🔧 devops_engineer 🤖] Starting Root project files and Docker
+          Compose
         </div>
-
-        {/* Live log */}
-        <div className="bg-black/20 rounded-lg border border-white/[0.06] p-3 font-mono text-[10px] text-slate-500 space-y-1.5">
-          <div>
-            <span className="text-emerald-400/80">devops_engineer</span>{" "}
-            <ChevronRight className="w-2.5 h-2.5 inline text-slate-700" />{" "}
-            Created Dockerfile with multi-stage build
-          </div>
-          <div>
-            <span className="text-blue-400/80">backend_developer</span>{" "}
-            <ChevronRight className="w-2.5 h-2.5 inline text-slate-700" />{" "}
-            Added SQLAlchemy models for base tables
-          </div>
-          <div>
-            <span className="text-emerald-400/80">devops_engineer</span>{" "}
-            <ChevronRight className="w-2.5 h-2.5 inline text-slate-700" />{" "}
-            Configured docker-compose.yml with health checks
-          </div>
+        <div className="text-blue-400">
+          [💻 backend_developer 🤖] Starting Go module, config, and database
+          layer
+        </div>
+        <div className="text-purple-400">
+          [🎨 frontend_developer 🤖] Starting SvelteKit frontend scaffolding
+        </div>
+        <div className="text-emerald-400">
+          [🔧 devops_engineer 🤖] Target repo: workermill-examples/flagdeck
+        </div>
+        <div className="text-blue-400">
+          [💻 backend_developer 🤖] Target repo: workermill-examples/flagdeck
+        </div>
+        <div className="text-purple-400">
+          [🎨 frontend_developer 🤖] Target repo:
+          workermill-examples/flagdeck
+        </div>
+        <div className="text-emerald-400">
+          [🔧 devops_engineer 🤖] Created branch:
+          story/fdpfb-1/0-root-project-files-and-docker
+        </div>
+        <div className="text-blue-400">
+          [💻 backend_developer 🤖] Created branch:
+          story/fdpfb-1/1-go-module-config-and-database
+        </div>
+        <div className="text-purple-400">
+          [🎨 frontend_developer 🤖] Created branch:
+          story/fdpfb-1/4-sveltekit-frontend-scaffolding
+        </div>
+        <div className="text-emerald-400">
+          [🔧 devops_engineer 🤖] Worktree: /workspace/worktrees/story-0
+        </div>
+        <div className="text-blue-400">
+          [💻 backend_developer 🤖] Worktree: /workspace/worktrees/story-1
+        </div>
+        <div className="text-purple-400">
+          [🎨 frontend_developer 🤖] Worktree: /workspace/worktrees/story-4
+        </div>
+        <div className="text-emerald-400">
+          [🔧 devops_engineer 🤖] Pushed branch (initial checkpoint)
+        </div>
+        <div className="text-blue-400">
+          [💻 backend_developer 🤖] Pushed branch (initial checkpoint)
+        </div>
+        <div className="text-purple-400">
+          [🎨 frontend_developer 🤖] Pushed branch (initial checkpoint)
+        </div>
+        <div className="text-emerald-400">
+          [🔧 devops_engineer 🤖] Executing story with Claude CLI
+          (claude-sonnet-4-6)...
+        </div>
+        <div className="text-blue-400">
+          [💻 backend_developer 🤖] Executing story with Claude CLI
+          (claude-sonnet-4-6)...
+        </div>
+        <div className="text-purple-400">
+          [🎨 frontend_developer 🤖] Executing story with Claude CLI
+          (claude-sonnet-4-6)...
+          <span className="animate-pulse"> _</span>
         </div>
       </div>
     </div>
@@ -431,69 +515,89 @@ function ExecutingContent() {
 }
 
 function ReviewContent() {
+  const stories = [
+    { name: "Root project files and Docker Compose", status: "approved" },
+    { name: "Go server entrypoint and router", status: "approved" },
+    { name: "SvelteKit frontend scaffolding", status: "approved" },
+  ];
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header bar */}
-      <div className="flex items-center justify-between bg-[***REMOVED***1a1a1c] border-b border-white/[0.06] px-5 py-2.5">
-        <div className="flex items-center gap-2 text-[11px] text-violet-400 font-medium">
-          <Shield className="w-3.5 h-3.5" />
-          Tech Lead Review
-        </div>
-        <div className="text-[10px] text-emerald-400 font-medium">
-          Approved
+      {/* Terminal tab — review logs */}
+      <div className="flex items-center bg-[***REMOVED***1a1a1c] border-b border-white/[0.06]">
+        <div className="px-4 py-2.5 text-[11px] text-slate-300 bg-[***REMOVED***1e1e1e] border-b-2 border-blue-400/60 font-medium flex items-center gap-1.5">
+          <Terminal className="w-3 h-3" />
+          Terminal
         </div>
       </div>
 
-      <div className="flex-1 p-5 overflow-hidden flex flex-col gap-4">
-        {/* Review card */}
-        <div className="bg-violet-500/[0.04] border border-violet-500/20 rounded-lg p-4 space-y-3">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500/30 to-violet-600/20 flex items-center justify-center ring-1 ring-violet-500/20">
-              <Shield className="w-4 h-4 text-violet-400" />
-            </div>
-            <div>
-              <div className="text-xs font-medium text-violet-300">
-                Tech Lead
-              </div>
-              <div className="text-[10px] text-slate-600">AI Agent</div>
-            </div>
+      <div className="flex-1 p-4 overflow-hidden flex flex-col gap-3">
+        {/* Story reviews — each story reviewed by tech lead */}
+        <div className="bg-white/[0.02] rounded-lg border border-white/[0.06] p-3 space-y-2">
+          <div className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold">
+            Story Reviews
           </div>
-          <p className="text-xs text-slate-400 leading-relaxed pl-11">
-            &ldquo;Clean implementation. Docker setup is correct, Alembic config
-            follows project conventions. All 4 stories passing tests.
-            Approving.&rdquo;
-          </p>
-        </div>
-
-        {/* Checklist grid */}
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            "All tests passing",
-            "Type check clean",
-            "No security issues",
-            "Conventions followed",
-          ].map((item, i) => (
+          {stories.map((s, i) => (
             <div
               key={i}
-              className="flex items-center gap-2 text-xs bg-white/[0.02] rounded-md px-3 py-2 border border-white/[0.06]"
+              className="flex items-center gap-2 text-[11px] text-slate-400"
             >
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-              <span className="text-slate-400">{item}</span>
+              <span className="flex-1 truncate">{s.name}</span>
+              <span className="text-[9px] text-emerald-400/70 font-mono">
+                {s.status}
+              </span>
             </div>
           ))}
         </div>
 
-        {/* Verdict */}
-        <div className="bg-emerald-500/[0.06] border border-emerald-500/20 rounded-lg p-3.5 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-emerald-500/15 flex items-center justify-center">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+        {/* Branch consolidation */}
+        <div className="bg-blue-500/[0.04] border border-blue-500/20 rounded-lg p-3 font-mono text-[10px] space-y-1">
+          <div className="text-blue-400">
+            [👑 manager_reviewer 🤖] Consolidating feature branches into final
+            PR...
           </div>
+          <div className="text-slate-500">
+            [👑 manager_reviewer 🤖] Merging story/fdpfb-1/0-root-project-files
+            → main
+          </div>
+          <div className="text-slate-500">
+            [👑 manager_reviewer 🤖] Merging story/fdpfb-1/1-go-module-config →
+            main
+          </div>
+          <div className="text-emerald-400">
+            [👑 manager_reviewer 🤖] PR ***REMOVED***1 created — reviewing with Claude CLI
+          </div>
+        </div>
+
+        {/* Final PR review by tech lead */}
+        <div className="bg-violet-500/[0.04] border border-violet-500/20 rounded-lg p-3 flex items-center gap-3">
+          <div className="w-7 h-7 rounded-full bg-violet-500/15 flex items-center justify-center">
+            <Shield className="w-3.5 h-3.5 text-violet-400" />
+          </div>
+          <div className="flex-1">
+            <div className="text-[11px] text-violet-300 font-medium">
+              Tech Lead — Final PR Review
+            </div>
+            <div className="text-[10px] text-slate-500">
+              All tests passing &middot; Type check clean &middot; No security
+              issues
+            </div>
+          </div>
+          <div className="px-2 py-1 bg-emerald-500/10 rounded-full text-[10px] text-emerald-400 font-medium">
+            Approved
+          </div>
+        </div>
+
+        {/* Unlock next epic */}
+        <div className="bg-emerald-500/[0.06] border border-emerald-500/20 rounded-lg p-3 flex items-center gap-3">
+          <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
           <div>
             <div className="text-xs text-emerald-400 font-medium">
-              Epic 1 complete
+              Epic 1 complete — merged to main
             </div>
             <div className="text-[10px] text-emerald-400/60">
-              Unlocking: AWS Infrastructure via Terraform
+              Unlocking: Database &amp; Cache Connectivity Layer
             </div>
           </div>
         </div>
@@ -505,11 +609,18 @@ function ReviewContent() {
 function MontageContent() {
   const epicProgress = [
     { name: "Project Setup", status: "done" as const },
-    { name: "AWS Infrastructure", status: "done" as const },
-    { name: "CI/CD Pipelines", status: "done" as const },
-    { name: "Auth System", status: "done" as const },
-    { name: "Product CRUD", status: "executing" as const },
-    { name: "Stock & Audit", status: "locked" as const },
+    { name: "DB & Cache", status: "done" as const },
+    { name: "Models & Auth", status: "done" as const },
+    { name: "Flag CRUD API", status: "done" as const },
+    { name: "Eval Engine", status: "done" as const },
+    { name: "Segments & Exp", status: "done" as const },
+    { name: "Seed & Verify", status: "done" as const },
+    { name: "Dashboard UI", status: "done" as const },
+    { name: "Flag Mgmt UI", status: "done" as const },
+    { name: "Settings Pages", status: "executing" as const },
+    { name: "Test Suite", status: "locked" as const },
+    { name: "Documentation", status: "locked" as const },
+    { name: "Deploy & Valid", status: "locked" as const },
   ];
 
   return (
@@ -517,16 +628,18 @@ function MontageContent() {
       {/* Header bar */}
       <div className="flex items-center justify-between bg-[***REMOVED***1a1a1c] border-b border-white/[0.06] px-5 py-2.5">
         <div className="text-[11px] text-white font-medium">Build Progress</div>
-        <div className="text-[10px] text-emerald-400 font-mono">5/6 epics</div>
+        <div className="text-[10px] text-emerald-400 font-mono">
+          10/13 epics
+        </div>
       </div>
 
-      <div className="flex-1 p-5 overflow-hidden flex gap-5">
-        {/* Epic list */}
-        <div className="flex-1 space-y-2">
+      <div className="flex-1 p-4 overflow-hidden flex gap-4">
+        {/* Epic list — two columns to fit 13 */}
+        <div className="flex-1 grid grid-cols-2 gap-1.5 content-start">
           {epicProgress.map((epic, i) => (
             <div
               key={i}
-              className={`flex items-center gap-3 text-xs rounded-md px-3 py-2.5 border transition-all ${
+              className={`flex items-center gap-2 text-[11px] rounded-md px-2.5 py-2 border transition-all ${
                 epic.status === "done"
                   ? "bg-emerald-500/[0.04] border-emerald-500/15"
                   : epic.status === "executing"
@@ -535,20 +648,20 @@ function MontageContent() {
               }`}
             >
               {epic.status === "done" ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
               ) : epic.status === "executing" ? (
-                <Loader2 className="w-4 h-4 text-blue-400 animate-spin flex-shrink-0" />
+                <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin flex-shrink-0" />
               ) : (
-                <Lock className="w-4 h-4 text-slate-700 flex-shrink-0" />
+                <Lock className="w-3.5 h-3.5 text-slate-700 flex-shrink-0" />
               )}
               <span
-                className={
+                className={`truncate ${
                   epic.status === "done"
                     ? "text-emerald-400/70"
                     : epic.status === "executing"
                       ? "text-white font-medium"
                       : "text-slate-600"
-                }
+                }`}
               >
                 {epic.name}
               </span>
@@ -557,18 +670,18 @@ function MontageContent() {
         </div>
 
         {/* Stats panel */}
-        <div className="w-[160px] flex flex-col gap-3">
+        <div className="w-[140px] flex flex-col gap-2.5">
           {[
-            { label: "Elapsed", value: "4h 12m", color: "text-white" },
-            { label: "Stories", value: "23", color: "text-blue-400" },
-            { label: "Tests", value: "142 pass", color: "text-emerald-400" },
-            { label: "API cost", value: "$301", color: "text-amber-400" },
+            { label: "Elapsed", value: "6h 47m", color: "text-white" },
+            { label: "Stories", value: "89", color: "text-blue-400" },
+            { label: "Tests", value: "347 pass", color: "text-emerald-400" },
+            { label: "API cost", value: "$412", color: "text-amber-400" },
           ].map((stat) => (
             <div
               key={stat.label}
-              className="bg-white/[0.02] border border-white/[0.06] rounded-lg p-3"
+              className="bg-white/[0.02] border border-white/[0.06] rounded-lg p-2.5"
             >
-              <div className={`text-lg font-bold ${stat.color}`}>
+              <div className={`text-base font-bold ${stat.color}`}>
                 {stat.value}
               </div>
               <div className="text-[10px] text-slate-600">{stat.label}</div>
@@ -591,25 +704,25 @@ function CompleteContent() {
           Build complete
         </div>
         <div className="text-sm text-slate-500 text-center mt-1">
-          6 epics &middot; 23 stories &middot; 142 tests passing
+          13 epics &middot; 89 stories &middot; 347 tests passing
         </div>
       </div>
       <div className="flex items-center gap-3 px-6 py-3 bg-emerald-500/[0.08] border border-emerald-500/20 rounded-xl">
         <GitPullRequest className="w-5 h-5 text-emerald-400" />
         <div>
           <div className="text-sm text-emerald-300 font-semibold">
-            PR ***REMOVED***42 ready for review
+            PR ***REMOVED***1 ready for review
           </div>
           <div className="text-[11px] text-emerald-400/50 font-mono">
-            github.com/acme/shipapi/pull/42
+            github.com/workermill-examples/flagdeck/pull/1
           </div>
         </div>
       </div>
       <div className="flex gap-6 mt-2 text-center">
         {[
-          { label: "Time", value: "7h 23m" },
-          { label: "Cost", value: "$301" },
-          { label: "Files", value: "84" },
+          { label: "Time", value: "8h 14m" },
+          { label: "Cost", value: "$412" },
+          { label: "Files", value: "156" },
         ].map((s) => (
           <div key={s.label}>
             <div className="text-sm font-bold text-slate-300">{s.value}</div>
@@ -635,14 +748,16 @@ function buildFrames(): Frame[] {
   }));
 
   return [
-    { epics: base, content: <ContextMenuContent /> },
+    // Frame 0: Spec — context menu on PRD, sidebar empty (pre-decomposition)
+    { epics: [], content: <ContextMenuContent /> },
+
+    // Frame 1: Decompose — PRD streaming, sidebar shows Backlog (13)
     {
-      epics: base.map((e, i) => ({
-        ...e,
-        status: i === 0 ? ("active" as const) : ("locked" as const),
-      })),
+      epics: base,
       content: <DecomposingContent />,
     },
+
+    // Frame 2: Plan — planning agent, FDPFB-1 active in sidebar
     {
       epics: base.map((e, i) => ({
         ...e,
@@ -650,6 +765,8 @@ function buildFrames(): Frame[] {
       })),
       content: <PlanningContent />,
     },
+
+    // Frame 3: Execute — parallel experts, FDPFB-1 executing
     {
       epics: base.map((e, i) => ({
         ...e,
@@ -657,6 +774,8 @@ function buildFrames(): Frame[] {
       })),
       content: <ExecutingContent />,
     },
+
+    // Frame 4: Review — FDPFB-1 done, FDPFB-2 unlocked in backlog
     {
       epics: base.map((e, i) => ({
         ...e,
@@ -669,18 +788,22 @@ function buildFrames(): Frame[] {
       })),
       content: <ReviewContent />,
     },
+
+    // Frame 5: Progress — cascade: 9 done, FDPFB-10 executing, 3 locked
     {
       epics: base.map((e, i) => ({
         ...e,
         status:
-          i < 4
+          i < 9
             ? ("done" as const)
-            : i === 4
+            : i === 9
               ? ("executing" as const)
               : ("locked" as const),
       })),
       content: <MontageContent />,
     },
+
+    // Frame 6: Ship — all done
     {
       epics: base.map((e) => ({ ...e, status: "done" as const })),
       content: <CompleteContent />,
@@ -814,7 +937,7 @@ export default function ExecutionShowcase() {
                     <path d="M17.583 2.603L12.2 7.28l-4.041-3.06L2 7.38v9.24l6.16 3.16 4.04-3.06 5.382 4.677L24 18.24V5.76l-6.417-3.157zM8.16 15.38L4.4 13.2V10.8l3.76-2.18v6.76zm9.44-.54l-3.76 2.18V7.18l3.76-2.18v9.84z" />
                   </svg>
                   <span className="text-[11px] text-slate-500">
-                    ShipAPI &mdash; Visual Studio Code
+                    FlagDeck &mdash; Visual Studio Code
                   </span>
                 </div>
                 <div className="w-[72px]" />
@@ -824,7 +947,7 @@ export default function ExecutionShowcase() {
               <div className="flex h-[400px] lg:h-[440px]">
                 {/* Sidebar — hidden on mobile */}
                 <div className="hidden lg:block">
-                  <EpicSidebar epics={currentFrame.epics} />
+                  <VsCodeSidebar epics={currentFrame.epics} />
                 </div>
 
                 {/* Content area with crossfade */}

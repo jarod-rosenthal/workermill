@@ -28,11 +28,11 @@ export interface RetryConfig {
 }
 
 const DEFAULT_RETRY_CONFIG: Required<RetryConfig> = {
-  maxRetries: 3,
+  maxRetries: 5,
   initialDelayMs: 1000,
   maxDelayMs: 10000,
   backoffMultiplier: 2,
-  retryableStatuses: [502, 503, 504],
+  retryableStatuses: [408, 429, 502, 503, 504],
   retryOnNetworkError: true,
   logger: console.log,
 };

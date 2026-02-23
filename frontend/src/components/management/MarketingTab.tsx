@@ -12,6 +12,13 @@ import {
   Target,
   BarChart3,
   Megaphone,
+  Plus,
+  ChevronDown,
+  ChevronRight,
+  Save,
+  Settings,
+  Shield,
+  Key,
 } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -60,6 +67,69 @@ interface ActionItem {
   createdAt: string;
 }
 
+interface MarketingConfig {
+  enabled: boolean;
+  intervalMinutes: number;
+  monthlyBudgetCents: number;
+  escalationThresholdCents: number;
+  config: Record<string, unknown>;
+  channels: Record<string, { enabled: boolean }>;
+}
+
+interface ConfigFormState {
+  // Agent settings
+  enabled: boolean;
+  intervalMinutes: number;
+  missionTimeWindowStart: string;
+  missionTimeWindowEnd: string;
+  maxMissionsPerDay: number;
+  aiModel: string;
+  voiceTone: string;
+  brandKeywords: string;
+  competitorKeywords: string;
+
+  // Budget & Spend
+  monthlyBudgetDollars: string;
+  dailySpendLimitDollars: string;
+  perCampaignMaxSpendDollars: string;
+  autoApproveSpendThresholdDollars: string;
+  budgetPauseThresholdPct: number;
+  budgetAlertThresholdPct: number;
+
+  // Guardrails
+  autoPublishRoutineContent: boolean;
+  autoAdjustBids: boolean;
+  maxBidAdjustmentPct: number;
+  autoPauseUnderperformers: boolean;
+  cpaCeilingDollars: string;
+
+  // Channel credentials
+  channelCredentials: Record<
+    string,
+    { enabled: boolean; apiKey: string }
+  >;
+}
+
+const CHANNEL_PLATFORMS = [
+  { key: "google_ads", label: "Google Ads" },
+  { key: "reddit", label: "Reddit" },
+  { key: "x", label: "X (Twitter)" },
+  { key: "devto", label: "Dev.to" },
+  { key: "hackernews", label: "Hacker News" },
+] as const;
+
+const CAMPAIGN_PLATFORMS = [
+  "google_ads",
+  "reddit",
+  "x",
+  "devto",
+  "hackernews",
+] as const;
+
+const CONTENT_PLATFORMS = ["x", "reddit", "devto", "hackernews"] as const;
+
+const CONTENT_TYPES = ["tweet", "post", "article", "ad_copy"] as const;
+
 // --- Helpers ---
 
 const PLATFORM_NAMES: Record<string, string> = {
@@ -85,7 +155,8 @@ const ACTION_TYPE_COLORS: Record<string, string> = {
   content_created: "bg-purple-500/10 text-purple-500 border-purple-500/20",
   campaign_paused: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
   campaign_started: "bg-green-500/10 text-green-500 border-green-500/20",
-  budget_reallocated: "bg-orange-500/10 text-orange-500 border-orange-500/20",
+  budget_reallocated:
+    "bg-orange-500/10 text-orange-500 border-orange-500/20",
   escalation: "bg-red-500/10 text-red-500 border-red-500/20",
 };
 
@@ -146,6 +217,103 @@ function formatDate(dateStr: string): string {
   return date.toLocaleDateString();
 }
 
+function centsToDollars(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
+
+function dollarsToCents(dollars: string): number {
+  const parsed = parseFloat(dollars);
+  if (isNaN(parsed)) return 0;
+  return Math.round(parsed * 100);
+}
+
+// --- Reusable sub-components ---
+
+function ToggleSwitch({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
+        checked ? "bg-blue-600" : "bg-gray-600"
+      }`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+          checked ? "translate-x-6" : "translate-x-1"
+        }`}
+      />
+      {label && (
+        <span className="sr-only">{label}</span>
+      )}
+    </button>
+  );
+}
+
+function CollapsibleSection({
+  title,
+  icon,
+  children,
+  defaultOpen = true,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="bg-card rounded-lg border border-border overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full px-6 py-4 flex items-center gap-3 hover:bg-muted/30 transition-colors cursor-pointer"
+      >
+        {icon}
+        <h3 className="text-md font-semibold text-foreground">{title}</h3>
+        <span className="ml-auto text-muted-foreground">
+          {open ? (
+            <ChevronDown className="w-4 h-4" />
+          ) : (
+            <ChevronRight className="w-4 h-4" />
+          )}
+        </span>
+      </button>
+      {open && <div className="px-6 pb-6 space-y-4">{children}</div>}
+    </div>
+  );
+}
+
+function FormField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1">
+      <label className="text-sm text-muted-foreground">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+const INPUT_CLASS =
+  "w-full bg-muted/50 border border-border rounded px-3 py-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500";
+const SELECT_CLASS =
+  "w-full bg-muted/50 border border-border rounded px-3 py-2 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 cursor-pointer";
+
 // --- Component ---
 
 type SubTab = "campaigns" | "content" | "actions" | "config";
@@ -158,7 +326,38 @@ export function MarketingTab({ accessToken }: { accessToken: string }) {
   const [actions, setActions] = useState<ActionItem[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Config form state
+  const [configForm, setConfigForm] = useState<ConfigFormState | null>(null);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configSaved, setConfigSaved] = useState(false);
+
+  // Create campaign form state
+  const [showNewCampaign, setShowNewCampaign] = useState(false);
+  const [newCampaignName, setNewCampaignName] = useState("");
+  const [newCampaignPlatform, setNewCampaignPlatform] = useState<string>(
+    CAMPAIGN_PLATFORMS[0],
+  );
+  const [newCampaignBudget, setNewCampaignBudget] = useState("");
+  const [campaignCreating, setCampaignCreating] = useState(false);
+
+  // Create content form state
+  const [showNewContent, setShowNewContent] = useState(false);
+  const [newContentPlatform, setNewContentPlatform] = useState<string>(
+    CONTENT_PLATFORMS[0],
+  );
+  const [newContentType, setNewContentType] = useState<string>(
+    CONTENT_TYPES[0],
+  );
+  const [newContentTitle, setNewContentTitle] = useState("");
+  const [newContentBody, setNewContentBody] = useState("");
+  const [contentCreating, setContentCreating] = useState(false);
+
   const headers = { Authorization: `Bearer ${accessToken}` };
+  const jsonHeaders = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  };
 
   const fetchAll = useCallback(async () => {
     try {
@@ -196,6 +395,86 @@ export function MarketingTab({ accessToken }: { accessToken: string }) {
     fetchAll();
   }, [fetchAll]);
 
+  // Fetch config when switching to config tab
+  const fetchConfig = useCallback(async () => {
+    try {
+      setConfigLoading(true);
+      const res = await fetch(`${API_BASE}/api/marketing/config`, {
+        headers,
+      });
+      if (!res.ok) return;
+      const data: MarketingConfig = await res.json();
+
+      const cfg = data.config || {};
+      const timeWindow =
+        (cfg.missionTimeWindow as string) || "06:00-22:00";
+      const [startTime, endTime] = timeWindow.split("-");
+
+      setConfigForm({
+        enabled: data.enabled,
+        intervalMinutes: data.intervalMinutes,
+        missionTimeWindowStart: startTime || "06:00",
+        missionTimeWindowEnd: endTime || "22:00",
+        maxMissionsPerDay: (cfg.maxMissionsPerDay as number) || 12,
+        aiModel: (cfg.aiModel as string) || "",
+        voiceTone: (cfg.voiceTone as string) || "",
+        brandKeywords: Array.isArray(cfg.brandKeywords)
+          ? (cfg.brandKeywords as string[]).join(", ")
+          : "",
+        competitorKeywords: Array.isArray(cfg.competitorKeywords)
+          ? (cfg.competitorKeywords as string[]).join(", ")
+          : "",
+
+        monthlyBudgetDollars: centsToDollars(data.monthlyBudgetCents),
+        dailySpendLimitDollars: centsToDollars(
+          (cfg.dailySpendLimitCents as number) || 0,
+        ),
+        perCampaignMaxSpendDollars: centsToDollars(
+          (cfg.perCampaignMaxSpendCents as number) || 0,
+        ),
+        autoApproveSpendThresholdDollars: centsToDollars(
+          data.escalationThresholdCents,
+        ),
+        budgetPauseThresholdPct:
+          (cfg.budgetPauseThresholdPct as number) || 90,
+        budgetAlertThresholdPct:
+          (cfg.budgetAlertThresholdPct as number) || 75,
+
+        autoPublishRoutineContent:
+          (cfg.autoPublishRoutineContent as boolean) !== false,
+        autoAdjustBids: (cfg.autoAdjustBids as boolean) !== false,
+        maxBidAdjustmentPct:
+          (cfg.maxBidAdjustmentPct as number) || 15,
+        autoPauseUnderperformers:
+          (cfg.autoPauseUnderperformers as boolean) !== false,
+        cpaCeilingDollars: centsToDollars(
+          (cfg.cpaCeilingCents as number) || 0,
+        ),
+
+        channelCredentials: Object.fromEntries(
+          CHANNEL_PLATFORMS.map(({ key }) => [
+            key,
+            {
+              enabled: data.channels?.[key]?.enabled || false,
+              apiKey: "",
+            },
+          ]),
+        ),
+      });
+    } catch (err) {
+      console.error("Failed to fetch marketing config:", err);
+    } finally {
+      setConfigLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (subTab === "config" && !configForm) {
+      fetchConfig();
+    }
+  }, [subTab, configForm, fetchConfig]);
+
   // --- Handlers ---
 
   const handleApprove = async (id: string) => {
@@ -220,6 +499,166 @@ export function MarketingTab({ accessToken }: { accessToken: string }) {
       headers,
     });
     setTimeout(() => fetchAll(), 3000);
+  };
+
+  const handleSaveConfig = async () => {
+    if (!configForm) return;
+    setConfigSaving(true);
+    setConfigSaved(false);
+
+    try {
+      const brandKeywordsArr = configForm.brandKeywords
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const competitorKeywordsArr = configForm.competitorKeywords
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      // Build credentials object — only include channels with a non-empty apiKey
+      const credentials: Record<string, { apiKey: string }> = {};
+      for (const [channel, cred] of Object.entries(
+        configForm.channelCredentials,
+      )) {
+        if (cred.apiKey) {
+          credentials[channel] = { apiKey: cred.apiKey };
+        }
+      }
+
+      const body = {
+        enabled: configForm.enabled,
+        intervalMinutes: configForm.intervalMinutes,
+        monthlyBudgetCents: dollarsToCents(
+          configForm.monthlyBudgetDollars,
+        ),
+        escalationThresholdCents: dollarsToCents(
+          configForm.autoApproveSpendThresholdDollars,
+        ),
+        config: {
+          missionTimeWindow: `${configForm.missionTimeWindowStart}-${configForm.missionTimeWindowEnd}`,
+          maxMissionsPerDay: configForm.maxMissionsPerDay,
+          aiModel: configForm.aiModel || undefined,
+          voiceTone: configForm.voiceTone || undefined,
+          brandKeywords:
+            brandKeywordsArr.length > 0 ? brandKeywordsArr : undefined,
+          competitorKeywords:
+            competitorKeywordsArr.length > 0
+              ? competitorKeywordsArr
+              : undefined,
+          dailySpendLimitCents: dollarsToCents(
+            configForm.dailySpendLimitDollars,
+          ),
+          perCampaignMaxSpendCents: dollarsToCents(
+            configForm.perCampaignMaxSpendDollars,
+          ),
+          budgetPauseThresholdPct: configForm.budgetPauseThresholdPct,
+          budgetAlertThresholdPct: configForm.budgetAlertThresholdPct,
+          autoPublishRoutineContent:
+            configForm.autoPublishRoutineContent,
+          autoAdjustBids: configForm.autoAdjustBids,
+          maxBidAdjustmentPct: configForm.maxBidAdjustmentPct,
+          autoPauseUnderperformers:
+            configForm.autoPauseUnderperformers,
+          cpaCeilingCents: dollarsToCents(configForm.cpaCeilingDollars),
+        },
+        ...(Object.keys(credentials).length > 0 && { credentials }),
+      };
+
+      await fetch(`${API_BASE}/api/marketing/config`, {
+        method: "PUT",
+        headers: jsonHeaders,
+        body: JSON.stringify(body),
+      });
+
+      setConfigSaved(true);
+      setTimeout(() => setConfigSaved(false), 3000);
+    } catch (err) {
+      console.error("Failed to save marketing config:", err);
+    } finally {
+      setConfigSaving(false);
+    }
+  };
+
+  const handleCreateCampaign = async () => {
+    if (!newCampaignName.trim()) return;
+    setCampaignCreating(true);
+    try {
+      await fetch(`${API_BASE}/api/marketing/campaigns`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          name: newCampaignName.trim(),
+          platform: newCampaignPlatform,
+          budgetCents: dollarsToCents(newCampaignBudget),
+          status: "pending_review",
+        }),
+      });
+      setShowNewCampaign(false);
+      setNewCampaignName("");
+      setNewCampaignBudget("");
+      setNewCampaignPlatform(CAMPAIGN_PLATFORMS[0]);
+      await fetchAll();
+    } catch (err) {
+      console.error("Failed to create campaign:", err);
+    } finally {
+      setCampaignCreating(false);
+    }
+  };
+
+  const handleCreateContent = async () => {
+    if (!newContentBody.trim()) return;
+    setContentCreating(true);
+    try {
+      await fetch(`${API_BASE}/api/marketing/content`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          platform: newContentPlatform,
+          contentType: newContentType,
+          title: newContentTitle.trim() || null,
+          body: newContentBody.trim(),
+          status: "draft",
+        }),
+      });
+      setShowNewContent(false);
+      setNewContentPlatform(CONTENT_PLATFORMS[0]);
+      setNewContentType(CONTENT_TYPES[0]);
+      setNewContentTitle("");
+      setNewContentBody("");
+      await fetchAll();
+    } catch (err) {
+      console.error("Failed to create content:", err);
+    } finally {
+      setContentCreating(false);
+    }
+  };
+
+  // Config form updater
+  const updateConfig = (
+    updates: Partial<ConfigFormState>,
+  ) => {
+    setConfigForm((prev) => (prev ? { ...prev, ...updates } : prev));
+  };
+
+  const updateChannelCred = (
+    channel: string,
+    field: "enabled" | "apiKey",
+    value: boolean | string,
+  ) => {
+    setConfigForm((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        channelCredentials: {
+          ...prev.channelCredentials,
+          [channel]: {
+            ...prev.channelCredentials[channel],
+            [field]: value,
+          },
+        },
+      };
+    });
   };
 
   // --- Budget progress bar color ---
@@ -372,13 +811,86 @@ export function MarketingTab({ accessToken }: { accessToken: string }) {
             <h2 className="text-lg font-semibold text-foreground">
               Campaigns ({campaigns.length})
             </h2>
+            <button
+              onClick={() => setShowNewCampaign(!showNewCampaign)}
+              className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
+            >
+              <Plus className="w-3 h-3" />
+              New Campaign
+            </button>
           </div>
-          {campaigns.length === 0 ? (
+
+          {/* Inline create campaign form */}
+          {showNewCampaign && (
+            <div className="px-4 py-4 border-b border-border bg-muted/20">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <FormField label="Name">
+                  <input
+                    type="text"
+                    value={newCampaignName}
+                    onChange={(e) => setNewCampaignName(e.target.value)}
+                    placeholder="Campaign name"
+                    className={INPUT_CLASS}
+                  />
+                </FormField>
+                <FormField label="Platform">
+                  <select
+                    value={newCampaignPlatform}
+                    onChange={(e) =>
+                      setNewCampaignPlatform(e.target.value)
+                    }
+                    className={SELECT_CLASS}
+                  >
+                    {CAMPAIGN_PLATFORMS.map((p) => (
+                      <option key={p} value={p}>
+                        {platformName(p)}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+                <FormField label="Budget ($)">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={newCampaignBudget}
+                    onChange={(e) => setNewCampaignBudget(e.target.value)}
+                    placeholder="0.00"
+                    className={INPUT_CLASS}
+                  />
+                </FormField>
+                <div className="flex items-end gap-2">
+                  <button
+                    onClick={handleCreateCampaign}
+                    disabled={
+                      campaignCreating || !newCampaignName.trim()
+                    }
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  >
+                    {campaignCreating ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Plus className="w-3 h-3" />
+                    )}
+                    Create
+                  </button>
+                  <button
+                    onClick={() => setShowNewCampaign(false)}
+                    className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {campaigns.length === 0 && !showNewCampaign ? (
             <div className="p-8 text-center">
               <Megaphone className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
               <p className="text-muted-foreground">No campaigns yet</p>
             </div>
-          ) : (
+          ) : campaigns.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-muted/50">
@@ -423,7 +935,9 @@ export function MarketingTab({ accessToken }: { accessToken: string }) {
                           {platformName(c.platform)}
                         </span>
                       </td>
-                      <td className="px-4 py-3">{statusBadge(c.status)}</td>
+                      <td className="px-4 py-3">
+                        {statusBadge(c.status)}
+                      </td>
                       <td className="px-4 py-3 text-sm text-foreground text-right">
                         {formatCurrency(c.spend)}
                       </td>
@@ -444,12 +958,108 @@ export function MarketingTab({ accessToken }: { accessToken: string }) {
                 </tbody>
               </table>
             </div>
-          )}
+          ) : null}
         </div>
       )}
 
       {subTab === "content" && (
         <div className="space-y-6">
+          {/* New content button + inline form */}
+          <div className="bg-card rounded-lg border border-border overflow-hidden">
+            <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+              <Plus className="w-4 h-4 text-muted-foreground" />
+              <h2 className="text-lg font-semibold text-foreground">
+                Create Content
+              </h2>
+              <button
+                onClick={() => setShowNewContent(!showNewContent)}
+                className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
+              >
+                <Plus className="w-3 h-3" />
+                New Content
+              </button>
+            </div>
+
+            {showNewContent && (
+              <div className="px-4 py-4 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <FormField label="Platform">
+                    <select
+                      value={newContentPlatform}
+                      onChange={(e) =>
+                        setNewContentPlatform(e.target.value)
+                      }
+                      className={SELECT_CLASS}
+                    >
+                      {CONTENT_PLATFORMS.map((p) => (
+                        <option key={p} value={p}>
+                          {platformName(p)}
+                        </option>
+                      ))}
+                    </select>
+                  </FormField>
+                  <FormField label="Content Type">
+                    <select
+                      value={newContentType}
+                      onChange={(e) =>
+                        setNewContentType(e.target.value)
+                      }
+                      className={SELECT_CLASS}
+                    >
+                      {CONTENT_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t.replace(/_/g, " ")}
+                        </option>
+                      ))}
+                    </select>
+                  </FormField>
+                  <FormField label="Title (optional)">
+                    <input
+                      type="text"
+                      value={newContentTitle}
+                      onChange={(e) =>
+                        setNewContentTitle(e.target.value)
+                      }
+                      placeholder="Content title"
+                      className={INPUT_CLASS}
+                    />
+                  </FormField>
+                </div>
+                <FormField label="Body">
+                  <textarea
+                    value={newContentBody}
+                    onChange={(e) => setNewContentBody(e.target.value)}
+                    placeholder="Write your content here..."
+                    rows={4}
+                    className={`${INPUT_CLASS} resize-y`}
+                  />
+                </FormField>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleCreateContent}
+                    disabled={
+                      contentCreating || !newContentBody.trim()
+                    }
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  >
+                    {contentCreating ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Plus className="w-3 h-3" />
+                    )}
+                    Create as Draft
+                  </button>
+                  <button
+                    onClick={() => setShowNewContent(false)}
+                    className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Pending review section */}
           {pendingContent.length > 0 && (
             <div className="bg-card rounded-lg border border-border overflow-hidden">
@@ -630,10 +1240,453 @@ export function MarketingTab({ accessToken }: { accessToken: string }) {
       )}
 
       {subTab === "config" && (
-        <div className="bg-card rounded-lg border border-border p-8 text-center">
-          <p className="text-muted-foreground">
-            Marketing agent configuration panel — coming in next iteration.
-          </p>
+        <div className="space-y-4">
+          {configLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : configForm ? (
+            <>
+              {/* Agent Settings */}
+              <CollapsibleSection
+                title="Agent Settings"
+                icon={
+                  <Settings className="w-4 h-4 text-blue-500" />
+                }
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="flex items-center justify-between col-span-full">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        Agent Enabled
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Enable or disable the marketing agent
+                      </p>
+                    </div>
+                    <ToggleSwitch
+                      checked={configForm.enabled}
+                      onChange={(v) => updateConfig({ enabled: v })}
+                      label="Agent enabled"
+                    />
+                  </div>
+
+                  <FormField label="Mission Interval (minutes)">
+                    <input
+                      type="number"
+                      min={1}
+                      value={configForm.intervalMinutes}
+                      onChange={(e) =>
+                        updateConfig({
+                          intervalMinutes:
+                            parseInt(e.target.value, 10) || 1,
+                        })
+                      }
+                      className={INPUT_CLASS}
+                    />
+                  </FormField>
+
+                  <FormField label="Max Missions Per Day">
+                    <input
+                      type="number"
+                      min={1}
+                      value={configForm.maxMissionsPerDay}
+                      onChange={(e) =>
+                        updateConfig({
+                          maxMissionsPerDay:
+                            parseInt(e.target.value, 10) || 1,
+                        })
+                      }
+                      className={INPUT_CLASS}
+                    />
+                  </FormField>
+
+                  <FormField label="Mission Window Start (UTC)">
+                    <input
+                      type="time"
+                      value={configForm.missionTimeWindowStart}
+                      onChange={(e) =>
+                        updateConfig({
+                          missionTimeWindowStart: e.target.value,
+                        })
+                      }
+                      className={INPUT_CLASS}
+                    />
+                  </FormField>
+
+                  <FormField label="Mission Window End (UTC)">
+                    <input
+                      type="time"
+                      value={configForm.missionTimeWindowEnd}
+                      onChange={(e) =>
+                        updateConfig({
+                          missionTimeWindowEnd: e.target.value,
+                        })
+                      }
+                      className={INPUT_CLASS}
+                    />
+                  </FormField>
+
+                  <FormField label="AI Model">
+                    <input
+                      type="text"
+                      value={configForm.aiModel}
+                      onChange={(e) =>
+                        updateConfig({ aiModel: e.target.value })
+                      }
+                      placeholder="e.g. claude-sonnet-4-6"
+                      className={INPUT_CLASS}
+                    />
+                  </FormField>
+
+                  <div className="col-span-full">
+                    <FormField label="Voice / Tone Guidelines">
+                      <textarea
+                        value={configForm.voiceTone}
+                        onChange={(e) =>
+                          updateConfig({
+                            voiceTone: e.target.value,
+                          })
+                        }
+                        placeholder="Describe the brand voice and tone for generated content..."
+                        rows={3}
+                        className={`${INPUT_CLASS} resize-y`}
+                      />
+                    </FormField>
+                  </div>
+
+                  <FormField label="Brand Keywords (comma-separated)">
+                    <input
+                      type="text"
+                      value={configForm.brandKeywords}
+                      onChange={(e) =>
+                        updateConfig({
+                          brandKeywords: e.target.value,
+                        })
+                      }
+                      placeholder="workermill, AI agents, automation"
+                      className={INPUT_CLASS}
+                    />
+                  </FormField>
+
+                  <FormField label="Competitor Keywords (comma-separated)">
+                    <input
+                      type="text"
+                      value={configForm.competitorKeywords}
+                      onChange={(e) =>
+                        updateConfig({
+                          competitorKeywords: e.target.value,
+                        })
+                      }
+                      placeholder="devin, cursor, copilot"
+                      className={INPUT_CLASS}
+                    />
+                  </FormField>
+                </div>
+              </CollapsibleSection>
+
+              {/* Budget & Spend */}
+              <CollapsibleSection
+                title="Budget & Spend"
+                icon={
+                  <DollarSign className="w-4 h-4 text-green-500" />
+                }
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <FormField label="Monthly Budget Cap ($)">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={configForm.monthlyBudgetDollars}
+                      onChange={(e) =>
+                        updateConfig({
+                          monthlyBudgetDollars: e.target.value,
+                        })
+                      }
+                      className={INPUT_CLASS}
+                    />
+                  </FormField>
+
+                  <FormField label="Daily Spend Limit ($)">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={configForm.dailySpendLimitDollars}
+                      onChange={(e) =>
+                        updateConfig({
+                          dailySpendLimitDollars: e.target.value,
+                        })
+                      }
+                      className={INPUT_CLASS}
+                    />
+                  </FormField>
+
+                  <FormField label="Per-Campaign Max Spend ($)">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={configForm.perCampaignMaxSpendDollars}
+                      onChange={(e) =>
+                        updateConfig({
+                          perCampaignMaxSpendDollars: e.target.value,
+                        })
+                      }
+                      className={INPUT_CLASS}
+                    />
+                  </FormField>
+
+                  <FormField label="Auto-Approve Spend Threshold ($)">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={
+                        configForm.autoApproveSpendThresholdDollars
+                      }
+                      onChange={(e) =>
+                        updateConfig({
+                          autoApproveSpendThresholdDollars:
+                            e.target.value,
+                        })
+                      }
+                      className={INPUT_CLASS}
+                    />
+                  </FormField>
+
+                  <FormField
+                    label={`Pause at Budget % (${configForm.budgetPauseThresholdPct}%)`}
+                  >
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={configForm.budgetPauseThresholdPct}
+                      onChange={(e) =>
+                        updateConfig({
+                          budgetPauseThresholdPct: parseInt(
+                            e.target.value,
+                            10,
+                          ),
+                        })
+                      }
+                      className="w-full accent-blue-600 cursor-pointer"
+                    />
+                  </FormField>
+
+                  <FormField
+                    label={`Budget Alert Threshold % (${configForm.budgetAlertThresholdPct}%)`}
+                  >
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={configForm.budgetAlertThresholdPct}
+                      onChange={(e) =>
+                        updateConfig({
+                          budgetAlertThresholdPct: parseInt(
+                            e.target.value,
+                            10,
+                          ),
+                        })
+                      }
+                      className="w-full accent-blue-600 cursor-pointer"
+                    />
+                  </FormField>
+                </div>
+              </CollapsibleSection>
+
+              {/* Guardrails */}
+              <CollapsibleSection
+                title="Guardrails"
+                icon={
+                  <Shield className="w-4 h-4 text-yellow-500" />
+                }
+              >
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        Auto-Publish Routine Content
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Automatically publish tweets and short posts
+                        without review
+                      </p>
+                    </div>
+                    <ToggleSwitch
+                      checked={configForm.autoPublishRoutineContent}
+                      onChange={(v) =>
+                        updateConfig({
+                          autoPublishRoutineContent: v,
+                        })
+                      }
+                      label="Auto-publish routine content"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        Auto-Adjust Bids
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Allow the agent to adjust ad bids
+                        automatically
+                      </p>
+                    </div>
+                    <ToggleSwitch
+                      checked={configForm.autoAdjustBids}
+                      onChange={(v) =>
+                        updateConfig({ autoAdjustBids: v })
+                      }
+                      label="Auto-adjust bids"
+                    />
+                  </div>
+
+                  {configForm.autoAdjustBids && (
+                    <div className="ml-8">
+                      <FormField label="Max Bid Adjustment (%)">
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={configForm.maxBidAdjustmentPct}
+                          onChange={(e) =>
+                            updateConfig({
+                              maxBidAdjustmentPct:
+                                parseInt(e.target.value, 10) || 1,
+                            })
+                          }
+                          className={`${INPUT_CLASS} max-w-[200px]`}
+                        />
+                      </FormField>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        Auto-Pause Underperformers
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Automatically pause campaigns with poor
+                        performance
+                      </p>
+                    </div>
+                    <ToggleSwitch
+                      checked={configForm.autoPauseUnderperformers}
+                      onChange={(v) =>
+                        updateConfig({
+                          autoPauseUnderperformers: v,
+                        })
+                      }
+                      label="Auto-pause underperformers"
+                    />
+                  </div>
+
+                  <FormField label="CPA Ceiling ($)">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={configForm.cpaCeilingDollars}
+                      onChange={(e) =>
+                        updateConfig({
+                          cpaCeilingDollars: e.target.value,
+                        })
+                      }
+                      placeholder="0.00"
+                      className={`${INPUT_CLASS} max-w-[200px]`}
+                    />
+                  </FormField>
+                </div>
+              </CollapsibleSection>
+
+              {/* Channel Credentials */}
+              <CollapsibleSection
+                title="Channel Credentials"
+                icon={<Key className="w-4 h-4 text-purple-500" />}
+                defaultOpen={false}
+              >
+                <div className="space-y-4">
+                  {CHANNEL_PLATFORMS.map(({ key, label }) => (
+                    <div
+                      key={key}
+                      className="bg-muted/30 rounded-lg border border-border p-4"
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-sm font-medium text-foreground">
+                          {label}
+                        </p>
+                        <ToggleSwitch
+                          checked={
+                            configForm.channelCredentials[key]
+                              ?.enabled || false
+                          }
+                          onChange={(v) =>
+                            updateChannelCred(key, "enabled", v)
+                          }
+                          label={`${label} enabled`}
+                        />
+                      </div>
+                      {configForm.channelCredentials[key]
+                        ?.enabled && (
+                        <FormField label="API Key">
+                          <input
+                            type="password"
+                            value={
+                              configForm.channelCredentials[key]
+                                ?.apiKey || ""
+                            }
+                            onChange={(e) =>
+                              updateChannelCred(
+                                key,
+                                "apiKey",
+                                e.target.value,
+                              )
+                            }
+                            placeholder="Enter API key (leave blank to keep existing)"
+                            className={INPUT_CLASS}
+                          />
+                        </FormField>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CollapsibleSection>
+
+              {/* Save button */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleSaveConfig}
+                  disabled={configSaving}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                >
+                  {configSaving ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  Save Configuration
+                </button>
+                {configSaved && (
+                  <span className="inline-flex items-center gap-1 text-sm text-green-500">
+                    <CheckCircle className="w-4 h-4" />
+                    Saved
+                  </span>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="bg-card rounded-lg border border-border p-8 text-center">
+              <p className="text-muted-foreground">
+                Failed to load configuration. Please try again.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

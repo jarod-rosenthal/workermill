@@ -149,7 +149,7 @@ export class LiveDiffManager {
       return;
     }
     if (managers.size === 1) {
-      const [mgr] = managers.values();
+      const mgr = managers.values().next().value as LiveDiffManager;
       mgr.showFilePicker();
       return;
     }
@@ -242,8 +242,9 @@ export class LiveDiffManager {
     let newestFile: string | null = null;
 
     for (const ev of events) {
-      const rawPath = ev.filePath || "(unknown)";
-      const fp = stripWorktreePrefix(rawPath);
+      if (!ev.filePath) continue;
+      const fp = stripWorktreePrefix(ev.filePath);
+      if (!fp) continue;
       const meta = ev.metadata;
 
       if (!meta) continue;
@@ -262,6 +263,7 @@ export class LiveDiffManager {
           existing.after = meta.newStr ?? "";
           existing.expert = meta.expert ?? existing.expert;
           existing.lastUpdated = Date.now();
+          fileStates.set(key, existing);
         } else {
           const state: FileState = {
             before: meta.oldStr ?? "",
@@ -274,20 +276,15 @@ export class LiveDiffManager {
         }
       } else {
         // Write event: empty before, full content as after
+        // content is persisted as newStr in metadata by the API
         const state: FileState = {
           before: "",
-          after: ev.message,
+          after: meta.newStr ?? ev.message,
           expert: meta.expert ?? null,
           lastUpdated: Date.now(),
         };
         this.files.set(fp, state);
         fileStates.set(key, state);
-      }
-
-      // Update the shared state map reference
-      const currentState = this.files.get(fp);
-      if (currentState) {
-        fileStates.set(key, currentState);
       }
 
       this.scheduleFire(fp);

@@ -31,14 +31,22 @@ router.get("/", async (req: Request, res: Response) => {
     const remoteAgentOnline = !!onlineAgent;
     const remoteAgentHostname = onlineAgent?.hostname || agents[0]?.hostname || null;
 
-    // Resolve the API key for the configured planning provider (for agent PRD decomposition)
+    // Resolve planning API key — only return actual key for API key auth (agents),
+    // return boolean for JWT auth (dashboard) to prevent leaking keys to all org members
     let planningApiKey: string | undefined;
+    let hasPlanningApiKey = false;
     const planProvider = org.planningAgentProvider || "anthropic";
+    const isApiKeyAuth = !req.user; // API key auth doesn't set req.user (only req.organization)
     if (planProvider !== "anthropic") { // Anthropic uses OAuth, doesn't need API key
       try {
         const orgCreds = await getOrgCredentials(org.id);
-        if (planProvider === "openai") planningApiKey = orgCreds.openaiApiKey;
-        else if (planProvider === "google") planningApiKey = orgCreds.googleApiKey;
+        if (planProvider === "openai") {
+          hasPlanningApiKey = !!orgCreds.openaiApiKey;
+          if (isApiKeyAuth) planningApiKey = orgCreds.openaiApiKey;
+        } else if (planProvider === "google") {
+          hasPlanningApiKey = !!orgCreds.googleApiKey;
+          if (isApiKeyAuth) planningApiKey = orgCreds.googleApiKey;
+        }
       } catch { /* credentials not configured */ }
     }
 
@@ -102,7 +110,7 @@ router.get("/", async (req: Request, res: Response) => {
       planningAgentModel: org.planningAgentModel || "",
       planningMode: org.planningMode || "strict",
       storyCalibrationMultiplier: org.storyCalibrationMultiplier ?? 0.4,
-      planningApiKey: planningApiKey || undefined,
+      hasPlanningApiKey,
 
       // Email Settings
       emailFromAddress: org.emailFromAddress,

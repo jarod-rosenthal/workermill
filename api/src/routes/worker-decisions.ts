@@ -17,6 +17,8 @@
 import { Router, type Request, type Response } from "express";
 import { authenticateApiKey } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
+import { AppDataSource } from "../db/connection.js";
+import { WorkerTask } from "../models/index.js";
 import {
   classifyError,
   evaluateQuality,
@@ -62,9 +64,22 @@ router.post("/classify-error", (req: Request, res: Response) => {
  *
  * Evaluate quality metrics against configured thresholds.
  */
-router.post("/evaluate-quality", (req: Request, res: Response) => {
+router.post("/evaluate-quality", async (req: Request, res: Response) => {
   try {
-    const result = evaluateQuality(req.body);
+    let body = req.body;
+
+    // Server-side bypass verification: don't trust the client's bypassRequested flag
+    if (body.bypassRequested && body.taskId) {
+      const task = await AppDataSource.getRepository(WorkerTask).findOneBy({ id: body.taskId });
+      if (!task?.qualityGateBypass) {
+        body = { ...body, bypassRequested: false };
+      }
+    } else if (body.bypassRequested) {
+      // No taskId — can't verify, deny bypass
+      body = { ...body, bypassRequested: false };
+    }
+
+    const result = evaluateQuality(body);
     res.json(result);
   } catch (error) {
     logger.error("evaluate-quality failed", {

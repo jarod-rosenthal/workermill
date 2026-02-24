@@ -462,6 +462,13 @@ router.post("/jira/test", async (req: Request, res: Response) => {
       return;
     }
 
+    // Validate URL to prevent SSRF (matching GitLab/Teams/Slack pattern)
+    const jiraUrlCheck = await validateExternalUrl(`${base_url}/rest/api/3/myself`);
+    if (!jiraUrlCheck.valid) {
+      res.status(400).json({ error: `Invalid Jira URL: ${jiraUrlCheck.reason}` });
+      return;
+    }
+
     // Test connection by fetching current user
     const authHeader = Buffer.from(`${email}:${api_token}`).toString("base64");
     const response = await fetch(`${base_url}/rest/api/3/myself`, {
@@ -1487,8 +1494,8 @@ router.post("/aws/test", async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error("Error testing AWS credentials", { error });
-    const message = error instanceof Error ? error.message : "AWS connection failed";
-    res.status(400).json({ error: message });
+    logger.error("Error testing AWS credentials", { error });
+    res.status(400).json({ error: "AWS connection failed" });
   }
 });
 
@@ -1918,6 +1925,13 @@ router.post("/oncallshift/test", async (req: Request, res: Response) => {
       return;
     }
 
+    // Validate URL to prevent SSRF (matching GitLab/Teams/Slack pattern)
+    const oncallshiftUrlCheck = await validateExternalUrl(`${baseUrl}/api/v1/services`);
+    if (!oncallshiftUrlCheck.valid) {
+      res.status(400).json({ error: `Invalid OnCallShift URL: ${oncallshiftUrlCheck.reason}` });
+      return;
+    }
+
     // Test connection by listing services
     const response = await fetch(`${baseUrl}/api/v1/services`, {
       method: "GET",
@@ -1944,7 +1958,7 @@ router.post("/oncallshift/test", async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error("Error testing OnCallShift connection", { error });
-    res.status(500).json({ error: `Failed to test OnCallShift connection: ${error instanceof Error ? error.message : String(error)}` });
+    res.status(500).json({ error: "Failed to test OnCallShift connection" });
   }
 });
 

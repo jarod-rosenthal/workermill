@@ -63,6 +63,7 @@ export interface EvaluateQualityRequest {
     typeErrors?: boolean;
     testFailures?: boolean;
   };
+  taskId?: string;
   bypassRequested: boolean;
   qualityGateEnabled: boolean;
   thresholds?: {
@@ -719,9 +720,9 @@ export function evaluateQuality(
     return { pass: true, reasons: ["Quality gate disabled"], blockers: [] };
   }
 
-  // If bypass is requested, auto-pass
+  // If bypass is requested (verified server-side by route handler), auto-pass
   if (req.bypassRequested) {
-    return { pass: true, reasons: ["Bypass requested"], blockers: [] };
+    return { pass: true, reasons: ["Quality gate bypass authorized"], blockers: [] };
   }
 
   const thresholds = req.thresholds ?? {};

@@ -47,6 +47,7 @@ export interface Settings {
   taskCooldownSeconds: number;
   defaultWorkerModel: string;
   defaultWorkerPersona: string;
+  aiGuidelines: string | null;
   primaryProvider: string;
   providerRouting: Record<string, ProviderRoutingConfig>;
   ollamaBaseUrl: string | null;

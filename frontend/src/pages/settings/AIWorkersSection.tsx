@@ -102,6 +102,26 @@ export function AIWorkersSection({
         </div>
       ) : (
         <div className="space-y-4">
+          {/* AI Worker Guidelines */}
+          <div className="card p-6 space-y-4">
+            <div>
+              <h3 className="text-base font-semibold text-foreground">AI Worker Guidelines</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Help workers understand your organization's priorities. These guidelines flow into every
+                worker's context and the planning agent.{" "}
+                <span className="text-muted-foreground/70">
+                  For repo-specific guidelines, add an <code className="text-xs bg-muted px-1 rounded">AGENT.md</code> to the repo root.
+                </span>
+              </p>
+            </div>
+            <textarea
+              className="w-full min-h-[160px] resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              placeholder={`What should AI workers always or never do in this codebase?\nWhat does your org prioritize in ambiguous situations?\n\nExample: "Never modify files outside the specified scope. Prefer backward-compatible changes. Mobile is the primary surface — web is secondary."`}
+              value={settings.aiGuidelines ?? ""}
+              onChange={(e) => updateSetting("aiGuidelines", e.target.value || null)}
+            />
+          </div>
+
           {/* Expert Workers */}
           <CollapsibleSection
             title="Expert Workers"

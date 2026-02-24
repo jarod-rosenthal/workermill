@@ -104,18 +104,29 @@ router.get(
         .andWhere("task.claimed_by_agent != :agentId", { agentId })
         .getMany();
 
-      for (const staleTask of staleCandidates) {
-        const claimingAgent = await agentRepo
-          .createQueryBuilder("agent")
-          .where("agent.org_id = :orgId AND agent.agent_id = :claimAgent", {
-            orgId: org.id,
-            claimAgent: staleTask.claimedByAgent,
-          })
-          .getOne();
+      // Batch-fetch all claiming agents in one query (avoids N+1)
+      const claimingAgentIds = [
+        ...new Set(staleCandidates.map((t) => t.claimedByAgent).filter(Boolean)),
+      ];
+      const claimingAgents =
+        claimingAgentIds.length > 0
+          ? await agentRepo
+              .createQueryBuilder("agent")
+              .where("agent.org_id = :orgId", { orgId: org.id })
+              .andWhere("agent.agent_id IN (:...agentIds)", {
+                agentIds: claimingAgentIds,
+              })
+              .getMany()
+          : [];
+      const agentMap = new Map(claimingAgents.map((a) => [a.agentId, a]));
 
-        const isStale = !claimingAgent
-          || claimingAgent.status === "offline"
-          || claimingAgent.lastHeartbeatAt < staleCutoff;
+      for (const staleTask of staleCandidates) {
+        const claimingAgent = agentMap.get(staleTask.claimedByAgent!);
+
+        const isStale =
+          !claimingAgent ||
+          claimingAgent.status === "offline" ||
+          claimingAgent.lastHeartbeatAt < staleCutoff;
 
         if (isStale) {
           await taskRepo
@@ -132,11 +143,15 @@ router.get(
             taskId: staleTask.id,
             previousAgent: staleTask.claimedByAgent,
             agentStatus: claimingAgent?.status ?? "not_found",
-            lastHeartbeat: claimingAgent?.lastHeartbeatAt?.toISOString() ?? "never",
+            lastHeartbeat:
+              claimingAgent?.lastHeartbeatAt?.toISOString() ?? "never",
           });
         }
       }
     }
+
+    // Bail if the request already timed out during stale-claim processing
+    if (req.timedout) return;
 
     // Find tasks in planning or queued status for this org.
     // Exclude tasks with planStatus = "pending_approval" — those are being planned by
@@ -159,6 +174,9 @@ router.get(
       (t) => !t.claimedByAgent || t.claimedByAgent === agentId,
     );
 
+    // Bail if the request timed out during main task query
+    if (req.timedout) return;
+
     // Find manager tasks (log analysis / PR review) for the remote agent
     // These are tasks that would normally be handled by ECS manager spawns
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -176,6 +194,9 @@ router.get(
       .orderBy("task.updated_at", "ASC")
       .limit(3)
       .getMany();
+
+    // Bail if the request timed out during manager task query
+    if (req.timedout) return;
 
     res.json({
       tasks: availableTasks.map((t) => ({

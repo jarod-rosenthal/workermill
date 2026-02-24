@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { redis } from "./redis-client.js";
 
 /**
  * Real-time planning progress events for SSE streaming.
@@ -29,6 +30,15 @@ class PlanningProgressEmitter extends EventEmitter {
     this.setMaxListeners(100);
   }
 
+  public initRedisSubscription(): void {
+    redis.subscribeToChannel("events:planning", (msg) => {
+      const taskId = msg.taskId as string;
+      if (taskId) {
+        super.emit(`planning:${taskId}`, msg);
+      }
+    });
+  }
+
   public static getInstance(): PlanningProgressEmitter {
     if (!PlanningProgressEmitter.instance) {
       PlanningProgressEmitter.instance = new PlanningProgressEmitter();
@@ -38,6 +48,10 @@ class PlanningProgressEmitter extends EventEmitter {
 
   public emitProgress(taskId: string, event: PlanningProgressEvent): void {
     this.emit(`planning:${taskId}`, event);
+    redis.publish(
+      "events:planning",
+      { taskId, ...event } as unknown as Record<string, unknown>,
+    );
   }
 
   public subscribeToProgress(

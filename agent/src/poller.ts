@@ -209,6 +209,9 @@ async function handlePlanningTask(
     console.log(`${ts()} ${chalk.magenta("◆ RESUME")} ${taskLabel} ${task.summary.substring(0, 60)}`);
     console.log(`${ts()} ${taskLabel} Retry #${claimedTask!.retryCount} with existing plan — skipping planning`);
 
+    // Notify VS Code so the task is brought into focus immediately
+    agentEvents.emit("task:planning", { id: task.id, summary: task.summary, description: task.description });
+
     // Tell the API to resume with the existing plan (planning → queued)
     try {
       await api.post("/api/agent/resume-plan", {

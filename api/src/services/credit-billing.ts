@@ -1,8 +1,9 @@
 /**
- * WorkerMill Credit Billing Service
+ * WorkerMill Cloud Compute Billing Service
  *
- * Handles prepaid credit system with 15% fee markup on AI costs.
- * Supports auto-recharge, payment methods, and transaction history.
+ * Handles cloud compute balance: $3/hr billed per-minute.
+ * Supports auto-recharge, payment methods, transaction history,
+ * and welcome credits for Max plan upgrades.
  */
 
 import Stripe from "stripe";
@@ -12,6 +13,7 @@ import {
   CreditTransaction,
   PaymentMethod,
   type CreditTransactionType,
+  PLAN_FEATURES,
 } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
@@ -29,20 +31,20 @@ const stripe = stripeSecretKey
 // =============================================================================
 
 export interface CreditBalance {
-  totalCents: number;
-  freeCreditsRemaining: number;
-  paidCredits: number;
+  balanceCents: number;
+  computeRateCentsPerHour: number;
+  estimatedHoursRemaining: number;
 }
 
-export interface DeductUsageResult {
+export interface DeductComputeUsageResult {
   totalDeducted: number;
-  aiCostCents: number;
-  feeCents: number;
+  durationMinutes: number;
   balanceAfter: number;
   autoRechargeTriggered: boolean;
+  lowBalance: boolean;
 }
 
-export interface CanExecuteTaskResult {
+export interface CanExecuteCloudTaskResult {
   allowed: boolean;
   reason?: string;
   balanceCents: number;
@@ -69,26 +71,28 @@ export async function getBalance(orgId: string): Promise<CreditBalance> {
     throw new Error(`Organization not found: ${orgId}`);
   }
 
-  const freeCredits = org.freeCreditsRemainingCents || 0;
-  const totalBalance = org.creditBalanceCents || 0;
+  const balanceCents = org.creditBalanceCents || 0;
+  const rateCentsPerHour = config.billing.computeRateCentsPerHour;
 
   return {
-    totalCents: totalBalance,
-    freeCreditsRemaining: freeCredits,
-    paidCredits: Math.max(0, totalBalance - freeCredits),
+    balanceCents,
+    computeRateCentsPerHour: rateCentsPerHour,
+    estimatedHoursRemaining:
+      rateCentsPerHour > 0
+        ? Math.floor((balanceCents / rateCentsPerHour) * 100) / 100
+        : 0,
   };
 }
 
 /**
- * Deduct credits when a task completes
- * Uses free credits first, then paid credits
- * Triggers auto-recharge if balance drops below threshold
+ * Deduct compute usage when a cloud task completes.
+ * Cost = ceil(durationMinutes) * ($3/hr / 60) = ceil(minutes) * 5 cents
  */
-export async function deductUsage(
+export async function deductComputeUsage(
   orgId: string,
   taskId: string,
-  aiCostCents: number
-): Promise<DeductUsageResult> {
+  durationMinutes: number,
+): Promise<DeductComputeUsageResult> {
   const orgRepo = AppDataSource.getRepository(Organization);
   const txRepo = AppDataSource.getRepository(CreditTransaction);
 
@@ -97,35 +101,20 @@ export async function deductUsage(
     throw new Error(`Organization not found: ${orgId}`);
   }
 
-  // Calculate fee (15% markup)
-  const feePercent = config.creditBilling.feePercent;
-  const feeCents = Math.ceil(aiCostCents * (feePercent / 100));
-  const totalDeduction = aiCostCents + feeCents;
+  // Round up to nearest minute, compute cost
+  const roundedMinutes = Math.ceil(durationMinutes);
+  const centsPerMinute = config.billing.computeRateCentsPerHour / 60;
+  const totalDeduction = Math.ceil(roundedMinutes * centsPerMinute);
 
-  // Deduct from free credits first
-  let freeCreditsUsed = 0;
-  let paidCreditsUsed = 0;
-
-  if (org.freeCreditsRemainingCents > 0) {
-    freeCreditsUsed = Math.min(org.freeCreditsRemainingCents, totalDeduction);
-    paidCreditsUsed = totalDeduction - freeCreditsUsed;
-    org.freeCreditsRemainingCents -= freeCreditsUsed;
-  } else {
-    paidCreditsUsed = totalDeduction;
-  }
-
-  // Deduct from credit balance atomically
+  // Deduct from credit balance atomically (allow negative — don't kill mid-task workers)
   await orgRepo
     .createQueryBuilder()
     .update(Organization)
     .set({
       creditBalanceCents: () =>
-        `GREATEST(0, "credit_balance_cents" - :deduction)`,
-      freeCreditsRemainingCents: () =>
-        `GREATEST(0, "free_credits_remaining_cents" - :freeUsed)`,
+        `"credit_balance_cents" - :deduction`,
     })
     .setParameter("deduction", totalDeduction)
-    .setParameter("freeUsed", freeCreditsUsed)
     .where("id = :id", { id: org.id })
     .execute();
 
@@ -140,21 +129,21 @@ export async function deductUsage(
     type: "usage" as CreditTransactionType,
     amountCents: -totalDeduction,
     balanceAfterCents: balanceAfter,
-    description: `Task ${taskId} - AI cost + ${feePercent}% fee`,
+    description: `Cloud compute — ${roundedMinutes} min @ $${(config.billing.computeRateCentsPerHour / 100).toFixed(2)}/hr`,
     taskId,
-    aiCostCents,
-    feeCents,
+    metadata: {
+      durationMinutes: roundedMinutes,
+      computeRateCentsPerHour: config.billing.computeRateCentsPerHour,
+    },
   });
   await txRepo.save(transaction);
 
-  logger.info("Credit usage deducted", {
+  logger.info("Compute usage deducted", {
     orgId,
     taskId,
-    aiCostCents,
-    feeCents,
+    durationMinutes: roundedMinutes,
     totalDeduction,
     balanceAfter,
-    freeCreditsUsed,
   });
 
   // Check if auto-recharge should trigger
@@ -176,12 +165,29 @@ export async function deductUsage(
     autoRechargeTriggered = true;
   }
 
+  const lowBalance = balanceAfter < config.billing.minBalanceToLaunchCents;
+
+  // Send email notification when balance hits $0 and auto-recharge is NOT enabled
+  // Only send once per 7-day window (tracked via lastBalanceEmailSentAt)
+  if (balanceAfter <= 0 && !org.autoRechargeEnabled) {
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+    const lastSent = org.lastBalanceEmailSentAt?.getTime() ?? 0;
+    if (Date.now() - lastSent > SEVEN_DAYS_MS) {
+      sendZeroBalanceEmail(orgId).catch((error) => {
+        logger.error("Failed to send zero balance email", {
+          orgId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+  }
+
   return {
     totalDeducted: totalDeduction,
-    aiCostCents,
-    feeCents,
+    durationMinutes: roundedMinutes,
     balanceAfter,
     autoRechargeTriggered,
+    lowBalance,
   };
 }
 
@@ -196,7 +202,7 @@ export async function addCredits(
     description?: string;
     stripePaymentIntentId?: string;
     stripeChargeId?: string;
-  }
+  },
 ): Promise<void> {
   const orgRepo = AppDataSource.getRepository(Organization);
   const txRepo = AppDataSource.getRepository(CreditTransaction);
@@ -206,26 +212,16 @@ export async function addCredits(
     throw new Error(`Organization not found: ${orgId}`);
   }
 
-  // Update balance atomically - increment creditBalanceCents
-  const qb = orgRepo
+  // Update balance atomically
+  await orgRepo
     .createQueryBuilder()
     .update(Organization)
     .set({
       creditBalanceCents: () => `"credit_balance_cents" + :amount`,
     })
     .setParameter("amount", amountCents)
-    .where("id = :id", { id: org.id });
-
-  // If adding bonus/free credits, also increment free credits
-  if (type === "bonus") {
-    qb.set({
-      creditBalanceCents: () => `"credit_balance_cents" + :amount`,
-      freeCreditsRemainingCents: () =>
-        `"free_credits_remaining_cents" + :amount`,
-    });
-  }
-
-  await qb.execute();
+    .where("id = :id", { id: org.id })
+    .execute();
 
   // Unpause billing if it was paused
   if (org.billingPaused) {
@@ -234,6 +230,14 @@ export async function addCredits(
       { billingPaused: false, billingPausedReason: null as unknown as string },
     );
     logger.info("Billing unpaused after credit addition", { orgId });
+  }
+
+  // Clear balance email flag when topped up above threshold
+  if (org.lastBalanceEmailSentAt) {
+    const refreshed = await orgRepo.findOneBy({ id: org.id });
+    if (refreshed && refreshed.creditBalanceCents >= config.billing.minBalanceToLaunchCents) {
+      await orgRepo.update({ id: org.id }, { lastBalanceEmailSentAt: null as unknown as Date });
+    }
   }
 
   // Refresh org to get updated balance
@@ -266,134 +270,10 @@ export async function addCredits(
 // =============================================================================
 
 /**
- * Process initial signup deposit
- * Also adds signup bonus credits
- */
-export async function processSignupDeposit(
-  orgId: string,
-  paymentMethodId: string,
-  amountCents: number
-): Promise<{
-  paymentIntentId: string;
-  requiresAction?: boolean;
-  clientSecret?: string;
-}> {
-  if (!stripe) {
-    throw new Error("Stripe is not configured");
-  }
-
-  const orgRepo = AppDataSource.getRepository(Organization);
-  const org = await orgRepo.findOne({ where: { id: orgId } });
-  if (!org) {
-    throw new Error(`Organization not found: ${orgId}`);
-  }
-
-  // Validate minimum deposit
-  if (amountCents < config.creditBilling.minDepositCents) {
-    throw new Error(
-      `Minimum deposit is $${(config.creditBilling.minDepositCents / 100).toFixed(2)}`
-    );
-  }
-
-  // Get or create Stripe customer
-  let customerId = org.stripeCustomerId;
-  if (!customerId) {
-    const customer = await stripe.customers.create({
-      metadata: { orgId: org.id, orgName: org.name },
-    });
-    customerId = customer.id;
-    await orgRepo.update({ id: org.id }, { stripeCustomerId: customerId });
-    org.stripeCustomerId = customerId;
-  }
-
-  // Attach payment method to customer
-  await stripe.paymentMethods.attach(paymentMethodId, {
-    customer: customerId,
-  });
-
-  // Set as default payment method
-  await stripe.customers.update(customerId, {
-    invoice_settings: { default_payment_method: paymentMethodId },
-  });
-
-  // Create PaymentIntent — allow_redirects: "always" supports 3D Secure (SCA)
-  // which is mandatory for EU/UK card payments.
-  const paymentIntent = await stripe.paymentIntents.create({
-    amount: amountCents,
-    currency: "usd",
-    customer: customerId,
-    payment_method: paymentMethodId,
-    confirm: true,
-    automatic_payment_methods: {
-      enabled: true,
-      allow_redirects: "always",
-    },
-    return_url: `${config.apiBaseUrl || "https://workermill.com"}/billing?payment_status=complete`,
-    metadata: {
-      orgId,
-      type: "signup_deposit",
-    },
-  });
-
-  if (
-    paymentIntent.status === "succeeded" ||
-    paymentIntent.status === "processing"
-  ) {
-    // Save payment method to our database
-    await savePaymentMethod(orgId, paymentMethodId);
-
-    // Add deposit credits
-    await addCredits(orgId, amountCents, "deposit", {
-      description: "Initial signup deposit",
-      stripePaymentIntentId: paymentIntent.id,
-    });
-
-    // Add signup bonus
-    const bonusCents = config.creditBilling.signupBonusCents;
-    if (bonusCents > 0) {
-      await addCredits(orgId, bonusCents, "bonus", {
-        description: "Signup bonus credits",
-      });
-    }
-
-    // Mark signup deposit as completed
-    await orgRepo.update({ id: org.id }, { signupDepositCompleted: true });
-    org.signupDepositCompleted = true;
-
-    logger.info("Signup deposit processed", {
-      orgId,
-      amountCents,
-      bonusCents,
-      paymentIntentId: paymentIntent.id,
-    });
-  } else if (paymentIntent.status === "requires_action") {
-    // 3D Secure / SCA redirect required — return the URL for client to complete
-    logger.info("Signup deposit requires 3DS authentication", {
-      orgId,
-      amountCents,
-      paymentIntentId: paymentIntent.id,
-    });
-
-    // Save payment method ahead of time so it's available after redirect
-    await savePaymentMethod(orgId, paymentMethodId);
-
-    return {
-      paymentIntentId: paymentIntent.id,
-      requiresAction: true,
-      clientSecret: paymentIntent.client_secret || undefined,
-    };
-  } else {
-    throw new Error(`Payment failed with status: ${paymentIntent.status}`);
-  }
-
-  return { paymentIntentId: paymentIntent.id };
-}
-
-/**
  * Process auto-recharge when balance drops below threshold
  */
 export async function processAutoRecharge(
-  orgId: string
+  orgId: string,
 ): Promise<AutoRechargeResult> {
   if (!stripe) {
     return { success: false, error: "Stripe is not configured" };
@@ -499,7 +379,7 @@ export async function retryPayment(orgId: string): Promise<AutoRechargeResult> {
  * Create SetupIntent for adding a new payment method
  */
 export async function createSetupIntent(
-  orgId: string
+  orgId: string,
 ): Promise<{ clientSecret: string }> {
   if (!stripe) {
     throw new Error("Stripe is not configured");
@@ -540,7 +420,7 @@ export async function createSetupIntent(
  */
 export async function savePaymentMethod(
   orgId: string,
-  stripePaymentMethodId: string
+  stripePaymentMethodId: string,
 ): Promise<PaymentMethod> {
   if (!stripe) {
     throw new Error("Stripe is not configured");
@@ -592,7 +472,7 @@ export async function savePaymentMethod(
  * List all payment methods for an organization
  */
 export async function listPaymentMethods(
-  orgId: string
+  orgId: string,
 ): Promise<PaymentMethod[]> {
   const pmRepo = AppDataSource.getRepository(PaymentMethod);
   return pmRepo.find({
@@ -606,7 +486,7 @@ export async function listPaymentMethods(
  */
 export async function deletePaymentMethod(
   orgId: string,
-  paymentMethodId: string
+  paymentMethodId: string,
 ): Promise<void> {
   if (!stripe) {
     throw new Error("Stripe is not configured");
@@ -643,7 +523,7 @@ export async function deletePaymentMethod(
  */
 export async function setDefaultPaymentMethod(
   orgId: string,
-  paymentMethodId: string
+  paymentMethodId: string,
 ): Promise<void> {
   const pmRepo = AppDataSource.getRepository(PaymentMethod);
 
@@ -653,7 +533,7 @@ export async function setDefaultPaymentMethod(
   // Set new default
   const result = await pmRepo.update(
     { id: paymentMethodId, orgId },
-    { isDefault: true }
+    { isDefault: true },
   );
 
   if (result.affected === 0) {
@@ -671,18 +551,33 @@ export async function setDefaultPaymentMethod(
 // =============================================================================
 
 /**
- * Check if organization can execute a task
- * Validates balance and billing status
+ * Check if organization can execute a cloud task.
+ * Pro = local only, Max/Enterprise = cloud allowed with balance check.
  */
-export async function canExecuteTask(
+export async function canExecuteCloudTask(
   orgId: string,
-  estimatedCostCents: number = 0
-): Promise<CanExecuteTaskResult> {
+): Promise<CanExecuteCloudTaskResult> {
   const orgRepo = AppDataSource.getRepository(Organization);
   const org = await orgRepo.findOne({ where: { id: orgId } });
 
   if (!org) {
-    return { allowed: false, reason: "Organization not found", balanceCents: 0 };
+    return {
+      allowed: false,
+      reason: "Organization not found",
+      balanceCents: 0,
+    };
+  }
+
+  // Check if plan supports cloud execution
+  const planFeatures =
+    PLAN_FEATURES[org.plan as keyof typeof PLAN_FEATURES];
+  if (!planFeatures?.cloudExecution) {
+    return {
+      allowed: false,
+      reason:
+        "Cloud execution is not available on your plan. Upgrade to Max to use cloud workers.",
+      balanceCents: org.creditBalanceCents,
+    };
   }
 
   // Check if billing is paused
@@ -694,24 +589,12 @@ export async function canExecuteTask(
     };
   }
 
-  // Check if signup deposit is completed
-  if (!org.signupDepositCompleted) {
+  // Check minimum balance ($5.00 required)
+  const minBalance = config.billing.minBalanceToLaunchCents;
+  if (org.creditBalanceCents < minBalance) {
     return {
       allowed: false,
-      reason: "Please complete your initial deposit to start using workers",
-      balanceCents: org.creditBalanceCents,
-    };
-  }
-
-  // Calculate total with fee
-  const feePercent = config.creditBilling.feePercent;
-  const totalWithFee = estimatedCostCents + Math.ceil(estimatedCostCents * (feePercent / 100));
-
-  // Check if balance is sufficient (with some buffer)
-  if (org.creditBalanceCents < totalWithFee) {
-    return {
-      allowed: false,
-      reason: `Insufficient balance. Current: $${(org.creditBalanceCents / 100).toFixed(2)}, Required: $${(totalWithFee / 100).toFixed(2)}`,
+      reason: `Insufficient cloud balance. You need at least $${(minBalance / 100).toFixed(2)} to start a cloud task. Current balance: $${(org.creditBalanceCents / 100).toFixed(2)}. Add funds at /billing.`,
       balanceCents: org.creditBalanceCents,
     };
   }
@@ -737,7 +620,7 @@ export async function getTransactionHistory(
     type?: CreditTransactionType;
     startDate?: Date;
     endDate?: Date;
-  } = {}
+  } = {},
 ): Promise<{ transactions: CreditTransaction[]; total: number }> {
   const txRepo = AppDataSource.getRepository(CreditTransaction);
 
@@ -777,11 +660,11 @@ export async function getTransactionHistory(
 }
 
 /**
- * Get this month's usage summary
+ * Get this month's compute usage summary
  */
 export async function getMonthlyUsage(orgId: string): Promise<{
-  aiCostCents: number;
-  feeCents: number;
+  computeCostCents: number;
+  totalMinutes: number;
   taskCount: number;
 }> {
   const txRepo = AppDataSource.getRepository(CreditTransaction);
@@ -792,17 +675,33 @@ export async function getMonthlyUsage(orgId: string): Promise<{
 
   const result = await txRepo
     .createQueryBuilder("tx")
-    .select("SUM(ABS(tx.ai_cost_cents))", "aiCostCents")
-    .addSelect("SUM(ABS(tx.fee_cents))", "feeCents")
+    .select("SUM(ABS(tx.amount_cents))", "computeCostCents")
     .addSelect("COUNT(tx.id)", "taskCount")
     .where("tx.org_id = :orgId", { orgId })
     .andWhere("tx.type = :type", { type: "usage" })
     .andWhere("tx.created_at >= :startOfMonth", { startOfMonth })
     .getRawOne();
 
+  // Sum up duration minutes from metadata
+  const txsWithMetadata = await txRepo
+    .createQueryBuilder("tx")
+    .select("tx.metadata")
+    .where("tx.org_id = :orgId", { orgId })
+    .andWhere("tx.type = :type", { type: "usage" })
+    .andWhere("tx.created_at >= :startOfMonth", { startOfMonth })
+    .getMany();
+
+  let totalMinutes = 0;
+  for (const tx of txsWithMetadata) {
+    const meta = tx.metadata as Record<string, unknown> | null;
+    if (meta?.durationMinutes) {
+      totalMinutes += meta.durationMinutes as number;
+    }
+  }
+
   return {
-    aiCostCents: parseInt(result?.aiCostCents || "0", 10),
-    feeCents: parseInt(result?.feeCents || "0", 10),
+    computeCostCents: parseInt(result?.computeCostCents || "0", 10),
+    totalMinutes,
     taskCount: parseInt(result?.taskCount || "0", 10),
   };
 }
@@ -842,7 +741,7 @@ export async function updateAutoRechargeSettings(
     enabled?: boolean;
     thresholdCents?: number;
     amountCents?: number;
-  }
+  },
 ): Promise<void> {
   const orgRepo = AppDataSource.getRepository(Organization);
   const org = await orgRepo.findOne({ where: { id: orgId } });
@@ -875,6 +774,141 @@ export async function updateAutoRechargeSettings(
 }
 
 // =============================================================================
+// Manual Top-Up (Deposit)
+// =============================================================================
+
+/**
+ * Process manual top-up (add funds)
+ */
+export async function processDeposit(
+  orgId: string,
+  paymentMethodId: string,
+  amountCents: number,
+): Promise<{
+  paymentIntentId: string;
+  requiresAction?: boolean;
+  clientSecret?: string;
+}> {
+  if (!stripe) {
+    throw new Error("Stripe is not configured");
+  }
+
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+  if (!org) {
+    throw new Error(`Organization not found: ${orgId}`);
+  }
+
+  // Validate minimum top-up
+  if (amountCents < config.billing.minTopUpCents) {
+    throw new Error(
+      `Minimum top-up is $${(config.billing.minTopUpCents / 100).toFixed(2)}`,
+    );
+  }
+
+  if (!org.stripeCustomerId) {
+    throw new Error("No Stripe customer — subscribe to a plan first");
+  }
+
+  // Create PaymentIntent
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount: amountCents,
+    currency: "usd",
+    customer: org.stripeCustomerId,
+    payment_method: paymentMethodId,
+    confirm: true,
+    off_session: true,
+    metadata: {
+      orgId,
+      type: "manual_deposit",
+    },
+  });
+
+  if (paymentIntent.status === "requires_action") {
+    return {
+      paymentIntentId: paymentIntent.id,
+      requiresAction: true,
+      clientSecret: paymentIntent.client_secret ?? undefined,
+    };
+  }
+
+  if (paymentIntent.status === "succeeded") {
+    // Add credits
+    await addCredits(orgId, amountCents, "deposit", {
+      description: "Manual top-up",
+      stripePaymentIntentId: paymentIntent.id,
+    });
+
+    logger.info("Manual top-up processed", {
+      orgId,
+      amountCents,
+      paymentIntentId: paymentIntent.id,
+    });
+
+    return { paymentIntentId: paymentIntent.id };
+  } else {
+    throw new Error(`Payment failed with status: ${paymentIntent.status}`);
+  }
+}
+
+// =============================================================================
+// Low Balance Email Notification
+// =============================================================================
+
+/**
+ * Send a zero-balance email to org admins when balance hits $0
+ * and auto-recharge is not enabled.
+ * Updates lastBalanceEmailSentAt to prevent repeat sends within 7 days.
+ */
+async function sendZeroBalanceEmail(orgId: string): Promise<void> {
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+  if (!org) return;
+
+  // Import UserOrganization dynamically to avoid circular deps
+  const { UserOrganization } = await import("../models/UserOrganization.js");
+  const { In } = await import("typeorm");
+  const { sendLowBalanceEmail } = await import("./email/billing-emails.js");
+
+  const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+  const adminMemberships = await userOrgRepo.find({
+    where: {
+      orgId,
+      role: In(["admin", "owner"]),
+    },
+    relations: ["user"],
+  });
+
+  for (const membership of adminMemberships) {
+    const user = membership.user;
+    if (!user?.email) continue;
+
+    await sendLowBalanceEmail(user, org, org.creditBalanceCents, 0).catch(
+      (emailError) => {
+        logger.error("Failed to send zero balance email to admin", {
+          orgId,
+          userId: user.id,
+          error: emailError instanceof Error ? emailError.message : String(emailError),
+        });
+      },
+    );
+  }
+
+  // Mark email as sent to prevent repeats
+  await orgRepo
+    .createQueryBuilder()
+    .update(Organization)
+    .set({ lastBalanceEmailSentAt: new Date() })
+    .where("id = :id", { id: orgId })
+    .execute();
+
+  logger.info("Zero balance email sent to org admins", {
+    orgId,
+    adminCount: adminMemberships.length,
+  });
+}
+
+// =============================================================================
 // Webhook Handlers
 // =============================================================================
 
@@ -882,27 +916,17 @@ export async function updateAutoRechargeSettings(
  * Handle payment_intent.succeeded webhook
  * Adds credits for manual deposits or auto-recharge
  */
-export async function handlePaymentIntentSucceeded(
-  paymentIntent: {
-    id: string;
-    amount: number;
-    metadata?: { orgId?: string; type?: string };
-    charges?: { data: Array<{ id: string }> };
-  }
-): Promise<void> {
+export async function handlePaymentIntentSucceeded(paymentIntent: {
+  id: string;
+  amount: number;
+  metadata?: { orgId?: string; type?: string };
+  charges?: { data: Array<{ id: string }> };
+}): Promise<void> {
   const orgId = paymentIntent.metadata?.orgId;
   const type = paymentIntent.metadata?.type;
 
   if (!orgId) {
     logger.warn("Payment intent succeeded without orgId", {
-      paymentIntentId: paymentIntent.id,
-    });
-    return;
-  }
-
-  // Skip if this is a signup deposit (already handled in processSignupDeposit)
-  if (type === "signup_deposit") {
-    logger.debug("Skipping payment_intent.succeeded for signup_deposit", {
       paymentIntentId: paymentIntent.id,
     });
     return;
@@ -950,13 +974,11 @@ export async function handlePaymentIntentSucceeded(
  * Handle payment_intent.payment_failed webhook
  * Pauses billing if this was an auto-recharge attempt
  */
-export async function handlePaymentIntentFailed(
-  paymentIntent: {
-    id: string;
-    metadata?: { orgId?: string; type?: string };
-    last_payment_error?: { message?: string };
-  }
-): Promise<void> {
+export async function handlePaymentIntentFailed(paymentIntent: {
+  id: string;
+  metadata?: { orgId?: string; type?: string };
+  last_payment_error?: { message?: string };
+}): Promise<void> {
   const orgId = paymentIntent.metadata?.orgId;
   const type = paymentIntent.metadata?.type;
 
@@ -994,13 +1016,11 @@ export async function handlePaymentIntentFailed(
  * Handle setup_intent.succeeded webhook
  * Saves the payment method to the database
  */
-export async function handleSetupIntentSucceeded(
-  setupIntent: {
-    id: string;
-    metadata?: { orgId?: string };
-    payment_method?: string;
-  }
-): Promise<void> {
+export async function handleSetupIntentSucceeded(setupIntent: {
+  id: string;
+  metadata?: { orgId?: string };
+  payment_method?: string;
+}): Promise<void> {
   const orgId = setupIntent.metadata?.orgId;
   const paymentMethodId = setupIntent.payment_method;
 
@@ -1032,11 +1052,9 @@ export async function handleSetupIntentSucceeded(
  * Handle payment_method.detached webhook
  * Removes the payment method from our database
  */
-export async function handlePaymentMethodDetached(
-  paymentMethod: {
-    id: string;
-  }
-): Promise<void> {
+export async function handlePaymentMethodDetached(paymentMethod: {
+  id: string;
+}): Promise<void> {
   const pmRepo = AppDataSource.getRepository(PaymentMethod);
 
   const pm = await pmRepo.findOne({
@@ -1056,14 +1074,12 @@ export async function handlePaymentMethodDetached(
  * Handle charge.refunded webhook
  * Creates a refund transaction and deducts credits
  */
-export async function handleChargeRefunded(
-  charge: {
-    id: string;
-    amount_refunded: number;
-    payment_intent?: string;
-    metadata?: { orgId?: string };
-  }
-): Promise<void> {
+export async function handleChargeRefunded(charge: {
+  id: string;
+  amount_refunded: number;
+  payment_intent?: string;
+  metadata?: { orgId?: string };
+}): Promise<void> {
   // Try to find the org from charge metadata or via payment intent
   let orgId = charge.metadata?.orgId;
 
@@ -1129,66 +1145,4 @@ export async function handleChargeRefunded(
     balanceAfter,
     chargeId: charge.id,
   });
-}
-
-/**
- * Process manual deposit (add credits)
- */
-export async function processDeposit(
-  orgId: string,
-  paymentMethodId: string,
-  amountCents: number
-): Promise<{ paymentIntentId: string }> {
-  if (!stripe) {
-    throw new Error("Stripe is not configured");
-  }
-
-  const orgRepo = AppDataSource.getRepository(Organization);
-  const org = await orgRepo.findOne({ where: { id: orgId } });
-  if (!org) {
-    throw new Error(`Organization not found: ${orgId}`);
-  }
-
-  // Validate minimum deposit
-  if (amountCents < config.creditBilling.minDepositCents) {
-    throw new Error(
-      `Minimum deposit is $${(config.creditBilling.minDepositCents / 100).toFixed(2)}`
-    );
-  }
-
-  if (!org.stripeCustomerId) {
-    throw new Error("No Stripe customer - complete signup deposit first");
-  }
-
-  // Create PaymentIntent
-  const paymentIntent = await stripe.paymentIntents.create({
-    amount: amountCents,
-    currency: "usd",
-    customer: org.stripeCustomerId,
-    payment_method: paymentMethodId,
-    confirm: true,
-    off_session: true,
-    metadata: {
-      orgId,
-      type: "manual_deposit",
-    },
-  });
-
-  if (paymentIntent.status === "succeeded") {
-    // Add credits
-    await addCredits(orgId, amountCents, "deposit", {
-      description: "Manual deposit",
-      stripePaymentIntentId: paymentIntent.id,
-    });
-
-    logger.info("Manual deposit processed", {
-      orgId,
-      amountCents,
-      paymentIntentId: paymentIntent.id,
-    });
-
-    return { paymentIntentId: paymentIntent.id };
-  } else {
-    throw new Error(`Payment failed with status: ${paymentIntent.status}`);
-  }
 }

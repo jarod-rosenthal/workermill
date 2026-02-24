@@ -145,13 +145,12 @@ export const config = {
     },
   },
 
-  // Credit-Based Billing
-  creditBilling: {
-    feePercent: parseInt(process.env.WORKERMILL_FEE_PERCENT || "15", 10),
-    minDepositCents: parseInt(process.env.MIN_DEPOSIT_CENTS || "1000", 10),
-    signupBonusCents: parseInt(process.env.SIGNUP_BONUS_CENTS || "1000", 10),
-    defaultRechargeThresholdCents: 1000, // $10
-    defaultRechargeAmountCents: 5000, // $50
+  // Cloud Compute Billing
+  billing: {
+    computeRateCentsPerHour: parseInt(process.env.COMPUTE_RATE_CENTS_PER_HOUR || "300", 10), // $3/hr
+    minTopUpCents: parseInt(process.env.MIN_TOP_UP_CENTS || "500", 10), // $5 minimum top-up
+    minBalanceToLaunchCents: 500, // $5 minimum balance to start a cloud task
+    welcomeCreditCents: 1000, // $10 one-time welcome credit for Max
   },
 
   // Encryption at rest for sensitive fields (Organization tokens, webhook secrets)

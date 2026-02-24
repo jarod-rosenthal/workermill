@@ -452,6 +452,12 @@ export class Organization {
   @Column({ name: "signup_deposit_completed", type: "boolean", default: false })
   signupDepositCompleted: boolean;
 
+  @Column({ name: "welcome_credit_applied", type: "boolean", default: false })
+  welcomeCreditApplied: boolean;
+
+  @Column({ name: "last_balance_email_sent_at", type: "timestamp", nullable: true })
+  lastBalanceEmailSentAt: Date | null;
+
   // Warm Container Pool Settings
   @Column({ name: "warm_pool_size", type: "int", default: 0 })
   warmPoolSize: number;

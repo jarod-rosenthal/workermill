@@ -50,6 +50,12 @@ You have access to these tools:
 - **Glob**: Find files by pattern
 - **Grep**: Search file contents
 
+***REMOVED******REMOVED*** Organization Guidelines
+
+If the following org-level guidelines were provided, flag any code that violates them — even if the implementation is otherwise technically correct:
+
+{{ORG_GUIDELINES}}
+
 ***REMOVED******REMOVED*** Code Review Standards
 
 ***REMOVED******REMOVED******REMOVED*** APPROVE when:

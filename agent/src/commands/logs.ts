@@ -40,8 +40,11 @@ export async function logsCommand(options: { lines?: string }): Promise<void> {
   watchFile(logFile, { interval: 500 }, () => {
     try {
       const currentSize = statSync(logFile).size;
+      if (currentSize < lastSize) {
+        // File was rotated — reset to read from beginning of new file
+        lastSize = 0;
+      }
       if (currentSize <= lastSize) {
-        lastSize = currentSize;
         return;
       }
 
@@ -53,7 +56,8 @@ export async function logsCommand(options: { lines?: string }): Promise<void> {
       process.stdout.write(buffer.toString());
       lastSize = currentSize;
     } catch {
-      // File may have been rotated
+      // File may have been deleted during rotation — reset
+      lastSize = 0;
     }
   });
 

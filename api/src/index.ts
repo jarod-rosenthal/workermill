@@ -374,6 +374,19 @@ async function start() {
     // Connect Redis for coordination pub/sub (optional — falls back to DB polling)
     if (config.redisUrl) {
       redis.connect(config.redisUrl);
+
+      // Initialize cross-instance event bridging
+      const { costEvents } = await import("./services/cost-events.js");
+      const { planningProgressEmitter } = await import("./services/planning-progress-events.js");
+      const { codeEventEmitter } = await import("./services/code-events.js");
+      const { initCredentialCacheSubscription } = await import("./services/org-credentials.js");
+
+      costEvents.initRedisSubscription();
+      planningProgressEmitter.initRedisSubscription();
+      codeEventEmitter.initRedisSubscription();
+      initCredentialCacheSubscription();
+
+      logger.info("Redis event bridging initialized");
     } else {
       logger.info("Redis not configured — SSE will use DB polling fallback");
     }

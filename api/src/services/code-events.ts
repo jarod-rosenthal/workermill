@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { redis } from "./redis-client.js";
 
 /**
  * Real-time code events for SSE streaming (Live Code Viewer).
@@ -24,6 +25,15 @@ class CodeEventEmitter extends EventEmitter {
     this.setMaxListeners(100);
   }
 
+  public initRedisSubscription(): void {
+    redis.subscribeToChannel("events:code", (msg) => {
+      const taskId = msg.taskId as string;
+      if (taskId) {
+        super.emit(`code:${taskId}`, msg);
+      }
+    });
+  }
+
   public static getInstance(): CodeEventEmitter {
     if (!CodeEventEmitter.instance) {
       CodeEventEmitter.instance = new CodeEventEmitter();
@@ -33,6 +43,10 @@ class CodeEventEmitter extends EventEmitter {
 
   public emitCodeEvent(taskId: string, event: CodeEvent): void {
     this.emit(`code:${taskId}`, event);
+    redis.publish(
+      "events:code",
+      event as unknown as Record<string, unknown>,
+    );
   }
 
   public subscribeToCodeEvents(

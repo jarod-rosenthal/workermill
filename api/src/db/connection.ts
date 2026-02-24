@@ -270,17 +270,25 @@ export const AppDataSource = new DataSource({
   username: config.database.url ? undefined : config.database.username,
   password: config.database.url ? undefined : config.database.password,
   database: config.database.url ? undefined : config.database.name,
-  // Connection pool configuration for db.t4g.micro (~22 max connections).
-  // Pool set to 10 to leave headroom for direct connections (bastion/psql),
-  // rolling deploys (brief overlap of old + new task), and monitoring.
-  // WARNING: The remote agent planner batches log POSTs sequentially to avoid
-  // saturating this pool — see agent/src/planner.ts logQueue. Do not raise
-  // this limit without also raising the RDS instance class.
+  // Connection pool configuration.
+  // DB_POOL_MAX: configurable pool size (default 10 for local, 20 for API, 15 for orchestrator)
+  // PGBOUNCER_HOST: when set, connects to PgBouncer sidecar instead of RDS directly.
+  // PgBouncer multiplexes app-level pool onto fewer real RDS connections.
+  // PgBouncer sidecar: override host when PGBOUNCER_HOST is set
+  ...(process.env.PGBOUNCER_HOST
+    ? {
+        host: process.env.PGBOUNCER_HOST,
+        port: parseInt(process.env.PGBOUNCER_PORT || "5432", 10),
+        url: undefined, // Override DATABASE_URL host
+      }
+    : {}),
   extra: {
-    max: 10, // Maximum connections in pool (reduced from 15 to prevent pool exhaustion)
-    min: 1, // Minimum connections to maintain (low to ease rolling deploy overlap)
-    idleTimeoutMillis: 30000, // Close idle connections after 30s
-    connectionTimeoutMillis: 15000, // Timeout for acquiring connection
+    max: parseInt(process.env.DB_POOL_MAX || "10", 10),
+    min: 1,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 15000,
+    // PgBouncer transaction pooling requires disabling prepared statements
+    ...(process.env.PGBOUNCER_HOST ? { prepareStatements: false } : {}),
   },
   entities: [
     Organization,
@@ -570,7 +578,7 @@ let poolMonitorInterval: ReturnType<typeof setInterval> | null = null;
  * Uses the underlying pg Pool stats (totalCount, idleCount, waitingCount).
  */
 function startPoolMonitor(): void {
-  const POOL_MAX = 10;
+  const POOL_MAX = parseInt(process.env.DB_POOL_MAX || "10", 10);
   const WARN_THRESHOLD = 0.8; // 80%
   const CHECK_INTERVAL_MS = 30_000; // every 30s
 

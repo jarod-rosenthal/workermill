@@ -360,6 +360,7 @@ router.put(
  */
 router.post(
   "/budget-override",
+  requireAdmin,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const org = req.organization!;
@@ -419,6 +420,7 @@ router.post(
  */
 router.delete(
   "/budget-override",
+  requireAdmin,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const org = req.organization!;

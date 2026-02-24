@@ -36,6 +36,7 @@ import {
   trackOperation,
   type OrchestratorState,
 } from "./orchestrator-utils.js";
+import { redis } from "./redis-client.js";
 
 // Timestamp for hourly trial reminder checks
 let lastTrialReminderCheck = 0;
@@ -48,6 +49,9 @@ async function pollLoop(): Promise<void> {
   while (state.running) {
     try {
       state.lastPollAt = new Date();
+
+      // Write heartbeat to Redis — API instances read this to report status
+      redis.set("orchestrator:heartbeat", new Date().toISOString(), 30).catch(() => {});
 
       // Process queued tasks (spawn workers)
       const tasks = await findQueuedTasks();

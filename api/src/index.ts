@@ -87,6 +87,7 @@ import {
 import { startOrchestrator, stopOrchestrator } from "./services/orchestrator.js";
 import { redis } from "./services/redis-client.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
+import { poolHealthMiddleware } from "./middleware/pool-health.js";
 import { seedDirectivesIfMissing } from "./db/seed-directives-startup.js";
 import { initializeEncryption } from "./utils/encryption.js";
 
@@ -138,6 +139,9 @@ app.use(
 
 // Apply timeout check after security middleware
 app.use(haltOnTimedout);
+
+// Pool health gating — 503 when pool exhausted (before routes)
+app.use(poolHealthMiddleware);
 
 // Stripe webhook needs raw body - must be before json body parser
 app.post(

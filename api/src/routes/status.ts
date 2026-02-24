@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { AppDataSource } from "../db/connection.js";
-import { isOrchestratorRunning } from "../services/orchestrator.js";
+import { redis } from "../services/redis-client.js";
 
 const router = Router();
 
@@ -70,7 +70,18 @@ router.get("/", async (_req: Request, res: Response) => {
   }
 
   // Task processing (orchestrator) status
-  const orchestratorRunning = isOrchestratorRunning();
+  // Task processing: check orchestrator heartbeat from Redis
+  // Falls back to "degraded" if Redis is unavailable or heartbeat is stale
+  let orchestratorRunning = false;
+  try {
+    const heartbeat = await redis.get("orchestrator:heartbeat");
+    if (heartbeat) {
+      const heartbeatAge = Date.now() - new Date(heartbeat).getTime();
+      orchestratorRunning = heartbeatAge < 30_000; // Stale if >30s
+    }
+  } catch {
+    // Redis unavailable — can't determine orchestrator status
+  }
   const taskProcessingHealth: ServiceHealth = {
     name: "Task Processing",
     status: orchestratorRunning ? "operational" : "degraded",

@@ -148,9 +148,9 @@ export function activate(context: vscode.ExtensionContext): void {
         currentFeedTaskId = info.id;
         currentFeedTaskStatus = "planning";
       }
-      // Open log terminal early so user sees planning output
-      logManager.openLogs(info.id, info.summary);
+      // Focus feed first, then open terminal last so terminal gets final focus
       vscode.commands.executeCommand("workermill.feedPanel.focus");
+      logManager.openLogs(info.id, info.summary);
     },
   );
 
@@ -158,27 +158,19 @@ export function activate(context: vscode.ExtensionContext): void {
   client.on(
     "task:started",
     (info: { id: string; summary: string; description?: string; persona?: string; model?: string; repo?: string }) => {
-      if (
-        !currentFeedTaskId ||
-        currentFeedTaskStatus === "completed" ||
-        currentFeedTaskStatus === "pr_approved" ||
-        currentFeedTaskStatus === "failed" ||
-        currentFeedTaskStatus === "escalated" ||
-        currentFeedTaskStatus === "planning"
-      ) {
-        const taskInfo: TaskInfo = {
-          ...info,
-          status: "running",
-          startedAt: new Date().toISOString(),
-        };
-        feedView.showTask(taskInfo);
-        currentFeedTaskId = info.id;
-        currentFeedTaskStatus = "running";
-      }
-      // Auto-open log terminal for new task
-      logManager.openLogs(info.id, info.summary);
-      // Bring activity feed into focus so user sees expert collaboration
+      // Always switch to the new task — the previous one is done or this is more important
+      const taskInfo: TaskInfo = {
+        ...info,
+        status: "running",
+        startedAt: new Date().toISOString(),
+      };
+      feedView.showTask(taskInfo);
+      currentFeedTaskId = info.id;
+      currentFeedTaskStatus = "running";
+
+      // Focus feed first, then open terminal last so terminal gets final focus
       vscode.commands.executeCommand("workermill.feedPanel.focus");
+      logManager.openLogs(info.id, info.summary);
     },
   );
 

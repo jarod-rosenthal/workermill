@@ -13,6 +13,32 @@ import {
   fetchEpicProgressForTask,
 } from "./helpers.js";
 
+/**
+ * Simple concurrency limiter for DB queries.
+ * Limits how many tasks are fetched in parallel to prevent pool exhaustion.
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  let index = 0;
+
+  async function worker(): Promise<void> {
+    while (index < items.length) {
+      const i = index++;
+      results[i] = await fn(items[i]);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () =>
+    worker(),
+  );
+  await Promise.all(workers);
+  return results;
+}
+
 const router = Router();
 
 /**
@@ -156,16 +182,26 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
         }
       }
 
-      // Fetch Ralph progress, checkpoint data, and Epic progress for running tasks in parallel
-      const runningTasks = await Promise.all(
-        filteredRunningTasks.map(async (task) => {
+      // Fetch Ralph progress, checkpoint data, and Epic progress
+      // Limit concurrency to 3 tasks at a time to prevent pool exhaustion
+      const runningTasks = await mapWithConcurrency(
+        filteredRunningTasks,
+        3,
+        async (task) => {
           const [ralphData, checkpointData, epicProgressData] = await Promise.all([
             fetchRalphProgressForTask(task.id),
             fetchCheckpointForTask(task.id),
             fetchEpicProgressForTask(task),
           ]);
-          return formatTaskData(task, ralphData, checkpointData, epicProgressData || undefined, freshOrg.maxReviewRevisions, cardContextMap.get(task.id) ?? null);
-        })
+          return formatTaskData(
+            task,
+            ralphData,
+            checkpointData,
+            epicProgressData || undefined,
+            freshOrg.maxReviewRevisions,
+            cardContextMap.get(task.id) ?? null,
+          );
+        },
       );
 
       const queuedTasks = displayableTasks

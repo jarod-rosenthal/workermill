@@ -19,7 +19,7 @@ function userOrgKey(req: any): string {
  * Create a Redis-backed store for rate limiting if REDIS_URL is configured.
  * Falls back to the default in-memory store otherwise.
  */
-function createStore(): Partial<Pick<Options, "store">> {
+export function createStore(): Partial<Pick<Options, "store">> {
   if (!config.redisUrl) {
     return {};
   }

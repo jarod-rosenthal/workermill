@@ -20,7 +20,6 @@ const envLocalPaths = [
 ];
 for (const envPath of envLocalPaths) {
   if (existsSync(envPath)) {
-    console.log(`[Config] Loading environment from: ${envPath}`);
     dotenvConfig({ path: envPath });
     break;
   }
@@ -88,7 +87,7 @@ export const config = {
 
   // S3 (worker state checkpoints)
   s3: {
-    checkpointBucket: process.env.CHECKPOINT_BUCKET || `workermill-dev-worker-state-AWS_ACCOUNT_ID`,
+    checkpointBucket: process.env.CHECKPOINT_BUCKET || "",
   },
 
   // Database

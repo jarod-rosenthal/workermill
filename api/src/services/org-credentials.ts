@@ -147,7 +147,8 @@ export async function getManagerGitHubToken(): Promise<string> {
       return "";
     }
     return (await getOrgSecretFromDb(platformOrg.id, "manager-github-token")) || "";
-  } catch {
+  } catch (error) {
+    logger.error("Failed to fetch manager GitHub token", { error: error instanceof Error ? error.message : String(error) });
     return "";
   }
 }
@@ -298,7 +299,7 @@ export async function getOrgCredentials(
       anthropicApiKey: anthropicKey || "",
       githubToken:
         scmProvider === "github" ? scmToken || undefined : undefined,
-      orgApiKey: org.apiKey || undefined,
+      orgApiKey: undefined, // Plaintext api_key column deprecated — workers use PLATFORM_API_KEY from Secrets Manager
       jiraBaseUrl,
       jiraEmail: jiraCredentials.email,
       jiraApiToken: jiraCredentials.api_token,

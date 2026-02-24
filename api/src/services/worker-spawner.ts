@@ -205,7 +205,7 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
         // Resolve API key from org
         const orgRepo = AppDataSource.getRepository(Organization);
         const org = await orgRepo.findOne({ where: { id: task.orgId } });
-        const apiKey = org?.apiKey || process.env.ORG_API_KEY || "local-dev";
+        const apiKey = process.env.ORG_API_KEY || process.env.PLATFORM_API_KEY || "local-dev";
         const port = process.env.PORT || 3001;
         const apiBaseUrl = `http://localhost:${port}`;
 

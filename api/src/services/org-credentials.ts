@@ -15,6 +15,7 @@ import { Organization } from "../models/index.js";
 import { getProviderCredentials } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { getOrgSecretFromDb } from "../utils/org-secret-store.js";
+import { redis } from "./redis-client.js";
 import type { ProviderId } from "../providers/types.js";
 
 export interface OrgCredentials {
@@ -82,6 +83,23 @@ export function invalidateOrgCredentialsCache(orgId: string): void {
   if (deletedCreds || deletedReviewer) {
     logger.info("Invalidated credentials cache for org", { orgId });
   }
+  // Broadcast to other instances
+  redis.publish("cache-invalidate:org-credentials", { orgId });
+}
+
+/**
+ * Subscribe to credential cache invalidation from other instances.
+ * Call once after Redis connects.
+ */
+export function initCredentialCacheSubscription(): void {
+  redis.subscribeToChannel("cache-invalidate:org-credentials", (msg) => {
+    const orgId = msg.orgId as string;
+    if (orgId) {
+      credentialsCache.delete(orgId);
+      reviewerTokenCache.delete(orgId);
+      logger.debug("Credential cache invalidated via Redis", { orgId });
+    }
+  });
 }
 
 /**

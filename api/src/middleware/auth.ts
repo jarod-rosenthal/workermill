@@ -433,7 +433,8 @@ export async function authenticateSSE(
       // Fall through to normal auth if local user not found
     }
 
-    // Try header first, then query param
+    // Try JWT first (Bearer header or query param), then fall back to API key.
+    // Dashboard uses JWT; workers use x-api-key.
     let token = "";
     const authHeader = req.headers.authorization;
 
@@ -443,12 +444,50 @@ export async function authenticateSSE(
       token = req.query.token;
     }
 
+    // --- API key fallback (workers send x-api-key, not JWT) ---
     if (!token) {
-      res.status(401).json({ error: "Missing authentication token" });
+      const apiKey = req.headers["x-api-key"] as string;
+      if (apiKey) {
+        const orgRepo = AppDataSource.getRepository(Organization);
+        const orgKeyPrefix = apiKey.substring(0, 12);
+        const orgs = await orgRepo.find({ where: { apiKeyPrefix: orgKeyPrefix } });
+
+        for (const org of orgs) {
+          if (org.apiKeyHash && (await bcrypt.compare(apiKey, org.apiKeyHash))) {
+            req.organization = org;
+            next();
+            return;
+          }
+        }
+
+        // Try user API key (usr_... prefix)
+        if (apiKey.startsWith("usr_")) {
+          const keyPrefix = apiKey.substring(0, 12);
+          const userApiKeyRepo = AppDataSource.getRepository(UserApiKey);
+          const userApiKey = await userApiKeyRepo.findOne({ where: { keyPrefix } });
+
+          if (userApiKey) {
+            const isValid = await bcrypt.compare(apiKey, userApiKey.keyHash);
+            if (isValid && (!userApiKey.expiresAt || userApiKey.expiresAt >= new Date())) {
+              const org = await orgRepo.findOneBy({ id: userApiKey.orgId });
+              if (org) {
+                req.organization = org;
+                next();
+                return;
+              }
+            }
+          }
+        }
+
+        res.status(401).json({ error: "Invalid API key" });
+        return;
+      }
+
+      res.status(401).json({ error: "Missing authentication token or API key" });
       return;
     }
 
-    // Verify JWT with Cognito
+    // --- JWT path (dashboard) ---
     const payload = await verifier.verify(token);
 
     req.cognitoUser = {
@@ -493,6 +532,7 @@ export async function authenticateSSE(
       errorMessage,
       errorName,
       hasToken: !!req.query.token,
+      hasApiKey: !!req.headers["x-api-key"],
       tokenLength: typeof req.query.token === "string" ? req.query.token.length : 0
     });
     res.status(401).json({ error: "Invalid or expired token" });

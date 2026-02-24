@@ -254,6 +254,7 @@ import { AddMarketingAgent1740400000000 } from "./migrations/1740400000000-AddMa
 import { CreateOrgCredentials1740500000000 } from "./migrations/1740500000000-CreateOrgCredentials.js";
 import { MigrateSecretsManagerToDb1740500000001 } from "./migrations/1740500000001-MigrateSecretsManagerToDb.js";
 import { AddPollPerformanceIndexes1740600000000 } from "./migrations/1740600000000-AddPollPerformanceIndexes.js";
+import { AddCoordinationAndStreamIndexes1740700000000 } from "./migrations/1740700000000-AddCoordinationAndStreamIndexes.js";
 import { logger } from "../utils/logger.js";
 import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
@@ -533,6 +534,7 @@ export const AppDataSource = new DataSource({
     CreateOrgCredentials1740500000000,
     MigrateSecretsManagerToDb1740500000001,
     AddPollPerformanceIndexes1740600000000,
+    AddCoordinationAndStreamIndexes1740700000000,
   ],
   subscribers: [
     OrganizationEncryptionSubscriber,

@@ -424,6 +424,16 @@ process.on("unhandledRejection", (reason, promise) => {
 
 // Handle uncaught exceptions - these are more serious and require exit
 process.on("uncaughtException", (error) => {
+  // ERR_HTTP_HEADERS_SENT is benign — connect-timeout already replied, then
+  // a route handler tried to respond again.  The client got their response;
+  // the process state is fine.  Log it and keep running.
+  if ((error as NodeJS.ErrnoException).code === "ERR_HTTP_HEADERS_SENT") {
+    logger.warn("Suppressed ERR_HTTP_HEADERS_SENT (connect-timeout race)", {
+      message: error.message,
+    });
+    return;
+  }
+
   logger.error("Uncaught Exception - shutting down", {
     message: error.message,
     stack: error.stack,

@@ -22,7 +22,7 @@ import { User } from "../models/User.js";
 import { Organization } from "../models/Organization.js";
 import { CreditTransaction } from "../models/CreditTransaction.js";
 import { logger } from "../utils/logger.js";
-import { MoreThan, Between } from "typeorm";
+import { Between } from "typeorm";
 import crypto from "crypto";
 
 const referralRepo = () => AppDataSource.getRepository(Referral);
@@ -149,15 +149,6 @@ export async function validateReferralCode(
   const oneYearAgo = new Date();
   oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
-  const thisYearReferrals = await referralRepo().count({
-    where: {
-      referrerUserId: referrer.id,
-      createdAt: MoreThan(oneYearAgo),
-      status: MoreThan("expired") as any, // Not expired or revoked - this is a hack, should use NOT IN
-    },
-  });
-
-  // Better query for counting valid referrals this year
   const validReferralsThisYear = await referralRepo()
     .createQueryBuilder("r")
     .where("r.referrer_user_id = :userId", { userId: referrer.id })

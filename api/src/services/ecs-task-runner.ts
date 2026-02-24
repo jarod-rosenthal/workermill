@@ -415,14 +415,6 @@ export class ECSTaskRunner {
       }
     }
 
-    // TEMPORARY: Using On-Demand only for demo reliability
-    // TODO: Restore Spot with fallback after demo:
-    // const capacityProviderStrategy = task.isPlatformTask
-    //   ? [{ capacityProvider: "FARGATE", weight: 1, base: 1 }]
-    //   : [
-    //       { capacityProvider: "FARGATE_SPOT", weight: 2, base: 0 },
-    //       { capacityProvider: "FARGATE", weight: 1, base: 0 },
-    //     ];
     const capacityProviderStrategy = [
       { capacityProvider: "FARGATE", weight: 1, base: 1 },
     ];
@@ -600,7 +592,6 @@ export class ECSTaskRunner {
     const command = new RunTaskCommand({
       cluster: config.aws.ecsCluster,
       taskDefinition: config.aws.workerTaskDefinition,
-      // TEMPORARY: Using On-Demand only for demo reliability
       capacityProviderStrategy: [
         { capacityProvider: "FARGATE", weight: 1, base: 1 },
       ],
@@ -734,8 +725,6 @@ export class ECSTaskRunner {
       });
     }
 
-    // TEMPORARY: Using On-Demand only for demo reliability
-    // TODO: Restore Spot with fallback after demo
     const managerCapacityStrategy = [
       { capacityProvider: "FARGATE", weight: 1, base: 1 },
     ];

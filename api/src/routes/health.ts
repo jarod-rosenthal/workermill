@@ -20,11 +20,19 @@ router.get("/ready", async (_req: Request, res: Response) => {
   try {
     await AppDataSource.query("SELECT 1");
 
-    const redisStatus = !redis.isConfigured
-      ? "not_configured"
-      : redis.isConnected
-        ? "connected"
-        : "disconnected";
+    // Active Redis health check
+    let redisStatus: string;
+    let redisLatencyMs: number | null = null;
+    if (!redis.isConfigured) {
+      redisStatus = "not_configured";
+    } else {
+      try {
+        redisLatencyMs = await redis.ping();
+        redisStatus = redisLatencyMs !== null ? "connected" : "disconnected";
+      } catch {
+        redisStatus = "error";
+      }
+    }
 
     // Pool stats for monitoring
     let pool: Record<string, number> = {};
@@ -52,6 +60,7 @@ router.get("/ready", async (_req: Request, res: Response) => {
       status: "ready",
       database: "connected",
       redis: redisStatus,
+      ...(redisLatencyMs !== null && { redisLatencyMs }),
       pool,
       timestamp: new Date().toISOString(),
     });

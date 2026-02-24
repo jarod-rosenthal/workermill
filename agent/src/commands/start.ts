@@ -22,6 +22,7 @@ import {
   getLogFile,
   getConfigFile,
 } from "../config.js";
+import { rotateLogs } from "../log-rotation.js";
 import { startAgent } from "../index.js";
 
 export async function startCommand(options: { detach?: boolean }): Promise<void> {
@@ -112,6 +113,9 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     console.log(chalk.dim(`  Logs: ${logFile}`));
     console.log(chalk.dim(`  PID:  ${pidFile}`));
 
+    // Rotate log files before starting (prevents unbounded growth across restarts)
+    rotateLogs();
+
     // Spawn the CLI with "start" (no --detach) as a detached child, redirecting output to log file
     const logFd = openSync(logFile, "a");
     const stdinFd = openSync(devNull, "r");
@@ -141,7 +145,9 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
   // Foreground mode — tee stdout/stderr to log file so `workermill-agent logs` works.
   // Skip the tee if stdout is already redirected to a file (e.g. VS Code spawns us
   // with stdio: ["ignore", logFd, logFd], so stdout IS agent.log — tee would double-write).
+  // Log rotation happens at startup only (rotateLogs above) — current session is always one file.
   const logFile = getLogFile();
+  rotateLogs();
   if (process.stdout.isTTY) {
     const logStream = createWriteStream(logFile, { flags: "a" });
     const origStdoutWrite = process.stdout.write.bind(process.stdout);

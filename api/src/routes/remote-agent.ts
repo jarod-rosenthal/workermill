@@ -1075,6 +1075,7 @@ router.get(
       maxParallelExperts: org.maxParallelExperts,
       maxStories,
       availablePersonas,
+      orgGuidelines: org.aiGuidelines ?? undefined,
     };
 
     const prompt = buildPlanningPrompt(planningInput);

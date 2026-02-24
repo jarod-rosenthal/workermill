@@ -187,6 +187,31 @@ export const state: OrchestratorState = {
 };
 
 // =============================================================================
+// Concurrency Tracking
+// =============================================================================
+
+/** Active fire-and-forget operations for graceful shutdown + concurrency cap */
+export const activeOps = new Set<Promise<unknown>>();
+const MAX_ACTIVE_OPS = 10;
+
+/**
+ * Track a fire-and-forget operation.
+ * Returns false if too many operations are in flight (caller should skip).
+ */
+export function trackOperation(op: Promise<unknown>): boolean {
+  if (activeOps.size >= MAX_ACTIVE_OPS) {
+    logger.warn("Orchestrator concurrency cap reached, skipping spawn", {
+      activeOps: activeOps.size,
+      max: MAX_ACTIVE_OPS,
+    });
+    return false;
+  }
+  activeOps.add(op);
+  op.finally(() => activeOps.delete(op));
+  return true;
+}
+
+// =============================================================================
 // AWS Clients (shared across orchestrator modules)
 // =============================================================================
 

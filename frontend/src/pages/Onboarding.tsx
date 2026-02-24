@@ -12,7 +12,7 @@ import {
 import { authAPI } from "../lib/api-client";
 import { useAuthStore } from "../store/auth-store";
 
-type OnboardingStep = "choose" | "create" | "join";
+type OnboardingStep = "choose" | "create" | "join" | "guidelines";
 
 export default function Onboarding() {
   const navigate = useNavigate();
@@ -21,9 +21,11 @@ export default function Onboarding() {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
 
+  const tokens = useAuthStore((state) => state.tokens);
   const [step, setStep] = useState<OnboardingStep>("choose");
   const [organizationName, setOrganizationName] = useState("");
   const [inviteToken, setInviteToken] = useState("");
+  const [aiGuidelines, setAiGuidelines] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -68,7 +70,7 @@ export default function Onboarding() {
       });
       setOrganization(result.organization);
       setNeedsSetup(false);
-      navigate("/dashboard");
+      setStep("guidelines");
     } catch (err: any) {
       setError(
         err.response?.data?.error || "Failed to create organization. Please try again."
@@ -98,6 +100,24 @@ export default function Onboarding() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSaveGuidelines = async () => {
+    if (aiGuidelines.trim()) {
+      try {
+        await fetch(`${import.meta.env.VITE_API_BASE_URL || ""}/api/settings`, {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${tokens?.accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ aiGuidelines }),
+        });
+      } catch {
+        // Non-blocking — if it fails, they can set it in Settings later
+      }
+    }
+    navigate("/dashboard");
   };
 
   return (
@@ -267,6 +287,48 @@ export default function Onboarding() {
                   </button>
                 </form>
               </>
+            )}
+
+            {step === "guidelines" && (
+              <div className="space-y-6">
+                <div className="text-center">
+                  <div className="text-2xl mb-2">✨</div>
+                  <h2 className="text-xl font-semibold text-foreground mb-1">
+                    One last thing{" "}
+                    <span className="text-muted-foreground font-normal text-base">(optional)</span>
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Help your AI workers understand your organization's priorities.
+                  </p>
+                </div>
+
+                <textarea
+                  className="w-full min-h-[140px] resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  placeholder={`What should workers always or never do?\nWhat does your team prioritize?\n\nExample: "Never modify files outside the specified scope. Prefer backward-compatible changes."`}
+                  value={aiGuidelines}
+                  onChange={(e) => setAiGuidelines(e.target.value)}
+                />
+
+                <p className="text-xs text-muted-foreground text-center">
+                  You can always update this in{" "}
+                  <span className="text-foreground">Settings → AI Workers</span>.
+                </p>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => navigate("/dashboard")}
+                    className="flex-1 py-2.5 px-4 rounded-xl border border-border bg-background/50 text-muted-foreground hover:text-foreground hover:border-border/80 transition-all text-sm font-medium"
+                  >
+                    Skip for now
+                  </button>
+                  <button
+                    onClick={handleSaveGuidelines}
+                    className="flex-1 py-2.5 px-4 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-xl hover:shadow-lg hover:shadow-primary/30 transition-all text-sm"
+                  >
+                    Save &amp; get started →
+                  </button>
+                </div>
+              </div>
             )}
 
             {step === "join" && (

@@ -201,6 +201,8 @@ export interface EpicConfig {
   useUnifiedClient?: boolean;
   /** Maximum number of expert subagents that can run in parallel */
   maxParallelExperts?: number;
+  /** Org-level AI guidelines for intent engineering */
+  orgGuidelines?: string;
 }
 
 /**

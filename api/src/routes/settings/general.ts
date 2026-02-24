@@ -68,6 +68,9 @@ router.get("/", async (req: Request, res: Response) => {
       defaultWorkerModel: org.defaultWorkerModel,
       defaultWorkerPersona: org.defaultWorkerPersona,
 
+      // Intent Engineering
+      aiGuidelines: org.aiGuidelines ?? null,
+
       // Warm Container Pool Settings
       warmPoolSize: org.warmPoolSize,
       warmPoolHoursStart: org.warmPoolHoursStart,
@@ -220,6 +223,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       taskCooldownSeconds,
       defaultWorkerModel,
       defaultWorkerPersona,
+
+      // Intent Engineering
+      aiGuidelines,
 
       // Warm Container Pool Settings
       warmPoolSize,
@@ -491,6 +497,11 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         return;
       }
       org.defaultWorkerPersona = defaultWorkerPersona;
+    }
+
+    // Intent Engineering
+    if (aiGuidelines !== undefined) {
+      org.aiGuidelines = aiGuidelines === "" ? null : String(aiGuidelines);
     }
 
     // Validate and update AI Provider Settings

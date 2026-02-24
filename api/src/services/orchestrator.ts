@@ -33,6 +33,7 @@ import { Organization } from "../models/index.js";
 import {
   logTaskEvent,
   state,
+  trackOperation,
   type OrchestratorState,
 } from "./orchestrator-utils.js";
 
@@ -82,12 +83,13 @@ async function pollLoop(): Promise<void> {
               jiraIssueKey: task.jiraIssueKey,
               stepCount: task.executionPlanV2.steps?.length || 0,
             });
-            runSequentialPipeline(task.id).catch((error) => {
+            const pipelineOp = runSequentialPipeline(task.id).catch((error) => {
               logger.error("Error in V2 runSequentialPipeline", {
                 taskId: task.id,
                 error: error instanceof Error ? error.message : String(error),
               });
             });
+            trackOperation(pipelineOp);
             continue;
           }
 
@@ -110,12 +112,13 @@ async function pollLoop(): Promise<void> {
             );
 
             // Spawn worker directly (no staggering needed with separate story branches)
-            spawnWorker(task).catch((error) => {
+            const spawnOp = spawnWorker(task).catch((error) => {
               logger.error("Error in spawnWorker", {
                 taskId: task.id,
                 error: error instanceof Error ? error.message : String(error),
               });
             });
+            trackOperation(spawnOp);
           }
         }
       }
@@ -126,12 +129,13 @@ async function pollLoop(): Promise<void> {
         if (!state.running) break;
 
         // Process planning task (don't await - let it run in parallel)
-        processPlanningTask(task).catch((error) => {
+        const planOp = processPlanningTask(task).catch((error) => {
           logger.error("Error in processPlanningTask", {
             taskId: task.id,
             error: error instanceof Error ? error.message : String(error),
           });
         });
+        trackOperation(planOp);
       }
 
       // Process V2 Pipeline tasks ready for sequential execution
@@ -147,12 +151,13 @@ async function pollLoop(): Promise<void> {
         });
 
         // Run V2 sequential pipeline (don't await - let it run async)
-        runSequentialPipeline(task.id).catch((error) => {
+        const v2Op = runSequentialPipeline(task.id).catch((error) => {
           logger.error("Error in V2 runSequentialPipeline", {
             taskId: task.id,
             error: error instanceof Error ? error.message : String(error),
           });
         });
+        trackOperation(v2Op);
       }
 
       // Process tasks needing manager review (review workflow)
@@ -161,12 +166,13 @@ async function pollLoop(): Promise<void> {
         if (!state.running) break;
 
         // Spawn manager (don't await - let it run in parallel)
-        spawnManagerReview(task).catch((error) => {
+        const reviewOp = spawnManagerReview(task).catch((error) => {
           logger.error("Error in spawnManagerReview", {
             taskId: task.id,
             error: error instanceof Error ? error.message : String(error),
           });
         });
+        trackOperation(reviewOp);
       }
 
       // Process tasks needing log analysis (manager "training wheels" workflow)
@@ -175,12 +181,13 @@ async function pollLoop(): Promise<void> {
         if (!state.running) break;
 
         // Spawn manager log analysis (don't await - let it run in parallel)
-        spawnManagerLogAnalysis(task).catch((error) => {
+        const analysisOp = spawnManagerLogAnalysis(task).catch((error) => {
           logger.error("Error in spawnManagerLogAnalysis", {
             taskId: task.id,
             error: error instanceof Error ? error.message : String(error),
           });
         });
+        trackOperation(analysisOp);
       }
 
       // Check for approved tasks that need deployment (deploy label added after approval)
@@ -189,12 +196,13 @@ async function pollLoop(): Promise<void> {
         if (!state.running) break;
 
         // Re-queue for deployment
-        requeueForDeployment(task).catch((error) => {
+        const deployOp = requeueForDeployment(task).catch((error) => {
           logger.error("Error in requeueForDeployment", {
             taskId: task.id,
             error: error instanceof Error ? error.message : String(error),
           });
         });
+        trackOperation(deployOp);
       }
 
       // Monitor executing tasks - detect completion via ECS status

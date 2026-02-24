@@ -46,8 +46,11 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
   // Send initial connection message
   res.write(`data: ${JSON.stringify({ type: "connected", timestamp: new Date().toISOString() })}\n\n`);
 
+  let inFlight = false;
   const sendUpdate = async () => {
     if (!isConnected) return;
+    if (inFlight) return;
+    inFlight = true;
 
     try {
       const taskRepo = AppDataSource.getRepository(WorkerTask);
@@ -242,9 +245,15 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
         systemStatus,
       };
 
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
+      try {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      } catch {
+        isConnected = false;
+      }
     } catch (error) {
       logger.error("Error sending SSE update", { error, orgId: org.id });
+    } finally {
+      inFlight = false;
     }
   };
 
@@ -268,8 +277,8 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
         perTaskCostCeilingUsd: event.perTaskCostCeilingUsd,
         costCeilingPercent: event.costCeilingPercent,
       })}\n\n`);
-    } catch (error) {
-      logger.error("Error sending cost SSE event", { error, taskId: event.taskId });
+    } catch {
+      isConnected = false;
     }
   });
 

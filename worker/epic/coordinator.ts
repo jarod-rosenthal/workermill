@@ -2114,6 +2114,18 @@ export class EpicCoordinator {
       console.error("[Epic] Story execution failed:", error);
       // Unregister from mutex tracking on exception
       this.unregisterRunningStory(story.storyIndex);
+
+      // Clean up orphaned worktree if it was created before the exception
+      if (this.activeWorktrees.has(story.storyIndex)) {
+        const worktreePath = this.activeWorktrees.get(story.storyIndex)!;
+        try {
+          await this.gitOps.forceRemoveWorktree(worktreePath);
+        } catch {
+          // Ignore cleanup errors — worktree may already be removed
+        }
+        this.activeWorktrees.delete(story.storyIndex);
+      }
+
       const errorMessage = error instanceof Error ? error.message : String(error);
       await this.handleStoryFailure(story, expert, errorMessage);
     }

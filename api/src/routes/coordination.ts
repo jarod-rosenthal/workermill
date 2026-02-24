@@ -110,14 +110,21 @@ router.get(
 
     if (redis.isConnected) {
       // REAL-TIME MODE: Subscribe to Redis channel, push instantly
+      let isConnected = true;
       const unsubscribe = redis.subscribe(parentTaskId, (msg) => {
-        const data = JSON.stringify(msg);
-        res.write(`event: context\ndata: ${data}\n\n`);
+        if (!isConnected) return;
+        try {
+          const data = JSON.stringify(msg);
+          res.write(`event: context\ndata: ${data}\n\n`);
+        } catch { isConnected = false; }
       });
 
       // Heartbeat keeps the connection alive through proxies (CloudFront, ALB)
       const heartbeat = setInterval(() => {
-        res.write(`:heartbeat\n\n`);
+        if (!isConnected) return;
+        try {
+          res.write(`:heartbeat\n\n`);
+        } catch { isConnected = false; }
       }, 25000);
 
       req.on("close", () => {
@@ -128,9 +135,11 @@ router.get(
     } else {
       // FALLBACK MODE: Poll DB every 5s (existing behavior when Redis is unavailable)
       let lastChecked = new Date();
+      let isConnected = true;
       const contextRepo = AppDataSource.getRepository(WorkerContext);
 
       const pollInterval = setInterval(async () => {
+        if (!isConnected) return;
         try {
           const newContexts = await contextRepo
             .createQueryBuilder("context")
@@ -156,12 +165,16 @@ router.get(
                 sessionId: context.sessionId,
                 createdAt: context.createdAt,
               });
-              res.write(`event: context\ndata: ${data}\n\n`);
+              try {
+                res.write(`event: context\ndata: ${data}\n\n`);
+              } catch { isConnected = false; return; }
             }
           }
 
           if (Date.now() - lastChecked.getTime() > 25000) {
-            res.write(`:heartbeat\n\n`);
+            try {
+              res.write(`:heartbeat\n\n`);
+            } catch { isConnected = false; }
           }
         } catch (error) {
           logger.error("Error in context stream", {
@@ -862,8 +875,11 @@ router.post(
       .isString()
       .isIn(VALID_MESSAGE_TYPES)
       .withMessage(`messageType must be one of: ${VALID_MESSAGE_TYPES.join(", ")}`),
-    body("content").isString().trim().notEmpty().withMessage("content is required"),
-    body("metadata").optional().isObject(),
+    body("content").isString().trim().notEmpty().isLength({ max: 100000 }).withMessage("content is required and must be under 100KB"),
+    body("metadata").optional().isObject().custom((value) => {
+      if (JSON.stringify(value).length > 10000) throw new Error("Metadata too large (max 10KB)");
+      return true;
+    }),
     body("sessionId").optional().isString().trim(),
   ],
   validateRequest,

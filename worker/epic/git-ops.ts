@@ -650,12 +650,14 @@ export class GitOps {
         execSync(`git worktree add "${worktreePath}" "${branchName}"`, {
           cwd: this.repoPath,
           stdio: "pipe",
+          timeout: 120_000,
         });
       } catch (e) {
         // Branch might be checked out elsewhere, force it
         execSync(`git worktree add -f "${worktreePath}" "${branchName}"`, {
           cwd: this.repoPath,
           stdio: "pipe",
+          timeout: 120_000,
         });
       }
     } else {
@@ -664,6 +666,7 @@ export class GitOps {
       execSync(`git worktree add -b "${branchName}" "${worktreePath}" "${this.mainBranch}"`, {
         cwd: this.repoPath,
         stdio: "pipe",
+        timeout: 120_000,
       });
     }
 
@@ -711,7 +714,7 @@ export class GitOps {
 
       if (!existsSync(dest)) {
         try {
-          execSync(`cp -al "${src}" "${dest}"`, { stdio: "pipe" });
+          execSync(`cp -al "${src}" "${dest}"`, { stdio: "pipe", timeout: 120_000 });
           console.log(`[GitOps] Hard-linked node_modules: ${relDir || "root"}`);
         } catch (e) {
           console.warn(`[GitOps] Failed to copy node_modules (${relDir || "root"}): ${e}`);
@@ -827,8 +830,8 @@ export class GitOps {
             // of the files that both branches modified.
             for (const file of conflictedFiles) {
               try {
-                execSync(`git -C "${worktreePath}" checkout --ours -- "${file}"`, { encoding: "utf-8" });
-                execSync(`git -C "${worktreePath}" add -- "${file}"`, { encoding: "utf-8" });
+                execSync(`git -C "${worktreePath}" checkout --ours -- "${file}"`, { encoding: "utf-8", timeout: 120_000 });
+                execSync(`git -C "${worktreePath}" add -- "${file}"`, { encoding: "utf-8", timeout: 120_000 });
               } catch (resolveErr) {
                 console.warn(`[GitOps] Failed to resolve conflict for ${file}: ${resolveErr instanceof Error ? resolveErr.message : resolveErr}`);
               }
@@ -836,7 +839,7 @@ export class GitOps {
 
             // Complete the merge with resolved conflicts
             try {
-              execSync(`git -C "${worktreePath}" -c core.editor=true commit --no-edit`, { encoding: "utf-8" });
+              execSync(`git -C "${worktreePath}" -c core.editor=true commit --no-edit`, { encoding: "utf-8", timeout: 120_000 });
               merged.push(branch);
               console.log(`[GitOps] Merged dependency branch ${branch} (resolved ${conflictedFiles.length} conflicting file(s) with --ours)`);
             } catch (commitErr) {
@@ -1084,6 +1087,7 @@ export class GitOps {
       execSync(`git worktree remove "${worktreePath}" --force`, {
         cwd: this.repoPath,
         stdio: "pipe",
+        timeout: 120_000,
       });
     } catch {
       // Expected to fail if worktree is in a bad state
@@ -1092,7 +1096,7 @@ export class GitOps {
     // 2. Force-remove the directory via shell (more reliable than rmSync in Docker)
     if (existsSync(worktreePath)) {
       try {
-        execSync(`rm -rf "${worktreePath}"`, { cwd: this.repoPath, stdio: "pipe" });
+        execSync(`rm -rf "${worktreePath}"`, { cwd: this.repoPath, stdio: "pipe", timeout: 120_000 });
       } catch {
         // Fallback to Node's rmSync
         const { rmSync } = await import("fs");
@@ -1104,7 +1108,7 @@ export class GitOps {
     const internalWorktreePath = path.join(this.repoPath, ".git", "worktrees", worktreeName);
     if (existsSync(internalWorktreePath)) {
       try {
-        execSync(`rm -rf "${internalWorktreePath}"`, { cwd: this.repoPath, stdio: "pipe" });
+        execSync(`rm -rf "${internalWorktreePath}"`, { cwd: this.repoPath, stdio: "pipe", timeout: 120_000 });
       } catch {
         const { rmSync } = await import("fs");
         rmSync(internalWorktreePath, { recursive: true, force: true });
@@ -1113,7 +1117,7 @@ export class GitOps {
 
     // 4. Prune stale references
     try {
-      execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe" });
+      execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe", timeout: 120_000 });
     } catch {
       // Ignore prune errors
     }
@@ -1150,7 +1154,7 @@ export class GitOps {
 
     // Prune any stale worktree references
     try {
-      execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe" });
+      execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe", timeout: 120_000 });
     } catch {
       // Ignore prune errors
     }
@@ -1723,7 +1727,7 @@ export class GitOps {
 
     // Prune worktrees first (story branches may be checked out in worktrees)
     try {
-      execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe" });
+      execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe", timeout: 120_000 });
     } catch {}
 
     for (const branch of storyBranches) {
@@ -2402,6 +2406,7 @@ export class GitOps {
           const worktreeList = execSync("git worktree list --porcelain", {
             cwd: this.repoPath,
             encoding: "utf-8",
+            timeout: 120_000,
           });
           // Parse worktree list to find if our branch is checked out somewhere
           const lines = worktreeList.split("\n");

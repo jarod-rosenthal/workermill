@@ -53,6 +53,12 @@ export class SseSubscriber extends EventEmitter {
   private doConnect(): void {
     if (this.stopped) return;
 
+    // Clean up previous request to prevent listener leaks on reconnect
+    if (this.req) {
+      this.req.destroy();
+      this.req = null;
+    }
+
     const parsedUrl = new URL(this.options.url);
     const isHttps = parsedUrl.protocol === "https:";
     const transport = isHttps ? https : http;

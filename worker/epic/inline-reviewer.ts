@@ -179,7 +179,13 @@ export class InlineReviewer {
   constructor(config: EpicConfig, repoPath: string, serverReviewPrompt?: string) {
     this.config = config;
     this.repoPath = repoPath;
-    this.techLeadPrompt = serverReviewPrompt ?? TECH_LEAD_SYSTEM_PROMPT;
+    const reviewerPrompt = (serverReviewPrompt ?? TECH_LEAD_SYSTEM_PROMPT).replace(
+      "{{ORG_GUIDELINES}}",
+      config.orgGuidelines
+        ? config.orgGuidelines
+        : "(none set — skip this section)"
+    );
+    this.techLeadPrompt = reviewerPrompt;
 
     // Create axios instance for posting logs
     this.logsApi = axios.create({

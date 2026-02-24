@@ -145,7 +145,7 @@ resource "aws_ecs_task_definition" "api" {
         { name = "ENVIRONMENT", value = var.environment },
         { name = "PORT", value = "3000" },
         { name = "AWS_REGION", value = data.aws_region.current.name },
-        { name = "ENABLE_ORCHESTRATOR", value = "true" },
+        { name = "ENABLE_ORCHESTRATOR", value = "false" },
         { name = "ECS_CLUSTER", value = var.ecs_cluster_name },
         { name = "WORKER_TASK_DEFINITION", value = var.worker_task_definition },
         { name = "PRIVATE_SUBNETS", value = join(",", var.private_subnet_ids) },

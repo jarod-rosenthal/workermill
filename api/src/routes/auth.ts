@@ -30,6 +30,7 @@ import bcrypt from "bcryptjs";
 import { authenticateUserAllowNoOrg } from "../middleware/auth.js";
 import axios from "axios";
 import rateLimit from "express-rate-limit";
+import { createStore } from "../middleware/rate-limit.js";
 import { saveOrgSecret } from "./settings/helpers.js";
 import {
   AdminCreateUserCommand,
@@ -40,6 +41,7 @@ import {
 } from "@aws-sdk/client-cognito-identity-provider";
 import { TOS_VERSION } from "../constants/tos.js";
 import { logTosAccepted } from "../services/audit.js";
+import { redis } from "../services/redis-client.js";
 
 const router = Router();
 
@@ -846,6 +848,7 @@ const passwordResetLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5, // 5 requests per 15 min per IP
   message: { error: "Too many password reset attempts. Please try again later." },
+  ...createStore(),
 });
 
 /**
@@ -1497,18 +1500,33 @@ router.post(
 // Supports any Azure AD tenant for B2B scenarios with auto-org creation/joining
 // =============================================================================
 
-// Store PKCE state for Microsoft OAuth (in-memory, short-lived)
-const microsoftOAuthStates = new Map<string, { codeVerifier: string; expiresAt: number; inviteToken?: string }>();
+// OAuth PKCE state stored in Redis with 10-minute TTL.
+// Falls back to in-memory Map for local dev without Redis.
+const microsoftOAuthStatesFallback = new Map<
+  string,
+  { codeVerifier: string; expiresAt: number; inviteToken?: string }
+>();
 
-// Clean up expired states periodically
-setInterval(() => {
-  const now = Date.now();
-  for (const [state, data] of microsoftOAuthStates.entries()) {
-    if (data.expiresAt < now) {
-      microsoftOAuthStates.delete(state);
-    }
+async function setMicrosoftOAuthState(
+  state: string,
+  data: { codeVerifier: string; expiresAt: number; inviteToken?: string },
+): Promise<void> {
+  const stored = await redis.set(`oauth:microsoft:${state}`, JSON.stringify(data), 600);
+  if (!stored) microsoftOAuthStatesFallback.set(state, data);
+}
+
+async function getMicrosoftOAuthState(
+  state: string,
+): Promise<{ codeVerifier: string; expiresAt: number; inviteToken?: string } | undefined> {
+  const raw = await redis.get(`oauth:microsoft:${state}`);
+  if (raw) {
+    await redis.del(`oauth:microsoft:${state}`);
+    return JSON.parse(raw);
   }
-}, 60000); // Clean up every minute
+  const fallback = microsoftOAuthStatesFallback.get(state);
+  if (fallback) microsoftOAuthStatesFallback.delete(state);
+  return fallback;
+}
 
 /**
  * GET /api/auth/microsoft/config
@@ -1538,7 +1556,7 @@ router.get("/microsoft/config", (_req: Request, res: Response) => {
  * Generates Microsoft OAuth URL with state parameter
  * Returns the URL for frontend to redirect to
  */
-router.get("/microsoft/authorize", (req: Request, res: Response) => {
+router.get("/microsoft/authorize", async (req: Request, res: Response) => {
   const clientId = process.env.MICROSOFT_CLIENT_ID;
   const inviteToken = req.query.inviteToken as string | undefined;
 
@@ -1551,7 +1569,7 @@ router.get("/microsoft/authorize", (req: Request, res: Response) => {
   const codeVerifier = randomBytes(32).toString("base64url");
 
   // Store state with 10-minute expiration
-  microsoftOAuthStates.set(state, {
+  await setMicrosoftOAuthState(state, {
     codeVerifier,
     expiresAt: Date.now() + 10 * 60 * 1000,
     inviteToken,
@@ -1618,17 +1636,15 @@ router.post(
       let codeVerifier: string | undefined;
       let inviteToken: string | undefined;
       if (state) {
-        const stateData = microsoftOAuthStates.get(state);
+        const stateData = await getMicrosoftOAuthState(state);
         if (!stateData) {
           return res.status(400).json({ error: "Invalid or expired state parameter" });
         }
         if (stateData.expiresAt < Date.now()) {
-          microsoftOAuthStates.delete(state);
           return res.status(400).json({ error: "State parameter expired" });
         }
         codeVerifier = stateData.codeVerifier;
         inviteToken = stateData.inviteToken;
-        microsoftOAuthStates.delete(state);
       }
 
       // Exchange code for tokens with Microsoft
@@ -2023,18 +2039,30 @@ async function getCognitoTokensForUser(
 // GitHub OAuth SSO (Web Login — Direct OAuth, not via Cognito)
 // =============================================================================
 
-// Store PKCE state for GitHub OAuth (in-memory, short-lived)
-const githubOAuthStates = new Map<string, { expiresAt: number; inviteToken?: string }>();
+// OAuth state stored in Redis with 10-minute TTL.
+// Falls back to in-memory Map for local dev without Redis.
+const githubOAuthStatesFallback = new Map<string, { expiresAt: number; inviteToken?: string }>();
 
-// Clean up expired states periodically
-setInterval(() => {
-  const now = Date.now();
-  for (const [state, data] of githubOAuthStates.entries()) {
-    if (data.expiresAt < now) {
-      githubOAuthStates.delete(state);
-    }
+async function setGithubOAuthState(
+  state: string,
+  data: { expiresAt: number; inviteToken?: string },
+): Promise<void> {
+  const stored = await redis.set(`oauth:github:${state}`, JSON.stringify(data), 600);
+  if (!stored) githubOAuthStatesFallback.set(state, data);
+}
+
+async function getGithubOAuthState(
+  state: string,
+): Promise<{ expiresAt: number; inviteToken?: string } | undefined> {
+  const raw = await redis.get(`oauth:github:${state}`);
+  if (raw) {
+    await redis.del(`oauth:github:${state}`);
+    return JSON.parse(raw);
   }
-}, 60000);
+  const fallback = githubOAuthStatesFallback.get(state);
+  if (fallback) githubOAuthStatesFallback.delete(state);
+  return fallback;
+}
 
 /**
  * GET /api/auth/github/config
@@ -2054,7 +2082,7 @@ router.get("/github/config", (_req: Request, res: Response) => {
  * GET /api/auth/github/authorize
  * Generates GitHub OAuth URL with state parameter
  */
-router.get("/github/authorize", (req: Request, res: Response) => {
+router.get("/github/authorize", async (req: Request, res: Response) => {
   const clientId = process.env.GITHUB_CLIENT_ID;
   const inviteToken = req.query.inviteToken as string | undefined;
 
@@ -2063,7 +2091,7 @@ router.get("/github/authorize", (req: Request, res: Response) => {
   }
 
   const state = randomBytes(32).toString("hex");
-  githubOAuthStates.set(state, {
+  await setGithubOAuthState(state, {
     expiresAt: Date.now() + 10 * 60 * 1000,
     inviteToken,
   });
@@ -2112,16 +2140,14 @@ router.post(
       // Verify state
       let inviteToken: string | undefined;
       if (state) {
-        const stateData = githubOAuthStates.get(state);
+        const stateData = await getGithubOAuthState(state);
         if (!stateData) {
           return res.status(400).json({ error: "Invalid or expired state parameter" });
         }
         if (stateData.expiresAt < Date.now()) {
-          githubOAuthStates.delete(state);
           return res.status(400).json({ error: "State parameter expired" });
         }
         inviteToken = stateData.inviteToken;
-        githubOAuthStates.delete(state);
       }
 
       // Exchange code for access token
@@ -2337,6 +2363,7 @@ const githubOnboardLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 5,
   message: { error: "Too many signup attempts" },
+  ...createStore(),
 });
 
 /**

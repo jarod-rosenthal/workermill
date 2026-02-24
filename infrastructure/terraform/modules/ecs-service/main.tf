@@ -161,7 +161,10 @@ resource "aws_ecs_task_definition" "api" {
         { name = "SES_SOURCE_EMAIL", value = var.ses_source_email },
         { name = "SUPPORT_AGENT_ENABLED", value = var.support_agent_enabled },
         { name = "SENTRY_DSN", value = var.sentry_dsn },
-        { name = "REDIS_URL", value = var.redis_url }
+        { name = "REDIS_URL", value = var.redis_url },
+        { name = "PGBOUNCER_HOST", value = "127.0.0.1" },
+        { name = "PGBOUNCER_PORT", value = "5432" },
+        { name = "DB_POOL_MAX", value = "20" }
       ]
 
       secrets = concat([
@@ -196,6 +199,44 @@ resource "aws_ecs_task_definition" "api" {
           "awslogs-stream-prefix" = "api"
         }
       }
+
+      dependsOn = [
+        { containerName = "pgbouncer", condition = "START" }
+      ]
+    },
+    {
+      name      = "pgbouncer"
+      image     = "edoburu/pgbouncer:1.22.0"
+      essential = true
+
+      portMappings = []
+
+      environment = [
+        { name = "POOL_MODE", value = "transaction" },
+        { name = "DEFAULT_POOL_SIZE", value = "8" },
+        { name = "MAX_CLIENT_CONN", value = "50" },
+        { name = "SERVER_IDLE_TIMEOUT", value = "30" },
+        { name = "SERVER_LIFETIME", value = "3600" },
+        { name = "AUTH_TYPE", value = "plain" },
+        { name = "LISTEN_ADDR", value = "127.0.0.1" },
+        { name = "LISTEN_PORT", value = "5432" }
+      ]
+
+      secrets = [
+        { name = "DATABASE_URL", valueFrom = var.database_url_secret_arn }
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = var.log_group_name
+          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-stream-prefix" = "pgbouncer"
+        }
+      }
+
+      cpu    = 64
+      memory = 128
     }
   ])
 }

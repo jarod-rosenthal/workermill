@@ -717,8 +717,11 @@ export async function getBillingInfo(org: Organization): Promise<{
         type: "card",
       });
       hasPaymentMethod = paymentMethods.data.length > 0;
-    } catch {
-      // Ignore errors, assume no payment method
+    } catch (error) {
+      logger.warn("Failed to check Stripe payment methods", {
+        customerId: org.stripeCustomerId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

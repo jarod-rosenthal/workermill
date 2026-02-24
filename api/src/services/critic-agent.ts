@@ -571,7 +571,7 @@ export async function generatePlan(
   });
   // Terminal visibility: log the LLM call start
   const providerIcon = PROVIDER_ICONS[agentConfig.provider] || "🤖";
-  console.log(`[${new Date().toLocaleTimeString("en-US", { hour12: false })}] [💡 planning_agent ${providerIcon}] Generating plan using ${agentConfig.provider}/${agentConfig.model}${previousPlan ? " (refinement)" : ""}`);
+  logger.info(`[💡 planning_agent ${providerIcon}] Generating plan`, { provider: agentConfig.provider, model: agentConfig.model, refinement: !!previousPlan });
 
   // Use streaming if thought callback is provided
   if (onThought) {
@@ -671,7 +671,7 @@ export async function validatePlanWithCritic(
   // Terminal visibility: log critic validation start
   {
     const providerIcon = PROVIDER_ICONS[agentConfig.provider] || "🤖";
-    console.log(`[${new Date().toLocaleTimeString("en-US", { hour12: false })}] [💡 critic ${providerIcon}] Validating plan (${plan.steps.length} steps) using ${agentConfig.provider}/${agentConfig.model}`);
+    logger.info(`[💡 critic ${providerIcon}] Validating plan`, { steps: plan.steps.length, provider: agentConfig.provider, model: agentConfig.model });
   }
 
   const result = await backend.generate({
@@ -692,8 +692,7 @@ export async function validatePlanWithCritic(
   // Terminal visibility: log critic result
   {
     const providerIcon = PROVIDER_ICONS[agentConfig.provider] || "🤖";
-    const statusEmoji = criticResult.approved ? "✅" : "❌";
-    console.log(`[${new Date().toLocaleTimeString("en-US", { hour12: false })}] [💡 critic ${providerIcon}] ${statusEmoji} Score: ${criticResult.score}/100 — ${criticResult.approved ? "approved" : "rejected"} (${criticResult.risks.length} risks)`);
+    logger.info(`[💡 critic ${providerIcon}] Score: ${criticResult.score}/100 — ${criticResult.approved ? "approved" : "rejected"}`, { risks: criticResult.risks.length });
   }
 
   return criticResult;

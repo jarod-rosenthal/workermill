@@ -721,7 +721,7 @@ class LocalEpicSpawner {
       // API configuration - uses host.docker.internal on Docker Desktop (WSL/macOS),
       // localhost on native Linux with --network host
       API_BASE_URL: this.apiBaseUrl,
-      ORG_API_KEY: task.organization?.apiKey || process.env.ORG_API_KEY || "local-dev",
+      ORG_API_KEY: process.env.ORG_API_KEY || process.env.PLATFORM_API_KEY || "local-dev",
 
       // SCM provider configuration
       SCM_PROVIDER: scmProvider,

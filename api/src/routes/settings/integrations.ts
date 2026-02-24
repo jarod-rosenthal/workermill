@@ -1494,7 +1494,6 @@ router.post("/aws/test", async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error("Error testing AWS credentials", { error });
-    logger.error("Error testing AWS credentials", { error });
     res.status(400).json({ error: "AWS connection failed" });
   }
 });
@@ -1522,7 +1521,7 @@ router.get("/aws/external-id", async (req: Request, res: Response) => {
           {
             Effect: "Allow",
             Principal: {
-              AWS: "arn:aws:iam::AWS_ACCOUNT_ID:role/workermill-dev-worker-task",
+              AWS: process.env.WORKER_TASK_ROLE_ARN || `arn:aws:iam::<WORKERMILL_ACCOUNT_ID>:role/workermill-${config.environment}-worker-task`,
             },
             Action: "sts:AssumeRole",
             Condition: {
@@ -1944,7 +1943,7 @@ router.post("/oncallshift/test", async (req: Request, res: Response) => {
     if (!response.ok) {
       const errorText = await response.text();
       logger.warn("OnCallShift connection test failed", { status: response.status, error: errorText });
-      res.status(400).json({ error: `OnCallShift connection failed: ${response.status} - ${errorText}` });
+      res.status(400).json({ error: "OnCallShift connection failed" });
       return;
     }
 

@@ -70,12 +70,12 @@ export const VALID_TRANSITIONS: Record<WorkerTaskStatus, WorkerTaskStatus[]> = {
 };
 
 /**
- * Validate and log a task status transition.
- * Currently only logs invalid transitions without blocking.
+ * Validate a task status transition against the state machine.
+ * Returns false and logs a warning for invalid transitions.
  *
  * @param task - The task being updated
  * @param newStatus - The proposed new status
- * @returns true (always allows transition, logs if invalid)
+ * @returns true if the transition is valid, false otherwise
  */
 export function validateStatusTransition(
   task: WorkerTask,

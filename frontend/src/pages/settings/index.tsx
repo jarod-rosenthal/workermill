@@ -1021,8 +1021,6 @@ export default function Settings() {
       if (jiraApiKey) payload.apiToken = jiraApiKey;
       if (jiraWebhookSecret) payload.webhookSecret = jiraWebhookSecret;
 
-      console.log("Saving Jira settings:", { ...payload, apiToken: payload.apiToken ? "***" : undefined });
-
       const response = await fetch(`${API_BASE}/api/settings/integrations/jira`, {
         method: "PUT",
         headers: {

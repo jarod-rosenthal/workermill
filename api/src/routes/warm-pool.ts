@@ -6,6 +6,7 @@
  */
 
 import { Router, Request, Response } from "express";
+import { timingSafeEqual } from "crypto";
 import { body, param, validationResult } from "express-validator";
 import {
   registerContainerReady,
@@ -33,7 +34,11 @@ function validatePlatformApiKey(req: Request, res: Response, next: () => void): 
     return;
   }
 
-  if (!apiKey || apiKey !== platformKey) {
+  if (
+    !apiKey ||
+    apiKey.length !== platformKey.length ||
+    !timingSafeEqual(Buffer.from(apiKey), Buffer.from(platformKey))
+  ) {
     res.status(401).json({ error: "Invalid API key" });
     return;
   }

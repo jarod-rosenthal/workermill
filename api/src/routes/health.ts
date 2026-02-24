@@ -18,7 +18,6 @@ router.get("/", (_req: Request, res: Response) => {
  */
 router.get("/ready", async (_req: Request, res: Response) => {
   try {
-    // Check database connection
     await AppDataSource.query("SELECT 1");
 
     const redisStatus = !redis.isConfigured
@@ -27,10 +26,33 @@ router.get("/ready", async (_req: Request, res: Response) => {
         ? "connected"
         : "disconnected";
 
+    // Pool stats for monitoring
+    let pool: Record<string, number> = {};
+    try {
+      const pgPool = (AppDataSource.driver as any).master;
+      if (pgPool) {
+        const poolMax = parseInt(process.env.DB_POOL_MAX || "10", 10);
+        const total = pgPool.totalCount ?? 0;
+        const idle = pgPool.idleCount ?? 0;
+        pool = {
+          total,
+          idle,
+          waiting: pgPool.waitingCount ?? 0,
+          active: total - idle,
+          max: poolMax,
+          utilizationPct:
+            poolMax > 0 ? Math.round(((total - idle) / poolMax) * 100) : 0,
+        };
+      }
+    } catch {
+      // Best-effort pool monitoring
+    }
+
     res.json({
       status: "ready",
       database: "connected",
       redis: redisStatus,
+      pool,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

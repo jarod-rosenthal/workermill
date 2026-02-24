@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { In, MoreThan, Brackets } from "typeorm";
 import { authenticateSSE } from "../../middleware/auth.js";
 import { AppDataSource } from "../../db/connection.js";
 import { WorkerTask, Organization, KbCard } from "../../models/index.js";
@@ -58,15 +59,6 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
 
       const countersResetAt = freshOrg.countersResetAt || new Date(0);
 
-      const allTasks = await taskRepo.find({
-        where: { orgId: org.id },
-        order: { createdAt: "DESC" },
-      });
-
-      const tasksSinceReset = allTasks.filter(
-        (t) => new Date(t.createdAt) >= countersResetAt
-      );
-
       // Keep recently completed tasks visible based on org setting (only successful ones, not cancelled/failed)
       const displayMinutes = freshOrg.completedTaskDisplayMinutes || 10;
       const displayCutoff = new Date(Date.now() - displayMinutes * 60 * 1000);
@@ -82,80 +74,65 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
         "revision_needed", "awaiting_destructive_approval", "escalated",
         "pending_plan_approval"
       ];
-      const activeTasks = allTasks.filter((t) => {
-        // Always show tasks in truly active statuses
-        if (alwaysActiveStatuses.includes(t.status)) {
-          return true;
-        }
-        // Show intermediate statuses only if recent (based on org setting)
-        // Use updatedAt (when status changed) — NOT startedAt
-        if (intermediateStatuses.includes(t.status)) {
-          const taskTime = t.updatedAt || t.createdAt;
-          return taskTime && new Date(taskTime) > intermediateCutoff;
-        }
-        // Show completed/failed/terminal tasks within the display period
-        if (["completed", "deployed", "failed"].includes(t.status) &&
-            t.completedAt && new Date(t.completedAt) > displayCutoff) {
-          return true;
-        }
-        return false;
-      });
-
-      // Sort tasks: group PRD parent tasks with their children (children below parent)
-      const sortedActiveTasks = sortTasksWithPrdGrouping(activeTasks);
-      activeTasks.length = 0;
-      activeTasks.push(...sortedActiveTasks);
-
-      // Combined for other uses
-      const activeStatuses = [...alwaysActiveStatuses, ...intermediateStatuses];
-      // "Done" = terminal success + approved (work finished, PR approved)
+      const terminalStatuses = ["completed", "deployed", "failed"];
       const doneStatuses = ["completed", "deployed", "pr_approved", "review_approved"];
-      const completedSinceReset = tasksSinceReset.filter(
-        (t) => doneStatuses.includes(t.status)
-      );
-      const failedSinceReset = tasksSinceReset.filter(
-        (t) => t.status === "failed" && t.completedAt
-      );
 
-      const periodCost = [...completedSinceReset, ...failedSinceReset].reduce(
-        (sum, t) => sum + (Number(t.estimatedCostUsd) || 0),
-        0
-      );
+      // ── Targeted queries: only fetch tasks that will actually be displayed ──
+      // Instead of fetching ALL tasks (hundreds) and filtering in JS,
+      // let PostgreSQL do the filtering with indexed WHERE clauses.
+      const [displayableTasks, periodStats] = await Promise.all([
+        // 1. Tasks visible in the dashboard (active + recent intermediate + recent terminal)
+        taskRepo
+          .createQueryBuilder("task")
+          .where("task.orgId = :orgId", { orgId: org.id })
+          .andWhere(
+            new Brackets((qb) => {
+              qb.where("task.status IN (:...active)", { active: alwaysActiveStatuses })
+                .orWhere("task.status IN (:...intermediate) AND task.updatedAt > :intermediateCutoff", {
+                  intermediate: intermediateStatuses,
+                  intermediateCutoff,
+                })
+                .orWhere("task.status IN (:...terminal) AND task.completedAt > :displayCutoff", {
+                  terminal: terminalStatuses,
+                  displayCutoff,
+                });
+            }),
+          )
+          .orderBy("task.createdAt", "DESC")
+          .take(100)
+          .getMany(),
+
+        // 2. Lightweight aggregate for period stats (no full rows fetched)
+        taskRepo
+          .createQueryBuilder("task")
+          .select("COUNT(*) FILTER (WHERE task.status IN (:...done))", "periodCompleted")
+          .addSelect("COUNT(*) FILTER (WHERE task.status = 'failed' AND task.completed_at IS NOT NULL)", "periodFailed")
+          .addSelect("COALESCE(SUM(task.estimated_cost_usd) FILTER (WHERE task.status IN (:...costStatuses)), 0)", "periodCost")
+          .where("task.orgId = :orgId", { orgId: org.id })
+          .andWhere("task.createdAt >= :resetAt", { resetAt: countersResetAt })
+          .setParameters({
+            done: doneStatuses,
+            costStatuses: [...doneStatuses, "failed"],
+          })
+          .getRawOne(),
+      ]);
 
       // "Active" = tasks where a worker is actually executing (not queued, not waiting)
       const executingStatuses = ["claimed", "environment_setup", "executing", "planning", "dispatching", "pending_plan_approval", "reviewing", "consolidating"];
       const stats = {
         totalWorkers: 7,
-        activeWorkers: allTasks.filter(t => executingStatuses.includes(t.status)).length,
-        queueDepth: allTasks.filter((t) => t.status === "queued").length,
-        periodCost,
-        periodCompleted: completedSinceReset.length,
-        periodFailed: failedSinceReset.length,
+        activeWorkers: displayableTasks.filter(t => executingStatuses.includes(t.status)).length,
+        queueDepth: displayableTasks.filter((t) => t.status === "queued").length,
+        periodCost: Number(periodStats?.periodCost) || 0,
+        periodCompleted: Number(periodStats?.periodCompleted) || 0,
+        periodFailed: Number(periodStats?.periodFailed) || 0,
       };
 
-      // Include actively running tasks AND recently completed tasks (within display period)
-      // Include queued tasks so they stay visible when PRD plan is approved
-      const filteredTasks = allTasks.filter((t) => {
-        // Always show tasks in active statuses (including queued)
-        if (alwaysActiveStatuses.includes(t.status)) {
-          return true;
-        }
-        // Show intermediate statuses only if recent (based on org setting)
-        // Use updatedAt (when status changed) — NOT startedAt
-        if (intermediateStatuses.includes(t.status)) {
-          const taskTime = t.updatedAt || t.createdAt;
-          return taskTime && new Date(taskTime) > intermediateCutoff;
-        }
-        // Show completed/failed/deployed tasks within the display period
-        if (["completed", "deployed", "failed"].includes(t.status) &&
-            t.completedAt && new Date(t.completedAt) > displayCutoff) {
-          return true;
-        }
-        return false;
-      });
+      // Sort tasks: group PRD parent tasks with their children (children below parent)
+      const activeTasks = sortTasksWithPrdGrouping(displayableTasks);
 
       // Sort with PRD grouping, then limit to 10
-      const filteredRunningTasks = sortTasksWithPrdGrouping(filteredTasks).slice(0, 10);
+      const filteredRunningTasks = sortTasksWithPrdGrouping(displayableTasks).slice(0, 10);
 
       // Batch-fetch card context for internal board cards (for direct links)
       const streamTaskIds = filteredRunningTasks.map((t) => t.id);
@@ -188,7 +165,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
         })
       );
 
-      const queuedTasks = allTasks
+      const queuedTasks = displayableTasks
         .filter((t) => t.status === "queued")
         .slice(0, 20)
         .map((task) => ({
@@ -201,7 +178,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           createdAt: task.createdAt,
         }));
 
-      const recentCompleted = allTasks
+      const recentCompleted = displayableTasks
         .slice(0, 50)
         .map((task) => ({
           id: task.id,

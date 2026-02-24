@@ -36,6 +36,18 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ): void {
+  // If headers are already sent (e.g., connect-timeout already responded with 503),
+  // do NOT try to send another response — that would throw ERR_HTTP_HEADERS_SENT
+  // and crash the process.
+  if (res.headersSent) {
+    logger.warn("Error after response already sent (suppressed)", {
+      error: err.message,
+      path: req.path,
+      method: req.method,
+    });
+    return;
+  }
+
   // Handle known application errors with proper status codes
   if (err instanceof AppError) {
     const response: ErrorResponse = { error: err.message };

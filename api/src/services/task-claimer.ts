@@ -22,6 +22,7 @@ import { syncKbCardColumn } from "./task-monitor.js";
 import { logger } from "../utils/logger.js";
 import { getActiveWorkerCountsByRepo } from "./coordination.js";
 import { canCreateTask } from "./billing.js";
+import { canExecuteCloudTask } from "./credit-billing.js";
 import { canStartTaskWithinBudget } from "./budget-enforcement.js";
 import { getOrgRepo, getTaskRepo } from "./orchestrator-utils.js";
 
@@ -263,6 +264,27 @@ export async function findQueuedTasks(): Promise<WorkerTask[]> {
     }
   }
 
+  // Check cloud compute balance for each org (Max/Enterprise cloud execution)
+  // LOCAL MODE: Skip balance checks - local execution doesn't consume compute balance
+  const cloudBalanceBlockedOrgs = new Set<string>();
+
+  for (const orgId of orgIds) {
+    if (isLocalMode) continue;
+
+    const cloudCheck = await canExecuteCloudTask(orgId);
+    if (!cloudCheck.allowed) {
+      cloudBalanceBlockedOrgs.add(orgId);
+      logger.warn(
+        "Organization blocked by cloud compute balance - tasks will remain queued",
+        {
+          orgId,
+          reason: cloudCheck.reason,
+          balanceCents: cloudCheck.balanceCents,
+        },
+      );
+    }
+  }
+
   // Filter to tasks that can be executed
   // Note: already filtered out maintenance orgs and dependency-blocked tasks above
   const eligibleTasks = unblockedTasks.filter((task) => {
@@ -282,6 +304,11 @@ export async function findQueuedTasks(): Promise<WorkerTask[]> {
 
     // Check budget limits (AI FinOps)
     if (budgetBlockedOrgs.has(task.orgId)) {
+      return false;
+    }
+
+    // Check cloud compute balance (Max/Enterprise)
+    if (cloudBalanceBlockedOrgs.has(task.orgId)) {
       return false;
     }
 

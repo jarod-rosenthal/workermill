@@ -61,11 +61,29 @@ interface PaymentMethod {
 }
 
 interface CreditStatus {
+  balance: {
+    balanceCents: number;
+    computeRateCentsPerHour: number;
+    estimatedHoursRemaining: number;
+  };
+  autoRecharge: {
+    enabled: boolean;
+    thresholdCents: number;
+    amountCents: number;
+  };
   paymentMethods: PaymentMethod[];
   status: {
     paused: boolean;
     pausedReason: string | null;
-    depositCompleted: boolean;
+  };
+  thisMonth: {
+    computeCostCents: number;
+    totalMinutes: number;
+    taskCount: number;
+  };
+  computeRate: {
+    centsPerHour: number;
+    centsPerMinute: number;
   };
   stripeConfigured: boolean;
 }
@@ -76,8 +94,7 @@ interface Transaction {
   amountCents: number;
   balanceAfterCents: number;
   description: string | null;
-  aiCostCents: number | null;
-  feeCents: number | null;
+  metadata: Record<string, unknown> | null;
   createdAt: string;
 }
 
@@ -507,6 +524,73 @@ export default function Billing() {
                 <p className="text-sm text-purple-300/80">
                   {referralDiscount.monthsRemaining} month{referralDiscount.monthsRemaining !== 1 ? "s" : ""} remaining
                 </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Cloud Balance Card — Max/Enterprise only */}
+        {subscription.plan.features?.cloudExecution && creditStatus.balance && (
+          <div className="bg-card rounded-xl border border-border overflow-hidden">
+            <div className="p-6 border-b border-border bg-gradient-to-r from-green-500/5 to-emerald-500/5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center">
+                  <DollarSign className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground">Cloud Compute Balance</h2>
+                  <p className="text-sm text-muted-foreground">
+                    ${(creditStatus.computeRate.centsPerHour / 100).toFixed(2)}/hr billed per minute
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6">
+              {/* Low balance notice */}
+              {creditStatus.balance.balanceCents <= 0 && (
+                <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <p className="text-sm text-red-400">
+                    Cloud balance is empty. Add funds to run cloud tasks.
+                  </p>
+                </div>
+              )}
+              {creditStatus.balance.balanceCents > 0 &&
+                creditStatus.balance.balanceCents < 500 && (
+                  <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                    <p className="text-sm text-amber-400">
+                      Balance is getting low &mdash; ${(creditStatus.balance.balanceCents / 100).toFixed(2)} remaining.
+                    </p>
+                  </div>
+                )}
+
+              <div className="grid grid-cols-3 gap-6 mb-6">
+                <div className="text-center p-4 rounded-lg bg-muted/30">
+                  <p className="text-3xl font-bold text-foreground">
+                    ${(creditStatus.balance.balanceCents / 100).toFixed(2)}
+                  </p>
+                  <p className="text-sm text-muted-foreground">Balance</p>
+                </div>
+                <div className="text-center p-4 rounded-lg bg-muted/30">
+                  <p className="text-3xl font-bold text-foreground">
+                    {creditStatus.balance.estimatedHoursRemaining.toFixed(1)}h
+                  </p>
+                  <p className="text-sm text-muted-foreground">Estimated Remaining</p>
+                </div>
+                <div className="text-center p-4 rounded-lg bg-muted/30">
+                  <p className="text-3xl font-bold text-foreground">
+                    ${(creditStatus.thisMonth.computeCostCents / 100).toFixed(2)}
+                  </p>
+                  <p className="text-sm text-muted-foreground">This Month ({creditStatus.thisMonth.taskCount} tasks)</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                <span>
+                  Auto-recharge: {creditStatus.autoRecharge.enabled
+                    ? `On (add $${(creditStatus.autoRecharge.amountCents / 100).toFixed(0)} when below $${(creditStatus.autoRecharge.thresholdCents / 100).toFixed(0)})`
+                    : "Off"}
+                </span>
               </div>
             </div>
           </div>

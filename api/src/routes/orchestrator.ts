@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { authenticateRequest } from "../middleware/auth.js";
+import { authenticateRequest, requireAdmin } from "../middleware/auth.js";
 import { requireCurrentTos } from "../middleware/tos.js";
 import { logger } from "../utils/logger.js";
 import {
@@ -13,6 +13,7 @@ const router = Router();
 // All routes support both JWT and API key authentication
 router.use(authenticateRequest);
 router.use(requireCurrentTos);
+router.use(requireAdmin);
 
 /**
  * GET /api/orchestrator/status

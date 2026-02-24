@@ -15,6 +15,7 @@ import { config } from "../config/index.js";
 import { markReferralQualified, recordDiscountUsed, getReferralDiscount } from "./referral.js";
 import { UserOrganization } from "../models/UserOrganization.js";
 import { sendPaymentFailedEmail } from "./email/billing-emails.js";
+import { addCredits } from "./credit-billing.js";
 import { In } from "typeorm";
 
 // Initialize Stripe client (only if secret key is configured)
@@ -199,12 +200,11 @@ export async function handleSubscriptionCreated(
     return;
   }
 
-  // Map legacy plan names to new tiers
+  // Map legacy plan names to current tiers
   const legacyPlanMap: Record<string, OrganizationPlan> = {
     starter: "max",
     team: "max",
     business: "max",
-    free: "pro",
   };
   const newPlan: OrganizationPlan = plan
     ? (legacyPlanMap[plan] || plan) as OrganizationPlan
@@ -224,6 +224,30 @@ export async function handleSubscriptionCreated(
     .where("id = :id", { id: org.id })
     .execute();
   org.plan = newPlan;
+
+  // Apply one-time welcome credit for Max plan upgrades
+  if (newPlan === "max" && !org.welcomeCreditApplied) {
+    try {
+      await addCredits(orgId, config.billing.welcomeCreditCents, "bonus", {
+        description: "Welcome credit — $10 for cloud execution",
+      });
+      await orgRepo
+        .createQueryBuilder()
+        .update(Organization)
+        .set({ welcomeCreditApplied: true })
+        .where("id = :id", { id: orgId })
+        .execute();
+      logger.info("Applied welcome credit for Max plan", {
+        orgId,
+        amountCents: config.billing.welcomeCreditCents,
+      });
+    } catch (creditError) {
+      logger.error("Failed to apply welcome credit", {
+        orgId,
+        error: creditError instanceof Error ? creditError.message : String(creditError),
+      });
+    }
+  }
 
   logger.info("Subscription created for organization", {
     orgId: org.id,
@@ -555,12 +579,11 @@ export async function handleCheckoutSessionCompleted(
   org.stripeCustomerId = session.customer as string;
   org.stripeSubscriptionId = session.subscription as string;
 
-  // Map legacy plan names to new tiers and set plan
+  // Map legacy plan names to current tiers and set plan
   const legacyPlanMap: Record<string, OrganizationPlan> = {
     starter: "max",
     team: "max",
     business: "max",
-    free: "pro",
   };
   if (plan) {
     org.plan = (legacyPlanMap[plan] || plan) as OrganizationPlan;
@@ -589,6 +612,30 @@ export async function handleCheckoutSessionCompleted(
     } as Record<string, unknown>)
     .where("id = :id", { id: org.id })
     .execute();
+
+  // Apply one-time welcome credit for Max plan upgrades
+  if (org.plan === "max" && !org.welcomeCreditApplied) {
+    try {
+      await addCredits(org.id, config.billing.welcomeCreditCents, "bonus", {
+        description: "Welcome credit — $10 for cloud execution",
+      });
+      await orgRepo
+        .createQueryBuilder()
+        .update(Organization)
+        .set({ welcomeCreditApplied: true })
+        .where("id = :id", { id: org.id })
+        .execute();
+      logger.info("Applied welcome credit for Max plan", {
+        orgId: org.id,
+        amountCents: config.billing.welcomeCreditCents,
+      });
+    } catch (creditError) {
+      logger.error("Failed to apply welcome credit", {
+        orgId: org.id,
+        error: creditError instanceof Error ? creditError.message : String(creditError),
+      });
+    }
+  }
 
   logger.info("Checkout session completed for organization", {
     orgId: org.id,

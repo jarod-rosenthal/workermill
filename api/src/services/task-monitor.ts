@@ -45,6 +45,7 @@ import { getScmProvider } from "../scm-providers/index.js";
 import { validateQualityGates } from "./quality-gates.js";
 import { getCostTracker } from "./cost-tracker.js";
 import { updateDirectiveOutcome } from "./directive-tracker.js";
+import { deductComputeUsage } from "./credit-billing.js";
 import { localEpicSpawner } from "./local-epic-spawner.js";
 import { mergeStoryPRsInOrder } from "./task-dispatch.js";
 import {
@@ -1610,6 +1611,41 @@ export async function monitorExecutingTasks(): Promise<void> {
           logger.warn("Failed to update directive effectiveness metrics", {
             taskId: task.id,
             error: directiveError instanceof Error ? directiveError.message : String(directiveError),
+          });
+        }
+      }
+
+      // CLOUD COMPUTE BILLING: Deduct compute usage when cloud tasks reach terminal state
+      // Only deduct for cloud ECS tasks (not agent-claimed local tasks)
+      if (
+        ["completed", "deployed", "failed"].includes(newStatus) &&
+        !task.claimedByAgent &&
+        task.startedAt &&
+        !localEpicSpawner.isLocalMode()
+      ) {
+        try {
+          const durationMinutes = Math.max(
+            1,
+            (completedAt.getTime() - task.startedAt.getTime()) / (1000 * 60),
+          );
+          const deductResult = await deductComputeUsage(
+            task.orgId,
+            task.id,
+            durationMinutes,
+          );
+          logger.info("Deducted cloud compute usage", {
+            taskId: task.id,
+            orgId: task.orgId,
+            durationMinutes: Math.ceil(durationMinutes),
+            deductedCents: deductResult.totalDeducted,
+            balanceAfterCents: deductResult.balanceAfter,
+            autoRechargeTriggered: deductResult.autoRechargeTriggered,
+          });
+        } catch (billingError) {
+          logger.error("Failed to deduct cloud compute usage", {
+            taskId: task.id,
+            orgId: task.orgId,
+            error: billingError instanceof Error ? billingError.message : String(billingError),
           });
         }
       }

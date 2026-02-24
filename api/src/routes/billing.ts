@@ -5,7 +5,7 @@
  */
 
 import { Router, Request, Response, NextFunction } from "express";
-import { Between, MoreThanOrEqual } from "typeorm";
+import { Between } from "typeorm";
 import { authenticateUser, requireAdmin } from "../middleware/auth.js";
 import { requireCurrentTos } from "../middleware/tos.js";
 import { asyncHandler } from "../middleware/error-handler.js";
@@ -530,7 +530,6 @@ router.get(
       status: {
         paused: org.billingPaused,
         pausedReason: org.billingPausedReason,
-        depositCompleted: org.signupDepositCompleted,
       },
     });
   })
@@ -544,8 +543,7 @@ router.post(
   "/deposit",
   requireAdmin,
   body("paymentMethodId").isString().notEmpty(),
-  body("amountCents").isInt({ min: 1000 }).withMessage("Minimum deposit is $10"),
-  body("isSignup").optional().isBoolean(),
+  body("amountCents").isInt({ min: 500 }).withMessage("Minimum top-up is $5"),
   validateRequest,
   asyncHandler(async (req: Request, res: Response) => {
     if (!config.stripe?.secretKey) {
@@ -553,26 +551,13 @@ router.post(
     }
 
     const org = req.organization!;
-    const { paymentMethodId, amountCents, isSignup } = req.body;
+    const { paymentMethodId, amountCents } = req.body;
 
-    let result: {
-      paymentIntentId: string;
-      requiresAction?: boolean;
-      clientSecret?: string;
-    };
-    if (isSignup || !org.signupDepositCompleted) {
-      result = await creditBilling.processSignupDeposit(
-        org.id,
-        paymentMethodId,
-        amountCents
-      );
-    } else {
-      result = await creditBilling.processDeposit(
-        org.id,
-        paymentMethodId,
-        amountCents
-      );
-    }
+    const result = await creditBilling.processDeposit(
+      org.id,
+      paymentMethodId,
+      amountCents,
+    );
 
     if (result.requiresAction) {
       // 3D Secure / SCA redirect required
@@ -776,8 +761,7 @@ router.get(
         balanceAfterCents: tx.balanceAfterCents,
         description: tx.description,
         taskId: tx.taskId,
-        aiCostCents: tx.aiCostCents,
-        feeCents: tx.feeCents,
+        metadata: tx.metadata,
         createdAt: tx.createdAt,
       })),
       total,
@@ -844,11 +828,13 @@ router.get(
       status: {
         paused: org.billingPaused ?? false,
         pausedReason: org.billingPausedReason ?? null,
-        depositCompleted: org.signupDepositCompleted ?? false,
       },
       thisMonth: monthlyUsage,
+      computeRate: {
+        centsPerHour: config.billing.computeRateCentsPerHour,
+        centsPerMinute: Math.ceil(config.billing.computeRateCentsPerHour / 60),
+      },
       stripeConfigured: !!config.stripe?.secretKey,
-      feePercent: config.creditBilling.feePercent,
     });
   })
 );

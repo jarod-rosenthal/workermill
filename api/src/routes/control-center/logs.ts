@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { GetLogEventsCommand } from "@aws-sdk/client-cloudwatch-logs";
 import { authenticateRequest, authenticateSSE, authenticateApiKey } from "../../middleware/auth.js";
+import { acquireSSESlot, releaseSSESlot } from "../../middleware/sse-limiter.js";
 import { asyncHandler } from "../../middleware/error-handler.js";
 import { AppDataSource } from "../../db/connection.js";
 import { Not } from "typeorm";
@@ -282,6 +283,12 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
     return;
   }
 
+  const orgId = org.id;
+  if (!acquireSSESlot(orgId, 10)) {
+    res.status(429).json({ error: "Too many log stream connections" });
+    return;
+  }
+
   // Set up SSE headers
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -308,11 +315,6 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
       lastCreatedAt: new Date(Date.now() - 30 * 1000),
       lastId: "00000000-0000-0000-0000-000000000000",
     };
-
-  req.on("close", () => {
-    isConnected = false;
-    logger.debug("Log stream client disconnected", { taskId });
-  });
 
   // Send initial connection message with current cursor
   res.write(`data: ${JSON.stringify({
@@ -486,10 +488,13 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
   );
 
   req.on("close", () => {
+    isConnected = false;
     clearInterval(logInterval);
     clearInterval(pingInterval);
     unsubscribePlanning();
     unsubscribeCode();
+    releaseSSESlot(orgId);
+    logger.debug("Log stream client disconnected", { taskId });
   });
 });
 

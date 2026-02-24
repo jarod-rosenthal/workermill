@@ -267,6 +267,9 @@ module "ecs_service" {
   admin_phone_number_secret_arn = data.aws_secretsmanager_secret.admin_phone_number.arn
   admin_email_secret_arn        = data.aws_secretsmanager_secret.admin_email.arn
 
+  # Encryption
+  encryption_key_secret_arn = module.secrets.encryption_key_arn
+
   # Redis
   redis_url = module.redis.redis_url
 

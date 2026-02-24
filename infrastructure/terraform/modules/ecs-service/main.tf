@@ -176,7 +176,8 @@ resource "aws_ecs_task_definition" "api" {
         { name = "JIRA_CREDENTIALS", valueFrom = var.jira_credentials_secret_arn },
         { name = "STRIPE_SECRET_KEY", valueFrom = var.stripe_secret_key_arn },
         { name = "STRIPE_WEBHOOK_SECRET", valueFrom = var.stripe_webhook_secret_arn },
-        { name = "PLATFORM_API_KEY", valueFrom = var.platform_api_key_secret_arn }
+        { name = "PLATFORM_API_KEY", valueFrom = var.platform_api_key_secret_arn },
+        { name = "ENCRYPTION_KEY", valueFrom = var.encryption_key_secret_arn }
         ],
         # Microsoft SSO secrets (optional)
         var.microsoft_client_id_secret_arn != "" ? [{ name = "MICROSOFT_CLIENT_ID", valueFrom = var.microsoft_client_id_secret_arn }] : [],

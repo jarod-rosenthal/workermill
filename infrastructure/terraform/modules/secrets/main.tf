@@ -219,3 +219,23 @@ resource "aws_secretsmanager_secret_version" "stripe_webhook_secret" {
     ignore_changes = [secret_string]
   }
 }
+
+# Encryption Key (AES-256-GCM for encrypting sensitive fields at rest in PostgreSQL)
+# Must be a 64-character hex string (32 bytes). random_id outputs hex natively.
+resource "random_id" "encryption_key" {
+  byte_length = 32
+}
+
+resource "aws_secretsmanager_secret" "encryption_key" {
+  name                    = "workermill/${var.environment}/encryption-key"
+  recovery_window_in_days = 0
+
+  tags = {
+    Name = "workermill-${var.environment}-encryption-key"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "encryption_key" {
+  secret_id     = aws_secretsmanager_secret.encryption_key.id
+  secret_string = random_id.encryption_key.hex
+}

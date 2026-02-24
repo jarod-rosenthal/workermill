@@ -211,6 +211,12 @@ variable "github_runner_webhook_secret_arn" {
   default     = ""
 }
 
+# Encryption
+variable "encryption_key_secret_arn" {
+  description = "ARN of ENCRYPTION_KEY secret (AES-256 hex key for field-level encryption at rest)"
+  type        = string
+}
+
 # Redis
 variable "redis_url" {
   description = "Redis connection URL for coordination pub/sub (rediss://host:port)"

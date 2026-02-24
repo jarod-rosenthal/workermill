@@ -54,7 +54,8 @@ resource "aws_ecs_task_definition" "orchestrator" {
         { name = "JIRA_CREDENTIALS", valueFrom = var.jira_credentials_secret_arn },
         { name = "STRIPE_SECRET_KEY", valueFrom = var.stripe_secret_key_arn },
         { name = "STRIPE_WEBHOOK_SECRET", valueFrom = var.stripe_webhook_secret_arn },
-        { name = "PLATFORM_API_KEY", valueFrom = var.platform_api_key_secret_arn }
+        { name = "PLATFORM_API_KEY", valueFrom = var.platform_api_key_secret_arn },
+        { name = "ENCRYPTION_KEY", valueFrom = var.encryption_key_secret_arn }
         ],
         var.microsoft_client_id_secret_arn != "" ? [{ name = "MICROSOFT_CLIENT_ID", valueFrom = var.microsoft_client_id_secret_arn }] : [],
         var.microsoft_client_secret_secret_arn != "" ? [{ name = "MICROSOFT_CLIENT_SECRET", valueFrom = var.microsoft_client_secret_secret_arn }] : [],
@@ -88,7 +89,6 @@ resource "aws_ecs_task_definition" "orchestrator" {
       portMappings = []
 
       environment = [
-        { name = "DATABASE_URL", value = "" },
         { name = "POOL_MODE", value = "transaction" },
         { name = "DEFAULT_POOL_SIZE", value = "8" },
         { name = "MAX_CLIENT_CONN", value = "50" },

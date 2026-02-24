@@ -332,9 +332,17 @@ export async function awardReferralCredit(referralId: string): Promise<void> {
     return;
   }
 
-  // Add credit to referrer's org
+  // Atomic credit increment — prevents clobbering concurrent balance changes
+  await orgRepo()
+    .createQueryBuilder()
+    .update(Organization)
+    .set({
+      creditBalanceCents: () =>
+        `COALESCE("creditBalanceCents", 0) + ${referral.creditAmountCents}`,
+    })
+    .where("id = :id", { id: referrerOrg.id })
+    .execute();
   referrerOrg.creditBalanceCents += referral.creditAmountCents;
-  await orgRepo().save(referrerOrg);
 
   // Create credit transaction record
   const transaction = creditTxRepo().create({
@@ -445,8 +453,17 @@ export async function revokeReferral(referralId: string, reason: string): Promis
   if (referral.status === "credited") {
     const referrerOrg = await orgRepo().findOne({ where: { id: referral.referrerOrgId } });
     if (referrerOrg) {
+      // Atomic clawback — prevents clobbering concurrent balance changes
+      await orgRepo()
+        .createQueryBuilder()
+        .update(Organization)
+        .set({
+          creditBalanceCents: () =>
+            `GREATEST(0, COALESCE("creditBalanceCents", 0) - ${referral.creditAmountCents})`,
+        })
+        .where("id = :id", { id: referrerOrg.id })
+        .execute();
       referrerOrg.creditBalanceCents = Math.max(0, referrerOrg.creditBalanceCents - referral.creditAmountCents);
-      await orgRepo().save(referrerOrg);
 
       // Record the clawback transaction
       const transaction = creditTxRepo().create({

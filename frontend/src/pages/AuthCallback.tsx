@@ -34,14 +34,11 @@ export function AuthCallback() {
 
       // Extract invite token from state parameter if present
       let inviteToken: string | null = null;
-      console.log("[AuthCallback] State param:", stateParam);
       if (stateParam) {
         try {
           const decoded = JSON.parse(atob(stateParam));
-          console.log("[AuthCallback] Decoded state:", decoded);
           inviteToken = decoded.invite || null;
-        } catch (e) {
-          console.error("[AuthCallback] Failed to decode state:", e);
+        } catch {
           // State wasn't valid JSON, ignore
         }
       }
@@ -50,12 +47,10 @@ export function AuthCallback() {
       if (!inviteToken) {
         const storedToken = sessionStorage.getItem("pendingInviteToken");
         if (storedToken) {
-          console.log("[AuthCallback] Found invite token in sessionStorage:", storedToken);
           inviteToken = storedToken;
           sessionStorage.removeItem("pendingInviteToken"); // Clean up
         }
       }
-      console.log("[AuthCallback] Final invite token:", inviteToken);
 
       try {
         // Exchange code for tokens
@@ -70,23 +65,18 @@ export function AuthCallback() {
 
         // If there's an invite token, accept the invite first
         if (effectiveInviteToken) {
-          console.log("[AuthCallback] Accepting invite:", effectiveInviteToken);
           setStatus("Joining organization...");
           try {
-            const acceptResult = await apiClient.post(`/invites/${effectiveInviteToken}/accept`, {
+            await apiClient.post(`/invites/${effectiveInviteToken}/accept`, {
               tosAccepted: true, // Auto-accept ToS for SSO flow
             });
-            console.log("[AuthCallback] Invite accepted:", acceptResult.data);
             sessionStorage.removeItem("pendingInviteToken"); // Clean up
           } catch (inviteErr: any) {
-            console.error("[AuthCallback] Invite acceptance error:", inviteErr.response?.data || inviteErr);
             // If already a member, that's fine - continue
             if (!inviteErr.response?.data?.error?.includes("already")) {
               // Don't fail the whole flow, user is authenticated
             }
           }
-        } else {
-          console.log("[AuthCallback] No invite token, skipping invite acceptance");
         }
 
         // Fetch user info (will have updated org if invite was accepted)
@@ -102,7 +92,6 @@ export function AuthCallback() {
           navigate("/dashboard");
         }
       } catch (err: any) {
-        console.error("SSO callback error:", err);
         setError(err.response?.data?.error || "Authentication failed. Please try again.");
       }
     };

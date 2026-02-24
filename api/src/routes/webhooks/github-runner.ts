@@ -21,35 +21,34 @@ router.post("/github-runner", async (req: Request, res: Response) => {
     const signature = req.headers["x-hub-signature-256"] as string;
     const webhookSecret = process.env.GITHUB_RUNNER_WEBHOOK_SECRET;
 
-    if (webhookSecret) {
-      if (!signature) {
-        logger.warn("GitHub runner webhook missing signature");
-        return res.status(401).json({ error: "Missing signature" });
-      }
+    if (!webhookSecret) {
+      logger.error("GITHUB_RUNNER_WEBHOOK_SECRET not configured — rejecting webhook");
+      return res.status(500).json({ error: "Webhook secret not configured" });
+    }
 
-      const body = JSON.stringify(req.body);
-      const expected =
-        "sha256=" +
-        crypto
-          .createHmac("sha256", webhookSecret)
-          .update(body)
-          .digest("hex");
+    if (!signature) {
+      logger.warn("GitHub runner webhook missing signature");
+      return res.status(401).json({ error: "Missing signature" });
+    }
 
-      if (
-        !crypto.timingSafeEqual(
-          Buffer.from(signature),
-          Buffer.from(expected)
-        )
-      ) {
-        logger.warn("GitHub runner webhook invalid signature");
-        return res
-          .status(401)
-          .json({ error: "Invalid signature" });
-      }
-    } else {
-      logger.warn(
-        "GITHUB_RUNNER_WEBHOOK_SECRET not configured - webhook signature verification disabled"
-      );
+    const body = JSON.stringify(req.body);
+    const expected =
+      "sha256=" +
+      crypto
+        .createHmac("sha256", webhookSecret)
+        .update(body)
+        .digest("hex");
+
+    if (
+      !crypto.timingSafeEqual(
+        Buffer.from(signature),
+        Buffer.from(expected)
+      )
+    ) {
+      logger.warn("GitHub runner webhook invalid signature");
+      return res
+        .status(401)
+        .json({ error: "Invalid signature" });
     }
 
     const event = req.headers["x-github-event"] as string;

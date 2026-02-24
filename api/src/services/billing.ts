@@ -648,11 +648,16 @@ export async function canCreateTask(org: Organization): Promise<{
         usage: { used: org.taskUsageThisMonth, quota: -1 },
       };
     }
-    // If trialExpiresAt is null and no subscription, allow (legacy orgs / backward compat)
+    // trialExpiresAt is null and no subscription — block (no valid entitlement)
+    return {
+      allowed: false,
+      reason: "No active subscription or trial. Subscribe to start using WorkerMill.",
+      usage: { used: org.taskUsageThisMonth, quota: -1 },
+    };
   }
 
   // Check subscription status for paid plans (Max and Enterprise require active subscription)
-  if (org.plan !== "pro" && org.stripeSubscriptionStatus !== "active") {
+  if (org.stripeSubscriptionStatus !== "active") {
     return {
       allowed: false,
       reason: "Subscription is not active. Please update your payment method.",

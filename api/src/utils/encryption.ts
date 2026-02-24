@@ -33,6 +33,12 @@ export function initializeEncryption(): void {
   const keyHex = process.env.ENCRYPTION_KEY;
 
   if (!keyHex) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "[Encryption] FATAL: ENCRYPTION_KEY is required in production. " +
+          "Set ENCRYPTION_KEY to a 64-character hex string (32 bytes) to enable encryption at rest.",
+      );
+    }
     noOpMode = true;
     logger.warn(
       "[Encryption] ENCRYPTION_KEY not set — token encryption disabled (plaintext pass-through). " +
@@ -147,13 +153,16 @@ export function decrypt(encrypted: string): string {
     ]);
 
     return decrypted.toString("utf8");
-  } catch {
-    // If decryption fails (e.g., wrong key, corrupted data, or value was
-    // actually plaintext that happened to match the format), return as-is
-    logger.warn(
-      "[Encryption] Failed to decrypt value — returning as-is (may be plaintext or corrupted)",
+  } catch (err) {
+    // Decryption failure means wrong key, corrupted data, or tampered ciphertext.
+    // Returning ciphertext would leak encrypted material — throw instead.
+    logger.error(
+      "[Encryption] Decryption failed — possible key mismatch or data corruption",
+      { error: err instanceof Error ? err.message : String(err) },
     );
-    return encrypted;
+    throw new Error(
+      "[Encryption] Failed to decrypt value — possible key mismatch or data corruption",
+    );
   }
 }
 

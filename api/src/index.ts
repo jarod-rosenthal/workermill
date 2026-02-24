@@ -90,7 +90,16 @@ import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { seedDirectivesIfMissing } from "./db/seed-directives-startup.js";
 import { initializeEncryption } from "./utils/encryption.js";
 
+// Production guard: EXECUTION_MODE=local must NEVER run in production
+if (process.env.EXECUTION_MODE === "local" && process.env.NODE_ENV === "production") {
+  console.error("FATAL: EXECUTION_MODE=local is not allowed in production");
+  process.exit(1);
+}
+
 const app = express();
+
+// Trust one level of proxy (AWS ALB) so req.ip returns the real client IP
+app.set("trust proxy", 1);
 
 // Request timeout middleware - prevents stuck requests (60 second timeout)
 app.use(timeout("60s"));
@@ -374,11 +383,34 @@ async function start() {
       logger.info("Orchestrator disabled via ENABLE_ORCHESTRATOR=false");
     }
 
-    // Start HTTP server
+    // Start HTTP server (store handle for graceful shutdown)
     const port = config.port;
-    app.listen(port, () => {
+    const server = app.listen(port, () => {
       logger.info(`WorkerMill API listening on port ${port}`);
     });
+
+    // Graceful shutdown: drain connections before exiting
+    const gracefulShutdown = async (signal: string) => {
+      logger.info(`${signal} received, shutting down gracefully`);
+      stopOrchestrator();
+
+      // Stop accepting new connections and wait for in-flight requests to finish
+      server.close(async () => {
+        logger.info("HTTP server closed, cleaning up resources");
+        await redis.disconnect();
+        await AppDataSource.destroy();
+        process.exit(0);
+      });
+
+      // Force exit after 25 seconds (ECS default stopTimeout is 30s)
+      setTimeout(() => {
+        logger.warn("Graceful shutdown timed out, forcing exit");
+        process.exit(1);
+      }, 25_000).unref();
+    };
+
+    process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     logger.error("Failed to start server", {
@@ -390,23 +422,6 @@ async function start() {
     process.exit(1);
   }
 }
-
-// Handle graceful shutdown
-process.on("SIGTERM", async () => {
-  logger.info("SIGTERM received, shutting down gracefully");
-  stopOrchestrator();
-  await redis.disconnect();
-  await AppDataSource.destroy();
-  process.exit(0);
-});
-
-process.on("SIGINT", async () => {
-  logger.info("SIGINT received, shutting down gracefully");
-  stopOrchestrator();
-  await redis.disconnect();
-  await AppDataSource.destroy();
-  process.exit(0);
-});
 
 // Handle unhandled promise rejections - prevents silent failures
 process.on("unhandledRejection", (reason, promise) => {

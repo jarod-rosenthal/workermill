@@ -111,18 +111,30 @@ export class CostTracker {
       const txTaskRepo = transactionalEntityManager.getRepository(WorkerTask);
       const txOrgRepo = transactionalEntityManager.getRepository(Organization);
 
-      // Update task with cost and mark as reported
-      task.estimatedCostUsd = taskCost;
-      task.usageReportedAt = new Date();
-      await txTaskRepo.save(task);
+      // Update task with cost and mark as reported (atomic — only touches these columns)
+      await txTaskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          estimatedCostUsd: taskCost,
+          usageReportedAt: new Date(),
+        } as Record<string, unknown>)
+        .where("id = :id", { id: task.id })
+        .execute();
 
       // Use billingOrgId for cost attribution (platform tasks bill to platform org)
       const billingOrgId = task.getBillingOrgId();
       const org = await txOrgRepo.findOne({ where: { id: billingOrgId } });
       if (org) {
         const previousCost = Number(org.cumulativeCostUsd || 0);
+        // Atomic increment — prevents clobbering concurrent balance changes
+        await txOrgRepo
+          .createQueryBuilder()
+          .update(Organization)
+          .set({ cumulativeCostUsd: () => `COALESCE("cumulativeCostUsd", 0) + ${taskCost}` })
+          .where("id = :id", { id: billingOrgId })
+          .execute();
         org.cumulativeCostUsd = previousCost + taskCost;
-        await txOrgRepo.save(org);
 
         logger.info("Org cumulative cost updated", {
           taskId,
@@ -268,9 +280,13 @@ export class CostTracker {
     }
 
     const previousCost = org.cumulativeCostUsd;
-    org.cumulativeCostUsd = 0;
-    org.costResetAt = new Date();
-    await orgRepo.save(org);
+    // Atomic update — prevents clobbering concurrent changes
+    await orgRepo
+      .createQueryBuilder()
+      .update(Organization)
+      .set({ cumulativeCostUsd: 0, costResetAt: new Date() })
+      .where("id = :id", { id: orgId })
+      .execute();
 
     logger.info("Organization cost reset", {
       orgId,

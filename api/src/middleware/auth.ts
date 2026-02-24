@@ -81,6 +81,12 @@ export async function authenticateUser(
       email_verified: payload["email_verified"] as boolean,
     };
 
+    // Reject unverified email addresses
+    if (!payload["email_verified"]) {
+      res.status(403).json({ error: "Email address must be verified" });
+      return;
+    }
+
     // Look up user in database
     const userRepo = AppDataSource.getRepository(User);
     const user = await userRepo.findOne({
@@ -162,6 +168,12 @@ export async function authenticateUserAllowNoOrg(
       email: payload["email"] as string,
       email_verified: payload["email_verified"] as boolean,
     };
+
+    // Reject unverified email addresses
+    if (!payload["email_verified"]) {
+      res.status(403).json({ error: "Email address must be verified" });
+      return;
+    }
 
     // Look up user in database
     const userRepo = AppDataSource.getRepository(User);
@@ -495,6 +507,12 @@ export async function authenticateSSE(
       email: payload["email"] as string,
       email_verified: payload["email_verified"] as boolean,
     };
+
+    // Reject unverified email addresses
+    if (!payload["email_verified"]) {
+      res.status(403).json({ error: "Email address must be verified" });
+      return;
+    }
 
     // Look up user in database
     const userRepo = AppDataSource.getRepository(User);

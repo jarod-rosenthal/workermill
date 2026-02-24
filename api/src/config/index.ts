@@ -118,10 +118,10 @@ export const config = {
 
   // Cognito
   cognito: {
-    userPoolId: process.env.COGNITO_USER_POOL_ID || "COGNITO_POOL_ID",
-    clientId: process.env.COGNITO_CLIENT_ID || "COGNITO_CLIENT_ID",
+    userPoolId: process.env.COGNITO_USER_POOL_ID || "",
+    clientId: process.env.COGNITO_CLIENT_ID || "",
     region: process.env.AWS_REGION || "us-east-1",
-    domain: process.env.COGNITO_DOMAIN || "REDACTED_COGNITO_DOMAIN",
+    domain: process.env.COGNITO_DOMAIN || "",
   },
 
   // Secrets
@@ -400,15 +400,23 @@ export function validateEnvironment(): void {
     }
   }
 
-  // Log warnings (both dev and prod - informational only)
+  // In production, critical vars are fatal
+  if (isProduction) {
+    const missing = criticalVars.filter((v) => !v.hasValue).map((v) => v.name);
+    if (missing.length > 0) {
+      throw new Error(
+        `[Config] FATAL: Missing required environment variables in production: ${missing.join(", ")}`,
+      );
+    }
+  }
+
+  // Log warnings (both dev and prod - informational for non-critical)
   if (warnings.length > 0) {
     const prefix = isProduction ? "[Config] WARNING" : "[Config] Development mode";
     console.warn(`${prefix}: Some environment variables not explicitly set:`);
     for (const w of warnings) {
       console.warn(`  - ${w}`);
     }
-    // NOTE: Not failing - just informational. The app may still work if
-    // environment is configured via other means (Secrets Manager, task definition, etc.)
   }
 }
 

@@ -85,15 +85,14 @@ export function validateStatusTransition(
   const validNextStatuses = VALID_TRANSITIONS[currentStatus] || [];
 
   if (!validNextStatuses.includes(newStatus) && currentStatus !== newStatus) {
-    logger.warn("Invalid status transition detected", {
+    logger.warn("Invalid status transition blocked", {
       taskId: task.id,
       jiraIssueKey: task.jiraIssueKey,
       currentStatus,
       newStatus,
       validTransitions: validNextStatuses,
     });
-    // TODO: Once we're confident the state machine is complete,
-    // return false here to block invalid transitions
+    return false;
   }
 
   return true;

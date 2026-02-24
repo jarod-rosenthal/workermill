@@ -519,7 +519,7 @@ router.post(
  * GET /api/organizations/current/invites
  * List all pending invites for current organization
  */
-router.get("/current/invites", async (req: Request, res: Response) => {
+router.get("/current/invites", requireAdmin, async (req: Request, res: Response) => {
   try {
     const org = req.organization!;
     const inviteRepo = AppDataSource.getRepository(OrgInvite);

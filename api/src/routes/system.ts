@@ -1,13 +1,13 @@
 import { Router, Request, Response } from "express";
 import { MoreThan } from "typeorm";
-import { authenticateRequest } from "../middleware/auth.js";
+import { authenticateRequest, requireAdmin } from "../middleware/auth.js";
 import { AppDataSource } from "../db/connection.js";
 import { Organization, WorkerTask } from "../models/index.js";
 import { logger } from "../utils/logger.js";
-import { startOrchestrator, stopOrchestrator } from "../services/orchestrator.js";
 
 const router = Router();
 router.use(authenticateRequest);
+router.use(requireAdmin);
 
 router.get("/status", async (req: Request, res: Response) => {
   const org = req.organization!;
@@ -25,21 +25,13 @@ router.post("/enable", async (req: Request, res: Response) => {
     org.systemEnabled = true;
     await orgRepo.save(org);
 
-    // Also start the orchestrator to resume task execution
-    const autoStart = req.body?.autoStartOrchestrator !== false; // default true
-    if (autoStart) {
-      startOrchestrator();
-    }
-
     logger.info("System enabled (maintenance mode exited)", {
       orgId: org.id,
-      orchestratorStarted: autoStart,
     });
     res.json({
       success: true,
       message: "System enabled - maintenance mode exited",
       systemEnabled: true,
-      orchestratorStarted: autoStart,
     });
   } catch (error) {
     logger.error("Failed to enable system", { error });
@@ -54,9 +46,7 @@ router.post("/disable", async (req: Request, res: Response) => {
     org.systemEnabled = false;
     await orgRepo.save(org);
 
-    // Also stop the orchestrator to ensure immediate effect
-    // This prevents any pending poll cycles from claiming tasks
-    stopOrchestrator();
+    // Orchestrator keeps running but task-claimer skips orgs with systemEnabled=false
 
     logger.info("System disabled (maintenance mode entered)", {
       orgId: org.id,
@@ -66,7 +56,6 @@ router.post("/disable", async (req: Request, res: Response) => {
       success: true,
       message: "System disabled - maintenance mode active",
       systemEnabled: false,
-      orchestratorStopped: true,
     });
   } catch (error) {
     logger.error("Failed to disable system", { error });

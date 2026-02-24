@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { randomUUID } from "crypto";
 import { redis } from "./redis-client.js";
 
 /**
@@ -24,6 +25,7 @@ export interface PlanningProgressEvent {
 
 class PlanningProgressEmitter extends EventEmitter {
   private static instance: PlanningProgressEmitter;
+  private instanceId = randomUUID();
 
   private constructor() {
     super();
@@ -32,6 +34,7 @@ class PlanningProgressEmitter extends EventEmitter {
 
   public initRedisSubscription(): void {
     redis.subscribeToChannel("events:planning", (msg) => {
+      if (msg._instanceId === this.instanceId) return; // Skip own messages
       const taskId = msg.taskId as string;
       if (taskId) {
         super.emit(`planning:${taskId}`, msg);
@@ -48,10 +51,11 @@ class PlanningProgressEmitter extends EventEmitter {
 
   public emitProgress(taskId: string, event: PlanningProgressEvent): void {
     this.emit(`planning:${taskId}`, event);
-    redis.publish(
-      "events:planning",
-      { taskId, ...event } as unknown as Record<string, unknown>,
-    );
+    redis.publish("events:planning", {
+      taskId,
+      ...(event as unknown as Record<string, unknown>),
+      _instanceId: this.instanceId,
+    });
   }
 
   public subscribeToProgress(

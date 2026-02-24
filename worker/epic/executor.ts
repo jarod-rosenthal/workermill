@@ -378,6 +378,11 @@ export class StoryExecutor {
       prompt += "\n\n***REMOVED******REMOVED*** Domain Expertise\n\n" + directive;
     }
 
+    // Inject org-level AI guidelines (intent engineering)
+    if (this.config.orgGuidelines) {
+      prompt += `\n\n***REMOVED******REMOVED*** Organization Guidelines\n\nThe following guidelines are set by this organization and take precedence over general best practices. Treat these as hard constraints, not suggestions:\n\n${this.config.orgGuidelines}`;
+    }
+
     // Only add coordination instructions for multi-story tasks (saves ~1K tokens for single-story)
     if (totalStories > 1) {
       prompt += this.serverCoordinationInstructions ?? COORDINATION_INSTRUCTIONS;

@@ -26,7 +26,7 @@ import {
   hasOrgAccess,
 } from "../services/user-organizations.js";
 import { randomBytes, randomUUID } from "crypto";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { authenticateUserAllowNoOrg } from "../middleware/auth.js";
 import axios from "axios";
 import rateLimit from "express-rate-limit";

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { CognitoJwtVerifier } from "aws-jwt-verify";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { config } from "../config/index.js";
 import { AppDataSource } from "../db/connection.js";
 import { User, Organization, UserApiKey, UserOrganization } from "../models/index.js";

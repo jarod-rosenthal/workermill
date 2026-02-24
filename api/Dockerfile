@@ -21,15 +21,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-***REMOVED*** Install build dependencies for native modules (bcrypt)
-RUN apk add --no-cache python3 make g++
-
 ***REMOVED*** Install production dependencies only
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
-
-***REMOVED*** Remove build dependencies to reduce image size
-RUN apk del python3 make g++
 
 ***REMOVED*** Copy built files
 COPY --from=builder /app/dist ./dist

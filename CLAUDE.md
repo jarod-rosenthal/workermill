@@ -20,6 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | **Task orchestration** | Database polling with atomic claim | Polls for queued tasks, claims via UPDATE...WHERE, spawns ECS |
 | **Worker entrypoint** | `post_log()` shell function | Posts terminal output to API in real-time |
 | **LLM Models** | NEVER change without approval | No default model changes, no provider switches, no model name changes in code/env/config |
+| **Coordination SSE** | Redis pub/sub with DB polling fallback | SSE endpoint subscribes to Redis for instant push. If Redis is down, falls back to 5s DB polling transparently. Fire-and-forget publishes never block writes. |
 
 **If you think something could be "better" (CloudWatch, WebSockets, etc.), ASK FIRST.**
 
@@ -157,6 +158,9 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 
 ***REMOVED******REMOVED*** Recent Changes (keep updated)
 
+- 2026-02-23: Redis pub/sub for real-time coordination — ElastiCache `cache.t4g.micro`, SSE pushes instantly via Redis subscribe, falls back to 5s DB polling if Redis unavailable. Workers use SSE subscriber with event-driven coordinator loop.
+- 2026-02-23: bcrypt → bcryptjs (pure JS, no native deps) — eliminates Docker build warnings and `python3 make g++` from Dockerfile.
+- 2026-02-23: CloudFront origin timeouts increased (read 30→60s, keepalive 5→30s) to prevent 504s during coordination.
 - 2026-02-22: Multi-type server-side filtering for coordination API (`messageTypes` query param) — root cause fix for poll timeouts on large epics.
 - 2026-02-22: Multi-org support — VS Code extension + web dashboard org switcher (`dc82abc`).
 - 2026-02-21: Billing tiers renamed: Free/Pro/Enterprise → **Pro/Max/Enterprise** (`e8928aa`).
@@ -188,7 +192,7 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 
 ***REMOVED******REMOVED*** Quick Reference
 
-**Ports:** API: 3001, Frontend: 5173, Local DB: 5433
+**Ports:** API: 3001, Frontend: 5173, Local DB: 5433, Local Redis: 6379
 
 | Task | Command |
 |------|---------|

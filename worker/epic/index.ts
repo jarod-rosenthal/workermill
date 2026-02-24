@@ -77,6 +77,8 @@ function loadConfig(): EpicConfig {
     qualityGateBypass: process.env.QUALITY_GATE_BYPASS === "true",
     // Max parallel experts cap
     maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10),
+    // Intent Engineering — org guidelines from settings
+    orgGuidelines: process.env.ORG_GUIDELINES || undefined,
     // Quality gate thresholds from organization settings
     qualityThresholds: process.env.QUALITY_THRESHOLDS
       ? JSON.parse(process.env.QUALITY_THRESHOLDS)

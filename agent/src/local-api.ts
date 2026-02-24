@@ -239,13 +239,14 @@ async function getMergedTasks(): Promise<LocalTaskInfo[]> {
       recentCompleted?: CloudTask[];
     };
 
-    const localIds = new Set(localList.map((t) => t.id));
+    const seenIds = new Set(localList.map((t) => t.id));
     const cloudTasks: LocalTaskInfo[] = [];
 
     for (const list of [dashboard.activeTasks, dashboard.queuedTasks, dashboard.recentCompleted]) {
       if (!Array.isArray(list)) continue;
       for (const ct of list) {
-        if (localIds.has(ct.id)) continue; // local takes priority
+        if (seenIds.has(ct.id)) continue; // local takes priority, skip duplicates across lists
+        seenIds.add(ct.id);
         cloudTasks.push({
           id: ct.id,
           summary: ct.summary || "Unknown task",

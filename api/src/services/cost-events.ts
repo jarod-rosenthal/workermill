@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { redis } from "./redis-client.js";
 
 /**
  * Real-time cost update events for SSE streaming.
@@ -30,6 +31,20 @@ class CostEventEmitter extends EventEmitter {
     this.setMaxListeners(100);
   }
 
+  /**
+   * Initialize Redis subscription for cross-instance delivery.
+   * Call once after Redis connects.
+   */
+  public initRedisSubscription(): void {
+    redis.subscribeToChannel("events:cost", (msg) => {
+      const orgId = msg.orgId as string;
+      if (orgId) {
+        // Deliver to local SSE listeners without re-publishing to Redis
+        super.emit(`cost:${orgId}`, msg);
+      }
+    });
+  }
+
   public static getInstance(): CostEventEmitter {
     if (!CostEventEmitter.instance) {
       CostEventEmitter.instance = new CostEventEmitter();
@@ -42,7 +57,10 @@ class CostEventEmitter extends EventEmitter {
    * SSE handlers subscribe by orgId to receive updates for their org's tasks.
    */
   public emitCostUpdate(event: CostUpdateEvent): void {
+    // Local delivery
     this.emit(`cost:${event.orgId}`, event);
+    // Cross-instance delivery via Redis
+    redis.publish("events:cost", event as unknown as Record<string, unknown>);
   }
 
   /**

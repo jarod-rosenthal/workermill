@@ -7,7 +7,10 @@ import {
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
 import type { ProviderId } from "../providers/types.js";
-import { getOrgSecretFromDb } from "../utils/org-secret-store.js";
+
+// NOTE: Do NOT import org-secret-store at the top level — it creates a circular dependency:
+// config → org-secret-store → connection → config
+// Instead, use dynamic import() in the async functions that need it.
 
 // Load .env.local first (for local development), then .env as fallback
 // Check both current dir and parent dir (API runs from api/ subdirectory)
@@ -244,6 +247,8 @@ export async function getProviderCredentials(
   }
 
   // DB-first credential lookup (encrypted org_credentials table)
+  // Dynamic import to avoid circular dependency (config → org-secret-store → connection → config)
+  const { getOrgSecretFromDb } = await import("../utils/org-secret-store.js");
   const dbValue = await getOrgSecretFromDb(orgId, `providers/${providerId}`);
   if (dbValue) {
     providerCredentialsCache.set(orgCacheKey, {
@@ -281,6 +286,7 @@ export async function hasProviderCredentials(
     return true;
   }
 
+  const { getOrgSecretFromDb } = await import("../utils/org-secret-store.js");
   const dbValue = await getOrgSecretFromDb(orgId, `providers/${providerId}`);
   return !!dbValue;
 }

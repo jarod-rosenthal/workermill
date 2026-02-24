@@ -1,5 +1,9 @@
 import winston from "winston";
-import { config } from "../config/index.js";
+
+// NOTE: Do NOT import config here — it creates a circular dependency:
+// config → org-secret-store → logger → config
+// Use process.env directly instead.
+const isProduction = process.env.NODE_ENV === "production";
 
 /**
  * Fields that contain sensitive data and should be redacted in logs
@@ -74,7 +78,7 @@ const redactSensitiveFields = winston.format((info) => {
 });
 
 export const logger = winston.createLogger({
-  level: config.nodeEnv === "production" ? "info" : "debug",
+  level: isProduction ? "info" : "debug",
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
@@ -85,7 +89,7 @@ export const logger = winston.createLogger({
   transports: [
     new winston.transports.Console({
       format:
-        config.nodeEnv === "production"
+        isProduction
           ? winston.format.json()
           : winston.format.combine(
               winston.format.colorize(),

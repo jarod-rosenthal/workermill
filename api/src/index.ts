@@ -90,6 +90,8 @@ import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { poolHealthMiddleware } from "./middleware/pool-health.js";
 import { seedDirectivesIfMissing } from "./db/seed-directives-startup.js";
 import { initializeEncryption } from "./utils/encryption.js";
+import { activeOps } from "./services/orchestrator-utils.js";
+import { stopPoolMonitor } from "./db/connection.js";
 
 // Production guard: EXECUTION_MODE=local must NEVER run in production
 if (process.env.EXECUTION_MODE === "local" && process.env.NODE_ENV === "production") {
@@ -410,9 +412,19 @@ async function start() {
       logger.info(`${signal} received, shutting down gracefully`);
       stopOrchestrator();
 
+      // Wait for fire-and-forget operations to complete (max 20s)
+      if (activeOps.size > 0) {
+        logger.info(`Waiting for ${activeOps.size} active operations to complete`);
+        await Promise.race([
+          Promise.allSettled([...activeOps]),
+          new Promise((resolve) => setTimeout(resolve, 20_000)),
+        ]);
+      }
+
       // Stop accepting new connections and wait for in-flight requests to finish
       server.close(async () => {
         logger.info("HTTP server closed, cleaning up resources");
+        stopPoolMonitor();
         await redis.disconnect();
         await AppDataSource.destroy();
         process.exit(0);

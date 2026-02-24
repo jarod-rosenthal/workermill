@@ -37,7 +37,6 @@ router.get("/ready", async (_req: Request, res: Response) => {
     res.status(503).json({
       status: "not ready",
       database: "disconnected",
-      error: error instanceof Error ? error.message : "Unknown error",
     });
   }
 });

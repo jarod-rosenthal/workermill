@@ -27,6 +27,7 @@ import { encrypt, decrypt } from "../../utils/encryption.js";
  * These are encrypted at rest in the database.
  */
 const SENSITIVE_FIELDS: (keyof Organization)[] = [
+  "apiKey",
   "sonarqubeToken",
   "coderabbitApiKey",
   "deepsourceToken",

@@ -889,7 +889,6 @@ router.post("/siem/test", async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: "Failed to test SIEM webhook",
-      details: error instanceof Error ? error.message : "Unknown error",
     });
   }
 });

@@ -482,11 +482,6 @@ router.get(
 
       res.json({ issues });
     } catch (error: unknown) {
-      const err = error as Error & { statusCode?: number };
-      if (err.statusCode) {
-        res.status(err.statusCode).json({ error: err.message });
-        return;
-      }
       logger.error("Error searching issues", { error, orgId, provider });
       res.status(500).json({ error: "Failed to search issues" });
     }
@@ -549,11 +544,6 @@ router.get("/projects", async (req: Request, res: Response) => {
 
     res.json({ projects });
   } catch (error: unknown) {
-    const err = error as Error & { statusCode?: number };
-    if (err.statusCode) {
-      res.status(err.statusCode).json({ error: err.message });
-      return;
-    }
     logger.error("Error fetching projects", { error, orgId, provider });
     res.status(500).json({ error: "Failed to fetch projects" });
   }

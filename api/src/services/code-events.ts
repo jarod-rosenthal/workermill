@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { randomUUID } from "crypto";
 import { redis } from "./redis-client.js";
 
 /**
@@ -19,6 +20,7 @@ export interface CodeEvent {
 
 class CodeEventEmitter extends EventEmitter {
   private static instance: CodeEventEmitter;
+  private instanceId = randomUUID();
 
   private constructor() {
     super();
@@ -27,6 +29,7 @@ class CodeEventEmitter extends EventEmitter {
 
   public initRedisSubscription(): void {
     redis.subscribeToChannel("events:code", (msg) => {
+      if (msg._instanceId === this.instanceId) return; // Skip own messages
       const taskId = msg.taskId as string;
       if (taskId) {
         super.emit(`code:${taskId}`, msg);
@@ -43,10 +46,10 @@ class CodeEventEmitter extends EventEmitter {
 
   public emitCodeEvent(taskId: string, event: CodeEvent): void {
     this.emit(`code:${taskId}`, event);
-    redis.publish(
-      "events:code",
-      event as unknown as Record<string, unknown>,
-    );
+    redis.publish("events:code", {
+      ...(event as unknown as Record<string, unknown>),
+      _instanceId: this.instanceId,
+    });
   }
 
   public subscribeToCodeEvents(

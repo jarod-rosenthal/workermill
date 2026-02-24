@@ -255,6 +255,10 @@ export class Organization {
   @Column({ name: "default_worker_persona", type: "varchar", length: 50, default: "backend_developer" })
   defaultWorkerPersona: string;
 
+  // Intent Engineering
+  @Column({ name: "ai_guidelines", type: "text", nullable: true })
+  aiGuidelines: string | null;
+
   // Cost Settings
   @Column({ name: "cost_alert_threshold_usd", type: "decimal", precision: 10, scale: 2, nullable: true })
   costAlertThresholdUsd: number | null;

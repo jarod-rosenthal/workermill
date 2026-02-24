@@ -256,6 +256,17 @@ class RedisService {
   }
 
   /**
+   * Active health check — sends PING to Redis and returns latency in ms.
+   * Returns null if not configured or not connected.
+   */
+  async ping(): Promise<number | null> {
+    if (!this.pub || !this._connected) return null;
+    const start = Date.now();
+    await this.pub.ping();
+    return Date.now() - start;
+  }
+
+  /**
    * Gracefully disconnect both clients.
    */
   async disconnect(): Promise<void> {

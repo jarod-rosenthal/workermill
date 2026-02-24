@@ -353,6 +353,7 @@ export async function spawnWorker(
     PUSH_AFTER_COMMIT: orgConfig.pushAfterCommit !== false ? "true" : "false",
     GRACEFUL_SHUTDOWN_ENABLED: orgConfig.gracefulShutdownEnabled !== false ? "true" : "false",
     MAX_PARALLEL_EXPERTS: String(orgConfig.maxParallelExperts),
+    ORG_GUIDELINES: String(orgConfig.aiGuidelines || ""),
     REVIEW_ENABLED: task.skipManagerReview === false ? "true" : "false",
     SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (orgConfig.selfReviewEnabled !== false) ? "true" : "false",
 

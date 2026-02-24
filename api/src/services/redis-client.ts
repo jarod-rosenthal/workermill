@@ -147,6 +147,106 @@ class RedisService {
     };
   }
 
+  // ── Generic pub/sub (any channel) ─────────────────────────────────────
+
+  /**
+   * Publish a message to any channel. Fire-and-forget — never blocks the caller.
+   * If Redis is down, the publish silently fails.
+   */
+  publish(channel: string, payload: Record<string, unknown>): void {
+    if (!this.pub || !this._connected) return;
+
+    this.pub.publish(channel, JSON.stringify(payload)).catch(() => {
+      // Intentionally swallowed — callers handle Redis-down case
+    });
+  }
+
+  /**
+   * Subscribe to messages on any channel.
+   * Returns an unsubscribe function for cleanup.
+   */
+  subscribeToChannel(
+    channel: string,
+    callback: MessageCallback,
+  ): () => void {
+    if (!this.sub) return () => {};
+
+    // Track the callback
+    let channelListeners = this.listeners.get(channel);
+    if (!channelListeners) {
+      channelListeners = new Set();
+      this.listeners.set(channel, channelListeners);
+      // First listener for this channel — subscribe at Redis level
+      this.sub.subscribe(channel).catch((err) => {
+        logger.warn("Redis subscribe failed", {
+          channel,
+          error: err.message,
+        });
+      });
+    }
+    channelListeners.add(callback);
+
+    // Return unsubscribe function
+    return () => {
+      channelListeners!.delete(callback);
+      if (channelListeners!.size === 0) {
+        this.listeners.delete(channel);
+        this.sub?.unsubscribe(channel).catch(() => {});
+      }
+    };
+  }
+
+  // ── Key-value operations ─────────────────────────────────────────────
+
+  /**
+   * GET a key from Redis. Returns null if Redis is unavailable or key doesn't exist.
+   */
+  async get(key: string): Promise<string | null> {
+    if (!this.pub || !this._connected) return null;
+
+    try {
+      return await this.pub.get(key);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * SET a key in Redis with optional TTL. Returns false if Redis is unavailable.
+   */
+  async set(
+    key: string,
+    value: string,
+    ttlSeconds?: number,
+  ): Promise<boolean> {
+    if (!this.pub || !this._connected) return false;
+
+    try {
+      if (ttlSeconds !== undefined) {
+        await this.pub.set(key, value, "EX", ttlSeconds);
+      } else {
+        await this.pub.set(key, value);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * DEL a key from Redis. Returns false if Redis is unavailable.
+   */
+  async del(key: string): Promise<boolean> {
+    if (!this.pub || !this._connected) return false;
+
+    try {
+      await this.pub.del(key);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   get isConnected(): boolean {
     return this._connected;
   }

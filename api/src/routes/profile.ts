@@ -9,7 +9,7 @@ import {
   VerifySoftwareTokenCommand,
   SetUserMFAPreferenceCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { authenticateUser } from "../middleware/auth.js";

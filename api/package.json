@@ -39,7 +39,7 @@
     "ai": "^6.0.0",
     "aws-jwt-verify": "^4.0.1",
     "axios": "^1.13.3",
-    "bcrypt": "^5.1.1",
+    "bcryptjs": "^3.0.3",
     "compression": "^1.8.1",
     "connect-timeout": "^1.9.1",
     "cors": "^2.8.5",
@@ -62,7 +62,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
-    "@types/bcrypt": "^5.0.2",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/minimatch": "^5.1.2",

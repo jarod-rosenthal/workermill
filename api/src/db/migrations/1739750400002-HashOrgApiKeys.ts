@@ -1,5 +1,5 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 
 export class HashOrgApiKeys1739750400002 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {

@@ -7,7 +7,7 @@ import { authenticateUser, authenticateCognitoOnly, requireAdmin } from "../midd
 import { requireCurrentTos } from "../middleware/tos.js";
 import { logger } from "../utils/logger.js";
 import { randomUUID } from "crypto";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { sendInviteEmail, sendOrgAddedEmail, sendWelcomeEmail } from "../services/email/index.js";
 import { TOS_VERSION } from "../constants/tos.js";
 import { logTosAccepted } from "../services/audit.js";

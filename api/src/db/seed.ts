@@ -2,7 +2,7 @@ import { AppDataSource } from "./connection.js";
 import { Organization, User, UserOrganization } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import { randomUUID } from "crypto";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 
 /**
  * Seed initial data for WorkerMill

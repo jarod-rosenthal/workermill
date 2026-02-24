@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { randomUUID } from "crypto";
 import { redis } from "./redis-client.js";
 
 /**
@@ -24,6 +25,7 @@ export interface CostUpdateEvent {
  */
 class CostEventEmitter extends EventEmitter {
   private static instance: CostEventEmitter;
+  private instanceId = randomUUID();
 
   private constructor() {
     super();
@@ -37,6 +39,7 @@ class CostEventEmitter extends EventEmitter {
    */
   public initRedisSubscription(): void {
     redis.subscribeToChannel("events:cost", (msg) => {
+      if (msg._instanceId === this.instanceId) return; // Skip own messages
       const orgId = msg.orgId as string;
       if (orgId) {
         // Deliver to local SSE listeners without re-publishing to Redis
@@ -60,7 +63,10 @@ class CostEventEmitter extends EventEmitter {
     // Local delivery
     this.emit(`cost:${event.orgId}`, event);
     // Cross-instance delivery via Redis
-    redis.publish("events:cost", event as unknown as Record<string, unknown>);
+    redis.publish("events:cost", {
+      ...(event as unknown as Record<string, unknown>),
+      _instanceId: this.instanceId,
+    });
   }
 
   /**

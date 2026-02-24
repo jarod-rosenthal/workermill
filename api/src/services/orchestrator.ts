@@ -316,6 +316,8 @@ async function pollLoop(): Promise<void> {
         });
       }
 
+      state.tasksProcessed++;
+
       // Sleep between polls
       await new Promise((resolve) => setTimeout(resolve, 5000));
     } catch (error) {

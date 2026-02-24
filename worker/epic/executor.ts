@@ -1462,10 +1462,13 @@ Begin your implementation now.`;
       this.postLog(msg.content, expert, "output");
 
       // Detect and post collaboration markers to coordination feed
-      this.detectAndPostDecisions(msg.content, expert, story);
-      this.detectAndPostQuestions(msg.content, expert, story);
-      this.detectAndPostAnswers(msg.content, expert, story);
-      this.detectAndPostAcknowledgments(msg.content, expert, story);
+      // Wrapped in Promise.allSettled so individual failures don't become unhandled rejections
+      Promise.allSettled([
+        this.detectAndPostDecisions(msg.content, expert, story),
+        this.detectAndPostQuestions(msg.content, expert, story),
+        this.detectAndPostAnswers(msg.content, expert, story),
+        this.detectAndPostAcknowledgments(msg.content, expert, story),
+      ]).catch(() => {}); // allSettled never rejects, but safety net
     } else if (msg.type === "tool_result") {
       console.log(`${prefix} Tool result received`);
     } else if (msg.type === "result" && msg.content) {

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { In, MoreThan, Brackets } from "typeorm";
 import { authenticateSSE } from "../../middleware/auth.js";
+import { acquireSSESlot, releaseSSESlot } from "../../middleware/sse-limiter.js";
 import { AppDataSource } from "../../db/connection.js";
 import { WorkerTask, Organization, KbCard } from "../../models/index.js";
 import { logger } from "../../utils/logger.js";
@@ -54,6 +55,11 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
     return;
   }
 
+  if (!acquireSSESlot(org.id, 5)) {
+    res.status(429).json({ error: "Too many dashboard connections" });
+    return;
+  }
+
   // Set up SSE headers
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -62,12 +68,6 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
   res.flushHeaders();
 
   let isConnected = true;
-
-  // Handle client disconnect
-  req.on("close", () => {
-    isConnected = false;
-    logger.debug("SSE client disconnected", { orgId: org.id });
-  });
 
   // Send initial connection message
   res.write(`data: ${JSON.stringify({ type: "connected", timestamp: new Date().toISOString() })}\n\n`);
@@ -320,8 +320,11 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
 
   // Clean up on disconnect
   req.on("close", () => {
+    isConnected = false;
     clearInterval(interval);
     unsubscribeCost();
+    releaseSSESlot(org.id);
+    logger.debug("SSE client disconnected", { orgId: org.id });
   });
 });
 

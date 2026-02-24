@@ -18,6 +18,7 @@
 import { Router, Request, Response } from "express";
 import { body, query, param, validationResult } from "express-validator";
 import { authenticateApiKey, authenticateSSE, authenticateRequest, authenticateUser } from "../middleware/auth.js";
+import { acquireSSESlot, releaseSSESlot } from "../middleware/sse-limiter.js";
 import { asyncHandler } from "../middleware/error-handler.js";
 import { validateRequest } from "../middleware/validation.js";
 import {
@@ -97,6 +98,11 @@ router.get(
       return;
     }
 
+    if (!acquireSSESlot(orgId, 20)) {
+      res.status(429).json({ error: "Too many coordination connections" });
+      return;
+    }
+
     // Set up SSE headers
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -128,8 +134,10 @@ router.get(
       }, 25000);
 
       req.on("close", () => {
+        isConnected = false;
         unsubscribe();
         clearInterval(heartbeat);
+        releaseSSESlot(orgId);
         logger.info("Context stream disconnected (redis)", { parentTaskId });
       });
     } else {
@@ -185,7 +193,9 @@ router.get(
       }, 5000);
 
       req.on("close", () => {
+        isConnected = false;
         clearInterval(pollInterval);
+        releaseSSESlot(orgId);
         logger.info("Context stream disconnected (polling)", { parentTaskId });
       });
     }

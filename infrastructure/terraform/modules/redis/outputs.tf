@@ -9,8 +9,15 @@ output "port" {
 }
 
 output "redis_url" {
-  description = "Full Redis connection URL (TLS)"
-  value       = "rediss://${aws_elasticache_replication_group.main.primary_endpoint_address}:${aws_elasticache_replication_group.main.port}"
+  description = "Full Redis connection URL (TLS with auth)"
+  value       = "rediss://:${random_password.redis_auth.result}@${aws_elasticache_replication_group.main.primary_endpoint_address}:${aws_elasticache_replication_group.main.port}"
+  sensitive   = true
+}
+
+output "redis_auth_token" {
+  description = "Redis AUTH token"
+  value       = random_password.redis_auth.result
+  sensitive   = true
 }
 
 output "security_group_id" {

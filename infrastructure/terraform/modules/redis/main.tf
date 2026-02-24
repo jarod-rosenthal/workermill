@@ -1,6 +1,11 @@
 # ElastiCache Redis for coordination pub/sub
 # Single-node cache.t4g.micro (~$12/month) with encryption
 
+resource "random_password" "redis_auth" {
+  length  = 32
+  special = false # ElastiCache auth tokens don't support all special chars
+}
+
 resource "aws_elasticache_subnet_group" "main" {
   name       = "workermill-${var.environment}-redis"
   subnet_ids = var.private_subnet_ids
@@ -51,6 +56,7 @@ resource "aws_elasticache_replication_group" "main" {
 
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true
+  auth_token                 = random_password.redis_auth.result
 
   # Single node — no failover
   automatic_failover_enabled = false

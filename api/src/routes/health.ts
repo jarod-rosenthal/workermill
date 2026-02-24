@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { AppDataSource } from "../db/connection.js";
+import { redis } from "../services/redis-client.js";
 
 const router = Router();
 
@@ -20,9 +21,16 @@ router.get("/ready", async (_req: Request, res: Response) => {
     // Check database connection
     await AppDataSource.query("SELECT 1");
 
+    const redisStatus = !redis.isConfigured
+      ? "not_configured"
+      : redis.isConnected
+        ? "connected"
+        : "disconnected";
+
     res.json({
       status: "ready",
       database: "connected",
+      redis: redisStatus,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

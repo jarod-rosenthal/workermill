@@ -18,6 +18,7 @@ class RedisService {
   private pub: Redis | null = null;
   private sub: Redis | null = null;
   private _connected = false;
+  private _configured = false;
   private listeners = new Map<string, Set<MessageCallback>>();
 
   /**
@@ -25,6 +26,7 @@ class RedisService {
    * Handles reconnection automatically via ioredis defaults.
    */
   connect(url: string): void {
+    this._configured = true;
     const opts = {
       maxRetriesPerRequest: null as unknown as undefined, // Disable per-command retry (pub/sub doesn't use it)
       retryStrategy(times: number) {
@@ -147,6 +149,10 @@ class RedisService {
 
   get isConnected(): boolean {
     return this._connected;
+  }
+
+  get isConfigured(): boolean {
+    return this._configured;
   }
 
   /**

@@ -337,7 +337,9 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
       }
 
       if (currentTask.status !== lastStatus) {
-        res.write(`data: ${JSON.stringify({ type: "status", status: currentTask.status })}\n\n`);
+        try {
+          res.write(`data: ${JSON.stringify({ type: "status", status: currentTask.status })}\n\n`);
+        } catch { isConnected = false; return; }
         lastStatus = currentTask.status;
       }
 
@@ -359,34 +361,38 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
       // Send each log as a separate SSE event with event ID for resume
       for (const log of newLogs) {
         const eventId = `${log.createdAt.toISOString()}|${log.id}`;
-        res.write(`id: ${eventId}\n`);
-        res.write("event: log\n");
-        res.write(`data: ${JSON.stringify({
-          type: "log",
-          id: log.id,
-          timestamp: log.createdAt.toISOString(),
-          logType: log.type,
-          message: capMessage(log.message),
-          severity: log.severity,
-          command: log.command,
-          exitCode: log.exitCode,
-          filePath: log.filePath,
-          durationMs: log.durationMs,
-          metadata: log.metadata,
-          cursor: eventId,
-        })}\n\n`);
+        try {
+          res.write(`id: ${eventId}\n`);
+          res.write("event: log\n");
+          res.write(`data: ${JSON.stringify({
+            type: "log",
+            id: log.id,
+            timestamp: log.createdAt.toISOString(),
+            logType: log.type,
+            message: capMessage(log.message),
+            severity: log.severity,
+            command: log.command,
+            exitCode: log.exitCode,
+            filePath: log.filePath,
+            durationMs: log.durationMs,
+            metadata: log.metadata,
+            cursor: eventId,
+          })}\n\n`);
+        } catch { isConnected = false; return; }
 
         // Check for Ralph progress markers and emit separate event
         const ralphProgress = parseRalphProgressMarker(log.message);
         if (ralphProgress) {
-          res.write("event: ralph_progress\n");
-          res.write(`data: ${JSON.stringify({
-            type: "ralph_progress",
-            currentStory: ralphProgress.currentStory,
-            totalStories: ralphProgress.totalStories,
-            currentStoryDescription: ralphProgress.currentStoryDescription,
-            timestamp: log.createdAt.toISOString(),
-          })}\n\n`);
+          try {
+            res.write("event: ralph_progress\n");
+            res.write(`data: ${JSON.stringify({
+              type: "ralph_progress",
+              currentStory: ralphProgress.currentStory,
+              totalStories: ralphProgress.totalStories,
+              currentStoryDescription: ralphProgress.currentStoryDescription,
+              timestamp: log.createdAt.toISOString(),
+            })}\n\n`);
+          } catch { isConnected = false; return; }
         }
 
         // Update cursor
@@ -395,12 +401,14 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
 
       // Check if task is complete
       if (currentTask.isTerminal()) {
-        res.write(`data: ${JSON.stringify({
-          type: "complete",
-          status: currentTask.status,
-          timestamp: new Date().toISOString(),
-        })}\n\n`);
-        res.end();
+        try {
+          res.write(`data: ${JSON.stringify({
+            type: "complete",
+            status: currentTask.status,
+            timestamp: new Date().toISOString(),
+          })}\n\n`);
+          res.end();
+        } catch { isConnected = false; }
       }
     } catch (error) {
       logger.error("Error in SSE log stream", { error, taskId });
@@ -409,8 +417,10 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
 
   const sendPing = () => {
     if (!isConnected) return;
-    res.write("event: ping\n");
-    res.write("data: {}\n\n");
+    try {
+      res.write("event: ping\n");
+      res.write("data: {}\n\n");
+    } catch { isConnected = false; }
   };
 
   // Initial fetch
@@ -446,8 +456,8 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
           charsGenerated: event.charsGenerated,
           toolCallCount: event.toolCallCount,
         })}\n\n`);
-      } catch (error) {
-        logger.error("Error sending planning progress SSE event", { error, taskId });
+      } catch {
+        isConnected = false;
       }
     },
   );
@@ -469,8 +479,8 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
           expert: event.expert,
           timestamp: event.timestamp,
         })}\n\n`);
-      } catch (error) {
-        logger.error("Error sending code event SSE", { error, taskId });
+      } catch {
+        isConnected = false;
       }
     },
   );

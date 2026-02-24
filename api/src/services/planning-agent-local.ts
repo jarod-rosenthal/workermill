@@ -239,6 +239,8 @@ export interface PlanningInput {
   scmProvider?: string;
   /** SCM token for cloning the target repo. */
   scmToken?: string;
+  /** Org-level AI guidelines for intent engineering */
+  orgGuidelines?: string;
 }
 
 /**
@@ -904,6 +906,10 @@ ${input.labels?.length ? `**Labels:** ${input.labels.join(", ")}` : ""}
     for (const att of input.attachments) {
       prompt += `### ${att.filename}\n\`\`\`\n${att.content}\n\`\`\`\n\n`;
     }
+  }
+
+  if (input.orgGuidelines) {
+    prompt += `## Organization Guidelines\n\nThe following constraints must be reflected in your execution plan. They take precedence over general recommendations:\n\n${input.orgGuidelines}\n\n`;
   }
 
   prompt += `## Instructions

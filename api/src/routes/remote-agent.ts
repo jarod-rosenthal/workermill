@@ -683,7 +683,6 @@ router.post(
 
       res.status(422).json({
         error: "Plan validation failed",
-        detail: errorMessage,
       });
     }
   }),

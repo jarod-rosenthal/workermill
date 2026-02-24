@@ -256,6 +256,7 @@ import { MigrateSecretsManagerToDb1740500000001 } from "./migrations/17405000000
 import { AddPollPerformanceIndexes1740600000000 } from "./migrations/1740600000000-AddPollPerformanceIndexes.js";
 import { AddCoordinationAndStreamIndexes1740700000000 } from "./migrations/1740700000000-AddCoordinationAndStreamIndexes.js";
 import { EnsureEnterpriseMevionAndPlatform1740800000000 } from "./migrations/1740800000000-EnsureEnterpriseMevionAndPlatform.js";
+import { EncryptExistingApiKeys1740900000000 } from "./migrations/1740900000000-EncryptExistingApiKeys.js";
 import { logger } from "../utils/logger.js";
 import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
@@ -537,6 +538,7 @@ export const AppDataSource = new DataSource({
     AddPollPerformanceIndexes1740600000000,
     AddCoordinationAndStreamIndexes1740700000000,
     EnsureEnterpriseMevionAndPlatform1740800000000,
+    EncryptExistingApiKeys1740900000000,
   ],
   subscribers: [
     OrganizationEncryptionSubscriber,

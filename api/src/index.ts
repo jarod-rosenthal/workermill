@@ -240,28 +240,27 @@ app.use((req, _res, next) => {
   next();
 });
 
-// API Documentation (Swagger UI)
-// Disable CSP for Swagger UI to allow inline scripts
-app.use(
-  "/api/docs",
-  (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    // Temporarily disable helmet CSP for swagger routes
-    helmet({
-      contentSecurityPolicy: false,
-    })(req, res, next);
-  },
-  swaggerUi.serve,
-  swaggerUi.setup(swaggerSpec, {
-    customCss: ".swagger-ui .topbar { display: none }",
-    customSiteTitle: "WorkerMill API Documentation",
-  })
-);
+// API Documentation (Swagger UI) — disabled in production to avoid exposing API surface
+if (process.env.NODE_ENV !== "production") {
+  app.use(
+    "/api/docs",
+    (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      helmet({
+        contentSecurityPolicy: false,
+      })(req, res, next);
+    },
+    swaggerUi.serve,
+    swaggerUi.setup(swaggerSpec, {
+      customCss: ".swagger-ui .topbar { display: none }",
+      customSiteTitle: "WorkerMill API Documentation",
+    })
+  );
 
-// Serve OpenAPI spec as JSON
-app.get("/api/docs.json", (_req, res) => {
-  res.setHeader("Content-Type", "application/json");
-  res.send(swaggerSpec);
-});
+  app.get("/api/docs.json", (_req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    res.send(swaggerSpec);
+  });
+}
 
 // Routes
 app.use("/health", healthRouter);

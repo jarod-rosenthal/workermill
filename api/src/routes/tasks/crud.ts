@@ -644,7 +644,7 @@ router.post(
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       logger.error("Error creating run-file task", { error: msg });
-      res.status(500).json({ error: `Failed to create task: ${msg}` });
+      res.status(500).json({ error: "Failed to create task" });
     }
   },
 );

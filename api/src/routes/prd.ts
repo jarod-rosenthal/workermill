@@ -662,7 +662,7 @@ router.post(
         error: errorMsg,
         stack: error instanceof Error ? error.stack : undefined,
       });
-      res.status(500).json({ error: `PRD decomposition failed: ${errorMsg}` });
+      res.status(500).json({ error: "PRD decomposition failed" });
     }
   },
 );

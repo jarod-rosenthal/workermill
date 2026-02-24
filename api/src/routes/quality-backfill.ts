@@ -228,12 +228,13 @@ router.post("/backfill", async (req: Request, res: Response) => {
         const repoPath = path.join(tmpDir, repo);
 
         try {
-          // Clone and checkout PR branch
-          exec(`git clone --depth 1 https://github.com/${owner}/${repo}.git ${repoPath} 2>&1`, tmpDir);
+          // Clone and checkout PR branch (use -- to prevent argument injection)
+          exec(`git clone --depth 1 -- https://github.com/${owner.replace(/[^a-zA-Z0-9_.-]/g, "")}/${repo.replace(/[^a-zA-Z0-9_.-]/g, "")}.git ${repoPath} 2>&1`, tmpDir);
 
           // If task has a branch, checkout that branch
           if (task.githubBranch) {
-            exec(`git fetch origin ${task.githubBranch} && git checkout ${task.githubBranch}`, repoPath);
+            const safeBranch = task.githubBranch.replace(/[^a-zA-Z0-9/_.-]/g, "");
+            exec(`git fetch origin -- ${safeBranch} && git checkout -- ${safeBranch}`, repoPath);
           }
 
           // Analyze the repo
@@ -303,12 +304,17 @@ router.post("/scan-repo", async (req: Request, res: Response) => {
     const [, owner, repo] = repoMatch;
     const repoName = repo.replace(/\.git$/, "");
 
+    // Sanitize inputs to prevent command injection
+    const safeOwner = owner.replace(/[^a-zA-Z0-9_.-]/g, "");
+    const safeRepo = repoName.replace(/[^a-zA-Z0-9_.-]/g, "");
+    const safeBranch = branch ? branch.replace(/[^a-zA-Z0-9/_.-]/g, "") : "";
+
     // Clone to temp directory
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "quality-scan-"));
-    const repoPath = path.join(tmpDir, repoName);
+    const repoPath = path.join(tmpDir, safeRepo);
 
     try {
-      exec(`git clone --depth 1 ${branch ? `-b ${branch}` : ""} https://github.com/${owner}/${repoName}.git ${repoPath} 2>&1`, tmpDir);
+      exec(`git clone --depth 1 ${safeBranch ? `-b ${safeBranch}` : ""} -- https://github.com/${safeOwner}/${safeRepo}.git ${repoPath} 2>&1`, tmpDir);
 
       const metrics = analyzeRepo(repoPath);
 

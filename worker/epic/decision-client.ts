@@ -373,7 +373,8 @@ export class DecisionClient {
         req,
         10_000,
       );
-    } catch {
+    } catch (err) {
+      this.log(`[Decision API] classifyError fallback — ${err instanceof Error ? err.message : String(err)}`);
       return {
         category: "unknown",
         fixable: false,
@@ -397,7 +398,8 @@ export class DecisionClient {
         req,
         5_000,
       );
-    } catch {
+    } catch (err) {
+      this.log(`[Decision API] evaluateQuality fallback — ${err instanceof Error ? err.message : String(err)}`);
       return {
         pass: true,
         reasons: ["Decision API unavailable — skipping quality gate"],
@@ -420,7 +422,8 @@ export class DecisionClient {
         req,
         10_000,
       );
-    } catch {
+    } catch (err) {
+      this.log(`[Decision API] parseReviewOutcome fallback — ${err instanceof Error ? err.message : String(err)}`);
       return {
         decision: "approved" as const,
         score: null,
@@ -444,7 +447,8 @@ export class DecisionClient {
         req,
         5_000,
       );
-    } catch {
+    } catch (err) {
+      this.log(`[Decision API] routeQuestion fallback — ${err instanceof Error ? err.message : String(err)}`);
       return {
         targetExpert: req.idleExperts?.[0] || null,
         routingTier: 3 as const,
@@ -465,7 +469,8 @@ export class DecisionClient {
         req,
         5_000,
       );
-    } catch {
+    } catch (err) {
+      this.log(`[Decision API] routeProvider fallback — ${err instanceof Error ? err.message : String(err)}`);
       return {
         provider: "anthropic",
         model: req.modelName || "claude-haiku-4-5",
@@ -486,7 +491,8 @@ export class DecisionClient {
         undefined,
         15_000,
       );
-    } catch {
+    } catch (err) {
+      this.log(`[Decision API] getWorkerConfig fallback — ${err instanceof Error ? err.message : String(err)}`);
       return {
         agentsMd:
           "***REMOVED*** WorkerMill Agent\n\nFollow project conventions and write clean code.\n",

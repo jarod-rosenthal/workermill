@@ -56,6 +56,36 @@ export async function processUnblockedCards(
   let stillBlocked = 0;
   let alreadyComplete = 0;
 
+  // Serial execution: only one card runs at a time per board.
+  // Each epic spawns multiple expert workers — running 2+ epics in parallel
+  // would starve the user's machine of resources.
+  const hasActiveCard = cards.some(
+    (c) =>
+      c.workerTask &&
+      !DONE_STATUSES.includes(c.workerTask.status) &&
+      c.workerTask.status !== "failed" &&
+      c.workerTask.status !== "cancelled",
+  );
+
+  if (hasActiveCard) {
+    const activeCards = cards.filter(
+      (c) =>
+        c.workerTask &&
+        !DONE_STATUSES.includes(c.workerTask.status) &&
+        c.workerTask.status !== "failed" &&
+        c.workerTask.status !== "cancelled",
+    );
+    logger.debug("processUnblockedCards: board already has active card, waiting", {
+      boardId,
+      activeCards: activeCards.map((c) => ({
+        cardId: c.id,
+        title: c.title,
+        status: c.workerTask?.status,
+      })),
+    });
+    return { triggered: 0, stillBlocked: cards.length, alreadyComplete };
+  }
+
   // Dynamic import to avoid circular deps — boards.ts exports runCardAsWorkerTask
   const { runCardAsWorkerTask } = await import("../routes/boards.js");
 
@@ -95,7 +125,7 @@ export async function processUnblockedCards(
       continue;
     }
 
-    // Card is unblocked — trigger it
+    // Card is unblocked — trigger it (only one at a time for serial execution)
     try {
       await runCardAsWorkerTask(card.id, orgId, boardExecutionId);
       triggered++;
@@ -104,6 +134,9 @@ export async function processUnblockedCards(
         cardId: card.id,
         cardTitle: card.title,
       });
+      // Serial: stop after triggering one card — the cascade will
+      // trigger the next one when this card completes.
+      break;
     } catch (err) {
       logger.error("PRD cascade: failed to trigger card", {
         boardId,

@@ -1009,6 +1009,8 @@ router.get(
       // Worker image registry (keeps ECR details server-side)
       workerImageUrl: `${process.env.ECR_REGISTRY || "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"}/workermill-dev/worker:latest`,
       ecrRegistry: process.env.ECR_REGISTRY || "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com",
+      // Intent Engineering
+      aiGuidelines: org.aiGuidelines ?? null,
     });
   }),
 );

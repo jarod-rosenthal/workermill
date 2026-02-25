@@ -1,13 +1,9 @@
-"use strict";
 /**
  * API Retry Utility
  *
  * Provides retry logic with exponential backoff for transient API errors (5xx, timeouts).
  * Used by Epic, Multi-Expert, and Standard worker modes.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.withRetry = withRetry;
-exports.createRetryableApi = createRetryableApi;
 const DEFAULT_RETRY_CONFIG = {
     maxRetries: 5,
     initialDelayMs: 1000,
@@ -53,7 +49,7 @@ function calculateDelay(attempt, config) {
  * @returns The API response
  * @throws The last error if all retries fail
  */
-async function withRetry(requestFn, config) {
+export async function withRetry(requestFn, config) {
     const mergedConfig = { ...DEFAULT_RETRY_CONFIG, ...config };
     let lastError;
     for (let attempt = 0; attempt <= mergedConfig.maxRetries; attempt++) {
@@ -87,7 +83,7 @@ async function withRetry(requestFn, config) {
  * @param config - Retry configuration options
  * @returns Object with get, post, put, patch, delete methods that retry on failure
  */
-function createRetryableApi(api, config) {
+export function createRetryableApi(api, config) {
     const mergedConfig = { ...DEFAULT_RETRY_CONFIG, ...config };
     return {
         get: (url, requestConfig) => withRetry(() => api.get(url, requestConfig), mergedConfig),
@@ -100,4 +96,4 @@ function createRetryableApi(api, config) {
 /**
  * Default export for convenience.
  */
-exports.default = { withRetry, createRetryableApi };
+export default { withRetry, createRetryableApi };

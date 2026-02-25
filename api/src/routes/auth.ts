@@ -848,7 +848,7 @@ const passwordResetLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5, // 5 requests per 15 min per IP
   message: { error: "Too many password reset attempts. Please try again later." },
-  ...createStore(),
+  ...createStore("rl:pwreset:"),
 });
 
 /**
@@ -2363,7 +2363,7 @@ const githubOnboardLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 5,
   message: { error: "Too many signup attempts" },
-  ...createStore(),
+  ...createStore("rl:ghonboard:"),
 });
 
 /**

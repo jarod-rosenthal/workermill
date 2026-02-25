@@ -11,13 +11,10 @@ import {
   HardDrive,
   Wifi,
   Settings,
-  Play,
-  Square,
   Activity,
   FileText,
   RefreshCw,
   AlertTriangle,
-  ExternalLink,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useState } from "react";

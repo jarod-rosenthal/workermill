@@ -6,7 +6,6 @@ import {
   Settings,
   Plus,
   Columns3,
-  X,
   Play,
 } from "lucide-react";
 import {

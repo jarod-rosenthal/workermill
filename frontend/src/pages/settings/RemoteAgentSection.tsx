@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import {
   CheckCircle,
   ExternalLink,
@@ -238,7 +237,7 @@ function InstallInstructions() {
 export function RemoteAgentSection({
   remoteAgents,
   remoteAgentsLoading,
-  orgPlan,
+  orgPlan: _orgPlan,
   apiKeyPrefix,
 }: RemoteAgentSectionProps) {
   return (

@@ -435,6 +435,18 @@ export class TaskDetailPanel {
   .finished-banner.completed { background: rgba(78,201,176,0.15); color: var(--green); }
   .finished-banner.failed { background: rgba(244,71,71,0.15); color: var(--red); }
   .finished-banner.cancelled { background: rgba(244,71,71,0.15); color: var(--red); }
+  .error-detail {
+    display: none;
+    padding: 10px 24px 12px;
+    background: rgba(244,71,71,0.08);
+    border-top: 1px solid rgba(244,71,71,0.2);
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.5;
+    word-break: break-word;
+  }
+  .error-detail.visible { display: block; }
+  .error-detail .error-label { color: var(--red); font-weight: 600; margin-right: 6px; }
 
   ::-webkit-scrollbar { width: 8px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -527,6 +539,7 @@ export class TaskDetailPanel {
 </div>
 
 <div class="finished-banner${task.status === "completed" ? " visible completed" : task.status === "pr_approved" ? " visible completed" : task.status === "failed" ? " visible failed" : task.status === "escalated" ? " visible failed" : task.status === "cancelled" ? " visible cancelled" : ""}" id="finishedBanner">${task.status === "completed" ? "&#x2705; Task completed successfully" : task.status === "pr_approved" ? "&#x2705; PR approved" : task.status === "failed" ? "&#x274C; Task failed" : task.status === "escalated" ? "&#x26A0; Task escalated — needs attention" : task.status === "cancelled" ? "&#x274C; Task cancelled" : ""}</div>
+<div class="error-detail${task.status === "failed" && task.errorMessage ? " visible" : ""}" id="errorDetail">${task.status === "failed" && task.errorMessage ? `<span class="error-label">Error:</span>${esc(task.errorMessage)}` : ""}</div>
 
 
 <script>
@@ -562,8 +575,8 @@ function handleCoordinationItem(item) {
   }
 }
 
-function updateStatus(status) {
-  if (status === taskStatus) return;
+function updateStatus(status, errorMessage) {
+  if (status === taskStatus && !errorMessage) return;
   taskStatus = status;
   const badge = document.getElementById("statusBadge");
   badge.textContent = status;
@@ -579,6 +592,15 @@ function updateStatus(status) {
       : status === "escalated" ? "\\u26A0 Task escalated \\u2014 needs attention"
       : status === "cancelled" ? "\\u274C Task cancelled"
       : "\\u274C Task failed";
+    // Show error detail for failed tasks
+    var errEl = document.getElementById("errorDetail");
+    if (status === "failed" && errorMessage) {
+      errEl.innerHTML = '<span class="error-label">Error:</span>' + escHtml(errorMessage);
+      errEl.className = "error-detail visible";
+    } else {
+      errEl.className = "error-detail";
+      errEl.innerHTML = "";
+    }
     document.getElementById("actionsBar").style.display = "none";
     document.getElementById("retryBar").style.display = (status === "failed" || status === "cancelled" || status === "escalated") ? "flex" : "none";
     var retryBtn = document.getElementById("retryBtn");
@@ -588,7 +610,14 @@ function updateStatus(status) {
     document.getElementById("actionsBar").style.display = "";
     document.getElementById("retryBar").style.display = "none";
     document.getElementById("finishedBanner").className = "finished-banner";
+    document.getElementById("errorDetail").className = "error-detail";
   }
+}
+
+function escHtml(s) {
+  var d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
 }
 
 window.addEventListener("message", (event) => {
@@ -620,8 +649,8 @@ window.addEventListener("message", (event) => {
     const d = msg.data;
     if (!d) return;
 
-    // Update status
-    if (d.status) updateStatus(d.status);
+    // Update status (pass errorMessage for failed tasks)
+    if (d.status) updateStatus(d.status, d.errorMessage || null);
 
     // Story progress
     if (d.isEpicWorkflow && d.storiesTotal > 0) {

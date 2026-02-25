@@ -57,6 +57,7 @@ export interface TaskInfo {
   repo?: string;
   startedAt: string;
   cost?: number;
+  errorMessage?: string;
 }
 
 export interface LogLine {

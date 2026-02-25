@@ -33,10 +33,10 @@ const autopilotStages = [
     bgColor: "bg-gray-400/10",
     borderColor: "border-gray-400/30",
     title: "Task Created",
-    description: "A Jira ticket is assigned to WorkerMill and a task is created.",
+    description: "A ticket is assigned to WorkerMill and a task is created.",
     duration: "Instant",
     details: [
-      "Jira ticket detected via webhook or polling",
+      "Ticket detected via webhook or polling",
       "Task record created with ticket metadata",
       "Worker persona selected based on task type",
     ],
@@ -99,7 +99,7 @@ const autopilotStages = [
     duration: "Instant",
     details: [
       "PR merged to main branch",
-      "Jira ticket status updated",
+      "Ticket status updated",
       "Metrics recorded (MTTA, MTTR, cost)",
     ],
   },
@@ -113,9 +113,9 @@ const reviewRequestedFlow = [
     bgColor: "bg-gray-400/10",
     borderColor: "border-gray-400/30",
     title: "Task Created",
-    description: "A Jira ticket with 'review' label triggers this workflow.",
+    description: "A ticket with the 'review' label triggers this workflow.",
     details: [
-      "Jira ticket detected via webhook",
+      "Ticket detected via webhook",
       "Task created with review flag enabled",
       "Worker persona selected based on task type",
     ],
@@ -277,23 +277,23 @@ const failureStates = [
   },
 ];
 
-// Workflow modes based on Jira labels
+// Workflow modes based on issue tracker labels
 const workflowModes = [
   {
     id: "default",
-    name: "Epic Planning (Default)",
+    name: "Default",
     labels: ["workermill"],
     labelDescription: "Only the workermill label",
     icon: FileText,
     color: "text-green-500",
     bgColor: "bg-green-500/10",
     borderColor: "border-green-500/30",
-    description: "Planning Agent analyzes your ticket and decomposes tasks into stories executed in parallel by specialized experts.",
+    description: "WorkerMill plans your task, breaks it into sub-tasks, and executes them — creating a PR when done.",
     steps: ["Planning", "Parallel Execution", "PR Created", "Approval", "Deploy & Merge"],
     keyPoints: [
-      "Planning Agent decomposes tickets into smaller stories",
-      "Multiple AI experts work in parallel",
-      "Real-time progress tracking per story",
+      "Automatically decomposes tasks into smaller sub-tasks",
+      "Multiple AI workers execute in parallel",
+      "Real-time progress tracking per sub-task",
     ],
   },
   {
@@ -354,12 +354,12 @@ const workflowModes = [
 
 // Label combinations reference
 const labelReference = [
-  { labels: ["workermill"], workflow: "Epic Planning (Default)", description: "Decomposes task into parallel stories" },
+  { labels: ["workermill"], workflow: "Default", description: "Automatically plans and executes task" },
   { labels: ["workermill", "deploy"], workflow: "Auto-Deploy", description: "Auto-merge PR and deploy, no approval required" },
   { labels: ["workermill", "review"], workflow: "Auto Review", description: "Tech Lead Reviewer AI reviews PR before deploy" },
-  { labels: ["workermill", "critic"], workflow: "Critic Validation", description: "Planner-Critic validates plan before execution" },
-  { labels: ["workermill", "improve"], workflow: "Self-Improve", description: "Worker analyzes and learns from task" },
-  { labels: ["workermill", "sdk"], workflow: "Standard SDK Mode", description: "Single worker, no story decomposition" },
+  { labels: ["workermill", "critic"], workflow: "Plan Validation", description: "Validates the execution plan before running" },
+  { labels: ["workermill", "improve"], workflow: "Self-Improve", description: "Worker reflects and learns from the task" },
+  { labels: ["workermill", "sdk"], workflow: "Single Worker", description: "Skip planning, single worker handles entire task" },
   { labels: ["workermill", "haiku"], workflow: "Model Override", description: "Use efficient model (optimized for speed)" },
   { labels: ["workermill", "sonnet"], workflow: "Model Override", description: "Use balanced model (speed + capability)" },
   { labels: ["workermill", "opus"], workflow: "Model Override", description: "Use flagship model (most capable)" },
@@ -418,16 +418,16 @@ const advancedFeatures = [
   },
   {
     id: "team-planning",
-    title: "Epic Planning",
+    title: "Task Planning",
     icon: FileText,
     color: "text-green-500",
     bgColor: "bg-green-500/10",
-    description: "Planning Agent decomposes complex tickets into coordinated, parallel stories with dependency tracking.",
+    description: "Automatically decomposes tasks into coordinated, parallel sub-tasks with dependency tracking.",
     details: [
-      "Planning Agent analyzes requirements and creates stories",
-      "Determines dependency order between stories",
-      "Executes stories in parallel with specialized experts",
-      "Real-time progress per story in dashboard",
+      "Analyzes requirements and creates sub-tasks",
+      "Determines dependency order between sub-tasks",
+      "Executes sub-tasks in parallel with specialized workers",
+      "Real-time progress per sub-task in dashboard",
     ],
   },
 ];
@@ -585,7 +585,7 @@ export default function TaskLifecycle() {
           <ul className="space-y-2 text-sm text-muted-foreground">
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
-              <span><strong className="text-foreground">Planning is the default</strong> — just add the <code className="px-1 bg-muted rounded">workermill</code> label for automatic task decomposition and parallel execution.</span>
+              <span><strong className="text-foreground">Planning is automatic</strong> — just add the <code className="px-1 bg-muted rounded">workermill</code> label and WorkerMill will plan, decompose, and execute your task in parallel.</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
@@ -593,7 +593,7 @@ export default function TaskLifecycle() {
             </li>
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
-              <span>The <code className="px-1 bg-muted rounded">critic</code> label adds Planner-Critic validation before execution. The <code className="px-1 bg-muted rounded">improve</code> label enables self-learning.</span>
+              <span>The <code className="px-1 bg-muted rounded">critic</code> label validates the execution plan before running. The <code className="px-1 bg-muted rounded">improve</code> label enables self-learning.</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
@@ -933,7 +933,7 @@ export default function TaskLifecycle() {
             AI Provider Support
           </h2>
           <p className="text-muted-foreground mt-2">
-            WorkerMill supports multiple AI providers. Add a provider label to your Jira ticket to select which AI runs your task.
+            WorkerMill supports multiple AI providers. Add a provider label to your ticket to select which AI runs your task.
           </p>
         </div>
 

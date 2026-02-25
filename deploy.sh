@@ -675,6 +675,20 @@ deploy_api() {
     echo -e "${GREEN}API deployment initiated!${NC}"
     echo -e "${GREEN}Image: $NEW_IMAGE${NC}"
 
+    ***REMOVED*** Force-redeploy orchestrator so it picks up the same image
+    ***REMOVED*** The orchestrator uses :latest tag, so force-new-deployment makes ECS pull the fresh image
+    ORCHESTRATOR_SERVICE="${ECS_CLUSTER}-orchestrator"
+    if aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ORCHESTRATOR_SERVICE" --region "$AWS_REGION" --query 'services[0].status' --output text 2>/dev/null | grep -q "ACTIVE"; then
+        echo -e "${YELLOW}Force-redeploying orchestrator to pick up new image...${NC}"
+        aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ORCHESTRATOR_SERVICE" \
+            --force-new-deployment \
+            --region "$AWS_REGION" \
+            --output text > /dev/null
+        echo -e "${GREEN}Orchestrator redeployment initiated${NC}"
+    fi
+
     ***REMOVED*** Wait for deployment if requested
     if [[ "$WAIT_FOR_DEPLOY" == "true" ]]; then
         wait_for_deployment

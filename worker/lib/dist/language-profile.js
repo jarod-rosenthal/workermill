@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Language Profile Utility — Multi-Language Support for Worker Scripts
  *
@@ -7,47 +6,8 @@
  *
  * Used by quality-runner.ts, execution scripts (run_tests, run_typecheck, analyze_code).
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ALL_PROFILES = void 0;
-exports.getProfile = getProfile;
-exports.detectLanguage = detectLanguage;
-exports.detectLanguageWithTestRunner = detectLanguageWithTestRunner;
-exports.findGoModDirs = findGoModDirs;
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
+import * as fs from "fs";
+import * as path from "path";
 // ─── TypeScript Profile ──────────────────────────────────────────────────────
 /**
  * Detect JS/TS test runner from package.json dependencies.
@@ -493,7 +453,7 @@ const rubyProfile = {
     },
 };
 // ─── Profile Registry ────────────────────────────────────────────────────────
-exports.ALL_PROFILES = {
+export const ALL_PROFILES = {
     typescript: typescriptProfile,
     python: pythonProfile,
     rust: rustProfile,
@@ -504,8 +464,8 @@ exports.ALL_PROFILES = {
 /**
  * Get a language profile by ID.
  */
-function getProfile(id) {
-    const profile = exports.ALL_PROFILES[id.toLowerCase()];
+export function getProfile(id) {
+    const profile = ALL_PROFILES[id.toLowerCase()];
     if (!profile) {
         console.warn(`[language-profile] Unknown profile "${id}", falling back to TypeScript`);
         return typescriptProfile;
@@ -523,11 +483,11 @@ function getProfile(id) {
  * 6. pom.xml / build.gradle → Java
  * 7. package.json / tsconfig.json → TypeScript (default)
  */
-function detectLanguage(repoPath) {
+export function detectLanguage(repoPath) {
     // Fast path: env var override
     const envLang = process.env.PROJECT_LANGUAGE;
     if (envLang) {
-        const profile = exports.ALL_PROFILES[envLang.toLowerCase()];
+        const profile = ALL_PROFILES[envLang.toLowerCase()];
         if (profile) {
             console.log(`[language-profile] Using PROJECT_LANGUAGE="${envLang}"`);
             return profile;
@@ -553,7 +513,7 @@ function detectLanguage(repoPath) {
  * For TypeScript projects, detects jest/vitest/mocha from package.json and adjusts
  * the test + testTargeted commands accordingly.
  */
-function detectLanguageWithTestRunner(repoPath) {
+export function detectLanguageWithTestRunner(repoPath) {
     const profile = detectLanguage(repoPath);
     // Only customize test runner for TypeScript
     if (profile.id !== "typescript")
@@ -573,7 +533,7 @@ function detectLanguageWithTestRunner(repoPath) {
 /**
  * Find Go module directories (including subdirectories with go.mod).
  */
-function findGoModDirs(repoPath) {
+export function findGoModDirs(repoPath) {
     const dirs = [];
     if (fs.existsSync(path.join(repoPath, "go.mod")))
         dirs.push(repoPath);

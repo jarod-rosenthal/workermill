@@ -90,6 +90,11 @@ RUN echo "Verifying compiled files..." && \
 
 WORKDIR /app
 
+***REMOVED*** Compile shared lib/ (language-profile, api-retry) to ESM before components that
+***REMOVED*** import from ../lib/dist/. lib/package.json has "type":"module" so tsc emits ESM.
+WORKDIR /app/lib
+RUN npm install && npx tsc
+
 ***REMOVED*** Circular dependency: epic imports types from multi-expert, multi-expert imports
 ***REMOVED*** values from epic. Build order: epic first (with type stub) → multi-expert second.
 ***REMOVED*** Cross-sibling imports (../lib/, ../epic/) trigger TS6059 rootDir violations, but

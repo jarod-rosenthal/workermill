@@ -346,7 +346,7 @@ export function serializePlan(plan: ExecutionPlan): string {
  * Requires getCriticConfig() to have been called first (caller responsibility).
  * Returns null if critic config was never fetched.
  */
-export function buildCriticPrompt(
+function buildCriticPrompt(
   prd: string,
   plan: ExecutionPlan,
 ): string | null {

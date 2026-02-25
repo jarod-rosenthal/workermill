@@ -271,6 +271,16 @@ export default function PersonaDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persona, tokens, id, selectedDirective]);
 
+  // Auto-load the first script when persona loads (so users can see content immediately)
+  useEffect(() => {
+    if (!persona || !tokens || !id) return;
+    const firstScript = persona.scripts[0];
+    if (firstScript && !selectedScript) {
+      handleSelectScript(firstScript);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persona, tokens, id, selectedScript]);
+
   const handleSaveOverview = async () => {
     if (!tokens || !id || !persona) return;
 

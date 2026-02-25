@@ -89,6 +89,7 @@ import { redis } from "./services/redis-client.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { poolHealthMiddleware } from "./middleware/pool-health.js";
 import { seedDirectivesIfMissing } from "./db/seed-directives-startup.js";
+import { seedScriptsIfMissing } from "./db/seed-scripts-startup.js";
 import { initializeEncryption } from "./utils/encryption.js";
 import { activeOps } from "./services/orchestrator-utils.js";
 import { stopPoolMonitor } from "./db/connection.js";
@@ -372,6 +373,9 @@ async function start() {
 
     // Seed system persona directives if missing
     await seedDirectivesIfMissing();
+
+    // Seed system persona scripts if missing
+    await seedScriptsIfMissing();
 
     // Connect Redis for coordination pub/sub (optional — falls back to DB polling)
     if (config.redisUrl) {

@@ -46,14 +46,34 @@ router.get("/health", (_req: Request, res: Response) => {
  * POST /api/worker-decisions/classify-error
  *
  * Classify an error and determine the recommended action (auto_retry, escalate, skip).
+ *
+ * Normalizes client field names to match the service interface:
+ *   client sends: { errorOutput, storyContext?, persona?, affectedFiles?, retryCount? }
+ *   service expects: { errorText, retryCount, maxAutoRetries, storyContext: { title, persona, targetFiles } }
  */
 router.post("/classify-error", (req: Request, res: Response) => {
   try {
-    const result = classifyError(req.body);
+    const org = req.organization!;
+    const body = req.body;
+    const normalized = {
+      errorText: body.errorText || body.errorOutput || "",
+      retryCount: body.retryCount ?? 0,
+      maxAutoRetries: body.maxAutoRetries ?? org.blockerMaxAutoRetries,
+      storyContext:
+        body.storyContext && typeof body.storyContext === "object"
+          ? body.storyContext
+          : {
+              title: typeof body.storyContext === "string" ? body.storyContext : "",
+              persona: body.persona || "",
+              targetFiles: body.affectedFiles || [],
+            },
+    };
+    const result = classifyError(normalized);
     res.json(result);
   } catch (error) {
     logger.error("classify-error failed", {
       error: error instanceof Error ? error.message : String(error),
+      body: JSON.stringify(req.body).substring(0, 500),
     });
     res.status(500).json({ error: "Failed to classify error" });
   }
@@ -63,10 +83,38 @@ router.post("/classify-error", (req: Request, res: Response) => {
  * POST /api/worker-decisions/evaluate-quality
  *
  * Evaluate quality metrics against configured thresholds.
+ *
+ * Normalizes client field names to match the service interface:
+ *   client sends: { diff, storyDescription? }
+ *   service expects: { metrics: {...}, bypassRequested, qualityGateEnabled, thresholds? }
  */
 router.post("/evaluate-quality", async (req: Request, res: Response) => {
   try {
+    const org = req.organization!;
     let body = req.body;
+
+    // Normalize: if client sends flat { diff, storyDescription } instead of { metrics, ... },
+    // build the service-expected shape. The "diff" field is a summary string like
+    // "score=85/100, typeErrors=false, lintErrors=0, testsFailed=0".
+    if (body.diff !== undefined && body.metrics === undefined) {
+      const diffStr = String(body.diff);
+      const scoreMatch = diffStr.match(/score=(\d+)/);
+      const typeErrorsMatch = diffStr.match(/typeErrors=(true|false)/);
+      const testsFailedMatch = diffStr.match(/testsFailed=(\d+|true|false)/);
+      body = {
+        metrics: {
+          qualityScore: scoreMatch ? parseInt(scoreMatch[1], 10) : undefined,
+          typeErrors: typeErrorsMatch ? typeErrorsMatch[1] === "true" : false,
+          testFailures: testsFailedMatch
+            ? testsFailedMatch[1] === "true" || parseInt(testsFailedMatch[1], 10) > 0
+            : false,
+        },
+        taskId: body.taskId,
+        bypassRequested: body.bypassRequested ?? false,
+        qualityGateEnabled: body.qualityGateEnabled ?? org.qualityGateEnabled,
+        thresholds: body.thresholds,
+      };
+    }
 
     // Server-side bypass verification: don't trust the client's bypassRequested flag
     if (body.bypassRequested && body.taskId) {
@@ -84,6 +132,7 @@ router.post("/evaluate-quality", async (req: Request, res: Response) => {
   } catch (error) {
     logger.error("evaluate-quality failed", {
       error: error instanceof Error ? error.message : String(error),
+      body: JSON.stringify(req.body).substring(0, 500),
     });
     res.status(500).json({ error: "Failed to evaluate quality" });
   }
@@ -93,14 +142,28 @@ router.post("/evaluate-quality", async (req: Request, res: Response) => {
  * POST /api/worker-decisions/review-outcome
  *
  * Parse the output of a code reviewer into a structured decision.
+ *
+ * Normalizes client field names to match the service interface:
+ *   client sends: { reviewOutput, reviewerPersona?, revisionNumber? }
+ *   service expects: { reviewerOutput, revisionCount, maxRevisions, perStoryRevisionCount, maxPerStoryRevisions }
  */
 router.post("/review-outcome", (req: Request, res: Response) => {
   try {
-    const result = parseReviewOutcome(req.body);
+    const org = req.organization!;
+    const body = req.body;
+    const normalized = {
+      reviewerOutput: body.reviewerOutput || body.reviewOutput || "",
+      revisionCount: body.revisionCount ?? body.revisionNumber ?? 0,
+      maxRevisions: body.maxRevisions ?? org.maxReviewRevisions,
+      perStoryRevisionCount: body.perStoryRevisionCount ?? 0,
+      maxPerStoryRevisions: body.maxPerStoryRevisions ?? org.maxPerStoryRevisions,
+    };
+    const result = parseReviewOutcome(normalized);
     res.json(result);
   } catch (error) {
     logger.error("review-outcome failed", {
       error: error instanceof Error ? error.message : String(error),
+      body: JSON.stringify(req.body).substring(0, 500),
     });
     res.status(500).json({ error: "Failed to parse review outcome" });
   }

@@ -276,13 +276,21 @@ export const AppDataSource = new DataSource({
   // DB_POOL_MAX: configurable pool size (default 10 for local, 20 for API, 15 for orchestrator)
   // PGBOUNCER_HOST: when set, connects to PgBouncer sidecar instead of RDS directly.
   // PgBouncer multiplexes app-level pool onto fewer real RDS connections.
-  // PgBouncer sidecar: override host when PGBOUNCER_HOST is set
-  ...(process.env.PGBOUNCER_HOST
-    ? {
-        host: process.env.PGBOUNCER_HOST,
-        port: parseInt(process.env.PGBOUNCER_PORT || "5432", 10),
-        url: undefined, // Override DATABASE_URL host
-      }
+  // PgBouncer sidecar: override host/port when PGBOUNCER_HOST is set.
+  // Must also extract username/password/database from DATABASE_URL since
+  // url is cleared (TypeORM can't mix url with host override).
+  ...(process.env.PGBOUNCER_HOST && config.database.url
+    ? (() => {
+        const parsed = new URL(config.database.url);
+        return {
+          url: undefined,
+          host: process.env.PGBOUNCER_HOST,
+          port: parseInt(process.env.PGBOUNCER_PORT || "5432", 10),
+          username: decodeURIComponent(parsed.username),
+          password: decodeURIComponent(parsed.password),
+          database: parsed.pathname.replace(/^\//, ""),
+        };
+      })()
     : {}),
   extra: {
     max: parseInt(process.env.DB_POOL_MAX || "10", 10),

@@ -10,7 +10,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as https from "https";
 import * as http from "http";
-import { detectLanguageWithTestRunner, findGoModDirs } from "../lib/language-profile.js";
+import { detectLanguageWithTestRunner, findGoModDirs } from "../lib/dist/language-profile.js";
 
 // Score weights (must sum to 1.0)
 const WEIGHTS = {

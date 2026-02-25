@@ -264,34 +264,32 @@ import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncr
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
 import { OrgCredentialEncryptionSubscriber } from "./subscribers/OrgCredentialEncryptionSubscriber.js";
 
+// When PGBOUNCER_HOST is set, connect to the sidecar instead of using DATABASE_URL directly.
+// Must parse credentials from DATABASE_URL since TypeORM can't mix url with host/port overrides.
+const dbConnectionOptions: Record<string, unknown> = process.env.PGBOUNCER_HOST && config.database.url
+  ? (() => {
+      const parsed = new URL(config.database.url);
+      return {
+        host: process.env.PGBOUNCER_HOST,
+        port: parseInt(process.env.PGBOUNCER_PORT || "5432", 10),
+        username: decodeURIComponent(parsed.username),
+        password: decodeURIComponent(parsed.password),
+        database: parsed.pathname.replace(/^\//, ""),
+      };
+    })()
+  : config.database.url
+    ? { url: config.database.url }
+    : {
+        host: config.database.host,
+        port: config.database.port,
+        username: config.database.username,
+        password: config.database.password,
+        database: config.database.name,
+      };
+
 export const AppDataSource = new DataSource({
   type: "postgres",
-  url: config.database.url,
-  host: config.database.url ? undefined : config.database.host,
-  port: config.database.url ? undefined : config.database.port,
-  username: config.database.url ? undefined : config.database.username,
-  password: config.database.url ? undefined : config.database.password,
-  database: config.database.url ? undefined : config.database.name,
-  // Connection pool configuration.
-  // DB_POOL_MAX: configurable pool size (default 10 for local, 20 for API, 15 for orchestrator)
-  // PGBOUNCER_HOST: when set, connects to PgBouncer sidecar instead of RDS directly.
-  // PgBouncer multiplexes app-level pool onto fewer real RDS connections.
-  // PgBouncer sidecar: override host/port when PGBOUNCER_HOST is set.
-  // Must also extract username/password/database from DATABASE_URL since
-  // url is cleared (TypeORM can't mix url with host override).
-  ...(process.env.PGBOUNCER_HOST && config.database.url
-    ? (() => {
-        const parsed = new URL(config.database.url);
-        return {
-          url: undefined,
-          host: process.env.PGBOUNCER_HOST,
-          port: parseInt(process.env.PGBOUNCER_PORT || "5432", 10),
-          username: decodeURIComponent(parsed.username),
-          password: decodeURIComponent(parsed.password),
-          database: parsed.pathname.replace(/^\//, ""),
-        };
-      })()
-    : {}),
+  ...dbConnectionOptions,
   extra: {
     max: parseInt(process.env.DB_POOL_MAX || "10", 10),
     min: 1,

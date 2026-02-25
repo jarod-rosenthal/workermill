@@ -51,7 +51,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
-const fs = __importStar(require("fs"));
+const language_profile_js_1 = require("../../lib/dist/language-profile.js");
 function exec(cmd, cwd) {
     try {
         const stdout = (0, child_process_1.execSync)(cmd, {
@@ -97,10 +97,6 @@ function parseTypeScriptErrors(output) {
     }
     return errors;
 }
-function hasTsConfig(projectPath) {
-    return (fs.existsSync(path.join(projectPath, "tsconfig.json")) ||
-        fs.existsSync(path.join(projectPath, "tsconfig.build.json")));
-}
 async function main() {
     const output = {
         success: false,
@@ -112,38 +108,33 @@ async function main() {
     try {
         const repoPath = process.env.REPO_PATH || process.cwd();
         const project = process.env.PROJECT || "";
-        const strict = process.env.STRICT === "true";
         const projectPath = project ? path.join(repoPath, project) : repoPath;
-        if (!hasTsConfig(projectPath)) {
+        const profile = (0, language_profile_js_1.detectLanguage)(projectPath);
+        if (!profile.typecheck) {
             output.success = true;
-            output.error = "No tsconfig.json found, skipping type check";
+            output.error = `No type checking available for ${profile.displayName}`;
             console.log(JSON.stringify(output));
             process.exit(0);
         }
-        console.error(`[run_typecheck] Running tsc in ${projectPath}`);
-        // Build tsc command
-        let cmd = "npx tsc --noEmit";
-        if (strict) {
-            cmd += " --strict";
+        console.error(`[run_typecheck] Running typecheck (${profile.displayName}) in ${projectPath}`);
+        const result = exec(profile.typecheck, projectPath);
+        const parsed = profile.parseTypecheck(result.stdout, result.stderr, result.exitCode);
+        // For TypeScript, extract detailed error locations
+        if (profile.id === "typescript") {
+            const allOutput = result.stdout + result.stderr;
+            const errors = parseTypeScriptErrors(allOutput);
+            output.errors = errors;
+            output.errorCount = errors.filter((e) => e.code.startsWith("TS") && !e.message.includes("warning")).length;
+            output.warningCount = errors.length - output.errorCount;
+            if (!parsed.passed && errors.length === 0) {
+                output.error = allOutput.slice(0, 1000);
+            }
         }
-        // Check if using project references (tsc -b)
-        const tsConfig = JSON.parse(fs.readFileSync(path.join(projectPath, "tsconfig.json"), "utf-8"));
-        if (tsConfig.references) {
-            cmd = "npx tsc -b --dry";
+        else {
+            output.errorCount = parsed.errors;
         }
-        const result = exec(cmd, projectPath);
-        // Parse errors
-        const allOutput = result.stdout + result.stderr;
-        const errors = parseTypeScriptErrors(allOutput);
-        output.errors = errors;
-        output.errorCount = errors.filter((e) => e.code.startsWith("TS") && !e.message.includes("warning")).length;
-        output.warningCount = errors.length - output.errorCount;
-        output.success = result.exitCode === 0;
+        output.success = parsed.passed;
         output.duration = (Date.now() - startTime) / 1000;
-        if (!output.success && errors.length === 0) {
-            // No parsed errors but still failed - include raw output
-            output.error = allOutput.slice(0, 1000);
-        }
     }
     catch (error) {
         output.error = error instanceof Error ? error.message : String(error);
@@ -153,7 +144,6 @@ async function main() {
     // Output markers
     console.error(`::type_errors::${output.errorCount}`);
     if (output.errors.length > 0) {
-        // Output first few errors for quick visibility
         output.errors.slice(0, 5).forEach((e) => {
             console.error(`::error::${e.file}:${e.line} - ${e.code}: ${e.message}`);
         });

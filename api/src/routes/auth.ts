@@ -8,7 +8,6 @@ import {
   ForgotPasswordCommand,
   ConfirmForgotPasswordCommand,
   ListIdentityProvidersCommand,
-  AuthFlowType,
   RespondToAuthChallengeCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { body, validationResult } from "express-validator";
@@ -76,7 +75,7 @@ router.post("/login", async (req: Request, res: Response) => {
     }
 
     const command = new InitiateAuthCommand({
-      AuthFlow: AuthFlowType.USER_PASSWORD_AUTH,
+      AuthFlow: AdminAuthFlowType.USER_PASSWORD_AUTH,
       ClientId: config.cognito.clientId,
       AuthParameters: {
         USERNAME: email,

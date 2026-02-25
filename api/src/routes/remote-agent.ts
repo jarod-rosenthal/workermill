@@ -1011,6 +1011,11 @@ router.get(
       ecrRegistry: process.env.ECR_REGISTRY || "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com",
       // Intent Engineering
       aiGuidelines: org.aiGuidelines ?? null,
+      // Review workflow settings
+      maxReviewRevisions: org.maxReviewRevisions,
+      maxPerStoryRevisions: org.maxPerStoryRevisions,
+      // Codebase RAG
+      codebaseIndexingEnabled: org.codebaseIndexingEnabled === true,
     });
   }),
 );

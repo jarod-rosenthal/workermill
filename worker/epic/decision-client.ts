@@ -375,6 +375,28 @@ export class DecisionClient {
       );
     } catch (err) {
       this.log(`[Decision API] classifyError fallback — ${err instanceof Error ? err.message : String(err)}`);
+
+      // When the Decision API is unreachable, check for known transient/network
+      // patterns locally so 502/503/504 errors still get retried instead of
+      // immediately escalating as "unknown".
+      const text = req.errorOutput || "";
+      const isTransient =
+        /ECONNREFUSED|ETIMEDOUT|ENOTFOUND|ENETUNREACH|socket hang up|network timeout|fetch failed/i.test(text) ||
+        /(?:status code |Bad Gateway|Service Unavailable|Gateway Timeout).*50[234]/i.test(text) ||
+        /50[234](?:\s|.*(?:Bad Gateway|Service Unavailable|Gateway Timeout))/i.test(text);
+
+      if (isTransient) {
+        this.log(`[Decision API] Local fallback detected transient network error — will retry`);
+        return {
+          category: "network",
+          fixable: false,
+          action: "auto_retry",
+          affectedFiles: [],
+          summary: "Decision API unavailable — local fallback detected transient error",
+          fixStrategy: null,
+        };
+      }
+
       return {
         category: "unknown",
         fixable: false,

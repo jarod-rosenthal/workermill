@@ -33,7 +33,7 @@ import { spawn, execSync } from "child_process";
 import { writeFileSync, unlinkSync, existsSync, readFileSync } from "fs";
 import { runQualityVerification, postQualityMetrics, type QualityMetrics } from "./quality-runner.js";
 import type { EvaluateQualityResponse } from "./decision-client.js";
-import { runAutoFixWithTracking, formatAutoFixResult, type AutoFixResult, type QualityGateResult as AutoFixQualityGateResult } from "./auto-fix-agent.js";
+import { runAutoFixWithTracking, formatAutoFixResult, type QualityGateResult as AutoFixQualityGateResult } from "./auto-fix-agent.js";
 
 /**
  * Personas excluded from question routing (Tier 2/3 fallback).
@@ -2744,7 +2744,7 @@ export class EpicCoordinator {
               // Re-capture metrics after auto-fix for accurate PR reporting
               const updatedMetrics = await runQualityVerification(repoPath);
               capturedQualityMetrics = updatedMetrics;
-              await postQualityMetrics(updatedMetrics, this.config.apiBaseUrl, this.config.orgApiKey, this.config.taskId);
+              await postQualityMetrics(this.config.apiBaseUrl, this.config.orgApiKey, this.config.parentTaskId, updatedMetrics);
             } else {
               // Auto-fix failed — fall through to existing failure path
               console.log("[Epic] Auto-fix could not resolve all quality issues");

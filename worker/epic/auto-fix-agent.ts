@@ -8,7 +8,7 @@
 import { spawn } from "child_process";
 import { QualityMetrics } from "./quality-runner.js";
 /** Quality gate result type (formerly from quality-gate.ts, now inline) */
-interface QualityGateResult {
+export interface QualityGateResult {
   passed: boolean;
   bypassed?: boolean;
   bypassReason?: string;

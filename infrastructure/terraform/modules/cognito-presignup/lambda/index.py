@@ -189,6 +189,8 @@ def lambda_handler(event, context):
         # Check if user already exists in our database (re-signup scenario)
         if check_user_exists(email):
             logger.info(f"User {email} already exists in database, allowing sign-up")
+            event["response"]["autoConfirmUser"] = True
+            event["response"]["autoVerifyEmail"] = True
             return event
 
         # Check for valid invitation

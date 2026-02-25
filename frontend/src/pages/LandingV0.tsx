@@ -355,7 +355,7 @@ export default function LandingV0() {
               <div className="mt-4 flex justify-center">
                 <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium bg-teal-500/10 text-teal-400 border border-teal-500/20 tracking-wide backdrop-blur-sm">
                   <Lock className="w-3 h-3" />
-                  Local-first — your code executes on your machine, not ours.
+                  Your infrastructure, your rules — local by default, cloud when you need it.
                 </span>
               </div>
             </div>

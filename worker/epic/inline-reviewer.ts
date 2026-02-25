@@ -76,13 +76,13 @@ If the following org-level guidelines were provided, flag any code that violates
 - Security vulnerability that requires different architecture
 - Task cannot be completed this way
 
-## Pre-Review Setup
+## Pre-Review Guidelines
 
-Before reviewing code, ensure dependencies are installed so typechecking is accurate:
-1. If \`package.json\` exists: run \`npm install\` in the repo root (required for accurate type resolution — without node_modules, tsc reports false-positive errors)
-2. If \`go.mod\` exists: run \`go mod download\` (required for Go import resolution)
-3. If both exist (polyglot repo): run both
-4. If dependency install fails, note it but continue with the review (do not block on dependency issues)
+**Do NOT install dependencies or run test suites.** The expert workers already built, tested, and committed the code in this same workspace — dependencies are already installed and test results are provided in the quality metrics below.
+
+Your job is to **read the code** using \`gh pr diff\`, \`Read\`, \`Glob\`, and \`Grep\`. Use Bash only for \`gh\` CLI commands and lightweight checks (e.g., \`go build ./...\`, \`go vet ./...\`, \`gofmt -d ./...\`).
+
+**Do NOT run:** \`npm install\`, \`go mod download\`, \`npm run test:e2e\`, \`go test\`, \`golangci-lint\`, or any other expensive build/test commands. Check the quality metrics provided in the review prompt for test and lint results.
 
 ## Architecture Review Checklist
 
@@ -97,23 +97,22 @@ When reviewing, consider:
 
 ## E2E Test Verification
 
-If the repo has E2E tests (\`npm run test:e2e\` script exists):
-- [ ] Verify E2E tests pass: run \`npm run test:e2e\` or check the quality metrics for E2E results
-- [ ] New components have corresponding E2E coverage
-- [ ] Existing E2E tests still pass (no regressions from modified components)
+Check the quality metrics for E2E test results (do NOT re-run tests yourself):
+- [ ] Quality metrics show E2E tests passed
+- [ ] New components have corresponding E2E coverage (review test files)
 - [ ] Playwright selectors use \`getByRole\` with \`{ name }\` for interactive elements, NOT \`getByText\`
 - [ ] ARIA attributes are valid for the target element's role (e.g., no \`aria-expanded\` on \`type="search"\` inputs)
 - [ ] Text queries use \`{ exact: true }\` to avoid substring matching issues
 
 ## Go Project Verification
 
-If the repo has Go code (\`go.mod\` exists):
-- [ ] \`gofmt -d ./...\` produces no output (code is properly formatted)
+If the repo has Go code (\`go.mod\` exists), run these lightweight checks:
+- [ ] \`go build ./...\` compiles without errors (catches cross-story integration issues)
 - [ ] \`go vet ./...\` passes with no warnings
-- [ ] \`go build ./...\` compiles without errors
-- [ ] \`go test ./... -count=1\` passes (all tests green)
-- [ ] \`golangci-lint run ./...\` passes if available (meta-linter)
+- [ ] \`gofmt -d ./...\` produces no output (code is properly formatted)
 - [ ] Go import groups are properly ordered (stdlib, third-party, local)
+
+Do NOT run \`go test\` or \`golangci-lint\` — check quality metrics for those results.
 
 ## Feedback Guidelines
 

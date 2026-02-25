@@ -47,6 +47,10 @@ vi.mock("../models/KbCardDependency.js", () => ({
   KbCardDependency: class KbCardDependency {},
 }));
 
+vi.mock("../models/WorkerTask.js", () => ({
+  WorkerTask: class WorkerTask {},
+}));
+
 import { processUnblockedCards } from "./board-execution.js";
 
 // ── Helper factories ──

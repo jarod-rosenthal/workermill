@@ -374,7 +374,7 @@ export class DecisionClient {
         10_000,
       );
     } catch (err) {
-      this.log(`[Decision API] classifyError fallback — ${err instanceof Error ? err.message : String(err)}`);
+      this.log(`[Decision API] classifyError FAILED — ${err instanceof Error ? err.message : String(err)}`);
 
       // When the Decision API is unreachable, check for known transient/network
       // patterns locally so 502/503/504 errors still get retried instead of
@@ -402,7 +402,7 @@ export class DecisionClient {
         fixable: false,
         action: "escalate",
         affectedFiles: [],
-        summary: "Decision API unavailable — escalating to human",
+        summary: "Decision API unavailable — escalating to human for error classification",
         fixStrategy: null,
       };
     }
@@ -410,7 +410,7 @@ export class DecisionClient {
 
   /**
    * Evaluate quality of a diff against story requirements.
-   * Fallback: pass (skip quality gate).
+   * Fallback: fail with visible blocker (quality gate cannot be verified when API is unavailable).
    */
   async evaluateQuality(req: EvaluateQualityRequest): Promise<EvaluateQualityResponse> {
     try {
@@ -421,18 +421,18 @@ export class DecisionClient {
         5_000,
       );
     } catch (err) {
-      this.log(`[Decision API] evaluateQuality fallback — ${err instanceof Error ? err.message : String(err)}`);
+      this.log(`[Decision API] evaluateQuality FAILED — ${err instanceof Error ? err.message : String(err)}`);
       return {
-        pass: true,
-        reasons: ["Decision API unavailable — skipping quality gate"],
-        blockers: [],
+        pass: false,
+        reasons: [],
+        blockers: ["Decision API unavailable — quality gate cannot be verified. Fix the Decision API connection or disable the quality gate in org settings."],
       };
     }
   }
 
   /**
    * Parse review output into a structured decision.
-   * Fallback: auto-approve.
+   * Fallback: revision_needed with revisionExhausted=true (escalates — review cannot be verified).
    */
   async parseReviewOutcome(
     req: ParseReviewOutcomeRequest,
@@ -445,14 +445,14 @@ export class DecisionClient {
         10_000,
       );
     } catch (err) {
-      this.log(`[Decision API] parseReviewOutcome fallback — ${err instanceof Error ? err.message : String(err)}`);
+      this.log(`[Decision API] parseReviewOutcome FAILED — ${err instanceof Error ? err.message : String(err)}`);
       return {
-        decision: "approved" as const,
+        decision: "revision_needed" as const,
         score: null,
-        feedback: null,
+        feedback: "Decision API unavailable — review cannot be parsed. Fix the Decision API connection before retrying.",
         shouldRevise: false,
-        revisionExhausted: false,
-        reason: "Decision API unavailable — auto-approving",
+        revisionExhausted: true,
+        reason: "Decision API unavailable — cannot verify review outcome, escalating",
       };
     }
   }
@@ -470,7 +470,10 @@ export class DecisionClient {
         5_000,
       );
     } catch (err) {
-      this.log(`[Decision API] routeQuestion fallback — ${err instanceof Error ? err.message : String(err)}`);
+      // routeQuestion fallback is acceptable — round-robin to first idle
+      // expert is a reasonable degradation since questions will still get
+      // answered, just potentially by a less specialized expert.
+      this.log(`[Decision API] routeQuestion unavailable, using round-robin — ${err instanceof Error ? err.message : String(err)}`);
       return {
         targetExpert: req.idleExperts?.[0] || null,
         routingTier: 3 as const,
@@ -481,7 +484,8 @@ export class DecisionClient {
 
   /**
    * Route to the best provider/model for a given persona and complexity.
-   * Fallback: anthropic / claude-haiku-4-5.
+   * Fallback: use the model the caller already configured (req.modelName).
+   * If the caller didn't send a model name, fail visibly.
    */
   async routeProvider(req: RouteProviderRequest): Promise<RouteProviderResponse> {
     try {
@@ -492,10 +496,23 @@ export class DecisionClient {
         5_000,
       );
     } catch (err) {
-      this.log(`[Decision API] routeProvider fallback — ${err instanceof Error ? err.message : String(err)}`);
+      this.log(`[Decision API] routeProvider FAILED — ${err instanceof Error ? err.message : String(err)}`);
+      if (!req.modelName) {
+        // No model configured and API unavailable — caller must handle this
+        throw new Error("Decision API unavailable and no modelName provided — cannot determine provider/model");
+      }
+      // Caller provided a model — infer provider from it
+      const modelLower = req.modelName.toLowerCase();
+      const provider = modelLower.includes("gpt") || modelLower.includes("o1") || modelLower.includes("o3")
+        ? "openai"
+        : modelLower.includes("gemini")
+          ? "google"
+          : modelLower.includes("qwen") || modelLower.includes("deepseek") || modelLower.includes("llama")
+            ? "ollama"
+            : "anthropic";
       return {
-        provider: "anthropic",
-        model: req.modelName || "claude-haiku-4-5",
+        provider,
+        model: req.modelName,
         inferenceSource: "fallback" as const,
       };
     }
@@ -503,7 +520,8 @@ export class DecisionClient {
 
   /**
    * Get worker configuration (AGENTS.md, persona icons, review schema, etc.).
-   * Fallback: minimal stub so workers can still operate.
+   * Fails visibly if the Decision API is unreachable — worker cannot operate
+   * with correct settings without this config.
    */
   async getWorkerConfig(): Promise<WorkerConfigResponse> {
     try {
@@ -514,23 +532,8 @@ export class DecisionClient {
         15_000,
       );
     } catch (err) {
-      this.log(`[Decision API] getWorkerConfig fallback — ${err instanceof Error ? err.message : String(err)}`);
-      return {
-        agentsMd:
-          "# WorkerMill Agent\n\nFollow project conventions and write clean code.\n",
-        personaIcons: {},
-        providerIcons: {},
-        reviewSchema: {
-          decision: ["approved", "revision_needed", "rejected"],
-          scoreRange: [1, 10],
-        },
-        claudeMdTemplate: "# Project\n\nThis project uses TypeScript.\n",
-        defaults: {
-          blockerMaxAutoRetries: 3,
-          maxReviewRevisions: 3,
-          maxPerStoryRevisions: 2,
-        },
-      };
+      this.log(`[Decision API] getWorkerConfig FAILED — ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(`Decision API unavailable — cannot fetch worker config: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

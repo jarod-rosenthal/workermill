@@ -572,10 +572,10 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     additionalEnv.CODEBASE_INDEXING_ENABLED = "true";
   }
   if (org) {
-    additionalEnv.MAX_REVIEW_REVISIONS = String(org.maxReviewRevisions ?? 3);
-    additionalEnv.MAX_PER_STORY_REVISIONS = String(org.maxPerStoryRevisions ?? 2);
+    additionalEnv.MAX_REVIEW_REVISIONS = String(org.maxReviewRevisions);
+    additionalEnv.MAX_PER_STORY_REVISIONS = String(org.maxPerStoryRevisions);
     additionalEnv.MAX_PARALLEL_EXPERTS = String(org.maxParallelExperts);
-    additionalEnv.BLOCKER_MAX_AUTO_RETRIES = String(org.blockerMaxAutoRetries ?? 3);
+    additionalEnv.BLOCKER_MAX_AUTO_RETRIES = String(org.blockerMaxAutoRetries);
     additionalEnv.BLOCKER_AUTO_RETRY_ENABLED = org.blockerAutoRetryEnabled !== false ? "true" : "false";
     additionalEnv.PUSH_AFTER_COMMIT = org.pushAfterCommit !== false ? "true" : "false";
     additionalEnv.GRACEFUL_SHUTDOWN_ENABLED = org.gracefulShutdownEnabled !== false ? "true" : "false";
@@ -593,8 +593,8 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   allProviders.add("anthropic");
 
   // Manager/reviewer provider
-  const managerProvider = org?.managerProvider || "openai";
-  allProviders.add(managerProvider);
+  const managerProvider = org?.managerProvider || "";
+  if (managerProvider) allProviders.add(managerProvider);
 
   task.providersUsed = Array.from(allProviders);
 
@@ -864,8 +864,8 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
     if (planningProvider) allProviders.add(planningProvider);
 
     // Add manager/reviewer provider
-    const managerProvider = org?.managerProvider || "openai";
-    allProviders.add(managerProvider);
+    const managerProvider = org?.managerProvider || "";
+    if (managerProvider) allProviders.add(managerProvider);
 
     // Store all providers used for dashboard visibility
     task.providersUsed = Array.from(allProviders);
@@ -883,8 +883,8 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
     allProviders.add(defaultWorkerProvider);
 
     // Manager/reviewer provider
-    const managerProvider = org?.managerProvider || "openai";
-    allProviders.add(managerProvider);
+    const managerProvider2 = org?.managerProvider || "";
+    if (managerProvider2) allProviders.add(managerProvider2);
 
     task.providersUsed = Array.from(allProviders);
   }

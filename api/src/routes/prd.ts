@@ -385,7 +385,7 @@ router.post(
       } else {
         // Use the planning agent model/provider from org settings
         const planProvider = org.planningAgentProvider || "anthropic";
-        const planModel = org.planningAgentModel || org.defaultWorkerModel || "claude-sonnet-4-6";
+        const planModel = org.planningAgentModel || org.defaultWorkerModel;
         const orgCreds = await getOrgCredentials(org.id);
 
         logger.info("Decomposing PRD server-side", {

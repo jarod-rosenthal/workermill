@@ -61,7 +61,7 @@ export class EpicCoordinator {
   // Inline review and deployment tracking
   private revisionCount: number = 0;
   private maxRevisions: number = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
-  private maxPerStoryRevisions: number = parseInt(process.env.MAX_PER_STORY_REVISIONS || "2", 10);
+  private maxPerStoryRevisions: number = parseInt(process.env.MAX_PER_STORY_REVISIONS || "1", 10);
   private currentPrUrl: string | undefined;
   private currentPrNumber: number | undefined;
   private lastReviewFeedback: string | undefined;
@@ -255,8 +255,10 @@ export class EpicCoordinator {
         console.log("[Epic] Stale claims archived");
       }
     } catch (error) {
-      console.warn("[Epic] Failed to check for existing completions:", error instanceof Error ? error.message : error);
-      // Non-fatal - continue without resume
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.log("[Epic] ⚠️ Failed to check for existing completions: " + errMsg);
+      this.postLog(`⚠️ Resume check failed: ${errMsg} — stale claims may cause retry loops`);
+      // Non-fatal - continue without resume, but stale claims may block re-claiming
     }
   }
 
@@ -1878,9 +1880,28 @@ export class EpicCoordinator {
       }
 
       // Try to claim the story
-      const claimResult = await this.coordination.claimStory(story.id, expertPersona);
+      let claimResult: Awaited<ReturnType<typeof this.coordination.claimStory>>;
+      try {
+        claimResult = await this.coordination.claimStory(story.id, expertPersona);
+      } catch (claimError) {
+        const msg = claimError instanceof Error ? claimError.message : String(claimError);
+        console.log(`[Epic] ⚠️ Claim threw for story ${story.storyIndex}: ${msg}`);
+        this.postLog(`⚠️ Claim error for story ${story.storyIndex}: ${msg}`);
+        continue;
+      }
       if (!claimResult.success) {
-        console.log(`[Epic] Claim failed for story ${story.storyIndex} (alreadyClaimed=${claimResult.alreadyClaimed}, claimedBy=${claimResult.claimedBy})`);
+        if (claimResult.alreadyClaimed && !this.completedStoryIndices.has(story.storyIndex)) {
+          // Stale claim from a previous retry — archive it and retry on next iteration
+          console.log(`[Epic] Story ${story.storyIndex} has stale claim (claimedBy=${claimResult.claimedBy}) — archiving`);
+          this.postLog(`Archiving stale claim for story ${story.storyIndex} — will retry`);
+          try {
+            await this.coordination.archiveStoryClaims([story.storyIndex]);
+          } catch (archiveErr) {
+            console.log(`[Epic] Failed to archive stale claim: ${archiveErr instanceof Error ? archiveErr.message : String(archiveErr)}`);
+          }
+        } else {
+          console.log(`[Epic] Claim failed for story ${story.storyIndex} (alreadyClaimed=${claimResult.alreadyClaimed}, claimedBy=${claimResult.claimedBy})`);
+        }
         continue;
       }
 

@@ -498,7 +498,7 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
       );
       additionalEnv.SELF_REVIEW_ENABLED = hasSelfReviewLabel || (org.selfReviewEnabled === true) ? "true" : "false";
       // Other resilience settings
-      additionalEnv.BLOCKER_MAX_AUTO_RETRIES = String(org.blockerMaxAutoRetries ?? 3);
+      additionalEnv.BLOCKER_MAX_AUTO_RETRIES = String(org.blockerMaxAutoRetries);
       additionalEnv.BLOCKER_AUTO_RETRY_ENABLED = org.blockerAutoRetryEnabled !== false ? "true" : "false";
       additionalEnv.PUSH_AFTER_COMMIT = org.pushAfterCommit !== false ? "true" : "false";
       additionalEnv.GRACEFUL_SHUTDOWN_ENABLED = org.gracefulShutdownEnabled !== false ? "true" : "false";

@@ -230,7 +230,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           ecsTaskId: task.ecsTaskId,
           retryCount: task.retryCount || 0,
           revisionCount: task.revisionCount || 0,
-          maxReviewRevisions: freshOrg.maxReviewRevisions ?? 3,
+          maxReviewRevisions: freshOrg.maxReviewRevisions,
           errorMessage: task.errorMessage || null,
           lastHeartbeatAt: task.lastHeartbeatAt?.toISOString() || null,
           // Remote agent info

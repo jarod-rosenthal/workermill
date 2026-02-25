@@ -914,7 +914,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       "system"
     );
     const maxPerStoryRevisions = parseInt(
-      process.env.MAX_PER_STORY_REVISIONS || "2",
+      process.env.MAX_PER_STORY_REVISIONS || "1",
       10
     );
     if (revisionCount > 0) {
@@ -1057,7 +1057,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     expertContext?: string
   ): string {
     const maxPerStoryRevisions = parseInt(
-      process.env.MAX_PER_STORY_REVISIONS || "2",
+      process.env.MAX_PER_STORY_REVISIONS || "1",
       10
     );
     const revisionSection = previousFeedback

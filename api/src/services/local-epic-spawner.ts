@@ -793,7 +793,7 @@ class LocalEpicSpawner {
       // refresh token, allowing it to auto-refresh expired access tokens mid-run.
 
       // Resilience Settings (from org settings)
-      BLOCKER_MAX_AUTO_RETRIES: String(task.organization?.blockerMaxAutoRetries ?? 3),
+      BLOCKER_MAX_AUTO_RETRIES: String(task.organization?.blockerMaxAutoRetries),
       BLOCKER_AUTO_RETRY_ENABLED: task.organization?.blockerAutoRetryEnabled !== false ? "true" : "false",
       PUSH_AFTER_COMMIT: task.organization?.pushAfterCommit !== false ? "true" : "false",
       GRACEFUL_SHUTDOWN_ENABLED: task.organization?.gracefulShutdownEnabled !== false ? "true" : "false",

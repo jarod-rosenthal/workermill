@@ -159,9 +159,17 @@ export function findOllamaPath(): string | null {
     candidates.push(
       join(localAppData, "Programs", "Ollama", "ollama.exe"),
       join(process.env.ProgramFiles || "C:\\Program Files", "Ollama", "ollama.exe"),
+      join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Ollama", "ollama.exe"),
+      join(homedir(), "AppData", "Local", "Ollama", "ollama.exe"),
     );
   } else {
-    candidates.push("/usr/local/bin/ollama", "/opt/homebrew/bin/ollama", join(homedir(), ".local", "bin", "ollama"));
+    candidates.push(
+      "/usr/local/bin/ollama",
+      "/opt/homebrew/bin/ollama",
+      join(homedir(), ".local", "bin", "ollama"),
+      "/usr/bin/ollama",
+      "/snap/bin/ollama",
+    );
   }
 
   for (const candidate of candidates) {
@@ -261,28 +269,20 @@ export async function ensureOllamaRunning(port: number = 11434): Promise<boolean
   return false;
 }
 
-// ── Install ───────────────────────────────────────────
+// ── Install helpers ──────────────────────────────────
 
-/**
- * Install Ollama using the official install script.
- * Linux/macOS: runs `curl -fsSL https://ollama.com/install.sh | sh`
- * Windows: opens the download page (automated install not supported).
- * Returns true on success.
- */
-export async function installOllama(
+/** Run a command, pipe stdout/stderr to onProgress, resolve with exit code 0 = success. */
+function runInstallCommand(
+  cmd: string,
+  args: string[],
   onProgress?: (message: string) => void,
+  timeoutMs: number = 120_000,
 ): Promise<boolean> {
-  if (process.platform === "win32") {
-    onProgress?.("Windows detected — please download Ollama from https://ollama.com/download");
-    return false;
-  }
-
-  onProgress?.("Installing Ollama via official install script...");
-
   return new Promise((resolve) => {
-    const child = spawn("sh", ["-c", "curl -fsSL https://ollama.com/install.sh | sh"], {
+    const child = spawn(cmd, args, {
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 120_000,
+      timeout: timeoutMs,
+      windowsHide: true,
     });
 
     child.stdout?.on("data", (chunk: Buffer) => {
@@ -295,21 +295,101 @@ export async function installOllama(
       if (line) onProgress?.(line);
     });
 
-    child.on("close", (code) => {
-      if (code === 0) {
-        onProgress?.("Ollama installed successfully");
-        resolve(true);
-      } else {
-        onProgress?.(`Ollama install failed (exit code ${code})`);
-        resolve(false);
-      }
-    });
-
+    child.on("close", (code) => resolve(code === 0));
     child.on("error", (err) => {
-      onProgress?.(`Ollama install error: ${err.message}`);
+      onProgress?.(`Install error: ${err.message}`);
       resolve(false);
     });
   });
+}
+
+/** Check if a command exists (returns true/false). */
+function commandExists(cmd: string): boolean {
+  try {
+    const which = process.platform === "win32" ? "where.exe" : "which";
+    execFileSync(which, [cmd], {
+      encoding: "utf-8",
+      timeout: 5_000,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ── Install ───────────────────────────────────────────
+
+/**
+ * Install Ollama automatically.
+ * - Windows: `winget install Ollama.Ollama` (ships with Windows 10/11)
+ * - macOS: `brew install ollama` (Homebrew), falls back to official curl script
+ * - Linux: official curl script (`curl -fsSL https://ollama.com/install.sh | sh`)
+ * Returns true on success. Re-verifies binary exists after install.
+ */
+export async function installOllama(
+  onProgress?: (message: string) => void,
+): Promise<boolean> {
+  let ok = false;
+
+  if (process.platform === "win32") {
+    // Windows: use winget (built into Windows 10 1709+ and Windows 11)
+    onProgress?.("Installing Ollama via winget...");
+    ok = await runInstallCommand(
+      "winget",
+      ["install", "--id", "Ollama.Ollama", "--accept-package-agreements", "--accept-source-agreements", "--silent"],
+      onProgress,
+      180_000, // 3 min — winget can be slow
+    );
+    if (!ok) {
+      onProgress?.("winget install failed — trying direct download...");
+      // Fallback: download the installer exe directly
+      ok = await runInstallCommand(
+        "powershell",
+        [
+          "-NoProfile",
+          "-Command",
+          `$f = "$env:TEMP\\OllamaSetup.exe"; ` +
+            `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; ` +
+            `Invoke-WebRequest -Uri 'https://ollama.com/download/OllamaSetup.exe' -OutFile $f; ` +
+            `Start-Process $f -ArgumentList '/SILENT','/NORESTART' -Wait; ` +
+            `Remove-Item $f -ErrorAction SilentlyContinue`,
+        ],
+        onProgress,
+        300_000, // 5 min — download + install
+      );
+    }
+  } else if (process.platform === "darwin") {
+    // macOS: try Homebrew first (no sudo needed), fall back to curl script
+    if (commandExists("brew")) {
+      onProgress?.("Installing Ollama via Homebrew...");
+      ok = await runInstallCommand("brew", ["install", "ollama"], onProgress, 180_000);
+    }
+    if (!ok) {
+      onProgress?.("Installing Ollama via official install script...");
+      ok = await runInstallCommand("sh", ["-c", "curl -fsSL https://ollama.com/install.sh | sh"], onProgress);
+    }
+  } else {
+    // Linux: official install script (handles sudo internally)
+    onProgress?.("Installing Ollama via official install script...");
+    ok = await runInstallCommand("sh", ["-c", "curl -fsSL https://ollama.com/install.sh | sh"], onProgress);
+  }
+
+  if (!ok) {
+    onProgress?.("Ollama install failed — download manually from https://ollama.com/download");
+    return false;
+  }
+
+  // Verify the binary is actually available after install
+  const path = findOllamaPath();
+  if (!path) {
+    onProgress?.("Ollama installed but binary not found on PATH — you may need to restart your terminal");
+    return false;
+  }
+
+  onProgress?.("Ollama installed successfully");
+  return true;
 }
 
 // ── Model management ─────────────────────────────────

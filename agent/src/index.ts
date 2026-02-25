@@ -14,7 +14,7 @@ import { AGENT_VERSION } from "./version.js";
 import { selfUpdate, restartAgent } from "./updater.js";
 import { startLocalApi, stopLocalApi } from "./local-api.js";
 import { detectGpu } from "./gpu-detector.js";
-import { ensureOllamaRunning, pullModel, stopOllama } from "./ollama-manager.js";
+import { ensureOllamaRunning, pullModel, stopOllama, findOllamaPath, installOllama } from "./ollama-manager.js";
 
 export { loadConfig, loadConfigFromFile, validatePrerequisites, getSystemInfo, findClaudePath } from "./config.js";
 export type { AgentConfig } from "./config.js";
@@ -57,8 +57,15 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
       `  ${chalk.dim("GPU:")}      ${gpu.available ? chalk.green("●") + ` ${gpu.vendor} ${gpu.model}` : chalk.yellow("None")}`,
     );
 
-    // Local RAG: start Ollama and pull embedding model
+    // Local RAG: auto-install Ollama if needed, start it, pull embedding model
     if (config.localRag) {
+      if (!findOllamaPath()) {
+        console.log(`  ${chalk.dim("Ollama:")}   ${chalk.yellow("Not found")} — installing automatically...`);
+        const installed = await installOllama((msg) => console.log(`  ${chalk.dim("  ")} ${msg}`));
+        if (!installed) {
+          console.log(`  ${chalk.yellow("⚠")} Ollama install failed — local RAG disabled`);
+        }
+      }
       const ollamaOk = await ensureOllamaRunning(config.ollamaPort);
       if (ollamaOk) {
         await pullModel("nomic-embed-text", config.ollamaPort);

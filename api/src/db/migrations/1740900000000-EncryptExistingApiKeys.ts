@@ -20,9 +20,25 @@ export class EncryptExistingApiKeys1740900000000
       return;
     }
 
+    // Check which column name exists — older schemas use snake_case "api_key",
+    // the original migration used camelCase "apiKey".
+    const colCheck = (await queryRunner.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'organizations' AND column_name IN ('apiKey', 'api_key')`,
+    )) as { column_name: string }[];
+
+    if (colCheck.length === 0) {
+      console.log(
+        "[Migration] Skipping API key encryption — no apiKey/api_key column found",
+      );
+      return;
+    }
+
+    const col = colCheck[0].column_name; // "apiKey" or "api_key"
+    const quoted = col === "api_key" ? "api_key" : `"apiKey"`;
+
     // Fetch all orgs with non-null apiKey
     const rows = (await queryRunner.query(
-      `SELECT id, "apiKey" FROM organizations WHERE "apiKey" IS NOT NULL AND "apiKey" != ''`,
+      `SELECT id, ${quoted} AS "apiKey" FROM organizations WHERE ${quoted} IS NOT NULL AND ${quoted} != ''`,
     )) as { id: string; apiKey: string }[];
 
     let encrypted = 0;
@@ -36,7 +52,7 @@ export class EncryptExistingApiKeys1740900000000
 
       const encryptedValue = encrypt(row.apiKey);
       await queryRunner.query(
-        `UPDATE organizations SET "apiKey" = $1 WHERE id = $2`,
+        `UPDATE organizations SET ${quoted} = $1 WHERE id = $2`,
         [encryptedValue, row.id],
       );
       encrypted++;

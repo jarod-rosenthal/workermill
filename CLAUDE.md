@@ -169,7 +169,7 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 
 ---
 
-## Recent Changes (keep updated)
+## Recent Changes (keep updated — max 10 entries, archive older to `docs/claude/changelog.md`)
 
 - 2026-02-23: Redis pub/sub for real-time coordination — ElastiCache `cache.t4g.micro`, SSE pushes instantly via Redis subscribe, falls back to 5s DB polling if Redis unavailable. Workers use SSE subscriber with event-driven coordinator loop.
 - 2026-02-23: bcrypt → bcryptjs (pure JS, no native deps) — eliminates Docker build warnings and `python3 make g++` from Dockerfile.
@@ -181,13 +181,6 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 - 2026-02-20: Full Build (formerly "PRD") decomposition — `POST /api/prd/decompose` creates boards with dependency-ordered cards. Board execution engine (`api/src/services/board-execution.ts`) cascade-triggers dependent cards on completion.
 - 2026-02-20: Card dependencies (`KbCardDependency` model), run-all/cancel-all endpoints, external tracker sync (Jira/GitHub/Linear).
 - 2026-02-19: Rate limit detection — agent detects rate limits → blocker escalation → dashboard banner + VS Code notification.
-- 2026-02-19: Personas consolidated from 16 to 12. Persona Studio is single source of truth for all persona data.
-- 2026-02-19: Anthropic models upgraded to `claude-sonnet-4-6` across codebase.
-- 2026-02-18: Agent binaries distributed via S3/CDN (`workermill.com/agent/latest/`) instead of GitHub Releases.
-- 2026-02-18: VS Code GitHub SSO onboarding, TOS acceptance, settings panel, sign-out.
-- 2026-02-17: Board issue keys — sequential `PREFIX-NUMBER` per board (`KbBoard.prefix`, `KbCard.card_number`).
-- 2026-02-17: Go language support added to worker pipeline.
-- 2026-02-16: StatusSnapshot model for uptime history (`status.workermill.com`).
 
 ---
 
@@ -207,8 +200,14 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 
 **Ports:** API: 3001, Frontend: 5173, Local DB: 5433, Local Redis: 6379
 
+**Environment variables:** See `.env.local` setup in `docs/claude/local-dev.md`. Key vars: `DATABASE_URL`, `EXECUTION_MODE` (local/remote), `TARGET_REPO_PATH`.
+
 | Task | Command |
 |------|---------|
+| Install API deps | `cd api && npm ci` |
+| Install frontend deps | `cd frontend && npm ci` |
+| Install agent deps | `cd agent && npm install` |
+| Install worker deps | `cd worker && npm install` |
 | Type check API | `cd api && npm run typecheck` |
 | Type check frontend | `cd frontend && npx tsc -b` |
 | Type check agent | `cd agent && npm run typecheck` |
@@ -280,7 +279,12 @@ Focus on these directories (production services):
 - `packages/workermill-mcp/` - WorkerMill MCP server (published to npm)
 - `packages/oncallshift-mcp/` - OncallShift MCP server (published to npm)
 
-Ignore other `packages/*` directories - original modular architecture, not actively deployed.
+Supporting directories:
+- `bin/` - CLI scripts (`local-workermill`, `bastion`)
+- `docker/` - Docker configurations for local development
+- `data/dumps/` - Database backup dumps (local dev)
+- `scripts/` - Utility scripts
+- `infrastructure/` - Terraform IaC (AWS ECS, RDS, S3, CloudFront)
 
 User-facing documentation is at https://workermill.com/docs (overview, quick start, integrations, task lifecycle, personas, epics, analytics, MCP, advanced).
 
@@ -327,7 +331,9 @@ Worker Docker images are used ONLY by **cloud ECS tasks** and **local WorkerMill
 | Committed changes | Requires `git pull` in other terminals |
 
 **Before changes:** `git pull`
-**After changes:** Commit and push promptly
+**After changes:** Commit and push to both remotes: `git push origin main && git push upstream main`
+
+**Git remotes:** `origin` = `jarod-rosenthal/workermill` (dev, public), `upstream` = `workermill/workermill` (prod, private).
 
 **Note:** AI workers use git worktrees for parallel expert execution (`worker/epic/git-ops.ts`). This is separate from the development workflow — workers create temporary worktrees within the target repo clone, not within this repository.
 
@@ -370,6 +376,10 @@ There are TWO separate board/project systems — do NOT confuse them:
 - **Projects** (`/api/projects`, `Project`/`InternalTask`) = Jira-like epic/story system. Frontend redirects `/projects` → `/boards` — **Projects are NOT visible in the Boards UI.**
 
 **ALWAYS use `/api/boards` to create items the user will see.**
+
+### Board Execution Engine
+
+`api/src/services/board-execution.ts` handles dependency-ordered card execution. When a card completes, it cascade-triggers dependent cards (`KbCardDependency` model). PRD decomposition (`POST /api/prd/decompose`) creates boards with dependency-ordered cards that execute via this engine. Run-all and cancel-all endpoints operate on entire boards.
 
 ### Orchestrator Module Architecture
 

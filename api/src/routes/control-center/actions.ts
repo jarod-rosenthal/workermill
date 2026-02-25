@@ -264,13 +264,13 @@ router.post(
 );
 
 /**
- * POST /api/control-center/tasks/:id/review
+ * POST /api/control-center/tasks/:id/trigger-review
  * Trigger a review-only run on an existing PR.
  * Re-queues the task with REVIEW_RUN in taskNotes and forces review enabled.
  * If revision is needed, the worker enters the full revision loop automatically.
  */
 router.post(
-  "/tasks/:id/review",
+  "/tasks/:id/trigger-review",
   authenticateRequest,
   param("id").isUUID().withMessage("id must be a valid UUID"),
   validateRequest,

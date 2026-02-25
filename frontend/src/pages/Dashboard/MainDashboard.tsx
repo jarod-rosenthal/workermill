@@ -1518,7 +1518,7 @@ export default function Dashboard() {
     setActionLoading(taskId);
     try {
       const token = localStorage.getItem("accessToken");
-      const response = await fetch(`${API_BASE}/api/control-center/tasks/${taskId}/review`, {
+      const response = await fetch(`${API_BASE}/api/control-center/tasks/${taskId}/trigger-review`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });

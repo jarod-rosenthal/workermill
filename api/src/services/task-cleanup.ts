@@ -17,6 +17,7 @@ import { logger } from "../utils/logger.js";
 import { notifyTaskFailed } from "./notifications.js";
 import { localEpicSpawner } from "./local-epic-spawner.js";
 import { expireOldReferrals } from "./referral.js";
+import { redis } from "./redis-client.js";
 import {
   getOrgRepo,
   getTaskRepo,
@@ -759,27 +760,31 @@ async function releaseStaleAgentTasks(): Promise<void> {
 
 /**
  * Cleanup loop - runs hourly
- * Cleans up old logs and checkpoints to prevent unbounded growth
+ * Cleans up old logs and checkpoints to prevent unbounded growth.
+ * Distributed lock ensures only one orchestrator instance runs cleanup per hour.
  */
 export async function cleanupLoop(): Promise<void> {
   while (state.running) {
-    // Run cleanup tasks in parallel
-    await Promise.all([
-      cleanupOldLogs(),
-      cleanupOldCheckpoints(),
-      failOrphanedTasks(),
-      cleanupStuckPlanningTasks(),
-      releaseStaleAgentTasks(),
-      expireOldReferrals().catch((error) => {
-        logger.error("Error expiring old referrals", {
+    // Distributed lock: only one instance runs hourly cleanup
+    const won = await redis.setnx("orchestrator:lock:hourly-cleanup", "1", 3500);
+    if (won) {
+      await Promise.all([
+        cleanupOldLogs(),
+        cleanupOldCheckpoints(),
+        failOrphanedTasks(),
+        cleanupStuckPlanningTasks(),
+        releaseStaleAgentTasks(),
+        expireOldReferrals().catch((error) => {
+          logger.error("Error expiring old referrals", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }),
+      ]).catch((error) => {
+        logger.error("Error during cleanup operations", {
           error: error instanceof Error ? error.message : String(error),
         });
-      }),
-    ]).catch((error) => {
-      logger.error("Error during cleanup operations", {
-        error: error instanceof Error ? error.message : String(error),
       });
-    });
+    }
     // Run every hour
     await new Promise((resolve) => setTimeout(resolve, 60 * 60 * 1000));
   }

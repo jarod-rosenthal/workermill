@@ -38,9 +38,8 @@ import {
 } from "./orchestrator-utils.js";
 import { redis } from "./redis-client.js";
 
-// Timestamp for hourly trial reminder checks
-let lastTrialReminderCheck = 0;
-let lastMarketingAgentRun = 0;
+// Redis-based distributed locks for cron jobs (safe with multiple orchestrator instances)
+// setnx returns true if this instance "won" the lock — only one instance runs the job per interval.
 
 /**
  * Main polling loop
@@ -233,31 +232,36 @@ async function pollLoop(): Promise<void> {
 
       // Clean up stale coordination data (Phase 8: Watcher/Cleanup)
       // Run every ~1 minute (12 polls * 5 seconds = 60 seconds)
-      // This releases file locks and removes check-ins for workers that haven't heartbeated in 5+ minutes
-      // Also checks for hung tasks (no heartbeat in 10+ min) and fails them
+      // Distributed lock: only one orchestrator runs cleanup per interval
       if (state.tasksProcessed % 12 === 0 || state.tasksProcessed === 0) {
-        await cleanupStaleCoordination().catch((error) => {
-          logger.error("Error in cleanupStaleCoordination", {
-            error: error instanceof Error ? error.message : String(error),
+        const wonCleanup = await redis.setnx("orchestrator:lock:stale-coordination", "1", 55);
+        if (wonCleanup) {
+          await cleanupStaleCoordination().catch((error) => {
+            logger.error("Error in cleanupStaleCoordination", {
+              error: error instanceof Error ? error.message : String(error),
+            });
           });
-        });
 
-        // Fail tasks with stale heartbeats (hung workers) or no heartbeat at all
-        await failHungTasks().catch((error) => {
-          logger.error("Error in failHungTasks", {
-            error: error instanceof Error ? error.message : String(error),
+          // Fail tasks with stale heartbeats (hung workers) or no heartbeat at all
+          await failHungTasks().catch((error) => {
+            logger.error("Error in failHungTasks", {
+              error: error instanceof Error ? error.message : String(error),
+            });
           });
-        });
+        }
       }
 
       // Fail orphaned tasks (ECS task missing or stuck without check-in)
-      // Run every ~5 minutes (60 polls * 5 seconds = 300 seconds)
+      // Run every ~5 minutes — distributed lock prevents duplicate runs
       if (state.tasksProcessed % 60 === 0 || state.tasksProcessed === 0) {
-        await failOrphanedTasks().catch((error) => {
-          logger.error("Error in failOrphanedTasks", {
-            error: error instanceof Error ? error.message : String(error),
+        const wonOrphan = await redis.setnx("orchestrator:lock:orphaned-tasks", "1", 280);
+        if (wonOrphan) {
+          await failOrphanedTasks().catch((error) => {
+            logger.error("Error in failOrphanedTasks", {
+              error: error instanceof Error ? error.message : String(error),
+            });
           });
-        });
+        }
       }
 
       // NOTE: OAuth token refresh was REMOVED from the orchestrator poll loop.
@@ -267,47 +271,55 @@ async function pollLoop(): Promise<void> {
       // ensuring each container starts with a fresh 8-hour access token that never expires mid-run.
 
       // Maintain warm container pools
-      // Run every ~30 seconds (6 polls * 5 seconds = 30 seconds)
+      // Run every ~30 seconds — distributed lock prevents duplicate runs
       if (state.tasksProcessed % 6 === 0) {
-        await maintainAllWarmPools().catch((error) => {
-          logger.error("Error in maintainAllWarmPools", {
-            error: error instanceof Error ? error.message : String(error),
+        const wonWarmPool = await redis.setnx("orchestrator:lock:warm-pools", "1", 25);
+        if (wonWarmPool) {
+          await maintainAllWarmPools().catch((error) => {
+            logger.error("Error in maintainAllWarmPools", {
+              error: error instanceof Error ? error.message : String(error),
+            });
           });
-        });
+        }
       }
 
-      // Check trial reminders — once per hour
-      const now = Date.now();
-      if (now - lastTrialReminderCheck > 60 * 60 * 1000) {
-        lastTrialReminderCheck = now;
-        checkTrialReminders().catch((err) =>
-          logger.error("Trial reminder check failed", {
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        );
+      // Check trial reminders — once per hour (distributed lock via Redis)
+      if (state.tasksProcessed % 720 === 0) {
+        const won = await redis.setnx("orchestrator:lock:trial-reminders", "1", 3600);
+        if (won) {
+          checkTrialReminders().catch((err) =>
+            logger.error("Trial reminder check failed", {
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        }
       }
 
-      // Marketing agent — configurable interval (default 2 hours)
+      // Marketing agent — configurable interval (distributed lock via Redis)
       try {
         const platformOrg = await Organization.getPlatformOrg();
-        if (
-          platformOrg?.marketingAgentEnabled &&
-          now - lastMarketingAgentRun > platformOrg.marketingAgentIntervalMinutes * 60 * 1000
-        ) {
-          const config = platformOrg.marketingAgentConfig as Record<string, unknown>;
-          const timeWindow = (config.missionTimeWindow as string) || "06:00-22:00";
-          const [startStr, endStr] = timeWindow.split("-");
-          const startHour = parseInt(startStr.split(":")[0], 10);
-          const endHour = parseInt(endStr.split(":")[0], 10);
-          const currentHour = new Date().getUTCHours();
+        if (platformOrg?.marketingAgentEnabled) {
+          const intervalMinutes = platformOrg.marketingAgentIntervalMinutes || 120;
+          const won = await redis.setnx(
+            "orchestrator:lock:marketing-agent",
+            "1",
+            intervalMinutes * 60,
+          );
+          if (won) {
+            const config = platformOrg.marketingAgentConfig as Record<string, unknown>;
+            const timeWindow = (config.missionTimeWindow as string) || "06:00-22:00";
+            const [startStr, endStr] = timeWindow.split("-");
+            const startHour = parseInt(startStr.split(":")[0], 10);
+            const endHour = parseInt(endStr.split(":")[0], 10);
+            const currentHour = new Date().getUTCHours();
 
-          if (currentHour >= startHour && currentHour < endHour) {
-            lastMarketingAgentRun = now;
-            executeMarketingAgentMission(platformOrg).catch((err) =>
-              logger.error("Marketing agent mission failed", {
-                error: err instanceof Error ? err.message : String(err),
-              }),
-            );
+            if (currentHour >= startHour && currentHour < endHour) {
+              executeMarketingAgentMission(platformOrg).catch((err) =>
+                logger.error("Marketing agent mission failed", {
+                  error: err instanceof Error ? err.message : String(err),
+                }),
+              );
+            }
           }
         }
       } catch (err) {

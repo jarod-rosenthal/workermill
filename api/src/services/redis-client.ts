@@ -234,6 +234,22 @@ class RedisService {
   }
 
   /**
+   * SET a key only if it does not already exist (NX), with a mandatory TTL.
+   * Returns true if the key was set (this caller "won" the lock), false otherwise.
+   * If Redis is unavailable, returns true (allow execution — degrade to multi-run).
+   */
+  async setnx(key: string, value: string, ttlSeconds: number): Promise<boolean> {
+    if (!this.pub || !this._connected) return true;
+
+    try {
+      const result = await this.pub.set(key, value, "EX", ttlSeconds, "NX");
+      return result === "OK";
+    } catch {
+      return true; // Redis down — allow execution
+    }
+  }
+
+  /**
    * DEL a key from Redis. Returns false if Redis is unavailable.
    */
   async del(key: string): Promise<boolean> {

@@ -93,7 +93,7 @@ export function Header() {
               size="sm"
               className="bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-400 hover:to-teal-500 text-white rounded-lg px-4 h-9 text-sm font-medium shadow-lg shadow-teal-500/20 border-0"
             >
-              Get Started
+              Join the Waitlist
             </Button>
           </Link>
           {/* Mobile menu toggle */}

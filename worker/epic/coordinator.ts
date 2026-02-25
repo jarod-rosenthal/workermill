@@ -239,6 +239,21 @@ export class EpicCoordinator {
       } else {
         console.log("[Epic] No previously completed stories found - starting fresh");
       }
+
+      // Archive stale claims: stories that were claimed but never completed (e.g. worker crashed mid-execution).
+      // Without this, the coordinator loops forever trying to re-claim already-claimed stories.
+      const claims = await this.coordination.getContextsByTypes(["story_claimed"]);
+      const staleClaims = claims.filter((c) => {
+        const idx = c.metadata?.storyIndex as number;
+        return idx !== undefined && !this.completedStoryIndices.has(idx);
+      });
+      if (staleClaims.length > 0) {
+        const staleIndices = staleClaims.map((c) => c.metadata?.storyIndex as number);
+        console.log(`[Epic] Found ${staleClaims.length} stale claims (claimed but not completed): ${staleIndices.join(", ")}`);
+        console.log("[Epic] Archiving stale claims so stories can be re-claimed...");
+        await this.coordination.archiveStoryClaims(staleIndices);
+        console.log("[Epic] Stale claims archived");
+      }
     } catch (error) {
       console.warn("[Epic] Failed to check for existing completions:", error instanceof Error ? error.message : error);
       // Non-fatal - continue without resume
@@ -1853,7 +1868,7 @@ export class EpicCoordinator {
       // Try to claim the story
       const claimResult = await this.coordination.claimStory(story.id, expertPersona);
       if (!claimResult.success) {
-        // Don't log "already claimed" every poll cycle - too noisy
+        console.log(`[Epic] Claim failed for story ${story.storyIndex} (alreadyClaimed=${claimResult.alreadyClaimed}, claimedBy=${claimResult.claimedBy})`);
         continue;
       }
 

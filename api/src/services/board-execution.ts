@@ -1,10 +1,29 @@
 import { AppDataSource } from "../db/connection.js";
 import { KbCard } from "../models/KbCard.js";
 import { KbCardDependency } from "../models/KbCardDependency.js";
+import { WorkerTask } from "../models/WorkerTask.js";
 import { logger } from "../utils/logger.js";
 
 // Statuses that count as "done" for dependency resolution — work is complete and validated
 const DONE_STATUSES = ["completed", "deployed", "pr_approved", "review_approved"];
+
+/**
+ * Check if a task is truly done for cascade purposes.
+ * "completed" with an unmerged PR is NOT done — the code never landed on main,
+ * so dependent tasks would build on stale code.
+ * "completed" without a PR (no-code/analysis tasks) IS done.
+ */
+function isTaskDoneForCascade(task: WorkerTask): boolean {
+  if (!DONE_STATUSES.includes(task.status)) return false;
+  if (task.status === "completed" && task.githubPrUrl) {
+    logger.warn("Cascade blocked: task completed with unmerged PR", {
+      taskId: task.id,
+      prUrl: task.githubPrUrl,
+    });
+    return false;
+  }
+  return true;
+}
 
 export async function processUnblockedCards(
   boardId: string,
@@ -62,7 +81,7 @@ export async function processUnblockedCards(
   const hasActiveCard = cards.some(
     (c) =>
       c.workerTask &&
-      !DONE_STATUSES.includes(c.workerTask.status) &&
+      !isTaskDoneForCascade(c.workerTask) &&
       c.workerTask.status !== "failed" &&
       c.workerTask.status !== "cancelled",
   );
@@ -71,7 +90,7 @@ export async function processUnblockedCards(
     const activeCards = cards.filter(
       (c) =>
         c.workerTask &&
-        !DONE_STATUSES.includes(c.workerTask.status) &&
+        !isTaskDoneForCascade(c.workerTask) &&
         c.workerTask.status !== "failed" &&
         c.workerTask.status !== "cancelled",
     );
@@ -92,8 +111,7 @@ export async function processUnblockedCards(
   for (const card of cards) {
     // Skip cards that already have a worker task
     if (card.workerTask) {
-      const status = card.workerTask.status;
-      if (DONE_STATUSES.includes(status)) {
+      if (isTaskDoneForCascade(card.workerTask)) {
         alreadyComplete++;
       }
       // Any existing task (running, failed, etc.) — skip
@@ -104,13 +122,13 @@ export async function processUnblockedCards(
     const depCardIds = depsMap.get(card.id) || [];
     const allDepsMet = depCardIds.every((depId) => {
       const depCard = cardMap.get(depId);
-      return depCard?.workerTask && DONE_STATUSES.includes(depCard.workerTask.status);
+      return depCard?.workerTask && isTaskDoneForCascade(depCard.workerTask);
     });
 
     if (!allDepsMet) {
       const unmetDeps = depCardIds.filter((depId) => {
         const depCard = cardMap.get(depId);
-        return !depCard?.workerTask || !DONE_STATUSES.includes(depCard.workerTask.status);
+        return !depCard?.workerTask || !isTaskDoneForCascade(depCard.workerTask);
       });
       logger.debug("processUnblockedCards: card still blocked", {
         cardId: card.id,

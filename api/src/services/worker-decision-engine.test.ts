@@ -220,7 +220,7 @@ describe("evaluateQuality", () => {
     });
 
     expect(result.pass).toBe(true);
-    expect(result.reasons).toContain("Bypass requested");
+    expect(result.reasons).toContain("Quality gate bypass authorized");
   });
 
   it("passes when all thresholds are met", () => {

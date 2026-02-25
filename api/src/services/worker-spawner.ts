@@ -482,6 +482,8 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
         maxSecurityHighVulns: org.maxSecurityHighVulns,
         blockOnTypeErrors: org.blockOnTypeErrors ?? false,
         blockOnTestFailures: org.blockOnTestFailures ?? false,
+        autoFixEnabled: org.autoFixEnabled ?? false,
+        autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
       });
 
       // Resilience settings: self-review (label overrides org default)

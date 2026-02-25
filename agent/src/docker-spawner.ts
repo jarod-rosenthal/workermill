@@ -614,13 +614,11 @@ export async function spawnDockerWorker(
     EXECUTION_MODE_SETTING:
       (task.jiraFields?.executionMode as string) || "autonomous",
 
-    // OAuth takes priority: if we have a token, pass it and skip API key.
-    // If OAuth credentials exist but token read failed, fall back to API key
-    // so the worker isn't left with NO credentials.
-    ANTHROPIC_API_KEY: oauthToken
-      ? ""
-      : credentials?.anthropicApiKey || "",
-    CLAUDE_CODE_OAUTH_TOKEN: oauthToken,
+    // Authentication: When the credentials file is mounted, don't pass
+    // CLAUDE_CODE_OAUTH_TOKEN — let Claude CLI read the file directly so it
+    // can refresh expired tokens mid-run. The env var is a static snapshot.
+    ANTHROPIC_API_KEY: credentials?.anthropicApiKey || "",
+    CLAUDE_CODE_OAUTH_TOKEN: claudeConfigDir ? "" : oauthToken,
     WORKER_PROVIDER: task.workerProvider || "anthropic",
     OPENAI_API_KEY: credentials?.openaiApiKey || "",
     GOOGLE_API_KEY: credentials?.googleApiKey || "",

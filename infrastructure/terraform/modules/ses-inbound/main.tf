@@ -392,6 +392,10 @@ resource "aws_lambda_function" "email_processor" {
   }
 
   tags = local.tags
+
+  lifecycle {
+    ignore_changes = [source_code_hash]
+  }
 }
 
 # Allow SNS to invoke Lambda

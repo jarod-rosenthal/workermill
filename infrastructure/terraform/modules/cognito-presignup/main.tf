@@ -172,11 +172,14 @@ data "archive_file" "lambda_layer" {
 resource "aws_lambda_layer_version" "pg8000" {
   layer_name          = "workermill-${var.environment}-pg8000"
   filename            = data.archive_file.lambda_layer.output_path
-  source_code_hash    = data.archive_file.lambda_layer.output_base64sha256
   compatible_runtimes = ["python3.11", "python3.12"]
   description         = "pg8000 PostgreSQL driver for Python"
 
   depends_on = [null_resource.lambda_layer]
+
+  lifecycle {
+    ignore_changes = [source_code_hash]
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -225,7 +228,7 @@ resource "aws_lambda_function" "presignup" {
   # Ignore environment changes - password was manually corrected
   # TODO: Sync db-credentials secret with actual RDS password
   lifecycle {
-    ignore_changes = [environment]
+    ignore_changes = [environment, source_code_hash, layers]
   }
 
   tags = local.tags

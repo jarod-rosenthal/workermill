@@ -204,7 +204,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           createdAt: task.createdAt,
         }));
 
-      const recentCompleted = displayableTasks
+      const recentCompleted = allTasks
         .slice(0, 50)
         .map((task) => ({
           id: task.id,

@@ -39,19 +39,15 @@ import {
   Network,
   MessageSquare,
   Wifi,
-  WifiOff,
-  Sparkles,
   Brain,
   BookOpen,
   TrendingUp,
   AlertTriangle,
   Target,
   FileSearch,
-  Monitor,
   LayoutGrid,
   FileCode,
   ArrowRight,
-  Crown,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../../components/RalphProgress";
 import type { PlanningProgressData } from "../../components/PlanningProgress";
@@ -223,15 +219,11 @@ export default function Dashboard() {
   const [systemEnabled, setSystemEnabled] = useState(true);
   const [systemToggleLoading, setSystemToggleLoading] = useState(false);
 
-  // Auto-workflow toggles (from org settings)
-  const [autoReviewEnabled, setAutoReviewEnabled] = useState(false);
-  const [autoDeployEnabled, setAutoDeployEnabled] = useState(false);
-  const [autoImproveEnabled, setAutoImproveEnabled] = useState(false);
+  // Remote agent state (from org settings, used for task badges)
   const [remoteAgentOnly, setRemoteAgentOnly] = useState(false);
   const [hasRemoteAgent, setHasRemoteAgent] = useState(false);
   const [remoteAgentOnline, setRemoteAgentOnline] = useState(false);
-  const [remoteAgentHostname, setRemoteAgentHostname] = useState<string | null>(null);
-  const [autoToggleLoading, setAutoToggleLoading] = useState<"review" | "deploy" | "improve" | "localMode" | null>(null);
+  const [_remoteAgentHostname, setRemoteAgentHostname] = useState<string | null>(null);
 
   // Action states
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -513,9 +505,6 @@ export default function Dashboard() {
 
       if (response.ok) {
         const settings = await response.json();
-        setAutoReviewEnabled(settings.autoReviewEnabled ?? false);
-        setAutoDeployEnabled(settings.autoDeployEnabled ?? false);
-        setAutoImproveEnabled(settings.autoImproveEnabled ?? false);
         setRemoteAgentOnly(settings.remoteAgentOnly ?? false);
         setHasRemoteAgent(settings.hasRemoteAgent ?? false);
         setRemoteAgentOnline(settings.remoteAgentOnline ?? false);
@@ -525,134 +514,6 @@ export default function Dashboard() {
       console.error("Failed to fetch org settings:", err);
     }
   }, []);
-
-  // Toggle auto-review setting
-  const toggleAutoReview = async () => {
-    setAutoToggleLoading("review");
-    try {
-      const token = localStorage.getItem("accessToken");
-      const newValue = !autoReviewEnabled;
-      const response = await fetch(`${API_BASE}/api/settings`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ autoReviewEnabled: newValue }),
-      });
-
-      if (response.ok) {
-        setAutoReviewEnabled(newValue);
-        setActionSuccess(`PR-Review ${newValue ? "enabled" : "disabled"}`);
-        setTimeout(() => setActionSuccess(null), 3000);
-      } else {
-        const err = await response.json();
-        setActionError(err.error || "Failed to update PR-Review setting");
-        setTimeout(() => setActionError(null), 5000);
-      }
-    } catch (_err) {
-      setActionError("Failed to update PR-Review setting");
-      setTimeout(() => setActionError(null), 5000);
-    } finally {
-      setAutoToggleLoading(null);
-    }
-  };
-
-  // Toggle auto-deploy setting
-  const toggleAutoDeploy = async () => {
-    setAutoToggleLoading("deploy");
-    try {
-      const token = localStorage.getItem("accessToken");
-      const newValue = !autoDeployEnabled;
-      const response = await fetch(`${API_BASE}/api/settings`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ autoDeployEnabled: newValue }),
-      });
-
-      if (response.ok) {
-        setAutoDeployEnabled(newValue);
-        setActionSuccess(`Auto-deploy ${newValue ? "enabled" : "disabled"}`);
-        setTimeout(() => setActionSuccess(null), 3000);
-      } else {
-        const err = await response.json();
-        setActionError(err.error || "Failed to update auto-deploy setting");
-        setTimeout(() => setActionError(null), 5000);
-      }
-    } catch (_err) {
-      setActionError("Failed to update auto-deploy setting");
-      setTimeout(() => setActionError(null), 5000);
-    } finally {
-      setAutoToggleLoading(null);
-    }
-  };
-
-  // Toggle auto-improve setting
-  const toggleAutoImprove = async () => {
-    setAutoToggleLoading("improve");
-    try {
-      const token = localStorage.getItem("accessToken");
-      const newValue = !autoImproveEnabled;
-      const response = await fetch(`${API_BASE}/api/settings`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ autoImproveEnabled: newValue }),
-      });
-
-      if (response.ok) {
-        setAutoImproveEnabled(newValue);
-        setActionSuccess(`Anneal ${newValue ? "enabled" : "disabled"}`);
-        setTimeout(() => setActionSuccess(null), 3000);
-      } else {
-        const err = await response.json();
-        setActionError(err.error || "Failed to update anneal setting");
-        setTimeout(() => setActionError(null), 5000);
-      }
-    } catch (_err) {
-      setActionError("Failed to update anneal setting");
-      setTimeout(() => setActionError(null), 5000);
-    } finally {
-      setAutoToggleLoading(null);
-    }
-  };
-
-  // Toggle local mode (remote agent only) setting
-  const toggleLocalMode = async () => {
-    setAutoToggleLoading("localMode");
-    try {
-      const token = localStorage.getItem("accessToken");
-      const newValue = !remoteAgentOnly;
-      const response = await fetch(`${API_BASE}/api/settings`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ remoteAgentOnly: newValue }),
-      });
-
-      if (response.ok) {
-        setRemoteAgentOnly(newValue);
-        setActionSuccess(`Local Mode ${newValue ? "enabled" : "disabled"}`);
-        setTimeout(() => setActionSuccess(null), 3000);
-      } else {
-        const err = await response.json();
-        setActionError(err.error || "Failed to update Local Mode setting");
-        setTimeout(() => setActionError(null), 5000);
-      }
-    } catch (_err) {
-      setActionError("Failed to update Local Mode setting");
-      setTimeout(() => setActionError(null), 5000);
-    } finally {
-      setAutoToggleLoading(null);
-    }
-  };
 
   // Handle bfcache restoration - reset state when page is restored from cache
   useEffect(() => {
@@ -2498,126 +2359,14 @@ export default function Dashboard() {
                 )}
               </h2>
               <div className="flex items-center gap-2">
-                {/* Local Mode Toggle - auto-detects remote agent, shows connection status */}
-                {(() => {
-                  const isEffectivelyLocal = isProPlan || remoteAgentOnly || (hasRemoteAgent && remoteAgentOnline);
-                  const connectionLost = !isProPlan && hasRemoteAgent && !remoteAgentOnline && !remoteAgentOnly;
-                  const label = isProPlan
-                    ? "Local ON"
-                    : connectionLost
-                      ? "Local (Disconnected)"
-                      : isEffectivelyLocal
-                        ? "Local ON"
-                        : "Local OFF";
-                  const colorClass = connectionLost
-                    ? "bg-red-500/20 text-red-400 border border-red-500/50"
-                    : isEffectivelyLocal
-                      ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/50"
-                      : "bg-muted/50 text-muted-foreground border border-border hover:border-cyan-500/30";
-                  const title = isProPlan
-                    ? "Local mode — tasks run on your remote agent"
-                    : connectionLost
-                      ? `Remote agent ${remoteAgentHostname || "unknown"} is offline — last heartbeat stale`
-                      : isEffectivelyLocal
-                        ? `Local mode: tasks run on remote agent${remoteAgentHostname ? ` (${remoteAgentHostname})` : ""}`
-                        : "No remote agent connected — tasks run on cloud ECS";
-
-                  return (
-                    <button
-                      onClick={isProPlan ? undefined : toggleLocalMode}
-                      disabled={isProPlan || autoToggleLoading === "localMode"}
-                      className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${colorClass} ${isProPlan || autoToggleLoading === "localMode" ? "opacity-50 cursor-not-allowed" : ""}`}
-                      title={title}
-                    >
-                      {autoToggleLoading === "localMode" ? (
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      ) : connectionLost ? (
-                        <WifiOff className="w-3.5 h-3.5" />
-                      ) : (
-                        <Monitor className="w-3.5 h-3.5" />
-                      )}
-                      {label}
-                    </button>
-                  );
-                })()}
-
-                {/* PR-Review Toggle */}
-                <button
-                  onClick={isProPlan ? undefined : toggleAutoReview}
-                  disabled={isProPlan || autoToggleLoading === "review"}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                    isProPlan || autoReviewEnabled
-                      ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/50"
-                      : "bg-muted/50 text-muted-foreground border border-border hover:border-indigo-500/30"
-                  } ${isProPlan || autoToggleLoading === "review" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  title={isProPlan ? "PR-Review is always enabled on Pro plan" : autoReviewEnabled ? "AI PR review enabled for all tasks" : "Click to enable AI PR review"}
-                >
-                  {autoToggleLoading === "review" ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Eye className="w-3.5 h-3.5" />
-                  )}
-                  PR-Review {isProPlan ? "ON" : autoReviewEnabled ? "ON" : "OFF"}
-                </button>
-
-                {/* Auto-Deploy Toggle */}
-                <button
-                  onClick={isProPlan ? undefined : toggleAutoDeploy}
-                  disabled={isProPlan || autoToggleLoading === "deploy"}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                    isProPlan
-                      ? "bg-muted/50 text-muted-foreground border border-border cursor-not-allowed"
-                      : autoDeployEnabled
-                        ? "bg-green-500/20 text-green-400 border border-green-500/50"
-                        : "bg-muted/50 text-muted-foreground border border-border hover:border-green-500/30"
-                  } ${autoToggleLoading === "deploy" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  title={isProPlan ? "Auto-deploy requires Max plan" : autoDeployEnabled ? "Auto-deploy enabled for all tasks" : "Click to enable auto-deploy"}
-                >
-                  {autoToggleLoading === "deploy" ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Rocket className="w-3.5 h-3.5" />
-                  )}
-                  Deploy {isProPlan ? "OFF" : autoDeployEnabled ? "ON" : "OFF"}
-                  {isProPlan && <Crown className="w-3 h-3 text-amber-400" />}
-                </button>
-
-                {/* Anneal Toggle */}
-                <button
-                  onClick={isProPlan ? undefined : toggleAutoImprove}
-                  disabled={isProPlan || autoToggleLoading === "improve"}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                    isProPlan
-                      ? "bg-muted/50 text-muted-foreground border border-border cursor-not-allowed"
-                      : autoImproveEnabled
-                        ? "bg-amber-500/20 text-amber-400 border border-amber-500/50"
-                        : "bg-muted/50 text-muted-foreground border border-border hover:border-amber-500/30"
-                  } ${autoToggleLoading === "improve" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  title={isProPlan ? "Anneal requires Max plan" : autoImproveEnabled ? "Anneal enabled - iteratively refines and improves WorkerMill" : "Click to enable annealing"}
-                >
-                  {autoToggleLoading === "improve" ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Sparkles className="w-3.5 h-3.5" />
-                  )}
-                  Anneal {isProPlan ? "OFF" : autoImproveEnabled ? "ON" : "OFF"}
-                  {isProPlan && <Crown className="w-3 h-3 text-amber-400" />}
-                </button>
-
                 {/* Search Button */}
                 <button
-                  onClick={isProPlan ? undefined : () => setIsLogSearchOpen(true)}
-                  disabled={isProPlan}
-                  className={`flex items-center gap-2 px-3 py-1.5 bg-background border border-border/50 rounded-lg text-sm transition-colors ${
-                    isProPlan
-                      ? "text-muted-foreground/50 cursor-not-allowed"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                  }`}
-                  title={isProPlan ? "Search requires Max plan" : "Search all task logs"}
+                  onClick={() => setIsLogSearchOpen(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-background border border-border/50 rounded-lg text-sm transition-colors text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  title="Search all task logs"
                 >
                   <Search className="w-4 h-4" />
                   <span>Search tasks and logs...</span>
-                  {isProPlan && <Crown className="w-3 h-3 text-amber-400" />}
                 </button>
               </div>
             </div>

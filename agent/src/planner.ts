@@ -113,6 +113,28 @@ export interface PlanningTask {
 /** Max Planner-Critic iterations before giving up */
 const MAX_ITERATIONS = 3;
 
+/** Max retries for transient CLI/API errors (5xx, timeouts) within a single planning attempt */
+const MAX_CLI_RETRIES = 2;
+
+/** Check if an error message indicates a transient/retryable failure */
+function isTransientError(errMsg: string): boolean {
+  const transientPatterns = [
+    /5\d{2}/,                  // Any 5xx status code
+    /internal server error/i,
+    /api_error/i,
+    /timeout/i,
+    /ETIMEDOUT/i,
+    /ECONNRESET/i,
+    /ECONNREFUSED/i,
+    /socket hang up/i,
+    /overloaded/i,
+    /rate.?limit/i,
+    /too many requests/i,
+    /529/,                     // Anthropic overloaded
+  ];
+  return transientPatterns.some((p) => p.test(errMsg));
+}
+
 /** Timestamp prefix */
 function ts(): string {
   return chalk.dim(new Date().toLocaleTimeString());
@@ -819,55 +841,80 @@ export async function planTask(
     const iterationCwd = iteration === 1 ? (repoPath || undefined) : undefined;
 
     let rawOutput: string;
-    try {
-      if (isAnthropicPlanning) {
-        rawOutput = await runClaudeCli(
-          claudePath,
-          cliModel,
-          currentPrompt,
-          cleanEnv,
-          task.id,
-          startTime,
-          iterationCwd,
-        );
-      } else {
-        if (!providerApiKey) {
-          throw new Error(`No API key available for provider "${provider}". Configure it in Settings > Integrations.`);
-        }
-        const genStart = Math.round((Date.now() - startTime) / 1000);
-        await postProgress(task.id, "generating_plan", genStart, "Generating plan via AI SDK...", 0, 0);
-        // Use AI SDK with tool access to cloned repo (only on first attempt)
-        rawOutput = await generateTextWithTools({
-          provider,
-          model: cliModel,
-          apiKey: providerApiKey,
-          prompt: currentPrompt,
-          workingDir: iterationCwd,
-          enableTools: !!iterationCwd,
-          maxSteps: 10,
-        });
-        // Post "validating" phase so the dashboard progress bar transitions correctly
-        const genEnd = Math.round((Date.now() - startTime) / 1000);
-        await postProgress(task.id, "validating", genEnd, "Validating plan...", rawOutput.length, 0);
-      }
-    } catch (error: unknown) {
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-      const errMsg = error instanceof Error ? error.message : String(error);
-      console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Failed after ${elapsed}s: ${errMsg.substring(0, 100)}`);
-      await postLog(
-        task.id,
-        `${PREFIX} Planning failed after ${formatElapsed(elapsed)}: ${errMsg.substring(0, 200)}`,
-        "error",
-        "error",
-      );
-      // Report failure to server so the task doesn't stay stuck in "planning"
+    let cliSuccess = false;
+    for (let cliAttempt = 1; cliAttempt <= MAX_CLI_RETRIES + 1; cliAttempt++) {
       try {
-        await api.post("/api/agent/plan-failed", {
-          taskId: task.id,
-          agentId: config.agentId,
-          reason: `Planning CLI/API error after ${formatElapsed(elapsed)}: ${errMsg.substring(0, 300)}`,
-        });
-      } catch { /* best effort */ }
+        if (isAnthropicPlanning) {
+          rawOutput = await runClaudeCli(
+            claudePath,
+            cliModel,
+            currentPrompt,
+            cleanEnv,
+            task.id,
+            startTime,
+            iterationCwd,
+          );
+        } else {
+          if (!providerApiKey) {
+            throw new Error(`No API key available for provider "${provider}". Configure it in Settings > Integrations.`);
+          }
+          const genStart = Math.round((Date.now() - startTime) / 1000);
+          await postProgress(task.id, "generating_plan", genStart, "Generating plan via AI SDK...", 0, 0);
+          // Use AI SDK with tool access to cloned repo (only on first attempt)
+          rawOutput = await generateTextWithTools({
+            provider,
+            model: cliModel,
+            apiKey: providerApiKey,
+            prompt: currentPrompt,
+            workingDir: iterationCwd,
+            enableTools: !!iterationCwd,
+            maxSteps: 10,
+          });
+          // Post "validating" phase so the dashboard progress bar transitions correctly
+          const genEnd = Math.round((Date.now() - startTime) / 1000);
+          await postProgress(task.id, "validating", genEnd, "Validating plan...", rawOutput.length, 0);
+        }
+        cliSuccess = true;
+        break; // Success — exit retry loop
+      } catch (error: unknown) {
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        const errMsg = error instanceof Error ? error.message : String(error);
+
+        // Retry on transient errors (5xx, timeouts, connection resets)
+        if (isTransientError(errMsg) && cliAttempt <= MAX_CLI_RETRIES) {
+          const backoffSec = cliAttempt * 10; // 10s, 20s
+          console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Transient error (attempt ${cliAttempt}/${MAX_CLI_RETRIES + 1}), retrying in ${backoffSec}s: ${errMsg.substring(0, 100)}`);
+          await postLog(
+            task.id,
+            `${PREFIX} Transient API error (attempt ${cliAttempt}/${MAX_CLI_RETRIES + 1}), retrying in ${backoffSec}s...`,
+            "output",
+            "warning",
+          );
+          await new Promise((r) => setTimeout(r, backoffSec * 1000));
+          continue;
+        }
+
+        // Non-transient error or final retry exhausted — fail
+        console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Failed after ${elapsed}s: ${errMsg.substring(0, 100)}`);
+        await postLog(
+          task.id,
+          `${PREFIX} Planning failed after ${formatElapsed(elapsed)}: ${errMsg.substring(0, 200)}`,
+          "error",
+          "error",
+        );
+        // Report failure to server so the task doesn't stay stuck in "planning"
+        try {
+          await api.post("/api/agent/plan-failed", {
+            taskId: task.id,
+            agentId: config.agentId,
+            reason: `Planning CLI/API error after ${formatElapsed(elapsed)}: ${errMsg.substring(0, 300)}`,
+          });
+        } catch { /* best effort */ }
+        return false;
+      }
+    }
+    if (!cliSuccess) {
+      // Should not reach here, but safety net
       return false;
     }
 

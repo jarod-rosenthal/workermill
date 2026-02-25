@@ -25,14 +25,15 @@ function getRedisClient(): Redis | null {
   if (!config.redisUrl) return null;
 
   try {
+    // RedisStore runs a Lua script in its constructor, so the connection must
+    // be ready immediately. Use default (eager) connect with offline queue
+    // enabled so commands buffer until the handshake completes.
     redisClient = new Redis(config.redisUrl, {
-      maxRetriesPerRequest: 1,
-      enableOfflineQueue: false,
-      lazyConnect: true,
+      maxRetriesPerRequest: 2,
     });
 
-    redisClient.connect().catch((err) => {
-      logger.warn("Rate limiter Redis connection failed — falling back to in-memory", {
+    redisClient.on("error", (err) => {
+      logger.warn("Rate limiter Redis error", {
         error: err instanceof Error ? err.message : String(err),
       });
     });

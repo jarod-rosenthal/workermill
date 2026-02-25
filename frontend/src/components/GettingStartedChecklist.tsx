@@ -120,19 +120,23 @@ export function GettingStartedChecklist() {
 
   if (dismissed || loading || !status) return null;
 
+  // Pro users don't need AI provider keys (they use Claude Max, not cloud execution)
+  const showAiProviderStep = !isProPlan;
+
   // Count completed steps
   const steps = [
     status.scmConnected,
     status.issueTrackerConnected,
-    status.aiProviderConnected,
+    ...(showAiProviderStep ? [status.aiProviderConnected] : []),
     status.hasCreatedTask,
   ];
+  const totalSteps = steps.length;
   const completedCount = steps.filter(Boolean).length;
 
-  // Hide when all 4 steps are completed
-  if (completedCount >= 4) return null;
+  // Hide when all steps are completed
+  if (completedCount >= totalSteps) return null;
 
-  const progressPercent = (completedCount / 4) * 100;
+  const progressPercent = (completedCount / totalSteps) * 100;
 
   return (
     <div className="border border-border/50 rounded-xl bg-card p-5 mb-6">
@@ -146,7 +150,7 @@ export function GettingStartedChecklist() {
               Getting Started
             </h3>
             <p className="text-xs text-muted-foreground">
-              {completedCount} of 4 steps completed
+              {completedCount} of {totalSteps} steps completed
             </p>
           </div>
         </div>
@@ -194,22 +198,20 @@ export function GettingStartedChecklist() {
           actionLabel="Connect"
           optional
         />
-        <ChecklistStep
-          completed={status.aiProviderConnected}
-          stepNumber={3}
-          title="Set up your AI provider API key"
-          description={
-            isProPlan
-              ? "Anthropic included via Claude Max"
-              : "Anthropic, OpenAI, Google, or others"
-          }
-          icon={Bot}
-          onClick={() => navigate("/settings?tab=integrations")}
-          actionLabel="Configure"
-        />
+        {showAiProviderStep && (
+          <ChecklistStep
+            completed={status.aiProviderConnected}
+            stepNumber={3}
+            title="Set up your AI provider API key"
+            description="Anthropic, OpenAI, Google, or others"
+            icon={Bot}
+            onClick={() => navigate("/settings?tab=ai-workers")}
+            actionLabel="Configure"
+          />
+        )}
         <ChecklistStep
           completed={status.hasCreatedTask}
-          stepNumber={4}
+          stepNumber={showAiProviderStep ? 4 : 3}
           title="Create your first task"
           description="Run a task from the dashboard or a board"
           icon={Rocket}

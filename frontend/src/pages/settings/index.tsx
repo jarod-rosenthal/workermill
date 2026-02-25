@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   CheckCircle,
@@ -80,7 +80,23 @@ export default function Settings() {
   const tokens = useAuthStore((state) => state.tokens);
   const organization = useAuthStore((state) => state.organization);
   const currentUser = useAuthStore((state) => state.user);
-  const [activeCategory, setActiveCategory] = useState<SettingsCategory>("general");
+  const [searchParams] = useSearchParams();
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>(() => {
+    const tab = searchParams.get("tab");
+    const validTabs = NAV_ITEMS.map((n) => n.id);
+    return tab && validTabs.includes(tab as SettingsCategory)
+      ? (tab as SettingsCategory)
+      : "general";
+  });
+
+  // Sync activeCategory when URL ?tab= changes (e.g. navigating from checklist)
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    const validTabs = NAV_ITEMS.map((n) => n.id);
+    if (tab && validTabs.includes(tab as SettingsCategory)) {
+      setActiveCategory(tab as SettingsCategory);
+    }
+  }, [searchParams]);
 
   const externalLinks: ExternalLinkItem[] = organization?.plan === 'enterprise'
     ? [{ label: "Compliance Center", icon: <Shield className="w-5 h-5" />, href: "/compliance" }]

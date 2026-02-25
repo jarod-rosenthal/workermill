@@ -278,7 +278,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         ecsTaskId: task.ecsTaskId,
         retryCount: task.retryCount || 0,
         revisionCount: task.revisionCount || 0,
-        maxReviewRevisions: org.maxReviewRevisions ?? 3,
+        maxReviewRevisions: org.maxReviewRevisions,
         errorMessage: task.errorMessage || null,
         lastHeartbeatAt: task.lastHeartbeatAt?.toISOString() || null,
         // Checkpoint info

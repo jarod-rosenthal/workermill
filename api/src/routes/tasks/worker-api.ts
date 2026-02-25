@@ -597,7 +597,7 @@ router.post("/:id/manager-complete", authenticateApiKey, async (req: Request, re
       case "revision_needed": {
         // Check if we can still revise (use org's maxReviewRevisions setting)
         task.revisionCount = (task.revisionCount || 0) + 1;
-        const maxRevisions = org.maxReviewRevisions ?? 3;
+        const maxRevisions = org.maxReviewRevisions;
         if (task.canRevise(maxRevisions)) {
           // Re-queue for worker to address feedback
           newStatus = "queued";

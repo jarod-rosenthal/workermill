@@ -197,7 +197,7 @@ export class ECSTaskRunner {
       // Multi-provider support
       { name: "WORKER_PROVIDER", value: providerId },
       // Manager provider and model for Epic/PRD workflows (separate from worker model)
-      { name: "MANAGER_PROVIDER", value: credentials.managerProvider || "anthropic" },
+      { name: "MANAGER_PROVIDER", value: credentials.managerProvider || "" },
       { name: "MANAGER_MODEL", value: credentials.managerModelId || "" },
       // PRD Orchestration - Parent task ID for multi-story coordination
       { name: "PARENT_TASK_ID", value: task.parentTaskId || task.id },
@@ -659,7 +659,7 @@ export class ECSTaskRunner {
     action: "review_pr" | "analyze_logs",
   ): Promise<RunTaskResult> {
     // Use org's manager settings — no hardcoded model fallbacks
-    const managerProvider = credentials.managerProvider || "openai";
+    const managerProvider = credentials.managerProvider || "";
     const managerModel = credentials.managerModelId || "";
 
     const environment = [

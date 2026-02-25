@@ -103,10 +103,10 @@ router.get("/", async (req: Request, res: Response) => {
       dryRunVisibilityMinutes: org.dryRunVisibilityMinutes,
 
       // Tech Lead Settings
-      managerProvider: org.managerProvider || "anthropic",
+      managerProvider: org.managerProvider,
       managerModelId: org.managerModelId || "",
-      maxReviewRevisions: org.maxReviewRevisions ?? 3,
-      maxPerStoryRevisions: org.maxPerStoryRevisions ?? 2,
+      maxReviewRevisions: org.maxReviewRevisions,
+      maxPerStoryRevisions: org.maxPerStoryRevisions,
 
       // Planning Agent Settings (Project Manager)
       planningAgentProvider: org.planningAgentProvider || "anthropic",
@@ -170,11 +170,11 @@ router.get("/", async (req: Request, res: Response) => {
       managerEnabled: org.managerEnabled,
 
       // Resilience Settings
-      blockerMaxAutoRetries: org.blockerMaxAutoRetries ?? 3,
-      blockerAutoRetryEnabled: org.blockerAutoRetryEnabled ?? true,
-      pushAfterCommit: org.pushAfterCommit ?? true,
-      gracefulShutdownEnabled: org.gracefulShutdownEnabled ?? true,
-      selfReviewEnabled: org.selfReviewEnabled ?? false,
+      blockerMaxAutoRetries: org.blockerMaxAutoRetries,
+      blockerAutoRetryEnabled: org.blockerAutoRetryEnabled,
+      pushAfterCommit: org.pushAfterCommit,
+      gracefulShutdownEnabled: org.gracefulShutdownEnabled,
+      selfReviewEnabled: org.selfReviewEnabled,
 
       // Repository List
       repositories: org.repositories || [],
@@ -1252,11 +1252,11 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
         autoFixStats: org.autoFixStats || {},
         // Resilience Settings
-        blockerMaxAutoRetries: org.blockerMaxAutoRetries ?? 3,
-        blockerAutoRetryEnabled: org.blockerAutoRetryEnabled ?? true,
-        pushAfterCommit: org.pushAfterCommit ?? true,
-        gracefulShutdownEnabled: org.gracefulShutdownEnabled ?? true,
-        selfReviewEnabled: org.selfReviewEnabled ?? false,
+        blockerMaxAutoRetries: org.blockerMaxAutoRetries,
+        blockerAutoRetryEnabled: org.blockerAutoRetryEnabled,
+        pushAfterCommit: org.pushAfterCommit,
+        gracefulShutdownEnabled: org.gracefulShutdownEnabled,
+        selfReviewEnabled: org.selfReviewEnabled,
         // Repository List
         repositories: org.repositories || [],
         // Codebase RAG Settings

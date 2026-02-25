@@ -295,7 +295,7 @@ export async function spawnWorker(
     CUSTOMER_AWS_REGION: credentials?.customerAwsRegion || "",
 
     // Manager settings
-    MANAGER_PROVIDER: credentials?.managerProvider || "anthropic",
+    MANAGER_PROVIDER: credentials?.managerProvider || "",
     MANAGER_MODEL: credentials?.managerModelId || "",
     BITBUCKET_EMAIL: credentials?.bitbucketEmail || "",
 
@@ -305,8 +305,8 @@ export async function spawnWorker(
     IMPROVEMENT_ENABLED: task.improvementEnabled ? "true" : "false",
     QUALITY_GATE_BYPASS: task.qualityGateBypass ? "true" : "false",
     STANDARD_SDK_MODE: task.standardSdkMode ? "true" : "false",
-    MAX_REVIEW_REVISIONS: String(orgConfig.maxReviewRevisions ?? 3),
-    MAX_PER_STORY_REVISIONS: String(orgConfig.maxPerStoryRevisions ?? 2),
+    MAX_REVIEW_REVISIONS: String(orgConfig.maxReviewRevisions),
+    MAX_PER_STORY_REVISIONS: String(orgConfig.maxPerStoryRevisions),
     CODEBASE_INDEXING_ENABLED: orgConfig.codebaseIndexingEnabled === true ? "true" : "false",
 
     // Existing PR info
@@ -348,14 +348,14 @@ export async function spawnWorker(
     VLLM_BASE_URL: credentials?.vllmBaseUrl || "",
 
     // Resilience settings
-    BLOCKER_MAX_AUTO_RETRIES: String(orgConfig.blockerMaxAutoRetries ?? 3),
+    BLOCKER_MAX_AUTO_RETRIES: String(orgConfig.blockerMaxAutoRetries),
     BLOCKER_AUTO_RETRY_ENABLED: orgConfig.blockerAutoRetryEnabled !== false ? "true" : "false",
     PUSH_AFTER_COMMIT: orgConfig.pushAfterCommit !== false ? "true" : "false",
     GRACEFUL_SHUTDOWN_ENABLED: orgConfig.gracefulShutdownEnabled !== false ? "true" : "false",
     MAX_PARALLEL_EXPERTS: String(orgConfig.maxParallelExperts),
     ORG_GUIDELINES: String(orgConfig.aiGuidelines || ""),
     REVIEW_ENABLED: task.skipManagerReview === false ? "true" : "false",
-    SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (orgConfig.selfReviewEnabled !== false) ? "true" : "false",
+    SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (orgConfig.selfReviewEnabled === true) ? "true" : "false",
 
     // Persistent workspace for batch board executions
     ...(task.boardExecutionId ? { PERSISTENT_WORKSPACE: workDir } : {}),
@@ -678,7 +678,7 @@ export async function spawnManagerWorker(
     BITBUCKET_USERNAME: credentials?.bitbucketUsername || "x-token-auth",
     GITLAB_TOKEN: gitlabToken,
 
-    MANAGER_PROVIDER: credentials?.managerProvider || "anthropic",
+    MANAGER_PROVIDER: credentials?.managerProvider || "",
     MANAGER_MODEL: credentials?.managerModelId || "",
 
     ANTHROPIC_API_KEY: hasOAuthCredentials() ? "" : (credentials?.anthropicApiKey || ""),

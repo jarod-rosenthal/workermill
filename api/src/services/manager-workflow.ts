@@ -344,7 +344,7 @@ export async function monitorManagerTasks(): Promise<void> {
             task.getCredentialsOrgId(),
           );
           const maxRevisions =
-            revisionCredentials?.maxReviewRevisions ?? 3;
+            revisionCredentials?.maxReviewRevisions ?? 0;
           if (task.canRevise(maxRevisions)) {
             newStatus = "queued";
             task.taskNotes = `REVISION_RUN: Manager requested changes (attempt ${task.revisionCount}/${maxRevisions}). Feedback: ${detectedFeedback || "See logs"}`;
@@ -508,7 +508,7 @@ export async function spawnManagerReview(task: WorkerTask): Promise<void> {
       .update(WorkerTask)
       .set({
         status: "manager_review" as WorkerTask["status"],
-        managerProvider: managerCredentials.managerProvider || "openai",
+        managerProvider: managerCredentials.managerProvider || "",
         managerModel: managerCredentials.managerModelId || "",
       } as Record<string, unknown>)
       .where("id = :id", { id: task.id })

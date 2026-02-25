@@ -1035,7 +1035,13 @@ export function activate(context: vscode.ExtensionContext): void {
         } else {
           const error = readAgentStartupError();
           if (error) {
-            vscode.window.showErrorMessage(`WorkerMill agent failed to start: ${error}`);
+            if (/pulling|downloading|starting ollama/i.test(error)) {
+              vscode.window.showInformationMessage(
+                "WorkerMill agent is starting up (this may take a moment).",
+              );
+            } else {
+              vscode.window.showErrorMessage(`WorkerMill agent failed to start: ${error}`);
+            }
           } else {
             vscode.window.showWarningMessage(
               "Agent didn't start. Check ~/.workermill/agent.log for details.",
@@ -1071,7 +1077,14 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!port) {
         const error = readAgentStartupError();
         if (error) {
-          vscode.window.showErrorMessage(`WorkerMill: ${error}`);
+          // Agent still starting up (Docker image pull, Ollama, etc.) — not a real error
+          if (/pulling|downloading|starting ollama/i.test(error)) {
+            vscode.window.showInformationMessage(
+              "WorkerMill agent is starting up (this may take a moment).",
+            );
+          } else {
+            vscode.window.showErrorMessage(`WorkerMill: ${error}`);
+          }
         }
       }
     });
@@ -1102,31 +1115,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.executeCommand("setContext", "workermill.agentConnected", false);
   });
 
-  client.on("ragAutoOffer", (gpu: { available: boolean; vendor: string; model: string | null }) => {
-    const gpuLabel = gpu.vendor + (gpu.model ? " " + gpu.model : "");
-    vscode.window
-      .showInformationMessage(
-        `GPU detected (${gpuLabel}). Enable local codebase indexing for faster, private RAG?`,
-        "Enable",
-        "Not Now",
-      )
-      .then((action) => {
-        if (action === "Enable") {
-          const configPath = path.join(os.homedir(), ".workermill", "config.json");
-          let config: Record<string, unknown> = {};
-          try {
-            config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-          } catch {
-            /* no config */
-          }
-          config.localRag = true;
-          fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-          vscode.window.showInformationMessage(
-            "Local RAG enabled. Restart the agent for changes to take effect.",
-          );
-        }
-      });
-  });
+  // RAG auto-offer disabled — feature not ready yet. Re-enable once Ollama
+  // setup + indexing pipeline is fully tested end-to-end.
+  // client.on("ragAutoOffer", (gpu) => { ... });
 
   client.on("reconnectGaveUp", () => {
     log("Reconnect attempts exhausted");

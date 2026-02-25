@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import axios from "axios";
+import apiClient from "../lib/api-client";
 
 interface PersonaMeta {
   slug: string;
@@ -39,11 +39,11 @@ export function usePersonas(): Record<string, PersonaMeta> {
   useEffect(() => {
     if (cachedPersonas) return;
 
-    axios
-      .get("/api/personas")
+    apiClient
+      .get("/personas")
       .then((res) => {
         const map: Record<string, PersonaMeta> = { ...FALLBACK_PERSONAS };
-        for (const p of res.data) {
+        for (const p of res.data.personas) {
           map[p.slug] = {
             slug: p.slug,
             name: p.name,

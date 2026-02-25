@@ -22,7 +22,8 @@
 
 import { execSync } from "child_process";
 import * as path from "path";
-import * as fs from "fs";
+import { detectLanguageWithTestRunner, getProfile } from "../../lib/dist/language-profile.js";
+import type { LanguageProfile } from "../../lib/dist/language-profile.js";
 
 interface Output {
   success: boolean;
@@ -53,56 +54,33 @@ function exec(cmd: string, cwd?: string): { stdout: string; stderr: string; exit
   }
 }
 
-function detectTestRunner(projectPath: string): string {
-  const packageJsonPath = path.join(projectPath, "package.json");
-
-  if (fs.existsSync(packageJsonPath)) {
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
-    const deps = {
-      ...packageJson.dependencies,
-      ...packageJson.devDependencies,
-    };
-
-    if (deps.vitest) return "vitest";
-    if (deps.jest) return "jest";
-    if (deps.mocha) return "mocha";
-  }
-
-  // Check for Python
-  if (fs.existsSync(path.join(projectPath, "pytest.ini")) ||
-      fs.existsSync(path.join(projectPath, "pyproject.toml"))) {
-    return "pytest";
-  }
-
-  return "jest"; // Default
-}
-
-function parseJestOutput(stdout: string): Partial<Output> {
+function parseTestOutputForDetails(
+  profile: LanguageProfile,
+  stdout: string,
+  stderr: string,
+): Partial<Output> {
+  const parsed = profile.parseTests(stdout, stderr);
   const result: Partial<Output> = {
-    testsRun: 0,
-    testsPassed: 0,
-    testsFailed: 0,
+    testsPassed: parsed.passed,
+    testsFailed: parsed.failed,
+    testsRun: parsed.passed + parsed.failed + parsed.skipped,
     failedTests: [],
   };
 
-  // Parse Jest summary line: "Tests: X passed, Y failed, Z total"
-  const testsMatch = stdout.match(/Tests:\s+(\d+)\s+passed(?:,\s+(\d+)\s+failed)?(?:,\s+(\d+)\s+total)?/);
-  if (testsMatch) {
-    result.testsPassed = parseInt(testsMatch[1]) || 0;
-    result.testsFailed = parseInt(testsMatch[2]) || 0;
-    result.testsRun = parseInt(testsMatch[3]) || result.testsPassed + result.testsFailed;
-  }
+  // Extract coverage from Jest/Vitest output (TS only)
+  if (profile.id === "typescript") {
+    const coverageMatch = stdout.match(
+      /All files\s+\|\s+[\d.]+\s+\|\s+[\d.]+\s+\|\s+[\d.]+\s+\|\s+([\d.]+)/,
+    );
+    if (coverageMatch) {
+      result.coveragePercent = parseFloat(coverageMatch[1]);
+    }
 
-  // Parse coverage
-  const coverageMatch = stdout.match(/All files\s+\|\s+[\d.]+\s+\|\s+[\d.]+\s+\|\s+[\d.]+\s+\|\s+([\d.]+)/);
-  if (coverageMatch) {
-    result.coveragePercent = parseFloat(coverageMatch[1]);
-  }
-
-  // Extract failed test names
-  const failedMatches = stdout.matchAll(/FAIL\s+(.+\.test\.[jt]sx?)/g);
-  for (const match of failedMatches) {
-    result.failedTests?.push(match[1]);
+    // Extract failed test names
+    const failedMatches = stdout.matchAll(/FAIL\s+(.+\.test\.[jt]sx?)/g);
+    for (const match of failedMatches) {
+      result.failedTests?.push(match[1]);
+    }
   }
 
   // Parse time
@@ -110,44 +88,6 @@ function parseJestOutput(stdout: string): Partial<Output> {
   if (timeMatch) {
     result.duration = parseFloat(timeMatch[1]);
   }
-
-  return result;
-}
-
-function parseVitestOutput(stdout: string): Partial<Output> {
-  const result: Partial<Output> = {
-    testsRun: 0,
-    testsPassed: 0,
-    testsFailed: 0,
-    failedTests: [],
-  };
-
-  // Vitest format: "Tests  X passed | Y failed (Z)"
-  const testsMatch = stdout.match(/Tests\s+(\d+)\s+passed(?:\s+\|\s+(\d+)\s+failed)?/);
-  if (testsMatch) {
-    result.testsPassed = parseInt(testsMatch[1]) || 0;
-    result.testsFailed = parseInt(testsMatch[2]) || 0;
-    result.testsRun = result.testsPassed + result.testsFailed;
-  }
-
-  return result;
-}
-
-function parsePytestOutput(stdout: string): Partial<Output> {
-  const result: Partial<Output> = {
-    testsRun: 0,
-    testsPassed: 0,
-    testsFailed: 0,
-    failedTests: [],
-  };
-
-  // Pytest format: "X passed, Y failed in Z.XXs"
-  const passedMatch = stdout.match(/(\d+)\s+passed/);
-  const failedMatch = stdout.match(/(\d+)\s+failed/);
-
-  if (passedMatch) result.testsPassed = parseInt(passedMatch[1]);
-  if (failedMatch) result.testsFailed = parseInt(failedMatch[1]);
-  result.testsRun = (result.testsPassed ?? 0) + (result.testsFailed ?? 0);
 
   return result;
 }
@@ -167,61 +107,59 @@ async function main(): Promise<void> {
     const pattern = process.env.PATTERN || "";
     const project = process.env.PROJECT || "";
     const coverage = process.env.COVERAGE === "true";
-    let testRunner = process.env.TEST_RUNNER || "";
+    const testRunnerEnv = process.env.TEST_RUNNER || "";
 
     const projectPath = project ? path.join(repoPath, project) : repoPath;
 
-    if (!testRunner) {
-      testRunner = detectTestRunner(projectPath);
+    // Use explicit TEST_RUNNER env if set, otherwise auto-detect
+    // Map runner names (jest, vitest, pytest, mocha) to language profile IDs
+    const runnerToProfileId: Record<string, string> = {
+      jest: "typescript",
+      vitest: "typescript",
+      mocha: "typescript",
+      pytest: "python",
+    };
+    const profile = testRunnerEnv
+      ? getProfile(runnerToProfileId[testRunnerEnv.toLowerCase()] || testRunnerEnv)
+      : detectLanguageWithTestRunner(projectPath);
+
+    console.error(`[run_tests] Using ${profile.displayName} profile in ${projectPath}`);
+
+    // Build command with pattern/coverage options
+    let cmd = profile.test;
+    if (pattern) {
+      // Append pattern flag based on language
+      switch (profile.id) {
+        case "typescript":
+          // Detect if vitest or jest from the command
+          if (cmd.includes("vitest")) cmd = `npx vitest run --filter "${pattern}"`;
+          else if (cmd.includes("mocha")) cmd = `npx mocha --grep "${pattern}"`;
+          else cmd = `npx jest --testPathPattern="${pattern}" --forceExit --detectOpenHandles`;
+          break;
+        case "python":
+          cmd = `python -m pytest -v -k "${pattern}"`;
+          break;
+        case "rust":
+          cmd = `cargo test ${pattern} 2>&1`;
+          break;
+        case "go":
+          cmd = `go test ./... -v -count=1 -run "${pattern}" 2>&1`;
+          break;
+        case "ruby":
+          cmd = `bundle exec rspec --tag "${pattern}" 2>&1`;
+          break;
+      }
     }
-
-    console.error(`[run_tests] Using ${testRunner} in ${projectPath}`);
-
-    let cmd: string;
-
-    switch (testRunner.toLowerCase()) {
-      case "vitest":
-        cmd = "npx vitest run";
-        if (pattern) cmd += ` --filter "${pattern}"`;
-        if (coverage) cmd += " --coverage";
-        break;
-
-      case "mocha":
-        cmd = "npx mocha";
-        if (pattern) cmd += ` --grep "${pattern}"`;
-        break;
-
-      case "pytest":
-        cmd = "python -m pytest -v";
-        if (pattern) cmd += ` -k "${pattern}"`;
-        if (coverage) cmd += " --cov";
-        break;
-
-      case "jest":
-      default:
-        cmd = "npx jest";
-        if (pattern) cmd += ` --testPathPattern="${pattern}"`;
-        if (coverage) cmd += " --coverage";
-        cmd += " --forceExit --detectOpenHandles";
-        break;
+    if (coverage && profile.id === "typescript") {
+      if (cmd.includes("vitest")) cmd += " --coverage";
+      else if (cmd.includes("jest")) cmd += " --coverage";
+    }
+    if (coverage && profile.id === "python") {
+      cmd += " --cov";
     }
 
     const result = exec(cmd, projectPath);
-
-    // Parse output based on runner
-    let parsed: Partial<Output>;
-    switch (testRunner.toLowerCase()) {
-      case "vitest":
-        parsed = parseVitestOutput(result.stdout);
-        break;
-      case "pytest":
-        parsed = parsePytestOutput(result.stdout);
-        break;
-      case "jest":
-      default:
-        parsed = parseJestOutput(result.stdout);
-        break;
-    }
+    const parsed = parseTestOutputForDetails(profile, result.stdout, result.stderr);
 
     Object.assign(output, parsed);
     output.success = result.exitCode === 0;

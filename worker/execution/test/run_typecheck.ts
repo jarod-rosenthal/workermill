@@ -18,7 +18,7 @@
 
 import { execSync } from "child_process";
 import * as path from "path";
-import * as fs from "fs";
+import { detectLanguage } from "../../lib/dist/language-profile.js";
 
 interface TypeCheckError {
   file: string;
@@ -88,13 +88,6 @@ function parseTypeScriptErrors(output: string): TypeCheckError[] {
   return errors;
 }
 
-function hasTsConfig(projectPath: string): boolean {
-  return (
-    fs.existsSync(path.join(projectPath, "tsconfig.json")) ||
-    fs.existsSync(path.join(projectPath, "tsconfig.build.json"))
-  );
-}
-
 async function main(): Promise<void> {
   const output: Output = {
     success: false,
@@ -108,47 +101,42 @@ async function main(): Promise<void> {
   try {
     const repoPath = process.env.REPO_PATH || process.cwd();
     const project = process.env.PROJECT || "";
-    const strict = process.env.STRICT === "true";
 
     const projectPath = project ? path.join(repoPath, project) : repoPath;
 
-    if (!hasTsConfig(projectPath)) {
+    const profile = detectLanguage(projectPath);
+
+    if (!profile.typecheck) {
       output.success = true;
-      output.error = "No tsconfig.json found, skipping type check";
+      output.error = `No type checking available for ${profile.displayName}`;
       console.log(JSON.stringify(output));
       process.exit(0);
     }
 
-    console.error(`[run_typecheck] Running tsc in ${projectPath}`);
+    console.error(`[run_typecheck] Running typecheck (${profile.displayName}) in ${projectPath}`);
 
-    // Build tsc command
-    let cmd = "npx tsc --noEmit";
-    if (strict) {
-      cmd += " --strict";
+    const result = exec(profile.typecheck, projectPath);
+    const parsed = profile.parseTypecheck(result.stdout, result.stderr, result.exitCode);
+
+    // For TypeScript, extract detailed error locations
+    if (profile.id === "typescript") {
+      const allOutput = result.stdout + result.stderr;
+      const errors = parseTypeScriptErrors(allOutput);
+      output.errors = errors;
+      output.errorCount = errors.filter(
+        (e) => e.code.startsWith("TS") && !e.message.includes("warning"),
+      ).length;
+      output.warningCount = errors.length - output.errorCount;
+
+      if (!parsed.passed && errors.length === 0) {
+        output.error = allOutput.slice(0, 1000);
+      }
+    } else {
+      output.errorCount = parsed.errors;
     }
 
-    // Check if using project references (tsc -b)
-    const tsConfig = JSON.parse(fs.readFileSync(path.join(projectPath, "tsconfig.json"), "utf-8"));
-    if (tsConfig.references) {
-      cmd = "npx tsc -b --dry";
-    }
-
-    const result = exec(cmd, projectPath);
-
-    // Parse errors
-    const allOutput = result.stdout + result.stderr;
-    const errors = parseTypeScriptErrors(allOutput);
-
-    output.errors = errors;
-    output.errorCount = errors.filter((e) => e.code.startsWith("TS") && !e.message.includes("warning")).length;
-    output.warningCount = errors.length - output.errorCount;
-    output.success = result.exitCode === 0;
+    output.success = parsed.passed;
     output.duration = (Date.now() - startTime) / 1000;
-
-    if (!output.success && errors.length === 0) {
-      // No parsed errors but still failed - include raw output
-      output.error = allOutput.slice(0, 1000);
-    }
   } catch (error: unknown) {
     output.error = error instanceof Error ? error.message : String(error);
     output.duration = (Date.now() - startTime) / 1000;
@@ -159,7 +147,6 @@ async function main(): Promise<void> {
   // Output markers
   console.error(`::type_errors::${output.errorCount}`);
   if (output.errors.length > 0) {
-    // Output first few errors for quick visibility
     output.errors.slice(0, 5).forEach((e) => {
       console.error(`::error::${e.file}:${e.line} - ${e.code}: ${e.message}`);
     });

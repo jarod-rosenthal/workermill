@@ -34,10 +34,11 @@
  */
 
 import { execSync } from "child_process";
-import * as fs from "fs";
 import * as path from "path";
 import * as https from "https";
 import * as http from "http";
+import { detectLanguageWithTestRunner } from "../../lib/dist/language-profile.js";
+import type { LanguageProfile } from "../../lib/dist/language-profile.js";
 
 // Score weights (must sum to 1.0)
 const WEIGHTS = {
@@ -131,69 +132,51 @@ function exec(
   }
 }
 
-function countLinesOfCode(projectPath: string): number {
-  // Count TypeScript/JavaScript lines (rough estimate)
+function countLinesOfCode(projectPath: string, profile: LanguageProfile): number {
+  // Build find pattern from profile extensions
+  const extPatterns = profile.extensions
+    .map((ext) => `-name "*${ext}"`)
+    .join(" -o ");
   try {
     const result = exec(
-      'find . -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" | xargs wc -l 2>/dev/null | tail -1',
-      projectPath
+      `find . \\( ${extPatterns} \\) | xargs wc -l 2>/dev/null | tail -1`,
+      projectPath,
     );
     const match = result.stdout.match(/(\d+)/);
-    return match ? parseInt(match[1]) : 1000; // Default to 1000 to avoid division by zero
+    return match ? parseInt(match[1]) : 1000;
   } catch {
     return 1000;
   }
 }
 
-function runLint(projectPath: string): LintMetrics {
+function runLint(projectPath: string, profile: LanguageProfile): LintMetrics {
   const metrics: LintMetrics = { errors: 0, warnings: 0 };
 
-  // Try ESLint first
-  const result = exec("npx eslint . --format json 2>/dev/null", projectPath);
-
-  if (result.exitCode !== 127) {
-    // ESLint exists
-    try {
-      const eslintOutput = JSON.parse(result.stdout);
-      for (const file of eslintOutput) {
-        metrics.errors += file.errorCount || 0;
-        metrics.warnings += file.warningCount || 0;
-      }
-    } catch {
-      // Try parsing summary from stderr
-      const errorMatch = result.stderr.match(/(\d+)\s+error/);
-      const warnMatch = result.stderr.match(/(\d+)\s+warning/);
-      if (errorMatch) metrics.errors = parseInt(errorMatch[1]);
-      if (warnMatch) metrics.warnings = parseInt(warnMatch[1]);
-    }
+  if (profile.lint) {
+    const result = exec(profile.lint, projectPath);
+    const parsed = profile.parseLint(result.stdout, result.stderr);
+    metrics.errors = parsed.errors;
+    metrics.warnings = parsed.warnings;
   }
 
-  metrics.linesOfCode = countLinesOfCode(projectPath);
+  metrics.linesOfCode = countLinesOfCode(projectPath, profile);
   return metrics;
 }
 
-function runTypecheck(projectPath: string): TypecheckMetrics {
-  const metrics: TypecheckMetrics = { errors: 0, passed: true };
-
-  // Check for tsconfig
-  if (
-    !fs.existsSync(path.join(projectPath, "tsconfig.json")) &&
-    !fs.existsSync(path.join(projectPath, "tsconfig.build.json"))
-  ) {
-    return metrics; // No TypeScript, pass by default
+function runTypecheck(projectPath: string, profile: LanguageProfile): TypecheckMetrics {
+  if (!profile.typecheck) {
+    return { errors: 0, passed: true };
   }
 
-  const result = exec("npx tsc --noEmit 2>&1", projectPath);
-
-  // Count errors
-  const errorMatches = result.stdout.match(/error TS\d+/g);
-  metrics.errors = errorMatches ? errorMatches.length : 0;
-  metrics.passed = result.exitCode === 0;
-
-  return metrics;
+  const result = exec(profile.typecheck, projectPath);
+  const parsed = profile.parseTypecheck(result.stdout, result.stderr, result.exitCode);
+  return { errors: parsed.errors, passed: parsed.passed };
 }
 
-function runTests(projectPath: string): TestMetrics & CoverageMetrics {
+function runTests(
+  projectPath: string,
+  profile: LanguageProfile,
+): TestMetrics & CoverageMetrics {
   const metrics: TestMetrics & CoverageMetrics = {
     passed: 0,
     failed: 0,
@@ -202,41 +185,18 @@ function runTests(projectPath: string): TestMetrics & CoverageMetrics {
     branches: 0,
   };
 
-  // Detect test runner
-  const packageJsonPath = path.join(projectPath, "package.json");
-  if (!fs.existsSync(packageJsonPath)) {
-    return metrics;
-  }
+  const result = exec(profile.test, projectPath);
+  const parsed = profile.parseTests(result.stdout, result.stderr);
+  metrics.passed = parsed.passed;
+  metrics.failed = parsed.failed;
+  metrics.skipped = parsed.skipped;
 
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
-  const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
-
-  let result: { stdout: string; stderr: string; exitCode: number };
-
-  if (deps.vitest) {
-    result = exec("npx vitest run --reporter=json 2>&1", projectPath);
+  // Extract coverage for TypeScript (Jest/Vitest JSON or summary output)
+  if (profile.id === "typescript") {
+    // Try JSON coverage from Jest
     try {
       const json = JSON.parse(result.stdout);
-      metrics.passed = json.numPassedTests || 0;
-      metrics.failed = json.numFailedTests || 0;
-      metrics.skipped = json.numPendingTests || 0;
-    } catch {
-      // Parse from output
-      const passMatch = result.stdout.match(/(\d+)\s+passed/);
-      const failMatch = result.stdout.match(/(\d+)\s+failed/);
-      if (passMatch) metrics.passed = parseInt(passMatch[1]);
-      if (failMatch) metrics.failed = parseInt(failMatch[1]);
-    }
-  } else if (deps.jest) {
-    result = exec("npx jest --json --coverage 2>&1", projectPath);
-    try {
-      const json = JSON.parse(result.stdout);
-      metrics.passed = json.numPassedTests || 0;
-      metrics.failed = json.numFailedTests || 0;
-      metrics.skipped = json.numPendingTests || 0;
-
       if (json.coverageMap) {
-        // Extract coverage
         let totalLines = 0;
         let coveredLines = 0;
         let totalBranches = 0;
@@ -260,72 +220,29 @@ function runTests(projectPath: string): TestMetrics & CoverageMetrics {
           metrics.branches = (coveredBranches / totalBranches) * 100;
       }
     } catch {
-      // Parse from output
-      const passMatch = result.stdout.match(/Tests:\s+(\d+)\s+passed/);
-      const failMatch = result.stdout.match(/(\d+)\s+failed/);
-      if (passMatch) metrics.passed = parseInt(passMatch[1]);
-      if (failMatch) metrics.failed = parseInt(failMatch[1]);
-
       // Parse coverage summary
       const coverageMatch = result.stdout.match(
-        /All files\s+\|\s+[\d.]+\s+\|\s+[\d.]+\s+\|\s+[\d.]+\s+\|\s+([\d.]+)/
+        /All files\s+\|\s+[\d.]+\s+\|\s+[\d.]+\s+\|\s+[\d.]+\s+\|\s+([\d.]+)/,
       );
       if (coverageMatch) {
         metrics.lines = parseFloat(coverageMatch[1]);
       }
     }
-  } else if (deps.pytest || fs.existsSync(path.join(projectPath, "pytest.ini"))) {
-    result = exec("python -m pytest -v --tb=no 2>&1", projectPath);
-    const passMatch = result.stdout.match(/(\d+)\s+passed/);
-    const failMatch = result.stdout.match(/(\d+)\s+failed/);
-    if (passMatch) metrics.passed = parseInt(passMatch[1]);
-    if (failMatch) metrics.failed = parseInt(failMatch[1]);
   }
 
   return metrics;
 }
 
-function runSecurityAudit(projectPath: string): SecurityMetrics {
-  const metrics: SecurityMetrics = { high: 0, medium: 0, low: 0 };
-
-  // Check for package.json
-  if (!fs.existsSync(path.join(projectPath, "package.json"))) {
-    return metrics;
+function runSecurityAudit(
+  projectPath: string,
+  profile: LanguageProfile,
+): SecurityMetrics {
+  if (!profile.audit) {
+    return { high: 0, medium: 0, low: 0 };
   }
 
-  const result = exec("npm audit --json 2>/dev/null", projectPath);
-
-  try {
-    const audit = JSON.parse(result.stdout);
-    const vulnerabilities = audit.vulnerabilities || {};
-
-    for (const vuln of Object.values(vulnerabilities) as Array<{ severity: string }>) {
-      switch (vuln.severity) {
-        case "critical":
-        case "high":
-          metrics.high++;
-          break;
-        case "moderate":
-        case "medium":
-          metrics.medium++;
-          break;
-        case "low":
-        case "info":
-          metrics.low++;
-          break;
-      }
-    }
-  } catch {
-    // Try parsing from text output
-    const highMatch = result.stdout.match(/(\d+)\s+high/);
-    const medMatch = result.stdout.match(/(\d+)\s+moderate/);
-    const lowMatch = result.stdout.match(/(\d+)\s+low/);
-    if (highMatch) metrics.high = parseInt(highMatch[1]);
-    if (medMatch) metrics.medium = parseInt(medMatch[1]);
-    if (lowMatch) metrics.low = parseInt(lowMatch[1]);
-  }
-
-  return metrics;
+  const result = exec(profile.audit, projectPath);
+  return profile.parseAudit(result.stdout);
 }
 
 function calculateScores(
@@ -456,22 +373,23 @@ async function main(): Promise<void> {
 
     const projectPath = project ? path.join(repoPath, project) : repoPath;
 
-    console.error(`[analyze_code] Analyzing code quality in ${projectPath}`);
+    const profile = detectLanguageWithTestRunner(projectPath);
+    console.error(`[analyze_code] Analyzing code quality in ${projectPath} (${profile.displayName})`);
 
     // Run all analysis
     console.error("[analyze_code] Running lint analysis...");
-    const lintMetrics = runLint(projectPath);
+    const lintMetrics = runLint(projectPath, profile);
 
     console.error("[analyze_code] Running typecheck analysis...");
-    const typecheckMetrics = runTypecheck(projectPath);
+    const typecheckMetrics = runTypecheck(projectPath, profile);
 
     console.error("[analyze_code] Running test analysis...");
-    const testMetrics = runTests(projectPath);
+    const testMetrics = runTests(projectPath, profile);
 
     let securityMetrics: SecurityMetrics = { high: 0, medium: 0, low: 0 };
     if (!skipSecurity) {
       console.error("[analyze_code] Running security audit...");
-      securityMetrics = runSecurityAudit(projectPath);
+      securityMetrics = runSecurityAudit(projectPath, profile);
     }
 
     // Calculate scores

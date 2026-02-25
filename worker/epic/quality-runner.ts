@@ -10,6 +10,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as https from "https";
 import * as http from "http";
+import { detectLanguageWithTestRunner, findGoModDirs } from "../lib/dist/language-profile.js";
 
 // Score weights (must sum to 1.0)
 const WEIGHTS = {
@@ -260,129 +261,61 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
     securityLow: 0,
   };
 
-  // Detect project language(s)
-  const hasGoMod = fs.existsSync(path.join(repoPath, "go.mod"));
-  const hasPackageJson = fs.existsSync(path.join(repoPath, "package.json"));
-  // Also check common subdirectories for Go modules (e.g. api/go.mod)
-  const goModDirs: string[] = [];
-  if (hasGoMod) goModDirs.push(repoPath);
-  try {
-    for (const entry of fs.readdirSync(repoPath)) {
-      if (entry === "node_modules" || entry === "vendor" || entry.startsWith(".")) continue;
-      const sub = path.join(repoPath, entry);
-      if (fs.statSync(sub).isDirectory() && fs.existsSync(path.join(sub, "go.mod"))) {
-        goModDirs.push(sub);
-      }
-    }
-  } catch { /* ignore */ }
+  // Detect project language via shared profiles
+  const profile = detectLanguageWithTestRunner(repoPath);
+  console.log(`[quality-runner] Detected language: ${profile.displayName}`);
+  // For Go, find all module directories (including subdirectories)
+  const goModDirs = profile.id === "go" ? findGoModDirs(repoPath) : [];
+  const effectiveCwd = goModDirs[0] || repoPath;
 
   // Run TypeCheck
   console.log("[quality-runner] Running typecheck...");
-  if (hasGoMod || goModDirs.length > 0) {
-    // Go: use go build as typecheck equivalent
-    const goDir = goModDirs[0] || repoPath;
-    const typecheckResult = runCommand("go build ./... 2>&1", goDir);
-    const goErrors = typecheckResult.exitCode !== 0 ? 1 : 0;
-    metrics.typeErrors = goErrors;
-    metrics.typecheckScore = goErrors === 0 ? 100 : 0;
-    console.log(`[quality-runner] Typecheck (go build): ${metrics.typecheckScore}/100`);
+  if (profile.typecheck) {
+    const typecheckResult = runCommand(profile.typecheck, effectiveCwd);
+    const parsed = profile.parseTypecheck(typecheckResult.stdout, typecheckResult.stderr, typecheckResult.exitCode);
+    metrics.typeErrors = parsed.errors;
+    metrics.typecheckScore = parsed.passed ? 100 : 0;
+    console.log(`[quality-runner] Typecheck (${profile.displayName}): ${metrics.typecheckScore}/100 (${metrics.typeErrors} errors)`);
   } else {
-    const typecheckResult = runCommand("npm run typecheck 2>&1 || npx tsc --noEmit 2>&1 || echo 'no typecheck'", repoPath);
-    const typeErrors = (typecheckResult.stdout.match(/error TS\d+/g) || []).length;
-    metrics.typeErrors = typeErrors;
-    metrics.typecheckScore = typeErrors === 0 && typecheckResult.exitCode === 0 ? 100 : 0;
-    console.log(`[quality-runner] Typecheck: ${metrics.typecheckScore}/100 (${typeErrors} errors)`);
+    metrics.typecheckScore = 100;
+    console.log(`[quality-runner] Typecheck: skipped (not available for ${profile.displayName})`);
   }
 
   // Run Lint
   console.log("[quality-runner] Running lint...");
-  if (hasGoMod || goModDirs.length > 0) {
-    // Go: use go vet + golangci-lint
-    const goDir = goModDirs[0] || repoPath;
-    const vetResult = runCommand("go vet ./... 2>&1", goDir);
-    const lintResult = runCommand("golangci-lint run ./... 2>&1 || echo 'golangci-lint not available'", goDir);
-    const fmtResult = runCommand("gofmt -l . 2>&1", goDir);
-    // Count vet errors
-    const vetErrors = vetResult.exitCode !== 0 ? 1 : 0;
-    // Count golangci-lint issues
-    const golintIssues = (lintResult.stdout.match(/\.\w+:\d+:\d+:/g) || []).length;
-    // Count unformatted files
-    const fmtFiles = fmtResult.stdout.trim().split("\n").filter((l: string) => l.trim().length > 0 && !l.includes("not available")).length;
-    metrics.lintErrors = vetErrors + golintIssues + fmtFiles;
-    metrics.lintWarnings = 0;
+  if (profile.lint) {
+    const lintResult = runCommand(profile.lint, effectiveCwd);
+    const parsedLint = profile.parseLint(lintResult.stdout, lintResult.stderr);
+    metrics.lintErrors = parsedLint.errors;
+    metrics.lintWarnings = parsedLint.warnings;
     metrics.lintScore = Math.max(0, 100 - metrics.lintErrors);
-    console.log(`[quality-runner] Lint (Go): ${metrics.lintScore}/100 (vet: ${vetErrors}, lint: ${golintIssues}, fmt: ${fmtFiles} unformatted files)`);
+    console.log(`[quality-runner] Lint (${profile.displayName}): ${metrics.lintScore}/100 (${metrics.lintErrors} errors, ${metrics.lintWarnings} warnings)`);
   } else {
-    const lintResult = runCommand("npm run lint 2>&1 || echo 'no lint script'", repoPath);
-
-    // Parse ESLint output for error/warning counts
-    const problemsMatch = lintResult.stdout.match(/(\d+)\s+problems?\s*\((\d+)\s+errors?,\s*(\d+)\s+warnings?\)/i);
-    if (problemsMatch) {
-      metrics.lintErrors = parseInt(problemsMatch[2]) || 0;
-      metrics.lintWarnings = parseInt(problemsMatch[3]) || 0;
-    } else {
-      // Try alternate format
-      const errorMatch = lintResult.stdout.match(/(\d+)\s+errors?/i);
-      const warnMatch = lintResult.stdout.match(/(\d+)\s+warnings?/i);
-      if (errorMatch) metrics.lintErrors = parseInt(errorMatch[1]) || 0;
-      if (warnMatch) metrics.lintWarnings = parseInt(warnMatch[1]) || 0;
-    }
-    metrics.lintScore = Math.max(0, 100 - metrics.lintErrors);
-    console.log(`[quality-runner] Lint: ${metrics.lintScore}/100 (${metrics.lintErrors} errors, ${metrics.lintWarnings} warnings)`);
+    metrics.lintScore = 100;
+    console.log(`[quality-runner] Lint: skipped (not available for ${profile.displayName})`);
   }
 
   // Run Tests
   console.log("[quality-runner] Running tests...");
-  if (hasGoMod || goModDirs.length > 0) {
-    // Go: run go test and parse output
-    const goDir = goModDirs[0] || repoPath;
-    const testResult = runCommand("go test ./... -v -count=1 2>&1", goDir, 300000);
-
-    // Parse Go test output: "--- PASS:", "--- FAIL:", "--- SKIP:"
-    const goPassCount = (testResult.stdout.match(/--- PASS:/g) || []).length;
-    const goFailCount = (testResult.stdout.match(/--- FAIL:/g) || []).length;
-    const goSkipCount = (testResult.stdout.match(/--- SKIP:/g) || []).length;
-    // Also check for "ok" lines (package-level pass) and "FAIL" lines (package-level fail)
-    const pkgPass = (testResult.stdout.match(/^ok\s+/gm) || []).length;
-    const pkgFail = (testResult.stdout.match(/^FAIL\s+/gm) || []).length;
-
-    metrics.testsPassed = goPassCount || pkgPass;
-    metrics.testsFailed = goFailCount || pkgFail;
-    metrics.testsSkipped = goSkipCount;
+  {
+    const testResult = runCommand(profile.test, effectiveCwd, 300000);
+    const parsedTests = profile.parseTests(testResult.stdout, testResult.stderr);
+    metrics.testsPassed = parsedTests.passed;
+    metrics.testsFailed = parsedTests.failed;
+    metrics.testsSkipped = parsedTests.skipped;
 
     const totalTests = metrics.testsPassed + metrics.testsFailed + metrics.testsSkipped;
     metrics.testScore = totalTests > 0 ? Math.round((metrics.testsPassed / totalTests) * 100) : (testResult.exitCode === 0 ? 100 : 0);
-    console.log(`[quality-runner] Tests (Go): ${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped)`);
-  } else {
-    const testResult = runCommand("npm test 2>&1 || echo 'no test script'", repoPath, 300000); // 5 min timeout for tests
+    console.log(`[quality-runner] Tests (${profile.displayName}): ${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped)`);
 
-    // Parse test output (Jest/Vitest format)
-    // Look for patterns like "Tests: 5 passed, 2 failed, 1 skipped"
-    const testsLineMatch = testResult.stdout.match(/Tests:\s*(\d+)\s*passed(?:,\s*(\d+)\s*failed)?(?:,\s*(\d+)\s*(?:skipped|todo))?/i);
-    if (testsLineMatch) {
-      metrics.testsPassed = parseInt(testsLineMatch[1]) || 0;
-      metrics.testsFailed = parseInt(testsLineMatch[2]) || 0;
-      metrics.testsSkipped = parseInt(testsLineMatch[3]) || 0;
-    } else {
-      // Try alternate format: "X passing", "X failing"
-      const passMatch = testResult.stdout.match(/(\d+)\s+pass(?:ing|ed)?/i);
-      const failMatch = testResult.stdout.match(/(\d+)\s+fail(?:ing|ed)?/i);
-      const skipMatch = testResult.stdout.match(/(\d+)\s+(?:skipped|pending)/i);
-      if (passMatch) metrics.testsPassed = parseInt(passMatch[1]) || 0;
-      if (failMatch) metrics.testsFailed = parseInt(failMatch[1]) || 0;
-      if (skipMatch) metrics.testsSkipped = parseInt(skipMatch[1]) || 0;
-    }
-
-    const totalTests = metrics.testsPassed + metrics.testsFailed + metrics.testsSkipped;
-    metrics.testScore = totalTests > 0 ? Math.round((metrics.testsPassed / totalTests) * 100) : 100;
-    console.log(`[quality-runner] Tests: ${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped)`);
-
-    // Extract coverage if available (Jest/Vitest format)
-    const coverageMatch = testResult.stdout.match(/All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/);
-    if (coverageMatch) {
-      metrics.coverageLines = parseFloat(coverageMatch[1]) || 0;
-      metrics.coverageBranches = parseFloat(coverageMatch[2]) || 0;
-      metrics.coverageScore = Math.round(metrics.coverageLines);
+    // Extract coverage if available (Jest/Vitest format — TS only)
+    if (profile.id === "typescript") {
+      const coverageMatch = testResult.stdout.match(/All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/);
+      if (coverageMatch) {
+        metrics.coverageLines = parseFloat(coverageMatch[1]) || 0;
+        metrics.coverageBranches = parseFloat(coverageMatch[2]) || 0;
+        metrics.coverageScore = Math.round(metrics.coverageLines);
+      }
     }
   }
 
@@ -401,58 +334,17 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
 
   // Run Security Audit
   console.log("[quality-runner] Running security audit...");
-  if (hasGoMod || goModDirs.length > 0) {
-    // Go: use go vet as a basic security check (catches suspicious constructs)
-    const goDir = goModDirs[0] || repoPath;
-    const goVetResult = runCommand("go vet ./... 2>&1", goDir);
-    if (goVetResult.exitCode !== 0) {
-      metrics.securityHigh = 1;
-      metrics.securityScore = 0;
-    } else {
-      metrics.securityScore = 100;
-    }
-    console.log(`[quality-runner] Security (go vet): ${metrics.securityScore}/100`);
-  }
-  const auditResult = runCommand("npm audit --json 2>/dev/null || echo '{}'", repoPath);
-  try {
-    const audit = JSON.parse(auditResult.stdout || "{}");
-    const vulns = audit.metadata?.vulnerabilities || audit.vulnerabilities || {};
-
-    // Handle both old and new npm audit formats
-    if (typeof vulns === "object") {
-      if ("critical" in vulns || "high" in vulns) {
-        // New format: metadata.vulnerabilities has counts
-        metrics.securityHigh = (vulns.critical || 0) + (vulns.high || 0);
-        metrics.securityMedium = vulns.moderate || 0;
-        metrics.securityLow = (vulns.low || 0) + (vulns.info || 0);
-      } else {
-        // Old format: vulnerabilities is an object with package names
-        for (const vuln of Object.values(vulns) as Array<{ severity?: string }>) {
-          if (!vuln.severity) continue;
-          switch (vuln.severity) {
-            case "critical":
-            case "high":
-              metrics.securityHigh++;
-              break;
-            case "moderate":
-            case "medium":
-              metrics.securityMedium++;
-              break;
-            case "low":
-            case "info":
-              metrics.securityLow++;
-              break;
-          }
-        }
-      }
-    }
-  } catch {
-    // Ignore parse errors
+  if (profile.audit) {
+    const auditResult = runCommand(profile.audit, effectiveCwd);
+    const parsedAudit = profile.parseAudit(auditResult.stdout);
+    metrics.securityHigh = parsedAudit.high;
+    metrics.securityMedium = parsedAudit.medium;
+    metrics.securityLow = parsedAudit.low;
   }
 
   const securityDeduction = metrics.securityHigh * 20 + metrics.securityMedium * 5 + metrics.securityLow;
   metrics.securityScore = Math.max(0, 100 - securityDeduction);
-  console.log(`[quality-runner] Security: ${metrics.securityScore}/100 (${metrics.securityHigh}H/${metrics.securityMedium}M/${metrics.securityLow}L)`);
+  console.log(`[quality-runner] Security (${profile.displayName}): ${metrics.securityScore}/100 (${metrics.securityHigh}H/${metrics.securityMedium}M/${metrics.securityLow}L)`);
 
   // Run E2E tests if available (best-effort — Playwright may not be installed)
   console.log("[quality-runner] Checking for E2E test script...");
@@ -801,76 +693,18 @@ export function runTargetedTests(
     return { passed: true, stdout: "", stderr: "", exitCode: 0, testRunner: "none" };
   }
 
-  const fileList = changedFiles.join(" ");
+  const profile = detectLanguageWithTestRunner(repoPath);
 
-  // Check for package.json to detect JS/TS test runners
-  const pkgJsonPath = path.join(repoPath, "package.json");
-  if (fs.existsSync(pkgJsonPath)) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
-      const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
-
-      if (allDeps?.vitest) {
-        console.log(`[quality-runner] Detected vitest — running related tests for ${changedFiles.length} files`);
-        const result = runCommand(`npx vitest run --related ${fileList} 2>&1`, repoPath, timeoutMs);
-        return { ...result, passed: result.exitCode === 0, testRunner: "vitest" };
-      }
-
-      if (allDeps?.jest) {
-        console.log(`[quality-runner] Detected jest — running related tests for ${changedFiles.length} files`);
-        const result = runCommand(`npx jest --findRelatedTests ${fileList} --ci 2>&1`, repoPath, timeoutMs);
-        return { ...result, passed: result.exitCode === 0, testRunner: "jest" };
-      }
-    } catch {
-      console.warn("[quality-runner] Failed to parse package.json");
-    }
+  if (profile.testTargeted) {
+    const cmd = profile.testTargeted(changedFiles);
+    console.log(`[quality-runner] Running targeted tests (${profile.displayName}) for ${changedFiles.length} files`);
+    const result = runCommand(cmd, repoPath, timeoutMs);
+    const runner = profile.id === "typescript" ? (cmd.includes("vitest") ? "vitest" : cmd.includes("jest") ? "jest" : "npm_test") : profile.id === "python" ? "pytest" : "npm_test";
+    return { ...result, passed: result.exitCode === 0, testRunner: runner as TargetedTestResult["testRunner"] };
   }
 
-  // Check for Python test runners
-  if (
-    fs.existsSync(path.join(repoPath, "pytest.ini")) ||
-    fs.existsSync(path.join(repoPath, "pyproject.toml")) ||
-    fs.existsSync(path.join(repoPath, "setup.py"))
-  ) {
-    // Infer test directories from changed files
-    const testDirs = new Set<string>();
-    for (const f of changedFiles) {
-      const dir = path.dirname(f);
-      const candidates = [
-        dir.replace(/^src\//, "tests/"),
-        dir.replace(/^src\//, "test/"),
-        `tests/${dir}`,
-        `test/${dir}`,
-      ];
-      for (const candidate of candidates) {
-        if (fs.existsSync(path.join(repoPath, candidate))) {
-          testDirs.add(candidate);
-        }
-      }
-    }
-
-    if (testDirs.size > 0) {
-      const dirs = Array.from(testDirs).join(" ");
-      console.log(`[quality-runner] Detected pytest — running tests in: ${dirs}`);
-      const result = runCommand(`pytest ${dirs} -q 2>&1`, repoPath, timeoutMs);
-      return { ...result, passed: result.exitCode === 0, testRunner: "pytest" };
-    }
-  }
-
-  // Fallback: run npm test if available
-  if (fs.existsSync(pkgJsonPath)) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
-      if (pkg.scripts?.test) {
-        console.log("[quality-runner] Falling back to npm test");
-        const result = runCommand("npm test 2>&1", repoPath, timeoutMs);
-        return { ...result, passed: result.exitCode === 0, testRunner: "npm_test" };
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  console.log("[quality-runner] No test runner detected — skipping");
-  return { passed: true, stdout: "", stderr: "", exitCode: 0, testRunner: "none" };
+  // No targeted test support — fall back to full test suite
+  console.log(`[quality-runner] No targeted tests for ${profile.displayName} — running full suite`);
+  const result = runCommand(profile.test, repoPath, timeoutMs);
+  return { ...result, passed: result.exitCode === 0, testRunner: "npm_test" };
 }

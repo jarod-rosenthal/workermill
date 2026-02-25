@@ -208,7 +208,13 @@ async function finishSetup(
   if (!port) {
     const error = readAgentStartupError();
     if (error) {
-      vscode.window.showErrorMessage(`WorkerMill agent failed to start: ${error}`);
+      if (/pulling|downloading|starting ollama/i.test(error)) {
+        vscode.window.showInformationMessage(
+          "WorkerMill agent is starting up (this may take a moment).",
+        );
+      } else {
+        vscode.window.showErrorMessage(`WorkerMill agent failed to start: ${error}`);
+      }
     } else {
       vscode.window.showWarningMessage(
         "Agent didn't start. Check ~/.workermill/agent.log for details.",

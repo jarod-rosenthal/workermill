@@ -21,6 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | **Worker entrypoint** | `post_log()` shell function | Posts terminal output to API in real-time |
 | **LLM Models** | NEVER change without approval | No default model changes, no provider switches, no model name changes in code/env/config |
 | **Coordination SSE** | Redis pub/sub with DB polling fallback | SSE endpoint subscribes to Redis for instant push. If Redis is down, falls back to 5s DB polling transparently. Fire-and-forget publishes never block writes. |
+| **Code events (Live Code View)** | Stateless API + client-side accumulation | API stores raw immutable events only. Clients (dashboard + VS Code) reconstruct file state. See "Code Events Architecture" below. |
 
 **If you think something could be "better" (CloudWatch, WebSockets, etc.), ASK FIRST.**
 
@@ -381,6 +382,34 @@ Single-agent planning + repo clone in `agent/src/planner.ts`. Critic threshold *
 ***REMOVED******REMOVED******REMOVED*** Heartbeat Must Always Update
 
 The agent heartbeat endpoint must ALWAYS update `remote_agents.last_heartbeat_at` even when there are 0 active tasks. Otherwise the orchestrator thinks the agent is offline and starts claiming tasks itself.
+
+***REMOVED******REMOVED******REMOVED*** Code Events Architecture (Live Code View)
+
+The API is **stateless** for code events — it stores raw immutable events and does NOT maintain cumulative file state. Clients reconstruct file snapshots themselves.
+
+**Flow:** Worker → `POST /api/control-center/code-events` → stored as `WorkerTaskLog` (type `code_event`) → SSE broadcast via in-memory EventEmitter → clients poll/stream and accumulate state.
+
+**What the API stores per event:**
+- `toolName`: "Write" or "Edit"
+- `filePath`, `expert`
+- `metadata.newStr` (both Write and Edit), `metadata.oldStr` (Edit only)
+- Truncated at 50KB for DB persistence, 100KB for SSE
+
+**Client-side state accumulation** (dashboard `MainDashboard.tsx` + VS Code `live-diff-manager.ts`):
+- **Write event:** `before=""`, `after=content` (new file — all-green diff)
+- **Edit event (first):** `before=oldStr`, `after=newStr` (freeze `before`)
+- **Edit event (subsequent):** `before` stays frozen, `after=newStr` (only latest diff shown)
+- VS Code polls incrementally via `?since=timestamp`, dashboard uses SSE
+
+**Key files:**
+- `api/src/routes/control-center/code-events.ts` — POST/GET endpoints
+- `api/src/services/code-events.ts` — EventEmitter for real-time SSE
+- `worker/epic/executor.ts` — `postCodeEvent()` (fire-and-forget)
+- `frontend/src/components/DiffView.tsx` — syntax-highlighted diff renderer
+- `frontend/src/components/LiveCodeViewer.tsx` — `DiffFile` interface, file sidebar + diff view
+- `packages/vscode-workermill/src/live-diff-manager.ts` — native diff editor with polling
+
+**Do NOT:** Add server-side file state accumulation, pre-computed snapshots, or "current file content" endpoints. The stateless design scales because the API never stores "what should the file look like right now."
 
 ---
 

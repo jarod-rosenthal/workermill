@@ -4,379 +4,215 @@ Mission control for autonomous AI coding agents.
 
 ***REMOVED******REMOVED*** What is this?
 
-A real-time monitoring and orchestration system for AI agents that execute coding tasks. Think "htop for AI workers" - see what your agents are doing, track costs, and maintain control.
+A real-time monitoring and orchestration platform for AI agents that execute coding tasks. Think "htop for AI workers" — see what your agents are doing, watch code being written live, track costs, and maintain control.
 
-**Live Demo**: [workermill.com](https://workermill.com)
+**Live**: [workermill.com](https://workermill.com) | **Docs**: [workermill.com/docs](https://workermill.com/docs)
+
+***REMOVED******REMOVED*** Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     VS Code Extension                                   │
+│         Sidebar tree, activity feed, live diff, log terminals           │
+└─────────────────────┬───────────────────────────────────────────────────┘
+                      │ localhost (agent local API)
+┌─────────────────────▼───────────────────────────────────────────────────┐
+│                     Remote Agent (standalone binary)                     │
+│           Task polling, planning (Claude CLI), worker spawning          │
+│           Native process self-invocation or Docker sandbox              │
+└─────────────────────┬───────────────────────────────────────────────────┘
+                      │ REST / SSE
+┌─────────────────────▼───────────────────────────────────────────────────┐
+│                     Cloud API (Express + TypeScript)                     │
+│     Task management, log streaming (PostgreSQL + SSE), orchestrator     │
+│     Webhooks (Jira, GitHub, Linear, Bitbucket), coordination (Redis)   │
+│     Worker decision engine, billing, analytics, board execution         │
+├─────────────────────┬───────────────────────────────────────────────────┤
+│   PostgreSQL (RDS)  │  Redis (ElastiCache)  │  S3 + CloudFront        │
+└─────────────────────┴───────────────────────┴─────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────────────────────────┐
+│                     Dashboard (React 19 + Vite)                         │
+│     Real-time monitoring, Kanban boards, live code view (diff),        │
+│     cost tracking, orchestration controls, persona studio               │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+***REMOVED******REMOVED******REMOVED*** Execution Paths
+
+| Path | Worker runs as | Planning | When to use |
+|------|---------------|----------|-------------|
+| **Remote Agent** | Native process (agent binary self-invocation) | Yes (single-agent planner + critic) | Production, VS Code |
+| **Remote Agent + Docker Sandbox** | Docker container (`ghcr.io/workermill/worker`) | Yes | Production (sandboxed) |
+| **Local WorkerMill** | Docker container (`workermill-worker:local`) | No (skipped) | Local development |
+| **Cloud ECS** | ECS Fargate task | Yes (requires remote agent for planning) | Legacy |
+
+***REMOVED******REMOVED******REMOVED*** Task Flow (Remote Agent — Primary)
+
+```
+Jira/GitHub/Linear webhook ──┐
+VS Code (Run Issue) ─────────┤→ Cloud API creates task (status: planning)
+Dashboard (Run Card) ────────┘       │
+                                     ▼
+                              Remote agent polls /api/agent/poll
+                                     │
+                              Agent claims → runs planner (Claude CLI)
+                                     │
+                              Critic validates (score ≥ 85/100, max 3 iterations)
+                                     │
+                              Agent posts plan → API sets status: queued
+                                     │
+                              Agent claims → spawns worker (native or Docker sandbox)
+                                     │
+                              Epic Coordinator → experts in parallel (git worktrees)
+                                     │
+                              Live logs + code events stream to dashboard & VS Code
+                                     │
+                              Worker posts result → PR created → review/deploy
+```
 
 ***REMOVED******REMOVED*** Features
 
 ***REMOVED******REMOVED******REMOVED*** Core Platform
-- **Real-time monitoring** - Live terminal streaming of agent execution via SSE
-- **Cost tracking** - Per-task and aggregate spend on AI APIs + compute
-- **Orchestration controls** - Queue management, worker slots, system on/off
-- **Safety guardrails** - Blocked commands, protected files, approval gates
-- **Workflow integration** - Jira webhook → Execution → GitHub PR → Review → Deploy
+- **Real-time log streaming** — PostgreSQL + SSE, live terminal output in dashboard and VS Code
+- **Live code view** — Syntax-highlighted diffs as workers write code (unified/split modes)
+- **Kanban boards** — Trello-like boards with dependency-ordered cards and cascade execution
+- **Cost tracking** — Per-task and aggregate spend on AI APIs + compute
+- **Orchestration controls** — Queue management, worker slots, system on/off
+- **Safety guardrails** — Blocked commands, protected files, approval gates
+- **Multi-org support** — Organization switcher in VS Code and dashboard
+- **Billing tiers** — Pro / Max / Enterprise
+
+***REMOVED******REMOVED******REMOVED*** BYOK (Bring Your Own Key)
+Use your own AI provider API keys with zero markup on token costs:
+
+- **Anthropic** (Claude Sonnet 4.6, Opus 4.6, Haiku 4.5) — default, Epic mode with parallel experts
+- **OpenAI** (GPT-4, GPT-4o) — Multi-Expert mode via Vercel AI SDK
+- **Google** (Gemini Pro, Gemini Flash) — Multi-Expert mode
+- **Ollama** (local/self-hosted models) — Multi-Expert mode + codebase RAG embeddings
+
+***REMOVED******REMOVED******REMOVED*** Worker System
+
+**Epic Mode (Anthropic):** Planning agent decomposes task → Epic Coordinator → Claude CLI experts work in parallel via git worktrees → coordination feed → consolidated PR.
+
+**Multi-Expert Mode (non-Anthropic):** Planning agent decomposes task → Multi-Expert Coordinator → Vercel AI SDK calls in parallel, each persona routed to configured provider → coordination feed → consolidated PR.
+
+***REMOVED******REMOVED******REMOVED*** Worker Personas (12 roles)
+
+| Persona | Best For |
+|---------|----------|
+| **Architect** | System design, architecture decisions |
+| **Backend Developer** | APIs, database, business logic |
+| **Frontend Developer** | UI components, React, styling |
+| **Mobile Developer** | React Native, iOS/Android |
+| **DevOps Engineer** | Infrastructure, CI/CD, Docker |
+| **Data/ML Engineer** | Pipelines, data modeling, ML |
+| **Security Engineer** | Vulnerability fixes, auth, audits |
+| **QA Engineer** | Unit tests, E2E tests, automation |
+| **Tech Writer** | Documentation, API docs |
+| **Tech Lead** | Code review, standards enforcement |
+| **Project Manager** | Task triage, planning, reports |
+| **Support Agent** | Customer-facing issue resolution |
+
+Personas are auto-assigned based on ticket content or manually selected. **Persona Studio** is the single source of truth for all persona data.
+
+***REMOVED******REMOVED******REMOVED*** Integrations
+
+| Platform | Type | Status |
+|----------|------|--------|
+| **Jira** | Issue tracker | Production |
+| **GitHub Issues** | Issue tracker | Production |
+| **Linear** | Issue tracker | Production |
+| **GitHub** | SCM + PRs | Production |
+| **GitLab** | SCM + MRs | Production |
+| **Bitbucket** | SCM + PRs | Production |
+| **Slack** | Notifications | Production |
+
+All issue trackers use the same pattern — add the `workermill` label to trigger a worker.
 
 ***REMOVED******REMOVED******REMOVED*** Advanced Capabilities
 
 | Feature | Description |
 |---------|-------------|
-| **BYOK (Bring Your Own Key)** | Use your own AI provider API keys with zero markup |
-| **Multi-Provider AI** | Support for Anthropic, OpenAI, Google Gemini, and Ollama |
-| **Worker Checkpointing** | Resume tasks after Spot interruptions with S3-backed state |
-| **Multi-Worker Coordination** | File locks, heartbeats, and conflict prevention |
-| **Ralph Integration** | PRD-to-code execution engine for complex tasks |
-| **Escalation Workflow** | Intelligent handoff when tasks need human input |
+| **Full Build (Epic) Decomposition** | PRD → dependency-ordered board cards with cascade execution |
+| **Escalation Workflow** | Workers escalate blockers to dashboard for human input, then retry |
 | **Virtual Manager** | AI-powered PR review and approval |
+| **Rate Limit Detection** | Auto-detects rate limits → blocker escalation → dashboard banner |
+| **Real-time Coordination** | Redis pub/sub SSE for instant multi-worker coordination |
+| **Worker Decision Engine** | Server-side error classification, quality gates, routing (IP protection) |
+| **Codebase RAG** | Vector search via Ollama embeddings (nomic-embed-text) + pgvector |
+| **MCP Servers** | WorkerMill + OncallShift MCP servers (published to npm) |
 
-***REMOVED******REMOVED******REMOVED*** BYOK (Bring Your Own Key)
+***REMOVED******REMOVED*** Stack
 
-WorkerMill supports a **BYOK model** - use your own AI provider API keys with complete cost transparency:
-
-- **Zero markup** on AI token costs (vs 15-20% markup from competitors)
-- **Direct provider relationship** - access the latest models immediately
-- **Leverage existing contracts** - use your enterprise Anthropic/OpenAI agreements
-- **Full cost visibility** - see exact token costs per task
-
-Supported providers:
-- **Anthropic** (Claude Sonnet, Opus, Haiku)
-- **OpenAI** (GPT-4, GPT-4o)
-- **Google** (Gemini Pro, Gemini Flash)
-- **Ollama** (Local models, self-hosted)
-
-***REMOVED******REMOVED*** Architecture
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                         Dashboard (React)                            │
-│              Real-time monitoring, controls, settings                │
-└─────────────────────────────────┬────────────────────────────────────┘
-                                  │ SSE / REST
-┌─────────────────────────────────▼────────────────────────────────────┐
-│                          API Server (Express)                        │
-│         Task management, log streaming, webhooks, settings           │
-└─────────────────────────────────┬────────────────────────────────────┘
-                                  │
-          ┌───────────────────────┼───────────────────────┐
-          │                       │                       │
-          ▼                       ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Orchestrator  │    │  Coordination   │    │  Checkpointing  │
-│                 │    │    Service      │    │    Service      │
-│ Queue polling   │    │ Worker locks    │    │ S3 state save   │
-│ Worker spawning │    │ Heartbeats      │    │ Spot recovery   │
-│ Cost tracking   │    │ Conflict detect │    │ Resume logic    │
-└────────┬────────┘    └─────────────────┘    └─────────────────┘
-         │
-         ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                    Worker Containers (ECS Fargate)                   │
-│                                                                      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
-│  │  Anthropic  │  │   OpenAI    │  │   Gemini    │  │   Ollama    │  │
-│  │   Claude    │  │    GPT-4    │  │   Models    │  │   Local     │  │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  │
-│                                                                      │
-│  ┌─────────────────────────────────────────────────────────────────┐ │
-│  │                    Optional: Ralph Engine                       │ │
-│  │              PRD Generation → Planning → Story Loop             │ │
-│  └─────────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────┘
-```
+| Component | Technology | Directory |
+|-----------|------------|-----------|
+| **API** | Express + TypeScript + TypeORM + PostgreSQL | `api/` |
+| **Frontend** | React 19 + Vite + TailwindCSS + Zustand | `frontend/` |
+| **Remote Agent** | Standalone binary (Bun compile), polyglot CLI/worker/manager | `agent/` |
+| **VS Code Extension** | VS Code Marketplace (`workermill`) | `packages/vscode-workermill/` |
+| **Worker Containers** | Docker + Claude Code for task execution | `worker/` |
+| **MCP Servers** | WorkerMill + OncallShift | `packages/workermill-mcp/`, `packages/oncallshift-mcp/` |
+| **Infrastructure** | Terraform → AWS (ECS Fargate, RDS, ElastiCache, S3, CloudFront) | `infrastructure/` |
+| **Database** | PostgreSQL (RDS) | — |
+| **Cache/Pubsub** | Redis (ElastiCache) | — |
 
 ***REMOVED******REMOVED*** Quick Start
-
-***REMOVED******REMOVED******REMOVED*** Using Docker Compose (Recommended)
-
-```bash
-***REMOVED*** Clone the repo
-git clone https://github.com/jarod-rosenthal/workermill.git
-cd workermill
-
-***REMOVED*** Copy environment template
-cp .env.example .env
-***REMOVED*** Edit .env with your API keys
-
-***REMOVED*** Start all services
-docker-compose up -d
-
-***REMOVED*** Dashboard: http://localhost:3000
-***REMOVED*** API: http://localhost:4000
-```
 
 ***REMOVED******REMOVED******REMOVED*** Local Development
 
 ```bash
-***REMOVED*** Start PostgreSQL
-docker-compose up -d postgres
+***REMOVED*** Start local services (PostgreSQL, Redis)
+./bin/local-workermill start
 
-***REMOVED*** API Server
+***REMOVED*** API Server (auto-reloads via tsx watch)
 cd api && npm install && npm run dev
+***REMOVED*** → http://localhost:3001
 
-***REMOVED*** Frontend (separate terminal)
+***REMOVED*** Frontend (auto-reloads via Vite HMR)
 cd frontend && npm install && npm run dev
-
-***REMOVED*** Dashboard: http://localhost:5173
-***REMOVED*** API: http://localhost:4000
+***REMOVED*** → http://localhost:5173
 ```
 
-***REMOVED******REMOVED*** Task Workflows
-
-***REMOVED******REMOVED******REMOVED*** Standard Workflow
-
-```
-Jira Ticket + workermill label
-           │
-           ▼
-      ┌─────────┐
-      │ Queued  │
-      └────┬────┘
-           │
-           ▼
-     ┌───────────┐
-     │ Executing │ ←── Live terminal streaming
-     └─────┬─────┘
-           │
-     ┌─────┴─────┐
-     │           │
-     ▼           ▼
-┌─────────┐  ┌──────────┐
-│ Review  │  │ Escalated│ ←── Task needs clarification
-│Requested│  └──────────┘
-└────┬────┘
-     │ PR Approved on GitHub
-     ▼
-┌──────────┐
-│ Approved │
-└────┬─────┘
-     │ Worker re-runs to deploy
-     ▼
-┌──────────┐
-│ Deployed │ ←── Changes live in production
-└──────────┘
-```
-
-***REMOVED******REMOVED******REMOVED*** With `deploy` Label (Auto-Deploy)
-
-```
-Jira Ticket + workermill + deploy
-           │
-           ▼
-      ┌─────────┐
-      │ Queued  │
-      └────┬────┘
-           │
-           ▼
-     ┌───────────┐
-     │ Executing │
-     └─────┬─────┘
-           │ No PR approval needed
-           ▼
-      ┌──────────┐
-      │ Deployed │
-      └──────────┘
-```
-
-***REMOVED******REMOVED*** Integrations
-
-***REMOVED******REMOVED******REMOVED*** Issue Trackers
-
-| Platform | Status | Webhook Endpoint | Notes |
-|----------|--------|------------------|-------|
-| **Jira** | Production | `/api/webhooks/jira` | Primary integration |
-| **Linear** | Production | `/api/webhooks/linear` | Same label workflow |
-| **GitHub Issues** | Production | `/api/webhooks/github-issues` | Uses `GH-{number}` as key |
-| **Asana** | Coming Soon | `/api/webhooks/asana` | Enterprise project management |
-| **ClickUp** | Coming Soon | `/api/webhooks/clickup` | All-in-one productivity |
-| **GitLab Issues** | Coming Soon | `/api/webhooks/gitlab` | GitLab-native teams |
-
-All platforms use the same label system - add `workermill` to trigger a worker.
-
-***REMOVED******REMOVED******REMOVED*** Code & Deployment
-
-| Platform | Status | Purpose |
-|----------|--------|---------|
-| **GitHub** | Production | PR creation, webhooks, branch management |
-| **GitLab** | Coming Soon | MR creation, CI/CD integration |
-
-***REMOVED******REMOVED******REMOVED*** Notifications
-
-| Platform | Status | Purpose |
-|----------|--------|---------|
-| **Slack** | Production | Task notifications, cost alerts |
-| **Discord** | Coming Soon | Community/team notifications |
-| **Email** | Coming Soon | Digest and real-time notifications |
-
-***REMOVED******REMOVED*** Worker Personas
-
-WorkerMill uses specialized AI personas optimized for different types of work:
-
-***REMOVED******REMOVED******REMOVED*** Production Personas
-
-| Persona | Best For | Skills |
-|---------|----------|--------|
-| **Backend Developer** | APIs, database, business logic | Node.js, Python, TypeORM, REST/GraphQL |
-| **Frontend Developer** | UI components, React, styling | React 19, TypeScript, TailwindCSS, accessibility |
-| **DevOps Engineer** | Infrastructure, CI/CD, Docker | Terraform, GitHub Actions, ECS, CloudFormation |
-| **Security Engineer** | Vulnerability fixes, auth, audits | OWASP Top 10, Snyk, secrets management |
-| **QA Engineer** | Unit tests, E2E tests, automation | Jest, Playwright, Vitest, k6 |
-| **Technical Writer** | README, API docs, comments | OpenAPI/Swagger, Markdown, Docusaurus |
-| **Project Manager** | Task triage, planning, reports | Jira, estimation, dependency mapping |
-
-***REMOVED******REMOVED******REMOVED*** Coming Soon
-
-| Persona | Best For | Skills |
-|---------|----------|--------|
-| **Data Engineer** | ETL pipelines, data modeling | dbt, Airflow, Snowflake, BigQuery |
-| **ML Engineer** | Training pipelines, model deployment | PyTorch, MLflow, SageMaker |
-| **Mobile Developer (iOS)** | iOS app development | Swift, SwiftUI, Xcode |
-| **Mobile Developer (Android)** | Android app development | Kotlin, Jetpack Compose |
-| **API Developer** | API design, SDK creation | OpenAPI, Postman, GraphQL codegen |
-| **Database Administrator** | Schema design, query optimization | PostgreSQL, indexing, migrations |
-
-Personas are auto-assigned based on ticket content or can be manually selected.
-
-**Virtual Manager**: Reviews all PRs, provides feedback, and handles approval workflow.
-
-***REMOVED******REMOVED*** Configuration
-
-***REMOVED******REMOVED******REMOVED*** Control Labels
-
-| Label | Purpose |
-|-------|---------|
-| `workermill` | **Required** - Triggers processing |
-| `haiku` / `sonnet` / `opus` | Model selection |
-| `deploy` | Auto-deploy without PR approval |
-| `review` | Require Virtual Manager review |
-| `anthropic` / `openai` / `gemini` / `ollama` | AI provider selection |
-
-***REMOVED******REMOVED******REMOVED*** Environment Variables
+***REMOVED******REMOVED******REMOVED*** Remote Agent
 
 ```bash
-***REMOVED*** Required
-DATABASE_URL=postgresql://user:pass@host:5432/db
-ANTHROPIC_API_KEY=sk-ant-...
+***REMOVED*** Install agent binary (Mac/Linux)
+curl -fsSL https://workermill.com/install.sh | bash
 
-***REMOVED*** AWS (for ECS orchestration)
-AWS_REGION=us-east-1
-ECS_CLUSTER_NAME=your-cluster
-
-***REMOVED*** Optional Provider Keys (in AWS Secrets Manager)
-***REMOVED*** workermill/dev/openai-api-key
-***REMOVED*** workermill/dev/google-api-key
-
-***REMOVED*** Integrations
-JIRA_BASE_URL=https://your-org.atlassian.net
-JIRA_EMAIL=your@email.com
-JIRA_API_TOKEN=...
-GITHUB_TOKEN=ghp_...
+***REMOVED*** Start agent
+workermill-agent start
 ```
 
-***REMOVED******REMOVED*** API Endpoints
-
-***REMOVED******REMOVED******REMOVED*** Webhooks
-- `POST /api/webhooks/jira` - Jira issue events
-- `POST /api/webhooks/linear` - Linear issue events
-- `POST /api/webhooks/github` - GitHub PR reviews
-- `POST /api/webhooks/github-issues` - GitHub Issues
-
-***REMOVED******REMOVED******REMOVED*** Billing & Analytics
-- `GET /api/billing/status` - Plan and usage info
-- `POST /api/billing/checkout` - Stripe checkout session
-- `GET /api/analytics/tasks` - Task statistics
-- `GET /api/analytics/costs` - Cost breakdown by model/persona
-
-***REMOVED******REMOVED******REMOVED*** Audit (Admin)
-- `GET /api/audit/logs` - Query audit logs
-- `GET /api/audit/summary` - Activity summary
-- `GET /api/audit/export` - JSON export for compliance
-
-***REMOVED******REMOVED*** Documentation
-
-- **[User Guide](docs/USER_GUIDE.md)** - Complete guide to using WorkerMill
-- **[Worker Instructions](worker/AGENTS.md)** - How AI workers operate
-- **[Infrastructure](infrastructure/terraform/README.md)** - Terraform deployment
-- **[In-App Docs](https://workermill.com/docs)** - Interactive documentation including:
-  - Task Lifecycle and workflows
-  - Worker Personas (all 7 types)
-  - Integrations (Jira, Linear, GitHub)
-  - Advanced Features (checkpointing, coordination)
-
-***REMOVED******REMOVED*** Key Concepts
-
-***REMOVED******REMOVED******REMOVED*** Escalation Workflow
-
-When workers can't complete a task (unclear requirements, missing info, security concerns), they **escalate** rather than fail:
-
-1. Worker adds detailed comment explaining the blocker
-2. Task enters "Escalated" state
-3. Human reviews and provides clarification
-4. Task is re-queued for retry
-
-This ensures work is never lost and maintains quality.
-
-***REMOVED******REMOVED******REMOVED*** Worker Checkpointing
-
-Tasks running on AWS Spot instances can be interrupted. Checkpointing:
-
-1. Saves worker state to S3 every 60 seconds
-2. Catches SIGTERM on Spot reclaim
-3. Re-queues task with checkpoint reference
-4. New worker resumes from saved state
-
-***REMOVED******REMOVED******REMOVED*** Multi-Worker Coordination
-
-When multiple workers target the same repository:
-
-1. Workers check-in when starting
-2. Send heartbeats every 30 seconds
-3. Declare file manifests before editing
-4. Locks prevent conflicting edits
-5. Stale workers are cleaned up automatically
-
-***REMOVED******REMOVED*** Stack
-
-| Component | Technology |
-|-----------|------------|
-| **API** | Express + TypeScript + TypeORM |
-| **Database** | PostgreSQL |
-| **Frontend** | React 19 + Vite + TailwindCSS |
-| **State** | Zustand |
-| **Infrastructure** | Terraform + AWS (ECS Fargate, RDS, S3, CloudFront) |
-| **AI Providers** | Anthropic, OpenAI, Google, Ollama |
+The VS Code extension connects to the remote agent automatically via `~/.workermill/agent.port`.
 
 ***REMOVED******REMOVED*** Deployment
 
 ```bash
-***REMOVED*** Deploy everything
+***REMOVED*** Deploy everything to production
 ./deploy.sh --all
 
 ***REMOVED*** Deploy specific components
-./deploy.sh --api        ***REMOVED*** API service
-./deploy.sh --worker     ***REMOVED*** Worker container
-./deploy.sh --frontend   ***REMOVED*** React dashboard
+./deploy.sh --api        ***REMOVED*** API service (ECS)
+./deploy.sh --frontend   ***REMOVED*** React dashboard (S3/CloudFront)
+./deploy.sh --worker     ***REMOVED*** Worker Docker image (ECR)
 ```
 
-***REMOVED******REMOVED*** Status
+Additional flags: `--skip-build`, `--db-check`, `--check-migrations`, `--snapshot`, `--wait`, `--publish-agent`.
 
-Production deployment at [workermill.com](https://workermill.com).
+**Agent release:** Bump `agent/package.json` version → `git tag agent-v<version>` → push tag → CI builds binaries + Docker sandbox image.
 
-***REMOVED******REMOVED*** Roadmap
+**VS Code release:** Bump `packages/vscode-workermill/package.json` version → `git tag vscode-v<version>` → push tag → CI publishes to Marketplace.
 
-***REMOVED******REMOVED******REMOVED*** Current Focus
-- Multi-worker coordination with file-level locking
-- BYOK support for all 4 AI providers
-- Real-time log streaming and cost tracking
-- Virtual Manager PR review system
+***REMOVED******REMOVED*** Documentation
 
-***REMOVED******REMOVED******REMOVED*** Coming Soon
-- **Team Collaboration** - Member invites, role-based access, team analytics
-- **New Personas** - Data Engineer, ML Engineer, Mobile Developer, DBA
-- **More Integrations** - Asana, ClickUp, GitLab, Notion
-- **Enhanced Analytics** - Cost forecasting, ROI tracking, provider comparison
-- **Enterprise Features** - SSO/SAML, audit logging, custom deployment
-
-See [STRATEGIC_EXPANSION_PLAN.md](STRATEGIC_EXPANSION_PLAN.md) for the full roadmap.
+- **[User Docs](https://workermill.com/docs)** — Overview, quick start, integrations, task lifecycle, personas, epics, analytics, MCP, advanced
+- **[Architecture](docs/claude/architecture.md)** — Models, routes, task flow, execution modes
+- **[Infrastructure](docs/claude/infrastructure.md)** — Terraform, SES, AWS setup
+- **[Local Dev](docs/claude/local-dev.md)** — Local development setup
+- **[Agent & VS Code](docs/claude/agent-and-vscode.md)** — Remote agent and extension details
+- **[Testing](docs/claude/testing.md)** — Vitest (API), Playwright (E2E)
+- **[Troubleshooting](docs/claude/troubleshooting.md)** — Common issues and fixes
 
 ***REMOVED******REMOVED*** License
 

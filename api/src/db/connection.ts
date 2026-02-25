@@ -562,16 +562,19 @@ export const AppDataSource = new DataSource({
   // Enable SSL for RDS connections (direct or via bastion tunnel)
   // - Direct RDS: URL contains rds.amazonaws.com
   // - Via tunnel: URL contains sslmode=require
+  // - PgBouncer sidecar (PGBOUNCER_HOST): NO SSL — PgBouncer handles the RDS SSL
   ssl:
-    config.database.url?.includes("rds.amazonaws.com") ||
-    config.database.url?.includes("sslmode=require")
-      ? {
-          rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
-          ...(fs.existsSync("/app/rds-combined-ca-bundle.pem")
-            ? { ca: [fs.readFileSync("/app/rds-combined-ca-bundle.pem", "utf8")] }
-            : {}),
-        }
-      : false,
+    process.env.PGBOUNCER_HOST
+      ? false
+      : config.database.url?.includes("rds.amazonaws.com") ||
+          config.database.url?.includes("sslmode=require")
+        ? {
+            rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
+            ...(fs.existsSync("/app/rds-combined-ca-bundle.pem")
+              ? { ca: [fs.readFileSync("/app/rds-combined-ca-bundle.pem", "utf8")] }
+              : {}),
+          }
+        : false,
 });
 
 /** Interval handle for pool monitoring — cleared on shutdown. */

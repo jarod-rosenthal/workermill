@@ -375,6 +375,19 @@ There are TWO separate board/project systems — do NOT confuse them:
 
 The orchestrator is decomposed into focused modules in `api/src/services/`: `orchestrator.ts` (entry point — poll loop + lifecycle), `task-claimer.ts`, `worker-spawner.ts`, `task-dispatch.ts`, `task-monitor.ts`, `task-cleanup.ts`, `planning-workflow.ts`, `manager-workflow.ts`, `orchestrator-utils.ts`. Edit the relevant module — `orchestrator.ts` is just the coordination hub.
 
+***REMOVED******REMOVED******REMOVED*** Orchestrator is Multi-Instance Ready
+
+The orchestrator is **stateless** — all state lives in the database, and every mutation uses atomic `UPDATE...WHERE`. Multiple orchestrator instances can run safely:
+
+- **Task claiming**: `claimTask()` uses atomic `UPDATE...WHERE status = 'queued'` — two instances competing never double-claim.
+- **Task monitoring**: `monitorExecutingTasks()` queries DB for all executing tasks — any instance can monitor any task.
+- **Cleanup**: All cleanup functions are DB-driven and idempotent.
+- **Cron jobs**: Periodic jobs (stale coordination cleanup, orphaned task detection, warm pools, trial reminders, marketing agent, hourly cleanup) are guarded by Redis `SETNX` distributed locks so only one instance runs each job per interval. If Redis is down, all instances run (graceful degradation to old behavior).
+
+**Lock keys** (in `orchestrator.ts` and `task-cleanup.ts`): `orchestrator:lock:stale-coordination` (55s), `orchestrator:lock:orphaned-tasks` (280s), `orchestrator:lock:warm-pools` (25s), `orchestrator:lock:trial-reminders` (1h), `orchestrator:lock:marketing-agent` (configurable), `orchestrator:lock:hourly-cleanup` (~1h).
+
+**In-memory state** (`orchestrator-utils.ts`): `state` (running/poll counters — local bookkeeping only), `activeOps` (in-flight promise cap of 10 per instance — prevents one instance from over-spawning). Neither requires cross-instance coordination.
+
 ***REMOVED******REMOVED******REMOVED*** Planner Architecture (v0.8.0)
 
 Single-agent planning + repo clone in `agent/src/planner.ts`. Critic threshold **85**/100, max 3 iterations, dynamic file cap per story (5/6/8). **Do NOT change** critic threshold, stdin prompt delivery, or `--verbose` flag without asking. See MEMORY.md for full details.

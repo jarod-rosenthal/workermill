@@ -231,6 +231,7 @@ module "ecs_service" {
   ecs_task_role_arn                = module.ecs_cluster.task_role_arn
   ecs_tasks_security_group_id      = module.ecs_cluster.tasks_security_group_id
   ecr_api_repository_url           = module.ecr.api_repository_url
+  pgbouncer_image                  = "${module.ecr.pgbouncer_repository_url}:v1.23.1-p3"
   log_group_name                   = module.ecs_cluster.api_log_group_name
   certificate_arn                  = module.dns.certificate_arn
   database_url_secret_arn          = module.secrets.database_url_arn

@@ -207,7 +207,7 @@ resource "aws_ecs_task_definition" "api" {
     },
     {
       name      = "pgbouncer"
-      image     = "edoburu/pgbouncer:v1.23.1-p3"
+      image     = var.pgbouncer_image
       essential = true
 
       portMappings = []

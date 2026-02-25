@@ -18,3 +18,8 @@ output "worker_repository_arn" {
   value       = aws_ecr_repository.worker.arn
 }
 
+output "pgbouncer_repository_url" {
+  description = "ECR repository URL for pgbouncer sidecar"
+  value       = aws_ecr_repository.pgbouncer.repository_url
+}
+

@@ -48,6 +48,20 @@ resource "aws_ecr_lifecycle_policy" "api" {
   })
 }
 
+# ECR Repository for PgBouncer sidecar (avoids Docker Hub rate limits)
+resource "aws_ecr_repository" "pgbouncer" {
+  name                 = "workermill-${var.environment}/pgbouncer"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = false
+  }
+
+  tags = {
+    Name = "workermill-${var.environment}-pgbouncer"
+  }
+}
+
 resource "aws_ecr_lifecycle_policy" "worker" {
   repository = aws_ecr_repository.worker.name
 

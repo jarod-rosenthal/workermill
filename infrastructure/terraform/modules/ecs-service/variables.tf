@@ -43,6 +43,11 @@ variable "ecr_api_repository_url" {
   type        = string
 }
 
+variable "pgbouncer_image" {
+  description = "PgBouncer Docker image (ECR URL with tag)"
+  type        = string
+}
+
 variable "log_group_name" {
   description = "CloudWatch log group name"
   type        = string

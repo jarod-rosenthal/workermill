@@ -120,7 +120,7 @@ export class LiveDiffManager {
   }
 
   /**
-   * Create a new manager for a task, or show the file picker for an existing one.
+   * Toggle live diff for a task: start if not active, stop if already active.
    */
   static createOrShow(
     client: AgentClient,
@@ -128,10 +128,16 @@ export class LiveDiffManager {
   ): void {
     const existing = managers.get(task.id);
     if (existing) {
-      existing.showFilePicker();
+      existing.dispose(); // Toggle OFF — stop live diff
       return;
     }
     new LiveDiffManager(client, task.id, task.summary);
+  }
+
+  /** Close the live diff session for a specific task. */
+  static closeTask(taskId: string): void {
+    const mgr = managers.get(taskId);
+    if (mgr) mgr.dispose();
   }
 
   /** Dispose all active managers. */

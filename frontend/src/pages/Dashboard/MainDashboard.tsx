@@ -83,7 +83,7 @@ import {
   StepsIcon,
   TechLeadReviewIcon,
 } from "../../components/icons";
-import { LiveCodeViewer, type CodeFile } from "../../components/LiveCodeViewer";
+import { LiveCodeViewer, type DiffFile } from "../../components/LiveCodeViewer";
 import { useIssueTrackerConfig } from "../../hooks/useIssueTrackerConfig";
 import { usePersonas } from "../../hooks/usePersonas";
 import { buildTicketUrl } from "../../lib/utils";
@@ -210,7 +210,7 @@ export default function Dashboard() {
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
 
   // Live Code Viewer state
-  const [codeFiles, setCodeFiles] = useState<Record<string, Record<string, CodeFile>>>({});
+  const [codeFiles, setCodeFiles] = useState<Record<string, Record<string, DiffFile>>>({});
   const [selectedCodeFile, setSelectedCodeFile] = useState<Record<string, string | null>>({});
   const [terminalTab, setTerminalTab] = useState<Record<string, "terminal" | "code">>({});
   const userSelectedFileRef = useRef<Record<string, boolean>>({});
@@ -1086,33 +1086,35 @@ export default function Dashboard() {
           const now = Date.now();
 
           if (toolName === "Write") {
+            // Write event: before="", after=fullContent
             taskFiles[filePath] = {
               filePath,
-              content: data.content,
-              patches: existing?.patches || [],
+              before: "",
+              after: data.content || "",
               lastTouched: now,
               lastToolName: "Write",
               expert: data.expert,
             };
           } else {
-            // Edit — append patch
-            const patches = [...(existing?.patches || [])];
-            patches.push({
-              oldStr: data.oldStr || "",
-              newStr: data.newStr || "",
-              expert: data.expert,
-              timestamp: data.timestamp,
-            });
-            // Bound patches to 20 per file
-            const bounded = patches.length > 20 ? patches.slice(-20) : patches;
-            taskFiles[filePath] = {
-              filePath,
-              content: existing?.content,
-              patches: bounded,
-              lastTouched: now,
-              lastToolName: "Edit",
-              expert: data.expert || existing?.expert,
-            };
+            // Edit event: freeze before on first edit, update after on subsequent
+            if (existing) {
+              taskFiles[filePath] = {
+                ...existing,
+                after: data.newStr || "",
+                lastTouched: now,
+                lastToolName: "Edit",
+                expert: data.expert || existing.expert,
+              };
+            } else {
+              taskFiles[filePath] = {
+                filePath,
+                before: data.oldStr || "",
+                after: data.newStr || "",
+                lastTouched: now,
+                lastToolName: "Edit",
+                expert: data.expert,
+              };
+            }
           }
 
           // Bound to 50 files per task
@@ -1260,7 +1262,7 @@ export default function Dashboard() {
       return prev;
     });
     setCodeFiles((prev) => {
-      const cleaned: Record<string, Record<string, CodeFile>> = {};
+      const cleaned: Record<string, Record<string, DiffFile>> = {};
       for (const taskId of Object.keys(prev)) {
         if (activeTaskIdSet.has(taskId)) {
           cleaned[taskId] = prev[taskId];

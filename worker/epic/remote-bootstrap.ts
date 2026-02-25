@@ -195,6 +195,24 @@ function cloneRepo(repoUrl: string, workDir: string): string {
   const repoDir = join(workDir, "repo");
   mkdirSync(workDir, { recursive: true });
 
+  // If a previous clone exists (e.g. failed cleanup on Windows), reset it instead of re-cloning
+  if (existsSync(join(repoDir, ".git"))) {
+    console.log(`[Bootstrap] Previous clone found, resetting to clean state...`);
+    try {
+      execSync("git fetch origin", { cwd: repoDir, stdio: "pipe", timeout: 120_000 });
+      const mainBranch = detectMainBranchFromRepo(repoDir);
+      execSync(`git checkout ${mainBranch}`, { cwd: repoDir, stdio: "pipe" });
+      execSync(`git reset --hard origin/${mainBranch}`, { cwd: repoDir, stdio: "pipe" });
+      execSync("git clean -fd", { cwd: repoDir, stdio: "pipe" });
+      console.log(`[Bootstrap] Previous clone reset to origin/${mainBranch}`);
+      return repoDir;
+    } catch {
+      // Reset failed — remove and clone fresh
+      console.warn(`[Bootstrap] Reset failed, removing stale clone`);
+      try { rmSync(repoDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  }
+
   console.log(`[Bootstrap] Cloning repository...`);
   try {
     execSync(`git clone "${repoUrl}" repo`, {
@@ -211,6 +229,19 @@ function cloneRepo(repoUrl: string, workDir: string): string {
 
   console.log(`[Bootstrap] Repository cloned to ${repoDir}`);
   return repoDir;
+}
+
+/** Detect main branch without failing — used during clone recovery */
+function detectMainBranchFromRepo(repoDir: string): string {
+  try {
+    execSync("git rev-parse --verify origin/main", { cwd: repoDir, stdio: "pipe" });
+    return "main";
+  } catch { /* not main */ }
+  try {
+    execSync("git rev-parse --verify origin/master", { cwd: repoDir, stdio: "pipe" });
+    return "master";
+  } catch { /* not master */ }
+  return "main";
 }
 
 function detectMainBranch(repoDir: string): string {
@@ -524,7 +555,13 @@ async function main(): Promise<void> {
 
   // Only clean up temp dirs, not persistent workspaces
   if (!persistentWorkspace && existsSync(workDir)) {
-    rmSync(workDir, { recursive: true, force: true });
+    try {
+      rmSync(workDir, { recursive: true, force: true });
+    } catch {
+      // On Windows, lingering handles from a previous run can lock the dir (EBUSY).
+      // Not fatal — cloneRepo will overwrite or git will reuse the existing clone.
+      console.warn(`[Bootstrap] Could not remove previous work dir, continuing`);
+    }
   }
 
   // 6. Clone repository

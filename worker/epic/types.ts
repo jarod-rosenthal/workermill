@@ -285,19 +285,6 @@ export type ErrorCategory =
   | "unknown";    // Unclassified errors (NOT fixable)
 
 /**
- * Classification result for an error.
- */
-export interface ErrorClassification {
-  category: ErrorCategory;
-  /** Whether this error type can be automatically fixed */
-  isFixable: boolean;
-  /** Matched pattern that identified this error */
-  matchedPattern?: string;
-  /** Suggested fix approach for fixable errors */
-  fixStrategy?: string;
-}
-
-/**
  * Blocker information posted to coordination feed.
  */
 export interface BlockerInfo {

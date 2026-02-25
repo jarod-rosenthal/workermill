@@ -19,9 +19,9 @@ const features = [
   },
   {
     icon: Zap,
-    title: "Epic Planning",
+    title: "Task Planning",
     description:
-      "A Planning Agent analyzes your ticket and decomposes complex tasks into parallel stories executed by specialized experts.",
+      "WorkerMill analyzes your task and breaks it into smaller sub-tasks, each handled by a specialized worker.",
   },
   {
     icon: GitPullRequest,
@@ -55,7 +55,7 @@ export default function DocsOverview() {
   }, []);
 
   const stats = [
-    { label: "AI Experts", value: personaCount !== null ? String(personaCount) : "—", icon: Cpu },
+    { label: "Worker Personas", value: personaCount !== null ? String(personaCount) : "—", icon: Cpu },
     { label: "AI Providers", value: "4+", icon: Zap },
     { label: "Issue Trackers", value: "3+", icon: CheckCircle },
   ];
@@ -80,11 +80,11 @@ export default function DocsOverview() {
           <p className="text-muted-foreground leading-relaxed">
             WorkerMill is an <strong className="text-foreground">AI-powered development automation platform</strong> that
             transforms how engineering teams handle routine development tasks. By connecting your issue tracker
-            (Jira, Linear, or GitHub Issues) with your SCM (GitHub, GitLab, or BitBucket), WorkerMill deploys
-            specialized AI workers to execute tickets autonomously using <strong className="text-foreground">Epic Planning</strong> by default.
+            (Jira, Linear, or GitHub Issues) with your SCM (GitHub, GitLab, or BitBucket), WorkerMill automatically
+            plans and decomposes your tasks, then deploys specialized AI workers to execute them autonomously.
           </p>
           <p className="text-muted-foreground leading-relaxed">
-            Each task is handled by a <strong className="text-foreground">team of specialized AI experts</strong> running in isolated environments
+            Each task is handled by <strong className="text-foreground">specialized AI workers</strong> running in isolated environments
             with access to your codebase, able to read documentation, understand context, write code, run tests,
             and create pull requests. WorkerMill works with <strong className="text-foreground">all major AI providers</strong> including
             Anthropic Claude, OpenAI GPT, Google Gemini, and self-hosted models via Ollama.
@@ -119,9 +119,9 @@ export default function DocsOverview() {
         <div className="bg-card border border-border rounded-xl p-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             {[
-              { step: "1", label: "Create Ticket", desc: "Jira, Linear, or GitHub" },
-              { step: "2", label: "Planning", desc: "AI decomposes into stories" },
-              { step: "3", label: "Parallel Execute", desc: "Experts work simultaneously" },
+              { step: "1", label: "Create Ticket", desc: "In your issue tracker" },
+              { step: "2", label: "Planning", desc: "AI plans and decomposes into sub-tasks" },
+              { step: "3", label: "Parallel Execute", desc: "Workers execute in parallel" },
               { step: "4", label: "PR Created", desc: "Review and merge" },
             ].map((item, idx, arr) => (
               <div key={item.step} className="flex items-center gap-4">

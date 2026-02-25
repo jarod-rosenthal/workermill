@@ -42,7 +42,7 @@ import {
   Gauge,
 } from "lucide-react";
 
-// Epic Planning stages
+// Task Planning stages
 const teamPlanningStages = [
   {
     phase: "1",
@@ -86,7 +86,7 @@ const teamPlanningStages = [
     description: "Execute stories in parallel (respecting dependencies)",
     details: [
       "Spawn worker for each ready story",
-      "Coordinate via file locking system",
+      "Coordinate via coordination system",
       "Stream progress to dashboard in real-time",
       "Mark dependencies as satisfied on completion",
     ],
@@ -106,7 +106,7 @@ const teamPlanningStages = [
       "No stories complete → failed",
       "Create PR with all changes",
     ],
-    output: "::result:: marker",
+    output: "Final task status",
   },
 ];
 
@@ -266,7 +266,7 @@ const envVars = {
     { name: "OLLAMA_HOST", required: false, description: "Ollama server URL" },
   ],
   features: [
-    { name: "USE_PRD_ORCHESTRATION", required: false, description: "Enable Epic Planning mode" },
+    { name: "USE_PRD_ORCHESTRATION", required: false, description: "Enable Task Planning mode" },
     { name: "PRD_ORCHESTRATION_MAX_STORIES", required: false, description: "Maximum stories per plan (1-50)" },
     { name: "CHECKPOINT_ENABLED", required: false, description: "Enable state persistence" },
     { name: "CHECKPOINT_INTERVAL", required: false, description: "Sync interval in seconds (default: 60)" },
@@ -290,7 +290,7 @@ export default function AdvancedFeatures() {
         <h1 className="text-3xl font-bold text-foreground mb-2">Advanced Features</h1>
         <p className="text-muted-foreground">
           Comprehensive documentation for WorkerMill's advanced orchestration capabilities:
-          Epic Planning, Worker Checkpointing, Multi-Worker Coordination, and AI Provider Support.
+          Task Planning, Worker Checkpointing, Multi-Worker Coordination, and AI Provider Support.
         </p>
       </div>
 
@@ -300,7 +300,7 @@ export default function AdvancedFeatures() {
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
           <a href="#team-planning" className="flex items-center gap-2 p-3 rounded-lg bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 transition-colors">
             <FileText className="w-4 h-4 text-green-500" />
-            <span className="text-sm font-medium text-foreground">Epic Planning</span>
+            <span className="text-sm font-medium text-foreground">Task Planning</span>
           </a>
           <a href="#checkpointing" className="flex items-center gap-2 p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 transition-colors">
             <Save className="w-4 h-4 text-blue-500" />
@@ -342,18 +342,18 @@ export default function AdvancedFeatures() {
             <FileText className="w-6 h-6 text-green-500" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-foreground">Epic Planning</h2>
-            <p className="text-sm text-muted-foreground">Multi-story execution engine for complex tasks</p>
+            <h2 className="text-2xl font-bold text-foreground">Task Planning</h2>
+            <p className="text-sm text-muted-foreground">Multi-task execution engine for complex work</p>
           </div>
         </div>
 
-        {/* Epic Planning Overview */}
+        {/* Task Planning Overview */}
         <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-6">
-          <h3 className="font-semibold text-foreground mb-3">What is Epic Planning?</h3>
+          <h3 className="font-semibold text-foreground mb-3">What is Task Planning?</h3>
           <p className="text-muted-foreground mb-4">
-            When a task is created, the Planning Agent analyzes your ticket and creates an execution plan — transforming
+            When a task is created, WorkerMill analyzes your ticket and creates an execution plan — transforming
             complex requirements into coordinated, parallel implementation workflows. It decomposes requirements into
-            discrete "stories" with dependencies, then orchestrates their parallel execution with real-time progress tracking.
+            discrete sub-tasks with dependencies, then orchestrates their parallel execution with real-time progress tracking.
           </p>
           <div className="grid md:grid-cols-2 gap-4">
             <div className="bg-background rounded-lg p-4 border border-border">
@@ -377,7 +377,7 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* Epic Planning Workflow Phases */}
+        {/* Task Planning Workflow Phases */}
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-foreground">Workflow Phases</h3>
           <div className="space-y-0">
@@ -421,7 +421,7 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* Epic Planning Configuration */}
+        {/* Task Planning Configuration */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border bg-muted/30">
             <h3 className="font-semibold text-foreground flex items-center gap-2">
@@ -437,7 +437,7 @@ export default function AdvancedFeatures() {
                   <tbody className="divide-y divide-border">
                     <tr>
                       <td className="py-2 text-muted-foreground">usePrdOrchestration</td>
-                      <td className="py-2 text-foreground">Enable Epic Planning</td>
+                      <td className="py-2 text-foreground">Enable Task Planning</td>
                     </tr>
                     <tr>
                       <td className="py-2 text-muted-foreground">prdMaxStories</td>
@@ -469,7 +469,7 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* Epic Planning Result Mapping */}
+        {/* Task Planning Result Mapping */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border bg-muted/30">
             <h3 className="font-semibold text-foreground">Result Mapping</h3>

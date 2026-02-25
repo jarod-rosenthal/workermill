@@ -41,7 +41,7 @@ export default function Epics() {
       <div>
         <h1 className="text-3xl font-bold text-foreground mb-2">Epics & Stories</h1>
         <p className="text-muted-foreground">
-          Break down large features into manageable stories with the Board system.
+          Organize large features into a board of tasks that WorkerMill executes in dependency order.
           Access at <code className="bg-muted px-1.5 py-0.5 rounded">/boards</code>.
         </p>
       </div>
@@ -54,25 +54,25 @@ export default function Epics() {
         </h2>
         <div className="bg-card border border-border rounded-xl p-6">
           <p className="text-muted-foreground mb-4">
-            Epics are containers for related stories that together deliver a larger feature.
-            Instead of creating one massive task, break it into smaller stories that workers
+            An epic is a board of related tasks (cards) that together deliver a larger feature.
+            Instead of creating one massive task, break it into smaller cards that workers
             can execute independently.
           </p>
           <div className="grid md:grid-cols-3 gap-4">
             <div className="p-4 bg-muted/30 rounded-lg">
               <Layers className="w-5 h-5 text-primary mb-2" />
-              <h4 className="font-medium text-foreground mb-1">Epic</h4>
+              <h4 className="font-medium text-foreground mb-1">Board</h4>
               <p className="text-sm text-muted-foreground">The overall feature or initiative</p>
             </div>
             <div className="p-4 bg-muted/30 rounded-lg">
               <FileText className="w-5 h-5 text-primary mb-2" />
-              <h4 className="font-medium text-foreground mb-1">Stories</h4>
-              <p className="text-sm text-muted-foreground">Individual units of work within the epic</p>
+              <h4 className="font-medium text-foreground mb-1">Cards</h4>
+              <p className="text-sm text-muted-foreground">Individual tasks within the board</p>
             </div>
             <div className="p-4 bg-muted/30 rounded-lg">
               <GitBranch className="w-5 h-5 text-primary mb-2" />
               <h4 className="font-medium text-foreground mb-1">Execution</h4>
-              <p className="text-sm text-muted-foreground">Stories run in order, building on each other</p>
+              <p className="text-sm text-muted-foreground">Cards run in dependency order, building on each other</p>
             </div>
           </div>
         </div>
@@ -89,22 +89,22 @@ export default function Epics() {
             <li className="flex gap-4">
               <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold flex-shrink-0">1</div>
               <div>
-                <h4 className="font-medium text-foreground">Navigate to Epics</h4>
+                <h4 className="font-medium text-foreground">Navigate to Boards</h4>
                 <p className="text-sm text-muted-foreground">Go to <code className="bg-muted px-1.5 py-0.5 rounded">/boards</code> from the sidebar</p>
               </div>
             </li>
             <li className="flex gap-4">
               <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold flex-shrink-0">2</div>
               <div>
-                <h4 className="font-medium text-foreground">Click "New Epic"</h4>
-                <p className="text-sm text-muted-foreground">Fill in the epic name, key (e.g., AUTH), description, and target repository</p>
+                <h4 className="font-medium text-foreground">Click "New Board"</h4>
+                <p className="text-sm text-muted-foreground">Fill in the board name, key (e.g., AUTH), description, and target repository</p>
               </div>
             </li>
             <li className="flex gap-4">
               <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold flex-shrink-0">3</div>
               <div>
-                <h4 className="font-medium text-foreground">Add Stories</h4>
-                <p className="text-sm text-muted-foreground">Click into the epic to open the board and add stories</p>
+                <h4 className="font-medium text-foreground">Add Cards</h4>
+                <p className="text-sm text-muted-foreground">Click into the board and add cards for each task</p>
               </div>
             </li>
           </ol>
@@ -249,11 +249,11 @@ export default function Epics() {
           <ol className="space-y-3 text-sm">
             <li className="flex gap-3">
               <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
-              <span><strong className="text-foreground">Click "Run Epic"</strong> - Workers start executing stories in order</span>
+              <span><strong className="text-foreground">Click "Run All"</strong> - Workers start executing cards in dependency order</span>
             </li>
             <li className="flex gap-3">
               <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
-              <span><strong className="text-foreground">Monitor Progress</strong> - Watch stories move through the board</span>
+              <span><strong className="text-foreground">Monitor Progress</strong> - Watch cards move through the board</span>
             </li>
             <li className="flex gap-3">
               <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
@@ -261,12 +261,12 @@ export default function Epics() {
             </li>
             <li className="flex gap-3">
               <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
-              <span><strong className="text-foreground">Handle Failures</strong> - Edit and retry any failed stories</span>
+              <span><strong className="text-foreground">Handle Failures</strong> - Edit and retry any failed cards</span>
             </li>
           </ol>
           <div className="mt-4 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
             <p className="text-sm text-yellow-500">
-              <strong>Tip:</strong> Stories execute sequentially by default. Each story can build on the previous one's changes.
+              <strong>Tip:</strong> Cards execute in dependency order by default. Each card can build on the previous one's changes.
             </p>
           </div>
         </div>

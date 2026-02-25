@@ -370,9 +370,11 @@ export function validateEnvironment(): void {
   const warnings: string[] = [];
 
   // Check env vars directly (not config values which have fallbacks)
+  // DB_HOST/DB_PASSWORD are NOT required when DATABASE_URL is set (PgBouncer sidecar)
+  const hasDbUrl = !!process.env.DATABASE_URL;
   const criticalVars = [
-    { name: "DB_HOST", hasValue: !!process.env.DB_HOST },
-    { name: "DB_PASSWORD", hasValue: !!process.env.DB_PASSWORD },
+    { name: "DB_HOST", hasValue: hasDbUrl || !!process.env.DB_HOST },
+    { name: "DB_PASSWORD", hasValue: hasDbUrl || !!process.env.DB_PASSWORD },
     { name: "COGNITO_USER_POOL_ID", hasValue: !!process.env.COGNITO_USER_POOL_ID },
     { name: "COGNITO_CLIENT_ID", hasValue: !!process.env.COGNITO_CLIENT_ID },
   ];

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { In, MoreThan, Brackets } from "typeorm";
+// typeorm imports (Brackets etc.) removed — using JS filter for correctness match with REST
 import { authenticateSSE } from "../../middleware/auth.js";
 import { acquireSSESlot, releaseSSESlot } from "../../middleware/sse-limiter.js";
 import { AppDataSource } from "../../db/connection.js";
@@ -106,45 +106,35 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       const terminalStatuses = ["completed", "deployed", "failed"];
       const doneStatuses = ["completed", "deployed", "pr_approved", "review_approved"];
 
-      // ── Targeted queries: only fetch tasks that will actually be displayed ──
-      // Instead of fetching ALL tasks (hundreds) and filtering in JS,
-      // let PostgreSQL do the filtering with indexed WHERE clauses.
-      const [displayableTasks, periodStats] = await Promise.all([
-        // 1. Tasks visible in the dashboard (active + recent intermediate + recent terminal)
-        taskRepo
-          .createQueryBuilder("task")
-          .where("task.orgId = :orgId", { orgId: org.id })
-          .andWhere(
-            new Brackets((qb) => {
-              qb.where("task.status IN (:...active)", { active: alwaysActiveStatuses })
-                .orWhere("task.status IN (:...intermediate) AND task.updatedAt > :intermediateCutoff", {
-                  intermediate: intermediateStatuses,
-                  intermediateCutoff,
-                })
-                .orWhere("task.status IN (:...terminal) AND task.completedAt > :displayCutoff", {
-                  terminal: terminalStatuses,
-                  displayCutoff,
-                });
-            }),
-          )
-          .orderBy("task.createdAt", "DESC")
-          .take(100)
-          .getMany(),
+      // ── Fetch displayable tasks using same JS filter as REST endpoint ──
+      // Previous SQL-based query had subtle mismatches with the REST endpoint's
+      // JS filter, causing "flash then disappear" on page load.
+      // Use the same approach as the REST endpoint for correctness.
+      const allTasks = await taskRepo.find({
+        where: { orgId: org.id },
+        order: { createdAt: "DESC" },
+        take: 500,
+      });
 
-        // 2. Lightweight aggregate for period stats (no full rows fetched)
-        taskRepo
-          .createQueryBuilder("task")
-          .select("COUNT(*) FILTER (WHERE task.status IN (:...done))", "periodCompleted")
-          .addSelect("COUNT(*) FILTER (WHERE task.status = 'failed' AND task.completed_at IS NOT NULL)", "periodFailed")
-          .addSelect("COALESCE(SUM(task.estimated_cost_usd) FILTER (WHERE task.status IN (:...costStatuses)), 0)", "periodCost")
-          .where("task.orgId = :orgId", { orgId: org.id })
-          .andWhere("task.createdAt >= :resetAt", { resetAt: countersResetAt })
-          .setParameters({
-            done: doneStatuses,
-            costStatuses: [...doneStatuses, "failed"],
-          })
-          .getRawOne(),
-      ]);
+      const displayableTasks = allTasks.filter((t) => {
+        if (alwaysActiveStatuses.includes(t.status)) return true;
+        if (intermediateStatuses.includes(t.status)) {
+          const taskTime = t.updatedAt || t.createdAt;
+          return taskTime && new Date(taskTime) > intermediateCutoff;
+        }
+        if (terminalStatuses.includes(t.status) && t.completedAt && new Date(t.completedAt) > displayCutoff) {
+          return true;
+        }
+        return false;
+      });
+
+      // Lightweight aggregate for period stats
+      const tasksSinceReset = allTasks.filter((t) => new Date(t.createdAt) >= countersResetAt);
+      const periodCompleted = tasksSinceReset.filter((t) => doneStatuses.includes(t.status)).length;
+      const periodFailed = tasksSinceReset.filter((t) => t.status === "failed" && t.completedAt).length;
+      const periodCost = tasksSinceReset
+        .filter((t) => doneStatuses.includes(t.status) || t.status === "failed")
+        .reduce((sum, t) => sum + (Number(t.estimatedCostUsd) || 0), 0);
 
       // "Active" = tasks where a worker is actually executing (not queued, not waiting)
       const executingStatuses = ["claimed", "environment_setup", "executing", "planning", "dispatching", "pending_plan_approval", "reviewing", "consolidating"];
@@ -152,13 +142,10 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
         totalWorkers: 7,
         activeWorkers: displayableTasks.filter(t => executingStatuses.includes(t.status)).length,
         queueDepth: displayableTasks.filter((t) => t.status === "queued").length,
-        periodCost: Number(periodStats?.periodCost) || 0,
-        periodCompleted: Number(periodStats?.periodCompleted) || 0,
-        periodFailed: Number(periodStats?.periodFailed) || 0,
+        periodCost,
+        periodCompleted,
+        periodFailed,
       };
-
-      // Sort tasks: group PRD parent tasks with their children (children below parent)
-      const activeTasks = sortTasksWithPrdGrouping(displayableTasks);
 
       // Sort with PRD grouping, then limit to 10
       const filteredRunningTasks = sortTasksWithPrdGrouping(displayableTasks).slice(0, 10);

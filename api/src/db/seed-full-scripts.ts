@@ -23,12 +23,17 @@ const EXECUTION_PATH = resolve(__dirname, "../../../worker/execution");
 const SKIP_DIRS = new Set(["lib", "v2"]);
 
 // Database connection (uses DATABASE_URL environment variable)
+// SSL is enabled by default for RDS connections via bastion tunnel
 const dataSource = new DataSource({
   type: "postgres",
   url: process.env.DATABASE_URL,
   entities: [join(__dirname, "../models/*.{ts,js}")],
   synchronize: false,
   logging: false,
+  ssl:
+    process.env.DB_SSL === "false"
+      ? false
+      : { rejectUnauthorized: false },
 });
 
 interface ScriptFile {

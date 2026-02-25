@@ -53,10 +53,13 @@ Before EVERY `git commit` that touches `web/` files, workers MUST run:
 cd web && npm run lint
 cd web && npm run format
 
-# Step 2: Type check
+# Step 2: Run tests
+cd web && npm run test
+
+# Step 3: Type check
 cd web && npm run check
 
-# Step 3: Build
+# Step 4: Build
 cd web && npm run build
 ```
 
@@ -254,10 +257,14 @@ flagdeck/
 │   │   │   │       └── +page.server.ts  # Flag detail loader
 │   │   │   ├── segments/
 │   │   │   │   ├── +page.svelte         # Segment list
+│   │   │   │   ├── new/
+│   │   │   │   │   └── +page.svelte     # Create segment form (rule builder)
 │   │   │   │   └── [id]/
-│   │   │   │       └── +page.svelte     # Segment detail
+│   │   │   │       └── +page.svelte     # Segment detail/edit
 │   │   │   ├── experiments/
 │   │   │   │   ├── +page.svelte         # Experiment list
+│   │   │   │   ├── new/
+│   │   │   │   │   └── +page.svelte     # Create experiment form
 │   │   │   │   └── [id]/
 │   │   │   │       └── +page.svelte     # Experiment detail with stats
 │   │   │   ├── environments/
@@ -307,6 +314,8 @@ flagdeck/
 
 ## Core Domain Model
 
+> **CRITICAL — Exact Names Matter:** MongoDB collection names and field names in this section are the **canonical source of truth**. Use them exactly as written. Do NOT rename collections (e.g., `audit_log` is correct, NOT `audit_logs`). Do NOT rename fields (e.g., `impressions` is correct, NOT `exposures`). Do NOT omit fields marked in the schema — every field listed is required in the Go struct and MongoDB document.
+
 ### Flag Document (`flags` collection)
 
 ```json
@@ -315,15 +324,15 @@ flagdeck/
   "key": "string (unique, slug-format: lowercase, hyphens, e.g. 'dark-mode')",
   "name": "string (human-readable, e.g. 'Dark Mode')",
   "description": "string (optional)",
-  "type": "string (enum: 'boolean', 'string', 'number', 'json')",
-  "default_value": "any (matches type — false for boolean, '' for string, 0 for number, {} for json)",
+  "type": "string (enum: 'boolean', 'string', 'number', 'json')",      // ⚠ REQUIRED — used in evaluation response and UI type display
+  "default_value": "any (matches type — false for boolean, '' for string, 0 for number, {} for json)",  // ⚠ REQUIRED — returned when flag is disabled or no rules match
   "environments": {
     "production": {
       "enabled": "boolean",
       "rules": [
         {
           "id": "string (uuid)",
-          "priority": "integer (lower = evaluated first)",
+          "priority": "integer (lower = evaluated first)",  // ⚠ REQUIRED — rules MUST be sorted by this field during evaluation
           "conditions": [
             {
               "attribute": "string (e.g. 'country', 'plan', 'email')",
@@ -331,7 +340,7 @@ flagdeck/
               "value": "any (string, number, or array for 'in'/'not_in')"
             }
           ],
-          "logic": "string (enum: 'and', 'or') — how conditions within this rule combine. Default: 'and'",
+          "logic": "string (enum: 'and', 'or') — how conditions within this rule combine. Default: 'and'",  // ⚠ REQUIRED — must implement both AND and OR evaluation
           "value": "any (the value served when this rule matches)",
           "rollout_percentage": "number (0-100, optional — if set, only this % of matched users get the value)"
         }
@@ -680,6 +689,8 @@ If MongoDB or Redis is unreachable, return status `"degraded"` with the affected
 }
 ```
 
+> **Exact field names:** Use `total` (not `total_items` or `count`), `total_pages` (not `pages`), `per_page` (not `limit` or `page_size`). Frontend components depend on these exact names.
+
 ### Flag Evaluation (SDK-facing)
 
 | Endpoint | Method | Auth | Rate Limit | Description |
@@ -846,6 +857,8 @@ All error responses follow this format:
 
 In-memory rate limiting (token bucket). State resets on container restart — acceptable for single-instance showcase.
 
+> **CRITICAL — Rate limits MUST be wired in `router.go`:** Defining the rate limit middleware in `middleware/ratelimit.go` is not sufficient. The rate limiter MUST be applied to the actual route groups in `router/router.go`. Each endpoint group in the table above must have its rate limiter attached as Fiber middleware on the corresponding route group. If rate limits are defined but not mounted on routes, they do nothing.
+
 **Rate limit headers on every response:**
 ```
 X-RateLimit-Limit: 1000
@@ -923,16 +936,22 @@ require (
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@sveltejs/adapter-auto": "^3.0.0",
     "@sveltejs/kit": "^2.0.0",
     "@sveltejs/vite-plugin-svelte": "^4.0.0",
+    "@testing-library/svelte": "^5.0.0",
+    "@testing-library/jest-dom": "^6.0.0",
+    "jsdom": "^25.0.0",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "typescript": "^5.0.0",
     "vite": "^6.0.0",
+    "vitest": "^2.0.0",
     "tailwindcss": "^4.0.0",
     "eslint": "^9.0.0",
     "prettier": "^3.0.0",
@@ -941,6 +960,8 @@ require (
   "type": "module"
 }
 ```
+
+> **Testing deps are required:** `vitest`, `@testing-library/svelte`, `@testing-library/jest-dom`, and `jsdom` must be in devDependencies. The `test` and `test:watch` scripts must be present. Without these, frontend tests cannot run.
 
 ### docker-compose.yml (local development)
 
@@ -1108,6 +1129,29 @@ Tests run against local MongoDB and Redis (docker-compose services or testcontai
 | `experiment_stats_test.go` | Chi-squared calculation, confidence intervals, minimum sample guard |
 | `auth_test.go` | JWT lifecycle, API key auth, role enforcement |
 
+### SvelteKit Frontend Tests
+
+Tests use Vitest + `@testing-library/svelte` to mount and interact with real Svelte components. Tests MUST render actual Svelte components — not raw HTML strings. Each test file imports the component, mounts it with `render()`, and asserts on the rendered DOM.
+
+| File | What it tests |
+|------|--------------|
+| `flags.test.ts` | Flag list page — renders flag table, search input, tag filters, pagination |
+| `flag-detail.test.ts` | Flag detail page — environment tabs, rule display, toggle functionality |
+| `segments.test.ts` | Segment list page — renders segment table, search, delete confirmation |
+| `experiments.test.ts` | Experiment list page — status badges, variant display |
+| `auth.test.ts` | Login page — form validation, submit behavior, error display |
+| `components.test.ts` | Shared components — EmptyState, Sidebar, FlagToggle, RolloutSlider |
+
+> **CRITICAL — Real Component Tests Required:** Every test MUST use `@testing-library/svelte` to `render()` the actual Svelte component. Tests that create raw HTML with `document.createElement` or `innerHTML` and never import/mount a `.svelte` file are **not valid tests** and do not satisfy this requirement. The purpose of frontend tests is to verify component behavior — element rendering, user interactions, conditional display, API call mocking — not to test that HTML strings contain substrings.
+
+```bash
+# Run frontend tests
+cd web && npm run test
+
+# Run specific test
+cd web && npx vitest run src/routes/flags/flags.test.ts
+```
+
 ### Key Test Scenarios
 
 1. **Evaluation determinism**: Same (flagKey, userID) → same result across 1,000 evaluations
@@ -1207,7 +1251,7 @@ jobs:
         run: CGO_ENABLED=0 go build -o /dev/null ./cmd/server
 
   web:
-    name: Frontend — Lint, Check, Build
+    name: Frontend — Lint, Test, Check, Build
     runs-on: ubuntu-latest
 
     steps:
@@ -1224,6 +1268,10 @@ jobs:
       - name: Lint
         working-directory: web
         run: npm run lint
+
+      - name: Test
+        working-directory: web
+        run: npm run test
 
       - name: Type check
         working-directory: web
@@ -1288,6 +1336,7 @@ jobs:
 | Go tests | 100% pass | `cd api && go test ./... -v -count=1 -race` |
 | Go build | Successful binary | `cd api && go build -o /dev/null ./cmd/server` |
 | Frontend lint | 0 errors | `cd web && npm run lint` |
+| Frontend tests | 100% pass | `cd web && npm run test` |
 | Frontend types | 0 errors | `cd web && npm run check` |
 | Frontend build | Successful | `cd web && npm run build` |
 | Docker build | Successful | `docker build -f api/Dockerfile api/` |
@@ -1420,14 +1469,18 @@ Workers MUST create a `README.md` covering:
 ### Dashboard (SvelteKit)
 - [ ] Login page with JWT authentication
 - [ ] Flag list with search, tag filter, environment toggle
-- [ ] Flag detail with targeting rule builder UI
+- [ ] Flag create form (`/flags/new`) with type selector, default value, tags
+- [ ] Flag detail (`/flags/[id]`) with targeting rule builder UI
 - [ ] Visual rollout percentage slider
 - [ ] Environment switcher (tabs or dropdown)
-- [ ] Segment list and detail with rule builder
+- [ ] Segment list and segment create form (`/segments/new`) with rule builder
+- [ ] Segment detail (`/segments/[id]`) with edit capability
 - [ ] Experiment list with status badges
-- [ ] Experiment detail with results chart and confidence indicator
+- [ ] Experiment create form (`/experiments/new`) with variant configuration
+- [ ] Experiment detail (`/experiments/[id]`) with results chart and confidence indicator
 - [ ] Audit log timeline view
 - [ ] API key management page
+- [ ] All CRUD routes have corresponding SvelteKit pages (list, create/new, detail/edit)
 - [ ] Responsive layout (desktop + tablet)
 
 ### Production Hardening
@@ -1448,7 +1501,7 @@ Workers MUST create a `README.md` covering:
 - [ ] 30 audit log entries
 - [ ] Seed is idempotent
 
-### Testing
+### Testing (Go Backend)
 - [ ] All Go tests pass with `-race` flag
 - [ ] Evaluation determinism test (1,000 iterations, same result)
 - [ ] Rollout uniformity test (10K users, 50% ± 2%)
@@ -1457,6 +1510,16 @@ Workers MUST create a `README.md` covering:
 - [ ] Cache hit/miss/invalidation/failure tested
 - [ ] Auth lifecycle tested (register → login → access → refresh)
 - [ ] Role enforcement tested (viewer, editor, admin)
+
+### Testing (SvelteKit Frontend)
+- [ ] All frontend tests use `@testing-library/svelte` `render()` with real `.svelte` components (no raw HTML stubs)
+- [ ] Flag list page test — renders table, search input works, pagination controls visible
+- [ ] Flag detail page test — environment tabs render, rule display shows conditions
+- [ ] Segment list page test — renders segment table with rule count
+- [ ] Experiment list page test — status badges display correctly
+- [ ] Login page test — form validation, error display on failed login
+- [ ] Shared component tests — EmptyState, FlagToggle, RolloutSlider render correctly
+- [ ] `npm run test` passes with 0 failures
 
 ### Quality
 - [ ] `golangci-lint run ./api/...` — 0 errors

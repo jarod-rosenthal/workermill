@@ -40,9 +40,10 @@ export default function TrustCallout() {
                 Zero-trust AI engineering.
               </h3>
               <p className="mt-2 text-slate-400 leading-relaxed">
-                WorkerMill executes on your infrastructure — the agent runs
-                locally, clones your repo locally, pushes from your machine. We
-                never clone or run your code.
+                WorkerMill executes on your infrastructure. On Pro, the agent
+                runs locally — your code never leaves your machine. On Max, you
+                can optionally run in the cloud for parallel workloads. Either
+                way, you control where your code runs.
               </p>
             </div>
           </div>

@@ -27,13 +27,13 @@ const features: FeatureRow[] = [
     cursor_note: "Free limited",
   },
   {
-    feature: "Self-hosted / local-first",
-    description: "Run workers on your own machine — code never leaves your environment",
+    feature: "Runs on your infrastructure",
+    description: "Local execution by default, optional cloud for scaling — you choose where code runs",
     workermill: "yes",
     devin: "no",
     copilot: "no",
     cursor: "partial",
-    workermill_note: "Full local mode",
+    workermill_note: "Local or cloud",
     cursor_note: "IDE only",
   },
   {

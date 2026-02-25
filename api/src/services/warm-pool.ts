@@ -526,10 +526,10 @@ export function buildTaskEnvironment(
     AWS_REGION: config.aws.region,
     ECS_CLUSTER: config.aws.ecsCluster,
     WORKER_PROVIDER: task.workerProvider || "anthropic",
-    MANAGER_PROVIDER: credentials.managerProvider || "anthropic",
+    MANAGER_PROVIDER: credentials.managerProvider || "",
     MANAGER_MODEL: credentials.managerModelId || "",
-    MAX_REVIEW_REVISIONS: String(credentials.maxReviewRevisions ?? 3),
-    MAX_PER_STORY_REVISIONS: String(credentials.maxPerStoryRevisions ?? 2),
+    MAX_REVIEW_REVISIONS: String(credentials.maxReviewRevisions),
+    MAX_PER_STORY_REVISIONS: String(credentials.maxPerStoryRevisions),
     PARENT_TASK_ID: task.parentTaskId || task.id,
   };
 

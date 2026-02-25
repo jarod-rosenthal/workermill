@@ -995,7 +995,7 @@ router.get(
       defaultGithubRepo: org.defaultGithubRepo ?? null,
       defaultBitbucketRepo: org.defaultBitbucketRepo ?? null,
       defaultGitlabRepo: org.defaultGitlabRepo ?? null,
-      blockerMaxAutoRetries: org.blockerMaxAutoRetries ?? 3,
+      blockerMaxAutoRetries: org.blockerMaxAutoRetries,
       blockerAutoRetryEnabled: org.blockerAutoRetryEnabled !== false,
       pushAfterCommit: org.pushAfterCommit !== false,
       gracefulShutdownEnabled: org.gracefulShutdownEnabled !== false,

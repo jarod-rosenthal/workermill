@@ -309,10 +309,10 @@ export async function getOrgCredentials(
       // v1-only: Ralph execution settings from org
       useRalph: org.useRalphExecution ?? false,
       ralphMaxStories: org.ralphMaxStories ?? 10,
-      maxReviewRevisions: org.maxReviewRevisions ?? 3,
-      maxPerStoryRevisions: org.maxPerStoryRevisions ?? 2,
+      maxReviewRevisions: org.maxReviewRevisions,
+      maxPerStoryRevisions: org.maxPerStoryRevisions,
       // Manager provider and model for Epic/PRD workflows
-      managerProvider: org.managerProvider || "openai",
+      managerProvider: org.managerProvider,
       managerModelId: org.managerModelId || undefined,
       // Multi-SCM provider support
       scmProvider: org.scmProvider || "github",

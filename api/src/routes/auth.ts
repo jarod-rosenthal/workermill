@@ -25,7 +25,7 @@ import {
   getUserOrganizations,
   hasOrgAccess,
 } from "../services/user-organizations.js";
-import { randomBytes, randomUUID } from "crypto";
+import { randomBytes, randomUUID, createHash } from "crypto";
 import bcrypt from "bcryptjs";
 import { authenticateUserAllowNoOrg } from "../middleware/auth.js";
 import axios from "axios";
@@ -1587,9 +1587,9 @@ router.get("/microsoft/authorize", async (req: Request, res: Response) => {
     scope: "openid profile email User.Read",
     state,
     response_mode: "query",
-    // PKCE
-    code_challenge: codeVerifier, // In production, this should be SHA256 hash
-    code_challenge_method: "plain", // Using plain for simplicity; use S256 in production
+    // PKCE with S256: code_challenge = BASE64URL(SHA256(code_verifier))
+    code_challenge: createHash("sha256").update(codeVerifier).digest("base64url"),
+    code_challenge_method: "S256",
   });
 
   const authorizeUrl = `https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?${params.toString()}`;
@@ -1611,7 +1611,7 @@ router.post(
   [
     body("code").isString().notEmpty().withMessage("Authorization code is required"),
     body("redirectUri").isString().notEmpty().withMessage("Redirect URI is required"),
-    body("state").optional().isString(),
+    body("state").isString().notEmpty().withMessage("State parameter is required"),
   ],
   async (req: Request, res: Response) => {
     try {
@@ -1632,20 +1632,15 @@ router.post(
         return res.status(503).json({ error: "Microsoft SSO not configured" });
       }
 
-      // Verify state if provided
-      let codeVerifier: string | undefined;
-      let inviteToken: string | undefined;
-      if (state) {
-        const stateData = await getMicrosoftOAuthState(state);
-        if (!stateData) {
-          return res.status(400).json({ error: "Invalid or expired state parameter" });
-        }
-        if (stateData.expiresAt < Date.now()) {
-          return res.status(400).json({ error: "State parameter expired" });
-        }
-        codeVerifier = stateData.codeVerifier;
-        inviteToken = stateData.inviteToken;
+      // Verify state (required for CSRF protection)
+      const stateData = await getMicrosoftOAuthState(state);
+      if (!stateData) {
+        return res.status(400).json({ error: "Invalid or expired state parameter" });
       }
+      if (stateData.expiresAt < Date.now()) {
+        return res.status(400).json({ error: "State parameter expired" });
+      }
+      const { codeVerifier, inviteToken } = stateData;
 
       // Exchange code for tokens with Microsoft
       const tokenParams: Record<string, string> = {
@@ -1654,11 +1649,8 @@ router.post(
         code,
         redirect_uri: redirectUri,
         grant_type: "authorization_code",
+        code_verifier: codeVerifier,
       };
-
-      if (codeVerifier) {
-        tokenParams.code_verifier = codeVerifier;
-      }
 
       const tokenResponse = await axios.post(
         "https://login.microsoftonline.com/organizations/oauth2/v2.0/token",
@@ -2120,7 +2112,7 @@ router.post(
   [
     body("code").isString().notEmpty().withMessage("Authorization code is required"),
     body("redirectUri").isString().notEmpty().withMessage("Redirect URI is required"),
-    body("state").optional().isString(),
+    body("state").isString().notEmpty().withMessage("State parameter is required"),
   ],
   async (req: Request, res: Response) => {
     try {
@@ -2137,18 +2129,15 @@ router.post(
         return res.status(503).json({ error: "GitHub SSO not configured" });
       }
 
-      // Verify state
-      let inviteToken: string | undefined;
-      if (state) {
-        const stateData = await getGithubOAuthState(state);
-        if (!stateData) {
-          return res.status(400).json({ error: "Invalid or expired state parameter" });
-        }
-        if (stateData.expiresAt < Date.now()) {
-          return res.status(400).json({ error: "State parameter expired" });
-        }
-        inviteToken = stateData.inviteToken;
+      // Verify state (required for CSRF protection)
+      const stateData = await getGithubOAuthState(state);
+      if (!stateData) {
+        return res.status(400).json({ error: "Invalid or expired state parameter" });
       }
+      if (stateData.expiresAt < Date.now()) {
+        return res.status(400).json({ error: "State parameter expired" });
+      }
+      const inviteToken = stateData.inviteToken;
 
       // Exchange code for access token
       const tokenResponse = await axios.post(

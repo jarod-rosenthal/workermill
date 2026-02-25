@@ -80,11 +80,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ***REMOVED******REMOVED******REMOVED*** DO NOT Modify Infrastructure Outside Terraform
 
 **Terraform is the ONLY source of truth. NEVER:**
-- Create AWS resources via console
-- Manually modify ECS task definitions
+- Create AWS resources via console or CLI (`aws ecs register-task-definition`, `aws ecr create-repository`, etc.) — ALWAYS add to Terraform first, then apply
+- Manually modify ECS task definitions — `deploy.sh` handles image updates; Terraform owns the task definition structure
 - Push Docker images without using `deploy.sh`
 - Change security groups, IAM roles, or networking outside Terraform
 - Use `terraform apply -target` without **explicit user approval** — targeted applies cause state drift that compounds over time and creates dangerous surprises on the next full apply
+- Reference third-party Docker Hub images directly in task definitions — copy them to private ECR first to avoid rate limits
+- Leave Terraform in a dirty state — after ANY infrastructure change, run `terraform plan` and confirm zero drift before considering the work done. If drift remains, fix it or explain why it's expected.
+- Run `terraform apply` without first running `terraform plan` and reviewing the output
+
+**Terraform workflow:**
+1. Make changes in `.tf` files
+2. `terraform plan` — review ALL changes
+3. `terraform apply` — full apply, NOT targeted
+4. `terraform plan` again — confirm **zero drift**
+5. Commit `.tf` changes to git
+
+**Remaining known drift:** ECS task definitions cycle because `deploy.sh` registers new revisions with pinned image digests, while Terraform uses `:latest`. This is expected — `deploy.sh` owns image deployments, Terraform owns the task definition structure. Do NOT chase this drift with repeated applies.
 
 ***REMOVED******REMOVED******REMOVED*** DO NOT Add Labels When Creating Jira Tickets
 

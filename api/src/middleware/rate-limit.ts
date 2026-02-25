@@ -16,43 +16,51 @@ function userOrgKey(req: any): string {
 }
 
 /**
- * Create a Redis-backed store for rate limiting if REDIS_URL is configured.
- * Falls back to the default in-memory store otherwise.
+ * Shared Redis client for rate limiting (lazy, one connection for all limiters).
  */
-export function createStore(): Partial<Pick<Options, "store">> {
-  if (!config.redisUrl) {
-    return {};
-  }
+let redisClient: Redis | null = null;
+
+function getRedisClient(): Redis | null {
+  if (redisClient) return redisClient;
+  if (!config.redisUrl) return null;
 
   try {
-    const client = new Redis(config.redisUrl, {
+    redisClient = new Redis(config.redisUrl, {
       maxRetriesPerRequest: 1,
       enableOfflineQueue: false,
       lazyConnect: true,
     });
 
-    client.connect().catch((err) => {
+    redisClient.connect().catch((err) => {
       logger.warn("Rate limiter Redis connection failed — falling back to in-memory", {
         error: err instanceof Error ? err.message : String(err),
       });
     });
 
-    return {
-      store: new RedisStore({
-        // Rate-limit-redis uses ioredis sendCommand
-        sendCommand: (...args: string[]) => client.call(args[0], ...args.slice(1)) as never,
-        prefix: "rl:",
-      }),
-    };
+    return redisClient;
   } catch (err) {
-    logger.warn("Failed to create Redis rate limit store — using in-memory", {
+    logger.warn("Failed to create Redis rate limit client — using in-memory", {
       error: err instanceof Error ? err.message : String(err),
     });
-    return {};
+    return null;
   }
 }
 
-const storeConfig = createStore();
+/**
+ * Create a Redis-backed store for a rate limiter.
+ * Each limiter MUST have its own RedisStore instance with a unique prefix.
+ */
+export function createStore(prefix: string): Partial<Pick<Options, "store">> {
+  const client = getRedisClient();
+  if (!client) return {};
+
+  return {
+    store: new RedisStore({
+      sendCommand: (...args: string[]) => client.call(args[0], ...args.slice(1)) as never,
+      prefix,
+    }),
+  };
+}
 
 /**
  * Rate limiter for webhook endpoints (Jira, GitHub, Linear)
@@ -65,7 +73,7 @@ export const webhookLimiter = rateLimit({
   message: { error: "Too many requests, please try again later" },
   standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
   legacyHeaders: false, // Disable `X-RateLimit-*` headers
-  ...storeConfig,
+  ...createStore("rl:webhook:"),
   handler: (req, res, _next, options) => {
     logger.warn("Webhook rate limit exceeded", {
       ip: req.ip,
@@ -87,7 +95,7 @@ export const authenticatedLimiter = rateLimit({
   message: { error: "Too many requests, please try again later" },
   standardHeaders: true,
   legacyHeaders: false,
-  ...storeConfig,
+  ...createStore("rl:auth:"),
   handler: (req, res, _next, options) => {
     logger.warn("API rate limit exceeded", {
       ip: req.ip,
@@ -109,7 +117,7 @@ export const strictLimiter = rateLimit({
   message: { error: "Too many attempts, please try again later" },
   standardHeaders: true,
   legacyHeaders: false,
-  ...storeConfig,
+  ...createStore("rl:strict:"),
   handler: (req, res, _next, options) => {
     logger.warn("Strict rate limit exceeded", {
       ip: req.ip,
@@ -131,7 +139,7 @@ export const taskCreationLimiter = rateLimit({
   message: { error: "Task creation rate limit exceeded. Try again later." },
   standardHeaders: true,
   legacyHeaders: false,
-  ...storeConfig,
+  ...createStore("rl:taskcreate:"),
   handler: (req, res, _next, options) => {
     logger.warn("Task creation rate limit exceeded", {
       ip: req.ip,
@@ -152,7 +160,7 @@ export const workerLogLimiter = rateLimit({
   message: { error: "Too many log requests, please slow down" },
   standardHeaders: true,
   legacyHeaders: false,
-  ...storeConfig,
+  ...createStore("rl:workerlog:"),
   handler: (req, res, _next, options) => {
     logger.warn("Worker log rate limit exceeded", {
       ip: req.ip,

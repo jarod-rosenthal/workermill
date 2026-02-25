@@ -742,13 +742,25 @@ export class EpicCoordinator {
 
           // Non-transient or too many consecutive failures
           if (transient && this.hasAnyCommittedCode) {
-            // Code is already committed and pushed — don't kill the task over transient API errors
+            // Code is already committed and pushed — don't kill the task over transient API errors.
+            // Report escalated status so the task doesn't end up as "completed" via spawner fallback.
+            const errMsg = loopError instanceof Error ? loopError.message : String(loopError);
             console.warn(
               `[Epic] ${MAX_CONSECUTIVE_ERRORS} consecutive transient errors, but code is committed on remote branches. Exiting gracefully.`
             );
             this.postDashboardLog(
               `⚠️ Coordination API unreachable after ${MAX_CONSECUTIVE_ERRORS} attempts, but all committed code is safely on remote branches. Stopping gracefully.`
             );
+            try {
+              await this.updateTaskStatus(
+                "escalated",
+                `Coordination API unreachable — code is on remote branches`,
+                `${MAX_CONSECUTIVE_ERRORS} consecutive transient errors: ${errMsg}`,
+                this.currentPrUrl
+              );
+            } catch {
+              // Best-effort — if this also fails, spawner fallback will handle it
+            }
             this.missionActive = false;
             continue;
           }

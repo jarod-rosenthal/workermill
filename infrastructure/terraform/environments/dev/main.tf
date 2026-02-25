@@ -165,6 +165,9 @@ module "ecs_service" {
   api_image_digest             = var.api_image_digest
   ses_source_email             = "noreply@workermill.com"
 
+  # Encryption
+  encryption_key_secret_arn = module.secrets.encryption_key_arn
+
   # Monitoring (disabled in dev)
   sentry_dsn = ""
 

@@ -23,12 +23,12 @@ import {
   runQualityVerification,
   postQualityMetrics,
   type QualityMetrics,
-} from "../epic/quality-runner.js";
-import type { EvaluateQualityResponse } from "../epic/decision-client.js";
-import { createAIClient, type AIClient, type AIClientConfig } from "../epic/ai-client-types.js";
-import { DecisionClient, createDecisionClient, type WorkerConfigResponse } from "../epic/decision-client.js";
+} from "../epic/dist/quality-runner.js";
+import type { EvaluateQualityResponse } from "../epic/dist/decision-client.js";
+import { createAIClient, type AIClient, type AIClientConfig } from "../epic/dist/ai-client-types.js";
+import { DecisionClient, createDecisionClient, type WorkerConfigResponse } from "../epic/dist/decision-client.js";
 // GitOps for worktree-based parallel execution (shared with Epic mode)
-import { GitOps, type StoryBranchResult } from "../epic/git-ops.js";
+import { GitOps, type StoryBranchResult } from "../epic/dist/git-ops.js";
 
 /**
  * Provider routing configuration.
@@ -287,7 +287,7 @@ export class MultiExpertCoordinator {
   // Max parallel experts (from env or default)
   private maxParallelExperts: number = parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10);
   // Server-side prompt templates (loaded from Decision API)
-  private serverPromptTemplates?: import("../epic/decision-client.js").WorkerConfigResponse["promptTemplates"];
+  private serverPromptTemplates?: import("../epic/dist/decision-client.js").WorkerConfigResponse["promptTemplates"];
   // Track active worktrees for cleanup
   private activeWorktrees: Map<number, string> = new Map();
   // Track story branch names for consolidated PR
@@ -2418,7 +2418,7 @@ The repository is cloned at: **${promptRepoPath}**
       const result = await client.execute({
         prompt,
         systemPrompt: expertConfig?.systemPrompt || `You are a ${story.persona} working on a software project.`,
-        persona: story.persona as import("../epic/types.js").ExpertPersona,
+        persona: story.persona as import("../epic/dist/types.js").ExpertPersona,
         model,
         workingDir: workingDir || this.repoPath,
         storyId: story.id,

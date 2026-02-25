@@ -84,7 +84,7 @@ resource "aws_ecs_task_definition" "orchestrator" {
     },
     {
       name      = "pgbouncer"
-      image     = "edoburu/pgbouncer:1.22.0"
+      image     = "edoburu/pgbouncer:v1.23.1-p3"
       essential = true
       portMappings = []
 

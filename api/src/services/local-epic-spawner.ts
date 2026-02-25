@@ -801,6 +801,18 @@ class LocalEpicSpawner {
       MAX_PARALLEL_EXPERTS: String(task.organization?.maxParallelExperts),
       ORG_GUIDELINES: task.organization?.aiGuidelines || "",
       CODEBASE_INDEXING_ENABLED: task.organization?.codebaseIndexingEnabled === true ? "true" : "false",
+
+      // Quality gate thresholds (from org settings)
+      QUALITY_THRESHOLDS: JSON.stringify({
+        qualityGateEnabled: task.organization?.qualityGateEnabled ?? false,
+        minQualityScore: task.organization?.minQualityScore ?? null,
+        minTestCoveragePercent: task.organization?.minTestCoveragePercent ?? null,
+        maxSecurityHighVulns: task.organization?.maxSecurityHighVulns ?? null,
+        blockOnTypeErrors: task.organization?.blockOnTypeErrors ?? false,
+        blockOnTestFailures: task.organization?.blockOnTestFailures ?? false,
+        autoFixEnabled: task.organization?.autoFixEnabled ?? false,
+        autoFixMaxIterations: task.organization?.autoFixMaxIterations ?? 3,
+      }),
     };
 
     // Filter out empty values and build -e args

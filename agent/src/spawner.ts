@@ -357,6 +357,9 @@ export async function spawnWorker(
     REVIEW_ENABLED: task.skipManagerReview === false ? "true" : "false",
     SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (orgConfig.selfReviewEnabled === true) ? "true" : "false",
 
+    // Quality gate thresholds (from org settings via /api/agent/config)
+    QUALITY_THRESHOLDS: orgConfig.qualityThresholds ? JSON.stringify(orgConfig.qualityThresholds) : "",
+
     // Persistent workspace for batch board executions
     ...(task.boardExecutionId ? { PERSISTENT_WORKSPACE: workDir } : {}),
     ...(task.boardExecutionId && hasClonedRepo(task.boardExecutionId)

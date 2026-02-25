@@ -10,7 +10,6 @@ import {
   Cpu,
   Rocket,
   Zap,
-  ChevronRight,
   ChevronDown,
   Terminal,
 } from "lucide-react";
@@ -56,7 +55,7 @@ const EPIC_NAMES = [
 
 // ─── Persona colors ─────────────────────────────────────────────────────────
 
-const PERSONA_COLORS: Record<string, string> = {
+const _PERSONA_COLORS: Record<string, string> = {
   devops_engineer: "text-emerald-400",
   backend_developer: "text-blue-400",
   frontend_developer: "text-purple-400",
@@ -64,7 +63,7 @@ const PERSONA_COLORS: Record<string, string> = {
   tech_writer: "text-slate-400",
 };
 
-const PERSONA_BG: Record<string, string> = {
+const _PERSONA_BG: Record<string, string> = {
   devops_engineer: "bg-emerald-500/20",
   backend_developer: "bg-blue-500/20",
   frontend_developer: "bg-purple-500/20",
@@ -72,7 +71,7 @@ const PERSONA_BG: Record<string, string> = {
   tech_writer: "bg-slate-500/20",
 };
 
-const PERSONA_BORDER: Record<string, string> = {
+const _PERSONA_BORDER: Record<string, string> = {
   devops_engineer: "border-emerald-500/30",
   backend_developer: "border-blue-500/30",
   frontend_developer: "border-purple-500/30",

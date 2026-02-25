@@ -18,7 +18,6 @@ import {
   Code2,
   FileCode,
   GitBranch,
-  AlertTriangle,
   XCircle,
   Archive,
 } from "lucide-react";

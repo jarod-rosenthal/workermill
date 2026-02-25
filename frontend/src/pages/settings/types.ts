@@ -82,6 +82,7 @@ export interface Settings {
   // Auto-workflow settings
   autoReviewEnabled: boolean;
   autoDeployEnabled: boolean;
+  autoImproveEnabled: boolean;
   autoSkillExtraction: boolean;
   prdAutoRun: boolean;
   remoteAgentOnly: boolean;

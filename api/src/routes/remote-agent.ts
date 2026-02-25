@@ -1016,6 +1016,17 @@ router.get(
       maxPerStoryRevisions: org.maxPerStoryRevisions,
       // Codebase RAG
       codebaseIndexingEnabled: org.codebaseIndexingEnabled === true,
+      // Quality gate thresholds (passed through to worker via QUALITY_THRESHOLDS env var)
+      qualityThresholds: {
+        qualityGateEnabled: org.qualityGateEnabled ?? false,
+        minQualityScore: org.minQualityScore,
+        minTestCoveragePercent: org.minTestCoveragePercent,
+        maxSecurityHighVulns: org.maxSecurityHighVulns,
+        blockOnTypeErrors: org.blockOnTypeErrors ?? false,
+        blockOnTestFailures: org.blockOnTestFailures ?? false,
+        autoFixEnabled: org.autoFixEnabled ?? false,
+        autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
+      },
     });
   }),
 );

@@ -188,6 +188,8 @@ export interface EpicConfig {
     maxSecurityHighVulns: number | null;
     blockOnTypeErrors: boolean;
     blockOnTestFailures: boolean;
+    autoFixEnabled: boolean;
+    autoFixMaxIterations: number;
   };
   /** Task summary for memory context retrieval (REQ-19) */
   taskSummary?: string;

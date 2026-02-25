@@ -33,6 +33,7 @@ import { spawn, execSync } from "child_process";
 import { writeFileSync, unlinkSync, existsSync, readFileSync } from "fs";
 import { runQualityVerification, postQualityMetrics, type QualityMetrics } from "./quality-runner.js";
 import type { EvaluateQualityResponse } from "./decision-client.js";
+import { runAutoFixWithTracking, formatAutoFixResult, type AutoFixResult, type QualityGateResult as AutoFixQualityGateResult } from "./auto-fix-agent.js";
 
 /**
  * Personas excluded from question routing (Tier 2/3 fallback).
@@ -2690,21 +2691,85 @@ export class EpicCoordinator {
         console.log(`[Epic] Quality Gate: ${statusIcon}${reasons}`);
 
         if (!qualityGateResult.pass) {
-          console.log("[Epic] Quality gate failed - blocking PR creation");
-          this.postDashboardLog("Quality gate failed — PR blocked");
-          const failureReasons = [...qualityGateResult.reasons, ...qualityGateResult.blockers];
-          await this.ticketOps.postComment(
-            `❌ Quality gate failed - PR not created.\n\n**Issues:**\n${failureReasons.map((r) => `- ${r}`).join("\n")}\n\n*Fix the issues and re-run, or add the \`bypass-quality-gate\` label to skip.*`,
-          );
+          const thresholds = this.config.qualityThresholds;
+          let autoFixSucceeded = false;
 
-          await this.updateTaskStatus(
-            "quality_gate_failed",
-            `Quality gate failed: ${failureReasons.join(", ")}`,
-            `Quality gate blocked PR creation: ${failureReasons[0] || "quality check failed"}`,
-          );
+          // Attempt auto-fix if enabled in org settings
+          if (thresholds?.autoFixEnabled) {
+            console.log("[Epic] Quality gate failed — attempting auto-fix...");
+            this.postDashboardLog("Quality gate failed — running auto-fix agent");
 
-          this.missionActive = false;
-          return;
+            const repoPath = this.gitOps.getRepoPath();
+
+            // Bridge EvaluateQualityResponse → AutoFixQualityGateResult
+            const toAutoFixGateResult = (evalResult: EvaluateQualityResponse): AutoFixQualityGateResult => ({
+              passed: evalResult.pass,
+              checks: [
+                ...evalResult.reasons.map((r) => ({ name: "quality", passed: false, message: r })),
+                ...evalResult.blockers.map((b) => ({ name: "blocker", passed: false, message: b })),
+              ],
+              summary: [...evalResult.reasons, ...evalResult.blockers].join("; "),
+              failureReasons: [...evalResult.reasons, ...evalResult.blockers],
+            });
+
+            // Re-check callback: runs quality verification + decision API evaluation
+            const recheckQuality = async () => {
+              const metrics = await runQualityVerification(repoPath);
+              const diffSummary = `score=${metrics.qualityScore}/100, typeErrors=${metrics.typeErrors}, lintErrors=${metrics.lintErrors}, testsFailed=${metrics.testsFailed}`;
+              const evalResult = await this.decisionClient.evaluateQuality({
+                diff: diffSummary,
+                storyDescription: this.config.jiraRequirements || undefined,
+              });
+              return { metrics, gateResult: toAutoFixGateResult(evalResult) };
+            };
+
+            const autoFixResult = await runAutoFixWithTracking(
+              toAutoFixGateResult(qualityGateResult),
+              capturedQualityMetrics!,
+              { maxIterations: thresholds.autoFixMaxIterations, projectRoot: repoPath },
+              recheckQuality,
+              { baseUrl: this.config.apiBaseUrl, apiKey: this.config.orgApiKey },
+            );
+
+            console.log(formatAutoFixResult(autoFixResult));
+
+            if (autoFixResult.success) {
+              // Auto-fix succeeded — commit fixes, update metrics, continue to PR
+              autoFixSucceeded = true;
+              console.log("[Epic] Auto-fix succeeded — committing fixes");
+              this.postDashboardLog(`Auto-fix succeeded after ${autoFixResult.totalIterations} iteration(s)`);
+
+              execSync(`git -C "${repoPath}" add -A && git -C "${repoPath}" commit -m "fix: auto-fix quality gate issues" --no-verify || true`);
+
+              // Re-capture metrics after auto-fix for accurate PR reporting
+              const updatedMetrics = await runQualityVerification(repoPath);
+              capturedQualityMetrics = updatedMetrics;
+              await postQualityMetrics(updatedMetrics, this.config.apiBaseUrl, this.config.orgApiKey, this.config.taskId);
+            } else {
+              // Auto-fix failed — fall through to existing failure path
+              console.log("[Epic] Auto-fix could not resolve all quality issues");
+              this.postDashboardLog(`Auto-fix incomplete — ${autoFixResult.issuesRemaining.length} issue(s) remain`);
+            }
+          }
+
+          // If auto-fix didn't run or didn't succeed, block PR creation
+          if (!autoFixSucceeded) {
+            console.log("[Epic] Quality gate failed - blocking PR creation");
+            this.postDashboardLog("Quality gate failed — PR blocked");
+            const failureReasons = [...qualityGateResult.reasons, ...qualityGateResult.blockers];
+            await this.ticketOps.postComment(
+              `❌ Quality gate failed - PR not created.\n\n**Issues:**\n${failureReasons.map((r) => `- ${r}`).join("\n")}\n\n*Fix the issues and re-run, or add the \`bypass-quality-gate\` label to skip.*`,
+            );
+
+            await this.updateTaskStatus(
+              "quality_gate_failed",
+              `Quality gate failed: ${failureReasons.join(", ")}`,
+              `Quality gate blocked PR creation: ${failureReasons[0] || "quality check failed"}`,
+            );
+
+            this.missionActive = false;
+            return;
+          }
         }
       } else {
         console.warn(

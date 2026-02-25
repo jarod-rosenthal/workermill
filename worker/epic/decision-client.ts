@@ -390,7 +390,7 @@ export class DecisionClient {
         return {
           category: "network",
           fixable: false,
-          action: "auto_retry",
+          action: "retry",
           affectedFiles: [],
           summary: "Decision API unavailable — local fallback detected transient error",
           fixStrategy: null,

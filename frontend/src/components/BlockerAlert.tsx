@@ -36,7 +36,7 @@ interface BlockerAlertProps {
 }
 
 export function BlockerAlert({
-  taskId,
+  taskId: _taskId,
   parentTaskId,
   blocker,
   onResolved,

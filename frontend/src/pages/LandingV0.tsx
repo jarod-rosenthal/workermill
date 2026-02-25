@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { Home, Search, FolderOpen, Sparkles, Lock, Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock } from "lucide-react";
+import { Lock, Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
@@ -265,44 +265,6 @@ function InstallSection() {
   );
 }
 
-// ─── Sidebar ────────────────────────────────────────────────────────────────
-
-function Sidebar({
-  onNavigate,
-}: {
-  onNavigate: (target: string) => void;
-}) {
-  const items = [
-    { icon: Home, label: "Home", action: () => onNavigate("top") },
-    { icon: Search, label: "Search", action: () => onNavigate("showcase") },
-    {
-      icon: FolderOpen,
-      label: "Projects",
-      action: () => onNavigate("showcase"),
-    },
-    {
-      icon: Sparkles,
-      label: "Showcase",
-      action: () => onNavigate("showcase"),
-    },
-  ];
-
-  return (
-    <aside className="fixed left-0 top-16 h-[calc(100vh-4rem)] w-16 bg-slate-950/80 backdrop-blur-sm hidden lg:flex flex-col items-center py-4 gap-2 z-40">
-      {items.map((item) => (
-        <button
-          key={item.label}
-          onClick={item.action}
-          title={item.label}
-          className="w-10 h-10 rounded-lg flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
-        >
-          <item.icon className="w-5 h-5" />
-        </button>
-      ))}
-    </aside>
-  );
-}
-
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function LandingV0() {
@@ -320,14 +282,6 @@ export default function LandingV0() {
       }
     }
   }, []);
-
-  const handleSidebarNavigate = (target: string) => {
-    const refMap: Record<string, React.RefObject<HTMLDivElement | null>> = {
-      top: topRef,
-      showcase: showcaseRef,
-    };
-    refMap[target]?.current?.scrollIntoView({ behavior: "smooth" });
-  };
 
   return (
     <main className="min-h-screen relative overflow-hidden">

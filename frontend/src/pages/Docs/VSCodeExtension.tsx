@@ -15,7 +15,6 @@ import {
   FileText,
   AlertTriangle,
   Play,
-  Square,
   Rocket,
   Settings,
   ExternalLink,

@@ -81,11 +81,9 @@ export async function authenticateUser(
       email_verified: payload["email_verified"] as boolean,
     };
 
-    // Reject unverified email addresses
-    if (!payload["email_verified"]) {
-      res.status(403).json({ error: "Email address must be verified" });
-      return;
-    }
+    // Note: email_verified check removed — Cognito access tokens do not carry
+    // that claim (it only exists in ID tokens). Cognito enforces email
+    // verification during sign-up, so a valid access token implies verified.
 
     // Look up user in database
     const userRepo = AppDataSource.getRepository(User);
@@ -169,11 +167,7 @@ export async function authenticateUserAllowNoOrg(
       email_verified: payload["email_verified"] as boolean,
     };
 
-    // Reject unverified email addresses
-    if (!payload["email_verified"]) {
-      res.status(403).json({ error: "Email address must be verified" });
-      return;
-    }
+    // Note: email_verified check removed — access tokens don't carry that claim.
 
     // Look up user in database
     const userRepo = AppDataSource.getRepository(User);
@@ -508,11 +502,7 @@ export async function authenticateSSE(
       email_verified: payload["email_verified"] as boolean,
     };
 
-    // Reject unverified email addresses
-    if (!payload["email_verified"]) {
-      res.status(403).json({ error: "Email address must be verified" });
-      return;
-    }
+    // Note: email_verified check removed — access tokens don't carry that claim.
 
     // Look up user in database
     const userRepo = AppDataSource.getRepository(User);

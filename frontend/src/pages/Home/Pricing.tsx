@@ -227,9 +227,9 @@ export function Pricing() {
               </p>
             </div>
             <div>
-              <p className="font-medium text-foreground mb-1">Runs on Your Machine</p>
+              <p className="font-medium text-foreground mb-1">Runs Where You Choose</p>
               <p className="text-sm text-muted-foreground">
-                Workers execute locally using your Anthropic account. Your code never leaves your hardware.
+                Pro runs locally on your hardware. Max adds optional cloud execution for parallel workloads.
               </p>
             </div>
             <div>

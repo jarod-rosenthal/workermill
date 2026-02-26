@@ -164,7 +164,7 @@ resource "aws_ecs_task_definition" "api" {
         { name = "REDIS_URL", value = var.redis_url },
         { name = "PGBOUNCER_HOST", value = "127.0.0.1" },
         { name = "PGBOUNCER_PORT", value = "5432" },
-        { name = "DB_POOL_MAX", value = "20" }
+        { name = "DB_POOL_MAX", value = "60" }
       ]
 
       secrets = concat([

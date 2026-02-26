@@ -217,6 +217,16 @@ async function handlePlanningTask(
     }
     credentials = claimResponse.data.credentials;
     claimedTask = claimResponse.data.task;
+
+    // Send an immediate heartbeat so the cloud orchestrator's findPlanningTasks()
+    // sees this org has an active agent and skips it. Without this, there's a race
+    // window between claim and the first periodic heartbeat where cloud can also
+    // start planning for the same task.
+    api.post("/api/agent/heartbeat", {
+      agentId: config.agentId,
+      activeTasks: [task.id],
+      agentVersion: AGENT_VERSION,
+    }).catch(() => {}); // fire-and-forget, non-critical
   } catch {
     planningInProgress.delete(task.id);
     return;

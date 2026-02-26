@@ -614,7 +614,15 @@ function cleanAgentState(): void {
  * can't re-invoke itself. Instead, we detach from the VS Code side by
  * redirecting stdio to the log file and calling child.unref().
  */
+let startInFlight = false;
+
 export function startAgentProcess(log?: (msg: string) => void): void {
+  // Prevent concurrent calls from multiple activation paths
+  if (startInFlight) {
+    log?.("Start already in-flight — skipping");
+    return;
+  }
+
   const binary = getAgentBinaryPath();
   log?.(`Binary resolved to: ${binary}`);
   log?.(`Binary exists: ${fs.existsSync(binary)}`);
@@ -628,6 +636,8 @@ export function startAgentProcess(log?: (msg: string) => void): void {
   if (existingPid) {
     log?.(`Stale PID ${existingPid} found — cleaning up`);
   }
+
+  startInFlight = true;
 
   // Agent is not running — clean up any stale state files
   cleanAgentState();
@@ -696,9 +706,20 @@ export function startAgentProcess(log?: (msg: string) => void): void {
     });
 
     child.unref();
+
+    // Write PID file immediately so subsequent calls see it before the agent
+    // async startup writes its own. The agent will overwrite with the same PID.
+    if (child.pid) {
+      const pidFile = path.join(os.homedir(), ".workermill", "agent.pid");
+      try {
+        fs.writeFileSync(pidFile, String(child.pid), { mode: 0o644 });
+      } catch { /* best effort */ }
+    }
+
     log?.(`Agent spawned (child PID ${child.pid})`);
   } catch (err) {
     log?.(`Spawn failed: ${err instanceof Error ? err.message : String(err)}`);
+    startInFlight = false;
   } finally {
     fs.closeSync(logFd);
     if (stdinFd !== undefined) try { fs.closeSync(stdinFd); } catch { /* already closed by spawn */ }
@@ -712,6 +733,7 @@ export function startAgentProcess(log?: (msg: string) => void): void {
  * gracefully (deregisters, cleans up workers, removes PID file).
  */
 export async function stopAgentProcess(): Promise<boolean> {
+  startInFlight = false;
   // Fast path: SIGTERM via PID (completes in <1s typically)
   const pid = readAgentPid();
   if (pid && isProcessAlive(pid)) {

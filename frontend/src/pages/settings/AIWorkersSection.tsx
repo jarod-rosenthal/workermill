@@ -494,7 +494,27 @@ export function AIWorkersSection({
               )}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-2">
+                  Max Files Per Story
+                </label>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="number"
+                    min="3"
+                    max="15"
+                    step="1"
+                    value={settings.maxTargetFiles}
+                    onChange={(e) => updateSetting("maxTargetFiles", parseInt(e.target.value, 10) || 5)}
+                    className="w-20 px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none text-sm text-center"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Maximum files each story can target. Higher values allow larger stories but increase merge conflict risk.
+                </p>
+              </div>
+              <div className="opacity-60">
+                <label className="block text-sm font-medium text-muted-foreground mb-2">
                   Story Calibration Multiplier
+                  <span className="ml-2 text-xs text-yellow-500 font-semibold px-1.5 py-0.5 rounded bg-yellow-500/10 border border-yellow-500/20">Experimental</span>
                   <span className="ml-2 text-xs text-purple-400">({Math.round(settings.storyCalibrationMultiplier * 100)}%)</span>
                 </label>
                 <div className="flex items-center gap-4">

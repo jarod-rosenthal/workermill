@@ -368,6 +368,9 @@ export class Organization {
   @Column({ name: "planning_mode", type: "varchar", length: 20, default: "strict" })
   planningMode: string; // "strict" (full critic loop) or "simplified" (single pass + refinement)
 
+  @Column({ name: "max_target_files", type: "integer", default: 5 })
+  maxTargetFiles: number; // Max files each story can target (3-15)
+
   @Column({ name: "story_calibration_multiplier", type: "decimal", precision: 3, scale: 2, default: 0.4 })
   storyCalibrationMultiplier: number; // Temperature dial: 0.3-1.0, lower = fewer stories
 

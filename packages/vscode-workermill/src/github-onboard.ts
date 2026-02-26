@@ -192,6 +192,52 @@ function httpsPostJsonWithBearer<T>(
   });
 }
 
+/** POST JSON with API key authentication. */
+function httpsPostJsonWithApiKey<T>(
+  url: string,
+  apiKey: string,
+  body: Record<string, unknown>,
+): Promise<{ status: number; data: T }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const payload = JSON.stringify(body);
+
+    const req = https.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname + parsed.search,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+          "x-api-key": apiKey,
+          "User-Agent": "WorkerMill-VSCode",
+        },
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          try {
+            resolve({ status: res.statusCode || 0, data: JSON.parse(data) as T });
+          } catch {
+            resolve({ status: res.statusCode || 0, data: {} as T });
+          }
+        });
+      },
+    );
+
+    req.on("error", reject);
+    req.setTimeout(30_000, () => {
+      req.destroy();
+      reject(new Error("Request timeout"));
+    });
+    req.write(payload);
+    req.end();
+  });
+}
+
 /** GET JSON from an HTTPS URL without authentication. */
 function httpsGetJsonNoAuth<T>(url: string): Promise<{ status: number; data: T }> {
   return new Promise((resolve, reject) => {
@@ -234,6 +280,136 @@ function httpsGetJsonNoAuth<T>(url: string): Promise<{ status: number; data: T }
 
 // Pending Google SSO auth — resolved when the URI handler fires
 let pendingGoogleAuth: { state: string; resolve: (success: boolean) => void } | null = null;
+
+/**
+ * Prompt the user to configure SCM access after SSO sign-in.
+ * Offers GitHub App install, PAT paste, or skip.
+ * Returns true if SCM was configured, false if skipped.
+ */
+export async function promptScmSetup(
+  apiKey: string,
+  log: (msg: string) => void,
+): Promise<boolean> {
+  const choice = await vscode.window.showQuickPick(
+    [
+      {
+        label: "$(key) Use a Personal Access Token",
+        description: "Create a GitHub PAT with repo access",
+        action: "pat" as const,
+      },
+      {
+        label: "$(github) Install GitHub App (coming soon)",
+        description: "One-click, no tokens to manage",
+        action: "app" as const,
+      },
+      {
+        label: "$(debug-step-over) Skip for now",
+        description: "You can configure this later in Settings",
+        action: "skip" as const,
+      },
+    ],
+    {
+      placeHolder: "WorkerMill needs access to your repositories to clone and push code",
+      title: "Configure Repository Access",
+      ignoreFocusOut: true,
+    },
+  );
+
+  if (!choice || choice.action === "skip") {
+    log("SCM setup skipped — user can configure later");
+    return false;
+  }
+
+  if (choice.action === "app") {
+    // GitHub App not yet available — fall through to PAT
+    vscode.window.showInformationMessage(
+      "GitHub App integration is coming soon. Please use a Personal Access Token for now.",
+    );
+    return promptPatSetup(apiKey, log);
+  }
+
+  return promptPatSetup(apiKey, log);
+}
+
+/**
+ * Guide the user through creating and pasting a GitHub PAT.
+ */
+async function promptPatSetup(
+  apiKey: string,
+  log: (msg: string) => void,
+): Promise<boolean> {
+  // Open GitHub PAT creation page with pre-filled scopes
+  const createAction = await vscode.window.showInformationMessage(
+    "Create a Personal Access Token on GitHub with 'repo' scope, then paste it here.",
+    { modal: false },
+    "Create Token on GitHub",
+    "I already have one",
+  );
+
+  if (createAction === "Create Token on GitHub") {
+    vscode.env.openExternal(
+      vscode.Uri.parse(
+        "https://github.com/settings/tokens/new?scopes=repo,workflow&description=WorkerMill%20Agent",
+      ),
+    );
+  } else if (!createAction) {
+    // Dismissed — skip
+    return false;
+  }
+
+  // Prompt for the token
+  const token = await vscode.window.showInputBox({
+    prompt: "Paste your GitHub Personal Access Token (starts with ghp_ or github_pat_)",
+    placeHolder: "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    password: true,
+    ignoreFocusOut: true,
+    validateInput: (value) => {
+      if (!value.trim()) return "Token is required";
+      if (!value.startsWith("ghp_") && !value.startsWith("github_pat_")) {
+        return "Token should start with ghp_ (classic) or github_pat_ (fine-grained)";
+      }
+      return null;
+    },
+  });
+
+  if (!token) return false;
+
+  // Send to API for validation and storage
+  log("Validating GitHub token...");
+  try {
+    const { status, data } = await httpsPostJsonWithApiKey<{
+      configured: boolean;
+      username: string;
+    }>(
+      `${API_BASE}/api/agent/configure-scm`,
+      apiKey,
+      { token: token.trim(), provider: "github" },
+    );
+
+    if (status === 401) {
+      vscode.window.showErrorMessage(
+        "Token validation failed. Make sure your PAT has 'repo' scope and hasn't expired.",
+      );
+      return false;
+    }
+
+    if (status < 200 || status >= 300) {
+      vscode.window.showErrorMessage(`Failed to save token (HTTP ${status}).`);
+      return false;
+    }
+
+    log(`GitHub token validated — authenticated as ${data.username}`);
+    vscode.window.showInformationMessage(
+      `Repository access configured as ${data.username}. You're all set!`,
+    );
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`SCM token setup failed: ${msg}`);
+    vscode.window.showErrorMessage(`Failed to configure repository access: ${msg}`);
+    return false;
+  }
+}
 
 /**
  * Install agent binary if needed, start it, and set context.
@@ -506,6 +682,10 @@ export async function signUpWithGitHub(
     }
 
     log("Sign-up successful");
+
+    // Prompt for SCM access before finishing setup
+    await promptScmSetup(data.apiKey, log);
+
     const success = await finishSetup(data.apiKey, log, {
       orgId: data.orgId,
       orgName: data.orgName,
@@ -516,7 +696,7 @@ export async function signUpWithGitHub(
     // Fire-and-forget — don't block client.connect() in extension.ts
     vscode.window
       .showInformationMessage(
-        `Welcome to WorkerMill, ${data.name || session.account.label}! Your GitHub token has been configured automatically.`,
+        `Welcome to WorkerMill, ${data.name || session.account.label}! Your agent is connecting...`,
         "Open Dashboard",
       )
       .then((action) => {
@@ -645,6 +825,21 @@ export async function signInWithGitHub(
     }
 
     log("Sign-in successful");
+
+    // Prompt for SCM access before finishing setup (skip if already configured)
+    try {
+      const scmCheck = await httpsGetJson<{ configured: boolean }>(
+        `${API_BASE}/api/agent/scm-status`,
+        data.apiKey,
+      );
+      if (!scmCheck.data.configured) {
+        await promptScmSetup(data.apiKey, log);
+      }
+    } catch {
+      // SCM status check failed — prompt anyway
+      await promptScmSetup(data.apiKey, log);
+    }
+
     const success = await finishSetup(data.apiKey, log, {
       orgId: data.orgId,
       orgName: data.orgName,

@@ -236,8 +236,9 @@ resource "aws_cognito_user_pool_client" "web" {
   callback_urls = [
     "https://${var.domain_name}/auth/callback",
     "https://${var.domain_name}/",
-    "http://localhost:3000/auth/callback", # Local dev
-    "http://localhost:5173/auth/callback", # Vite dev
+    "https://${var.domain_name}/api/auth/vscode-sso-callback", # VS Code Google SSO
+    "http://localhost:3000/auth/callback",                      # Local dev
+    "http://localhost:5173/auth/callback",                      # Vite dev
   ]
 
   logout_urls = [

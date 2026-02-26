@@ -273,7 +273,7 @@ start_bastion_if_needed() {
 
     while [[ $attempt -lt $max_attempts ]]; do
         sleep 5
-        ((attempt++))
+        ((++attempt))
 
         status_json=$(invoke_bastion "status")
         current_state=$(echo "$status_json" | jq -r '.status // "unknown"')
@@ -315,13 +315,13 @@ start_ssh_tunnel() {
     local retry=0
 
     while [[ $retry -lt $max_retries ]]; do
-        ((retry++))
+        ((++retry))
 
-        ***REMOVED*** Start SSH tunnel in background
+        ***REMOVED*** Start SSH tunnel in background (|| true prevents set -e exit on failure)
         ssh -f -N -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
             -i ~/.ssh/workermill-bastion \
             -L 5432:${rds_host}:5432 \
-            ec2-user@${BASTION_IP} 2>/dev/null
+            ec2-user@${BASTION_IP} 2>/dev/null || true
 
         ***REMOVED*** Give it a moment to establish
         sleep 2
@@ -461,7 +461,7 @@ wait_for_deployment() {
             return 0
         fi
 
-        ((attempt++))
+        ((++attempt))
         sleep 5
         echo -e "${YELLOW}  Waiting for health endpoint... ($((attempt * 5))s)${NC}"
     done

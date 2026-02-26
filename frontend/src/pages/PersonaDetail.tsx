@@ -146,6 +146,8 @@ type Tab = "overview" | "directives" | "scripts" | "diff";
 export default function PersonaDetail() {
   const { id } = useParams<{ id: string }>();
   const tokens = useAuthStore((state) => state.tokens);
+  const organization = useAuthStore((state) => state.organization);
+  const isProPlan = !organization?.plan || organization.plan === "pro";
   const navigate = useNavigate();
 
   const [persona, setPersona] = useState<Persona | null>(null);
@@ -826,7 +828,7 @@ export default function PersonaDetail() {
             </div>
 
             <div className="flex items-center gap-2">
-              {!persona.isSystem && (
+              {!persona.isSystem && !isProPlan && (
                 <button
                   onClick={handleDeletePersona}
                   className="flex items-center gap-2 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
@@ -874,7 +876,7 @@ export default function PersonaDetail() {
             <div className="bg-card border border-border rounded-xl p-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-lg font-semibold text-foreground">Persona Details</h2>
-                {!persona.isSystem && !editingOverview && (
+                {!persona.isSystem && !editingOverview && !isProPlan && (
                   <button
                     onClick={() => setEditingOverview(true)}
                     className="flex items-center gap-2 px-3 py-1.5 text-sm text-primary hover:bg-primary/10 rounded-lg transition-colors"
@@ -1091,7 +1093,7 @@ export default function PersonaDetail() {
                     {d.type === "readme" ? "README.md" : d.filename}
                   </button>
                 ))}
-                {!persona.isSystem && (
+                {!persona.isSystem && !isProPlan && (
                   <button
                     onClick={() => setShowNewDirectiveModal(true)}
                     className="flex items-center gap-1 px-3 py-3 text-sm text-muted-foreground hover:text-primary transition-colors"
@@ -1103,7 +1105,7 @@ export default function PersonaDetail() {
 
               {/* Action buttons */}
               <div className="flex items-center gap-2 py-2">
-                {selectedDirective && (
+                {selectedDirective && !isProPlan && (
                   <>
                     {persona.isSystem ? (
                       /* System persona - show Edit (Customize) button */
@@ -1237,7 +1239,7 @@ export default function PersonaDetail() {
                 <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                   <FileText className="h-12 w-12 mb-4 opacity-50" />
                   <p>No directive selected</p>
-                  {persona.directives.length === 0 && !persona.isSystem && (
+                  {persona.directives.length === 0 && !persona.isSystem && !isProPlan && (
                     <button
                       onClick={() => setShowNewDirectiveModal(true)}
                       className="mt-4 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
@@ -1272,7 +1274,7 @@ export default function PersonaDetail() {
                     {s.name}
                   </button>
                 ))}
-                {!persona.isSystem && (
+                {!persona.isSystem && !isProPlan && (
                   <button
                     onClick={() => setShowNewScriptModal(true)}
                     className="flex items-center gap-1 px-3 py-3 text-sm text-muted-foreground hover:text-primary transition-colors"
@@ -1284,7 +1286,7 @@ export default function PersonaDetail() {
             </div>
 
             {/* Action buttons - separate row */}
-            {selectedScript && (
+            {selectedScript && !isProPlan && (
               <div className="flex items-center justify-end gap-2 px-4 py-2 border-b border-border">
                 {persona.isSystem ? (
                   <button
@@ -1330,17 +1332,17 @@ export default function PersonaDetail() {
 
                   <textarea
                     value={scriptContent}
-                    onChange={(e) => !persona.isSystem && setScriptContent(e.target.value)}
-                    readOnly={persona.isSystem}
+                    onChange={(e) => !persona.isSystem && !isProPlan && setScriptContent(e.target.value)}
+                    readOnly={persona.isSystem || isProPlan}
                     className={`w-full min-h-[500px] px-4 py-3 bg-muted/30 border border-border rounded-lg text-foreground text-sm font-mono resize-y ${
-                      persona.isSystem
+                      persona.isSystem || isProPlan
                         ? "cursor-default"
                         : "focus:outline-none focus:ring-2 focus:ring-primary/50"
                     }`}
                     placeholder="Enter script content (TypeScript)..."
                   />
 
-                  {!persona.isSystem && (
+                  {!persona.isSystem && !isProPlan && (
                     <div className="mt-4">
                       <input
                         type="text"
@@ -1363,29 +1365,33 @@ export default function PersonaDetail() {
                           This system persona uses shared execution scripts for git, deploy, and testing operations.
                           Create a customizable copy to add persona-specific scripts.
                         </p>
-                        <button
-                          onClick={handleCustomizePersona}
-                          disabled={customizing}
-                          className="mt-4 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
-                        >
-                          {customizing ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Copy className="h-4 w-4" />
-                          )}
-                          Customize Persona
-                        </button>
+                        {!isProPlan && (
+                          <button
+                            onClick={handleCustomizePersona}
+                            disabled={customizing}
+                            className="mt-4 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                          >
+                            {customizing ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Copy className="h-4 w-4" />
+                            )}
+                            Customize Persona
+                          </button>
+                        )}
                       </>
                     ) : (
                       <>
                         <p>No scripts yet</p>
-                        <button
-                          onClick={() => setShowNewScriptModal(true)}
-                          className="mt-4 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-                        >
-                          <Plus className="h-4 w-4" />
-                          Add Script
-                        </button>
+                        {!isProPlan && (
+                          <button
+                            onClick={() => setShowNewScriptModal(true)}
+                            className="mt-4 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                          >
+                            <Plus className="h-4 w-4" />
+                            Add Script
+                          </button>
+                        )}
                       </>
                     )
                   ) : (

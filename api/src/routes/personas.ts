@@ -5,7 +5,7 @@
  * Admin-only for mutations, authenticated for reads.
  */
 
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { authenticateUser, requireAdmin, authenticateApiKey } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import * as personaService from "../services/persona.js";
@@ -13,6 +13,19 @@ import * as directiveValidation from "../services/directive-validation.js";
 import type { DirectiveType } from "../models/index.js";
 
 const router = Router();
+
+/**
+ * Middleware: require Max or Enterprise plan for persona mutations.
+ * Pro plan users can view personas but not edit/create/delete them.
+ */
+function requirePersonaEditAccess(req: Request, res: Response, next: NextFunction): void {
+  const plan = req.organization?.plan || "pro";
+  if (plan === "pro") {
+    res.status(403).json({ error: "Persona customization requires the Max plan or higher. Upgrade at /pricing." });
+    return;
+  }
+  next();
+}
 
 // ============================================================================
 // Persona Routes
@@ -83,6 +96,7 @@ router.post(
   "/common/directives",
   authenticateUser,
   requireAdmin,
+  requirePersonaEditAccess,
   async (req: Request, res: Response) => {
     try {
       const userId = req.user?.id || null;
@@ -222,7 +236,7 @@ router.get("/:id", authenticateUser, async (req: Request, res: Response) => {
  * POST /api/personas
  * Create a new persona
  */
-router.post("/", authenticateUser, requireAdmin, async (req: Request, res: Response) => {
+router.post("/", authenticateUser, requireAdmin, requirePersonaEditAccess, async (req: Request, res: Response) => {
   try {
     const orgId = req.organization!.id;
     const { slug, name, emoji, color, shortLabel, description, enabled, priority, skills, riskLevel } =
@@ -287,7 +301,7 @@ router.post("/", authenticateUser, requireAdmin, async (req: Request, res: Respo
  * PUT /api/personas/:id
  * Update a persona's metadata
  */
-router.put("/:id", authenticateUser, requireAdmin, async (req: Request, res: Response) => {
+router.put("/:id", authenticateUser, requireAdmin, requirePersonaEditAccess, async (req: Request, res: Response) => {
   try {
     const orgId = req.organization!.id;
     const id = req.params.id as string;
@@ -334,7 +348,7 @@ router.put("/:id", authenticateUser, requireAdmin, async (req: Request, res: Res
  * DELETE /api/personas/:id
  * Delete a persona (not allowed for system personas)
  */
-router.delete("/:id", authenticateUser, requireAdmin, async (req: Request, res: Response) => {
+router.delete("/:id", authenticateUser, requireAdmin, requirePersonaEditAccess, async (req: Request, res: Response) => {
   try {
     const orgId = req.organization!.id;
     const id = req.params.id as string;
@@ -468,6 +482,7 @@ router.post(
   "/:personaId/directives",
   authenticateUser,
   requireAdmin,
+  requirePersonaEditAccess,
   async (req: Request, res: Response) => {
     try {
       const personaId = req.params.personaId as string;
@@ -520,6 +535,7 @@ router.post(
   "/:personaId/directives/:id/rollback",
   authenticateUser,
   requireAdmin,
+  requirePersonaEditAccess,
   async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
@@ -553,6 +569,7 @@ router.delete(
   "/:personaId/directives/:id",
   authenticateUser,
   requireAdmin,
+  requirePersonaEditAccess,
   async (req: Request, res: Response) => {
     try {
       const personaId = req.params.personaId as string;
@@ -697,6 +714,7 @@ router.post(
   "/:personaId/scripts",
   authenticateUser,
   requireAdmin,
+  requirePersonaEditAccess,
   async (req: Request, res: Response) => {
     try {
       const personaId = req.params.personaId as string;
@@ -750,6 +768,7 @@ router.post(
   "/:personaId/scripts/:id/rollback",
   authenticateUser,
   requireAdmin,
+  requirePersonaEditAccess,
   async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
@@ -783,6 +802,7 @@ router.delete(
   "/:personaId/scripts/:id",
   authenticateUser,
   requireAdmin,
+  requirePersonaEditAccess,
   async (req: Request, res: Response) => {
     try {
       const personaId = req.params.personaId as string;
@@ -868,6 +888,7 @@ router.get(
 router.post(
   "/:id/customize",
   authenticateUser,
+  requirePersonaEditAccess,
   async (req: Request, res: Response) => {
     try {
       const personaId = req.params.id as string;
@@ -916,6 +937,7 @@ router.post(
   "/:id/generate-directive",
   authenticateUser,
   requireAdmin,
+  requirePersonaEditAccess,
   async (req: Request, res: Response) => {
     try {
       const personaId = req.params.id as string;

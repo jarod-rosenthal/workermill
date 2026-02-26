@@ -421,9 +421,16 @@ router.put(
         await orgRepo.save(org);
       }
 
+      // Invalidate credential cache so the new token is used immediately
+      if (token || reviewerToken) {
+        const { invalidateOrgCredentialsCache } = await import("../../services/org-credentials.js");
+        invalidateOrgCredentialsCache(org.id);
+      }
+
       logger.info("GitHub settings updated", {
         orgId: org.id,
         tokenUpdated: !!token,
+        tokenPrefix: token ? `${token.substring(0, 8)}...` : undefined,
         reviewerTokenUpdated: !!reviewerToken,
         repoUpdated: defaultRepo !== undefined,
         webhookSecretUpdated: !!webhookSecret,

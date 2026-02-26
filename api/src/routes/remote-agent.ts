@@ -349,11 +349,18 @@ router.post(
       });
     }
 
+    // Diagnostic: log token prefixes so we can debug clone failures
+    const ghTok = credentials.githubToken;
+    const scmTok = credentials.scmToken;
     logger.info("Remote agent claimed task", {
       taskId,
       agentId,
       orgId: org.id,
       status: task?.status,
+      githubTokenPrefix: ghTok ? `${ghTok.substring(0, 8)}...` : "(none)",
+      scmTokenPrefix: scmTok ? `${scmTok.substring(0, 4)}...` : "(none)",
+      githubRepo: task?.githubRepo,
+      scmProvider: task?.scmProvider,
     });
 
     res.json({

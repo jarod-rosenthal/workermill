@@ -157,6 +157,16 @@ Worker POST /api/control-center/logs { batch: [line1, line2, ...] }
 
 DB write and Redis publish happen in the same request handler. SSE writers are separate long-lived connections that only listen to Redis — they never query the DB for live data.
 
+### JWT Token Lifecycle on Long-Lived Connections
+
+SSE connections authenticate via `?token=<jwt>` on connect. JWTs have an expiry (typically 1 hour). SSE connections can last much longer. Policy:
+
+1. **Authenticate once on connect.** Do not periodically revalidate the JWT — this would require DB lookups and defeats the purpose of stateless JWT.
+2. **Set a maximum connection lifetime of 4 hours.** After 4 hours, the server sends a `reconnect` event. The client reconnects with a fresh JWT (it refreshes tokens independently via the auth flow). This limits exposure if a token is compromised.
+3. **Immediate disconnect on user deactivation.** When a user is deactivated or their org membership is revoked, publish a control message via Redis: `PUBLISH session:{sessionId}:control {"action":"disconnect","reason":"auth_revoked"}`. The SSE writer disconnects the session immediately.
+
+This is the same approach used by Slack, Discord, and other real-time platforms. Periodic revalidation on every heartbeat would reintroduce DB load.
+
 ### Connection Keepalive
 
 ALB kills connections idle for 60 seconds. SSE connections must send periodic heartbeat pings to stay alive through the ALB:
@@ -423,7 +433,15 @@ Currently running `cache.t4g.micro` (single node). Redis becomes the backbone of
 
 **No DB polling fallback in the unified SSE writer.** The old SSE endpoints (which do poll the DB) remain available during migration phases, so clients on old code paths are unaffected. Adding a DB polling fallback to the new writer would defeat the purpose and reintroduce the original scaling problem.
 
-**Monitoring:** `pubsub_channels`, `connected_clients`, `used_memory`, `pubsub_patterns`. Alert if `connected_clients` exceeds 80% of max connections (default 65,000 for t4g.micro).
+**Redis pub/sub memory management:** High-volume log channels push through pub/sub. If an SSE writer (subscriber) falls behind, Redis buffers messages in the subscriber's output buffer. Default `client-output-buffer-limit` for pub/sub is `32mb 8mb 60` (32MB hard, 8MB soft sustained for 60s). At scale with many log channels, a slow subscriber could hit this limit and get disconnected by Redis. Set explicit limits in the ElastiCache parameter group:
+
+```
+client-output-buffer-limit pubsub 64mb 16mb 120
+```
+
+This gives subscribers more headroom before Redis disconnects them. Combined with the SSE-side backpressure policy (drop events at 256KB, disconnect at 1MB), slow clients get cut off before they stress Redis.
+
+**Monitoring:** `pubsub_channels`, `connected_clients`, `used_memory`, `pubsub_patterns`. Alert if `connected_clients` exceeds 80% of max connections (default 65,000 for t4g.micro). Alert if `used_memory` exceeds 70% of instance capacity.
 
 ### ECS Fargate
 
@@ -448,9 +466,118 @@ SSE connections are long-lived HTTP/1.1. Key settings:
 | Deregistration delay | 30s | SSE clients reconnect in 1-3s after graceful shutdown signal. No need to hold for 300s. |
 | Sticky sessions | **OFF** | Not needed. Redis-mediated subscriptions allow any instance to handle subscribe/unsubscribe. |
 
-### Database
+### Database (PostgreSQL RDS) — CRITICAL SCALING PLAN
 
-Dramatically reduced read load. Writes unchanged (slightly reduced with log batching). Pool pressure drops significantly. The `DB_POOL_MAX=60` setting provides massive headroom for the write-only workload.
+The current database is a **single `db.t4g.micro` instance** (1 GiB RAM, single AZ, no read replicas). This is a scaling ceiling that must be addressed alongside the SSE work.
+
+#### Current Problem: Connection Exhaustion
+
+RDS `max_connections` formula: `LEAST(DBInstanceClassMemory / 9531392, 5000)`
+
+For `db.t4g.micro` (1 GiB): **max_connections ≈ 112**
+
+| Component | Pool Max | Actual RDS Connections |
+|-----------|----------|----------------------|
+| 2 API instances × `DB_POOL_MAX=60` | 120 | Up to 120 (direct, no PgBouncer) |
+| 1 orchestrator × PgBouncer (8 server conns) | 15 client / 8 server | 8 |
+| **Total** | **135 potential** | **Up to 128** |
+
+We're already at risk of hitting the ~112 limit under load. With horizontal scaling (5-20 API instances), this becomes impossible.
+
+#### Fix 1: PgBouncer Sidecar on API Tasks (Phase 1 prerequisite)
+
+API tasks currently connect directly to RDS. Add the same PgBouncer sidecar pattern the orchestrator already uses:
+
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| Pool mode | Transaction | Same as orchestrator. TypeORM already disables prepared statements when `PGBOUNCER_HOST` is set. |
+| Default pool size | 10 | 10 actual RDS connections per API instance. 5 instances × 10 = 50 connections. |
+| Max client connections | 100 | Handles `DB_POOL_MAX=60` from TypeORM + headroom for spikes. |
+| Server idle timeout | 30s | Release idle server connections quickly. |
+
+**Impact:** 5 API instances: 300 potential → 50 actual RDS connections. 20 instances: 1200 potential → 200 actual. Solves connection exhaustion.
+
+**TypeORM change:** Set `PGBOUNCER_HOST=127.0.0.1` and `PGBOUNCER_PORT=5432` on API tasks (same env vars orchestrator already uses). TypeORM auto-disables prepared statements when `PGBOUNCER_HOST` is set (existing logic in `connection.ts:302`).
+
+#### Fix 2: RDS Instance Upgrade Path
+
+| Scale | Instance | Memory | max_connections | With PgBouncer | Est. Cost |
+|-------|----------|--------|-----------------|---------------|-----------|
+| Current (10 tasks) | `db.t4g.micro` | 1 GiB | ~112 | Sufficient with PgBouncer | $12/mo |
+| Growth (50 tasks) | `db.t4g.small` | 2 GiB | ~224 | Comfortable headroom | $24/mo |
+| Scale (100+ tasks) | `db.t4g.medium` | 4 GiB | ~448 | Room for read replicas + many instances | $48/mo |
+| Enterprise (500+ tasks) | `db.r7g.large` | 16 GiB | ~1,680 | Full horizontal scaling | $190/mo |
+
+Upgrade to `db.t4g.small` when adding PgBouncer. The micro instance CPU is also a constraint for complex queries (6-way board JOINs, full-text search, analytics aggregations).
+
+#### Fix 3: Read Replica
+
+A read replica offloads read-only queries to a separate instance. The SSE multiplexer eliminates DB polling for real-time reads, but significant read load remains:
+
+**Route to read replica (safe, no read-after-write dependency):**
+
+| Query Pattern | File | Frequency | Complexity |
+|--------------|------|-----------|------------|
+| SSE backfill (logs, coordination, code) | backfill endpoints (new) | Per-reconnect burst | Medium |
+| Board detail (6-way JOINs) | `boards.ts:640` | Per user click | Very high |
+| Dashboard control center (500 tasks/org) | `dashboard.ts:22` | Per page load | High |
+| Analytics (stats, costs, token usage) | `analytics/*.ts` | Per session | Medium |
+| Full-text log search | `search.ts:14` | On-demand | Very high |
+| Board list with card counts | `boards.ts:355` | Per page load | Medium |
+
+**Must stay on primary (write-dependent):**
+
+| Query Pattern | Why Primary |
+|--------------|-------------|
+| Orchestrator task claiming | Atomic `UPDATE...WHERE status='queued'` |
+| Task state transitions | Read-after-write consistency |
+| Coordination write+read | Workers read their own writes |
+| Log ingestion | Write path |
+
+**TypeORM native replication support:**
+
+```typescript
+export const AppDataSource = new DataSource({
+  type: "postgres",
+  replication: {
+    master: { host: process.env.DB_PRIMARY_HOST, ... },
+    slaves: [{ host: process.env.DB_REPLICA_HOST, ... }],
+  },
+});
+```
+
+TypeORM routes `find*()` / `.getMany()` / `.getOne()` to slaves, and `save()` / `update()` / `insert()` / `.execute()` to master automatically. For explicit read-after-write cases, use `queryRunner` on master.
+
+**Replica lag tolerance:** All read-replica candidates tolerate 1-5s lag. Backfill queries serve reconnecting clients (1-2s stale is invisible). Board/analytics queries are inherently non-real-time.
+
+**Phased rollout:**
+
+| Scale | Database Configuration | Rationale |
+|-------|----------------------|-----------|
+| Launch (10-50 tasks) | `db.t4g.small` + PgBouncer on all tasks | Fix connection exhaustion, headroom for growth |
+| Growth (50-200 tasks) | + Read replica (`db.t4g.small`) | Offload backfill bursts, board JOINs, analytics, search |
+| Scale (200+ tasks) | `db.t4g.medium` primary + `db.t4g.medium` replica + Multi-AZ | Full HA, handle enterprise load |
+
+#### Fix 4: Multi-AZ (Reliability)
+
+Currently single-AZ. AZ failure = total database outage.
+
+| Scale | Configuration | Cost Impact |
+|-------|--------------|-------------|
+| Current | Single AZ | — |
+| Growth (paying customers) | Multi-AZ standby | ~2x instance cost (automatic failover ~60s, zero data loss) |
+| Scale | Multi-AZ primary + read replica in different AZ | Full HA across zones |
+
+Enable Multi-AZ when onboarding paying customers. The standby is synchronous replication — zero data loss on failover.
+
+#### Fix 5: Backfill Reconnection Storm Protection
+
+Rolling deploy or scale-in triggers all SSE clients on one instance to reconnect simultaneously. Each client fires 3-5 backfill REST requests (logs 200 lines, coordination 50 messages, code events). With 300 connections per instance, that's **900-1500 backfill queries in 1-3 seconds**.
+
+**Mitigations:**
+1. **Stagger reconnection:** Instead of all clients reconnecting at `t=0`, the server's `reconnect` event includes a random `delay` field (0-3000ms). Clients wait `delay` ms before reconnecting. Spreads 300 clients across 3 seconds instead of a thundering herd.
+2. **Rate limit backfill endpoints:** Per-org rate limit on backfill (50 req/s). Clients that exceed get 429 + `Retry-After`. The SSE connection itself is already live — they just don't get backfill history until the rate limit window passes.
+3. **Route backfill to read replica:** Backfill queries are read-only and tolerate 1-2s lag. Read replica absorbs the burst without impacting primary write performance.
 
 ## Auto-Scaling Strategy
 
@@ -583,18 +710,18 @@ CPU and memory-based step scaling as safety nets. These should **never fire** un
 
 ### Capacity Planning
 
-| Concurrent Tasks | Est. SSE Connections | Instances @ 300 target | Est. Monthly Cost (Fargate Spot) |
-|-----------------|---------------------|----------------------|--------------------------------|
-| 10 | ~30 | 2 (minimum) | ~$15 |
-| 50 | ~150 | 2 | ~$15 |
-| 100 | ~300 | 2 | ~$15 |
-| 200 | ~600 | 3 | ~$22 |
-| 500 | ~1,500 | 5-6 | ~$45 |
-| 1,000 | ~3,000 | 10-11 | ~$82 |
+| Concurrent Tasks | SSE Conns | API Instances | RDS Instance | Read Replica | Redis | Est. Total/mo |
+|-----------------|-----------|--------------|-------------|-------------|-------|--------------|
+| 10 | ~30 | 2 (min) | t4g.small | — | t4g.micro | ~$55 |
+| 50 | ~150 | 2 | t4g.small | t4g.small | t4g.micro | ~$80 |
+| 100 | ~300 | 2 | t4g.medium | t4g.small | t4g.small | ~$110 |
+| 200 | ~600 | 3 | t4g.medium | t4g.medium | t4g.small | ~$165 |
+| 500 | ~1,500 | 5-6 | r7g.large | t4g.medium | t4g.medium | ~$340 |
+| 1,000 | ~3,000 | 10-11 | r7g.large | r7g.large | t4g.medium | ~$530 |
 
-*Estimates assume 0.5 vCPU / 1 GB Fargate Spot pricing (~$0.01/hr per task). Actual costs vary by region and Spot availability.*
+*Includes Fargate Spot (~$0.01/hr), RDS on-demand, ElastiCache on-demand. Multi-AZ adds ~2x RDS cost (recommended at 50+ tasks with paying customers).*
 
-**Compare to current polling model at 100 tasks:** ~15,000 req/min → need 8-10 instances just for CPU headroom → ~$75/mo. The SSE model handles the same load on 2 instances.
+**Compare to current polling model at 100 tasks:** ~15,000 req/min → need 8-10 Fargate instances just for CPU headroom → ~$75/mo compute + bottlenecked on 112-connection db.t4g.micro. The SSE model handles the same load on 2 instances with headroom to grow.
 
 ### Monitoring and Alerts
 
@@ -613,25 +740,39 @@ CPU and memory-based step scaling as safety nets. These should **never fire** un
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
+| **DB connection exhaustion on horizontal scale** | **Critical** | PgBouncer sidecar on API tasks (10 server conns/instance). 20 instances = 200 RDS connections instead of 1200. |
 | Subscribe/unsubscribe hits wrong instance | Critical | Redis-mediated subscriptions — REST handler publishes control message, SSE writer reacts. No sticky sessions. |
+| **Backfill reconnection storm overwhelms DB** | **High** | Staggered reconnect delay (0-3s random), backfill rate limit (50 req/s/org), route backfill to read replica. |
 | Slow client causes memory leak | High | Backpressure policy — drop non-critical events at 256KB buffer, disconnect at 1MB. Client catches up via Last-Event-ID. |
 | Redis single point of failure | High | Phased HA — single node at launch, Multi-AZ replica at 50+ tasks. Old SSE endpoints remain during migration as fallback. |
+| **Redis pub/sub subscriber buffer overflow** | Medium | Set `client-output-buffer-limit pubsub 64mb 16mb 120`. SSE backpressure cuts off slow clients before they stress Redis. |
+| **JWT expires on long-lived SSE connection** | Medium | Authenticate once on connect. 4-hour max connection lifetime with server-initiated reconnect. Immediate disconnect on user deactivation via Redis control channel. |
 | ALB kills idle SSE connections | Medium | 30s heartbeat pings keep connections alive. ALB idle timeout set to 120s. |
 | Client opens excessive connections | Medium | Per-org cap of 20 SSE connections. Excess rejected with 429. |
 | Rolling deploy drops terminal sessions | Medium | Graceful SIGTERM → `reconnect` event → client reconnects in <3s → Last-Event-ID backfill. No visible disruption. |
-| Scale-in redistributes connections | Low | Same as rolling deploy — graceful shutdown signal + seamless reconnect. ECS deregistration delay set to 30s. |
+| **db.t4g.micro CPU/memory ceiling** | Medium | Upgrade to db.t4g.small at Phase 1. Read replica at 50+ tasks. Instance sizing matches scaling tiers. |
+| **Single-AZ database (no failover)** | Medium | Enable Multi-AZ when onboarding paying customers. Automatic failover ~60s, zero data loss. |
 | Auto-scaler scales in on low CPU despite active connections | Medium | CPU/memory guardrails are scale-out only. Scale-in governed exclusively by SSE connection count target tracking. |
+| Scale-in redistributes connections | Low | Same as rolling deploy — graceful shutdown signal + seamless reconnect. ECS deregistration delay set to 30s. |
 | Predictive scaling forecast inaccuracy | Low | Start in Forecast Only mode for 1-2 weeks. Target tracking handles real-time load regardless. Predictive is additive optimization. |
 | Fargate Spot reclaim during active sessions | Low | SIGTERM handler fires immediately. 120s Spot warning is ample time. Clients reconnect seamlessly. Existing strategy already uses Spot. |
+| **Worker crash loses buffered logs** | Low | Register `process.on('exit')` handler for final flush. Acceptable loss — just terminal output, not state. |
 
 ---
 
+## What Changes (Infrastructure)
+
+- **RDS:** Upgrade `db.t4g.micro` → `db.t4g.small` (Phase 1). Add read replica (Phase 2-3). Enable Multi-AZ (paying customers).
+- **PgBouncer:** Add sidecar to API ECS task definition (Phase 1, matches existing orchestrator pattern).
+- **Redis:** Set `client-output-buffer-limit` for pub/sub. Upgrade to Multi-AZ replica at 50+ tasks.
+- **ALB:** Idle timeout 120s, deregistration delay 30s.
+- **ECS:** Auto-scaling policies (target tracking + predictive + step guardrails).
+
 ## What Does NOT Change
 
-- Database schema
+- Database schema (no new tables — reads are rerouted, not restructured)
 - All REST write endpoints
 - Auth middleware (JWT validation)
 - Worker coordination SSE (already efficient, optional migration)
 - Agent heartbeat (write path, stays as REST POST)
-- Terraform infrastructure (no new services)
 - Stateless API architecture (session state is ephemeral, per-instance, reconstructable)

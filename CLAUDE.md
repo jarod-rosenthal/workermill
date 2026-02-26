@@ -359,6 +359,10 @@ await repo.update({ id, status: "queued" }, { status: "running" });
 
 `router.use(middleware)` runs for ALL routes defined AFTER it, not just routes in the same file section. If you add a global `router.use(authenticateApiKey)` in a route file, any route defined below it will require API key auth — even if you intended it for JWT/dashboard auth. **Always check route ordering when mixing auth strategies.**
 
+***REMOVED******REMOVED******REMOVED*** Org Credentials Are in the Database, NOT Secrets Manager
+
+All org integration credentials (SCM tokens, API keys, Jira, Linear, AWS) are stored in the **`org_credentials` table** (encrypted at rest via TypeORM subscriber). Access via `getOrgSecretFromDb(orgId, key)` in `api/src/utils/org-secret-store.ts`. **We do NOT use AWS Secrets Manager for org credentials.** Many code comments still say "Secrets Manager" — these are stale and should be updated when touched. The only remaining Secrets Manager usage is for ECS task definition env vars (GitHub OAuth client secret, database URL) managed by Terraform.
+
 ***REMOVED******REMOVED******REMOVED*** Agent Pitfalls
 
 - **Editing `agent/src/` locally does NOTHING to remote agents** — release a new binary. For local development: `cd agent && npm run build && npm link` then restart the agent.

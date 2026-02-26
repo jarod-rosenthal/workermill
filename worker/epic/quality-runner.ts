@@ -39,6 +39,10 @@ export interface QualityMetrics {
   securityHigh: number;
   securityMedium: number;
   securityLow: number;
+  // Check availability tracking (unavailable = tool couldn't run, not a real failure)
+  typecheckAvailable?: boolean;
+  testsAvailable?: boolean;
+  coverageAvailable?: boolean;
   // E2E test tracking
   e2eAvailable?: boolean;
   e2ePassed?: number;
@@ -270,15 +274,24 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
 
   // Run TypeCheck
   console.log("[quality-runner] Running typecheck...");
+  let typecheckAvailable = true;
   if (profile.typecheck) {
     const typecheckResult = runCommand(profile.typecheck, effectiveCwd);
     const parsed = profile.parseTypecheck(typecheckResult.stdout, typecheckResult.stderr, typecheckResult.exitCode);
     metrics.typeErrors = parsed.errors;
-    metrics.typecheckScore = parsed.passed ? 100 : 0;
-    console.log(`[quality-runner] Typecheck (${profile.displayName}): ${metrics.typecheckScore}/100 (${metrics.typeErrors} errors)`);
+    // If command failed but found 0 errors, the tool wasn't available (e.g. no tsconfig) — exclude from score
+    if (!parsed.passed && parsed.errors === 0) {
+      typecheckAvailable = false;
+      metrics.typecheckScore = 0;
+      console.log(`[quality-runner] Typecheck: unavailable (command failed with no errors found) — excluding from score`);
+    } else {
+      metrics.typecheckScore = parsed.passed ? 100 : 0;
+      console.log(`[quality-runner] Typecheck (${profile.displayName}): ${metrics.typecheckScore}/100 (${metrics.typeErrors} errors)`);
+    }
   } else {
-    metrics.typecheckScore = 100;
-    console.log(`[quality-runner] Typecheck: skipped (not available for ${profile.displayName})`);
+    typecheckAvailable = false;
+    metrics.typecheckScore = 0;
+    console.log(`[quality-runner] Typecheck: skipped (not available for ${profile.displayName}) — excluding from score`);
   }
 
   // Run Lint
@@ -297,6 +310,7 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
 
   // Run Tests
   console.log("[quality-runner] Running tests...");
+  let testsAvailable = true;
   {
     const testResult = runCommand(profile.test, effectiveCwd, 300000);
     const parsedTests = profile.parseTests(testResult.stdout, testResult.stderr);
@@ -305,8 +319,15 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
     metrics.testsSkipped = parsedTests.skipped;
 
     const totalTests = metrics.testsPassed + metrics.testsFailed + metrics.testsSkipped;
-    metrics.testScore = totalTests > 0 ? Math.round((metrics.testsPassed / totalTests) * 100) : (testResult.exitCode === 0 ? 100 : 0);
-    console.log(`[quality-runner] Tests (${profile.displayName}): ${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped)`);
+    // If runner failed but found no test results, tests are unavailable (missing deps, needs docker, etc.)
+    if (totalTests === 0 && testResult.exitCode !== 0) {
+      testsAvailable = false;
+      metrics.testScore = 0;
+      console.log(`[quality-runner] Tests: unavailable (runner failed with no test results) — excluding from score`);
+    } else {
+      metrics.testScore = totalTests > 0 ? Math.round((metrics.testsPassed / totalTests) * 100) : (testResult.exitCode === 0 ? 100 : 0);
+      console.log(`[quality-runner] Tests (${profile.displayName}): ${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped)`);
+    }
 
     // Extract coverage if available (Jest/Vitest format — TS only)
     if (profile.id === "typescript") {
@@ -389,23 +410,41 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
   }
 
   // Calculate composite score
-  // If coverage is not available (0), redistribute weight to other metrics
+  // Exclude unavailable checks and redistribute their weight proportionally
   const hasCoverage = metrics.coverageScore > 0;
-  const effectiveWeights = hasCoverage
-    ? WEIGHTS
-    : {
-        // Redistribute coverage weight (0.15) proportionally to other metrics
-        // Original: typecheck 0.25, lint 0.20, tests 0.30, security 0.10 = 0.85
-        // New totals: multiply each by 1/0.85 ≈ 1.176
-        typecheck: 0.294,  // 0.25 / 0.85
-        lint: 0.235,       // 0.20 / 0.85
-        tests: 0.353,      // 0.30 / 0.85
-        coverage: 0,
-        security: 0.118,   // 0.10 / 0.85
-      };
+  const checkAvailability: Record<keyof typeof WEIGHTS, boolean> = {
+    typecheck: typecheckAvailable,
+    lint: true, // lint always runs (falls back to "no lint script")
+    tests: testsAvailable,
+    coverage: hasCoverage,
+    security: true, // audit always runs
+  };
 
-  if (!hasCoverage) {
-    console.log(`[quality-runner] Coverage not available - redistributing weight to other metrics`);
+  // Sum weights of available checks
+  let availableWeight = 0;
+  for (const [key, available] of Object.entries(checkAvailability)) {
+    if (available) availableWeight += WEIGHTS[key as keyof typeof WEIGHTS];
+  }
+
+  // Guard: if no checks are available, default to 100 (nothing to score against)
+  if (availableWeight === 0) {
+    console.log(`[quality-runner] No checks available — defaulting composite score to 100`);
+    metrics.qualityScore = 100;
+    metrics.typecheckAvailable = typecheckAvailable;
+    metrics.testsAvailable = testsAvailable;
+    metrics.coverageAvailable = hasCoverage;
+    return metrics;
+  }
+
+  // Redistribute: multiply each available weight by 1/availableWeight
+  const effectiveWeights = {} as Record<keyof typeof WEIGHTS, number>;
+  for (const key of Object.keys(WEIGHTS) as Array<keyof typeof WEIGHTS>) {
+    effectiveWeights[key] = checkAvailability[key] ? WEIGHTS[key] / availableWeight : 0;
+  }
+
+  const unavailableChecks = Object.entries(checkAvailability).filter(([, v]) => !v).map(([k]) => k);
+  if (unavailableChecks.length > 0) {
+    console.log(`[quality-runner] Unavailable checks: ${unavailableChecks.join(", ")} — redistributing weight to: ${Object.entries(checkAvailability).filter(([, v]) => v).map(([k]) => k).join(", ")}`);
   }
 
   metrics.qualityScore = Math.round(
@@ -416,15 +455,20 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
     metrics.securityScore * effectiveWeights.security
   );
 
+  // Store availability flags for downstream consumers (PR report, etc.)
+  metrics.typecheckAvailable = typecheckAvailable;
+  metrics.testsAvailable = testsAvailable;
+  metrics.coverageAvailable = hasCoverage;
+
   console.log("\n========================================");
   console.log("         CODE QUALITY METRICS          ");
   console.log("========================================");
   console.log(`  Overall Score: ${metrics.qualityScore}/100 ${getGrade(metrics.qualityScore)}`);
   console.log("----------------------------------------");
-  console.log(`  TypeCheck:  ${metrics.typecheckScore}/100 (${metrics.typeErrors} errors)`);
+  console.log(`  TypeCheck:  ${typecheckAvailable ? `${metrics.typecheckScore}/100 (${metrics.typeErrors} errors)` : "---/100 (unavailable)"}`);
   console.log(`  Lint:       ${metrics.lintScore}/100 (${metrics.lintErrors} errors, ${metrics.lintWarnings} warnings)`);
-  console.log(`  Tests:      ${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed)`);
-  console.log(`  Coverage:   ${metrics.coverageScore}/100 (${metrics.coverageLines}% lines)`);
+  console.log(`  Tests:      ${testsAvailable ? `${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed)` : "---/100 (unavailable)"}`);
+  console.log(`  Coverage:   ${hasCoverage ? `${metrics.coverageScore}/100 (${metrics.coverageLines}% lines)` : "---/100 (unavailable)"}`);
   if (metrics.changedFileCoverage !== undefined) {
     console.log(`  Changed:    ${metrics.changedFileCoverage}% (${metrics.changedFiles?.length || 0} files)`);
   }
@@ -631,20 +675,32 @@ export function generateQualityMetricsPrSection(metrics: QualityMetrics): string
   lines.push("|----------|-------|---------|");
 
   // TypeCheck
-  const typeIcon = metrics.typecheckScore === 100 ? "✅" : "❌";
-  lines.push(`| TypeCheck | ${typeIcon} ${metrics.typecheckScore}/100 | ${metrics.typeErrors} errors |`);
+  if (metrics.typecheckAvailable === false) {
+    lines.push(`| TypeCheck | ⏭️ N/A | not available (excluded from score) |`);
+  } else {
+    const typeIcon = metrics.typecheckScore === 100 ? "✅" : "❌";
+    lines.push(`| TypeCheck | ${typeIcon} ${metrics.typecheckScore}/100 | ${metrics.typeErrors} errors |`);
+  }
 
   // Lint
   const lintIcon = metrics.lintScore >= 90 ? "✅" : metrics.lintScore >= 70 ? "⚠️" : "❌";
   lines.push(`| Lint | ${lintIcon} ${metrics.lintScore}/100 | ${metrics.lintErrors} errors, ${metrics.lintWarnings} warnings |`);
 
   // Tests
-  const testIcon = metrics.testScore === 100 ? "✅" : metrics.testScore >= 80 ? "⚠️" : "❌";
-  lines.push(`| Tests | ${testIcon} ${metrics.testScore}/100 | ${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped |`);
+  if (metrics.testsAvailable === false) {
+    lines.push(`| Tests | ⏭️ N/A | not available (excluded from score) |`);
+  } else {
+    const testIcon = metrics.testScore === 100 ? "✅" : metrics.testScore >= 80 ? "⚠️" : "❌";
+    lines.push(`| Tests | ${testIcon} ${metrics.testScore}/100 | ${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped |`);
+  }
 
   // Coverage
-  const covIcon = metrics.coverageScore >= 80 ? "✅" : metrics.coverageScore >= 60 ? "⚠️" : "❌";
-  lines.push(`| Coverage | ${covIcon} ${metrics.coverageScore}/100 | ${metrics.coverageLines.toFixed(1)}% lines |`);
+  if (metrics.coverageAvailable === false) {
+    lines.push(`| Coverage | ⏭️ N/A | not available (excluded from score) |`);
+  } else {
+    const covIcon = metrics.coverageScore >= 80 ? "✅" : metrics.coverageScore >= 60 ? "⚠️" : "❌";
+    lines.push(`| Coverage | ${covIcon} ${metrics.coverageScore}/100 | ${metrics.coverageLines.toFixed(1)}% lines |`);
+  }
 
   // Changed file coverage
   if (metrics.changedFileCoverage !== undefined) {

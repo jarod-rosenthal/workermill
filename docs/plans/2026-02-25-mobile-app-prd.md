@@ -1,4 +1,4 @@
-# WorkerMill Mobile App — Product Requirements Document
+# WorkerMill Mobile App
 
 ## Product Overview
 
@@ -6,7 +6,7 @@ Build a React Native mobile app (iOS + Android) that serves as a monitoring and 
 
 **The mobile app does NOT run AI agents.** It is a thin client over the existing WorkerMill REST + SSE API at `https://api.workermill.com`. No new business logic is needed on the server beyond push notification registration and delivery.
 
-**Target repository:** `workermill/workermill` (this monorepo)
+**Target repository:** `jarod-rosenthal/workermill` (this monorepo)
 **App location:** `mobile/` (top-level, parallel to `frontend/`, `api/`, `agent/`)
 **Framework:** Expo SDK 52, managed workflow
 **Platforms:** Android first (iOS added later when Apple Developer account is available)

@@ -2721,9 +2721,15 @@ export class EpicCoordinator {
             // Re-check callback: runs quality verification + decision API evaluation
             const recheckQuality = async () => {
               const metrics = await runQualityVerification(repoPath);
-              const diffSummary = `score=${metrics.qualityScore}/100, typeErrors=${metrics.typeErrors}, lintErrors=${metrics.lintErrors}, testsFailed=${metrics.testsFailed}`;
               const evalResult = await this.decisionClient.evaluateQuality({
-                diff: diffSummary,
+                metrics: {
+                  qualityScore: metrics.qualityScore,
+                  typeErrors: metrics.typeErrors > 0,
+                  testFailures: metrics.testsFailed > 0,
+                  testCoveragePercent: metrics.coverageLines || undefined,
+                  securityVulnsHigh: metrics.securityHigh,
+                },
+                qualityGateEnabled: true,
                 storyDescription: this.config.jiraRequirements || undefined,
               });
               return { metrics, gateResult: toAutoFixGateResult(evalResult) };
@@ -2762,15 +2768,15 @@ export class EpicCoordinator {
           if (!autoFixSucceeded) {
             console.log("[Epic] Quality gate failed - blocking PR creation");
             this.postDashboardLog("Quality gate failed — PR blocked");
-            const failureReasons = [...qualityGateResult.reasons, ...qualityGateResult.blockers];
+            const blockerMessages = qualityGateResult.blockers;
             await this.ticketOps.postComment(
-              `❌ Quality gate failed - PR not created.\n\n**Issues:**\n${failureReasons.map((r) => `- ${r}`).join("\n")}\n\n*Fix the issues and re-run, or add the \`bypass-quality-gate\` label to skip.*`,
+              `❌ Quality gate failed - PR not created.\n\n**Blockers:**\n${blockerMessages.map((r) => `- ${r}`).join("\n")}${qualityGateResult.reasons.length > 0 ? `\n\n**Passing checks:**\n${qualityGateResult.reasons.map((r) => `- ✅ ${r}`).join("\n")}` : ""}\n\n*Fix the issues and re-run, or add the \`bypass-quality-gate\` label to skip.*`,
             );
 
             await this.updateTaskStatus(
               "quality_gate_failed",
-              `Quality gate failed: ${failureReasons.join(", ")}`,
-              `Quality gate blocked PR creation: ${failureReasons[0] || "quality check failed"}`,
+              `Quality gate failed: ${blockerMessages.join(", ")}`,
+              `Quality gate blocked PR creation: ${blockerMessages[0] || "quality check failed"}`,
             );
 
             this.missionActive = false;

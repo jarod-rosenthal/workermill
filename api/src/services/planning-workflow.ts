@@ -91,8 +91,9 @@ export async function findPlanningTasks(): Promise<WorkerTask[]> {
   // - planStatus = 'changes_requested': user requested plan changes and task is back in planning
   // Load organization relation to access org settings (e.g., storyCalibrationMultiplier)
   //
-  // REMOTE AGENT: Skip tasks from orgs with active remote agents (heartbeat within 2 min).
-  // This prevents the cloud orchestrator from racing the agent to plan tasks.
+  // REMOTE AGENT: Skip tasks from orgs that use remote agents.
+  // 1. remoteAgentOnly orgs: cloud NEVER plans — agent is the only planner.
+  // 2. Non-remoteAgentOnly orgs with active agents: skip if heartbeat < 2 min.
   const activeAgentCutoff = new Date(Date.now() - 2 * 60 * 1000);
   const planningTasks = await taskRepo
     .createQueryBuilder("task")
@@ -105,6 +106,8 @@ export async function findPlanningTasks(): Promise<WorkerTask[]> {
       },
     )
     .andWhere("task.claimed_by_agent IS NULL")
+    // Hard gate: never plan for remoteAgentOnly orgs
+    .andWhere("organization.remote_agent_only IS NOT TRUE")
     .andWhere(
       `task.org_id NOT IN (
         SELECT DISTINCT org_id FROM remote_agents

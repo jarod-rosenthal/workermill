@@ -99,7 +99,8 @@ resource "aws_db_instance" "read_replica" {
   # Replica inherits storage from primary
   storage_type = "gp3"
 
-  # Network — same security group and subnet
+  # Network — same security group and subnet as primary
+  db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = false
 
@@ -215,7 +216,30 @@ export const AppDataSource = new DataSource({
 
 When `DB_REPLICA_HOST` is not set, TypeORM operates with a single connection (current behavior). When set, TypeORM routes `find*()` / `getMany()` / `getOne()` to the replica — through PgBouncer on port 5433.
 
-**PgBouncer replica listener:** The PgBouncer sidecar needs a second database section pointing at the replica. This requires a custom `pgbouncer.ini` with two `[databases]` entries (primary on port 5432, replica on port 5433). See the ECS task definition changes below.
+**PgBouncer replica listener:** The simplest approach is a **second PgBouncer sidecar container** in the ECS task definition, dedicated to the replica. This avoids custom config files and uses the same Bitnami image with env vars:
+
+```hcl
+# In main.tf, add alongside existing pgbouncer container (only when replica is enabled):
+{
+  name      = "pgbouncer-replica"
+  image     = var.pgbouncer_image
+  essential = false  # replica is optional — API works without it
+  environment = [
+    { name = "POOL_MODE", value = "transaction" },
+    { name = "DEFAULT_POOL_SIZE", value = "8" },
+    { name = "MAX_CLIENT_CONN", value = "100" },
+    { name = "LISTEN_ADDR", value = "127.0.0.1" },
+    { name = "LISTEN_PORT", value = "5433" },  # Different port from primary PgBouncer
+    { name = "AUTH_TYPE", value = "plain" },
+  ]
+  secrets = [
+    { name = "DATABASE_URL", valueFrom = var.db_replica_url_secret_arn }  # Points at replica
+  ]
+  cpu = 64, memory = 128
+}
+```
+
+Add `PGBOUNCER_REPLICA_PORT=5433` to the API container environment. TypeORM connects to `127.0.0.1:5433` for reads, which PgBouncer-replica routes to the RDS replica. This container is only added when `var.enable_read_replica` is true.
 
 **Step 2: Add env var to ECS task definition**
 
@@ -281,6 +305,17 @@ Add methods to `RedisService` class in `api/src/services/redis-client.ts`:
 publishStreamEvent(topic: string, event: Record<string, unknown>): void {
   if (!this.isConnected) return;
   this.pub.publish(`stream:${topic}`, JSON.stringify(event)).catch(() => {});
+}
+
+// Create a new ioredis subscriber connection for per-session SSE subscriptions.
+// Each SSE session gets its own subscriber to avoid shared-subscriber
+// scalability ceiling and refcount bugs.
+createSubscriber(): Redis {
+  return new Redis(this.url, {
+    ...this.options,
+    lazyConnect: true,
+    enableReadyCheck: false,
+  });
 }
 ```
 
@@ -418,17 +453,23 @@ const RECONNECT_GAP_MAX_MS = 5 * 60 * 1000;  // 5 minutes
 ```
 
 Methods:
-- `createSession(res, orgId, userId)` → sessionId
-- `destroySession(sessionId)` — cleanup all subscriptions
-- `subscribeChannels(sessionId, channels[])` — subscribe to Redis data topics
+- `createSession(res, orgId, userId)` → sessionId (stores userId for ownership validation; null for API key sessions — use orgId instead)
+- `destroySession(sessionId)` — cleanup: clear lifetime timer, unsubscribe all Redis topics, close response
+- `subscribeChannels(sessionId, channels[], requestOrgId)` — validates channel authorization (task orgId matches session orgId) THEN subscribes to Redis data topics
 - `unsubscribeChannels(sessionId, channels[])` — unsubscribe from Redis data topics
-- `writeEvent(session, channel, type, payload)` — serialize and write SSE frame with `id:` field, track buffer
+- `writeEvent(session, channel, type, payload)` — serialize and write SSE frame with composite `id: {counter}:{epoch_ms}`, track buffer
 - `getSessionCount()` — for EMF metric
 - `getTotalSubscriptions()` — for EMF metric
 - `getTotalBufferBytes()` — for EMF metric
 - `gracefulShutdown()` — send `reconnect` event to all sessions, clean up
 
-The control channel subscriber: when a session is created, subscribe to `session:{sessionId}:control` Redis topic. When a control message arrives (`subscribe`/`unsubscribe`), call `subscribeChannels`/`unsubscribeChannels`.
+**Channel authorization in `subscribeChannels`:** For task-scoped channels (`logs:{taskId}`, etc.), look up `Task.orgId` from DB (or LRU cache with 60s TTL), verify it matches `session.orgId`. Reject mismatches with an `error` event on the SSE stream. For `org:{orgId}:tasks`, verify the requested orgId matches `session.orgId`. This prevents IDOR — a user from Org A cannot subscribe to Org B's task channels.
+
+**Session ownership in control message handler:** When the control message arrives, validate: if `session.userId` is set (JWT auth), `ownerId` must match `session.userId`. If `session.userId` is null (API key auth), `orgId` must match `session.orgId`. This prevents session hijacking.
+
+The control channel subscriber: when a session is created, subscribe to `session:{sessionId}:control` Redis topic. When a control message arrives, validate ownership, then call `subscribeChannels`/`unsubscribeChannels`.
+
+**Redis subscriber creation:** Each session needs its own ioredis subscriber. The existing `RedisService` in `redis-client.ts` does NOT expose a `duplicate()` method. Add a `createSubscriber(): Redis` method to `RedisService` that creates a new ioredis connection using the same URL and options. The session manager uses this for per-session subscribers.
 
 **Step 2: Create the SSE route**
 
@@ -458,6 +499,7 @@ router.get("/", authenticateSSE, (req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
+  res.setHeader("Content-Encoding", "identity");  // Prevent CloudFront gzip buffering
   res.flushHeaders();
 
   // Send session ID as first event
@@ -479,32 +521,50 @@ router.get("/", authenticateSSE, (req: Request, res: Response) => {
   });
 });
 
-// POST /api/stream/subscribe
-router.post("/subscribe", authenticateRequest, express.json(), (req, res) => {
-  const { sessionId, channels } = req.body;
-  const userId = req.user?.id;
+// Channel name validation — prevent subscription to arbitrary Redis channels
+const CHANNEL_PATTERN = /^(logs|coordination|code|cost):[a-f0-9-]{36}$|^org:[a-f0-9-]{36}:tasks$/;
 
-  // Session ownership check — prevent one user from hijacking another's session.
-  // The instance holding the SSE session validates ownership on the control message.
-  // This is defense-in-depth (sessionId is UUID/unguessable), but prevents confused
-  // deputy attacks if sessionId is ever logged or exposed.
+function validateChannels(channels: unknown): string[] | null {
+  if (!Array.isArray(channels) || channels.length === 0 || channels.length > 10) return null;
+  for (const ch of channels) {
+    if (typeof ch !== "string" || !CHANNEL_PATTERN.test(ch)) return null;
+  }
+  return channels;
+}
+
+// POST /api/stream/subscribe
+router.post("/subscribe", authenticateRequest, (req, res) => {
+  const { sessionId, channels: rawChannels } = req.body;
+  const channels = validateChannels(rawChannels);
+  if (!channels) return res.status(400).json({ error: "Invalid channel names" });
+
+  // Session ownership: userId for JWT auth, orgId for API key auth (agents are org-scoped)
+  const ownerId = req.user?.id || null;
+  const orgId = req.organization?.id;
+
   redis.publishStreamEvent(`session:${sessionId}:control`, {
     action: "subscribe",
     channels,
-    userId,  // SSE writer validates this matches session owner
+    ownerId,  // SSE writer validates: userId match (JWT) or orgId match (API key)
+    orgId,    // SSE writer validates: task orgId matches session orgId (IDOR protection)
   });
   res.json({ ok: true });
 });
 
 // POST /api/stream/unsubscribe
-router.post("/unsubscribe", authenticateRequest, express.json(), (req, res) => {
-  const { sessionId, channels } = req.body;
-  const userId = req.user?.id;
+router.post("/unsubscribe", authenticateRequest, (req, res) => {
+  const { sessionId, channels: rawChannels } = req.body;
+  const channels = validateChannels(rawChannels);
+  if (!channels) return res.status(400).json({ error: "Invalid channel names" });
+
+  const ownerId = req.user?.id || null;
+  const orgId = req.organization?.id;
 
   redis.publishStreamEvent(`session:${sessionId}:control`, {
     action: "unsubscribe",
     channels,
-    userId,  // SSE writer validates this matches session owner
+    ownerId,
+    orgId,
   });
   res.json({ ok: true });
 });
@@ -659,11 +719,25 @@ const backfillLimiter = rateLimit({
 const router = Router();
 router.use(backfillLimiter);
 
+// Org authorization helper — prevents IDOR (cross-org data access)
+async function authorizeTaskAccess(req: Request, res: Response): Promise<boolean> {
+  const task = await taskRepo.findOne({
+    where: { id: req.params.taskId },
+    select: ["id", "orgId"],
+  });
+  if (!task || task.orgId !== req.organization.id) {
+    res.status(404).json({ error: "Task not found" });
+    return false;
+  }
+  return true;
+}
+
 // GET /api/backfill/logs/:taskId?limit=200
 // Response includes `cursor` (ISO timestamp of newest event) for client-side dedup.
 // Client flow: subscribe (SSE starts) → buffer SSE events → fetch backfill →
 // render backfill → replay SSE events with createdAt > cursor → switch to live.
 router.get("/logs/:taskId", authenticateRequest, async (req, res) => {
+  if (!(await authorizeTaskAccess(req, res))) return;
   const limit = Math.min(parseInt(req.query.limit as string) || 200, 500);
   const logs = await logRepo.find({
     where: { taskId: req.params.taskId },
@@ -677,6 +751,7 @@ router.get("/logs/:taskId", authenticateRequest, async (req, res) => {
 
 // GET /api/backfill/coordination/:taskId?limit=50
 router.get("/coordination/:taskId", authenticateRequest, async (req, res) => {
+  if (!(await authorizeTaskAccess(req, res))) return;
   const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
   const messages = await contextRepo.find({
     where: { parentTaskId: req.params.taskId },
@@ -688,6 +763,7 @@ router.get("/coordination/:taskId", authenticateRequest, async (req, res) => {
 
 // GET /api/backfill/code/:taskId
 router.get("/code/:taskId", authenticateRequest, async (req, res) => {
+  if (!(await authorizeTaskAccess(req, res))) return;
   const events = await logRepo.find({
     where: { taskId: req.params.taskId, type: "code_event" },
     order: { createdAt: "ASC" },
@@ -715,11 +791,13 @@ app.use("/api/backfill", authenticatedLimiter, backfillRouter);
 **Step 3: Write tests**
 
 Create `api/src/routes/backfill.test.ts`:
-- Test log backfill returns correct limit and order
+- Test log backfill returns correct limit, order, and cursor
 - Test coordination backfill returns correct limit
 - Test code events returns all events for task
 - Test limit capping (request 1000, get 500 max)
 - Test rate limiter returns 429 on burst exceeding 50 req/s
+- Test org authorization — request task from different org returns 404
+- Test nonexistent task returns 404
 
 Run: `cd api && npx vitest run src/routes/backfill.test.ts`
 
@@ -742,28 +820,34 @@ Handle `Last-Event-ID` header on SSE reconnect. Replay missed events from DB if 
 
 **Step 1: Implement handleReconnect in session manager**
 
-The `lastEventId` is a monotonic timestamp (epoch ms). On reconnect:
+Event IDs use composite format `{counter}:{epoch_ms}`. The `epoch_ms` portion is used for gap detection and DB replay. On reconnect:
 
 ```typescript
-async handleReconnect(sessionId: string, lastEventId: number): Promise<void> {
+async handleReconnect(sessionId: string, lastEventIdStr: string): Promise<void> {
   const session = sessions.get(sessionId);
   if (!session) return;
 
-  const gapMs = Date.now() - lastEventId;
+  // Parse composite ID: "42:1708900000123" → epoch_ms = 1708900000123
+  const parts = lastEventIdStr.split(":");
+  const epochMs = parseInt(parts[1] || parts[0], 10);
+  if (isNaN(epochMs)) return;
+
+  const gapMs = Date.now() - epochMs;
 
   if (gapMs > RECONNECT_GAP_MAX_MS) {
-    // Gap too large — tell client to refetch
+    // Gap too large — tell client to refetch via REST backfill
     this.writeRawEvent(session, "refresh", {
       reason: "gap_too_large",
-      lastEventId,
-      channels: Array.from(session.dataSubscriptions.keys()),
+      channels: Array.from(session.dataSubscriptions),
     });
     return;
   }
 
   // Replay missed events from DB for subscribed channels
-  // Query logs, coordination, code events created after lastEventId timestamp
+  // Query logs, coordination, code events WHERE created_at > to_timestamp(epochMs / 1000)
   // Push them through the SSE connection as catch-up events
+  const since = new Date(epochMs);
+  // ... query each subscribed channel's backing table with createdAt > since
 }
 ```
 
@@ -938,6 +1022,7 @@ type ChannelHandler = (type: string, payload: unknown) => void;
 export function useUnifiedStream() {
   const [connected, setConnected] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [reconnectCounter, setReconnectCounter] = useState(0);  // Triggers new EventSource on server-initiated reconnect
   const eventSourceRef = useRef<EventSource | null>(null);
   const handlersRef = useRef<Map<string, Set<ChannelHandler>>>(new Map());
   const subscribedRef = useRef<Set<string>>(new Set());
@@ -969,15 +1054,26 @@ export function useUnifiedStream() {
       // Gap too large — refetch backfill for all subscribed channels
     });
 
-    es.addEventListener("reconnect", () => {
-      // Server shutting down — close and let EventSource auto-reconnect
+    es.addEventListener("reconnect", (e) => {
+      // Server shutting down — close and create NEW EventSource after delay.
+      // IMPORTANT: EventSource.close() permanently kills auto-reconnect.
+      // A new instance must be created manually.
+      const { delay } = JSON.parse(e.data);
       es.close();
+      eventSourceRef.current = null;
+      setConnected(false);
+      setTimeout(() => {
+        // Re-create EventSource — the useEffect dependency on a reconnect
+        // counter (or a reconnect() function) triggers a new connection.
+        // Re-subscribe happens automatically after new session is created.
+        setReconnectCounter(c => c + 1);
+      }, delay || 0);
     });
 
     es.onerror = () => setConnected(false);
 
     return () => { es.close(); eventSourceRef.current = null; };
-  }, []);
+  }, [reconnectCounter]);  // reconnectCounter triggers re-creation
 
   const subscribe = useCallback((channels: string[], handler: ChannelHandler) => {
     // Register handler for each channel
@@ -1346,9 +1442,12 @@ export class LogBuffer {
   async flush(): Promise<void> {
     if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
     if (this.buffer.length === 0) return;
-    const batch = this.buffer.splice(0);
+    const entries = this.buffer.splice(0);
     try {
-      await this.api.post("/api/control-center/logs", { batch });
+      // Use EXISTING batch endpoint: POST /api/control-center/logs/batch
+      // (already exists at api/src/routes/control-center/logs.ts:599)
+      // Accepts { entries: [...] }, validates up to 100 entries per request
+      await this.api.post("/api/control-center/logs/batch", { entries });
     } catch {
       // Fire-and-forget — match existing postLog behavior
     }
@@ -1382,27 +1481,26 @@ git commit -m "feat: worker log batching — buffer and flush every 50 lines or 
 
 ---
 
-### Task 15: API Batch Log Ingestion
+### Task 15: Add Redis Publish to Existing Batch Log Endpoint
 
-Modify the log POST endpoint to accept batch payloads while remaining backward-compatible with single-log POSTs.
+The batch endpoint already exists at `POST /api/control-center/logs/batch` (`logs.ts:599`). It accepts `{ entries: [...] }` and does a bulk insert. The missing piece is Redis publish — the existing endpoint does NOT publish to Redis, so SSE clients won't see batch-ingested logs in real-time.
 
 **Files:**
-- Modify: `api/src/routes/control-center/logs.ts` (POST handler)
+- Modify: `api/src/routes/control-center/logs.ts` (batch POST handler, ~line 599)
 - Test: Extend existing log tests
 
 **Context:**
-- Current POST handler at `logs.ts` line 507-523: expects `{ taskId, type, message, severity }`
-- Need to also accept `{ batch: [{ taskId, type, message, severity }, ...] }`
+- Existing batch endpoint at `logs.ts:599`: accepts `{ entries: [...] }`, validates up to 100 entries, bulk inserts
+- Single-log POST at `logs.ts:507`: already publishes to Redis (Task 1 adds this)
+- Worker `LogBuffer` (Task 14) uses the existing batch endpoint
 
-**Step 1: Modify POST handler**
+**Step 1: Add Redis publish to batch handler**
+
+After the bulk insert in the batch handler, publish each entry individually to Redis:
 
 ```typescript
-// Detect batch vs single
-const entries = req.body.batch ? req.body.batch : [req.body];
-// Validate all entries
-// Bulk insert
-// Publish each to Redis individually (clients need per-line events)
-for (const entry of saved) {
+// After bulk insert — publish each log to Redis for SSE delivery
+for (const entry of savedEntries) {
   redis.publishStreamEvent(`task:${entry.taskId}:logs`, {
     t: "log",
     p: { id: entry.id, taskId: entry.taskId, message: entry.message, type: entry.type, severity: entry.severity, createdAt: entry.createdAt.toISOString() },
@@ -1412,9 +1510,9 @@ for (const entry of saved) {
 
 **Step 2: Write tests**
 
+- Test batch POST with Redis publish — verify `redis.publishStreamEvent` called once per entry
+- Test batch POST still works (existing tests should pass)
 - Test single-log POST still works (backward compat)
-- Test batch POST inserts all entries
-- Test Redis publish called per entry in batch
 
 Run: `cd api && npx vitest run src/routes/control-center/logs.test.ts`
 
@@ -1422,7 +1520,7 @@ Run: `cd api && npx vitest run src/routes/control-center/logs.test.ts`
 
 ```bash
 git add api/src/routes/control-center/logs.ts api/src/routes/control-center/logs.test.ts
-git commit -m "feat: batch log ingestion endpoint with backward-compatible single-log support"
+git commit -m "feat: add Redis publish to existing batch log endpoint for SSE delivery"
 ```
 
 ---
@@ -1512,25 +1610,55 @@ resource "aws_elasticache_parameter_group" "workermill" {
 
 Reference this parameter group in the ElastiCache replication group or cluster. This prevents Redis from disconnecting SSE subscriber connections under high log volume.
 
-**Step 4: Run terraform plan**
+**Step 4: Add CloudFront cache behavior for SSE (disable compression)**
+
+In `infrastructure/terraform/modules/cdn/main.tf`, add a new `ordered_cache_behavior` BEFORE the existing `/api/*` behavior (CloudFront evaluates in order, first match wins):
+
+```hcl
+ordered_cache_behavior {
+  path_pattern     = "/api/stream*"
+  allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+  cached_methods   = ["GET", "HEAD"]
+  target_origin_id = "api"
+
+  min_ttl     = 0
+  default_ttl = 0
+  max_ttl     = 0
+
+  forwarded_values {
+    query_string = true
+    headers      = ["Authorization", "Origin", "Accept", "Content-Type", "Host", "x-api-key"]
+    cookies { forward = "all" }
+  }
+
+  viewer_protocol_policy = "https-only"
+  compress               = false  # CRITICAL: disable compression for SSE streaming
+}
+```
+
+This prevents CloudFront from gzip-buffering SSE events. The existing `/api/*` behavior (with `compress = true`) continues to handle all other API calls.
+
+Also add `Content-Encoding: identity` to the SSE endpoint response headers in `stream.ts` as a defense-in-depth measure.
+
+**Step 5: Run terraform plan**
 
 Run: `cd infrastructure/terraform && terraform plan`
 
-Review changes — should be ALB timeout, target group deregistration delay, and Redis parameter group.
+Review changes — should be ALB timeout, target group deregistration delay, Redis parameter group, and new CloudFront cache behavior.
 
-**Step 5: Apply**
+**Step 6: Apply**
 
 Run: `terraform apply`
 
-**Step 6: Verify zero drift**
+**Step 7: Verify zero drift**
 
 Run: `terraform plan` — confirm zero changes.
 
-**Step 7: Commit**
+**Step 8: Commit**
 
 ```bash
-git add infrastructure/terraform/modules/ecs-service/main.tf infrastructure/terraform/modules/redis/main.tf
-git commit -m "infra: ALB idle timeout 120s, deregistration delay 30s, Redis pub/sub buffer limits"
+git add infrastructure/terraform/modules/ecs-service/main.tf infrastructure/terraform/modules/redis/main.tf infrastructure/terraform/modules/cdn/main.tf
+git commit -m "infra: ALB idle timeout 120s, deregistration delay 30s, Redis pub/sub limits, CloudFront SSE behavior"
 ```
 
 ---

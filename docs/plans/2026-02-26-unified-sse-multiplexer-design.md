@@ -92,7 +92,7 @@ event: message
 data: {"ch":"logs:abc123","t":"log","p":{"message":"Building...","level":"info","ts":"..."}}
 ```
 
-- `id` — monotonic counter per SSE session (not epoch millis — clock skew across instances and millisecond collisions make timestamps unreliable as event IDs). Counter starts at 0 on connect, increments per event. On reconnection with `Last-Event-ID`, server replays from DB using the event's stored `created_at` timestamp (set server-side, single clock). The `id` field is only for gap detection, not for cross-session ordering.
+- `id` — composite `{counter}:{epoch_ms}` format. `counter` is monotonic per-session (starts at 0, increments per event) for ordering. `epoch_ms` is the server timestamp at emission for gap detection on reconnect. On reconnect with `Last-Event-ID`, server parses the `epoch_ms` portion, computes the gap, and replays events from DB `WHERE created_at > to_timestamp(epoch_ms / 1000)`. This avoids clock skew issues (single server clock per event emission) while providing both ordering (counter) and temporal anchoring (epoch_ms) in one field.
 - `ch` — channel name (client routes to handler)
 - `t` — event type within channel
 - `p` — payload
@@ -153,7 +153,11 @@ Map<sessionId, {
 
 Not shared across instances. If an instance dies, the client reconnects to another instance and re-subscribes. Stateless from the cluster perspective — session state is ephemeral and fully reconstructable from the client's re-subscribe call.
 
-**Session ownership validation:** `POST /api/stream/subscribe` and `POST /api/stream/unsubscribe` verify that the authenticated user matches the `userId` stored in the session. This prevents one user from subscribing another user's session to arbitrary channels. The sessionId is a UUID (unguessable), and the ownership check is a defense-in-depth measure.
+**Session ownership validation:** `POST /api/stream/subscribe` and `POST /api/stream/unsubscribe` verify that the authenticated user/org matches the session owner. For user-authenticated sessions (JWT), `userId` is checked. For agent sessions (API key), `orgId` is checked (agents are org-scoped, not user-scoped). The sessionId is a UUID (unguessable), and the ownership check is a defense-in-depth measure.
+
+**Channel authorization (CRITICAL):** The session manager validates that the user is authorized to access the requested channel's data before subscribing. For task-scoped channels (`logs:{taskId}`, `coordination:{taskId}`, `code:{taskId}`, `cost:{taskId}`), the task's `orgId` must match `session.orgId`. For org-scoped channels (`org:{orgId}:tasks`), the requested `orgId` must match `session.orgId`. Without this check, an authenticated user from Org A could subscribe to `logs:task-from-org-B` and receive cross-org data.
+
+**Channel name validation:** Channel names are validated against a whitelist regex (`^(logs|coordination|code|cost):[a-f0-9-]{36}$` or `^org:[a-f0-9-]{36}:tasks$`). Invalid names are rejected before reaching Redis. This prevents subscription to internal Redis channels and limits attack surface.
 
 ### Event Flow (Example: Worker Posts a Log Batch)
 
@@ -291,7 +295,7 @@ On SIGTERM (rolling deploy, scale-in, or manual stop), the API's existing gracef
 
 The existing 25-second force-exit timer (`index.ts:438-441`) remains as the ultimate backstop. The SSE stagger (3.5s) + active operations wait (up to 20s) + server close fits within the 25s budget. ECS `stopTimeout` is 30s, providing 5s of additional margin.
 
-Client receives the `reconnect` event → waits `delay` ms → closes connection → `EventSource` auto-reconnects to a new instance via ALB → sends `Last-Event-ID` header → server backfills any gap → client re-sends subscribe requests for its active channels → live events resume.
+Client receives the `reconnect` event → waits `delay` ms → calls `EventSource.close()` → creates a **new** `EventSource` instance (note: `close()` permanently kills auto-reconnect — a new instance is required) → new instance connects to ALB, sends `Last-Event-ID` header → server backfills any gap → client re-sends subscribe requests for its active channels → live events resume.
 
 **No client-visible disruption to terminal sessions.** The reconnect is fast enough that log output appears continuous. The only observable effect is a brief pause (<3-6s) in the event stream — no errors, no lost data, no UI flicker if the client handles the `reconnect` event cleanly (suppress the default EventSource error handler during intentional reconnects).
 
@@ -525,6 +529,18 @@ SSE connections are long-lived HTTP/1.1. Key settings:
 | Deregistration delay | 30s | SSE clients reconnect in 1-3s after graceful shutdown signal. No need to hold for 300s. |
 | Sticky sessions | **OFF** | Not needed. Redis-mediated subscriptions allow any instance to handle subscribe/unsubscribe. |
 
+### CloudFront (CRITICAL)
+
+The dashboard frontend routes ALL `/api/*` requests through CloudFront (same-origin, `VITE_API_URL=""` resolves to relative URLs). CloudFront's `/api/*` cache behavior currently has `compress = true`, which can buffer SSE event delivery.
+
+**Existing SSE works** because the current endpoints already stream through CloudFront with 30s heartbeats and `origin_read_timeout = 60s`. However, the unified SSE endpoint needs explicit protection:
+
+1. **Disable compression for SSE path** — add a separate CloudFront cache behavior for `/api/stream*` with `compress = false`. Gzip compression buffers data and can delay SSE events by seconds.
+2. **Verify `origin_read_timeout`** — current 60s is sufficient since heartbeat (30s) keeps data flowing well within the timeout. The 4-hour max connection lifetime works because each heartbeat resets the timeout.
+3. **Set `Content-Encoding: identity`** — API SSE endpoint should set this header to prevent CloudFront from attempting gzip compression even if the cache behavior has `compress = true` as a fallback.
+
+**Agent SSE connections bypass CloudFront** — agents connect directly to the API via `API_BASE_URL` (`https://workermill.com`), which resolves through CloudFront. This is the same path as the dashboard. If SSE through CloudFront proves unreliable at scale, agents can be pointed at the ALB directly via a separate `API_SSE_URL` env var. This is a fallback, not a Phase 1 requirement.
+
 ### Database (PostgreSQL RDS) — SCALING PLAN
 
 The current database is a **single `db.t4g.micro` instance** (1 GiB RAM, single AZ, no read replicas). While PgBouncer already handles connection pooling, the instance size and lack of read replicas/HA are scaling ceilings.
@@ -628,7 +644,7 @@ TypeORM routes `find*()` / `.getMany()` / `.getOne()` to slaves, and `save()` / 
 
 | Scale | Database Configuration | Rationale |
 |-------|----------------------|-----------|
-| Launch (10-50 tasks) | `db.t4g.small` + PgBouncer on all tasks | Fix connection exhaustion, headroom for growth |
+| Launch (10-50 tasks) | `db.t4g.micro` (existing) + PgBouncer fix (`MAX_CLIENT_CONN` 50→100) | Fix config bug, PgBouncer already handles connection pooling |
 | Growth (50-200 tasks) | + Read replica (`db.t4g.small`) | Offload backfill bursts, board JOINs, analytics, search |
 | Scale (200+ tasks) | `db.t4g.medium` primary + `db.t4g.medium` replica + Multi-AZ | Full HA, handle enterprise load |
 

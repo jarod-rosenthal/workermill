@@ -177,9 +177,29 @@ Each API instance creates **one Redis subscriber connection per SSE session** (u
 
 **Per-session subscriber:** Each SSE session gets its own `redis.duplicate()` subscriber. When the session subscribes to `logs:abc123`, the subscriber calls `SUBSCRIBE stream:task:abc123:logs`. When the session ends, the subscriber calls `UNSUBSCRIBE` on all topics and `quit()`. No shared state, no refcount bugs.
 
-**Redis connection overhead:** Each subscriber is a TCP connection (~8KB memory on Redis side). At 300 SSE sessions per instance, that's ~2.4MB on Redis — well within `cache.t4g.micro` limits (500MB available). The alternative (shared subscriber with in-memory fan-out) saves Redis connections but adds complexity and a serialization bottleneck.
+**Redis connection overhead:** Each subscriber is a TCP connection (~8KB base memory on Redis side + pub/sub output buffers). The per-connection output buffer grows when the subscriber falls behind — up to 64MB hard limit (configured in ElastiCache parameter group). This makes `cache.t4g.micro` (500MB) dangerous at scale:
 
-**If this becomes a concern at scale (1000+ sessions/instance):** Pool subscribers — each subscriber handles N sessions (e.g., 10), with in-memory routing. But don't optimize for this until Redis `connected_clients` metrics indicate pressure.
+| API Instances | SSE Sessions | Redis Connections | Base Memory | Worst-Case Buffer (10% slow) | Total |
+|--------------|-------------|-------------------|-------------|------------------------------|-------|
+| 2 | 600 | ~600 | 5 MB | 60 × 16MB = 960 MB | **unsafe on micro** |
+| 5 | 1,500 | ~1,500 | 12 MB | 150 × 16MB = 2.4 GB | unsafe on micro/small |
+| 10 | 3,000 | ~3,000 | 24 MB | 300 × 16MB = 4.8 GB | needs medium |
+| 20 | 6,000 | ~6,000 | 48 MB | 600 × 16MB = 9.6 GB | needs large |
+
+*Worst-case assumes 10% of subscribers hit the 16MB soft buffer limit simultaneously during a log burst. SSE-side backpressure (disconnect at 1MB) should prevent most subscribers from reaching Redis-level buffer limits, but a burst of log events across many channels can briefly fill buffers before SSE backpressure kicks in.*
+
+**Redis upgrade triggers (by `connected_clients`, not task count):**
+
+| Redis Connections | Action |
+|------------------|--------|
+| < 500 | `cache.t4g.micro` (500 MB) — current |
+| 500-2,000 | **`cache.t4g.small` (1.37 GB)** — upgrade when auto-scaler reaches 5 API instances |
+| 2,000-5,000 | `cache.t4g.medium` (3.09 GB) + Multi-AZ replica |
+| 5,000+ | `cache.r7g.large` (13.07 GB) + Multi-AZ replica |
+
+**Alert:** Set CloudWatch alarm on ElastiCache `CurrConnections` > 400 (80% of micro capacity) as the trigger to upgrade. Do not wait for OOM.
+
+**If subscriber count becomes a concern (5,000+):** Pool subscribers — each subscriber handles N sessions (e.g., 10), with in-memory routing by channel name. But don't optimize for this until `connected_clients` metrics indicate pressure and SSE backpressure is confirmed working.
 
 ### JWT Token Lifecycle on Long-Lived Connections
 
@@ -488,9 +508,10 @@ Currently running `cache.t4g.micro` (single node). Redis becomes the backbone of
 
 | Scale | Redis Configuration | Rationale |
 |-------|-------------------|-----------|
-| Launch (10-50 tasks) | Single `cache.t4g.micro` (current) | Sufficient. Redis restarts in seconds. Brief SSE reconnection is acceptable at this scale. |
-| Growth (50-200 tasks) | `cache.t4g.small` with Multi-AZ replica | Automatic failover if primary dies. Replica promotes in ~15s. Clients reconnect seamlessly via `Last-Event-ID`. |
-| Scale (200+ tasks) | `cache.t4g.medium` with Multi-AZ replica | More memory for pub/sub subscriber state and connection buffers. |
+| Launch (10-50 tasks, ≤2 API instances) | Single `cache.t4g.micro` (current) | Sufficient. Redis restarts in seconds. Brief SSE reconnection is acceptable at this scale. ~600 connections, 5MB base. |
+| Growth (50-100 tasks, 3-5 API instances) | **`cache.t4g.small`** (1.37 GB) | Upgrade triggered by `CurrConnections > 400`. Handles up to ~2,000 subscriber connections with buffer headroom. Add Multi-AZ replica. |
+| Scale (100-200 tasks, 5-10 API instances) | `cache.t4g.medium` (3.09 GB) with Multi-AZ replica | Handles up to ~5,000 subscriber connections. More memory for pub/sub output buffers under log-heavy workloads. |
+| Large (200+ tasks, 10+ API instances) | `cache.r7g.large` (13.07 GB) with Multi-AZ replica | 6,000+ subscriber connections. Output buffer headroom for burst log scenarios. |
 
 **Redis failure mode:** If Redis is completely unavailable, SSE writers have nothing to listen to. Clients remain connected but receive no events (heartbeat pings keep the connection alive). When Redis recovers, pub/sub resumes automatically. Clients may have a gap — `Last-Event-ID` backfill from DB covers it.
 
@@ -800,16 +821,33 @@ CPU and memory-based step scaling as safety nets. These should **never fire** un
 
 ### Capacity Planning
 
-| Concurrent Tasks | SSE Conns | API Instances | Orchestrator | RDS Instance | Read Replica | Redis | Est. Total/mo |
-|-----------------|-----------|--------------|-------------|-------------|-------------|-------|--------------|
+**Infrastructure costs (API, orchestrator, database, Redis):**
+
+| Concurrent Tasks | SSE Conns | API Instances | Orchestrator | RDS Instance | Read Replica | Redis | Infra/mo |
+|-----------------|-----------|--------------|-------------|-------------|-------------|-------|----------|
 | 10 | ~30 | 2 (min) | 1 × 512/1024 | t4g.small | — | t4g.micro | ~$60 |
-| 50 | ~150 | 2 | 1 × 512/1024 | t4g.small | t4g.small | t4g.micro | ~$85 |
-| 100 | ~300 | 2 | 1 × 512/1024 | t4g.medium | t4g.small | t4g.small | ~$115 |
-| 200 | ~600 | 3 | 2 × 512/1024 | t4g.medium | t4g.medium | t4g.small | ~$175 |
-| 500 | ~1,500 | 5-6 | 2 × 1024/2048 | r7g.large | t4g.medium | t4g.medium | ~$360 |
-| 1,000 | ~3,000 | 10-11 | 3 × 1024/2048 | r7g.large | r7g.large | t4g.medium | ~$560 |
+| 50 | ~150 | 2 | 1 × 512/1024 | t4g.small | t4g.small | t4g.small | ~$95 |
+| 100 | ~300 | 2 | 1 × 512/1024 | t4g.medium | t4g.small | t4g.small | ~$120 |
+| 200 | ~600 | 3 | 2 × 512/1024 | t4g.medium | t4g.medium | t4g.medium | ~$195 |
+| 500 | ~1,500 | 5-6 | 2 × 1024/2048 | r7g.large | t4g.medium | r7g.large | ~$420 |
+| 1,000 | ~3,000 | 10-11 | 3 × 1024/2048 | r7g.large | r7g.large | r7g.large | ~$620 |
 
 *Includes Fargate Spot (~$0.01/hr), RDS on-demand, ElastiCache on-demand. Multi-AZ adds ~2x RDS cost (recommended at 50+ tasks with paying customers).*
+
+**Worker costs (the dominant expense):**
+
+Workers are Fargate Spot tasks running Claude Code. Each worker: 2 vCPU / 4 GB, ~$0.04/hr Fargate Spot. Average task duration ~30 min. Claude API costs vary by model and task complexity but typically exceed compute costs 5-10x.
+
+| Concurrent Workers | Fargate Spot/mo | Claude API/mo (est.) | Total Worker Cost/mo |
+|-------------------|----------------|---------------------|---------------------|
+| 10 | ~$290 | ~$1,500-3,000 | ~$2,000-3,300 |
+| 50 | ~$1,440 | ~$7,500-15,000 | ~$9,000-16,500 |
+| 100 | ~$2,880 | ~$15,000-30,000 | ~$18,000-33,000 |
+| 500 | ~$14,400 | ~$75,000-150,000 | ~$90,000-165,000 |
+
+*Claude API estimates assume ~$0.50-1.00 per task on average (Sonnet). Actual cost varies widely by task complexity, context size, and tool use. Worker compute is <10% of total cost — the API model choice is the primary cost lever.*
+
+**Key takeaway:** Infrastructure (this plan) is <5% of total cost at any scale. Optimizing API/Redis/DB saves $50-100/mo. Optimizing worker task efficiency (fewer retries, better planning, shorter tasks) saves thousands. This plan's value is **reliability and latency**, not cost reduction.
 
 **Compare to current polling model at 100 tasks:** ~15,000 req/min → need 8-10 Fargate instances just for CPU headroom → ~$75/mo compute + bottlenecked on 112-connection db.t4g.micro. The SSE model handles the same load on 2 API instances + 1 orchestrator with headroom to grow.
 
@@ -828,6 +866,8 @@ CPU and memory-based step scaling as safety nets. These should **never fire** un
 | Orchestrator CPU > 60% sustained | Warning | Right-size up or add second instance. Event-driven mode should keep CPU < 30%. |
 | Orchestrator memory > 70% sustained | Warning | Right-size up. Check cleanup operations for memory leaks. |
 | `orchestrator:task-queued` publish failures | Warning | Redis may be down. Orchestrator auto-falls back to DB polling. |
+| ElastiCache `CurrConnections` > 80% of max | Warning | Upgrade Redis instance size. Per-session subscribers scale linearly with SSE connections. |
+| ElastiCache `DatabaseMemoryUsagePercentage` > 70% | Warning | Pub/sub output buffers growing. Check for slow subscribers. Upgrade instance size. |
 
 ---
 
@@ -1003,6 +1043,7 @@ At 200+ tasks, add a second orchestrator instance. The code is already multi-ins
 | **RDS resize downtime (5-10 min)** | Medium | Schedule during low-traffic window. PgBouncer auto-reconnects. SSE gap covered by Last-Event-ID backfill. Multi-AZ enables near-zero-downtime resizes. |
 | **SIGTERM handler conflict** | Low | SSE shutdown integrates into existing handler (index.ts:415-442), runs before `server.close()`. 3.5s stagger + 20s ops wait fits within 25s force-exit timer. |
 | **Lifetime timer leak** | Low | `clearTimeout(lifetimeTimer)` called in session destroy path. Destroy called on: client disconnect, backpressure disconnect, SIGTERM, auth revocation. |
+| **Migration lock contention on auto-scale** | **High** | When auto-scaling adds 5 instances simultaneously, all 5 call `AppDataSource.runMigrations()` on startup. TypeORM acquires an advisory lock (`SELECT...FOR UPDATE` on `migrations` table), but all 5 compete for the lock through PgBouncer's limited connection pool (10 per instance). **Mitigation:** Run migrations in a single-shot ECS task (migration sidecar) BEFORE updating the API service. API service starts with `migrationsRun: false` — never runs migrations itself. Deploy script: `run migration task → wait for success → update API service`. See Phase 5B Task 27. |
 | **Orchestrator singleton on 256 CPU / 512 MB** | **High** | Right-size to 512/1024 in Phase 1. Event-driven task pickup reduces CPU from ~16% to <5% at 100 tasks. Background sweep at 30s instead of 5s polling. |
 | **Orchestrator missed Redis event (task stuck queued)** | Medium | 30s background sweep catches anything the event-driven path missed. Same safety-net pattern as SSE multiplexer's DB polling fallback. |
 | **Fargate Spot reclaim on singleton orchestrator** | Medium | At 200+ tasks, scale to 2 instances. Below that, Spot reclaim causes ~60s gap (ECS restarts task). Queued tasks wait; executing tasks are unaffected (workers are independent). |
@@ -1019,6 +1060,7 @@ At 200+ tasks, add a second orchestrator instance. The code is already multi-ins
 - **ALB:** Idle timeout 120s, deregistration delay 30s.
 - **ECS API service:** Auto-scaling policies (target tracking + predictive + step guardrails).
 - **ECS Orchestrator service:** Right-size 256/512 → 512/1024. Event-driven task pickup via Redis. Poll interval 5s → 30s background sweep. Scale to 2 instances at 200+ tasks.
+- **Migrations:** Move from API-startup migration runner to single-shot ECS migration task run by deploy script before API service update. Prevents migration lock contention when auto-scaling adds multiple instances simultaneously.
 
 ## What Does NOT Change
 

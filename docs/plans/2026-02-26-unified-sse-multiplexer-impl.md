@@ -2472,6 +2472,235 @@ git commit -m "infra: orchestrator multi-instance prep — variable desired_coun
 
 ---
 
+### Task 27: Migration Runner — Single-Shot ECS Task
+
+When auto-scaling adds multiple API instances simultaneously, they all call `AppDataSource.runMigrations()` on startup. TypeORM acquires an advisory lock (`SELECT...FOR UPDATE` on the `migrations` table), but all instances compete for this lock through PgBouncer's connection pool. With 5 instances starting at once, this can exhaust the pool and cause startup timeouts.
+
+**Solution:** Run migrations in a dedicated single-shot ECS task before updating the API service. API instances start with migrations disabled.
+
+**Files:**
+- Modify: `api/src/index.ts` (skip migrations when `SKIP_MIGRATIONS=true`)
+- Create: `infrastructure/terraform/modules/ecs-service/migration-task.tf`
+- Modify: `deploy.sh` (add migration step before API service update)
+- Modify: `infrastructure/terraform/modules/ecs-service/main.tf` (add `SKIP_MIGRATIONS=true` to API)
+- Modify: `infrastructure/terraform/modules/ecs-service/orchestrator.tf` (add `SKIP_MIGRATIONS=true`)
+
+**Step 1: Add migration skip flag to index.ts**
+
+At `api/src/index.ts:370-372`, wrap the migration call:
+
+```typescript
+// Run migrations (unless disabled — migrations run via separate ECS task during deploy)
+if (process.env.SKIP_MIGRATIONS !== "true") {
+  await AppDataSource.runMigrations();
+  logger.info("Migrations completed");
+} else {
+  logger.info("Migrations skipped (SKIP_MIGRATIONS=true — run via deploy task)");
+}
+```
+
+**Step 2: Create migration-task.tf**
+
+A standalone Fargate task definition that runs `node dist/db/migrate.js` and exits. No ALB, no long-running service.
+
+```hcl
+resource "aws_ecs_task_definition" "migration" {
+  family                   = "workermill-${var.environment}-migration"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = var.ecs_execution_role_arn
+  task_role_arn            = var.ecs_task_role_arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "migration"
+      image     = var.api_image_digest != "" ? "${var.ecr_api_repository_url}@${var.api_image_digest}" : "${var.ecr_api_repository_url}:latest"
+      essential = true
+      command   = ["node", "dist/db/migrate.js"]
+
+      environment = [
+        { name = "NODE_ENV", value = "production" },
+        { name = "PGBOUNCER_HOST", value = "127.0.0.1" },
+        { name = "PGBOUNCER_PORT", value = "5432" },
+        { name = "DB_POOL_MAX", value = "5" },
+      ]
+
+      secrets = [
+        { name = "DATABASE_URL", valueFrom = var.database_url_secret_arn },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = var.log_group_name
+          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-stream-prefix" = "migration"
+        }
+      }
+
+      dependsOn = [
+        { containerName = "pgbouncer", condition = "START" }
+      ]
+    },
+    {
+      name      = "pgbouncer"
+      image     = var.pgbouncer_image
+      essential = false
+      portMappings = []
+
+      environment = [
+        { name = "POOL_MODE", value = "transaction" },
+        { name = "DEFAULT_POOL_SIZE", value = "5" },
+        { name = "MAX_CLIENT_CONN", value = "10" },
+        { name = "AUTH_TYPE", value = "plain" },
+        { name = "LISTEN_ADDR", value = "127.0.0.1" },
+        { name = "LISTEN_PORT", value = "5432" },
+      ]
+
+      secrets = [
+        { name = "DATABASE_URL", valueFrom = var.database_url_secret_arn }
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = var.log_group_name
+          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-stream-prefix" = "migration-pgbouncer"
+        }
+      }
+    }
+  ])
+}
+```
+
+**Step 3: Update deploy.sh — add migration step before API update**
+
+Add `run_migration()` function that:
+1. Runs the migration task definition as a one-shot Fargate task
+2. Waits for task to stop (`aws ecs wait tasks-stopped`)
+3. Checks exit code of the `migration` container
+4. Fails deploy if exit code != 0
+
+```bash
+run_migration() {
+  echo "Running database migrations..."
+  MIGRATION_TASK_ARN=$(aws ecs run-task \
+    --cluster "$ECS_CLUSTER" \
+    --task-definition "workermill-${ENVIRONMENT}-migration" \
+    --launch-type FARGATE \
+    --network-configuration "awsvpcConfiguration={subnets=[$PRIVATE_SUBNETS],securityGroups=[$SECURITY_GROUPS],assignPublicIp=DISABLED}" \
+    --query 'tasks[0].taskArn' --output text)
+
+  echo "Migration task: $MIGRATION_TASK_ARN"
+  aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$MIGRATION_TASK_ARN"
+
+  EXIT_CODE=$(aws ecs describe-tasks \
+    --cluster "$ECS_CLUSTER" \
+    --tasks "$MIGRATION_TASK_ARN" \
+    --query 'tasks[0].containers[?name==`migration`].exitCode' --output text)
+
+  if [ "$EXIT_CODE" != "0" ]; then
+    echo "ERROR: Migration failed with exit code $EXIT_CODE"
+    exit 1
+  fi
+  echo "Migrations completed successfully"
+}
+```
+
+Call `run_migration` before `deploy_api` in the deploy flow.
+
+**Step 4: Add SKIP_MIGRATIONS to API and orchestrator environments**
+
+In `main.tf` (API container environment):
+```hcl
+{ name = "SKIP_MIGRATIONS", value = "true" },
+```
+
+In `orchestrator.tf` (orchestrator container environment):
+```hcl
+{ name = "SKIP_MIGRATIONS", value = "true" },
+```
+
+**Step 5: Test locally**
+
+```bash
+# Verify API starts without running migrations
+cd api && SKIP_MIGRATIONS=true node dist/index.js
+# Should log "Migrations skipped"
+
+# Verify migrate script runs independently
+cd api && node dist/db/migrate.js
+# Should run pending migrations and exit
+```
+
+**Step 6: Commit**
+
+```bash
+git add api/src/index.ts infrastructure/terraform/modules/ecs-service/migration-task.tf infrastructure/terraform/modules/ecs-service/main.tf infrastructure/terraform/modules/ecs-service/orchestrator.tf deploy.sh
+git commit -m "feat: single-shot ECS migration task — prevents lock contention on auto-scale"
+```
+
+---
+
+### Task 28: Redis Instance Sizing CloudWatch Alarms
+
+Per-session Redis subscribers scale linearly with SSE connections. `cache.t4g.micro` (500MB) is only safe up to ~500 connections (~2 API instances). Add CloudWatch alarms to trigger upgrade before hitting capacity.
+
+**Files:**
+- Create: `infrastructure/terraform/modules/redis/alarms.tf`
+
+**Step 1: Create alarms.tf**
+
+```hcl
+resource "aws_cloudwatch_metric_alarm" "redis_connections_high" {
+  alarm_name          = "workermill-${var.environment}-redis-connections-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "CurrConnections"
+  namespace           = "AWS/ElastiCache"
+  period              = 60
+  statistic           = "Maximum"
+  threshold           = 400
+  alarm_description   = "Redis connections > 400 — upgrade instance size (t4g.micro max safe ~500)"
+
+  dimensions = {
+    CacheClusterId = aws_elasticache_replication_group.main.member_clusters[0]
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "redis_memory_high" {
+  alarm_name          = "workermill-${var.environment}-redis-memory-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "DatabaseMemoryUsagePercentage"
+  namespace           = "AWS/ElastiCache"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 70
+  alarm_description   = "Redis memory > 70% — pub/sub output buffers growing, upgrade instance"
+
+  dimensions = {
+    CacheClusterId = aws_elasticache_replication_group.main.member_clusters[0]
+  }
+}
+```
+
+**Step 2: Plan and apply**
+
+Run: `cd infrastructure/terraform && terraform plan` → review → `terraform apply` → `terraform plan` (confirm zero drift)
+
+**Step 3: Commit**
+
+```bash
+git add infrastructure/terraform/modules/redis/alarms.tf
+git commit -m "infra: Redis connection and memory CloudWatch alarms for instance upgrade triggers"
+```
+
+---
+
 ## Phase 6: Cleanup
 
 After all clients validated on unified stream.
@@ -2531,7 +2760,7 @@ git commit -m "chore: remove legacy SSE endpoints and polling code — unified s
 | 3: Agent + VS Code | 10-13 | Version bump, auto-fallback | Downgrade agent/extension |
 | 4: Worker batching | 14-16 | Transparent, backward compat | Deploy old worker |
 | 5: Infrastructure | 17-19 | Transparent | Revert Terraform |
-| **5B: Orchestrator scaling** | **21-26** | **Transparent — faster task pickup** | **Revert orchestrator.ts, revert Terraform, set poll back to 5s** |
+| **5B: Orchestrator scaling** | **21-28** | **Transparent — faster task pickup** | **Revert orchestrator.ts, revert Terraform, set poll back to 5s** |
 | 6: Cleanup | 20 | N/A — old paths already unused | N/A |
 
 ### Database Scaling Roadmap

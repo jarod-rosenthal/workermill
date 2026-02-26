@@ -12,6 +12,7 @@ import {
 } from "@aws-sdk/client-cognito-identity-provider";
 import { body, validationResult } from "express-validator";
 import { authenticateUser, authenticateApiKey } from "../middleware/auth.js";
+import { asyncHandler } from "../middleware/error-handler.js";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { AppDataSource } from "../db/connection.js";
@@ -2890,5 +2891,48 @@ router.get("/vscode-sso-callback", async (req: Request, res: Response) => {
     res.status(500).send("SSO authentication failed. Please try again.");
   }
 });
+
+// ─── GET /github-app-callback ──────────────────────────────────────────────
+// Called by GitHub after a user installs the WorkerMill GitHub App.
+// Receives installation_id, maps it to the org, and redirects to VS Code.
+router.get(
+  "/github-app-callback",
+  asyncHandler(async (req: Request, res: Response) => {
+    const installationId = parseInt(req.query.installation_id as string, 10);
+    const setupAction = req.query.setup_action as string;
+
+    if (!installationId || isNaN(installationId)) {
+      res.status(400).send("Missing installation_id");
+      return;
+    }
+
+    // Validate by generating a token (will fail if credentials are wrong)
+    try {
+      const { getInstallationToken } = await import("../services/github-app.js");
+      await getInstallationToken(installationId);
+    } catch (err) {
+      logger.error("GitHub App callback: failed to validate installation", {
+        installationId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.status(500).send("Failed to validate GitHub App installation. Check server logs.");
+      return;
+    }
+
+    // The state param carries the org ID from the install URL
+    const orgId = req.query.state as string;
+    if (orgId) {
+      const orgRepo = AppDataSource.getRepository(Organization);
+      await orgRepo.update({ id: orgId }, { githubAppInstallationId: installationId });
+      logger.info("GitHub App installed", { orgId, installationId, setupAction });
+    }
+
+    // Redirect to VS Code URI handler
+    res.redirect(
+      `vscode://workermill.workermill/auth-callback?scmConfigured=true&method=github-app` +
+        (orgId ? `&orgId=${orgId}` : ""),
+    );
+  }),
+);
 
 export default router;

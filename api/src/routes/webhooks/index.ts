@@ -8,6 +8,7 @@ import bitbucketRouter from "./bitbucket.js";
 import emailRouter from "./email.js";
 import supportRouter from "./support.js";
 import githubRunnerRouter from "./github-runner.js";
+import githubAppRouter from "./github-app.js";
 
 // Re-export shared helpers for external consumers
 export { cleanupOldWebhookDeliveries } from "./helpers.js";
@@ -24,5 +25,6 @@ router.use(bitbucketRouter);
 router.use(emailRouter);
 router.use(supportRouter);
 router.use(githubRunnerRouter);
+router.use(githubAppRouter);
 
 export default router;

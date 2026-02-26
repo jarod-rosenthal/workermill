@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.2.56",
+  "version": "0.2.57",
   "publisher": "workermill",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -134,6 +134,14 @@
         "title": "WorkerMill: Sign In with GitHub"
       },
       {
+        "command": "workermill.signInWithEmail",
+        "title": "WorkerMill: Sign In with Email"
+      },
+      {
+        "command": "workermill.signInWithGoogle",
+        "title": "WorkerMill: Sign In with Google"
+      },
+      {
         "command": "workermill.manualSetup",
         "title": "WorkerMill: Manual Setup"
       },
@@ -262,7 +270,7 @@
     "viewsWelcome": [
       {
         "view": "workermill.teamPanel",
-        "contents": "WorkerMill assigns Jira and GitHub issues to AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Get Started with GitHub](command:workermill.signUpWithGitHub)\n\nAlready have an account? [Sign in](command:workermill.signInWithGitHub) · [Use API key](command:workermill.manualSetup)",
+        "contents": "WorkerMill assigns Jira and GitHub issues to AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Get Started with GitHub](command:workermill.signUpWithGitHub)\n\nAlready have an account?\n[Email & Password](command:workermill.signInWithEmail) · [Google](command:workermill.signInWithGoogle) · [GitHub](command:workermill.signInWithGitHub) · [Use API key](command:workermill.manualSetup)",
         "when": "!workermill.agentConfigured"
       },
       {

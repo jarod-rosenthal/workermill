@@ -17,6 +17,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { execFileSync } from "child_process";
+import { randomBytes } from "crypto";
 import {
   isAgentInstalled,
   installAgent,
@@ -142,6 +143,97 @@ function httpsGetJson<T>(
     });
   });
 }
+
+/** POST to an HTTPS URL with a Bearer token and return the parsed response. */
+function httpsPostJsonWithBearer<T>(
+  url: string,
+  bearerToken: string,
+): Promise<{ status: number; data: T }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const payload = "{}";
+
+    const req = https.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname + parsed.search,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+          Authorization: `Bearer ${bearerToken}`,
+          "User-Agent": "WorkerMill-VSCode",
+        },
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          try {
+            resolve({
+              status: res.statusCode || 0,
+              data: JSON.parse(data) as T,
+            });
+          } catch {
+            resolve({ status: res.statusCode || 0, data: {} as T });
+          }
+        });
+      },
+    );
+
+    req.on("error", reject);
+    req.setTimeout(30_000, () => {
+      req.destroy();
+      reject(new Error("Request timeout"));
+    });
+    req.write(payload);
+    req.end();
+  });
+}
+
+/** GET JSON from an HTTPS URL without authentication. */
+function httpsGetJsonNoAuth<T>(url: string): Promise<{ status: number; data: T }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+
+    const req = https.get(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname + parsed.search,
+        headers: {
+          "User-Agent": "WorkerMill-VSCode",
+        },
+      },
+      (res) => {
+        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
+          httpsGetJsonNoAuth<T>(res.headers.location).then(resolve, reject);
+          return;
+        }
+        let body = "";
+        res.on("data", (chunk) => (body += chunk));
+        res.on("end", () => {
+          try {
+            resolve({ status: res.statusCode || 0, data: JSON.parse(body) as T });
+          } catch {
+            resolve({ status: res.statusCode || 0, data: {} as T });
+          }
+        });
+      },
+    );
+
+    req.on("error", reject);
+    req.setTimeout(15_000, () => {
+      req.destroy();
+      reject(new Error("Request timeout"));
+    });
+  });
+}
+
+// Pending Google SSO auth — resolved when the URI handler fires
+let pendingGoogleAuth: { state: string; resolve: (success: boolean) => void } | null = null;
 
 /**
  * Install agent binary if needed, start it, and set context.
@@ -644,4 +736,292 @@ export async function enterApiKey(
     });
 
   return true;
+}
+
+/**
+ * Sign in with email and password.
+ * Handles MFA challenge if enabled on the account.
+ * Exchanges JWT for a usr_ API key via /vscode-exchange.
+ */
+export async function signInWithEmail(log: (msg: string) => void): Promise<boolean> {
+  try {
+    const email = await vscode.window.showInputBox({
+      prompt: "Enter your WorkerMill email address",
+      placeHolder: "you@example.com",
+      ignoreFocusOut: true,
+      validateInput: (value) => {
+        if (!value.trim()) return "Email is required";
+        if (!value.includes("@")) return "Please enter a valid email";
+        return null;
+      },
+    });
+    if (!email) return false;
+
+    const password = await vscode.window.showInputBox({
+      prompt: "Enter your password",
+      password: true,
+      ignoreFocusOut: true,
+      validateInput: (value) => {
+        if (!value) return "Password is required";
+        return null;
+      },
+    });
+    if (!password) return false;
+
+    log("Signing in with email...");
+
+    const loginResult = await httpsPostJson<{
+      tokens?: { accessToken: string; refreshToken: string; idToken: string };
+      challengeRequired?: boolean;
+      challengeName?: string;
+      session?: string;
+      email?: string;
+      error?: string;
+    }>(`${API_BASE}/api/auth/login`, { email: email.trim(), password });
+
+    if (loginResult.status === 401) {
+      vscode.window.showErrorMessage(
+        (loginResult.data as any)?.error || "Invalid email or password.",
+      );
+      return false;
+    }
+
+    if (loginResult.status === 429) {
+      vscode.window.showErrorMessage("Too many attempts. Please wait and try again.");
+      return false;
+    }
+
+    if (loginResult.status < 200 || loginResult.status >= 300) {
+      vscode.window.showErrorMessage(
+        (loginResult.data as any)?.error || `Sign-in failed (HTTP ${loginResult.status}).`,
+      );
+      return false;
+    }
+
+    let accessToken: string;
+
+    // Handle MFA challenge
+    if (loginResult.data.challengeRequired) {
+      log("MFA challenge required");
+      const code = await vscode.window.showInputBox({
+        prompt: "Enter your 6-digit authenticator code",
+        placeHolder: "123456",
+        ignoreFocusOut: true,
+        validateInput: (value) => {
+          if (!value || !/^\d{6}$/.test(value)) return "Please enter a 6-digit code";
+          return null;
+        },
+      });
+      if (!code) return false;
+
+      const mfaResult = await httpsPostJson<{
+        tokens?: { accessToken: string };
+        error?: string;
+      }>(`${API_BASE}/api/auth/mfa-challenge`, {
+        email: email.trim(),
+        session: loginResult.data.session,
+        code,
+      });
+
+      if (mfaResult.status < 200 || mfaResult.status >= 300) {
+        vscode.window.showErrorMessage(
+          (mfaResult.data as any)?.error || "MFA verification failed. Please try again.",
+        );
+        return false;
+      }
+
+      if (!mfaResult.data.tokens?.accessToken) {
+        vscode.window.showErrorMessage("MFA verification failed: no token received.");
+        return false;
+      }
+
+      accessToken = mfaResult.data.tokens.accessToken;
+    } else {
+      if (!loginResult.data.tokens?.accessToken) {
+        vscode.window.showErrorMessage("Sign-in failed: no token received.");
+        return false;
+      }
+      accessToken = loginResult.data.tokens.accessToken;
+    }
+
+    // Exchange JWT for API key
+    log("Exchanging token for API key...");
+    const exchangeResult = await httpsPostJsonWithBearer<OnboardResponse>(
+      `${API_BASE}/api/auth/vscode-exchange`,
+      accessToken,
+    );
+
+    if (exchangeResult.status < 200 || exchangeResult.status >= 300) {
+      const errorMsg = (exchangeResult.data as any)?.error || `HTTP ${exchangeResult.status}`;
+      vscode.window.showErrorMessage(`Failed to complete sign-in: ${errorMsg}`);
+      return false;
+    }
+
+    const data = exchangeResult.data;
+    log("Sign-in successful");
+
+    const success = await finishSetup(data.apiKey, log, {
+      orgId: data.orgId,
+      orgName: data.orgName,
+      orgSlug: data.orgSlug,
+    });
+    if (!success) return false;
+
+    // Fire-and-forget
+    vscode.window
+      .showInformationMessage(
+        `Welcome back, ${data.name || email}! Agent is connecting...`,
+        "Open Dashboard",
+      )
+      .then((action) => {
+        if (action === "Open Dashboard") {
+          vscode.env.openExternal(vscode.Uri.parse(`${API_BASE}/dashboard`));
+        }
+      });
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`Email sign-in error: ${msg}`);
+    vscode.window.showErrorMessage(`Sign-in failed: ${msg}`);
+    return false;
+  }
+}
+
+/**
+ * Sign in with Google SSO via browser OAuth + URI handler.
+ * Opens the browser to Cognito hosted UI with Google identity provider.
+ * Server exchanges code and redirects back to vscode:// URI with API key.
+ */
+export async function signInWithGoogle(log: (msg: string) => void): Promise<boolean> {
+  try {
+    // Get SSO config to build the authorize URL
+    log("Fetching SSO configuration...");
+    const ssoResult = await httpsGetJsonNoAuth<{
+      hostedUiBaseUrl: string;
+      clientId: string;
+      providers: { name: string }[];
+    }>(`${API_BASE}/api/auth/sso-config`);
+
+    if (ssoResult.status !== 200) {
+      vscode.window.showErrorMessage("Failed to get SSO configuration.");
+      return false;
+    }
+
+    const hasGoogle = ssoResult.data.providers?.some((p) => p.name === "Google");
+    if (!hasGoogle) {
+      vscode.window.showErrorMessage("Google SSO is not enabled for this WorkerMill instance.");
+      return false;
+    }
+
+    // Generate random state for CSRF protection
+    const state = randomBytes(16).toString("hex");
+
+    // Create a promise that resolves when the URI handler fires
+    const result = new Promise<boolean>((resolve) => {
+      pendingGoogleAuth = { state, resolve };
+      // Timeout after 5 minutes
+      setTimeout(() => {
+        if (pendingGoogleAuth?.state === state) {
+          pendingGoogleAuth = null;
+          resolve(false);
+        }
+      }, 5 * 60 * 1000);
+    });
+
+    // Open browser with Cognito hosted UI pointing to Google
+    const redirectUri = `${API_BASE}/api/auth/vscode-sso-callback`;
+    const authorizeUrl =
+      `${ssoResult.data.hostedUiBaseUrl}/oauth2/authorize` +
+      `?identity_provider=Google` +
+      `&client_id=${ssoResult.data.clientId}` +
+      `&response_type=code` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&scope=openid+email+profile` +
+      `&state=${state}`;
+
+    log("Opening browser for Google sign-in...");
+    vscode.env.openExternal(vscode.Uri.parse(authorizeUrl));
+
+    vscode.window.showInformationMessage(
+      "Complete sign-in in your browser. VS Code will connect automatically.",
+    );
+
+    return await result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`Google sign-in error: ${msg}`);
+    vscode.window.showErrorMessage(`Google sign-in failed: ${msg}`);
+    return false;
+  }
+}
+
+/**
+ * Handle the vscode://workermill.workermill/auth-callback URI.
+ * Called by the URI handler registered in extension.ts.
+ * Parses API key from query params and completes agent setup.
+ */
+export async function handleAuthCallback(
+  uri: vscode.Uri,
+  log: (msg: string) => void,
+): Promise<boolean> {
+  const params = new URLSearchParams(uri.query);
+
+  const error = params.get("error");
+  if (error) {
+    vscode.window.showErrorMessage(`Sign-in failed: ${error}`);
+    if (pendingGoogleAuth) {
+      pendingGoogleAuth.resolve(false);
+      pendingGoogleAuth = null;
+    }
+    return false;
+  }
+
+  const apiKey = params.get("apiKey");
+  const state = params.get("state");
+
+  if (!apiKey) {
+    vscode.window.showErrorMessage("Sign-in failed: no API key received.");
+    if (pendingGoogleAuth) {
+      pendingGoogleAuth.resolve(false);
+      pendingGoogleAuth = null;
+    }
+    return false;
+  }
+
+  // Validate state if we have a pending auth
+  if (pendingGoogleAuth && state !== pendingGoogleAuth.state) {
+    vscode.window.showErrorMessage("Sign-in failed: state mismatch. Please try again.");
+    pendingGoogleAuth.resolve(false);
+    pendingGoogleAuth = null;
+    return false;
+  }
+
+  log("SSO callback received — setting up agent...");
+
+  const orgInfo = {
+    orgId: params.get("orgId") || undefined,
+    orgName: params.get("orgName") || undefined,
+    orgSlug: params.get("orgSlug") || undefined,
+  };
+
+  const success = await finishSetup(apiKey, log, orgInfo);
+
+  if (pendingGoogleAuth) {
+    pendingGoogleAuth.resolve(success);
+    pendingGoogleAuth = null;
+  }
+
+  if (success) {
+    const name = params.get("name") || params.get("email") || "there";
+    // Fire-and-forget
+    vscode.window
+      .showInformationMessage(`Welcome, ${name}! Agent is connecting...`, "Open Dashboard")
+      .then((action) => {
+        if (action === "Open Dashboard") {
+          vscode.env.openExternal(vscode.Uri.parse(`${API_BASE}/dashboard`));
+        }
+      });
+  }
+
+  return success;
 }

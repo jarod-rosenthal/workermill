@@ -26,7 +26,7 @@ import { WorkerTask } from "../models/WorkerTask.js";
 import { RemoteAgent } from "../models/RemoteAgent.js";
 import { In, Not } from "typeorm";
 import { logger } from "../utils/logger.js";
-import { buildPlanningPrompt, computeMaxTargetFiles, type PlanningInput } from "../services/planning-agent-local.js";
+import { buildPlanningPrompt, type PlanningInput } from "../services/planning-agent-local.js";
 import { getExpertRegistry } from "../services/persona.js";
 import { publishStoriesReady } from "../services/pipeline-executor.js";
 import {
@@ -1114,7 +1114,7 @@ router.get(
       model,
       provider,
       maxStories,
-      maxTargetFiles: computeMaxTargetFiles((task.description || "").length),
+      maxTargetFiles: org.maxTargetFiles,
       planningMode: org.planningMode || "strict",
       validPersonas: availablePersonas.map((p: { slug: string }) => p.slug),
     });
@@ -1254,8 +1254,8 @@ router.post(
 router.get(
   "/critic-prompt",
   asyncHandler(async (req: Request, res: Response) => {
-    const maxTargetFiles = parseInt(req.query.maxTargetFiles as string, 10) || 5;
     const org = req.organization!;
+    const maxTargetFiles = parseInt(req.query.maxTargetFiles as string, 10) || org.maxTargetFiles;
 
     // Fetch available personas so the critic knows which are valid
     const experts = await getExpertRegistry(org.id);

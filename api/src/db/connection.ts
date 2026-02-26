@@ -259,6 +259,7 @@ import { EnsureEnterpriseMevionAndPlatform1740800000000 } from "./migrations/174
 import { EncryptExistingApiKeys1740900000000 } from "./migrations/1740900000000-EncryptExistingApiKeys.js";
 import { AddOrgAiGuidelines1741000000000 } from "./migrations/1741000000000-AddOrgAiGuidelines.js";
 import { AddCloudComputeBilling1741100000000 } from "./migrations/1741100000000-AddCloudComputeBilling.js";
+import { AddMaxTargetFiles1741200000000 } from "./migrations/1741200000000-AddMaxTargetFiles.js";
 import { logger } from "../utils/logger.js";
 import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
@@ -557,6 +558,7 @@ export const AppDataSource = new DataSource({
     EncryptExistingApiKeys1740900000000,
     AddOrgAiGuidelines1741000000000,
     AddCloudComputeBilling1741100000000,
+    AddMaxTargetFiles1741200000000,
   ],
   subscribers: [
     OrganizationEncryptionSubscriber,

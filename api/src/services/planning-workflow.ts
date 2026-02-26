@@ -69,7 +69,6 @@ function logPlanningToTerminal(taskId: string, message: string): void {
 // Local planning path — used by processLocalPlanningAgent() for EXECUTION_MODE=local
 import {
   runLocalPlanningAgent,
-  computeMaxTargetFiles,
 } from "./planning-agent-local.js";
 import {
   runLocalCriticAgent,
@@ -465,9 +464,6 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
 
     let executionPlanV2: Awaited<ReturnType<typeof generateValidatedPlan>>;
     try {
-      const cloudMaxFiles = computeMaxTargetFiles(
-        (task.description || "").length,
-      );
       executionPlanV2 = await generateValidatedPlan(
         prd,
         agentConfig,
@@ -475,7 +471,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         progressCallback,
         skipCritic,
         streamProgressCallback,
-        cloudMaxFiles,
+        task.organization?.maxTargetFiles ?? 5,
       );
     } finally {
       clearPlanningHeartbeat();
@@ -919,10 +915,8 @@ async function processLocalPlanningAgent(
       });
     }
 
-    // Apply file cap (max 5 files per story) — same as remote agent's applyFileCap
-    const maxFiles = computeMaxTargetFiles(
-      (task.description || "").length,
-    );
+    // Apply file cap — same as remote agent's applyFileCap
+    const maxFiles = task.organization?.maxTargetFiles ?? 5;
     let truncatedCount = 0;
     for (const story of plan.stories) {
       if (

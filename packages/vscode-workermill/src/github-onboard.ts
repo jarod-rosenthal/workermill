@@ -298,7 +298,7 @@ export async function promptScmSetup(
         action: "pat" as const,
       },
       {
-        label: "$(github) Install GitHub App (coming soon)",
+        label: "$(github) Install GitHub App",
         description: "One-click, no tokens to manage",
         action: "app" as const,
       },
@@ -321,11 +321,53 @@ export async function promptScmSetup(
   }
 
   if (choice.action === "app") {
-    // GitHub App not yet available — fall through to PAT
-    vscode.window.showInformationMessage(
-      "GitHub App integration is coming soon. Please use a Personal Access Token for now.",
+    // Open GitHub App installation page with state=orgId for callback mapping
+    const configPath = path.join(os.homedir(), ".workermill", "config.json");
+    let orgId = "";
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      orgId = config.orgId || "";
+    } catch {
+      /* no config */
+    }
+
+    const installUrl =
+      `https://github.com/apps/workermill-agent/installations/new` +
+      (orgId ? `?state=${orgId}` : "");
+    vscode.env.openExternal(vscode.Uri.parse(installUrl));
+
+    // Poll scm-status until configured or timeout (60s)
+    const configured = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Waiting for GitHub App installation...",
+      },
+      async () => {
+        const start = Date.now();
+        while (Date.now() - start < 60_000) {
+          await new Promise((r) => setTimeout(r, 5000));
+          try {
+            const check = await httpsGetJson<{ configured: boolean }>(
+              `${API_BASE}/api/agent/scm-status`,
+              apiKey,
+            );
+            if (check.data.configured) {
+              vscode.window.showInformationMessage(
+                "GitHub App installed! Repository access configured.",
+              );
+              return true;
+            }
+          } catch {
+            /* retry */
+          }
+        }
+        vscode.window.showWarningMessage(
+          "GitHub App installation not detected. You can check Settings > Integrations later.",
+        );
+        return false;
+      },
     );
-    return promptPatSetup(apiKey, log);
+    return configured;
   }
 
   return promptPatSetup(apiKey, log);
@@ -409,6 +451,66 @@ async function promptPatSetup(
     vscode.window.showErrorMessage(`Failed to configure repository access: ${msg}`);
     return false;
   }
+}
+
+/**
+ * Show an org picker if the user belongs to multiple orgs.
+ * If user picks a different org, calls switch-org-key to get a new API key.
+ * Returns the (possibly updated) apiKey and orgInfo.
+ */
+async function pickOrgIfMultiple(
+  apiKey: string,
+  currentOrgId: string | undefined,
+  organizations: OrgInfo[] | undefined,
+  log: (msg: string) => void,
+): Promise<{ apiKey: string; orgId?: string; orgName?: string; orgSlug?: string }> {
+  if (!organizations || organizations.length <= 1) {
+    return { apiKey };
+  }
+
+  const items = organizations.map((org) => ({
+    label: org.name,
+    description: `${org.role}${org.id === currentOrgId ? " (current)" : ""}`,
+    orgId: org.id,
+    orgName: org.name,
+    orgSlug: org.slug,
+  }));
+
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: "Select an organization",
+    title: "Which organization do you want to use?",
+  });
+
+  if (!picked || picked.orgId === currentOrgId) {
+    // User cancelled or picked the current org — no change
+    return { apiKey };
+  }
+
+  // Switch to the picked org — get a new API key
+  log(`Switching to org: ${picked.label}`);
+  try {
+    const switchResult = await httpsPostJsonWithApiKey<{
+      apiKey: string;
+      orgId: string;
+      orgName: string;
+      orgSlug: string;
+    }>(`${API_BASE}/api/auth/switch-org-key`, apiKey, { orgId: picked.orgId });
+
+    if (switchResult.status >= 200 && switchResult.status < 300) {
+      log(`Switched to ${switchResult.data.orgName}`);
+      return {
+        apiKey: switchResult.data.apiKey,
+        orgId: switchResult.data.orgId,
+        orgName: switchResult.data.orgName,
+        orgSlug: switchResult.data.orgSlug,
+      };
+    }
+    log(`Failed to switch org (HTTP ${switchResult.status}) — using default`);
+  } catch (err) {
+    log(`Org switch failed: ${err instanceof Error ? err.message : String(err)} — using default`);
+  }
+
+  return { apiKey };
 }
 
 /**
@@ -1055,10 +1157,17 @@ export async function signInWithEmail(log: (msg: string) => void): Promise<boole
     const data = exchangeResult.data;
     log("Sign-in successful");
 
-    const success = await finishSetup(data.apiKey, log, {
-      orgId: data.orgId,
-      orgName: data.orgName,
-      orgSlug: data.orgSlug,
+    // If user belongs to multiple orgs, let them pick which one
+    const orgChoice = await pickOrgIfMultiple(data.apiKey, data.orgId, data.organizations, log);
+    const activeApiKey = orgChoice.apiKey;
+    const activeOrgId = orgChoice.orgId || data.orgId;
+    const activeOrgName = orgChoice.orgName || data.orgName;
+    const activeOrgSlug = orgChoice.orgSlug || data.orgSlug;
+
+    const success = await finishSetup(activeApiKey, log, {
+      orgId: activeOrgId,
+      orgName: activeOrgName,
+      orgSlug: activeOrgSlug,
     });
     if (!success) return false;
 
@@ -1193,13 +1302,41 @@ export async function handleAuthCallback(
 
   log("SSO callback received — setting up agent...");
 
+  let activeApiKey = apiKey;
   const orgInfo = {
     orgId: params.get("orgId") || undefined,
     orgName: params.get("orgName") || undefined,
     orgSlug: params.get("orgSlug") || undefined,
   };
 
-  const success = await finishSetup(apiKey, log, orgInfo);
+  // Google SSO redirect only carries the default org — fetch full org list
+  // and let the user pick if they belong to multiple orgs.
+  try {
+    const orgsResult = await httpsGetJson<{
+      organizations: OrgInfo[];
+      currentOrgId: string;
+    }>(`${API_BASE}/api/settings/organizations`, apiKey);
+
+    if (orgsResult.status >= 200 && orgsResult.status < 300) {
+      const orgChoice = await pickOrgIfMultiple(
+        apiKey,
+        orgInfo.orgId,
+        orgsResult.data.organizations,
+        log,
+      );
+      activeApiKey = orgChoice.apiKey;
+      if (orgChoice.orgId) {
+        orgInfo.orgId = orgChoice.orgId;
+        orgInfo.orgName = orgChoice.orgName;
+        orgInfo.orgSlug = orgChoice.orgSlug;
+      }
+    }
+  } catch {
+    // Org fetch failed — proceed with default org
+    log("Could not fetch org list — using default org");
+  }
+
+  const success = await finishSetup(activeApiKey, log, orgInfo);
 
   if (pendingGoogleAuth) {
     pendingGoogleAuth.resolve(success);

@@ -100,9 +100,15 @@ export function triggerPoll(): void {
 /**
  * Run a single poll iteration.
  */
+let pollInFlight = false;
+
 async function pollOnce(config: AgentConfig): Promise<void> {
   // Skip polling when a required update is in progress
   if (updateInProgress) return;
+
+  // Prevent concurrent poll calls (setInterval + triggerPoll) from racing
+  if (pollInFlight) return;
+  pollInFlight = true;
 
   try {
     const response = await api.get("/api/agent/poll", {
@@ -181,6 +187,8 @@ async function pollOnce(config: AgentConfig): Promise<void> {
       console.warn(`${ts()} ${chalk.yellow("⚠")} Poll error: ${err.message || String(error)}`);
       reportDiagnostic("warn", "poller", `Poll error: ${err.message || String(error)}`);
     }
+  } finally {
+    pollInFlight = false;
   }
 }
 

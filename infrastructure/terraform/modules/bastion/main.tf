@@ -498,9 +498,23 @@ def handler(event, context):
 
         instance_id = instances[0]['InstanceId']
 
+        # Check instance launch time — skip if less than 25 min old
+        # CloudWatch EC2 metrics take ~5 min to populate, and we need
+        # 20 min of data for a meaningful idle determination
+        import datetime
+        ec2_response = ec2.describe_instances(InstanceIds=[instance_id])
+        launch_time = ec2_response['Reservations'][0]['Instances'][0]['LaunchTime']
+        # launch_time is timezone-aware, so compare with timezone-aware utcnow
+        age_minutes = (datetime.datetime.now(datetime.timezone.utc) - launch_time).total_seconds() / 60
+        if age_minutes < 25:
+            return {
+                'status': 'too_young',
+                'message': f'Bastion launched {int(age_minutes)} min ago. Skipping idle check (need 25 min).',
+                'age_minutes': int(age_minutes)
+            }
+
         # Query CloudWatch for network activity over last 20 minutes
         cw = boto3.client('cloudwatch')
-        import datetime
         end_time = datetime.datetime.utcnow()
         start_time = end_time - datetime.timedelta(minutes=20)
 

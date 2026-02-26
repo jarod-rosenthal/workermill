@@ -121,9 +121,11 @@ The mobile SSE client mirrors the web's Zustand store SSE patterns:
 ### First Launch — Sign In
 
 1. User sees sign-in screen with two options:
-   - **"Sign in with GitHub"** button — launches `expo-auth-session` OAuth PKCE flow
-     - Redirect URI: `workermill://auth/callback` (Expo deep link)
-     - Backend: `GET /api/auth/github/authorize` → `POST /api/auth/github/callback`
+   - **"Sign in with GitHub"** button — uses web callback redirect pattern (see "GitHub SSO on Mobile" below)
+     - Mobile opens GitHub auth via `expo-web-browser`
+     - Uses existing web callback URL `https://workermill.com/auth/github/callback`
+     - Frontend callback page detects mobile `state` prefix → redirects to `workermill://auth/callback?code=XXX`
+     - Mobile captures the deep link, sends code to `POST /api/auth/github/callback`
      - Returns JWT tokens + user/org info
    - **Email + password form** — calls `POST /api/auth/login`
      - Handles MFA challenge if enabled (TOTP code input screen)
@@ -499,13 +501,11 @@ mobile/
 
 This section contains everything needed to scaffold the Expo project from scratch. Workers MUST follow these steps exactly.
 
-### Step 1: Create Expo Project
+### Step 1: Expo Project (ALREADY CREATED)
 
-```bash
-cd /path/to/workermill
-npx create-expo-app@latest mobile --template blank-typescript
-cd mobile
-```
+The `mobile/` directory already exists with `app.json` containing the EAS project ID (`98e60e26-13c4-421e-b114-96a7b2523f35`). Do NOT run `create-expo-app` again. Build on the existing scaffolding.
+
+The `app.json` will be overwritten with the full configuration in Step 3 — ensure the `extra.eas.projectId` value is preserved.
 
 ### Step 2: Install Dependencies
 
@@ -596,7 +596,7 @@ npx expo install expo-splash-screen expo-font
     },
     "extra": {
       "eas": {
-        "projectId": "TO_BE_SET_BY_EAS_INIT"
+        "projectId": "98e60e26-13c4-421e-b114-96a7b2523f35"
       },
       "router": {
         "origin": "https://workermill.com"
@@ -641,22 +641,11 @@ No App Store/Play Store submission needed for MVP. Preview builds create install
 }
 ```
 
-### Step 5: EAS Project Setup
+### Step 5: EAS Project Setup (ALREADY DONE)
 
-```bash
-cd mobile
+The EAS project is already initialized and linked. The project ID `98e60e26-13c4-421e-b114-96a7b2523f35` is in `app.json`. Do NOT run `eas init` again.
 
-# Login to Expo (uses EXPO_TOKEN env var for CI/headless auth)
-npx eas-cli login
-
-# Initialize EAS project (links to Expo account)
-npx eas-cli init
-
-# Configure builds
-npx eas-cli build:configure
-```
-
-**Environment variable for headless auth:** Set `EXPO_TOKEN` in the worker environment. The Expo access token authenticates EAS CLI without interactive login.
+Workers do NOT need `EXPO_TOKEN` — builds run via GitHub Actions CI which has the token as a secret.
 
 ### Step 6: tsconfig.json
 
@@ -866,23 +855,83 @@ Add `sendPushNotification()` calls to existing code (non-blocking, fire-and-forg
 
 3. **`api/src/routes/remote-agent.ts`** — when plan result is received (`POST /api/agent/plan-result`), send push notification.
 
-### GitHub OAuth: Add Mobile Redirect URI
+### GitHub SSO on Mobile (Web Callback Redirect Pattern)
 
-The existing `GET /api/auth/github/authorize` endpoint builds the redirect URI from the request `origin` header. For mobile, the endpoint needs to accept an optional `redirectUri` query parameter so the mobile app can specify `workermill://auth/callback`.
+GitHub OAuth Apps only allow ONE callback URL. Instead of registering a second URL, the mobile app reuses the existing web callback flow with a state-based redirect.
 
-**Modify `api/src/routes/auth.ts`** line ~2091:
+**Flow:**
+1. Mobile calls `GET /api/auth/github/authorize` — gets the GitHub authorize URL (redirect_uri = `https://workermill.com/auth/github/callback`)
+2. Mobile opens this URL via `expo-web-browser` (`WebBrowser.openAuthSessionAsync`), adding `mobile_` prefix to the `state` param
+3. User authorizes on GitHub
+4. GitHub redirects to `https://workermill.com/auth/github/callback?code=XXX&state=mobile_YYY`
+5. **Frontend `GitHubCallback.tsx` detects `state` starts with `mobile_`** → instead of processing the code, it redirects to `workermill://auth/callback?code=XXX&state=YYY`
+6. `WebBrowser.openAuthSessionAsync` on the mobile app is watching for `workermill://` URLs — it captures the redirect and returns the code
+7. Mobile app extracts `code` from the URL and sends it to `POST /api/auth/github/callback`
+
+**No changes to the GitHub OAuth App settings needed.** The single registered callback URL (`https://workermill.com/auth/github/callback`) handles both web and mobile.
+
+**Frontend change required** — modify `frontend/src/pages/GitHubCallback.tsx`:
+
+Add this check at the top of the `handleCallback()` function (before the existing `authAPI.githubCallback` call):
+
 ```typescript
-// Current:
-const origin = req.headers.origin || config.apiBaseUrl.replace("/api", "");
-const redirectUri = `${origin}/auth/github/callback`;
-
-// Updated:
-const mobileRedirectUri = req.query.redirectUri as string | undefined;
-const origin = req.headers.origin || config.apiBaseUrl.replace("/api", "");
-const redirectUri = mobileRedirectUri || `${origin}/auth/github/callback`;
+// If this callback was initiated from the mobile app, redirect to the
+// mobile deep link with the code instead of processing it here.
+// The mobile app's WebBrowser session will capture the workermill:// URL.
+if (state && state.startsWith("mobile_")) {
+  const mobileRedirect = `workermill://auth/callback?code=${encodeURIComponent(code)}`;
+  window.location.href = mobileRedirect;
+  return;
+}
 ```
 
-Also: the GitHub OAuth App settings (on github.com) need `workermill://auth/callback` added as an authorized redirect URI. This is a manual step the project owner must do.
+**Mobile-side implementation** (in `mobile/lib/github-auth.ts`):
+
+```typescript
+import * as WebBrowser from 'expo-web-browser';
+import * as Crypto from 'expo-crypto';
+
+export async function signInWithGitHub(apiBaseUrl: string) {
+  // 1. Get the authorize URL from our API
+  const res = await fetch(`${apiBaseUrl}/auth/github/authorize`);
+  const { authorizeUrl, state } = await res.json();
+
+  // 2. Prefix the state with "mobile_" so the web callback knows to redirect
+  const mobileAuthorizeUrl = authorizeUrl.replace(
+    `state=${state}`,
+    `state=mobile_${state}`
+  );
+
+  // 3. Open browser and wait for workermill:// redirect
+  const result = await WebBrowser.openAuthSessionAsync(
+    mobileAuthorizeUrl,
+    'workermill://auth/callback'
+  );
+
+  if (result.type !== 'success') {
+    throw new Error('GitHub sign-in was cancelled');
+  }
+
+  // 4. Extract code from the redirect URL
+  const url = new URL(result.url);
+  const code = url.searchParams.get('code');
+  if (!code) throw new Error('No authorization code received');
+
+  // 5. Exchange code for tokens via our API
+  const tokenRes = await fetch(`${apiBaseUrl}/auth/github/callback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      code,
+      redirectUri: 'https://workermill.com/auth/github/callback',
+    }),
+  });
+
+  return tokenRes.json();
+}
+```
+
+**No API changes needed.** The existing `POST /api/auth/github/callback` already accepts the code and redirectUri from the client.
 
 ---
 
@@ -979,11 +1028,14 @@ jobs:
 
 No new env vars needed. Push notification service uses Expo's public HTTP API which requires no API key.
 
-### Manual Setup (must be done before Full Build)
+### Manual Setup Status
 
-1. **Expo project:** Run `eas init` to create the project and get the EAS project ID
-2. **GitHub OAuth App:** Add `workermill://auth/callback` to authorized redirect URIs (GitHub → Settings → Developer Settings → OAuth Apps)
-3. **GitHub Secret:** Add `EXPO_TOKEN` to the `workermill/workermill` repo
+| Step | Status | Details |
+|------|--------|---------|
+| Expo project created | DONE | `@jarod.rosenthal/workermill`, ID: `98e60e26-13c4-421e-b114-96a7b2523f35` |
+| GitHub Secret (EXPO_TOKEN) | DONE | Set on `jarod-rosenthal/workermill` repo |
+| GitHub OAuth for mobile | DONE | No OAuth App changes needed — uses web callback redirect pattern (see "GitHub SSO on Mobile" section) |
+| Scaffolded `mobile/` directory | DONE | `app.json` has EAS project ID, workers build on top of this |
 
 ---
 
@@ -1004,17 +1056,119 @@ These features are explicitly NOT included in the MVP:
 
 ---
 
+## Testing & Validation
+
+Workers MUST validate their work at each stage. The app cannot be tested on a real device from within the worker container, so validation relies on type checking, linting, and unit tests.
+
+### Validation Commands (run after every card)
+
+```bash
+# Type check (must pass with zero errors)
+cd mobile && npx tsc --noEmit
+
+# Lint
+cd mobile && npx expo lint
+
+# Unit tests
+cd mobile && npx jest --passWithNoTests
+
+# API type check (if API files were modified)
+cd api && npm run typecheck
+```
+
+### Unit Tests
+
+Workers MUST write unit tests using Jest + React Native Testing Library. Install test dependencies:
+
+```bash
+cd mobile
+npm install --save-dev jest @testing-library/react-native @testing-library/jest-native jest-expo @types/jest
+```
+
+Add to `mobile/package.json`:
+```json
+{
+  "scripts": {
+    "test": "jest"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "transformIgnorePatterns": [
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|nativewind)"
+    ],
+    "setupFilesAfterSetup": ["@testing-library/jest-native/extend-expect"]
+  }
+}
+```
+
+**Required test coverage:**
+
+| Layer | What to test | Files |
+|-------|-------------|-------|
+| **Stores** | Auth store token management, tasks store state updates, boards store CRUD, coordination store message handling | `stores/__tests__/*.test.ts` |
+| **API client** | Interceptor adds auth header, 401 triggers refresh, error extraction | `lib/__tests__/api-client.test.ts` |
+| **SSE client** | Connection lifecycle, reconnect on error, disconnect on background | `lib/__tests__/sse-client.test.ts` |
+| **Push service** | Token registration, unregistration, notification handling | `lib/__tests__/push.test.ts` |
+| **GitHub auth** | State prefix, URL parsing, code extraction | `lib/__tests__/github-auth.test.ts` |
+| **Components** | TaskListItem renders status/persona, StatusBadge colors, StatsBar formatting | `components/__tests__/*.test.tsx` |
+| **API routes** (server-side) | Push register/unregister, prefs CRUD | `api/src/routes/push.test.ts` |
+| **Push service** (server-side) | Notification delivery, preference filtering, token invalidation | `api/src/services/push-notifications.test.ts` |
+
+### API Integration Tests
+
+For the new push notification endpoints, add tests following the existing Vitest pattern in `api/`:
+
+```bash
+cd api && npx vitest run src/routes/push.test.ts
+cd api && npx vitest run src/services/push-notifications.test.ts
+```
+
+---
+
+## Build & Install (Manual Steps After Workers Complete)
+
+Workers write all code and push to the repository. The actual build and device installation requires these manual steps:
+
+### Step 1: Trigger the Build
+
+Go to GitHub → `jarod-rosenthal/workermill` → Actions → "Mobile Build" → "Run workflow" → Run
+
+This triggers `eas build --profile preview --platform android` via GitHub Actions.
+
+### Step 2: Download the APK
+
+After the build completes (~5-10 minutes):
+- Go to https://expo.dev → Projects → workermill → Builds
+- Download the `.apk` file for the preview build
+
+### Step 3: Install on Android Device
+
+- Transfer the APK to your phone (email, Google Drive, USB, etc.)
+- Open the APK → Allow install from unknown sources → Install
+- Or: scan the QR code from the Expo dashboard directly on your phone
+
+### Iterating on Bugs
+
+If the app crashes or has runtime issues after install:
+1. Check the EAS build logs for compile errors
+2. Use `npx expo start` in Expo Go for faster iteration on JS bugs (limited — no push notifications in Expo Go)
+3. Fix code, push, retrigger the workflow
+
+---
+
 ## Success Criteria
 
-1. `mobile/` directory contains a working Expo project that builds without errors
-2. `npx expo start` launches the app in Expo Go on a physical device
-3. User can sign in via GitHub SSO or email/password
-4. Dashboard shows real-time task status via SSE streaming
-5. User can browse boards, view cards, and create new cards
-6. User can view streaming logs on task detail screen
-7. User can cancel or retry tasks from the app
-8. Push notifications fire for task completions, failures, and blockers
-9. Tapping a push notification deep-links to the relevant task detail
-10. Biometric unlock works for subsequent app launches
-11. `eas build --profile preview --platform android` produces an installable APK
-12. API migration runs successfully and push endpoints respond correctly
+1. `mobile/` directory contains a working Expo project with zero TypeScript errors
+2. All unit tests pass (`npx jest` exits 0)
+3. API type check passes after server-side changes (`cd api && npm run typecheck`)
+4. API push notification tests pass (`cd api && npx vitest run src/routes/push.test.ts`)
+5. User can sign in via GitHub SSO or email/password
+6. Dashboard shows real-time task status via SSE streaming
+7. User can browse boards, view cards, and create new cards
+8. User can view streaming logs on task detail screen
+9. User can cancel or retry tasks from the app
+10. Push notifications fire for task completions, failures, and blockers
+11. Tapping a push notification deep-links to the relevant task detail
+12. Biometric unlock works for subsequent app launches
+13. Manual GitHub Actions trigger produces an installable Android APK
+14. Frontend `GitHubCallback.tsx` correctly redirects mobile OAuth flows

@@ -1855,6 +1855,623 @@ Track [hashicorp/terraform-provider-aws#40328](https://github.com/hashicorp/terr
 
 ---
 
+## Phase 5B: Orchestrator Scaling
+
+Replace the orchestrator's 5-second DB polling with event-driven Redis pub/sub for task pickup and completion, right-size the Fargate task, and prepare for multi-instance scaling.
+
+---
+
+### Task 21: Right-Size Orchestrator ECS Task Definition
+
+The orchestrator currently runs on 256 CPU / 512 MB — insufficient for 100+ concurrent tasks even with event-driven optimizations.
+
+**Files:**
+- Modify: `infrastructure/terraform/modules/ecs-service/orchestrator.tf`
+
+**Context:**
+- Current: `cpu = "256"`, `memory = "512"` (orchestrator.tf:6-7)
+- PgBouncer sidecar: `cpu = 64`, `memory = 128` (orchestrator.tf:115-116)
+- `DB_POOL_MAX = "15"` (orchestrator.tf:45)
+- `desired_count = 1` (orchestrator.tf:126)
+
+**Step 1: Update task definition resources**
+
+In `aws_ecs_task_definition.orchestrator`:
+```hcl
+cpu    = "512"
+memory = "1024"
+```
+
+**Step 2: Reduce DB_POOL_MAX**
+
+Event-driven mode needs fewer concurrent queries. In the orchestrator container environment:
+```hcl
+{ name = "DB_POOL_MAX", value = "10" },
+```
+
+**Step 3: Add ORCHESTRATOR_POLL_INTERVAL env var**
+
+```hcl
+{ name = "ORCHESTRATOR_POLL_INTERVAL", value = "30000" },
+```
+
+This will be read by the updated orchestrator code (Task 22) to control the background sweep interval.
+
+**Step 4: Plan and apply**
+
+Run: `cd infrastructure/terraform && terraform plan` → review → `terraform apply` → `terraform plan` (confirm zero drift)
+
+**Step 5: Commit**
+
+```bash
+git add infrastructure/terraform/modules/ecs-service/orchestrator.tf
+git commit -m "infra: right-size orchestrator 256/512 → 512/1024, add poll interval env var"
+```
+
+---
+
+### Task 22: Event-Driven Task Pickup (Redis `orchestrator:task-queued`)
+
+Replace the `findQueuedTasks()` DB poll (6-15 queries every 5s) with a Redis subscription that reacts instantly when tasks are queued.
+
+**Files:**
+- Modify: `api/src/services/orchestrator.ts` (subscribe to Redis channel, event handler, slow sweep)
+- Modify: `api/src/services/task-claimer.ts` (add `claimAndDispatchTask()` for event-driven path)
+- Modify: `api/src/services/orchestrator-utils.ts` (export poll interval config)
+- Modify: `api/src/services/redis-client.ts` (add `createSubscriber()` if not already added in Task 1)
+- Test: `api/src/services/orchestrator.test.ts`
+
+**Context:**
+- Current poll loop: `orchestrator.ts:47-345`, sleeps 5s at line 334
+- `findQueuedTasks()` in task-claimer.ts:38 runs every cycle
+- `claimTask()` in task-claimer.ts is already atomic (`UPDATE...WHERE status = 'queued'`)
+- Redis client: `api/src/services/redis-client.ts`
+- The orchestrator already writes `orchestrator:heartbeat` to Redis (line 53)
+
+**Step 1: Add poll interval config to orchestrator-utils.ts**
+
+```typescript
+export const POLL_INTERVAL = parseInt(process.env.ORCHESTRATOR_POLL_INTERVAL || "5000", 10);
+export const MONITOR_INTERVAL = parseInt(process.env.ORCHESTRATOR_MONITOR_INTERVAL || "5000", 10);
+```
+
+**Step 2: Add `claimAndDispatchTask()` to task-claimer.ts**
+
+This is the event-driven entry point — receives a specific taskId from Redis, validates it, claims it, and dispatches.
+
+```typescript
+/**
+ * Event-driven task claim — called when Redis publishes a task-queued event.
+ * Validates the task is still queued, applies org/quota checks, then claims and dispatches.
+ * Returns true if task was successfully claimed by this orchestrator instance.
+ */
+export async function claimAndDispatchTask(taskId: string): Promise<boolean> {
+  const taskRepo = getTaskRepo();
+  const orgRepo = getOrgRepo();
+
+  // Load task — may have been claimed by another instance already
+  const task = await taskRepo.findOne({ where: { id: taskId, status: "queued" as any } });
+  if (!task) return false; // Already claimed or status changed
+
+  // Skip tasks claimed by remote agents
+  if (task.claimedByAgent) return false;
+
+  // Check org is not in maintenance mode
+  const org = await orgRepo.findOne({ where: { id: task.orgId }, select: ["id", "systemEnabled", "maxConcurrentWorkers"] });
+  if (!org || !org.systemEnabled) return false;
+
+  // Quota / budget checks
+  const quotaOk = await canCreateTask(task.orgId);
+  if (!quotaOk) return false;
+  const budgetOk = await canStartTaskWithinBudget(task.orgId);
+  if (!budgetOk) return false;
+
+  // Attempt atomic claim
+  return claimTask(taskId);
+}
+```
+
+**Step 3: Update orchestrator.ts — add Redis subscription and slow sweep**
+
+```typescript
+import { redis } from "./redis-client.js";
+import { POLL_INTERVAL, MONITOR_INTERVAL } from "./orchestrator-utils.js";
+import { claimAndDispatchTask } from "./task-claimer.js";
+
+let eventDrivenEnabled = false;
+let orchestratorSub: ReturnType<typeof redis.createSubscriber> | null = null;
+
+/**
+ * Event-driven task pickup — subscribe to Redis channel.
+ * Falls back to polling if Redis is unavailable.
+ */
+async function startEventDrivenPickup(): Promise<void> {
+  try {
+    orchestratorSub = redis.createSubscriber();
+    await orchestratorSub.subscribe("orchestrator:task-queued");
+
+    orchestratorSub.on("message", async (_channel: string, message: string) => {
+      try {
+        const { taskId } = JSON.parse(message);
+        if (!taskId || !state.running) return;
+
+        const claimed = await claimAndDispatchTask(taskId);
+        if (claimed) {
+          const taskRepo = getTaskRepo();
+          const task = await taskRepo.findOneBy({ id: taskId });
+          if (!task) return;
+
+          await logTaskEvent(task.id, "status_change", "Task claimed by orchestrator (event-driven)");
+
+          // Route to appropriate handler (same logic as poll loop)
+          if (task.isV2Pipeline() && task.executionPlanV2) {
+            trackOperation(runSequentialPipeline(task.id).catch(err =>
+              logger.error("Event-driven V2 pipeline error", { taskId, error: String(err) })
+            ));
+          } else {
+            const wasDispatched = await dispatchMultiStoryPlan(task);
+            if (!wasDispatched) {
+              await logTaskEvent(task.id, "status_change", `Assigned to worker ${task.id.substring(0, 8)}`);
+              trackOperation(spawnWorker(task).catch(err =>
+                logger.error("Event-driven spawn error", { taskId, error: String(err) })
+              ));
+            }
+          }
+        }
+      } catch (err) {
+        logger.error("Error handling task-queued event", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
+
+    eventDrivenEnabled = true;
+    logger.info("Event-driven task pickup enabled via Redis subscription");
+  } catch (err) {
+    logger.warn("Failed to start event-driven pickup, falling back to polling", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    eventDrivenEnabled = false;
+  }
+}
+```
+
+**Step 4: Update pollLoop to become background sweep**
+
+Replace the sleep at line 334:
+```typescript
+// OLD:
+await new Promise((resolve) => setTimeout(resolve, 5000));
+
+// NEW:
+const interval = eventDrivenEnabled ? POLL_INTERVAL : 5000;
+await new Promise((resolve) => setTimeout(resolve, interval));
+```
+
+When event-driven is active, `POLL_INTERVAL` defaults to 30000 (30s). When Redis is down, it falls back to 5000 (5s) — identical to current behavior.
+
+**Step 5: Update startOrchestrator()**
+
+```typescript
+export async function startOrchestrator(): void {
+  if (state.running) {
+    logger.warn("Orchestrator already running");
+    return;
+  }
+
+  logger.info("Starting orchestrator");
+  state.running = true;
+  state.tasksProcessed = 0;
+  state.errors = 0;
+
+  // Try event-driven pickup first (Redis subscription)
+  await startEventDrivenPickup();
+
+  // Start polling loop (background sweep when event-driven is active)
+  pollLoop().catch((error) => {
+    logger.error("Orchestrator poll loop crashed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    state.running = false;
+  });
+
+  // Start cleanup loop (runs hourly, don't await)
+  cleanupLoop().catch((error) => {
+    logger.error("Cleanup loop crashed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+```
+
+**Step 6: Update stopOrchestrator()**
+
+```typescript
+export function stopOrchestrator(): void {
+  if (!state.running) {
+    logger.warn("Orchestrator not running");
+    return;
+  }
+
+  logger.info("Stopping orchestrator");
+  state.running = false;
+
+  // Unsubscribe from Redis
+  if (orchestratorSub) {
+    orchestratorSub.unsubscribe("orchestrator:task-queued").catch(() => {});
+    orchestratorSub.quit().catch(() => {});
+    orchestratorSub = null;
+  }
+}
+```
+
+**Step 7: Write tests**
+
+```typescript
+// api/src/services/orchestrator.test.ts
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+describe("Event-driven task pickup", () => {
+  it("claims task immediately when Redis event received", async () => {
+    // Mock Redis subscriber, publish task-queued event
+    // Assert claimAndDispatchTask() called with correct taskId
+    // Assert spawnWorker() called
+  });
+
+  it("falls back to DB polling when Redis unavailable", async () => {
+    // Mock Redis.createSubscriber() to throw
+    // Assert eventDrivenEnabled is false
+    // Assert poll interval stays at 5000ms
+  });
+
+  it("skips already-claimed tasks (idempotent)", async () => {
+    // Mock task already in 'claimed' status
+    // Publish task-queued event
+    // Assert claimAndDispatchTask() returns false
+  });
+
+  it("background sweep catches missed events", async () => {
+    // Simulate event-driven enabled but task missed (e.g., published before subscription)
+    // Assert findQueuedTasks() still runs on 30s interval
+    // Assert task is picked up by sweep
+  });
+
+  it("two instances competing never double-claim", async () => {
+    // Both instances receive same Redis event
+    // First claimTask() UPDATE succeeds
+    // Second claimTask() UPDATE matches 0 rows
+    // Assert only one spawnWorker() call total
+  });
+});
+```
+
+**Step 8: Run tests**
+
+Run: `cd api && npx vitest run src/services/orchestrator.test.ts`
+
+**Step 9: Commit**
+
+```bash
+git add api/src/services/orchestrator.ts api/src/services/task-claimer.ts api/src/services/orchestrator-utils.ts api/src/services/orchestrator.test.ts
+git commit -m "feat: event-driven task pickup — Redis subscription replaces 5s DB polling"
+```
+
+---
+
+### Task 23: Publish `orchestrator:task-queued` Events From All Task Creation Points
+
+Wire up Redis publish calls at every code path that creates or transitions a task to `queued` status.
+
+**Files:**
+- Modify: `api/src/routes/tasks.ts` (POST /api/tasks)
+- Modify: `api/src/routes/boards.ts` (POST /api/boards/:boardId/cards/:cardId/run)
+- Modify: `api/src/services/board-execution.ts` (dependency cascade)
+- Modify: `api/src/routes/remote-agent.ts` (POST /api/agent/plan-result)
+- Modify: `api/src/services/task-monitor.ts` (`checkAndUnblockDependentTasks`)
+- Modify: `api/src/services/manager-workflow.ts` (`requeueForDeployment`)
+- Create: `api/src/services/orchestrator-events.ts` (shared publish helper)
+- Test: `api/src/services/orchestrator-events.test.ts`
+
+**Step 1: Create orchestrator-events.ts helper**
+
+```typescript
+import { redis } from "./redis-client.js";
+import { logger } from "../utils/logger.js";
+
+/**
+ * Notify the orchestrator that a task is ready for claiming.
+ * Fire-and-forget — orchestrator poll loop is the safety net.
+ */
+export function notifyTaskQueued(taskId: string, orgId: string): void {
+  redis.publish("orchestrator:task-queued", JSON.stringify({ taskId, orgId }))
+    .catch((err) => {
+      logger.warn("Failed to publish task-queued event (orchestrator will pick up via sweep)", {
+        taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+}
+
+/**
+ * Notify the orchestrator that a task has completed or failed.
+ * Fire-and-forget — monitorExecutingTasks sweep is the safety net.
+ */
+export function notifyTaskCompleted(taskId: string, orgId: string, status: string): void {
+  redis.publish("orchestrator:task-completed", JSON.stringify({ taskId, orgId, status }))
+    .catch((err) => {
+      logger.warn("Failed to publish task-completed event", {
+        taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+}
+```
+
+**Step 2: Add `notifyTaskQueued()` to every task creation / re-queue path**
+
+| File | Location | When |
+|------|----------|------|
+| `api/src/routes/tasks.ts` | After task INSERT with status `queued` | New task created |
+| `api/src/routes/boards.ts` | After card run creates task | Card → task |
+| `api/src/services/board-execution.ts` | After cascade trigger creates queued task | Dependency complete → next card |
+| `api/src/routes/remote-agent.ts` | After plan-result creates child tasks | Plan approved → children queued |
+| `api/src/services/task-monitor.ts` | In `checkAndUnblockDependentTasks()` after `UPDATE...SET status = 'queued'` | Blocked → queued |
+| `api/src/services/manager-workflow.ts` | In `requeueForDeployment()` after status → queued | Approved → requeued for deploy |
+| `api/src/routes/tasks.ts` | Manual retry endpoint (PATCH /api/tasks/:id) | User retries failed task |
+
+Each insertion is a single line:
+```typescript
+import { notifyTaskQueued } from "../services/orchestrator-events.js";
+// ... after task status becomes 'queued':
+notifyTaskQueued(task.id, task.orgId);
+```
+
+**Step 3: Add `notifyTaskCompleted()` to task completion paths**
+
+| File | Location | When |
+|------|----------|------|
+| `api/src/routes/tasks.ts` | Worker callback endpoint (task reports completion) | Worker → completed/failed |
+| `api/src/services/task-monitor.ts` | `monitorExecutingTasks()` when ECS task stops | ECS stopped → completed/failed |
+
+**Step 4: Write tests**
+
+```typescript
+// api/src/services/orchestrator-events.test.ts
+describe("orchestrator-events", () => {
+  it("publishes task-queued event with taskId and orgId", async () => {
+    const publishSpy = vi.spyOn(redis, "publish").mockResolvedValue(1);
+    notifyTaskQueued("task-123", "org-456");
+    await vi.waitFor(() => {
+      expect(publishSpy).toHaveBeenCalledWith(
+        "orchestrator:task-queued",
+        JSON.stringify({ taskId: "task-123", orgId: "org-456" })
+      );
+    });
+  });
+
+  it("does not throw when Redis publish fails", async () => {
+    vi.spyOn(redis, "publish").mockRejectedValue(new Error("Redis down"));
+    // Should not throw — fire-and-forget
+    expect(() => notifyTaskQueued("task-123", "org-456")).not.toThrow();
+  });
+});
+```
+
+**Step 5: Run tests**
+
+Run: `cd api && npm run test`
+
+**Step 6: Commit**
+
+```bash
+git add api/src/services/orchestrator-events.ts api/src/services/orchestrator-events.test.ts api/src/routes/tasks.ts api/src/routes/boards.ts api/src/services/board-execution.ts api/src/routes/remote-agent.ts api/src/services/task-monitor.ts api/src/services/manager-workflow.ts
+git commit -m "feat: publish orchestrator:task-queued events from all task creation paths"
+```
+
+---
+
+### Task 24: Event-Driven Task Completion + Slow ECS Monitor
+
+Subscribe to `orchestrator:task-completed` events and reduce `monitorExecutingTasks()` from 5s to 60s safety-net interval.
+
+**Files:**
+- Modify: `api/src/services/orchestrator.ts` (subscribe to completion channel, slow monitor interval)
+- Modify: `api/src/services/task-monitor.ts` (extract post-completion logic into callable function)
+- Test: `api/src/services/orchestrator.test.ts` (add completion event tests)
+
+**Step 1: Extract post-completion handler from monitorExecutingTasks()**
+
+In `task-monitor.ts`, create a `handleTaskCompletion()` function that encapsulates the post-completion logic (quality gates, Jira transition, dependency unblocking, notifications) so it can be called from both the poll loop and the event handler.
+
+```typescript
+/**
+ * Post-completion handler — runs quality gates, transitions Jira, unblocks dependencies.
+ * Called from both monitorExecutingTasks (poll) and event-driven completion handler.
+ */
+export async function handleTaskCompletion(taskId: string, completionStatus: string): Promise<void> {
+  // ... existing completion logic extracted from monitorExecutingTasks
+}
+```
+
+**Step 2: Subscribe to completion events in orchestrator.ts**
+
+```typescript
+await orchestratorSub.subscribe("orchestrator:task-completed");
+
+orchestratorSub.on("message", async (channel: string, message: string) => {
+  if (channel === "orchestrator:task-queued") {
+    // ... existing task pickup handler
+  } else if (channel === "orchestrator:task-completed") {
+    try {
+      const { taskId, status } = JSON.parse(message);
+      if (!taskId || !state.running) return;
+      await handleTaskCompletion(taskId, status);
+    } catch (err) {
+      logger.error("Error handling task-completed event", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+});
+```
+
+**Step 3: Slow down monitorExecutingTasks() interval**
+
+In the poll loop, run `monitorExecutingTasks()` only every 12th cycle when event-driven is enabled (30s × 12 = 360s ≈ 60s effective since sweep is 30s):
+
+```typescript
+// Monitor executing tasks — primary path is event-driven completion;
+// this is the safety net for crashes, OOM, Spot reclaim
+if (!eventDrivenEnabled || state.tasksProcessed % 2 === 0) {
+  await monitorExecutingTasks().catch((error) => {
+    logger.error("Error in monitorExecutingTasks", { error: String(error) });
+  });
+}
+```
+
+When event-driven is enabled with 30s sweep, this runs every 60s. When polling at 5s, this runs every 10s — still plenty fast for the safety net.
+
+**Step 4: Write tests**
+
+```typescript
+describe("Event-driven task completion", () => {
+  it("runs post-completion logic when Redis event received", async () => {
+    // Publish task-completed event
+    // Assert handleTaskCompletion() called
+    // Assert Jira transition attempted
+    // Assert dependencies unblocked
+  });
+
+  it("monitorExecutingTasks runs at reduced interval when event-driven", async () => {
+    // Enable event-driven mode
+    // Assert monitorExecutingTasks called every other sweep (60s effective)
+  });
+});
+```
+
+**Step 5: Run tests**
+
+Run: `cd api && npx vitest run src/services/orchestrator.test.ts`
+
+**Step 6: Commit**
+
+```bash
+git add api/src/services/orchestrator.ts api/src/services/task-monitor.ts api/src/services/orchestrator.test.ts
+git commit -m "feat: event-driven task completion — Redis subscription + 60s ECS monitor safety net"
+```
+
+---
+
+### Task 25: Orchestrator CloudWatch EMF Metrics
+
+Emit orchestrator health metrics via CloudWatch Embedded Metric Format so auto-scaling decisions and monitoring alerts can be data-driven.
+
+**Files:**
+- Modify: `api/src/services/orchestrator.ts` (emit metrics each poll cycle)
+- Modify: `api/src/services/orchestrator-utils.ts` (expose `activeOps.size`)
+
+**Step 1: Add metric emission to poll loop**
+
+At the end of each poll cycle (before the sleep), emit:
+
+```typescript
+import { createMetricsLogger, Unit } from "aws-embedded-metrics";
+
+// Emit orchestrator metrics (every poll cycle)
+const metrics = createMetricsLogger();
+metrics.setNamespace("WorkerMill/Orchestrator");
+metrics.putMetric("PollDurationMs", Date.now() - state.lastPollAt.getTime(), Unit.Milliseconds);
+metrics.putMetric("ActiveOps", activeOps.size, Unit.Count);
+metrics.putMetric("EventDrivenEnabled", eventDrivenEnabled ? 1 : 0, Unit.Count);
+metrics.putMetric("TasksProcessed", state.tasksProcessed, Unit.Count);
+metrics.putMetric("Errors", state.errors, Unit.Count);
+await metrics.flush();
+```
+
+**Step 2: Commit**
+
+```bash
+git add api/src/services/orchestrator.ts api/src/services/orchestrator-utils.ts
+git commit -m "feat: orchestrator CloudWatch EMF metrics — poll duration, active ops, event-driven status"
+```
+
+---
+
+### Task 26: Terraform — Orchestrator Multi-Instance Prep
+
+Prepare the orchestrator ECS service for scaling to 2+ instances. The code is already safe (atomic claims, distributed locks). This task adds the infrastructure to enable it.
+
+**Files:**
+- Modify: `infrastructure/terraform/modules/ecs-service/orchestrator.tf`
+- Modify: `infrastructure/terraform/modules/ecs-service/variables.tf`
+
+**Step 1: Add variable for orchestrator desired count**
+
+```hcl
+variable "orchestrator_desired_count" {
+  description = "Number of orchestrator instances (increase at 200+ concurrent tasks)"
+  type        = number
+  default     = 1
+}
+```
+
+**Step 2: Update orchestrator service to use variable**
+
+```hcl
+desired_count = var.orchestrator_desired_count
+```
+
+**Step 3: Add CloudWatch alarms for orchestrator monitoring**
+
+```hcl
+resource "aws_cloudwatch_metric_alarm" "orchestrator_cpu_high" {
+  alarm_name          = "workermill-${var.environment}-orchestrator-cpu-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 60
+  alarm_description   = "Orchestrator CPU > 60% sustained — consider adding second instance or right-sizing up"
+
+  dimensions = {
+    ClusterName = var.ecs_cluster_name
+    ServiceName = aws_ecs_service.orchestrator.name
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "orchestrator_memory_high" {
+  alarm_name          = "workermill-${var.environment}-orchestrator-memory-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "MemoryUtilization"
+  namespace           = "AWS/ECS"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 70
+  alarm_description   = "Orchestrator memory > 70% sustained — consider right-sizing up"
+
+  dimensions = {
+    ClusterName = var.ecs_cluster_name
+    ServiceName = aws_ecs_service.orchestrator.name
+  }
+}
+```
+
+**Step 4: Plan and apply**
+
+Run: `cd infrastructure/terraform && terraform plan` → review → `terraform apply` → `terraform plan` (confirm zero drift)
+
+**Step 5: Commit**
+
+```bash
+git add infrastructure/terraform/modules/ecs-service/orchestrator.tf infrastructure/terraform/modules/ecs-service/variables.tf
+git commit -m "infra: orchestrator multi-instance prep — variable desired_count, CPU/memory alarms"
+```
+
+---
+
 ## Phase 6: Cleanup
 
 After all clients validated on unified stream.
@@ -1914,6 +2531,7 @@ git commit -m "chore: remove legacy SSE endpoints and polling code — unified s
 | 3: Agent + VS Code | 10-13 | Version bump, auto-fallback | Downgrade agent/extension |
 | 4: Worker batching | 14-16 | Transparent, backward compat | Deploy old worker |
 | 5: Infrastructure | 17-19 | Transparent | Revert Terraform |
+| **5B: Orchestrator scaling** | **21-26** | **Transparent — faster task pickup** | **Revert orchestrator.ts, revert Terraform, set poll back to 5s** |
 | 6: Cleanup | 20 | N/A — old paths already unused | N/A |
 
 ### Database Scaling Roadmap
@@ -1924,3 +2542,13 @@ git commit -m "chore: remove legacy SSE endpoints and polling code — unified s
 | 50+ tasks | db.t4g.small | Same | Enable (db.t4g.small) | Yes |
 | 100+ tasks | db.t4g.medium | Same | db.t4g.medium | Yes |
 | 500+ tasks | db.r7g.large | Same | db.t4g.medium | Yes |
+
+### Orchestrator Scaling Roadmap
+
+| Milestone | Instances | CPU/Memory | Poll Interval | Primary Mechanism | DB Queries/Hour |
+|-----------|----------|------------|---------------|-------------------|----------------|
+| Phase 0 (now) | 1 | 256/512 MB | 5s DB poll | DB polling | ~10,000 |
+| Phase 5B (with SSE multiplexer) | 1 | 512/1024 MB | 30s sweep | Redis events + sweep | ~5,000 |
+| 50+ tasks | 1 | 512/1024 MB | 30s sweep | Redis events + sweep | ~8,000 |
+| 200+ tasks | 2 | 512/1024 MB | 30s sweep | Redis events + sweep | ~6,000/inst |
+| 500+ tasks | 2-3 | 1024/2048 MB | 60s sweep | Redis events + sweep | ~8,000/inst |

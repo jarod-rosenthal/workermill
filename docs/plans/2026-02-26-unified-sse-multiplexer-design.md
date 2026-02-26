@@ -800,18 +800,18 @@ CPU and memory-based step scaling as safety nets. These should **never fire** un
 
 ### Capacity Planning
 
-| Concurrent Tasks | SSE Conns | API Instances | RDS Instance | Read Replica | Redis | Est. Total/mo |
-|-----------------|-----------|--------------|-------------|-------------|-------|--------------|
-| 10 | ~30 | 2 (min) | t4g.small | — | t4g.micro | ~$55 |
-| 50 | ~150 | 2 | t4g.small | t4g.small | t4g.micro | ~$80 |
-| 100 | ~300 | 2 | t4g.medium | t4g.small | t4g.small | ~$110 |
-| 200 | ~600 | 3 | t4g.medium | t4g.medium | t4g.small | ~$165 |
-| 500 | ~1,500 | 5-6 | r7g.large | t4g.medium | t4g.medium | ~$340 |
-| 1,000 | ~3,000 | 10-11 | r7g.large | r7g.large | t4g.medium | ~$530 |
+| Concurrent Tasks | SSE Conns | API Instances | Orchestrator | RDS Instance | Read Replica | Redis | Est. Total/mo |
+|-----------------|-----------|--------------|-------------|-------------|-------------|-------|--------------|
+| 10 | ~30 | 2 (min) | 1 × 512/1024 | t4g.small | — | t4g.micro | ~$60 |
+| 50 | ~150 | 2 | 1 × 512/1024 | t4g.small | t4g.small | t4g.micro | ~$85 |
+| 100 | ~300 | 2 | 1 × 512/1024 | t4g.medium | t4g.small | t4g.small | ~$115 |
+| 200 | ~600 | 3 | 2 × 512/1024 | t4g.medium | t4g.medium | t4g.small | ~$175 |
+| 500 | ~1,500 | 5-6 | 2 × 1024/2048 | r7g.large | t4g.medium | t4g.medium | ~$360 |
+| 1,000 | ~3,000 | 10-11 | 3 × 1024/2048 | r7g.large | r7g.large | t4g.medium | ~$560 |
 
 *Includes Fargate Spot (~$0.01/hr), RDS on-demand, ElastiCache on-demand. Multi-AZ adds ~2x RDS cost (recommended at 50+ tasks with paying customers).*
 
-**Compare to current polling model at 100 tasks:** ~15,000 req/min → need 8-10 Fargate instances just for CPU headroom → ~$75/mo compute + bottlenecked on 112-connection db.t4g.micro. The SSE model handles the same load on 2 instances with headroom to grow.
+**Compare to current polling model at 100 tasks:** ~15,000 req/min → need 8-10 Fargate instances just for CPU headroom → ~$75/mo compute + bottlenecked on 112-connection db.t4g.micro. The SSE model handles the same load on 2 API instances + 1 orchestrator with headroom to grow.
 
 ### Monitoring and Alerts
 
@@ -823,6 +823,157 @@ CPU and memory-based step scaling as safety nets. These should **never fire** un
 | `SSEChannelSubscriptions` > 5,000/instance | Warning | High subscription density. Check for subscription leaks (clients not unsubscribing). |
 | Predictive scaling forecast vs actual divergence > 30% | Info | Re-evaluate load metric. Patterns may have shifted. |
 | Step scaling (CPU/memory) fires | Critical | Something unexpected. Investigate immediately — this should never happen under normal SSE load. |
+| Orchestrator heartbeat stale > 30s | Critical | Orchestrator may be down. Check ECS service, Fargate Spot reclaim. |
+| Orchestrator `activeOps.size` > 8 sustained | Warning | Operations piling up. Check for stuck ECS spawns or planning tasks. |
+| Orchestrator CPU > 60% sustained | Warning | Right-size up or add second instance. Event-driven mode should keep CPU < 30%. |
+| Orchestrator memory > 70% sustained | Warning | Right-size up. Check cleanup operations for memory leaks. |
+| `orchestrator:task-queued` publish failures | Warning | Redis may be down. Orchestrator auto-falls back to DB polling. |
+
+---
+
+## Orchestrator Scaling
+
+The orchestrator is a **separate ECS service** (`orchestrator.tf`) running the same API image with `ENABLE_ORCHESTRATOR=true` and no ALB. It is currently a **singleton on 256 CPU (0.25 vCPU) / 512 MB Fargate Spot**. No inbound traffic — it talks exclusively to the database, Redis, and ECS API.
+
+The SSE multiplexer eliminates polling on the *client* side. But the orchestrator itself still **polls the database every 5 seconds** to find queued tasks, monitor executing tasks, run planning workflows, and perform cleanup. As concurrent tasks scale, the orchestrator becomes the bottleneck — not the API.
+
+### Current Orchestrator Workload (Per 5s Poll Cycle)
+
+| Operation | DB Queries | Scales With |
+|-----------|-----------|-------------|
+| `findQueuedTasks()` — queued + org settings + active counts + deps + quota/budget | 6-15 | O(queued × orgs) |
+| `claimTask()` — atomic `UPDATE...WHERE status = 'queued'` | 1 per claim | O(queued) |
+| `dispatchMultiStoryPlan()` / `spawnWorker()` | 2-5 per task | O(claimed) |
+| `findPlanningTasks()` + `processPlanningTask()` | 1 + 5-10 per task | O(planning) |
+| `findV2PipelineTasks()` + `runSequentialPipeline()` | 1 + 3-5 per task | O(pipelines) |
+| `findTasksNeedingManagerReview()` + `spawnManagerReview()` | 1 + 2-3 per task | O(review) |
+| `findTasksNeedingLogAnalysis()` | 1 | Fixed |
+| `findApprovedTasksNeedingDeployment()` | 1 | Fixed |
+| `monitorExecutingTasks()` — ECS DescribeTasks + status checks | 2-3 + 1 per batch of 100 | O(executing) |
+| `monitorManagerTasks()` | 1-2 | Fixed |
+| `checkParentTaskCompletion()` — parent + children queries | 2-3 per parent | O(parents) |
+
+**Scheduled cron jobs** (distributed-locked via Redis `SETNX`):
+
+| Job | Frequency | DB Queries | CPU Impact |
+|-----|-----------|-----------|------------|
+| `cleanupStaleCoordination()` + `failHungTasks()` | ~60s | 5-10 | Low |
+| `failOrphanedTasks()` — ECS DescribeTasks API calls | ~5 min | 10-20 + ECS API | Medium (network I/O) |
+| `maintainAllWarmPools()` | ~30s | 5-10 | Low |
+| `checkTrialReminders()` | ~1 hour | 2-5 | Negligible |
+| `cleanupLoop()` — 6 parallel cleanup tasks (logs, checkpoints, referrals, stuck planning, stale agents, orphaned) | ~1 hour | 50-100 | **High (30-60s spike)** |
+
+### DB Query Volume Projections
+
+| Concurrent Tasks | Queries/Poll | Polls/Hour | Queries/Hour | Cron/Hour | Total/Hour |
+|-----------------|-------------|-----------|-------------|-----------|-----------|
+| 10 | 10-15 | 720 | 7,200-10,800 | ~50 | ~10,000 |
+| 50 | 20-30 | 720 | 14,400-21,600 | ~100 | ~20,000 |
+| 100 | 35-50 | 720 | 25,200-36,000 | ~200 | ~35,000 |
+| 200 | 60-80 | 720 | 43,200-57,600 | ~400 | ~55,000 |
+
+### Phase 1: Event-Driven Task Pickup (Replace Polling for Queued Tasks)
+
+The biggest win is eliminating the `findQueuedTasks()` DB poll. This is the heaviest per-cycle query (6-15 DB queries) and runs every 5 seconds regardless of whether any tasks are actually queued.
+
+**Mechanism:** When any API route creates or transitions a task to `queued` status, it publishes a Redis event. The orchestrator subscribes to this channel and reacts instantly instead of polling.
+
+```
+# API route (existing task creation / status change code)
+await redis.publish("orchestrator:task-queued", JSON.stringify({ taskId, orgId }))
+
+# Orchestrator (new event-driven listener)
+redisSub.subscribe("orchestrator:task-queued", async (message) => {
+  const { taskId } = JSON.parse(message)
+  // Claim + dispatch immediately — no 5s wait
+  if (await claimTask(taskId)) { await spawnWorker(task) }
+})
+```
+
+**What this replaces:** The `findQueuedTasks()` call that runs 720 times/hour. At 100 concurrent tasks, this eliminates ~40% of the orchestrator's DB query volume (from ~35,000/hr to ~21,000/hr).
+
+**What it does NOT replace:** The poll loop still runs for monitoring, cleanup, and cron jobs. But it becomes a **slow background sweep** (every 30s instead of 5s) that catches anything the event-driven path missed — a safety net, not the primary mechanism.
+
+**Publish points** (where `orchestrator:task-queued` must be emitted):
+
+| Location | When |
+|----------|------|
+| `POST /api/tasks` (task creation) | New task → `queued` |
+| `POST /api/boards/:boardId/cards/:cardId/run` | Card run → task created → `queued` |
+| Board execution engine (`board-execution.ts`) | Dependency cascade triggers child → `queued` |
+| `POST /api/agent/plan-result` | Plan approved → children → `queued` |
+| `checkAndUnblockDependentTasks()` in task-monitor.ts | Blocked → `queued` when dependency completes |
+| `requeueForDeployment()` in manager-workflow.ts | Approved → `queued` for deploy |
+| Manual retry / re-queue via dashboard | Failed → `queued` |
+
+**Fallback:** The slow-poll sweep (30s) catches any missed events. If Redis is down, the orchestrator falls back to the current 5s polling — same as the SSE multiplexer's DB polling fallback.
+
+### Phase 2: Event-Driven Task Completion (Replace monitorExecutingTasks Polling)
+
+The second heaviest operation is `monitorExecutingTasks()`, which calls ECS `DescribeTasks` every 5 seconds for all executing tasks. At 100 executing tasks, this is 3-4 ECS API calls per cycle (batches of 100).
+
+**Mechanism:** Workers already POST task results to the API (`POST /api/tasks/:taskId/callback`). When the callback handler updates task status, it publishes:
+
+```
+await redis.publish("orchestrator:task-completed", JSON.stringify({ taskId, status, orgId }))
+```
+
+The orchestrator subscribes and runs post-completion logic (quality gates, Jira transition, dependency unblocking) immediately instead of waiting for the next poll cycle.
+
+**ECS monitoring as safety net:** `monitorExecutingTasks()` drops from 5s to 60s interval — catches cases where workers crash without calling back (OOM, Spot reclaim, etc.). This is already rare; making it the fallback path instead of primary reduces ECS API costs and DB queries by ~12x.
+
+### Phase 3: Right-Size the Orchestrator
+
+With event-driven task pickup and completion, the poll loop becomes a slow background sweep. Resource requirements drop significantly.
+
+**Current state:**
+
+| Resource | Current | With Event-Driven | Rationale |
+|----------|---------|-------------------|-----------|
+| CPU | 256 (0.25 vCPU) | 512 (0.5 vCPU) | Headroom for ECS API calls + cleanup spikes |
+| Memory | 512 MB | 1024 MB | Node.js baseline ~200MB + cleanup operations |
+| `DB_POOL_MAX` | 15 | 10 | Fewer concurrent queries with event-driven |
+| Poll interval | 5s | 30s (background sweep) | Primary path is event-driven |
+| ECS monitor interval | 5s | 60s (safety net) | Worker callbacks are primary |
+| Desired count | 1 | 1 (→ 2 at 200+ tasks) | Already multi-instance ready |
+
+**Scaling tiers:**
+
+| Concurrent Tasks | Orchestrator Instances | CPU | Memory | Queries/Hour (event-driven) |
+|-----------------|----------------------|-----|--------|----------------------------|
+| 10-50 | 1 | 512 | 1024 MB | ~5,000 (mostly cron) |
+| 50-200 | 1 | 512 | 1024 MB | ~8,000 |
+| 200-500 | 2 | 512 | 1024 MB | ~6,000/instance |
+| 500+ | 2-3 | 1024 | 2048 MB | ~8,000/instance |
+
+At 200+ tasks, add a second orchestrator instance. The code is already multi-instance safe — all task claims use atomic `UPDATE...WHERE`, all cron jobs use Redis distributed locks (`SETNX`). The second instance provides:
+- Redundancy if Fargate Spot reclaims one instance
+- Halved query volume per instance
+- Parallel cleanup operations
+
+### Monitoring Metrics
+
+| Metric | Source | Alert Threshold | Action |
+|--------|--------|----------------|--------|
+| `orchestrator:heartbeat` Redis key age | Redis | > 30s stale | Orchestrator may be down. Check ECS task status. |
+| Poll loop duration (`state.lastPollAt` → next) | CloudWatch EMF | > 10s average (event-driven mode) | Poll is taking too long. Check DB connection pool, cleanup operations. |
+| `activeOps.size` | CloudWatch EMF | > 8 sustained (of 10 max) | Operations piling up. Check for stuck ECS spawns or planning tasks. |
+| DB query latency (PgBouncer `avg_query_time`) | PgBouncer stats | > 50ms average | DB under load. Check read replica, indexes, vacuum status. |
+| ECS `DescribeTasks` API errors | CloudWatch | > 5/min | ECS API throttling. Increase monitor interval or add backoff. |
+| `orchestrator:task-queued` Redis publish failures | App logs | Any | Redis may be down. Orchestrator falls back to polling automatically. |
+| `cleanupLoop` duration | CloudWatch EMF | > 120s | Cleanup taking too long. Check S3 ListObjects pagination, orphaned task count. |
+| Orchestrator CPU utilization | ECS/CloudWatch | > 60% sustained | Right-size up. Event-driven mode should keep CPU < 30%. |
+| Orchestrator memory utilization | ECS/CloudWatch | > 70% sustained | Right-size up. Check for memory leaks in cleanup operations. |
+
+### Orchestrator Scaling Roadmap
+
+| Milestone | Instances | CPU/Memory | Poll Interval | Primary Mechanism | Queries/Hour |
+|-----------|----------|------------|---------------|-------------------|-------------|
+| **Phase 0** (now) | 1 | 256/512 MB | 5s DB poll | DB polling | ~10,000 |
+| **Phase 1** (with SSE multiplexer) | 1 | 512/1024 MB | 30s sweep | Redis `task-queued` events | ~5,000 |
+| **50+ tasks** | 1 | 512/1024 MB | 30s sweep | Event-driven + sweep | ~8,000 |
+| **200+ tasks** | 2 | 512/1024 MB | 30s sweep | Event-driven + sweep | ~6,000/inst |
+| **500+ tasks** | 2-3 | 1024/2048 MB | 60s sweep | Event-driven + sweep | ~8,000/inst |
 
 ---
 
@@ -852,6 +1003,11 @@ CPU and memory-based step scaling as safety nets. These should **never fire** un
 | **RDS resize downtime (5-10 min)** | Medium | Schedule during low-traffic window. PgBouncer auto-reconnects. SSE gap covered by Last-Event-ID backfill. Multi-AZ enables near-zero-downtime resizes. |
 | **SIGTERM handler conflict** | Low | SSE shutdown integrates into existing handler (index.ts:415-442), runs before `server.close()`. 3.5s stagger + 20s ops wait fits within 25s force-exit timer. |
 | **Lifetime timer leak** | Low | `clearTimeout(lifetimeTimer)` called in session destroy path. Destroy called on: client disconnect, backpressure disconnect, SIGTERM, auth revocation. |
+| **Orchestrator singleton on 256 CPU / 512 MB** | **High** | Right-size to 512/1024 in Phase 1. Event-driven task pickup reduces CPU from ~16% to <5% at 100 tasks. Background sweep at 30s instead of 5s polling. |
+| **Orchestrator missed Redis event (task stuck queued)** | Medium | 30s background sweep catches anything the event-driven path missed. Same safety-net pattern as SSE multiplexer's DB polling fallback. |
+| **Fargate Spot reclaim on singleton orchestrator** | Medium | At 200+ tasks, scale to 2 instances. Below that, Spot reclaim causes ~60s gap (ECS restarts task). Queued tasks wait; executing tasks are unaffected (workers are independent). |
+| **Duplicate task claims from Redis event + sweep race** | Low | `claimTask()` uses atomic `UPDATE...WHERE status = 'queued'`. Two instances competing never double-claim. Idempotent by design. |
+| **`cleanupLoop` 30-60s CPU spike on undersized orchestrator** | Medium | Right-sizing to 512 CPU provides headroom. Cleanup runs hourly under distributed lock. At 200+ tasks, second instance may win the lock, distributing the load. |
 
 ---
 
@@ -859,9 +1015,10 @@ CPU and memory-based step scaling as safety nets. These should **never fire** un
 
 - **RDS:** Upgrade `db.t4g.micro` → `db.t4g.small` (when traffic warrants). Add read replica (50+ tasks). Enable Multi-AZ (paying customers).
 - **PgBouncer:** Fix `MAX_CLIENT_CONN` 50→100 on existing API sidecar. Add second listener on port 5433 for replica traffic (when read replica is enabled).
-- **Redis:** Set `client-output-buffer-limit` for pub/sub. Upgrade to Multi-AZ replica at 50+ tasks.
+- **Redis:** Set `client-output-buffer-limit` for pub/sub. Upgrade to Multi-AZ replica at 50+ tasks. New channels: `orchestrator:task-queued`, `orchestrator:task-completed`.
 - **ALB:** Idle timeout 120s, deregistration delay 30s.
-- **ECS:** Auto-scaling policies (target tracking + predictive + step guardrails).
+- **ECS API service:** Auto-scaling policies (target tracking + predictive + step guardrails).
+- **ECS Orchestrator service:** Right-size 256/512 → 512/1024. Event-driven task pickup via Redis. Poll interval 5s → 30s background sweep. Scale to 2 instances at 200+ tasks.
 
 ## What Does NOT Change
 
@@ -871,3 +1028,5 @@ CPU and memory-based step scaling as safety nets. These should **never fire** un
 - Worker coordination SSE (already efficient, optional migration)
 - Agent heartbeat (write path, stays as REST POST)
 - Stateless API architecture (session state is ephemeral, per-instance, reconstructable)
+- Orchestrator atomic task claiming (`UPDATE...WHERE`) — already multi-instance safe
+- Orchestrator distributed cron locks (Redis `SETNX`) — already multi-instance safe

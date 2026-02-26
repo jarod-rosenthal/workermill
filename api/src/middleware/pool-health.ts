@@ -6,8 +6,10 @@ import { logger } from "../utils/logger.js";
 const EXEMPT_PATHS = [
   "/health",
   "/api/agent/poll",
+  "/api/agent/heartbeat",
   "/api/tasks/",
   "/api/coordination/",
+  "/api/control-center/logs",
   "/api/status",
 ];
 

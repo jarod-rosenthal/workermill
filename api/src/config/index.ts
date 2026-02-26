@@ -430,8 +430,10 @@ export function validateEnvironment(): void {
  * @returns TaskCheckpoint object or null if not found
  */
 export async function getTaskCheckpoint(taskId: string): Promise<TaskCheckpoint | null> {
-  const client = getS3Client();
   const bucket = config.s3.checkpointBucket;
+  if (!bucket) return null; // No bucket configured — skip S3 call
+
+  const client = getS3Client();
   const key = `${taskId}/checkpoint.json`;
 
   try {

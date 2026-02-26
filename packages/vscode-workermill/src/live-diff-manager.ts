@@ -92,7 +92,7 @@ export class LiveDiffManager {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private lastTimestamp: string | null = null;
   private consecutiveErrors = 0;
-  private currentInterval = 2_000;
+  private currentInterval = 5_000;
   private disposed = false;
 
   private statusBarItem: vscode.StatusBarItem;
@@ -230,8 +230,8 @@ export class LiveDiffManager {
       }
 
       this.consecutiveErrors = 0;
-      if (this.currentInterval !== 2_000) {
-        this.resetInterval(2_000);
+      if (this.currentInterval !== 5_000) {
+        this.resetInterval(5_000);
       }
     } catch {
       this.consecutiveErrors++;

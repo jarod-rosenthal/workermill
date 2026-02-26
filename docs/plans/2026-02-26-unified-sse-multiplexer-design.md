@@ -247,18 +247,20 @@ data: {"reason":"gap_too_large","channels":["logs:abc123","coordination:abc123"]
 
 On SIGTERM (rolling deploy, scale-in, or manual stop), the API instance:
 
-1. Sends a proactive reconnect signal to all active SSE sessions:
+1. Sends a proactive reconnect signal to each SSE session with a **random stagger delay** (0-3000ms):
    ```
    event: reconnect
-   data: {"reason":"server_shutdown"}
+   data: {"reason":"server_shutdown","delay":1234}
    ```
-2. Unsubscribes from all Redis topics (data + control channels)
-3. Closes all SSE response streams
-4. Exits cleanly
+   The `delay` field tells the client how many milliseconds to wait before reconnecting. This spreads 300 reconnects across 3 seconds instead of a thundering herd that would overwhelm the remaining instances with backfill queries.
+2. Waits 3.5 seconds (enough for all clients to receive their delay)
+3. Unsubscribes from all Redis topics (data + control channels)
+4. Closes all SSE response streams
+5. Exits cleanly
 
-Client receives the `reconnect` event → closes connection → `EventSource` auto-reconnects to a new instance via ALB (1-3s) → sends `Last-Event-ID` header → server backfills any gap → client re-sends subscribe requests for its active channels → live events resume.
+Client receives the `reconnect` event → waits `delay` ms → closes connection → `EventSource` auto-reconnects to a new instance via ALB → sends `Last-Event-ID` header → server backfills any gap → client re-sends subscribe requests for its active channels → live events resume.
 
-**No client-visible disruption to terminal sessions.** The reconnect is fast enough that log output appears continuous. The only observable effect is a brief pause (<3s) in the event stream — no errors, no lost data, no UI flicker if the client handles the `reconnect` event cleanly (suppress the default EventSource error handler during intentional reconnects).
+**No client-visible disruption to terminal sessions.** The reconnect is fast enough that log output appears continuous. The only observable effect is a brief pause (<3-6s) in the event stream — no errors, no lost data, no UI flicker if the client handles the `reconnect` event cleanly (suppress the default EventSource error handler during intentional reconnects).
 
 ---
 
@@ -345,16 +347,28 @@ Minimal changes. Workers already use SSE for coordination.
 
 Incremental rollout. Old and new coexist at every phase. Every phase is independently reversible.
 
+### Phase 0: Database Foundation
+
+Fix the scaling ceiling BEFORE building SSE infrastructure.
+
+1. PgBouncer sidecar on API ECS tasks (match orchestrator pattern)
+2. RDS instance upgrade (`db.t4g.micro` → `db.t4g.small`)
+3. Read replica resource (Terraform, disabled by default — enable at 50+ tasks)
+4. TypeORM replication config (activates when `DB_REPLICA_HOST` is set)
+
+**Deploy and validate. No client impact. No code changes except connection.ts.**
+
 ### Phase 1: Server-Side Foundation
 
 Build new infrastructure without touching any clients.
 
-1. New unified SSE endpoint (`api/src/routes/stream.ts`)
-2. Subscribe/unsubscribe REST endpoints
-3. Backfill REST endpoints
-4. Redis publish on every write path (logs, code events, coordination, task state, cost)
+1. Redis publish on every write path (logs, code events, coordination, task state, cost)
+2. New unified SSE endpoint (`api/src/routes/stream.ts`) with session management
+3. Subscribe/unsubscribe REST endpoints (Redis-mediated)
+4. Backfill REST endpoints with rate limiting (50 req/s/org for reconnection storm protection)
 5. `Last-Event-ID` handling with 5-minute gap detection
-6. Graceful shutdown: SIGTERM → send `reconnect` event
+6. EMF metric emission for auto-scaling
+7. Graceful shutdown: SIGTERM → send `reconnect` event with stagger delay (0-3s random per client)
 
 **Deploy and validate. No client impact. Old endpoints unchanged.**
 
@@ -365,7 +379,8 @@ Behind a feature flag (org setting or query param).
 1. New `useUnifiedStream` hook — manages single EventSource, session, subscriptions
 2. Channel router dispatches events to existing Zustand stores
 3. Replace per-task SSE connections + fallback polling with unified stream
-4. Validate behind flag, flip to default-on
+4. Client-side subscribe/backfill ordering: subscribe first, buffer SSE events, fetch backfill, merge by event ID, then consume live stream
+5. Validate behind flag, flip to default-on
 
 ### Phase 3: Agent + VS Code Migration
 
@@ -382,10 +397,17 @@ Ships as a version bump. Users get it on update.
 Independent of SSE work. Can run in parallel with Phases 2-3.
 
 1. Log buffer in executor (50 lines / 500ms / task completion)
-2. API batch ingestion endpoint (accepts array, publishes per-line to Redis)
-3. Old single-line POST still accepted (backward compat)
+2. Crash safety: `beforeExit` + `SIGINT`/`SIGTERM` handlers for final flush
+3. API batch ingestion endpoint (accepts array, publishes per-line to Redis)
+4. Old single-line POST still accepted (backward compat)
 
-### Phase 5: Cleanup
+### Phase 5: Infrastructure — Auto-Scaling and ALB
+
+1. ALB idle timeout (120s), target group deregistration delay (30s)
+2. ECS auto-scaling policies (target tracking on SSE connection count, step scaling guardrails)
+3. Predictive scaling (Forecast Only → Forecast And Scale after 2 weeks of data)
+
+### Phase 6: Cleanup
 
 After all clients migrated and validated.
 
@@ -397,21 +419,25 @@ After all clients migrated and validated.
 ### Phase Dependencies
 
 ```
-Phase 1 (Server)     ████████░░░░░░░░░░░░  ← no client impact
-Phase 2 (Dashboard)  ░░░░████████░░░░░░░░  ← depends on Phase 1
-Phase 3 (Agent+VSC)  ░░░░░░░░████████░░░░  ← depends on Phase 1, parallel with Phase 2
-Phase 4 (Worker)     ░░░░████████░░░░░░░░  ← independent
-Phase 5 (Cleanup)    ░░░░░░░░░░░░░░░░████  ← after all clients migrated
+Phase 0 (Database)   ████░░░░░░░░░░░░░░░░  ← prerequisite for horizontal scaling
+Phase 1 (Server)     ░░░░████████░░░░░░░░  ← depends on Phase 0
+Phase 2 (Dashboard)  ░░░░░░░░████████░░░░  ← depends on Phase 1
+Phase 3 (Agent+VSC)  ░░░░░░░░░░░░████████  ← depends on Phase 1, parallel with Phase 2
+Phase 4 (Worker)     ░░░░░░░░████████░░░░  ← independent (parallel with Phases 2-3)
+Phase 5 (Infra)      ░░░░░░░░░░░░████████  ← after Phase 1 (needs EMF metrics live)
+Phase 6 (Cleanup)    ░░░░░░░░░░░░░░░░████  ← after all clients migrated
 ```
 
 ### Rollback
 
 | Phase | Rollback |
 |-------|----------|
+| Phase 0 | Revert Terraform (PgBouncer, instance class). Remove `DB_REPLICA_HOST` env var. |
 | Phase 1 | Delete new endpoints. No client uses them. |
 | Phase 2 | Flip feature flag off. Dashboard reverts to old SSE + polling. |
 | Phase 3 | Users downgrade agent/extension. Old polling paths still work. |
 | Phase 4 | Deploy old worker image. Single-line POST still accepted. |
+| Phase 5 | Revert Terraform (scaling policies, ALB settings). |
 
 ---
 

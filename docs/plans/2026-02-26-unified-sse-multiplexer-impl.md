@@ -477,7 +477,7 @@ Create `api/src/routes/stream.ts`:
 
 ```typescript
 import { Router, Request, Response } from "express";
-import { authenticateSSE } from "../middleware/auth.js";
+import { authenticateSSE, authenticateRequest } from "../middleware/auth.js";
 import { sessionManager } from "../services/sse-session-manager.js";
 
 const router = Router();
@@ -521,7 +521,7 @@ router.get("/", authenticateSSE, (req: Request, res: Response) => {
 });
 
 // POST /api/stream/subscribe
-router.post("/subscribe", authenticateSSE, express.json(), (req, res) => {
+router.post("/subscribe", authenticateRequest, express.json(), (req, res) => {
   const { sessionId, channels } = req.body;
   // Publish control message to Redis — the instance holding the SSE session picks it up
   redis.publishStreamEvent(`session:${sessionId}:control`, {
@@ -532,7 +532,7 @@ router.post("/subscribe", authenticateSSE, express.json(), (req, res) => {
 });
 
 // POST /api/stream/unsubscribe
-router.post("/unsubscribe", authenticateSSE, express.json(), (req, res) => {
+router.post("/unsubscribe", authenticateRequest, express.json(), (req, res) => {
   const { sessionId, channels } = req.body;
   redis.publishStreamEvent(`session:${sessionId}:control`, {
     action: "unsubscribe",
@@ -1494,25 +1494,53 @@ In `aws_lb_target_group.api`:
 deregistration_delay = 30  # SSE clients reconnect in 1-3s after graceful shutdown
 ```
 
-**Step 3: Run terraform plan**
+**Step 3: Configure Redis ElastiCache parameter group for pub/sub buffer limits**
+
+In `infrastructure/terraform/modules/redis/main.tf`, add a custom parameter group:
+
+```hcl
+resource "aws_elasticache_parameter_group" "workermill" {
+  name   = "workermill-${var.environment}-redis7"
+  family = "redis7"
+
+  parameter {
+    name  = "client-output-buffer-limit-pubsub-hard-limit"
+    value = "67108864"  # 64MB
+  }
+
+  parameter {
+    name  = "client-output-buffer-limit-pubsub-soft-limit"
+    value = "16777216"  # 16MB
+  }
+
+  parameter {
+    name  = "client-output-buffer-limit-pubsub-soft-seconds"
+    value = "120"
+  }
+}
+```
+
+Reference this parameter group in the ElastiCache replication group or cluster. This prevents Redis from disconnecting SSE subscriber connections under high log volume.
+
+**Step 4: Run terraform plan**
 
 Run: `cd infrastructure/terraform && terraform plan`
 
-Review changes — should only be ALB timeout and target group deregistration delay.
+Review changes — should be ALB timeout, target group deregistration delay, and Redis parameter group.
 
-**Step 4: Apply**
+**Step 5: Apply**
 
 Run: `terraform apply`
 
-**Step 5: Verify zero drift**
+**Step 6: Verify zero drift**
 
 Run: `terraform plan` — confirm zero changes.
 
-**Step 6: Commit**
+**Step 7: Commit**
 
 ```bash
-git add infrastructure/terraform/modules/ecs-service/main.tf
-git commit -m "infra: ALB idle timeout 120s, deregistration delay 30s for SSE"
+git add infrastructure/terraform/modules/ecs-service/main.tf infrastructure/terraform/modules/redis/main.tf
+git commit -m "infra: ALB idle timeout 120s, deregistration delay 30s, Redis pub/sub buffer limits"
 ```
 
 ---

@@ -41,6 +41,7 @@ import {
   signInWithGoogle,
   handleAuthCallback,
   enterApiKey,
+  promptScmSetup,
 } from "./github-onboard";
 import { initSecretStorage, getApiKey, storeApiKey, deleteApiKey } from "./secret-storage";
 
@@ -1046,6 +1047,29 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
         client.connect();
       }
+    }),
+
+    vscode.commands.registerCommand("workermill.configureScm", async () => {
+      // Read API key from keychain first, then fall back to config file
+      let apiKey = await getApiKey();
+      if (!apiKey) {
+        const configPath = path.join(os.homedir(), ".workermill", "config.json");
+        try {
+          const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+          apiKey = config.apiKey;
+        } catch {
+          /* no config */
+        }
+      }
+
+      if (!apiKey) {
+        vscode.window.showErrorMessage(
+          "Not signed in. Please sign in first, then configure repository access.",
+        );
+        return;
+      }
+
+      await promptScmSetup(apiKey, log);
     }),
 
     // Single "Connect" action: install-if-needed → start-if-not-running → connect

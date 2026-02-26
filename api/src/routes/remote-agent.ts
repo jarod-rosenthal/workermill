@@ -1351,4 +1351,113 @@ Rules:
   }),
 );
 
+// ─── POST /configure-scm ──────────────────────────────────────────────────
+// Save an SCM token from the VS Code extension.
+// Validates the token against the provider's API before saving.
+router.post(
+  "/configure-scm",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { token, provider } = req.body;
+    const org = req.organization!;
+
+    if (!token || !provider) {
+      res.status(400).json({ error: "token and provider are required" });
+      return;
+    }
+
+    if (!["github", "bitbucket", "gitlab"].includes(provider)) {
+      res
+        .status(400)
+        .json({ error: "provider must be github, bitbucket, or gitlab" });
+      return;
+    }
+
+    // Validate the token against the provider's API
+    let username: string | null = null;
+    try {
+      if (provider === "github") {
+        const axios = (await import("axios")).default;
+        const userResponse = await axios.get("https://api.github.com/user", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+          },
+          timeout: 10000,
+        });
+        username = userResponse.data.login;
+      } else if (provider === "gitlab") {
+        const axios = (await import("axios")).default;
+        const baseUrl = org.scmBaseUrl || "https://gitlab.com";
+        const userResponse = await axios.get(`${baseUrl}/api/v4/user`, {
+          headers: { "PRIVATE-TOKEN": token },
+          timeout: 10000,
+        });
+        username = userResponse.data.username;
+      }
+      // Bitbucket validation can be added later
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn("SCM token validation failed", {
+        orgId: org.id,
+        provider,
+        error: msg,
+      });
+      res.status(401).json({
+        error:
+          "Token validation failed. Check that your token has repo access.",
+      });
+      return;
+    }
+
+    // Save to org secrets
+    const { saveOrgSecret } = await import("./settings/helpers.js");
+    const secretName =
+      provider === "github" ? "github-token" : `${provider}-token`;
+    await saveOrgSecret(org.id, secretName, token);
+
+    // Update org scmProvider if not already set to this provider
+    if (org.scmProvider !== provider) {
+      const orgRepo = AppDataSource.getRepository(
+        (await import("../models/index.js")).Organization,
+      );
+      await orgRepo.update({ id: org.id }, { scmProvider: provider });
+    }
+
+    logger.info("SCM token configured via remote agent", {
+      orgId: org.id,
+      provider,
+      username,
+    });
+
+    res.json({ configured: true, username, provider });
+  }),
+);
+
+// ─── GET /scm-status ────────────────────────────────────────────────────────
+// Check if SCM is configured for the org. Used by VS Code to poll after
+// GitHub App installation or to show "not configured" warnings.
+router.get(
+  "/scm-status",
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const provider = org.scmProvider || "github";
+
+    let configured = false;
+    let username: string | null = null;
+
+    try {
+      // Check for PAT in secrets
+      const { getOrgSecret } = await import("./settings/helpers.js");
+      const secretName =
+        provider === "github" ? "github-token" : `${provider}-token`;
+      const token = await getOrgSecret(org.id, secretName);
+      configured = !!token;
+    } catch {
+      // Secrets fetch failed — treat as not configured
+    }
+
+    res.json({ configured, provider, username });
+  }),
+);
+
 export default router;

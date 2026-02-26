@@ -146,6 +146,11 @@
         "title": "WorkerMill: Manual Setup"
       },
       {
+        "command": "workermill.configureScm",
+        "title": "Configure Repository Access",
+        "category": "WorkerMill"
+      },
+      {
         "command": "workermill.buildFromPrd",
         "title": "WorkerMill: Product Build",
         "icon": "$(rocket)"

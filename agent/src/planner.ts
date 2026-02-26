@@ -19,7 +19,7 @@ import chalk from "chalk";
 
 import { spawn, execFileSync } from "child_process";
 import { tmpdir } from "os";
-import { rmSync } from "fs";
+import { readFileSync, rmSync, existsSync } from "fs";
 import { findClaudePath, type AgentConfig } from "./config.js";
 import { api } from "./api.js";
 import {
@@ -628,6 +628,110 @@ function buildCloneUrl(
   }
 }
 
+// ============================================================================
+// WSL + Windows Credential Manager helpers
+// ============================================================================
+
+/** Cached WSL detection result */
+let _isWSL: boolean | null = null;
+
+/** Detect WSL via /proc/version containing "microsoft" (no subprocess spawn). */
+function isWSL(): boolean {
+  if (_isWSL !== null) return _isWSL;
+  try {
+    const procVersion = readFileSync("/proc/version", "utf8");
+    _isWSL = /microsoft/i.test(procVersion);
+  } catch {
+    _isWSL = false;
+  }
+  return _isWSL;
+}
+
+/** Known paths where Windows Git Credential Manager lives. */
+const GCM_PATHS = [
+  "/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe",
+  "/mnt/c/Program Files/Git/mingw64/libexec/git-core/git-credential-manager.exe",
+];
+
+/** Find Windows Git Credential Manager executable accessible from WSL. */
+function findWindowsGcm(): string | null {
+  for (const p of GCM_PATHS) {
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/** Build a plain clone URL (no auth credentials embedded). */
+function buildPlainCloneUrl(repo: string, scmProvider: string): string {
+  // Already a full URL — strip any embedded credentials and ensure .git suffix
+  if (repo.startsWith("https://") || repo.startsWith("http://")) {
+    const url = new URL(repo);
+    url.username = "";
+    url.password = "";
+    if (!url.pathname.endsWith(".git")) {
+      url.pathname += ".git";
+    }
+    return url.toString();
+  }
+
+  // Short form: owner/repo
+  switch (scmProvider) {
+    case "bitbucket":
+      return `https://bitbucket.org/${repo}.git`;
+    case "gitlab":
+      return `https://gitlab.com/${repo}.git`;
+    case "github":
+    default:
+      return `https://github.com/${repo}.git`;
+  }
+}
+
+/**
+ * Clone a repo using Windows Credential Manager from WSL.
+ * Returns the temp directory path on success, or null on failure.
+ */
+function cloneWithGcm(
+  repo: string,
+  scmProvider: string,
+  gcmPath: string,
+  taskId: string,
+): string | null {
+  const taskLabel = chalk.cyan(taskId.slice(0, 8));
+  const tmpDir = `${tmpdir()}/workermill-planning-${taskId.slice(0, 8)}-${Date.now()}`;
+  const plainUrl = buildPlainCloneUrl(repo, scmProvider);
+
+  try {
+    console.log(
+      `${ts()} ${taskLabel} ${chalk.dim("Cloning repo via Windows Credential Manager...")}`,
+    );
+    execFileSync(
+      "git",
+      [
+        "-c",
+        `credential.helper=${gcmPath}`,
+        "clone",
+        "--depth",
+        "1",
+        "--single-branch",
+        plainUrl,
+        tmpDir,
+      ],
+      { stdio: ["pipe", "pipe", "pipe"], timeout: 60_000, windowsHide: true },
+    );
+    console.log(
+      `${ts()} ${taskLabel} ${chalk.green("✓")} Repo cloned via Windows credential store`,
+    );
+    return tmpDir;
+  } catch {
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+}
+
 /**
  * Clone the target repo to a temp directory so the planner can explore with tools.
  * Returns the path on success, or null on failure.
@@ -674,6 +778,16 @@ async function cloneTargetRepo(
     } catch {
       /* ignore */
     }
+
+    // On WSL, retry without embedded token using Windows Credential Manager
+    if (isWSL()) {
+      const gcmPath = findWindowsGcm();
+      if (gcmPath) {
+        const gcmResult = cloneWithGcm(repo, scmProvider, gcmPath, taskId);
+        if (gcmResult) return gcmResult;
+      }
+    }
+
     return null;
   }
 }
@@ -794,9 +908,18 @@ export async function planTask(
         return false;
       }
     } else {
-      console.log(
-        `${ts()} ${taskLabel} ${chalk.yellow("⚠")} No SCM token for ${scmProvider}, planner will run without repo access`,
-      );
+      // No SCM token — on WSL, try Windows Credential Manager directly
+      if (isWSL()) {
+        const gcmPath = findWindowsGcm();
+        if (gcmPath) {
+          repoPath = cloneWithGcm(task.githubRepo, scmProvider, gcmPath, task.id);
+        }
+      }
+      if (!repoPath) {
+        console.log(
+          `${ts()} ${taskLabel} ${chalk.yellow("⚠")} No SCM token for ${scmProvider}, planner will run without repo access`,
+        );
+      }
     }
   }
 

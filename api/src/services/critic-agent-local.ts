@@ -46,7 +46,7 @@ export interface CriticResult {
  * Format critic feedback as a refinement prompt for the planner.
  * Used when the critic APPROVED the plan but has suggestions worth incorporating.
  */
-export function formatLocalRefinementFeedback(critic: CriticResult): string {
+export function formatLocalRefinementFeedback(critic: CriticResult, maxTargetFiles = 5): string {
   const lines: string[] = [
     "",
     "## REVIEWER NOTES — Your plan was APPROVED, but the reviewer has suggestions",
@@ -89,7 +89,7 @@ export function formatLocalRefinementFeedback(critic: CriticResult): string {
   }
 
   lines.push(
-    "Each story must target at most 5 files. Stories MUST NOT overlap on targetFiles.",
+    `Each story must target at most ${maxTargetFiles} files. Stories MUST NOT overlap on targetFiles.`,
     "",
     "**CRITICAL — OUTPUT FORMAT:** Output the refined plan as a ```json code block with the COMPLETE JSON object (`summary`, `stories`, `risks`, `assumptions`). Do NOT describe changes — output the full JSON.",
     "",
@@ -107,6 +107,7 @@ export interface CriticInput {
   plan: ExecutionPlan;
   originalRequirements: string;
   iteration?: number;
+  maxTargetFiles?: number;
 }
 
 /**
@@ -305,7 +306,7 @@ async function runCriticWithAiSdk(
  * Build the critic prompt from input.
  */
 function buildCriticPrompt(input: CriticInput): string {
-  const { plan, originalRequirements, iteration } = input;
+  const { plan, originalRequirements, iteration, maxTargetFiles = 5 } = input;
 
   return `You are a senior technical reviewer (Tech Lead / Critic Agent).
 
@@ -337,10 +338,10 @@ Score the plan from 0-100 based on:
 1. **Completeness (30 points):** Does the plan cover all requirements?
 2. **Feasibility (25 points):** Are the steps realistic and achievable?
 3. **Dependencies (15 points):** Are dependencies correctly ordered with no circular deps?
-4. **Unrealistic Scope** - Any story targeting >5 files MUST score below 85 (auto-rejection threshold). Each story should modify at most 5 files. If a story needs more, split it into multiple stories first.
+4. **Unrealistic Scope** - Any story targeting >${maxTargetFiles} files MUST score below 85 (auto-rejection threshold). Each story should modify at most ${maxTargetFiles} files. If a story needs more, split it into multiple stories first.
 5. **Quality (15 points):** Are acceptance criteria clear and testable?
 6. **Overlapping File Scope** - If two or more stories share the same targetFiles, this causes parallel merge conflicts. Stories MUST NOT overlap on targetFiles. Deduct 10 points per shared file across stories.
-7. **Serialization Bottleneck** - If more than half the stories depend on a single story that targets >5 files, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
+7. **Serialization Bottleneck** - If more than half the stories depend on a single story that targets >${maxTargetFiles} files, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
 8. **Risk Management (15 points):** Are risks properly identified and mitigated?
 
 ## Response Format

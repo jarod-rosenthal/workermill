@@ -37,7 +37,17 @@ export interface ClassifyErrorResponse {
 
 /** Request for POST /evaluate-quality */
 export interface EvaluateQualityRequest {
-  diff: string;
+  /** Legacy string summary (deprecated — use metrics instead) */
+  diff?: string;
+  /** Structured quality metrics (preferred) */
+  metrics?: {
+    qualityScore?: number;
+    typeErrors?: boolean;
+    testFailures?: boolean;
+    testCoveragePercent?: number;
+    securityVulnsHigh?: number;
+  };
+  qualityGateEnabled?: boolean;
   storyDescription?: string;
   persona?: string;
   targetFiles?: string[];

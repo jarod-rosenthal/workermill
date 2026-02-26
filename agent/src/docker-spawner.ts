@@ -29,6 +29,7 @@ import {
   getDockerVolumeName,
   cleanupDockerVolume,
 } from "./workspace-manager.js";
+import { reportDiagnostic } from "./poller.js";
 
 // ── Platform Detection ─────────────────────────────────
 
@@ -350,6 +351,7 @@ export async function spawnDockerWorker(
     console.error(`${ts()} ${taskLabel}   error: ${msg}`);
     if (stderr) console.error(`${ts()} ${taskLabel}   stderr: ${stderr.trim()}`);
     console.error(`${ts()} ${taskLabel}   PATH: ${process.env.PATH || "(empty)"}`);
+    reportDiagnostic("error", "docker", `Docker pre-flight failed: ${msg}`);
     throw new Error(`Docker is not running or not accessible. Start Docker and try again. (${msg})`);
   }
 
@@ -749,7 +751,7 @@ export async function spawnDockerWorker(
       });
 
       if (
-        /rate.limit|429|too many requests|over_quota|overloaded|capacity/i.test(
+        /rate.limit|429|too many requests|over_quota/i.test(
           line,
         )
       ) {

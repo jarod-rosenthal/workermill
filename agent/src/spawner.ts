@@ -25,6 +25,7 @@ import {
   hasClonedRepo,
   getRepoPath,
 } from "./workspace-manager.js";
+import { reportDiagnostic } from "./poller.js";
 
 /**
  * Detect whether we're running as a compiled binary or via Node.js.
@@ -397,6 +398,7 @@ export async function spawnWorker(
 
   if (!proc.pid) {
     console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Failed to spawn worker process`);
+    reportDiagnostic("error", "spawner", `Worker spawn failed for task ${task.id}`);
     return;
   }
 
@@ -448,7 +450,7 @@ export async function spawnWorker(
       lastErrorLine = redactSecrets(line);
 
       // Detect rate limiting from Claude CLI stderr
-      if (/rate.limit|429|too many requests|over_quota|overloaded|capacity/i.test(line)) {
+      if (/rate.limit|429|too many requests|over_quota/i.test(line)) {
         console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Rate limit detected`);
         agentEvents.emit("task:rate_limited", { id: task.id });
       }
@@ -530,6 +532,7 @@ export async function spawnWorker(
   proc.on("error", (err) => {
     active.status = "failed";
     console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Process error: ${err.message}`);
+    reportDiagnostic("error", "spawner", `Worker process error for task ${task.id}: ${err.message}`);
   });
 }
 

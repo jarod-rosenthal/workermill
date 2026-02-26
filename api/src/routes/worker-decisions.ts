@@ -116,6 +116,27 @@ router.post("/evaluate-quality", async (req: Request, res: Response) => {
       };
     }
 
+    // Ensure qualityGateEnabled has a default from org settings
+    if (body.qualityGateEnabled === undefined) {
+      body.qualityGateEnabled = org.qualityGateEnabled;
+    }
+
+    // Ensure bypassRequested has a default
+    if (body.bypassRequested === undefined) {
+      body.bypassRequested = false;
+    }
+
+    // Inject org quality thresholds when client doesn't provide them
+    if (!body.thresholds) {
+      body.thresholds = {
+        blockOnTestFailures: org.blockOnTestFailures ?? true,
+        blockOnTypeErrors: org.blockOnTypeErrors ?? false,
+        minQualityScore: org.minQualityScore ?? undefined,
+        minTestCoveragePercent: org.minTestCoveragePercent ?? undefined,
+        maxSecurityHighVulns: org.maxSecurityHighVulns ?? undefined,
+      };
+    }
+
     // Server-side bypass verification: don't trust the client's bypassRequested flag
     if (body.bypassRequested && body.taskId) {
       const task = await AppDataSource.getRepository(WorkerTask).findOneBy({ id: body.taskId });

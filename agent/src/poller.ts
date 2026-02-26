@@ -29,6 +29,33 @@ import { getOllamaStatus } from "./ollama-manager.js";
 // Track tasks currently being planned (to avoid double-dispatching)
 const planningInProgress = new Set<string>();
 
+// ─── Diagnostic Buffer ─────────────────────────────────────────────────────
+// Accumulates errors/warnings between heartbeats, sent and cleared each cycle.
+const diagnosticBuffer: Array<{
+  ts: string;
+  level: string;
+  component: string;
+  message: string;
+}> = [];
+
+/**
+ * Report a diagnostic event to be sent with the next heartbeat.
+ * Capped at 50 entries to prevent memory growth.
+ */
+export function reportDiagnostic(
+  level: "error" | "warn" | "info",
+  component: string,
+  message: string,
+): void {
+  diagnosticBuffer.push({
+    ts: new Date().toISOString(),
+    level,
+    component,
+    message,
+  });
+  if (diagnosticBuffer.length > 50) diagnosticBuffer.shift();
+}
+
 // Track manager tasks in progress (to avoid double-dispatching)
 const managerInProgress = new Set<string>();
 
@@ -149,11 +176,11 @@ async function pollOnce(config: AgentConfig): Promise<void> {
       if (!busy) {
         console.error(`${ts()} ${chalk.red("✗")} Authentication failed. Check your API key.`);
       }
-      // Silent when busy — transient DB pool exhaustion on server
+      reportDiagnostic("error", "poller", `Poll failed: ${err.response?.status} auth`);
     } else if (!busy) {
       console.warn(`${ts()} ${chalk.yellow("⚠")} Poll error: ${err.message || String(error)}`);
+      reportDiagnostic("warn", "poller", `Poll error: ${err.message || String(error)}`);
     }
-    // Silent when busy — expected during heavy planning/execution
   }
 }
 
@@ -465,6 +492,9 @@ export function startHeartbeat(config: AgentConfig): void {
       const gpuInfo = getGpuInfo();
       const ollamaStatus = await getOllamaStatus(config.ollamaPort);
 
+      // Flush diagnostic buffer into heartbeat payload
+      const diagnostics = diagnosticBuffer.splice(0);
+
       const response = await api.post("/api/agent/heartbeat", {
         agentId: config.agentId,
         activeTasks: activeTaskIds,
@@ -473,6 +503,7 @@ export function startHeartbeat(config: AgentConfig): void {
         gpuVendor: gpuInfo.vendor,
         localRagEnabled: config.localRag,
         ollamaRunning: ollamaStatus.running,
+        ...(diagnostics.length > 0 ? { diagnostics } : {}),
       });
 
       // Stop containers for tasks cancelled via the cloud dashboard

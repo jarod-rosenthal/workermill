@@ -40,6 +40,7 @@ import {
 import { generateText, type AIProvider } from "./providers.js";
 import { generateTextWithTools } from "./ai-sdk-generate.js";
 import type { ClaimCredentials } from "./spawner.js";
+import { reportDiagnostic } from "./poller.js";
 
 // ============================================================================
 // TOKEN USAGE HELPERS (mirrors worker/epic/agent-sdk.ts patterns)
@@ -666,6 +667,7 @@ async function cloneTargetRepo(
     console.error(
       `${ts()} ${taskLabel} ${chalk.yellow("⚠")} Clone failed, planner will run without repo access: ${safeDetail.substring(0, 300)}`,
     );
+    reportDiagnostic("warn", "planner", `Repo clone failed: ${safeDetail.substring(0, 200)}`);
     // Cleanup partial clone
     try {
       rmSync(tmpDir, { recursive: true, force: true });

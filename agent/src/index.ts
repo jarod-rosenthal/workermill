@@ -8,7 +8,7 @@
 import chalk from "chalk";
 import type { AgentConfig } from "./config.js";
 import { initApi, api } from "./api.js";
-import { startPolling, startHeartbeat, stopPolling } from "./poller.js";
+import { startPolling, startHeartbeat, stopPolling, reportDiagnostic } from "./poller.js";
 import { stopAll } from "./spawner.js";
 import { AGENT_VERSION } from "./version.js";
 import { selfUpdate, restartAgent } from "./updater.js";
@@ -74,6 +74,7 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
         );
       } else {
         console.log(`  ${chalk.yellow("⚠")} Ollama failed to start — local RAG disabled`);
+        reportDiagnostic("warn", "startup", "Ollama failed to start — local RAG disabled");
       }
     }
 

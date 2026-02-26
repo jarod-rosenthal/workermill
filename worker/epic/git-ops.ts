@@ -1771,6 +1771,12 @@ export class GitOps {
       securityLow: number;
     }
   ): Promise<string | undefined> {
+    // Defense-in-depth: never create a PR with failing tests
+    if (qualityMetrics?.testsFailed && qualityMetrics.testsFailed > 0) {
+      console.error(`[GitOps] BLOCKED: Cannot create PR with ${qualityMetrics.testsFailed} failing test(s)`);
+      return undefined;
+    }
+
     try {
       // 0. Fetch all remote refs to ensure we see newly pushed story branches
       // This is critical because story branches are pushed just before this method is called,

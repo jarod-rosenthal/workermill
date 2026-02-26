@@ -2696,4 +2696,217 @@ router.post(
   },
 );
 
+/**
+ * POST /api/auth/vscode-exchange
+ * Exchange a Cognito JWT for a VS Code API key.
+ * Bridges JWT-based auth flows (email/password, Google SSO) to the usr_ API key the agent needs.
+ */
+router.post(
+  "/vscode-exchange",
+  githubOnboardLimiter,
+  authenticateUserAllowNoOrg,
+  async (req: Request, res: Response) => {
+    try {
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      // Get all user organizations
+      const userOrgs = await getUserOrganizations(user.id);
+
+      // Get default org
+      const org = await getDefaultOrganization(user.id);
+      if (!org) {
+        return res
+          .status(404)
+          .json({ error: "No organization found. Complete onboarding at workermill.com first." });
+      }
+
+      // Create a user API key
+      const userApiKeyRepo = AppDataSource.getRepository(UserApiKey);
+      const userToken = `usr_${randomUUID().replace(/-/g, "")}`;
+      const userKeyPrefix = userToken.substring(0, 12);
+      const userKeyHash = await bcrypt.hash(userToken, 10);
+      const userApiKey = userApiKeyRepo.create({
+        userId: user.id,
+        orgId: org.id,
+        name: "VS Code Extension",
+        keyHash: userKeyHash,
+        keyPrefix: userKeyPrefix,
+        scopes: ["*"],
+      });
+      await userApiKeyRepo.save(userApiKey);
+
+      logger.info("VS Code exchange completed", { userId: user.id, orgId: org.id, email: user.email });
+
+      res.json({
+        apiKey: userToken,
+        apiUrl: config.apiBaseUrl,
+        orgSlug: org.slug,
+        orgId: org.id,
+        orgName: org.name,
+        userId: user.id,
+        email: user.email,
+        name: user.fullName,
+        organizations: userOrgs.map((o) => ({ id: o.id, name: o.name, slug: o.slug, role: o.role })),
+      });
+    } catch (error) {
+      logger.error("VS Code exchange failed", { error });
+      res.status(500).json({ error: "Token exchange failed" });
+    }
+  },
+);
+
+/**
+ * GET /api/auth/vscode-sso-callback
+ * Server-side callback for VS Code Google SSO flow.
+ * After Cognito redirects here with an auth code:
+ * 1. Exchange code for Cognito tokens
+ * 2. Auto-provision user if needed
+ * 3. Generate usr_ API key
+ * 4. Redirect to vscode://workermill.workermill/auth-callback?apiKey=...
+ */
+router.get("/vscode-sso-callback", async (req: Request, res: Response) => {
+  try {
+    const { code, state } = req.query;
+
+    if (!code || typeof code !== "string") {
+      return res.status(400).send("Missing authorization code");
+    }
+
+    // Exchange authorization code for tokens via Cognito token endpoint
+    const cognitoDomain = config.cognito.domain;
+    const region = config.cognito.region;
+    const isCustomDomain = cognitoDomain.includes(".");
+    const tokenUrl = isCustomDomain
+      ? `https://${cognitoDomain}/oauth2/token`
+      : `https://${cognitoDomain}.auth.${region}.amazoncognito.com/oauth2/token`;
+
+    const redirectUri = `${config.apiBaseUrl}/api/auth/vscode-sso-callback`;
+
+    const tokenResponse = await axios.post(
+      tokenUrl,
+      new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: config.cognito.clientId,
+        code,
+        redirect_uri: redirectUri,
+      }),
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      },
+    );
+
+    const { id_token } = tokenResponse.data;
+
+    if (!id_token) {
+      return res.status(400).send("No ID token received from SSO provider");
+    }
+
+    // Decode ID token to get user info
+    const idPayload = decodeJwtPayload(id_token);
+    const cognitoId = idPayload.sub;
+    const userEmail = idPayload.email;
+    const userName = idPayload.name || userEmail.split("@")[0];
+
+    // Find or auto-provision user
+    const userRepo = AppDataSource.getRepository(User);
+    let user = await userRepo.findOne({ where: { cognitoId } });
+
+    if (!user) {
+      user = await userRepo.findOne({ where: { email: userEmail.toLowerCase() } });
+
+      if (user) {
+        // Link existing user to Cognito
+        user.cognitoId = cognitoId;
+        user.status = "active";
+        if (user.tosVersion !== TOS_VERSION) {
+          user.tosAcceptedAt = new Date();
+          user.tosVersion = TOS_VERSION;
+        }
+        await userRepo.save(user);
+        logger.info("Linked SSO user to existing account (VS Code)", { email: userEmail, cognitoId });
+      } else {
+        // Auto-provision new user
+        const inviteRepo = AppDataSource.getRepository(OrgInvite);
+        const pendingInvite = await inviteRepo.findOne({
+          where: { email: userEmail.toLowerCase(), accepted: false },
+        });
+        const hasValidInvite = pendingInvite && !pendingInvite.isExpired();
+
+        user = userRepo.create({
+          cognitoId,
+          email: userEmail.toLowerCase(),
+          fullName: userName,
+          role: hasValidInvite ? "member" : "admin",
+          status: "active",
+          orgId: null,
+          tosAcceptedAt: new Date(),
+          tosVersion: TOS_VERSION,
+        });
+        await userRepo.save(user);
+        logger.info("SSO user provisioned via VS Code", { userId: user.id, hasValidInvite });
+      }
+    }
+
+    // Auto-accept TOS on SSO login
+    if (user.tosVersion !== TOS_VERSION) {
+      await userRepo.update(
+        { id: user.id },
+        { tosAcceptedAt: new Date(), tosVersion: TOS_VERSION },
+      );
+    }
+
+    // Get default org
+    const org = await getDefaultOrganization(user.id);
+    if (!org) {
+      const errorUrl = `vscode://workermill.workermill/auth-callback?error=${encodeURIComponent("No organization found. Complete onboarding at workermill.com first.")}`;
+      return res.redirect(errorUrl);
+    }
+
+    // Create user API key
+    const userApiKeyRepo = AppDataSource.getRepository(UserApiKey);
+    const userToken = `usr_${randomUUID().replace(/-/g, "")}`;
+    const userKeyPrefix = userToken.substring(0, 12);
+    const userKeyHash = await bcrypt.hash(userToken, 10);
+    const userApiKey = userApiKeyRepo.create({
+      userId: user.id,
+      orgId: org.id,
+      name: "VS Code Extension",
+      keyHash: userKeyHash,
+      keyPrefix: userKeyPrefix,
+      scopes: ["*"],
+    });
+    await userApiKeyRepo.save(userApiKey);
+
+    logger.info("VS Code SSO callback completed", { userId: user.id, orgId: org.id });
+
+    // Redirect to VS Code with credentials
+    const params = new URLSearchParams({
+      apiKey: userToken,
+      orgId: org.id,
+      orgName: org.name,
+      orgSlug: org.slug || "",
+      email: user.email,
+      name: user.fullName || userName,
+      ...(typeof state === "string" ? { state } : {}),
+    });
+    res.redirect(`vscode://workermill.workermill/auth-callback?${params.toString()}`);
+  } catch (error: any) {
+    logger.error("VS Code SSO callback error", {
+      error: error.message,
+      response: error.response?.data,
+    });
+
+    if (error.response?.status === 400) {
+      return res.status(400).send("Invalid or expired authorization code. Please try signing in again.");
+    }
+
+    res.status(500).send("SSO authentication failed. Please try again.");
+  }
+});
+
 export default router;

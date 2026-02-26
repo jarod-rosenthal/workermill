@@ -34,7 +34,14 @@ import {
   stripApiKeyFromConfig,
   deleteApiKeyFromKeychain,
 } from "./agent-installer";
-import { signUpWithGitHub, signInWithGitHub, enterApiKey } from "./github-onboard";
+import {
+  signUpWithGitHub,
+  signInWithGitHub,
+  signInWithEmail,
+  signInWithGoogle,
+  handleAuthCallback,
+  enterApiKey,
+} from "./github-onboard";
 import { initSecretStorage, getApiKey, storeApiKey, deleteApiKey } from "./secret-storage";
 
 /**
@@ -236,6 +243,23 @@ export function activate(context: vscode.ExtensionContext): void {
       log(`Secret storage migration error: ${err instanceof Error ? err.message : String(err)}`);
     }
   })();
+
+  // Register URI handler for SSO callbacks (vscode://workermill.workermill/auth-callback)
+  context.subscriptions.push(
+    vscode.window.registerUriHandler({
+      handleUri: async (uri: vscode.Uri) => {
+        if (uri.path === "/auth-callback") {
+          log(`URI callback received: ${uri.path}`);
+          const success = await handleAuthCallback(uri, log);
+          if (success) {
+            treeProvider.agentConfigured = true;
+            vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
+            client.connect();
+          }
+        }
+      },
+    }),
+  );
 
   // Register commands
   context.subscriptions.push(
@@ -983,6 +1007,30 @@ export function activate(context: vscode.ExtensionContext): void {
       "workermill.signInWithGitHub",
       async () => {
         const success = await signInWithGitHub(log);
+        if (success) {
+          treeProvider.agentConfigured = true;
+          vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
+          client.connect();
+        }
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "workermill.signInWithEmail",
+      async () => {
+        const success = await signInWithEmail(log);
+        if (success) {
+          treeProvider.agentConfigured = true;
+          vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
+          client.connect();
+        }
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "workermill.signInWithGoogle",
+      async () => {
+        const success = await signInWithGoogle(log);
         if (success) {
           treeProvider.agentConfigured = true;
           vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);

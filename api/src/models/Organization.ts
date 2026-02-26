@@ -191,6 +191,10 @@ export class Organization {
   @Column({ name: "scm_base_url", type: "varchar", length: 500, nullable: true })
   scmBaseUrl: string | null;
 
+  // GitHub App — installation ID for auto-rotating tokens
+  @Column({ name: "github_app_installation_id", type: "int", nullable: true })
+  githubAppInstallationId: number | null;
+
   // Issue Tracker Provider Configuration
   @Column({ name: "issue_tracker_provider", type: "varchar", length: 20, default: "internal" })
   issueTrackerProvider: "jira" | "linear" | "github-issues" | "internal";

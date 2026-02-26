@@ -1445,15 +1445,21 @@ router.get(
     let configured = false;
     let username: string | null = null;
 
-    try {
-      // Check for PAT in secrets
-      const { getOrgSecret } = await import("./settings/helpers.js");
-      const secretName =
-        provider === "github" ? "github-token" : `${provider}-token`;
-      const token = await getOrgSecret(org.id, secretName);
-      configured = !!token;
-    } catch {
-      // Secrets fetch failed — treat as not configured
+    // Check for GitHub App installation first
+    if (provider === "github" && org.githubAppInstallationId) {
+      configured = true;
+      username = "(GitHub App)";
+    } else {
+      try {
+        // Check for PAT in secrets
+        const { getOrgSecret } = await import("./settings/helpers.js");
+        const secretName =
+          provider === "github" ? "github-token" : `${provider}-token`;
+        const token = await getOrgSecret(org.id, secretName);
+        configured = !!token;
+      } catch {
+        // Secrets fetch failed — treat as not configured
+      }
     }
 
     res.json({ configured, provider, username });

@@ -6,6 +6,9 @@
  */
 
 import chalk from "chalk";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import type { AgentConfig } from "./config.js";
 import { initApi, api } from "./api.js";
 import { startPolling, startHeartbeat, stopPolling, reportDiagnostic } from "./poller.js";
@@ -16,6 +19,51 @@ import { startLocalApi, stopLocalApi } from "./local-api.js";
 import { detectGpu } from "./gpu-detector.js";
 import { ensureOllamaRunning, pullModel, stopOllama, findOllamaPath, installOllama } from "./ollama-manager.js";
 
+// ── Single-instance enforcement via PID file ────────────────────────────
+const PID_FILE = path.join(os.homedir(), ".workermill", "agent.pid");
+
+function killExistingAgent(): void {
+  try {
+    const oldPid = parseInt(fs.readFileSync(PID_FILE, "utf-8").trim(), 10);
+    if (oldPid && oldPid !== process.pid) {
+      try {
+        process.kill(oldPid, 0); // Check if alive
+        console.log(chalk.dim(`  Stopping previous agent (PID ${oldPid})...`));
+        process.kill(oldPid, "SIGTERM");
+        // Give it a moment to die
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          try { process.kill(oldPid, 0); } catch { break; } // Dead
+          const waitMs = 100;
+          const start = Date.now();
+          while (Date.now() - start < waitMs) { /* busy wait — no async available here */ }
+        }
+        // Force kill if still alive
+        try { process.kill(oldPid, "SIGKILL"); } catch { /* already dead */ }
+      } catch {
+        // Process doesn't exist — stale PID file
+      }
+    }
+  } catch {
+    // No PID file — first run
+  }
+}
+
+function writePidFile(): void {
+  try {
+    fs.writeFileSync(PID_FILE, String(process.pid), { mode: 0o644 });
+  } catch { /* best effort */ }
+}
+
+function removePidFile(): void {
+  try {
+    const content = fs.readFileSync(PID_FILE, "utf-8").trim();
+    if (content === String(process.pid)) {
+      fs.unlinkSync(PID_FILE);
+    }
+  } catch { /* best effort */ }
+}
+
 export { loadConfig, loadConfigFromFile, validatePrerequisites, getSystemInfo, findClaudePath } from "./config.js";
 export type { AgentConfig } from "./config.js";
 
@@ -24,6 +72,10 @@ export type { AgentConfig } from "./config.js";
  * Returns a cleanup function to stop the agent.
  */
 export async function startAgent(config: AgentConfig): Promise<() => Promise<void>> {
+  // Kill any existing agent process to prevent double-polling
+  killExistingAgent();
+  writePidFile();
+
   console.log();
   console.log(chalk.bold.cyan("  WorkerMill Remote Agent"));
   console.log(chalk.dim("  ─────────────────────────────────────"));
@@ -146,6 +198,7 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
       // Best-effort deregister
     }
     await stopAll();
+    removePidFile();
     console.log(`  ${chalk.red("●")} Agent stopped.`);
   };
 }

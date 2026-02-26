@@ -112,6 +112,7 @@ router.get("/", async (req: Request, res: Response) => {
       planningAgentProvider: org.planningAgentProvider || "anthropic",
       planningAgentModel: org.planningAgentModel || "",
       planningMode: org.planningMode || "strict",
+      maxTargetFiles: org.maxTargetFiles,
       storyCalibrationMultiplier: org.storyCalibrationMultiplier ?? 0.4,
       hasPlanningApiKey,
 
@@ -254,6 +255,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       planningAgentProvider,
       planningAgentModel,
       planningMode,
+      maxTargetFiles,
       storyCalibrationMultiplier,
 
       // Cost Settings
@@ -722,6 +724,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         return;
       }
       org.planningMode = planningMode;
+    }
+
+    if (maxTargetFiles !== undefined) {
+      const val = parseInt(maxTargetFiles, 10);
+      if (isNaN(val) || val < 3 || val > 15) {
+        res.status(400).json({ error: "maxTargetFiles must be between 3 and 15" });
+        return;
+      }
+      org.maxTargetFiles = val;
     }
 
     if (storyCalibrationMultiplier !== undefined) {
@@ -1212,6 +1223,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         planningAgentProvider: org.planningAgentProvider,
         planningAgentModel: org.planningAgentModel,
         planningMode: org.planningMode,
+        maxTargetFiles: org.maxTargetFiles,
         storyCalibrationMultiplier: org.storyCalibrationMultiplier,
         costAlertThresholdUsd: org.costAlertThresholdUsd,
         dailyBudgetLimitUsd: org.dailyBudgetLimitUsd,

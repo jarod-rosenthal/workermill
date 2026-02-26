@@ -60,6 +60,7 @@ export interface Settings {
   planningAgentProvider: string;
   planningAgentModel: string;
   planningMode: string;
+  maxTargetFiles: number;
   storyCalibrationMultiplier: number;
   costAlertThresholdUsd: number | null;
   // Budget Limits (AI FinOps)

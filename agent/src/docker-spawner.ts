@@ -654,12 +654,25 @@ export async function spawnDockerWorker(
       : {}),
   };
 
-  // Add env vars as -e flags, filtering empty values
+  // Write env vars to a temp file instead of passing as -e flags.
+  // On Windows, the total command-line length is capped at 32,767 chars.
+  // Long task descriptions + JSON fields easily exceed this, causing ENAMETOOLONG.
+  const envFileDir = path.join(os.tmpdir(), "workermill-docker");
+  fs.mkdirSync(envFileDir, { recursive: true });
+  const envFilePath = path.join(envFileDir, `${containerName}.env`);
+  const envFileLines: string[] = [];
   for (const [k, v] of Object.entries(envVars)) {
     if (v !== "") {
-      dockerArgs.push("-e", `${k}=${v}`);
+      // Docker --env-file format: KEY=VALUE (no quoting needed, one per line)
+      // Newlines in values would break the format, so replace with spaces
+      envFileLines.push(`${k}=${v.replace(/\n/g, " ")}`);
     }
   }
+  fs.writeFileSync(envFilePath, envFileLines.join("\n"), { mode: 0o600 });
+
+  // Use --env-file for Docker Desktop (Windows/WSL/macOS) where command-line limits apply.
+  // On Linux with --network host, -e flags are fine but --env-file works everywhere.
+  dockerArgs.push("--env-file", envFilePath);
 
   // Image
   dockerArgs.push(imageTag);
@@ -845,6 +858,13 @@ export async function spawnDockerWorker(
         const credFile = path.join(claudeConfigDir, ".credentials.json");
         if (fs.existsSync(credFile)) fs.chmodSync(credFile, 0o600);
       } catch { /* best effort */ }
+    }
+
+    // Clean up env file immediately (no longer needed after container starts)
+    try {
+      fs.unlinkSync(envFilePath);
+    } catch {
+      /* best effort */
     }
 
     // Clean up container and process reference after delay

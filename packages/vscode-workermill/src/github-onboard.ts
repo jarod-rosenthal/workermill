@@ -293,14 +293,14 @@ export async function promptScmSetup(
   const choice = await vscode.window.showQuickPick(
     [
       {
+        label: "$(github) Install GitHub App (Recommended)",
+        description: "One-click, no tokens to manage",
+        action: "app" as const,
+      },
+      {
         label: "$(key) Use a Personal Access Token",
         description: "Create a GitHub PAT with repo access",
         action: "pat" as const,
-      },
-      {
-        label: "$(github) Install GitHub App",
-        description: "One-click, no tokens to manage",
-        action: "app" as const,
       },
       {
         label: "$(debug-step-over) Skip for now",

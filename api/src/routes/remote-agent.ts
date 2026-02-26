@@ -1415,6 +1415,12 @@ router.post(
       provider === "github" ? "github-token" : `${provider}-token`;
     await saveOrgSecret(org.id, secretName, token);
 
+    // Invalidate credential cache so the new token is used immediately
+    const { invalidateOrgCredentialsCache } = await import(
+      "../services/org-credentials.js"
+    );
+    invalidateOrgCredentialsCache(org.id);
+
     // Update org scmProvider if not already set to this provider
     if (org.scmProvider !== provider) {
       const orgRepo = AppDataSource.getRepository(

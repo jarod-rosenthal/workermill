@@ -10,7 +10,7 @@
 import chalk from "chalk";
 import { totalmem, devNull, homedir } from "os";
 import { join } from "path";
-import { spawn } from "child_process";
+import { spawn, execFileSync } from "child_process";
 import { writeFileSync, readFileSync, existsSync, unlinkSync, openSync, closeSync, createWriteStream } from "fs";
 import { AGENT_VERSION } from "../version.js";
 import {
@@ -21,9 +21,53 @@ import {
   getPidFile,
   getLogFile,
   getConfigFile,
+  getPortFile,
 } from "../config.js";
 import { rotateLogs } from "../log-rotation.js";
 import { startAgent } from "../index.js";
+
+/**
+ * Check if an agent is already running by probing its local API port.
+ * Port binding is kernel-managed — automatically released on process exit
+ * including crashes and SIGKILL. Falls back to PID check for the startup
+ * window before the port file is written.
+ */
+function isAgentRunning(): { alive: boolean; detail: string } {
+  // Layer 1: Port-based liveness (authoritative)
+  const portFile = getPortFile();
+  try {
+    const port = parseInt(readFileSync(portFile, "utf-8").trim(), 10);
+    if (port > 0) {
+      try {
+        execFileSync("node", [
+          "-e",
+          `const http=require("http");const r=http.get("http://127.0.0.1:${port}/api/status",{timeout:2000},res=>{process.exit(res.statusCode===200?0:1)});r.on("error",()=>process.exit(1));r.on("timeout",()=>{r.destroy();process.exit(1)})`,
+        ], { stdio: "pipe", timeout: 3000, windowsHide: true });
+        return { alive: true, detail: `responding on port ${port}` };
+      } catch {
+        // Port not responding — stale port file, clean up
+        try { unlinkSync(portFile); } catch { /* ignore */ }
+      }
+    }
+  } catch { /* no port file */ }
+
+  // Layer 2: PID-based fallback (covers startup window before port file is written)
+  const pidFile = getPidFile();
+  try {
+    const existingPid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
+    if (existingPid && existingPid !== process.pid) {
+      try {
+        process.kill(existingPid, 0);
+        return { alive: true, detail: `PID ${existingPid}` };
+      } catch {
+        // Process is dead — clean up stale PID file
+        try { unlinkSync(pidFile); } catch { /* ignore */ }
+      }
+    }
+  } catch { /* no PID file */ }
+
+  return { alive: false, detail: "" };
+}
 
 export async function startCommand(options: { detach?: boolean }): Promise<void> {
   // Check config exists
@@ -33,27 +77,14 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     process.exit(1);
   }
 
-  // Single-instance guard: refuse to start if another agent process is alive.
+  // Single-instance guard: refuse to start if another agent is alive.
   // Prevents the double-planning bug where two agent processes poll and both
   // claim the same task (each has its own planningInProgress set in memory).
-  const pidFile = getPidFile();
-  if (existsSync(pidFile)) {
-    try {
-      const existingPid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
-      if (existingPid && existingPid !== process.pid) {
-        try {
-          process.kill(existingPid, 0); // signal 0 = check if alive
-          console.log(chalk.yellow(`Agent is already running (PID ${existingPid}).`));
-          console.log(`Stop it first with: ${chalk.cyan("workermill-agent stop")}`);
-          process.exit(1);
-        } catch {
-          // Process is dead — clean up stale PID file and continue
-          unlinkSync(pidFile);
-        }
-      }
-    } catch {
-      // Can't read PID file — ignore and continue
-    }
+  const existing = isAgentRunning();
+  if (existing.alive) {
+    console.log(chalk.yellow(`Agent is already running (${existing.detail}).`));
+    console.log(`Stop it first with: ${chalk.cyan("workermill-agent stop")}`);
+    process.exit(1);
   }
 
   const config = loadConfigFromFile();

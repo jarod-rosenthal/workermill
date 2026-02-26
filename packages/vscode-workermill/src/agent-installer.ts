@@ -616,8 +616,47 @@ function cleanAgentState(): void {
  */
 let startInFlight = false;
 
+/**
+ * Check if agent is already running by probing its local API port.
+ * This is the authoritative liveness check — port binding is kernel-managed
+ * and automatically released on process exit (including crashes/SIGKILL).
+ * Falls back to PID file check if no port file exists.
+ */
+function isAgentAlive(log?: (msg: string) => void): boolean {
+  // Layer 1: Port-based liveness (authoritative)
+  // Port binding is kernel-managed — automatically released on process exit
+  // including crashes and SIGKILL. No stale state possible.
+  const portFile = path.join(os.homedir(), ".workermill", "agent.port");
+  try {
+    const port = parseInt(fs.readFileSync(portFile, "utf-8").trim(), 10);
+    if (port > 0) {
+      try {
+        execFileSync("node", [
+          "-e",
+          `const http=require("http");const r=http.get("http://127.0.0.1:${port}/api/status",{timeout:2000},res=>{process.exit(res.statusCode===200?0:1)});r.on("error",()=>process.exit(1));r.on("timeout",()=>{r.destroy();process.exit(1)})`,
+        ], { stdio: "pipe", timeout: 3000, windowsHide: true });
+        log?.(`Agent is alive on port ${port}`);
+        return true;
+      } catch {
+        log?.(`Port ${port} not responding — stale port file`);
+      }
+    }
+  } catch {
+    // No port file
+  }
+
+  // Layer 2: PID-based fallback (covers startup window before port file is written)
+  const existingPid = readAgentPid();
+  if (existingPid && isProcessAlive(existingPid)) {
+    log?.(`Agent process alive (PID ${existingPid})`);
+    return true;
+  }
+
+  return false;
+}
+
 export function startAgentProcess(log?: (msg: string) => void): void {
-  // Prevent concurrent calls from multiple activation paths
+  // Prevent concurrent calls from multiple activation paths within this process
   if (startInFlight) {
     log?.("Start already in-flight — skipping");
     return;
@@ -627,14 +666,10 @@ export function startAgentProcess(log?: (msg: string) => void): void {
   log?.(`Binary resolved to: ${binary}`);
   log?.(`Binary exists: ${fs.existsSync(binary)}`);
 
-  // If agent is already running, don't start another
-  const existingPid = readAgentPid();
-  if (existingPid && isProcessAlive(existingPid)) {
-    log?.(`Agent already running (PID ${existingPid}) — skipping start`);
+  // Authoritative liveness check: port probe + PID fallback
+  if (isAgentAlive(log)) {
+    log?.("Agent already running — skipping start");
     return;
-  }
-  if (existingPid) {
-    log?.(`Stale PID ${existingPid} found — cleaning up`);
   }
 
   startInFlight = true;

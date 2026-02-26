@@ -251,6 +251,18 @@ export function activate(context: vscode.ExtensionContext): void {
       handleUri: async (uri: vscode.Uri) => {
         if (uri.path === "/auth-callback") {
           log(`URI callback received: ${uri.path}`);
+
+          // Check if this is a SCM configuration callback (from GitHub App install)
+          const params = new URLSearchParams(uri.query);
+          if (params.get("scmConfigured") === "true") {
+            const method = params.get("method") || "unknown";
+            log(`SCM configured via ${method}`);
+            vscode.window.showInformationMessage(
+              `Repository access configured via ${method === "github-app" ? "GitHub App" : method}. You're all set!`,
+            );
+            return;
+          }
+
           const success = await handleAuthCallback(uri, log);
           if (success) {
             treeProvider.agentConfigured = true;

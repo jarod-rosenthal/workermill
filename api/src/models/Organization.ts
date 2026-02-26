@@ -494,7 +494,7 @@ export class Organization {
   @Column({ name: "block_on_type_errors", type: "boolean", default: false })
   blockOnTypeErrors: boolean;
 
-  @Column({ name: "block_on_test_failures", type: "boolean", default: false })
+  @Column({ name: "block_on_test_failures", type: "boolean", default: true })
   blockOnTestFailures: boolean;
 
   // External Quality Tool Integrations

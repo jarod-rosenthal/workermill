@@ -23,6 +23,7 @@ import { authenticateApiKey } from "../middleware/auth.js";
 import { asyncHandler } from "../middleware/error-handler.js";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask } from "../models/WorkerTask.js";
+import { WorkerTaskLog } from "../models/WorkerTaskLog.js";
 import { RemoteAgent } from "../models/RemoteAgent.js";
 import { In, Not } from "typeorm";
 import { logger } from "../utils/logger.js";
@@ -895,7 +896,7 @@ router.post(
 router.post(
   "/heartbeat",
   asyncHandler(async (req: Request, res: Response) => {
-    const { agentId, activeTasks, agentVersion, gpuAvailable, gpuVendor, localRagEnabled, ollamaRunning } = req.body;
+    const { agentId, activeTasks, agentVersion, gpuAvailable, gpuVendor, localRagEnabled, ollamaRunning, diagnostics } = req.body;
     const org = req.organization!;
 
     if (!agentId || !Array.isArray(activeTasks)) {
@@ -936,6 +937,31 @@ router.post(
         agentId,
       })
       .execute();
+
+    // Store agent diagnostics if present and there's a task to attach them to
+    if (Array.isArray(diagnostics) && diagnostics.length > 0) {
+      if (activeTasks.length > 0) {
+        const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+        const logsToSave = diagnostics.slice(0, 50).map((d: { ts?: string; level?: string; component?: string; message?: string }) => {
+          const log = new WorkerTaskLog();
+          log.taskId = activeTasks[0];
+          log.type = "system";
+          log.message = `[agent:${d.component || "unknown"}] ${d.message || ""}`.substring(0, 5000);
+          log.severity = d.level === "error" ? "error" : d.level === "warn" ? "warning" : "info";
+          log.metadata = { component: d.component, agentId, ts: d.ts };
+          return log;
+        });
+        // Fire-and-forget — don't block heartbeat response
+        logRepo.save(logsToSave).catch((err) => {
+          logger.warn("Failed to save agent diagnostics", { error: err instanceof Error ? err.message : String(err) });
+        });
+      } else {
+        // No active task — log server-side for visibility
+        for (const d of diagnostics.slice(0, 10) as Array<{ level?: string; component?: string; message?: string }>) {
+          logger.warn("Agent diagnostic (no active task)", { agentId, orgId: org.id, component: d.component, message: d.message, level: d.level });
+        }
+      }
+    }
 
     // Compute update flags for the agent
     const updateAvailable = agentVersion ? semverLt(agentVersion, LATEST_AGENT_VERSION) : false;

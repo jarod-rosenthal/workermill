@@ -2678,10 +2678,16 @@ export class EpicCoordinator {
           qualityGateResult = { pass: true, reasons: ["bypass-quality-gate label set"], blockers: [] };
           console.log("[Epic] Quality gate bypassed");
         } else {
-          // Build diff summary for quality evaluation
-          const diffSummary = `score=${capturedQualityMetrics.qualityScore}/100, typeErrors=${capturedQualityMetrics.typeErrors}, lintErrors=${capturedQualityMetrics.lintErrors}, testsFailed=${capturedQualityMetrics.testsFailed}`;
+          // Send structured metrics to Decision API
           qualityGateResult = await this.decisionClient.evaluateQuality({
-            diff: diffSummary,
+            metrics: {
+              qualityScore: capturedQualityMetrics.qualityScore,
+              typeErrors: capturedQualityMetrics.typeErrors > 0,
+              testFailures: capturedQualityMetrics.testsFailed > 0,
+              testCoveragePercent: capturedQualityMetrics.coverageLines || undefined,
+              securityVulnsHigh: capturedQualityMetrics.securityHigh,
+            },
+            qualityGateEnabled: true,
             storyDescription: this.config.jiraRequirements || undefined,
           });
         }

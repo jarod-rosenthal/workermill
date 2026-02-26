@@ -53,32 +53,6 @@ const EPIC_NAMES = [
   { name: "Production Deploy & Validation", shortName: "Deploy & Valid", persona: "devops_engineer" },
 ];
 
-// ─── Persona colors ─────────────────────────────────────────────────────────
-
-const _PERSONA_COLORS: Record<string, string> = {
-  devops_engineer: "text-emerald-400",
-  backend_developer: "text-blue-400",
-  frontend_developer: "text-purple-400",
-  qa_engineer: "text-amber-400",
-  tech_writer: "text-slate-400",
-};
-
-const _PERSONA_BG: Record<string, string> = {
-  devops_engineer: "bg-emerald-500/20",
-  backend_developer: "bg-blue-500/20",
-  frontend_developer: "bg-purple-500/20",
-  qa_engineer: "bg-amber-500/20",
-  tech_writer: "bg-slate-500/20",
-};
-
-const _PERSONA_BORDER: Record<string, string> = {
-  devops_engineer: "border-emerald-500/30",
-  backend_developer: "border-blue-500/30",
-  frontend_developer: "border-purple-500/30",
-  qa_engineer: "border-amber-500/30",
-  tech_writer: "border-slate-500/30",
-};
-
 // ─── Frame durations ────────────────────────────────────────────────────────
 
 const FRAME_DURATIONS = [3500, 4000, 3500, 4500, 3500, 3000, 5000];

@@ -465,6 +465,9 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
 
     let executionPlanV2: Awaited<ReturnType<typeof generateValidatedPlan>>;
     try {
+      const cloudMaxFiles = computeMaxTargetFiles(
+        (task.description || "").length,
+      );
       executionPlanV2 = await generateValidatedPlan(
         prd,
         agentConfig,
@@ -472,6 +475,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         progressCallback,
         skipCritic,
         streamProgressCallback,
+        cloudMaxFiles,
       );
     } finally {
       clearPlanningHeartbeat();
@@ -975,6 +979,7 @@ async function processLocalPlanningAgent(
         plan,
         originalRequirements: `${task.summary}\n\n${task.description || ""}`,
         iteration: 1,
+        maxTargetFiles: maxFiles,
       });
 
       criticScore = criticResult.score;
@@ -1017,7 +1022,7 @@ async function processLocalPlanningAgent(
         );
 
         try {
-          const refinementFeedback = formatLocalRefinementFeedback(criticResult);
+          const refinementFeedback = formatLocalRefinementFeedback(criticResult, maxFiles);
           const refinedPlan = await runLocalPlanningAgent(
             {
               ...planningInput,

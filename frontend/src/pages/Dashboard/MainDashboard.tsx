@@ -223,7 +223,6 @@ export default function Dashboard() {
   const [remoteAgentOnly, setRemoteAgentOnly] = useState(false);
   const [hasRemoteAgent, setHasRemoteAgent] = useState(false);
   const [remoteAgentOnline, setRemoteAgentOnline] = useState(false);
-  const [_remoteAgentHostname, setRemoteAgentHostname] = useState<string | null>(null);
 
   // Action states
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -508,7 +507,6 @@ export default function Dashboard() {
         setRemoteAgentOnly(settings.remoteAgentOnly ?? false);
         setHasRemoteAgent(settings.hasRemoteAgent ?? false);
         setRemoteAgentOnline(settings.remoteAgentOnline ?? false);
-        setRemoteAgentHostname(settings.remoteAgentHostname ?? null);
       }
     } catch (err) {
       console.error("Failed to fetch org settings:", err);

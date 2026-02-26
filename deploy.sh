@@ -223,49 +223,29 @@ check_bastion_dependencies() {
 ***REMOVED*** Invoke bastion Lambda
 invoke_bastion() {
     local action="$1"
+    local extra_payload="${2:-}"
     local response_file=$(mktemp)
+    local payload="{\"action\":\"$action\"${extra_payload:+,$extra_payload}}"
 
-    MSYS_NO_PATHCONV=1 aws lambda invoke --function-name "workermill-dev-bastion-control" --payload "{\"action\":\"$action\"}" --cli-binary-format raw-in-base64-out --region "$AWS_REGION" "$response_file" > /dev/null 2>&1
+    MSYS_NO_PATHCONV=1 aws lambda invoke --function-name "workermill-dev-bastion-control" --payload "$payload" --cli-binary-format raw-in-base64-out --region "$AWS_REGION" "$response_file" > /dev/null 2>&1
 
     cat "$response_file"
     rm -f "$response_file"
 }
 
-***REMOVED*** Whitelist current IP in bastion security group
-whitelist_current_ip() {
-    local my_ip=$(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null)
-
-    if [[ -z "$my_ip" ]]; then
-        echo -e "${YELLOW}Warning: Could not detect public IP for whitelisting${NC}"
-        return 0
-    fi
-
-    ***REMOVED*** Check if already whitelisted (simple grep check)
-    local sg_id=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=workermill-dev-bastion" --query 'SecurityGroups[0].GroupId' --output text --region "$AWS_REGION" 2>/dev/null)
-
-    if [[ -z "$sg_id" ]]; then
-        echo -e "${YELLOW}Warning: Could not find bastion security group${NC}"
-        return 0
-    fi
-
-    if aws ec2 describe-security-groups --group-ids "$sg_id" --output json --region "$AWS_REGION" 2>/dev/null | grep -q "$my_ip"; then
-        echo -e "${GREEN}IP $my_ip already whitelisted${NC}"
-        return 0
-    fi
-
-    echo -e "${YELLOW}Whitelisting IP $my_ip...${NC}"
-    if aws ec2 authorize-security-group-ingress --group-id "$sg_id" --protocol tcp --port 22 --cidr "${my_ip}/32" --region "$AWS_REGION" > /dev/null 2>&1; then
-        echo -e "${GREEN}IP $my_ip whitelisted ✓${NC}"
-    else
-        ***REMOVED*** Don't fail if already exists
-        echo -e "${GREEN}IP $my_ip whitelisted (or already exists)${NC}"
-    fi
-    return 0
-}
-
 ***REMOVED*** Start bastion if not running, wait for it to be ready
 start_bastion_if_needed() {
     echo -e "${YELLOW}Checking bastion status...${NC}"
+
+    ***REMOVED*** Detect IP once for whitelisting
+    local my_ip=$(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null)
+    local ip_payload=""
+    if [[ -n "$my_ip" ]]; then
+        ip_payload="\"ip\":\"$my_ip\""
+        echo -e "${GREEN}Detected IP: $my_ip${NC}"
+    else
+        echo -e "${YELLOW}Warning: Could not detect public IP${NC}"
+    fi
 
     local status_json=$(invoke_bastion "status")
     local current_state=$(echo "$status_json" | jq -r '.status // "unknown"')
@@ -274,15 +254,18 @@ start_bastion_if_needed() {
         BASTION_IP=$(echo "$status_json" | jq -r '.instances[0].public_ip // empty')
         if [[ -n "$BASTION_IP" ]]; then
             echo -e "${GREEN}Bastion already running at $BASTION_IP${NC}"
-            whitelist_current_ip
+            ***REMOVED*** Whitelist via Lambda (not direct EC2 API)
+            if [[ -n "$ip_payload" ]]; then
+                invoke_bastion "whitelist" "$ip_payload" > /dev/null
+                echo -e "${GREEN}IP whitelisted via Lambda${NC}"
+            fi
             return 0
         fi
     fi
 
     echo -e "${YELLOW}Starting bastion (this takes ~60-90 seconds)...${NC}"
-    invoke_bastion "start" > /dev/null
+    invoke_bastion "start" "$ip_payload" > /dev/null
     BASTION_STARTED=true
-    whitelist_current_ip
 
     ***REMOVED*** Poll for bastion to be ready
     local max_attempts=18  ***REMOVED*** 90 seconds
@@ -310,7 +293,7 @@ start_bastion_if_needed() {
     exit 1
 }
 
-***REMOVED*** Start SSH tunnel to RDS
+***REMOVED*** Start SSH tunnel to RDS (with retries for sshd startup race)
 start_ssh_tunnel() {
     if [[ -z "$BASTION_IP" ]]; then
         echo -e "${RED}Bastion IP not set - cannot start SSH tunnel${NC}"
@@ -327,32 +310,44 @@ start_ssh_tunnel() {
         exit 1
     fi
 
-    ***REMOVED*** Start SSH tunnel in background
-    ssh -f -N -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-        -i ~/.ssh/workermill-bastion \
-        -L 5432:${rds_host}:5432 \
-        ec2-user@${BASTION_IP}
+    ***REMOVED*** Retry loop: sshd may not be ready on freshly-booted spot instances
+    local max_retries=3
+    local retry=0
 
-    ***REMOVED*** Give it a moment to establish
-    sleep 2
+    while [[ $retry -lt $max_retries ]]; do
+        ((retry++))
 
-    ***REMOVED*** Find the SSH tunnel PID
-    SSH_TUNNEL_PID=$(pgrep -f "ssh.*-L 5432.*${BASTION_IP}" | head -1)
+        ***REMOVED*** Start SSH tunnel in background
+        ssh -f -N -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            -i ~/.ssh/workermill-bastion \
+            -L 5432:${rds_host}:5432 \
+            ec2-user@${BASTION_IP} 2>/dev/null
 
-    if [[ -z "$SSH_TUNNEL_PID" ]]; then
-        echo -e "${RED}Failed to establish SSH tunnel${NC}"
-        exit 1
-    fi
+        ***REMOVED*** Give it a moment to establish
+        sleep 2
 
-    ***REMOVED*** Verify tunnel is working
-    if command -v nc &> /dev/null; then
-        if ! nc -z localhost 5432 2>/dev/null; then
-            echo -e "${RED}SSH tunnel established but port 5432 not responding${NC}"
-            exit 1
+        ***REMOVED*** Find the SSH tunnel PID
+        SSH_TUNNEL_PID=$(pgrep -f "ssh.*-L 5432.*${BASTION_IP}" | head -1)
+
+        if [[ -n "$SSH_TUNNEL_PID" ]]; then
+            ***REMOVED*** Verify tunnel is working
+            if command -v nc &> /dev/null && nc -z localhost 5432 2>/dev/null; then
+                echo -e "${GREEN}SSH tunnel established (PID: $SSH_TUNNEL_PID)${NC}"
+                return 0
+            fi
         fi
-    fi
 
-    echo -e "${GREEN}SSH tunnel established (PID: $SSH_TUNNEL_PID)${NC}"
+        if [[ $retry -lt $max_retries ]]; then
+            echo -e "${YELLOW}  SSH tunnel attempt $retry/$max_retries failed, retrying in 5s...${NC}"
+            ***REMOVED*** Kill any partial tunnel
+            [[ -n "$SSH_TUNNEL_PID" ]] && kill "$SSH_TUNNEL_PID" 2>/dev/null || true
+            SSH_TUNNEL_PID=""
+            sleep 5
+        fi
+    done
+
+    echo -e "${RED}Failed to establish SSH tunnel after $max_retries attempts${NC}"
+    exit 1
 }
 
 ***REMOVED*** Stop SSH tunnel

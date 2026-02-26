@@ -30,7 +30,6 @@ import { authenticateUserAllowNoOrg } from "../middleware/auth.js";
 import axios from "axios";
 import rateLimit from "express-rate-limit";
 import { createStore } from "../middleware/rate-limit.js";
-import { saveOrgSecret } from "./settings/helpers.js";
 import {
   AdminCreateUserCommand,
   AdminSetUserPasswordCommand,
@@ -2259,10 +2258,6 @@ router.post(
           });
           await userOrgRepo.save(membership);
 
-          // Store GitHub token in Secrets Manager
-          const secretPrefix = `workermill/${config.environment}`;
-          await saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via web SSO)");
-
           notifyNewSignup({ email: primaryEmail, fullName: name, organizationName: org.name }).catch(() => {});
           sendWelcomeEmail(user, org, false).catch(() => {});
 
@@ -2280,11 +2275,6 @@ router.post(
         if (defaultMembership) {
           org = await orgRepo.findOne({ where: { id: defaultMembership.orgId } }) || null;
 
-          // Update GitHub token in Secrets Manager (refresh on each login)
-          if (org) {
-            const secretPrefix = `workermill/${config.environment}`;
-            await saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via web SSO signin)");
-          }
         }
 
         // Auto-accept TOS on SSO login (user already accepted via GitHub OAuth consent)
@@ -2464,10 +2454,6 @@ router.post(
       });
       await userOrgRepo.save(membership);
 
-      // Store GitHub token in Secrets Manager
-      const secretPrefix = `workermill/${config.environment}`;
-      await saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via extension onboarding)");
-
       // Create a user API key (per-user, auditable) instead of exposing the org key
       const userApiKeyRepo = AppDataSource.getRepository(UserApiKey);
       const userToken = `usr_${randomUUID().replace(/-/g, "")}`;
@@ -2597,10 +2583,6 @@ router.post(
         scopes: ["*"],
       });
       await userApiKeyRepo.save(userApiKey);
-
-      // Update GitHub tokens in Secrets Manager
-      const secretPrefix = `workermill/${config.environment}`;
-      await saveOrgSecret(org.id, "github-token", githubToken, secretPrefix, "GitHub token (via extension signin)");
 
       // Auto-accept TOS on SSO login
       if (user.tosVersion !== TOS_VERSION) {

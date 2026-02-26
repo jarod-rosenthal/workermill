@@ -54,6 +54,7 @@ export interface FileConfig {
 const CONFIG_DIR = join(homedir(), ".workermill");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 const PID_FILE = join(CONFIG_DIR, "agent.pid");
+const PORT_FILE = join(CONFIG_DIR, "agent.port");
 const LOG_FILE = join(CONFIG_DIR, "agent.log");
 
 export function getConfigDir(): string {
@@ -66,6 +67,10 @@ export function getConfigFile(): string {
 
 export function getPidFile(): string {
   return PID_FILE;
+}
+
+export function getPortFile(): string {
+  return PORT_FILE;
 }
 
 export function getLogFile(): string {

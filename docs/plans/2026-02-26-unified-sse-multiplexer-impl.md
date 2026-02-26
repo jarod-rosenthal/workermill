@@ -14,89 +14,52 @@
 
 ## Phase 0: Database Foundation
 
-Fix the database scaling ceiling BEFORE adding SSE infrastructure. The current `db.t4g.micro` (max ~112 connections) cannot support horizontal API scaling.
+Fix pre-existing PgBouncer config issues and prepare read replica infrastructure BEFORE adding SSE.
 
 ---
 
-### Task 0A: Add PgBouncer Sidecar to API ECS Task Definition
+### Task 0A: Fix PgBouncer Config on API ECS Task Definition
 
-The orchestrator already uses PgBouncer (`infrastructure/terraform/modules/ecs-service/orchestrator.tf:85-117`). Add the same pattern to the API task definition.
+PgBouncer sidecar **already exists** on the API ECS task (`main.tf:208-241`). However, there's a pre-existing bug: `DB_POOL_MAX=60` (TypeORM pool) exceeds `MAX_CLIENT_CONN=50` (PgBouncer limit), causing connection refusals under sustained load. Also increase `DEFAULT_POOL_SIZE` from 8 to 10 for SSE write burst headroom.
 
 **Files:**
-- Modify: `infrastructure/terraform/modules/ecs-service/main.tf` (API task definition, lines 119-243)
-- Modify: `infrastructure/terraform/modules/ecs-service/main.tf` (API environment vars, add `PGBOUNCER_HOST` and `PGBOUNCER_PORT`)
+- Modify: `infrastructure/terraform/modules/ecs-service/main.tf` (PgBouncer container config, lines 208-241)
 
 **Context:**
-- The orchestrator PgBouncer config is in `orchestrator.tf:85-117` — use it as the exact template
-- TypeORM already handles PgBouncer: when `PGBOUNCER_HOST` is set, prepared statements are disabled (`api/src/db/connection.ts:302`)
-- The API container already has `dependsOn: [{ containerName: "pgbouncer", condition: "START" }]` — use same pattern
+- PgBouncer sidecar is at `main.tf:208-241` with `DEFAULT_POOL_SIZE=8`, `MAX_CLIENT_CONN=50`
+- API container already sets `PGBOUNCER_HOST=127.0.0.1`, `PGBOUNCER_PORT=5432` (`main.tf:165-166`)
+- API container already has `dependsOn: [{ containerName: "pgbouncer", condition: "START" }]` (`main.tf:204-206`)
+- TypeORM already disables prepared statements when `PGBOUNCER_HOST` is set (`connection.ts:302`)
 
-**Step 1: Add PgBouncer container to API task definition**
+**Step 1: Update PgBouncer environment in main.tf**
 
-In `infrastructure/terraform/modules/ecs-service/main.tf`, add a second container to the `container_definitions` (after the existing `api` container), matching the orchestrator's PgBouncer config:
+In `infrastructure/terraform/modules/ecs-service/main.tf`, update the PgBouncer container's environment (lines 215-224):
 
-```json
-{
-  "name": "pgbouncer",
-  "image": "${var.pgbouncer_image}",
-  "essential": true,
-  "portMappings": [],
-  "environment": [
-    { "name": "POOL_MODE", "value": "transaction" },
-    { "name": "DEFAULT_POOL_SIZE", "value": "10" },
-    { "name": "MAX_CLIENT_CONN", "value": "100" },
-    { "name": "SERVER_IDLE_TIMEOUT", "value": "30" },
-    { "name": "SERVER_LIFETIME", "value": "3600" },
-    { "name": "AUTH_TYPE", "value": "plain" },
-    { "name": "LISTEN_ADDR", "value": "127.0.0.1" },
-    { "name": "LISTEN_PORT", "value": "5432" }
-  ],
-  "secrets": [
-    { "name": "DATABASE_URL", "valueFrom": "${var.database_url_secret_arn}" }
-  ],
-  "logConfiguration": {
-    "logDriver": "awslogs",
-    "options": {
-      "awslogs-group": "${var.log_group_name}",
-      "awslogs-region": "${data.aws_region.current.name}",
-      "awslogs-stream-prefix": "pgbouncer-api"
-    }
-  },
-  "cpu": 64,
-  "memory": 128
-}
+Change `DEFAULT_POOL_SIZE` from `"8"` to `"10"`:
+```hcl
+{ name = "DEFAULT_POOL_SIZE", value = "10" },
 ```
 
-Note: `DEFAULT_POOL_SIZE=10` (not 8 like orchestrator) — API instances handle more concurrent requests. With 5 API instances, that's 50 actual RDS connections instead of 300.
-
-**Step 2: Add PgBouncer env vars to API container**
-
-Add to the API container's `environment` block:
-
-```json
-{ "name": "PGBOUNCER_HOST", "value": "127.0.0.1" },
-{ "name": "PGBOUNCER_PORT", "value": "5432" }
+Change `MAX_CLIENT_CONN` from `"50"` to `"100"`:
+```hcl
+{ name = "MAX_CLIENT_CONN", value = "100" },
 ```
 
-**Step 3: Add dependsOn to API container**
-
-The API container should depend on PgBouncer starting (it already has this for the pgbouncer sidecar — verify it's present in main.tf).
-
-**Step 4: Run Terraform plan**
+**Step 2: Run Terraform plan**
 
 ```bash
 cd infrastructure/terraform && terraform plan
 ```
 
-Verify: API task definition adds PgBouncer sidecar container + new env vars. No other changes.
+Verify: Only the API task definition changes (PgBouncer environment values). No other resources affected.
 
-**Step 5: Deploy**
+**Step 3: Deploy**
 
 ```bash
 ./deploy.sh --api
 ```
 
-**Step 6: Verify connections**
+**Step 4: Verify connections**
 
 Connect to bastion and check RDS connection count:
 
@@ -104,33 +67,26 @@ Connect to bastion and check RDS connection count:
 SELECT count(*) FROM pg_stat_activity WHERE datname = 'workermill';
 ```
 
-Should show ~20-30 connections (10 per PgBouncer × 2 API instances + orchestrator) instead of ~120.
+Should show ~24-30 connections (10 per PgBouncer × 2 API instances + 8 orchestrator). Verify no PgBouncer connection errors in CloudWatch logs.
 
-**Step 7: Commit**
+**Step 5: Commit**
 
 ```bash
-git commit -m "infra: add PgBouncer sidecar to API ECS task — fix connection exhaustion"
+git commit -m "infra: fix PgBouncer MAX_CLIENT_CONN (50→100), increase pool size (8→10)"
 ```
 
 ---
 
-### Task 0B: Upgrade RDS Instance and Enable Read Replica
+### Task 0B: Add Read Replica Terraform Resource (Disabled by Default)
 
-Upgrade from `db.t4g.micro` to `db.t4g.small` (2 GiB, ~224 max connections). Add a read replica for offloading read-heavy queries.
+Add a read replica resource for future use. Keep RDS at `db.t4g.micro` for now — PgBouncer fixes make connection exhaustion a non-issue, and instance upgrade can happen later when CPU/memory metrics warrant it (5-10 min downtime, schedule during low traffic).
 
 **Files:**
 - Modify: `infrastructure/terraform/modules/database/main.tf` (instance class, add replica)
 - Modify: `infrastructure/terraform/modules/database/outputs.tf` (add replica endpoint output)
 - Modify: `infrastructure/terraform/modules/database/variables.tf` (add replica toggle)
 
-**Step 1: Upgrade instance class**
-
-In `main.tf:60`, change:
-```hcl
-instance_class = "db.t4g.small"
-```
-
-**Step 2: Add read replica resource**
+**Step 1: Add read replica resource**
 
 ```hcl
 resource "aws_db_instance" "read_replica" {
@@ -162,7 +118,7 @@ resource "aws_db_instance" "read_replica" {
 }
 ```
 
-**Step 3: Add variables**
+**Step 2: Add variables**
 
 ```hcl
 variable "enable_read_replica" {
@@ -178,7 +134,7 @@ variable "replica_instance_class" {
 }
 ```
 
-**Step 4: Add outputs**
+**Step 3: Add outputs**
 
 ```hcl
 output "replica_endpoint" {
@@ -192,26 +148,18 @@ output "replica_address" {
 }
 ```
 
-**Step 5: Terraform plan (instance upgrade only first)**
+**Step 4: Terraform plan**
 
 ```bash
 cd infrastructure/terraform && terraform plan
 ```
 
-Review: should show in-place modification of instance class (brief downtime during resize, ~5 min).
+Review: should only show new resources with `count = 0` (no actual changes since `enable_read_replica` defaults to `false`).
 
-**Step 6: Apply instance upgrade**
-
-```bash
-terraform apply
-```
-
-Note: RDS instance modification may require a maintenance window or `apply_immediately`. Plan for a brief maintenance window.
-
-**Step 7: Commit**
+**Step 5: Commit**
 
 ```bash
-git commit -m "infra: upgrade RDS to db.t4g.small, add read replica resource (disabled by default)"
+git commit -m "infra: add read replica Terraform resource (disabled by default)"
 ```
 
 ---
@@ -229,6 +177,9 @@ Configure TypeORM to route read queries to the replica when available.
 ```typescript
 // After existing dbConnectionOptions
 const replicaHost = process.env.DB_REPLICA_HOST;
+const pgbouncerHost = process.env.PGBOUNCER_HOST;
+const pgbouncerPort = parseInt(process.env.PGBOUNCER_PORT || "5432");
+const pgbouncerReplicaPort = parseInt(process.env.PGBOUNCER_REPLICA_PORT || "5433");
 
 export const AppDataSource = new DataSource({
   type: "postgres",
@@ -237,12 +188,16 @@ export const AppDataSource = new DataSource({
         replication: {
           master: {
             ...dbConnectionOptions,
-            ...(process.env.PGBOUNCER_HOST ? { host: process.env.PGBOUNCER_HOST, port: parseInt(process.env.PGBOUNCER_PORT || "5432") } : {}),
+            ...(pgbouncerHost ? { host: pgbouncerHost, port: pgbouncerPort } : {}),
           },
           slaves: [{
             ...dbConnectionOptions,
-            host: replicaHost,
-            port: parseInt(process.env.DB_REPLICA_PORT || "5432"),
+            // CRITICAL: Route replica traffic through PgBouncer too (port 5433).
+            // Without this, TypeORM opens DB_POOL_MAX direct connections to the
+            // replica, bypassing PgBouncer entirely.
+            ...(pgbouncerHost
+              ? { host: pgbouncerHost, port: pgbouncerReplicaPort }
+              : { host: replicaHost, port: parseInt(process.env.DB_REPLICA_PORT || "5432") }),
           }],
         },
       }
@@ -252,13 +207,15 @@ export const AppDataSource = new DataSource({
     min: 1,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 15000,
-    ...(process.env.PGBOUNCER_HOST ? { prepareStatements: false } : {}),
+    ...(pgbouncerHost ? { prepareStatements: false } : {}),
   },
   // ... entities, migrations unchanged
 });
 ```
 
-When `DB_REPLICA_HOST` is not set, TypeORM operates with a single connection (current behavior). When set, TypeORM automatically routes `find*()` / `getMany()` / `getOne()` to the replica.
+When `DB_REPLICA_HOST` is not set, TypeORM operates with a single connection (current behavior). When set, TypeORM routes `find*()` / `getMany()` / `getOne()` to the replica — through PgBouncer on port 5433.
+
+**PgBouncer replica listener:** The PgBouncer sidecar needs a second database section pointing at the replica. This requires a custom `pgbouncer.ini` with two `[databases]` entries (primary on port 5432, replica on port 5433). See the ECS task definition changes below.
 
 **Step 2: Add env var to ECS task definition**
 
@@ -294,7 +251,7 @@ git commit -m "feat: TypeORM read replica support — routes reads to replica wh
 
 Build all new endpoints and Redis publish infrastructure. No client changes. Old endpoints unchanged.
 
-**Prerequisite:** Phase 0 (PgBouncer on API tasks) should be deployed first to ensure database can handle horizontal scaling.
+**Prerequisite:** Phase 0 (PgBouncer config fix) should be deployed first.
 
 ---
 
@@ -439,11 +396,13 @@ interface SSESession {
   id: string;
   res: Response;
   orgId: string;
-  userId: string | null;
-  dataSubscriptions: Map<string, () => void>;  // topic → unsubscribe fn
+  userId: string;                              // Owner — validated on subscribe/unsubscribe
+  redisSubscriber: Redis;                      // Per-session subscriber (redis.duplicate())
+  dataSubscriptions: Set<string>;              // Active Redis data topic names
   controlUnsubscribe: (() => void) | null;
   bufferBytes: number;
-  lastEventId: number;  // monotonic counter for Last-Event-ID
+  eventCounter: number;                        // Monotonic per-session event ID (not timestamp)
+  lifetimeTimer: NodeJS.Timeout;               // 4hr max connection timer (cleared on destroy)
   createdAt: number;
 }
 
@@ -523,10 +482,16 @@ router.get("/", authenticateSSE, (req: Request, res: Response) => {
 // POST /api/stream/subscribe
 router.post("/subscribe", authenticateRequest, express.json(), (req, res) => {
   const { sessionId, channels } = req.body;
-  // Publish control message to Redis — the instance holding the SSE session picks it up
+  const userId = req.user?.id;
+
+  // Session ownership check — prevent one user from hijacking another's session.
+  // The instance holding the SSE session validates ownership on the control message.
+  // This is defense-in-depth (sessionId is UUID/unguessable), but prevents confused
+  // deputy attacks if sessionId is ever logged or exposed.
   redis.publishStreamEvent(`session:${sessionId}:control`, {
     action: "subscribe",
     channels,
+    userId,  // SSE writer validates this matches session owner
   });
   res.json({ ok: true });
 });
@@ -534,9 +499,12 @@ router.post("/subscribe", authenticateRequest, express.json(), (req, res) => {
 // POST /api/stream/unsubscribe
 router.post("/unsubscribe", authenticateRequest, express.json(), (req, res) => {
   const { sessionId, channels } = req.body;
+  const userId = req.user?.id;
+
   redis.publishStreamEvent(`session:${sessionId}:control`, {
     action: "unsubscribe",
     channels,
+    userId,  // SSE writer validates this matches session owner
   });
   res.json({ ok: true });
 });
@@ -582,20 +550,28 @@ In `destroySession`, clear the lifetime timer:
 clearTimeout(session.lifetimeTimer);
 ```
 
-**Step 5: Add SIGTERM handler with staggered reconnect**
+**Step 5: Integrate SSE shutdown into existing SIGTERM handler**
 
-In `api/src/index.ts`, in the existing SIGTERM handler (or create one):
+The API already has a graceful shutdown handler in `api/src/index.ts:415-442`. **Do NOT register a separate `process.on("SIGTERM")` handler** — that would conflict with the existing one. Instead, call `sessionManager.gracefulShutdown()` at the top of the existing handler, before `server.close()`.
+
+In `api/src/index.ts`, modify `gracefulShutdown()` (line 415):
 ```typescript
-process.on("SIGTERM", () => {
-  sessionManager.gracefulShutdown();  // sends reconnect event with random delay to all SSE sessions
-  // existing shutdown logic...
-});
+const gracefulShutdown = async (signal: string) => {
+  logger.info(`${signal} received, shutting down gracefully`);
+  stopOrchestrator();
+
+  // SSE multiplexer: send reconnect events with stagger delay, then clean up
+  await sessionManager.gracefulShutdown();  // ← ADD THIS (completes in ~3.5s)
+
+  // Wait for fire-and-forget operations (max 20s)
+  // ... existing code unchanged ...
+};
 ```
 
-In `sse-session-manager.ts`, the `gracefulShutdown` method should stagger reconnects:
+In `sse-session-manager.ts`, the `gracefulShutdown` method sends staggered reconnects and waits:
 
 ```typescript
-gracefulShutdown() {
+async gracefulShutdown(): Promise<void> {
   for (const [sessionId, session] of this.sessions) {
     // Random delay 0-3000ms to prevent thundering herd on reconnect
     const delay = Math.floor(Math.random() * 3000);
@@ -604,33 +580,40 @@ gracefulShutdown() {
       data: { reason: "server_shutdown", delay },
     });
   }
-  // Close all connections after 3s (after all clients have received their delay)
-  setTimeout(() => {
-    for (const [sessionId] of this.sessions) {
-      this.destroySession(sessionId);
-    }
-  }, 3500);
+  // Wait 3.5s for all clients to receive their delay, then destroy all sessions
+  await new Promise(resolve => setTimeout(resolve, 3500));
+  for (const [sessionId] of this.sessions) {
+    this.destroySession(sessionId);  // clears lifetime timer, unsubscribes Redis, closes response
+  }
 }
 ```
 
+**Timing budget:** SSE stagger (3.5s) + active ops wait (up to 20s) + server.close() = fits within 25s force-exit timer (`index.ts:438`). ECS `stopTimeout` is 30s, providing 5s margin.
+
 Clients use the `delay` field to stagger their reconnection, spreading 300 reconnects across 3 seconds instead of a thundering herd.
 
-**Step 5: Write tests**
+**Step 6: Write tests**
 
 Create `api/src/routes/stream.test.ts`:
 - Test session creation returns sessionId
 - Test org connection limit (21st connection returns 429)
 - Test subscribe/unsubscribe publishes to Redis control channel
-- Test cleanup on disconnect removes session
+- Test session ownership validation — subscribe with wrong userId is rejected
+- Test cleanup on disconnect removes session and clears lifetime timer
+- Test monotonic event IDs increment per-session (not shared across sessions)
+- Test backpressure — buffer exceeds 256KB drops non-critical events
+- Test backpressure — buffer exceeds 1MB disconnects client
+- Test graceful shutdown sends reconnect with stagger delay to all sessions
+- Test SIGTERM integration — sessionManager.gracefulShutdown() called before server.close()
 - Mock auth, Redis, use supertest
 
 Run: `cd api && npx vitest run src/routes/stream.test.ts`
 
-**Step 6: Commit**
+**Step 7: Commit**
 
 ```bash
 git add api/src/services/sse-session-manager.ts api/src/routes/stream.ts api/src/routes/index.ts api/src/index.ts api/src/routes/stream.test.ts
-git commit -m "feat: unified SSE endpoint with session management and Redis-mediated subscriptions"
+git commit -m "feat: unified SSE endpoint with session management, ownership validation, and SIGTERM integration"
 ```
 
 ---
@@ -677,6 +660,9 @@ const router = Router();
 router.use(backfillLimiter);
 
 // GET /api/backfill/logs/:taskId?limit=200
+// Response includes `cursor` (ISO timestamp of newest event) for client-side dedup.
+// Client flow: subscribe (SSE starts) → buffer SSE events → fetch backfill →
+// render backfill → replay SSE events with createdAt > cursor → switch to live.
 router.get("/logs/:taskId", authenticateRequest, async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit as string) || 200, 500);
   const logs = await logRepo.find({
@@ -684,7 +670,9 @@ router.get("/logs/:taskId", authenticateRequest, async (req, res) => {
     order: { createdAt: "DESC" },
     take: limit,
   });
-  res.json(logs.reverse());  // oldest first for terminal display
+  const ordered = logs.reverse();  // oldest first for terminal display
+  const cursor = ordered.length > 0 ? ordered[ordered.length - 1].createdAt.toISOString() : null;
+  res.json({ data: ordered, cursor });
 });
 
 // GET /api/backfill/coordination/:taskId?limit=50
@@ -1371,13 +1359,15 @@ export class LogBuffer {
   }
 }
 
-// Register crash safety handler — flush remaining logs on unexpected exit
-// Call this once during executor initialization:
-// process.on("exit", () => logBuffer.flush());
-// Note: process.on("exit") is synchronous, but flush is async.
-// Use process.on("beforeExit") for async flush, plus SIGINT/SIGTERM handlers.
-
 ```
+
+**Crash safety:** `process.on('exit')` callbacks are synchronous-only — you cannot `await` the async `flush()`. Two approaches:
+
+1. **`process.on('beforeExit')`** — fires when the event loop is empty, allows async operations. But does NOT fire on `SIGTERM`/`SIGKILL`.
+2. **`SIGTERM`/`SIGINT` handlers** — call `await flush()` then `process.exit()`. This handles graceful shutdown.
+3. **Synchronous HTTP fallback** — for `process.on('exit')` (truly last-resort), use `child_process.execFileSync('curl', [...])` to do a blocking HTTP POST. This is ugly but guarantees delivery of buffered logs even on forced exit.
+
+Recommended: Use approach #2 (SIGTERM/SIGINT handlers) for the common case. Accept that `SIGKILL` or OOM kills lose buffered logs — this is acceptable since it's just terminal output, not state.
 
 **Step 2: Modify executor.ts to use buffer**
 
@@ -1790,7 +1780,7 @@ git commit -m "chore: remove legacy SSE endpoints and polling code — unified s
 
 | Phase | Tasks | Client Impact | Rollback |
 |-------|-------|--------------|----------|
-| **0: Database foundation** | **0A-0C** | **None — infrastructure only** | **Revert Terraform, remove replication config** |
+| **0: Database foundation** | **0A-0C** | **None — config fix + prep** | **Revert PgBouncer config, remove replication code** |
 | 1: Server foundation | 1-6 | None — new endpoints, old unchanged | Delete new endpoints |
 | 2: Dashboard | 7-9 | Behind feature flag | Flip flag off |
 | 3: Agent + VS Code | 10-13 | Version bump, auto-fallback | Downgrade agent/extension |
@@ -1802,7 +1792,7 @@ git commit -m "chore: remove legacy SSE endpoints and polling code — unified s
 
 | Milestone | RDS Config | Connections (with PgBouncer) | Read Replica | Multi-AZ |
 |-----------|-----------|------------------------------|-------------|----------|
-| Phase 0 (now) | db.t4g.small | 10/instance × PgBouncer | Disabled (toggle ready) | No |
+| Phase 0 (now) | db.t4g.micro (existing) | 10/instance × PgBouncer (MAX_CLIENT_CONN fix) | Disabled (toggle ready) | No |
 | 50+ tasks | db.t4g.small | Same | Enable (db.t4g.small) | Yes |
 | 100+ tasks | db.t4g.medium | Same | db.t4g.medium | Yes |
 | 500+ tasks | db.r7g.large | Same | db.t4g.medium | Yes |

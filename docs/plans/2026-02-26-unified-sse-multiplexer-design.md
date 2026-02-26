@@ -47,11 +47,16 @@ With 2 concurrent tasks, the API handles ~260 requests/min and pegs CPU at 100% 
 
 ### DB Connection Impact
 
-| | Current | After |
+**Note:** PgBouncer sidecar already exists on API ECS tasks (`main.tf:208-241`), with `DEFAULT_POOL_SIZE=8`, `MAX_CLIENT_CONN=50`. The API container connects through PgBouncer at `127.0.0.1:5432` (`PGBOUNCER_HOST`/`PGBOUNCER_PORT` env vars at `main.tf:165-166`). TypeORM auto-disables prepared statements when `PGBOUNCER_HOST` is set (`connection.ts:302`).
+
+| | Current (with PgBouncer) | After |
 |---|---------|-------|
+| Actual RDS connections (2 API instances) | ~16 (8 server conns × 2 instances) | Same — PgBouncer unchanged |
 | DB checkouts/min (10 clients, 5 tasks) | ~260 (constant polling) | ~30-50 (writes + occasional one-shot reads) |
-| Peak concurrent connections | Spikes when polls align | Steady, write-driven only |
+| Peak concurrent connections | Spikes when polls align — PgBouncer queues excess | Steady, write-driven only |
 | SSE connections holding DB connections | Yes (DB poll every 2-8s per SSE) | No (SSE reads from Redis only) |
+
+**Pre-existing issue:** `DB_POOL_MAX=60` (`main.tf:167`) exceeds PgBouncer `MAX_CLIENT_CONN=50` (`main.tf:218`). Under sustained load, TypeORM can attempt 60 client connections but PgBouncer only allows 50, causing connection refusals. Fix: raise `MAX_CLIENT_CONN` to 100 (Phase 0).
 
 ---
 
@@ -87,7 +92,7 @@ event: message
 data: {"ch":"logs:abc123","t":"log","p":{"message":"Building...","level":"info","ts":"..."}}
 ```
 
-- `id` — monotonic timestamp for `Last-Event-ID` reconnection
+- `id` — monotonic counter per SSE session (not epoch millis — clock skew across instances and millisecond collisions make timestamps unreliable as event IDs). Counter starts at 0 on connect, increments per event. On reconnection with `Last-Event-ID`, server replays from DB using the event's stored `created_at` timestamp (set server-side, single clock). The `id` field is only for gap detection, not for cross-session ordering.
 - `ch` — channel name (client routes to handler)
 - `t` — event type within channel
 - `p` — payload
@@ -127,7 +132,7 @@ POST /api/stream/unsubscribe   { sessionId, channels: ["logs:abc123"] }
 3. When it receives the control message, it adds/removes the corresponding Redis data topic subscriptions
 4. Any API instance can handle the subscribe/unsubscribe REST call — no sticky sessions needed
 
-This keeps the API truly stateless. The REST handler is a one-line Redis PUBLISH. The SSE writer reacts to control messages. ALB routing is irrelevant.
+This keeps the API truly stateless. The REST handler validates session ownership (authenticated userId must match session owner), then does a one-line Redis PUBLISH. The SSE writer reacts to control messages. ALB routing is irrelevant.
 
 ### Session State (Per-Instance, Ephemeral)
 
@@ -137,13 +142,18 @@ Each API instance keeps an in-memory map for its locally-held SSE connections on
 Map<sessionId, {
   res: Response,                    // Held-open SSE response
   orgId: string,
+  userId: string,                   // Owner — subscribe/unsubscribe validated against this
   redisSubscriptions: Set<string>,  // Active Redis data topic subscriptions
   controlSubscription: string,      // Redis control channel for this session
   bufferBytes: number,              // Current write buffer size (for backpressure)
+  eventCounter: number,             // Monotonic event ID counter (starts at 0)
+  lifetimeTimer: NodeJS.Timeout,    // 4-hour max connection timer (cleared on destroy)
 }>
 ```
 
 Not shared across instances. If an instance dies, the client reconnects to another instance and re-subscribes. Stateless from the cluster perspective — session state is ephemeral and fully reconstructable from the client's re-subscribe call.
+
+**Session ownership validation:** `POST /api/stream/subscribe` and `POST /api/stream/unsubscribe` verify that the authenticated user matches the `userId` stored in the session. This prevents one user from subscribing another user's session to arbitrary channels. The sessionId is a UUID (unguessable), and the ownership check is a defense-in-depth measure.
 
 ### Event Flow (Example: Worker Posts a Log Batch)
 
@@ -156,6 +166,16 @@ Worker POST /api/control-center/logs { batch: [line1, line2, ...] }
 ```
 
 DB write and Redis publish happen in the same request handler. SSE writers are separate long-lived connections that only listen to Redis — they never query the DB for live data.
+
+### Redis Subscriber Architecture
+
+Each API instance creates **one Redis subscriber connection per SSE session** (using ioredis). This is deliberate — sharing a single Redis subscriber across 300+ SSE sessions creates a scalability ceiling (one `message` callback dispatches to all sessions, creating a serialization bottleneck) and introduces cross-session refcount bugs.
+
+**Per-session subscriber:** Each SSE session gets its own `redis.duplicate()` subscriber. When the session subscribes to `logs:abc123`, the subscriber calls `SUBSCRIBE stream:task:abc123:logs`. When the session ends, the subscriber calls `UNSUBSCRIBE` on all topics and `quit()`. No shared state, no refcount bugs.
+
+**Redis connection overhead:** Each subscriber is a TCP connection (~8KB memory on Redis side). At 300 SSE sessions per instance, that's ~2.4MB on Redis — well within `cache.t4g.micro` limits (500MB available). The alternative (shared subscriber with in-memory fan-out) saves Redis connections but adds complexity and a serialization bottleneck.
+
+**If this becomes a concern at scale (1000+ sessions/instance):** Pool subscribers — each subscriber handles N sessions (e.g., 10), with in-memory routing. But don't optimize for this until Redis `connected_clients` metrics indicate pressure.
 
 ### JWT Token Lifecycle on Long-Lived Connections
 
@@ -231,6 +251,15 @@ When a client subscribes to a task's channels, it fetches history via one-shot R
 
 Backfill is delivered via REST, not pumped through the SSE pipe. This keeps the SSE connection lightweight and prevents large backfill payloads from blocking real-time events.
 
+**Backfill + SSE Deduplication:** There's a race window between subscribing (which starts live SSE delivery) and fetching backfill (which returns historical data). Events created during this window may appear in both. The client handles this:
+
+1. Subscribe to channel → SSE events start flowing → buffer them in memory
+2. Fetch backfill via REST → backfill response includes a `cursor` (DB timestamp of newest included event)
+3. Merge: render backfill, then replay buffered SSE events that have `created_at > cursor`
+4. Switch to live consumption
+
+This is the same pattern used by Slack's real-time messaging — subscribe first, backfill second, dedup by timestamp. The server does not need to participate in dedup.
+
 ### Reconnection (With Last-Event-ID)
 
 The SSE spec provides `Last-Event-ID` — the browser/client automatically sends it on reconnect.
@@ -245,18 +274,22 @@ data: {"reason":"gap_too_large","channels":["logs:abc123","coordination:abc123"]
 
 ### Graceful Shutdown (Rolling Deploys + Scale-In)
 
-On SIGTERM (rolling deploy, scale-in, or manual stop), the API instance:
+On SIGTERM (rolling deploy, scale-in, or manual stop), the API's existing graceful shutdown handler (`api/src/index.ts:415-442`) fires. The SSE multiplexer integrates into this existing handler — it does NOT register a separate SIGTERM listener.
+
+**Integration point:** The existing handler calls `server.close()` which stops new connections. Before that call, the SSE shutdown hook runs:
 
 1. Sends a proactive reconnect signal to each SSE session with a **random stagger delay** (0-3000ms):
    ```
    event: reconnect
    data: {"reason":"server_shutdown","delay":1234}
    ```
-   The `delay` field tells the client how many milliseconds to wait before reconnecting. This spreads 300 reconnects across 3 seconds instead of a thundering herd that would overwhelm the remaining instances with backfill queries.
+   The `delay` field tells the client how many milliseconds to wait before reconnecting. This spreads 300 reconnects across 3 seconds instead of a thundering herd.
 2. Waits 3.5 seconds (enough for all clients to receive their delay)
-3. Unsubscribes from all Redis topics (data + control channels)
+3. Unsubscribes from all Redis topics (data + control channels), clears all lifetime timers
 4. Closes all SSE response streams
-5. Exits cleanly
+5. Returns control to the existing handler (which then calls `server.close()`, waits for in-flight requests, disconnects DB/Redis, and exits)
+
+The existing 25-second force-exit timer (`index.ts:438-441`) remains as the ultimate backstop. The SSE stagger (3.5s) + active operations wait (up to 20s) + server close fits within the 25s budget. ECS `stopTimeout` is 30s, providing 5s of additional margin.
 
 Client receives the `reconnect` event → waits `delay` ms → closes connection → `EventSource` auto-reconnects to a new instance via ALB → sends `Last-Event-ID` header → server backfills any gap → client re-sends subscribe requests for its active channels → live events resume.
 
@@ -349,14 +382,14 @@ Incremental rollout. Old and new coexist at every phase. Every phase is independ
 
 ### Phase 0: Database Foundation
 
-Fix the scaling ceiling BEFORE building SSE infrastructure.
+Fix pre-existing config issues and prepare for scaling BEFORE building SSE infrastructure.
 
-1. PgBouncer sidecar on API ECS tasks (match orchestrator pattern)
-2. RDS instance upgrade (`db.t4g.micro` → `db.t4g.small`)
-3. Read replica resource (Terraform, disabled by default — enable at 50+ tasks)
-4. TypeORM replication config (activates when `DB_REPLICA_HOST` is set)
+1. Fix PgBouncer `MAX_CLIENT_CONN` (50→100) on existing API sidecar — resolves pre-existing mismatch with `DB_POOL_MAX=60`
+2. Increase `DEFAULT_POOL_SIZE` (8→10) for SSE write burst headroom
+3. Read replica Terraform resource (disabled by default — enable at 50+ tasks)
+4. TypeORM replication config with PgBouncer routing for replica traffic (activates when `DB_REPLICA_HOST` is set)
 
-**Deploy and validate. No client impact. No code changes except connection.ts.**
+**Deploy and validate. No client impact. Minimal code changes (connection.ts for replication).**
 
 ### Phase 1: Server-Side Foundation
 
@@ -432,7 +465,7 @@ Phase 6 (Cleanup)    ░░░░░░░░░░░░░░░░███�
 
 | Phase | Rollback |
 |-------|----------|
-| Phase 0 | Revert Terraform (PgBouncer, instance class). Remove `DB_REPLICA_HOST` env var. |
+| Phase 0 | Revert PgBouncer config changes. Remove `DB_REPLICA_HOST` env var. Remove read replica resource. |
 | Phase 1 | Delete new endpoints. No client uses them. |
 | Phase 2 | Flip feature flag off. Dashboard reverts to old SSE + polling. |
 | Phase 3 | Users downgrade agent/extension. Old polling paths still work. |
@@ -492,38 +525,36 @@ SSE connections are long-lived HTTP/1.1. Key settings:
 | Deregistration delay | 30s | SSE clients reconnect in 1-3s after graceful shutdown signal. No need to hold for 300s. |
 | Sticky sessions | **OFF** | Not needed. Redis-mediated subscriptions allow any instance to handle subscribe/unsubscribe. |
 
-### Database (PostgreSQL RDS) — CRITICAL SCALING PLAN
+### Database (PostgreSQL RDS) — SCALING PLAN
 
-The current database is a **single `db.t4g.micro` instance** (1 GiB RAM, single AZ, no read replicas). This is a scaling ceiling that must be addressed alongside the SSE work.
+The current database is a **single `db.t4g.micro` instance** (1 GiB RAM, single AZ, no read replicas). While PgBouncer already handles connection pooling, the instance size and lack of read replicas/HA are scaling ceilings.
 
-#### Current Problem: Connection Exhaustion
+#### Current State: PgBouncer Already in Place
+
+PgBouncer sidecar **already exists** on both API and orchestrator ECS tasks:
+
+- API: `main.tf:208-241` — `DEFAULT_POOL_SIZE=8`, `MAX_CLIENT_CONN=50`
+- Orchestrator: `orchestrator.tf:85-117` — same config
+- API container already sets `PGBOUNCER_HOST=127.0.0.1`, `PGBOUNCER_PORT=5432` (`main.tf:165-166`)
+- TypeORM already disables prepared statements when `PGBOUNCER_HOST` is set (`connection.ts:302`)
 
 RDS `max_connections` formula: `LEAST(DBInstanceClassMemory / 9531392, 5000)`
 
 For `db.t4g.micro` (1 GiB): **max_connections ≈ 112**
 
-| Component | Pool Max | Actual RDS Connections |
-|-----------|----------|----------------------|
-| 2 API instances × `DB_POOL_MAX=60` | 120 | Up to 120 (direct, no PgBouncer) |
-| 1 orchestrator × PgBouncer (8 server conns) | 15 client / 8 server | 8 |
-| **Total** | **135 potential** | **Up to 128** |
+| Component | PgBouncer Server Conns | Actual RDS Connections |
+|-----------|----------------------|----------------------|
+| 2 API instances × PgBouncer (`DEFAULT_POOL_SIZE=8`) | 8 each | 16 |
+| 1 orchestrator × PgBouncer (`DEFAULT_POOL_SIZE=8`) | 8 | 8 |
+| **Total** | | **~24** |
 
-We're already at risk of hitting the ~112 limit under load. With horizontal scaling (5-20 API instances), this becomes impossible.
+Connection exhaustion is **not an immediate risk** thanks to PgBouncer. However, there's a pre-existing config bug and the instance itself is undersized.
 
-#### Fix 1: PgBouncer Sidecar on API Tasks (Phase 1 prerequisite)
+#### Fix 1: PgBouncer Config Fix (Phase 0)
 
-API tasks currently connect directly to RDS. Add the same PgBouncer sidecar pattern the orchestrator already uses:
+**Pre-existing bug:** `DB_POOL_MAX=60` (`main.tf:167`) exceeds PgBouncer `MAX_CLIENT_CONN=50` (`main.tf:218`). Under sustained load (all TypeORM pool connections active), 10 connection attempts fail with "no more connections allowed."
 
-| Setting | Value | Rationale |
-|---------|-------|-----------|
-| Pool mode | Transaction | Same as orchestrator. TypeORM already disables prepared statements when `PGBOUNCER_HOST` is set. |
-| Default pool size | 10 | 10 actual RDS connections per API instance. 5 instances × 10 = 50 connections. |
-| Max client connections | 100 | Handles `DB_POOL_MAX=60` from TypeORM + headroom for spikes. |
-| Server idle timeout | 30s | Release idle server connections quickly. |
-
-**Impact:** 5 API instances: 300 potential → 50 actual RDS connections. 20 instances: 1200 potential → 200 actual. Solves connection exhaustion.
-
-**TypeORM change:** Set `PGBOUNCER_HOST=127.0.0.1` and `PGBOUNCER_PORT=5432` on API tasks (same env vars orchestrator already uses). TypeORM auto-disables prepared statements when `PGBOUNCER_HOST` is set (existing logic in `connection.ts:302`).
+**Fix:** Increase `MAX_CLIENT_CONN` from 50 to 100 in the PgBouncer container environment. Also increase `DEFAULT_POOL_SIZE` from 8 to 10 to give each API instance slightly more RDS headroom for the SSE write bursts (Redis publishes trigger DB writes in the same request handler).
 
 #### Fix 2: RDS Instance Upgrade Path
 
@@ -534,7 +565,14 @@ API tasks currently connect directly to RDS. Add the same PgBouncer sidecar patt
 | Scale (100+ tasks) | `db.t4g.medium` | 4 GiB | ~448 | Room for read replicas + many instances | $48/mo |
 | Enterprise (500+ tasks) | `db.r7g.large` | 16 GiB | ~1,680 | Full horizontal scaling | $190/mo |
 
-Upgrade to `db.t4g.small` when adding PgBouncer. The micro instance CPU is also a constraint for complex queries (6-way board JOINs, full-text search, analytics aggregations).
+Upgrade to `db.t4g.small` when traffic warrants it. The micro instance CPU is also a constraint for complex queries (6-way board JOINs, full-text search, analytics aggregations).
+
+**RDS Resize Downtime Mitigation:** Instance class modifications cause 5-10 minutes of downtime (RDS restarts). Mitigate:
+1. Schedule during lowest-traffic window (check CloudWatch `DatabaseConnections` metric for the quietest hour)
+2. Set `apply_immediately = true` in Terraform (don't wait for maintenance window)
+3. API PgBouncer sidecar auto-reconnects after RDS restart — no API code changes needed
+4. SSE clients experience a brief gap, covered by `Last-Event-ID` backfill on reconnect
+5. For future resizes with Multi-AZ enabled: RDS does a rolling upgrade (standby first, failover ~60s, then old primary) with near-zero downtime
 
 #### Fix 3: Read Replica
 
@@ -566,11 +604,21 @@ A read replica offloads read-only queries to a separate instance. The SSE multip
 export const AppDataSource = new DataSource({
   type: "postgres",
   replication: {
-    master: { host: process.env.DB_PRIMARY_HOST, ... },
-    slaves: [{ host: process.env.DB_REPLICA_HOST, ... }],
+    master: {
+      host: process.env.PGBOUNCER_HOST || dbHost,  // Primary through PgBouncer
+      port: parseInt(process.env.PGBOUNCER_PORT || "5432"),
+      ...credentials,
+    },
+    slaves: [{
+      host: process.env.PGBOUNCER_HOST || dbHost,  // Replica ALSO through PgBouncer
+      port: parseInt(process.env.PGBOUNCER_REPLICA_PORT || "5433"),
+      ...credentials,
+    }],
   },
 });
 ```
+
+**Critical: Replica traffic MUST go through PgBouncer** to maintain connection pooling. Run a second PgBouncer listener on port 5433 pointed at the replica endpoint. Without this, TypeORM's replica pool creates `DB_POOL_MAX` (60) direct connections to the replica, bypassing PgBouncer entirely. The PgBouncer sidecar container supports multiple databases — configure a separate `[replica]` section in the PgBouncer config.
 
 TypeORM routes `find*()` / `.getMany()` / `.getOne()` to slaves, and `save()` / `update()` / `insert()` / `.execute()` to master automatically. For explicit read-after-write cases, use `queryRunner` on master.
 
@@ -766,7 +814,7 @@ CPU and memory-based step scaling as safety nets. These should **never fire** un
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| **DB connection exhaustion on horizontal scale** | **Critical** | PgBouncer sidecar on API tasks (10 server conns/instance). 20 instances = 200 RDS connections instead of 1200. |
+| **DB connection exhaustion on horizontal scale** | **Critical** | PgBouncer already in place. Fix `MAX_CLIENT_CONN` 50→100 (Phase 0). At 20 instances × 10 server conns = 200 RDS connections, well within limits. |
 | Subscribe/unsubscribe hits wrong instance | Critical | Redis-mediated subscriptions — REST handler publishes control message, SSE writer reacts. No sticky sessions. |
 | **Backfill reconnection storm overwhelms DB** | **High** | Staggered reconnect delay (0-3s random), backfill rate limit (50 req/s/org), route backfill to read replica. |
 | Slow client causes memory leak | High | Backpressure policy — drop non-critical events at 256KB buffer, disconnect at 1MB. Client catches up via Last-Event-ID. |
@@ -782,14 +830,19 @@ CPU and memory-based step scaling as safety nets. These should **never fire** un
 | Scale-in redistributes connections | Low | Same as rolling deploy — graceful shutdown signal + seamless reconnect. ECS deregistration delay set to 30s. |
 | Predictive scaling forecast inaccuracy | Low | Start in Forecast Only mode for 1-2 weeks. Target tracking handles real-time load regardless. Predictive is additive optimization. |
 | Fargate Spot reclaim during active sessions | Low | SIGTERM handler fires immediately. 120s Spot warning is ample time. Clients reconnect seamlessly. Existing strategy already uses Spot. |
-| **Worker crash loses buffered logs** | Low | Register `process.on('exit')` handler for final flush. Acceptable loss — just terminal output, not state. |
+| **Worker crash loses buffered logs** | Low | `process.on('exit')` handler is sync-only — use synchronous HTTP (e.g., `child_process.execFileSync('curl', ...)`) for final flush. Acceptable loss if flush fails — just terminal output, not state. |
+| **Session hijacking via subscribe endpoint** | Medium | Session ownership check — `userId` stored on session creation, validated on every subscribe/unsubscribe. SessionId is UUID (unguessable) as additional defense. |
+| **Backfill + SSE race condition (duplicate events)** | Medium | Client-side dedup: subscribe first → buffer SSE → fetch backfill → merge by cursor timestamp → switch to live. |
+| **RDS resize downtime (5-10 min)** | Medium | Schedule during low-traffic window. PgBouncer auto-reconnects. SSE gap covered by Last-Event-ID backfill. Multi-AZ enables near-zero-downtime resizes. |
+| **SIGTERM handler conflict** | Low | SSE shutdown integrates into existing handler (index.ts:415-442), runs before `server.close()`. 3.5s stagger + 20s ops wait fits within 25s force-exit timer. |
+| **Lifetime timer leak** | Low | `clearTimeout(lifetimeTimer)` called in session destroy path. Destroy called on: client disconnect, backpressure disconnect, SIGTERM, auth revocation. |
 
 ---
 
 ## What Changes (Infrastructure)
 
-- **RDS:** Upgrade `db.t4g.micro` → `db.t4g.small` (Phase 1). Add read replica (Phase 2-3). Enable Multi-AZ (paying customers).
-- **PgBouncer:** Add sidecar to API ECS task definition (Phase 1, matches existing orchestrator pattern).
+- **RDS:** Upgrade `db.t4g.micro` → `db.t4g.small` (when traffic warrants). Add read replica (50+ tasks). Enable Multi-AZ (paying customers).
+- **PgBouncer:** Fix `MAX_CLIENT_CONN` 50→100 on existing API sidecar. Add second listener on port 5433 for replica traffic (when read replica is enabled).
 - **Redis:** Set `client-output-buffer-limit` for pub/sub. Upgrade to Multi-AZ replica at 50+ tasks.
 - **ALB:** Idle timeout 120s, deregistration delay 30s.
 - **ECS:** Auto-scaling policies (target tracking + predictive + step guardrails).

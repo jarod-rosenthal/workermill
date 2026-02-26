@@ -7,7 +7,7 @@
 ## Source of Truth
 
 - **Spec**: This document
-- **Target repo**: `workermill-examples/flagdeck` (GitHub, private — make public after build)
+- **Target repo**: `workermill-examples/flagdeck` (GitHub, public)
 - **Live URL**: https://flagdeck.workermill.com
 - **API compute**: Railway (Hobby plan, Docker container)
 - **Frontend compute**: Railway (static build or same service)
@@ -69,9 +69,10 @@ cd web && npm run build
 
 After every `git push`, workers MUST:
 
-1. Check GitHub Actions CI status (wait for it to complete)
-2. If CI fails: read the failure log, fix the issue, run the pre-commit quality gate again, push the fix
-3. Do NOT move on to the next task until CI is green
+1. Check GitHub Actions CI status (wait for it to complete — use `gh run list` or `gh run watch`)
+2. If CI fails due to **code issues**: read the failure log, fix the issue, run the pre-commit quality gate again, push the fix
+3. If CI fails due to **infrastructure issues** (billing, runner unavailable, service container failure): STOP and report the failure. Do NOT continue to the next task. Do NOT assume the code is correct just because it passes locally.
+4. Do NOT move on to the next task until CI is green — no exceptions
 
 ### Import and Package Conventions (Go)
 
@@ -114,7 +115,7 @@ All resources are **provisioned and ready**. Workers do NOT create accounts or s
 
 | Resource | Details |
 |----------|---------|
-| Repository | `workermill-examples/flagdeck` (private, empty) |
+| Repository | `workermill-examples/flagdeck` (public, empty) |
 | URL | https://github.com/workermill-examples/flagdeck |
 | Agent access | Push via GitHub PAT (already configured in WorkerMill org settings) |
 | Repo secret | `RAILWAY_TOKEN` — configured for GitHub Actions deployment |
@@ -294,7 +295,7 @@ flagdeck/
 │   │   └── app.css                      # TailwindCSS imports
 │   ├── static/
 │   │   └── favicon.png
-│   ├── svelte.config.js                 # SvelteKit config (adapter-auto)
+│   ├── svelte.config.js                 # SvelteKit config (adapter-static)
 │   ├── vite.config.ts                   # Vite config
 │   ├── tailwind.config.js               # Tailwind config
 │   ├── tsconfig.json
@@ -691,6 +692,8 @@ If MongoDB or Redis is unreachable, return status `"degraded"` with the affected
 
 > **Exact field names:** Use `total` (not `total_items` or `count`), `total_pages` (not `pages`), `per_page` (not `limit` or `page_size`). Frontend components depend on these exact names.
 
+> **Exact sort parameter names:** Use `sort_by` and `sort_order` as separate query parameters (not a combined `sort=name:asc` format). The Go API parses these as individual params. Frontend stores must send `?sort_by=name&sort_order=asc`, NOT `?sort=name:asc`.
+
 ### Flag Evaluation (SDK-facing)
 
 | Endpoint | Method | Auth | Rate Limit | Description |
@@ -798,6 +801,8 @@ If MongoDB or Redis is unreachable, return status `"degraded"` with the affected
 | `POST /api/v1/environments` | POST | JWT (admin) | Create environment |
 | `PUT /api/v1/environments/:key` | PUT | JWT (admin) | Update environment |
 | `DELETE /api/v1/environments/:key` | DELETE | JWT (admin) | Delete environment (must have no active flags) |
+
+> **Response format:** `GET /api/v1/environments` returns the standard paginated envelope `{"data": [...], "pagination": {...}}` — same as all other list endpoints (see "Paginated response format" above). Do NOT return a bare JSON array.
 
 ### API Keys
 
@@ -941,7 +946,7 @@ require (
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "@sveltejs/adapter-auto": "^3.0.0",
+    "@sveltejs/adapter-static": "^3.0.0",
     "@sveltejs/kit": "^2.0.0",
     "@sveltejs/vite-plugin-svelte": "^4.0.0",
     "@testing-library/svelte": "^5.0.0",
@@ -1151,6 +1156,12 @@ cd web && npm run test
 # Run specific test
 cd web && npx vitest run src/routes/flags/flags.test.ts
 ```
+
+> **Mock data MUST match the domain model exactly.** Test factory functions and mock API responses must use the same field names as the Core Domain Model section above. Common mistakes to avoid:
+> - Segments: Use `rules[].conditions[].attribute` (NOT `conditions[].property`)
+> - Experiments: Use `variants[].weight` (NOT `variations[].traffic`)
+> - Flags: Use `fallthrough.value` (NOT `fallthrough.variation`), and `rollout.attribute` is required on rollout objects
+> - Pagination: Use `total` (NOT `total_items`)
 
 ### Key Test Scenarios
 
@@ -1557,6 +1568,7 @@ Workers MUST create a `README.md` covering:
 | **CI broken = deploy blocked** | Demo stays on last working version | `deploy.yml` uses `workflow_run` with `if: conclusion == 'success'`. Fix CI immediately. |
 | **MongoDB connection string in Atlas** | Workers might hardcode or expose credentials | Connection string is in Railway env vars only. Workers read `MONGODB_URI` from environment. |
 | **Scratch Docker image missing TLS certs** | Cannot connect to Atlas or Upstash over TLS | Copy `/etc/ssl/certs/ca-certificates.crt` from builder stage (documented in Dockerfile). |
+| **GitHub Actions billing on private repos** | CI never runs, all deployments blocked, workers proceed blindly | Use a **public** repository. Public repos get unlimited free Actions minutes. Verify CI runs on the very first push before starting any feature work. |
 
 ---
 
@@ -1581,7 +1593,7 @@ All infrastructure is provisioned. Workers MUST NOT attempt to create or modify 
 | Create Railway account/project/services | **Done** | Project `FlagDeck`, services `flagdeck-api` + `flagdeck-web` |
 | Create MongoDB Atlas cluster | **Done** | M0 free tier, cluster `flagdeck`, region us-east-1 |
 | Create Upstash Redis instance | **Done** | Free tier, `credible-falcon-44150`, region us-east-1 |
-| Create GitHub repo | **Done** | `workermill-examples/flagdeck` (private) |
+| Create GitHub repo | **Done** | `workermill-examples/flagdeck` (public) |
 | Set Railway environment variables | **Done** | 6 vars on `flagdeck-api` (MONGODB_URI, REDIS_URL, JWT_SECRET, PORT, ENVIRONMENT, CORS_ORIGINS) |
 | Set GitHub repo secrets | **Done** | `RAILWAY_TOKEN` configured |
 | Add DNS CNAME records | **Done** | `flagdeck.workermill.com` + `flagdeck-app.workermill.com` via Route53 |

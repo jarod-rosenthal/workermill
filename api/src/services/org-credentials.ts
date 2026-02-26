@@ -261,12 +261,30 @@ export async function getOrgCredentials(
         scmToken = scmSecretString;
       }
     } else {
-      // GitHub SCM provider - fetch GitHub token
-      const githubToken = await getOrgIntegrationSecret("github-token");
+      // GitHub SCM provider — try GitHub App first, then PAT
+      let githubToken: string | null = null;
+
+      if (org.githubAppInstallationId) {
+        try {
+          const { getInstallationToken } = await import("./github-app.js");
+          githubToken = await getInstallationToken(org.githubAppInstallationId);
+        } catch (appErr) {
+          logger.warn("GitHub App token generation failed, falling back to PAT", {
+            orgId,
+            installationId: org.githubAppInstallationId,
+            error: appErr instanceof Error ? appErr.message : String(appErr),
+          });
+        }
+      }
+
+      if (!githubToken) {
+        githubToken = await getOrgIntegrationSecret("github-token");
+      }
+
       if (!githubToken) {
         throw new Error(
           `GitHub token not configured for organization '${org.name}'. ` +
-            `Please configure at Settings > Integrations > GitHub before running workers.`,
+            `Run 'WorkerMill: Configure Repository Access' in VS Code or visit Settings > Integrations.`,
         );
       }
       scmToken = githubToken;

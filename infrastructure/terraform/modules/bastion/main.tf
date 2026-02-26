@@ -279,6 +279,7 @@ resource "aws_autoscaling_group" "bastion" {
 
   lifecycle {
     create_before_destroy = true
+    ignore_changes        = [desired_capacity]
   }
 }
 
@@ -317,27 +318,20 @@ def get_my_ip():
         return None
 
 def update_security_group(ec2, sg_id, allowed_ip):
-    """Update security group to allow SSH from the given IP"""
+    """Update security group to allow SSH from the given IP.
+    Revokes ALL /32 SSH rules first (cleans up stale entries from any source).
+    Static CIDRs from Terraform are wider ranges and won't be affected."""
     cidr = f"{allowed_ip}/32"
 
     # Get current rules
     sg = ec2.describe_security_groups(GroupIds=[sg_id])['SecurityGroups'][0]
-    existing_cidrs = []
+
+    # Revoke all /32 SSH rules (both Lambda-added and manually-added)
     for rule in sg.get('IpPermissions', []):
         if rule.get('FromPort') == 22 and rule.get('ToPort') == 22:
-            existing_cidrs = [r['CidrIp'] for r in rule.get('IpRanges', [])]
-            break
-
-    # If already allowed, skip
-    if cidr in existing_cidrs:
-        return {'updated': False, 'message': f'{cidr} already allowed'}
-
-    # Revoke old dynamic rules (those added by Lambda, marked with description)
-    for rule in sg.get('IpPermissions', []):
-        if rule.get('FromPort') == 22:
-            dynamic_cidrs = [r['CidrIp'] for r in rule.get('IpRanges', [])
-                           if r.get('Description', '').startswith('Dynamic:')]
-            if dynamic_cidrs:
+            stale_cidrs = [r['CidrIp'] for r in rule.get('IpRanges', [])
+                          if r['CidrIp'].endswith('/32')]
+            if stale_cidrs:
                 try:
                     ec2.revoke_security_group_ingress(
                         GroupId=sg_id,
@@ -345,11 +339,11 @@ def update_security_group(ec2, sg_id, allowed_ip):
                             'IpProtocol': 'tcp',
                             'FromPort': 22,
                             'ToPort': 22,
-                            'IpRanges': [{'CidrIp': c} for c in dynamic_cidrs]
+                            'IpRanges': [{'CidrIp': c} for c in stale_cidrs]
                         }]
                     )
                 except Exception:
-                    pass  # Ignore if already removed
+                    pass
 
     # Add new rule
     ec2.authorize_security_group_ingress(
@@ -488,6 +482,59 @@ def handler(event, context):
                 'whitelisted_cidrs': whitelisted
             }
 
+    elif action == 'auto_stop_check':
+        # Check if bastion is running
+        response = asg.describe_auto_scaling_groups(AutoScalingGroupNames=[asg_name])
+        if not response['AutoScalingGroups']:
+            return {'status': 'no_asg'}
+
+        asg_info = response['AutoScalingGroups'][0]
+        if asg_info['DesiredCapacity'] == 0:
+            return {'status': 'already_stopped'}
+
+        instances = asg_info['Instances']
+        if not instances:
+            return {'status': 'no_instances'}
+
+        instance_id = instances[0]['InstanceId']
+
+        # Query CloudWatch for network activity over last 20 minutes
+        cw = boto3.client('cloudwatch')
+        import datetime
+        end_time = datetime.datetime.utcnow()
+        start_time = end_time - datetime.timedelta(minutes=20)
+
+        metrics = cw.get_metric_statistics(
+            Namespace='AWS/EC2',
+            MetricName='NetworkPacketsIn',
+            Dimensions=[{'Name': 'InstanceId', 'Value': instance_id}],
+            StartTime=start_time,
+            EndTime=end_time,
+            Period=300,
+            Statistics=['Sum']
+        )
+
+        total_packets = sum(dp['Sum'] for dp in metrics.get('Datapoints', []))
+
+        # Threshold: < 50 packets in 20 min means idle (no active SSH tunnel)
+        # An active SSH tunnel generates thousands of packets per period
+        if total_packets < 50:
+            asg.set_desired_capacity(
+                AutoScalingGroupName=asg_name,
+                DesiredCapacity=0
+            )
+            return {
+                'status': 'stopped_idle',
+                'message': f'Bastion idle for 20 min ({int(total_packets)} packets). Stopped.',
+                'total_packets': int(total_packets)
+            }
+
+        return {
+            'status': 'active',
+            'message': f'Bastion active ({int(total_packets)} packets in last 20 min).',
+            'total_packets': int(total_packets)
+        }
+
     else:
         return {'status': 'error', 'message': f"Unknown action: {action}. Use 'start', 'stop', 'status', or 'whitelist'."}
 PYTHON
@@ -573,6 +620,14 @@ resource "aws_iam_role_policy" "bastion_lambda" {
         Action = [
           "ec2:DescribeInstances",
           "ec2:DescribeSecurityGroups"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "CloudWatchMetrics"
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:GetMetricStatistics"
         ]
         Resource = "*"
       },
@@ -671,4 +726,32 @@ resource "aws_lambda_permission" "bastion_stop" {
   function_name = aws_lambda_function.bastion_control.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.bastion_stop[0].arn
+}
+
+# -----------------------------------------------------------------------------
+# Bastion Idle Auto-Stop (always enabled)
+# -----------------------------------------------------------------------------
+resource "aws_cloudwatch_event_rule" "bastion_idle_check" {
+  name                = "workermill-${var.environment}-bastion-idle-check"
+  description         = "Check bastion idle status every 5 minutes"
+  schedule_expression = "rate(5 minutes)"
+
+  tags = {
+    Name = "workermill-${var.environment}-bastion-idle-check"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "bastion_idle_check" {
+  rule      = aws_cloudwatch_event_rule.bastion_idle_check.name
+  target_id = "bastion-idle-check"
+  arn       = aws_lambda_function.bastion_control.arn
+  input     = jsonencode({ action = "auto_stop_check" })
+}
+
+resource "aws_lambda_permission" "bastion_idle_check" {
+  statement_id  = "AllowEventBridgeIdleCheck"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.bastion_control.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.bastion_idle_check.arn
 }

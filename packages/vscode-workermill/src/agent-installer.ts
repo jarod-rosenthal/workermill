@@ -893,11 +893,38 @@ export function writeAgentConfig(opts: {
 // ── OS Keychain helpers (for agent binary consumption) ───────────────
 // These use the same platform CLI tools as agent/src/keychain.ts so both
 // the VS Code extension and the standalone binary can share credentials.
+//
+// WSL Bridge: When running inside WSL, we call cmdkey.exe / powershell.exe
+// to access Windows Credential Manager instead of secret-tool (which requires
+// D-Bus and is typically unavailable in WSL). This keeps credentials in sync
+// with the native Windows VS Code extension and agent binary.
 
 const KC_SERVICE = "workermill";
 const KC_ACCOUNT = "workermill";
 const KC_LABEL = "WorkerMill API Key";
 const KC_TIMEOUT = 5_000;
+
+let _isWSL: boolean | null = null;
+
+/**
+ * Detect if running inside WSL (Windows Subsystem for Linux).
+ * Result is cached after first call.
+ */
+function isWSL(): boolean {
+  if (_isWSL !== null) return _isWSL;
+  if (process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP) {
+    _isWSL = true;
+    return true;
+  }
+  try {
+    const version = fs.readFileSync("/proc/version", "utf-8").toLowerCase();
+    _isWSL = version.includes("microsoft");
+    return _isWSL;
+  } catch {
+    _isWSL = false;
+    return false;
+  }
+}
 
 /**
  * Store the API key in the OS keychain so the agent binary can read it.
@@ -915,10 +942,18 @@ export function writeApiKeyToKeychain(apiKey: string): boolean {
         return true;
 
       case "linux":
-        execSync(
-          `echo -n '${apiKey.replace(/'/g, "'\\''")}' | secret-tool store --label='${KC_LABEL}' service ${KC_SERVICE} account ${KC_ACCOUNT}`,
-          { timeout: KC_TIMEOUT, stdio: "pipe" },
-        );
+        if (isWSL()) {
+          // WSL: use Windows Credential Manager via cmdkey.exe
+          execSync(
+            `cmdkey.exe /generic:${KC_SERVICE} /user:${KC_ACCOUNT} /pass:"${apiKey.replace(/"/g, '\\"')}"`,
+            { timeout: KC_TIMEOUT, stdio: "pipe" },
+          );
+        } else {
+          execSync(
+            `echo -n '${apiKey.replace(/'/g, "'\\''")}' | secret-tool store --label='${KC_LABEL}' service ${KC_SERVICE} account ${KC_ACCOUNT}`,
+            { timeout: KC_TIMEOUT, stdio: "pipe" },
+          );
+        }
         return true;
 
       case "win32":
@@ -953,6 +988,18 @@ export function readApiKeyFromKeychain(): string | null {
       }
 
       case "linux": {
+        if (isWSL()) {
+          // WSL: read from Windows Credential Manager via powershell.exe
+          const result = execSync(
+            `powershell.exe -NoProfile -NonInteractive -Command "` +
+              `try { ` +
+              `  Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class CredManager{[DllImport(\\\"advapi32.dll\\\",SetLastError=true,CharSet=CharSet.Unicode)]static extern bool CredRead(string target,int type,int flags,out IntPtr cred);[StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]struct CREDENTIAL{public int Flags;public int Type;public string TargetName;public string Comment;public long LastWritten;public int CredentialBlobSize;public IntPtr CredentialBlob;public int Persist;public int AttributeCount;public IntPtr Attributes;public string TargetAlias;public string UserName;}public static string Get(string target){IntPtr p;if(!CredRead(target,1,0,out p))return null;var c=Marshal.PtrToStructure<CREDENTIAL>(p);if(c.CredentialBlobSize>0){return Marshal.PtrToStringUni(c.CredentialBlob,c.CredentialBlobSize/2);}return null;}}'; ` +
+              `  [CredManager]::Get('${KC_SERVICE}') ` +
+              `} catch { $null }"`,
+            { encoding: "utf-8", timeout: KC_TIMEOUT, stdio: ["pipe", "pipe", "pipe"] },
+          ).trim();
+          return result || null;
+        }
         const result = execFileSync(
           "secret-tool",
           ["lookup", "service", KC_SERVICE, "account", KC_ACCOUNT],
@@ -996,11 +1043,19 @@ export function deleteApiKeyFromKeychain(): boolean {
         return true;
 
       case "linux":
-        execFileSync(
-          "secret-tool",
-          ["clear", "service", KC_SERVICE, "account", KC_ACCOUNT],
-          { timeout: KC_TIMEOUT, stdio: "pipe" },
-        );
+        if (isWSL()) {
+          // WSL: delete from Windows Credential Manager via cmdkey.exe
+          execSync(`cmdkey.exe /delete:${KC_SERVICE}`, {
+            timeout: KC_TIMEOUT,
+            stdio: "pipe",
+          });
+        } else {
+          execFileSync(
+            "secret-tool",
+            ["clear", "service", KC_SERVICE, "account", KC_ACCOUNT],
+            { timeout: KC_TIMEOUT, stdio: "pipe" },
+          );
+        }
         return true;
 
       case "win32":

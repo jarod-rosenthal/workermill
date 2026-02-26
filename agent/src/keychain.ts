@@ -13,6 +13,7 @@
  */
 
 import { execFileSync, execSync } from "child_process";
+import { readFileSync } from "fs";
 
 const SERVICE = "workermill";
 const ACCOUNT = "workermill";
@@ -20,6 +21,28 @@ const LABEL = "WorkerMill API Key";
 const TIMEOUT = 5_000;
 
 let _warned = false;
+let _isWSL: boolean | null = null;
+
+/**
+ * Detect if running inside WSL (Windows Subsystem for Linux).
+ * When in WSL, keychain operations bridge to Windows Credential Manager
+ * via cmdkey.exe / powershell.exe instead of secret-tool.
+ */
+function isWSL(): boolean {
+  if (_isWSL !== null) return _isWSL;
+  if (process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP) {
+    _isWSL = true;
+    return true;
+  }
+  try {
+    const version = readFileSync("/proc/version", "utf-8").toLowerCase();
+    _isWSL = version.includes("microsoft");
+    return _isWSL;
+  } catch {
+    _isWSL = false;
+    return false;
+  }
+}
 
 function warnOnce(msg: string): void {
   if (!_warned) {
@@ -138,6 +161,8 @@ function deleteMacOS(): boolean {
 // ── Linux: libsecret via `secret-tool` ───────────────────
 
 function readLinux(): string | null {
+  // WSL: bridge to Windows Credential Manager
+  if (isWSL()) return readWindows();
   try {
     const result = execFileSync(
       "secret-tool",
@@ -152,6 +177,8 @@ function readLinux(): string | null {
 }
 
 function writeLinux(apiKey: string): boolean {
+  // WSL: bridge to Windows Credential Manager
+  if (isWSL()) return writeWindows(apiKey);
   try {
     // secret-tool reads the secret from stdin
     execSync(
@@ -166,6 +193,8 @@ function writeLinux(apiKey: string): boolean {
 }
 
 function deleteLinux(): boolean {
+  // WSL: bridge to Windows Credential Manager
+  if (isWSL()) return deleteWindows();
   try {
     execFileSync(
       "secret-tool",
@@ -215,7 +244,7 @@ function readWindows(): string | null {
 function writeWindows(apiKey: string): boolean {
   try {
     execSync(
-      `cmdkey /generic:${SERVICE} /user:${ACCOUNT} /pass:${escapeWindowsArg(apiKey)}`,
+      `cmdkey.exe /generic:${SERVICE} /user:${ACCOUNT} /pass:${escapeWindowsArg(apiKey)}`,
       { timeout: TIMEOUT, windowsHide: true, stdio: "pipe" },
     );
     return true;
@@ -227,7 +256,7 @@ function writeWindows(apiKey: string): boolean {
 
 function deleteWindows(): boolean {
   try {
-    execSync(`cmdkey /delete:${SERVICE}`, {
+    execSync(`cmdkey.exe /delete:${SERVICE}`, {
       timeout: TIMEOUT,
       windowsHide: true,
       stdio: "pipe",

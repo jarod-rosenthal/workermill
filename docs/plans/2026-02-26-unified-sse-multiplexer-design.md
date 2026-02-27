@@ -9,14 +9,14 @@ With 2 concurrent tasks, the API handles ~260 requests/min and pegs CPU at 100% 
 | Client | Mechanism | Requests/min |
 |--------|-----------|-------------|
 | Dashboard | Main SSE (8s DB poll) + per-task log SSE (2s DB poll) + per-task coordination SSE + REST fallbacks | ~80 |
-| VS Code | 3 panels × 5s polling × 2-3 endpoints each | ~36 |
+| VS Code | 4 panels × 5s polling × 1-3 endpoints each | ~84 |
 | Worker | Per-line log POST (fire-and-forget) | ~24 |
 | Agent | Task poll + heartbeat | ~12 |
 
-**At 100 concurrent tasks:** ~15,000 req/min — unsustainable even with horizontal scaling.
+**At 100 concurrent tasks:** ~20,000 req/min — unsustainable even with horizontal scaling.
 
 **Key redundancy findings:**
-- VS Code's MissionControlPanel, FeedViewProvider, and TaskDetailPanel each independently poll the same coordination + task detail endpoints at 5s intervals. Three panels open = 6 duplicate polling loops.
+- VS Code's MissionControlPanel, FeedViewProvider, TaskDetailPanel, and LiveDiffManager each independently poll overlapping endpoints at 5s intervals. Four panels open = up to 8 duplicate polling loops.
 - VS Code has no SSE path for coordination or code events through the agent, forcing REST polling for data the dashboard receives in real-time via SSE.
 - Dashboard SSE endpoints poll the database on fixed intervals (2s for logs, 8s for tasks) rather than using Redis pub/sub push.
 - Workers POST individual log lines with no batching.
@@ -38,12 +38,12 @@ With 2 concurrent tasks, the API handles ~260 requests/min and pegs CPU at 100% 
 | Client | Current (per task) | After (per task) |
 |--------|-------------------|-----------------|
 | Dashboard | ~80 req/min | ~2 req/min (writes + one-shot backfills) |
-| VS Code (3 panels) | ~36 req/min | ~0 req/min (SSE only) |
+| VS Code (4 panels) | ~84 req/min | ~0 req/min (SSE only) |
 | Worker | ~24 req/min | ~4 req/min (batched log POST) |
 | Agent | ~12 req/min | ~2 req/min (heartbeat only) |
-| **Total** | **~150 req/min** | **~8 req/min** |
+| **Total** | **~200 req/min** | **~8 req/min** |
 
-**At 100 concurrent tasks:** 15,000 req/min → 800 req/min
+**At 100 concurrent tasks:** 20,000 req/min → 800 req/min
 
 ### DB Connection Impact
 
@@ -201,13 +201,29 @@ Each API instance creates **one Redis subscriber connection per SSE session** (u
 
 **If subscriber count becomes a concern (5,000+):** Pool subscribers — each subscriber handles N sessions (e.g., 10), with in-memory routing by channel name. But don't optimize for this until `connected_clients` metrics indicate pressure and SSE backpressure is confirmed working.
 
+### Redis Subscriber Error Handling
+
+Redis disconnects subscribers that exceed the `client-output-buffer-limit` (configured at 64MB hard limit). When this happens, the per-session ioredis subscriber emits an `error` event, and the connection is lost. Without handling, the SSE session stays connected but receives no events — a silent failure.
+
+**Subscriber error handling per session:**
+
+1. **On subscriber `error` event:** Log the error with sessionId and channel count. Do NOT immediately destroy the SSE session.
+2. **Reconnect with backoff:** Create a new subscriber connection (`redis.createSubscriber()`), re-subscribe to all channels in `session.dataSubscriptions` + the control channel. Backoff: 1s → 2s → 4s, max 3 attempts.
+3. **On reconnect success:** Resume normal operation. Send a `refresh` event on the SSE stream for all subscribed channels so the client re-fetches backfill to fill any gap during the disconnect.
+4. **On reconnect failure (3 attempts exhausted):** Disconnect the SSE client with a `reconnect` event. Client creates a new EventSource and starts fresh. This is a last resort — it means Redis is persistently unavailable or the subscriber is consistently too slow.
+5. **On subscriber `end` event (graceful close):** Same reconnect logic. Redis may close idle subscribers or connections during failover.
+
+**Why not just disconnect immediately?** Reconnecting the Redis subscriber is cheaper than forcing the SSE client to reconnect (which triggers backfill, re-subscribe, and authentication). Most buffer-limit disconnects are transient — a log burst fills the buffer briefly, then drains. The subscriber reconnect fills the gap with a `refresh` event + client-side backfill.
+
+**Monitoring:** Emit a `RedisSubscriberReconnect` EMF metric (count) per instance. Alert if sustained > 5/min — indicates subscribers are chronically too slow or Redis is undersized.
+
 ### JWT Token Lifecycle on Long-Lived Connections
 
 SSE connections authenticate via `?token=<jwt>` on connect. JWTs have an expiry (typically 1 hour). SSE connections can last much longer. Policy:
 
 1. **Authenticate once on connect.** Do not periodically revalidate the JWT — this would require DB lookups and defeats the purpose of stateless JWT.
-2. **Set a maximum connection lifetime of 4 hours.** After 4 hours, the server sends a `reconnect` event. The client reconnects with a fresh JWT (it refreshes tokens independently via the auth flow). This limits exposure if a token is compromised.
-3. **Immediate disconnect on user deactivation.** When a user is deactivated or their org membership is revoked, publish a control message via Redis: `PUBLISH session:{sessionId}:control {"action":"disconnect","reason":"auth_revoked"}`. The SSE writer disconnects the session immediately.
+2. **Set a maximum connection lifetime of 4 hours.** The session manager starts a `setTimeout` per session (`lifetimeTimer` in session state). After 4 hours, the server sends a `reconnect` event with `reason: "token_refresh"`. The client reconnects with a fresh JWT (it refreshes tokens independently via the auth flow). `clearTimeout(lifetimeTimer)` is called in every session destroy path (disconnect, backpressure, SIGTERM, auth revocation) to prevent timer leaks.
+3. **Immediate disconnect on user deactivation.** When a user is deactivated or their org membership is revoked, publish a disconnect command via Redis: `PUBLISH session:{sessionId}:control {"action":"disconnect","reason":"auth_revoked"}`. The SSE writer receives this on its control channel subscriber, sends a `disconnect` event to the client with the reason, then destroys the session. **Implementation note:** The admin/user-deactivation API route must look up active sessions for the deactivated user. Store a lightweight `userId → Set<sessionId>` mapping in Redis (key: `user-sessions:{userId}`, members: sessionIds, auto-expire with session TTL). On deactivation, read the set and publish disconnect to each session's control channel.
 
 This is the same approach used by Slack, Discord, and other real-time platforms. Periodic revalidation on every heartbeat would reintroduce DB load.
 
@@ -247,15 +263,19 @@ When a new connection exceeds the org limit, reject with HTTP 429 and `Retry-Aft
 
 ### Redis Publish Integration Points
 
-Every write path publishes to the corresponding Redis topic:
+Every write path publishes to the corresponding Redis topic. **Critical:** The existing codebase already uses Redis pub/sub for some data flows with different channel names. During migration, BOTH old and new channels must be published to, so existing SSE endpoints continue working while unified stream clients receive data on the new channels.
 
-| Write Endpoint | Redis Topic |
-|---------------|-------------|
-| `POST /api/control-center/logs` | `stream:task:{taskId}:logs` |
-| `POST /api/control-center/code-events` | `stream:task:{taskId}:code` |
-| Coordination writes (various) | `stream:task:{taskId}:coordination` |
-| Task state changes (various) | `stream:org:{orgId}:tasks` |
-| Cost updates | `stream:task:{taskId}:cost` |
+| Write Path | Current Redis Channel | New Redis Topic | Current File |
+|------------|----------------------|-----------------|-------------|
+| `POST /api/control-center/logs` | **None** (DB only, EventEmitter) | `stream:task:{taskId}:logs` | `logs.ts` |
+| `POST /api/control-center/logs/batch` | **None** (DB only) | `stream:task:{taskId}:logs` (per entry) | `logs.ts:599` |
+| `POST /api/control-center/code-events` | `events:code` | `stream:task:{taskId}:code` | `code-events.ts` |
+| Coordination writes | `coordination:{parentTaskId}` | `stream:task:{taskId}:coordination` | `coordination.ts` |
+| Cost updates | `events:cost` | `stream:task:{taskId}:cost` | `cost-events.ts` |
+| Planning progress | `events:planning` | `stream:task:{taskId}:planning` | `planning-progress-events.ts` |
+| Task state changes (claim, complete, fail, cancel) | **None** | `stream:org:{orgId}:tasks` | `task-claimer.ts`, `task-monitor.ts`, various |
+
+**Migration approach:** In Phase 1, add the new `stream:*` publishes alongside the existing ones. In Phase 6 (cleanup), remove the old channel publishes after all clients are migrated. The existing SSE endpoints (`/api/tasks/stream`, `/api/control-center/logs/stream`, etc.) continue subscribing to the old channels during migration.
 
 ---
 
@@ -275,10 +295,25 @@ When a client subscribes to a task's channels, it fetches history via one-shot R
 
 Backfill is delivered via REST, not pumped through the SSE pipe. This keeps the SSE connection lightweight and prevents large backfill payloads from blocking real-time events.
 
+**Every backfill response includes a `cursor` field** — the ISO timestamp of the newest included event. This is required for client-side dedup:
+
+```json
+// GET /api/backfill/logs/:taskId?limit=200
+{ "data": [...], "cursor": "2026-02-26T14:30:00.123Z" }
+
+// GET /api/backfill/coordination/:taskId?limit=50
+{ "data": [...], "cursor": "2026-02-26T14:30:01.456Z" }
+
+// GET /api/backfill/code/:taskId
+{ "data": [...], "cursor": "2026-02-26T14:29:55.789Z" }
+```
+
+If the response is empty, `cursor` is `null`.
+
 **Backfill + SSE Deduplication:** There's a race window between subscribing (which starts live SSE delivery) and fetching backfill (which returns historical data). Events created during this window may appear in both. The client handles this:
 
 1. Subscribe to channel → SSE events start flowing → buffer them in memory
-2. Fetch backfill via REST → backfill response includes a `cursor` (DB timestamp of newest included event)
+2. Fetch backfill via REST → backfill response includes `cursor` (ISO timestamp of newest included event)
 3. Merge: render backfill, then replay buffered SSE events that have `created_at > cursor`
 4. Switch to live consumption
 
@@ -349,23 +384,68 @@ Flow:
 
 ### Agent
 
-Agent subscribes to one multiplexed SSE from the cloud and re-broadcasts to VS Code.
+The agent is the bridge between the cloud API and VS Code. Today, the agent **does NOT consume cloud SSE** — it polls via `GET /api/agent/poll` (`poller.ts`) and exposes separate per-resource SSE endpoints on its local API (`local-api.ts`). The unified stream changes this fundamentally.
 
-**Cloud-facing:**
-- Connect `EventSource` to `GET /api/stream?token=...`
+**Current state (no cloud SSE):**
+- `agent/src/poller.ts` — polls `GET /api/agent/poll` every 5-10s for task discovery
+- `agent/src/local-api.ts` — local SSE endpoints: `/api/stream/tasks`, `/api/stream/logs/:taskId`, `/api/stream/coordination/:taskId`, `/api/stream/rag`
+- Data flows: cloud → agent poll → `agentEvents` EventEmitter → local SSE → VS Code
+- **No** `/api/stream/subscribe` or unified stream endpoint on the agent local API
+
+**After (cloud SSE bridge):**
+
+```
+Cloud API                    Agent                        VS Code
+─────────                    ─────                        ───────
+GET /api/stream ──SSE──→ unified-stream.ts
+                              │
+                              ├─ tasks channel ──→ agentEvents ──→ task handling
+                              │
+                              ├─ logs/coord/code ──→ local SSE writer
+                              │                          │
+                              │                          └──SSE──→ 4 panels
+                              │
+POST /api/stream/subscribe ←─┤─ POST /api/stream/subscribe (local)
+                              │                          ↑
+                              │                    VS Code AgentClient
+```
+
+**Cloud-facing (new: `agent/src/unified-stream.ts`):**
+- Connect to `GET /api/stream` using Node.js `https.request` (same pattern as `worker/epic/sse-subscriber.ts` — no browser EventSource in Node)
+- Authenticate with org API key via `?token=<apiKey>` query param
 - Auto-receive `tasks` channel (replaces `GET /api/agent/poll` for task discovery)
-- Subscribe to channels for active tasks it manages
+- Manage subscriptions for active tasks: when a task starts, subscribe to `logs:{taskId}`, `coordination:{taskId}`, `code:{taskId}`, `cost:{taskId}`; when a task completes, unsubscribe
+- On `tasks` channel `task_assigned` events → emit to `agentEvents` → triggers task handling (same flow as current `pollOnce`)
+- Re-broadcast all channel events to local SSE writer for VS Code consumption
 - Keep `POST /api/agent/heartbeat` as-is (write path — carries diagnostics, GPU info, cancellation signals)
-- Fall back to `GET /api/agent/poll` if unified stream unavailable (backward compat)
+- **Fallback:** If `GET /api/stream` returns 404 (old API), fall back to `GET /api/agent/poll` with current 5-10s interval. If stream disconnects, attempt reconnect with backoff; fall back to polling after 3 failed reconnects.
 
-**VS Code-facing (agent local API):**
-- `GET /api/stream` (local) — re-broadcasts cloud events to VS Code
-- `POST /api/stream/subscribe` / `POST /api/stream/unsubscribe` (local) — agent translates to cloud
-- Backfill endpoints (local) — agent proxies to cloud REST backfill
+**VS Code-facing (agent local API additions):**
+- `GET /api/stream` (local) — new unified SSE endpoint that re-broadcasts all cloud events to VS Code. Uses existing `broadcastSSE` pattern (`local-api.ts:152`)
+- `POST /api/stream/subscribe` (local) — VS Code requests channel subscription → agent calls cloud `POST /api/stream/subscribe` with its cloud sessionId → cloud subscribes the agent's SSE session → events flow to agent → re-broadcast to VS Code
+- `POST /api/stream/unsubscribe` (local) — inverse of subscribe
+- `GET /api/backfill/logs/:taskId` (local) — proxies to cloud `GET /api/backfill/logs/:taskId`
+- `GET /api/backfill/coordination/:taskId` (local) — proxies to cloud
+- `GET /api/backfill/code/:taskId` (local) — proxies to cloud
+- **Keep old endpoints working** — existing `/api/stream/tasks`, `/api/stream/logs/:taskId`, etc. remain for backward compatibility with older VS Code extensions
+
+**Version negotiation (backward compatibility):**
+- New VS Code extension + new agent: unified stream path
+- New VS Code extension + old agent: extension tries `GET /api/stream` → 404 → falls back to old per-resource SSE + polling
+- Old VS Code extension + new agent: old endpoints still work, agent maintains both paths
+- Old VS Code extension + old agent: current behavior unchanged
 
 ### VS Code Extension
 
-**Current:** 3 panels with independent 5s polling loops = 9 REST calls every 5 seconds for the same data.
+**Current:** 4 panels with independent 5s polling loops, generating ~84 REST req/min per active task:
+
+| Panel | File | Endpoints Polled (5s each) | Req/min |
+|-------|------|---------------------------|---------|
+| MissionControlPanel | `mission-control-panel.ts:62` | `getCloudLogs` + `getCoordinationFeed` + `getTaskDetail` | 36 |
+| TaskDetailPanel | `task-detail-panel.ts:121` | `getTaskDetail` + `getCoordinationFeed` | 24 |
+| FeedViewProvider | `feed-view.ts:71` | `getCoordinationFeed` + `getTaskDetail` | 24 |
+| LiveDiffManager | `live-diff-manager.ts:198` | `getCodeEvents` | 12 |
+| **Total** | | | **~96** (deduplicated to ~84 typical) |
 
 **After:** Shared subscription layer in `AgentClient` with reference counting.
 
@@ -379,10 +459,10 @@ Panel 2 closes → refcount=0, send unsubscribe to agent
 Three panels watching the same task = one subscription, one set of events, three UI updates.
 
 **Eliminated:**
-- `MissionControlPanel.startPolling()`
-- `FeedViewProvider.startPolling()`
-- `TaskDetailPanel.startPolling()`
-- `LiveDiffManager` polling timer
+- `MissionControlPanel.startPolling()` (`mission-control-panel.ts:62`)
+- `FeedViewProvider.startPolling()` (`feed-view.ts:71`)
+- `TaskDetailPanel.startPolling()` (`task-detail-panel.ts:121`)
+- `LiveDiffManager` polling timer (`live-diff-manager.ts:198`)
 
 ### Worker
 
@@ -868,6 +948,7 @@ Workers are Fargate Spot tasks running Claude Code. Each worker: 2 vCPU / 4 GB, 
 | `orchestrator:task-queued` publish failures | Warning | Redis may be down. Orchestrator auto-falls back to DB polling. |
 | ElastiCache `CurrConnections` > 80% of max | Warning | Upgrade Redis instance size. Per-session subscribers scale linearly with SSE connections. |
 | ElastiCache `DatabaseMemoryUsagePercentage` > 70% | Warning | Pub/sub output buffers growing. Check for slow subscribers. Upgrade instance size. |
+| `RedisSubscriberReconnect` > 5/min sustained | Warning | Per-session subscribers hitting buffer limits. Check for slow SSE clients or undersized Redis. |
 
 ---
 
@@ -1026,7 +1107,7 @@ At 200+ tasks, add a second orchestrator instance. The code is already multi-ins
 | **Backfill reconnection storm overwhelms DB** | **High** | Staggered reconnect delay (0-3s random), backfill rate limit (50 req/s/org), route backfill to read replica. |
 | Slow client causes memory leak | High | Backpressure policy — drop non-critical events at 256KB buffer, disconnect at 1MB. Client catches up via Last-Event-ID. |
 | Redis single point of failure | High | Phased HA — single node at launch, Multi-AZ replica at 50+ tasks. Old SSE endpoints remain during migration as fallback. |
-| **Redis pub/sub subscriber buffer overflow** | Medium | Set `client-output-buffer-limit pubsub 64mb 16mb 120`. SSE backpressure cuts off slow clients before they stress Redis. |
+| **Redis pub/sub subscriber buffer overflow** | Medium | Set `client-output-buffer-limit pubsub 64mb 16mb 120`. SSE backpressure cuts off slow clients before they stress Redis. Per-session subscriber reconnect logic (3 retries with backoff) handles transient disconnects. Send `refresh` event after reconnect so client refetches backfill. |
 | **JWT expires on long-lived SSE connection** | Medium | Authenticate once on connect. 4-hour max connection lifetime with server-initiated reconnect. Immediate disconnect on user deactivation via Redis control channel. |
 | ALB kills idle SSE connections | Medium | 30s heartbeat pings keep connections alive. ALB idle timeout set to 120s. |
 | Client opens excessive connections | Medium | Per-org cap of 20 SSE connections. Excess rejected with 429. |
@@ -1061,6 +1142,41 @@ At 200+ tasks, add a second orchestrator instance. The code is already multi-ins
 - **ECS API service:** Auto-scaling policies (target tracking + predictive + step guardrails).
 - **ECS Orchestrator service:** Right-size 256/512 → 512/1024. Event-driven task pickup via Redis. Poll interval 5s → 30s background sweep. Scale to 2 instances at 200+ tasks.
 - **Migrations:** Move from API-startup migration runner to single-shot ECS migration task run by deploy script before API service update. Prevents migration lock contention when auto-scaling adds multiple instances simultaneously.
+
+## Testing Strategy
+
+### Unit Tests (per task — already specified in impl plan)
+
+Each implementation task includes Vitest tests for its specific functionality: session management, backfill queries, Redis publish verification, backpressure behavior, etc.
+
+### Integration Tests
+
+End-to-end tests that validate the full SSE pipeline works across components. These run against the local dev environment (API + Redis + PostgreSQL).
+
+| Test | What It Validates | Approach |
+|------|-------------------|----------|
+| **SSE connect → subscribe → receive event** | Full pipeline: client connects, subscribes to `logs:{taskId}`, worker POSTs a log, client receives it via SSE within 1s | Supertest + EventSource polyfill. POST log, assert SSE message received with correct channel/payload. |
+| **Backfill + SSE dedup** | Subscribe, fetch backfill, verify no duplicate events when events arrive during the backfill window | Time-controlled: insert rows, subscribe, fetch backfill with cursor, verify cursor correctly delineates. |
+| **Reconnect with Last-Event-ID** | Client disconnects, reconnects with Last-Event-ID, receives missed events | POST events during disconnect window, reconnect, verify replay from DB. |
+| **Graceful shutdown drain** | SIGTERM sends reconnect events to all SSE clients with stagger delays | Spawn test server, connect 10 SSE clients, send SIGTERM, verify all receive `reconnect` event within 4s. |
+| **Cross-org isolation** | User from Org A cannot subscribe to Org B's task channels | Authenticate as Org A, subscribe to Org B task channel, verify rejection. |
+| **Redis failover recovery** | SSE sessions survive Redis subscriber disconnect | Connect SSE, kill Redis subscriber (simulate buffer overflow), verify subscriber reconnects and `refresh` event sent. |
+| **Agent SSE bridge** | Agent consumes cloud SSE and re-broadcasts to local API | Mock cloud SSE, connect local VS Code client, verify events propagate through agent bridge. |
+
+### Load Tests
+
+Validate capacity projections from the design. Run before each scaling tier milestone.
+
+| Scenario | Tool | Metric | Target |
+|----------|------|--------|--------|
+| **500 concurrent SSE connections** | k6 + SSE plugin | Connection success rate, event latency (p99) | 100% connect, <200ms latency |
+| **Burst: 300 reconnects in 3s** | k6 | Backfill query throughput, DB connection pool utilization | No pool exhaustion, p99 backfill <500ms |
+| **Log storm: 1000 logs/sec across 50 tasks** | k6 + POST /logs | Redis pub/sub throughput, SSE delivery latency | All SSE clients receive within 1s |
+| **Scale-in simulation** | Manual (ECS stop-task) | Client reconnect time, event gap duration | <5s total disruption |
+
+**k6 SSE support:** k6 supports SSE natively via the `k6/x/sse` extension. Script pattern: open SSE connection, subscribe to channels, measure event arrival latency, verify event count matches expected.
+
+**Load test environment:** Run against a staging environment with the same Fargate task sizes as production but with lower min/max scaling. Do NOT load test production directly.
 
 ## What Does NOT Change
 

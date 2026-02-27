@@ -295,7 +295,13 @@ Add Redis PUBLISH calls to every write path that feeds real-time data. These pub
 - Redis client is at `api/src/services/redis-client.ts`, singleton export `redis`
 - Existing pattern: `redis.publish(channel, payload)` — fire-and-forget, catches errors silently
 - Coordination already publishes: `redis.publishContext(parentTaskId, context)` on channel `coordination:{parentTaskId}`
-- Logs and code events currently only use in-memory EventEmitters (no Redis publish)
+- Code events already publish to `events:code` channel (`code-events.ts`)
+- Cost events already publish to `events:cost` channel (`cost-events.ts`)
+- Planning progress publishes to `events:planning` channel (`planning-progress-events.ts`)
+- Logs currently only use in-memory EventEmitters (NO Redis publish)
+- Task status changes have NO Redis publish at all
+
+**CRITICAL — Migration strategy:** Add NEW `stream:*` channel publishes ALONGSIDE existing channel publishes. Do NOT remove existing channel publishes — the old SSE endpoints (`/api/tasks/stream`, `/api/control-center/logs/stream`, etc.) still subscribe to the old channel names. Old channels will be removed in Phase 6 (cleanup) after all clients are migrated.
 
 **Step 1: Add stream topic publish helpers to redis-client.ts**
 
@@ -341,18 +347,33 @@ Import `redis` from `../../services/redis-client.js`.
 
 **Step 3: Add Redis publish to code event ingestion**
 
-In `api/src/routes/control-center/code-events.ts`, after the DB insert in the POST handler, add:
+In `api/src/routes/control-center/code-events.ts`, after the DB insert in the POST handler, add the new `stream:*` publish **alongside** the existing `events:code` publish (do NOT remove the existing one — old SSE endpoints still subscribe to it):
 
 ```typescript
+// EXISTING (keep): redis.publish("events:code", ...) — used by old SSE endpoints
+// NEW (add alongside):
 redis.publishStreamEvent(`task:${taskId}:code`, {
   t: "code_event",
   p: { id: saved.id, filePath, message, metadata, createdAt: saved.createdAt.toISOString() },
 });
 ```
 
-**Step 4: Add Redis publish to task state changes**
+**Step 4: Add Redis publish to coordination writes**
 
-In `api/src/services/task-claimer.ts` (after status update), `api/src/services/task-monitor.ts` (on completion/failure), and anywhere task status changes:
+In `api/src/routes/coordination.ts`, after writing coordination messages, add the new `stream:*` publish **alongside** the existing `coordination:{parentTaskId}` publish:
+
+```typescript
+// EXISTING (keep): redis.publishContext(parentTaskId, context) — uses old channel name
+// NEW (add alongside):
+redis.publishStreamEvent(`task:${parentTaskId}:coordination`, {
+  t: "coordination",
+  p: { id: saved.id, parentTaskId, message: context.message, role: context.role, createdAt: saved.createdAt.toISOString() },
+});
+```
+
+**Step 5: Add Redis publish to task state changes**
+
+In `api/src/services/task-claimer.ts` (after status update), `api/src/services/task-monitor.ts` (on completion/failure), and anywhere task status changes. These are **new** publishes — no existing Redis publish for task state changes:
 
 ```typescript
 redis.publishStreamEvent(`org:${orgId}:tasks`, {
@@ -361,34 +382,39 @@ redis.publishStreamEvent(`org:${orgId}:tasks`, {
 });
 ```
 
-This requires passing `orgId` through to these services. Check if it's already available on the task entity.
+`orgId` is already available on the task entity (`task.orgId`). All task state transitions already load the task from DB, so no additional query needed.
 
-**Step 5: Add Redis publish to cost events**
+**Step 6: Add Redis publish to cost events**
 
-In `api/src/services/cost-events.ts`, alongside the existing in-memory EventEmitter emission:
+In `api/src/services/cost-events.ts`, add the new `stream:*` publish **alongside** the existing `events:cost` publish:
 
 ```typescript
+// EXISTING (keep): redis.publish("events:cost", ...) — used by old SSE endpoints
+// NEW (add alongside):
 redis.publishStreamEvent(`task:${taskId}:cost`, {
   t: "cost",
   p: { taskId, cost, currency, provider, model },
 });
 ```
 
-**Step 6: Write tests**
+**Step 7: Write tests**
 
 Create `api/src/routes/control-center/logs-publish.test.ts`:
 - Mock `redis.publishStreamEvent`
-- POST a log entry
-- Verify `publishStreamEvent` called with correct topic and payload
-- Verify DB insert still happens (existing behavior preserved)
+- POST a log entry → verify `publishStreamEvent` called with `stream:task:{taskId}:logs` topic
+- POST a code event → verify `publishStreamEvent` called with `stream:task:{taskId}:code` topic
+- POST a coordination message → verify `publishStreamEvent` called with `stream:task:{taskId}:coordination` topic
+- Trigger task state change → verify `publishStreamEvent` called with `stream:org:{orgId}:tasks` topic
+- Verify old Redis channel publishes still happen (dual-publish during migration)
+- Verify DB inserts still happen (existing behavior preserved)
 
 Run: `cd api && npx vitest run src/routes/control-center/logs-publish.test.ts`
 
-**Step 7: Commit**
+**Step 8: Commit**
 
 ```bash
-git add api/src/services/redis-client.ts api/src/routes/control-center/logs.ts api/src/routes/control-center/code-events.ts api/src/services/cost-events.ts api/src/services/task-claimer.ts api/src/services/task-monitor.ts api/src/routes/control-center/logs-publish.test.ts
-git commit -m "feat: add Redis PUBLISH on all write paths for unified SSE multiplexer"
+git add api/src/services/redis-client.ts api/src/routes/control-center/logs.ts api/src/routes/control-center/code-events.ts api/src/routes/coordination.ts api/src/services/cost-events.ts api/src/services/task-claimer.ts api/src/services/task-monitor.ts api/src/routes/control-center/logs-publish.test.ts
+git commit -m "feat: add Redis PUBLISH on all write paths for unified SSE multiplexer (dual-publish with old channels)"
 ```
 
 ---
@@ -750,6 +776,7 @@ router.get("/logs/:taskId", authenticateRequest, async (req, res) => {
 });
 
 // GET /api/backfill/coordination/:taskId?limit=50
+// Response includes `cursor` (ISO timestamp of newest event) for client-side dedup.
 router.get("/coordination/:taskId", authenticateRequest, async (req, res) => {
   if (!(await authorizeTaskAccess(req, res))) return;
   const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
@@ -758,17 +785,21 @@ router.get("/coordination/:taskId", authenticateRequest, async (req, res) => {
     order: { createdAt: "DESC" },
     take: limit,
   });
-  res.json(messages.reverse());
+  const ordered = messages.reverse();  // oldest first for display
+  const cursor = ordered.length > 0 ? ordered[ordered.length - 1].createdAt.toISOString() : null;
+  res.json({ data: ordered, cursor });
 });
 
 // GET /api/backfill/code/:taskId
+// Response includes `cursor` (ISO timestamp of newest event) for client-side dedup.
 router.get("/code/:taskId", authenticateRequest, async (req, res) => {
   if (!(await authorizeTaskAccess(req, res))) return;
   const events = await logRepo.find({
     where: { taskId: req.params.taskId, type: "code_event" },
     order: { createdAt: "ASC" },
   });
-  res.json(events);
+  const cursor = events.length > 0 ? events[events.length - 1].createdAt.toISOString() : null;
+  res.json({ data: events, cursor });
 });
 
 export default router;
@@ -1203,7 +1234,7 @@ Migrate the agent and VS Code extension to use the unified stream.
 
 ### Task 10: Agent Unified Stream Client (Cloud-Facing)
 
-The agent connects to `GET /api/stream` on the cloud API instead of polling `GET /api/agent/poll` for task discovery.
+The agent currently does NOT consume cloud SSE — it polls via `GET /api/agent/poll` (`poller.ts`). This task adds a cloud SSE client that replaces polling for task discovery and bridges real-time events to VS Code.
 
 **Files:**
 - Create: `agent/src/unified-stream.ts`
@@ -1213,77 +1244,366 @@ The agent connects to `GET /api/stream` on the cloud API instead of polling `GET
 **Context:**
 - Agent API client: `agent/src/api.ts` — axios instance with cloud API URL and org API key
 - Current task discovery: `pollOnce()` in `agent/src/poller.ts` calls `GET /api/agent/poll`
-- Agent events: `agentEvents` EventEmitter in `agent/src/local-api.ts`
+- Agent events: `agentEvents` EventEmitter in `agent/src/local-api.ts` — bridges spawner/poller state to SSE clients
+- Existing SSE subscriber pattern: `worker/epic/sse-subscriber.ts` — Node.js `https.request` with line-by-line parsing (no browser EventSource in Node)
+- Local API broadcast: `broadcastSSE(channel, event, data)` at `local-api.ts:152`
 
 **Step 1: Create unified stream client**
 
 Create `agent/src/unified-stream.ts`:
 
-Connects to `GET /api/stream` with API key auth. Uses Node.js `https.request` (same pattern as `worker/epic/sse-subscriber.ts` — no browser EventSource available in Node).
+```typescript
+import https from "https";
+import { URL } from "url";
+import { agentEvents } from "./local-api.js";
+import { logger } from "./logger.js";
 
-On `tasks` channel events:
-- `task_assigned` → emit to `agentEvents` → triggers task handling (same flow as current `pollOnce`)
+let cloudSessionId: string | null = null;
+let activeRequest: ReturnType<typeof https.request> | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 3;
 
-Manages subscriptions for active tasks (logs, coordination, code events channels). Re-broadcasts all events to VS Code via the local API SSE writer.
+/**
+ * Connect to cloud unified SSE stream.
+ * Uses Node.js https.request (same pattern as worker/epic/sse-subscriber.ts).
+ * Authenticates with org API key via ?token= query param.
+ */
+export async function connectCloudStream(apiBaseUrl: string, apiKey: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const url = new URL(`/api/stream?token=${encodeURIComponent(apiKey)}`, apiBaseUrl);
 
-Falls back to `pollOnce()` if the unified stream endpoint returns 404 (old API version).
+    const req = https.request(url, { method: "GET", headers: { Accept: "text/event-stream" } }, (res) => {
+      if (res.statusCode === 404) {
+        logger.info("Cloud API does not support unified stream (404), falling back to polling");
+        resolve(false);
+        return;
+      }
+      if (res.statusCode !== 200) {
+        logger.warn(`Unified stream returned ${res.statusCode}`);
+        resolve(false);
+        return;
+      }
+
+      reconnectAttempts = 0;
+      activeRequest = req;
+      let buffer = "";
+
+      res.on("data", (chunk: Buffer) => {
+        buffer += chunk.toString();
+        // Parse SSE frames (same pattern as sse-subscriber.ts)
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        processSSELines(lines);
+      });
+
+      res.on("end", () => {
+        activeRequest = null;
+        scheduleReconnect(apiBaseUrl, apiKey);
+      });
+
+      resolve(true);
+    });
+
+    req.on("error", (err) => {
+      logger.warn("Unified stream connection error", { error: err.message });
+      resolve(false);
+    });
+
+    req.end();
+  });
+}
+
+function processSSELines(lines: string[]): void {
+  let eventType = "message";
+  let data = "";
+
+  for (const line of lines) {
+    if (line.startsWith("event: ")) eventType = line.slice(7);
+    else if (line.startsWith("data: ")) data = line.slice(6);
+    else if (line === "" && data) {
+      handleSSEEvent(eventType, data);
+      eventType = "message";
+      data = "";
+    }
+  }
+}
+
+function handleSSEEvent(eventType: string, rawData: string): void {
+  try {
+    if (eventType === "session") {
+      const { sessionId } = JSON.parse(rawData);
+      cloudSessionId = sessionId;
+      logger.info("Cloud unified stream connected", { sessionId });
+      return;
+    }
+
+    if (eventType === "reconnect") {
+      const { delay } = JSON.parse(rawData);
+      disconnectCloudStream();
+      reconnectTimer = setTimeout(() => connectCloudStream(/* stored url/key */), delay || 0);
+      return;
+    }
+
+    // Route channel events to local SSE writer for VS Code consumption
+    const event = JSON.parse(rawData);
+    const { ch, t, p } = event;
+
+    // Emit to agentEvents so local-api broadcasts to VS Code
+    agentEvents.emit("stream-event", { ch, t, p });
+
+    // Handle task assignment events specifically
+    if (ch?.startsWith("org:") && t === "task_assigned") {
+      agentEvents.emit("task-assigned", p);
+    }
+  } catch (err) {
+    logger.warn("Failed to parse SSE event", { error: String(err) });
+  }
+}
+
+/**
+ * Subscribe to channels for an active task.
+ * Called when agent starts working on a task.
+ */
+export async function subscribeTaskChannels(taskId: string, apiBaseUrl: string, apiKey: string): Promise<void> {
+  if (!cloudSessionId) return;
+  const channels = [`logs:${taskId}`, `coordination:${taskId}`, `code:${taskId}`, `cost:${taskId}`];
+  try {
+    await fetch(`${apiBaseUrl}/api/stream/subscribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+      body: JSON.stringify({ sessionId: cloudSessionId, channels }),
+    });
+  } catch (err) {
+    logger.warn("Failed to subscribe task channels", { taskId, error: String(err) });
+  }
+}
+
+/**
+ * Unsubscribe from task channels when task completes.
+ */
+export async function unsubscribeTaskChannels(taskId: string, apiBaseUrl: string, apiKey: string): Promise<void> {
+  if (!cloudSessionId) return;
+  const channels = [`logs:${taskId}`, `coordination:${taskId}`, `code:${taskId}`, `cost:${taskId}`];
+  try {
+    await fetch(`${apiBaseUrl}/api/stream/unsubscribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+      body: JSON.stringify({ sessionId: cloudSessionId, channels }),
+    });
+  } catch (err) {
+    logger.warn("Failed to unsubscribe task channels", { taskId, error: String(err) });
+  }
+}
+
+export function getCloudSessionId(): string | null { return cloudSessionId; }
+
+export function disconnectCloudStream(): void {
+  if (activeRequest) { activeRequest.destroy(); activeRequest = null; }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  cloudSessionId = null;
+}
+
+function scheduleReconnect(apiBaseUrl: string, apiKey: string): void {
+  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    logger.warn("Max reconnect attempts reached, falling back to polling");
+    agentEvents.emit("stream-fallback-to-polling");
+    return;
+  }
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+  reconnectAttempts++;
+  reconnectTimer = setTimeout(() => connectCloudStream(apiBaseUrl, apiKey), delay);
+}
+```
 
 **Step 2: Wire into agent startup**
 
 In `agent/src/index.ts`, try unified stream first. If it connects, reduce poll interval to a long safety-net interval (60s instead of the normal 5-10s). If it fails, keep current polling behavior.
 
-**Step 3: Commit**
+```typescript
+import { connectCloudStream, disconnectCloudStream } from "./unified-stream.js";
+
+// In startAgent():
+const streamConnected = await connectCloudStream(apiBaseUrl, apiKey);
+if (streamConnected) {
+  logger.info("Using unified SSE stream for task discovery");
+  // Reduce poll interval to 60s safety net
+  startPoller({ interval: 60000 });
+} else {
+  logger.info("Using REST polling for task discovery (unified stream unavailable)");
+  startPoller({ interval: 5000 });  // current behavior
+}
+
+// Handle fallback event (stream died after 3 reconnect attempts)
+agentEvents.on("stream-fallback-to-polling", () => {
+  startPoller({ interval: 5000 });
+});
+```
+
+**Step 3: Wire task subscription lifecycle**
+
+In spawner.ts (or wherever task execution starts/ends):
+```typescript
+import { subscribeTaskChannels, unsubscribeTaskChannels } from "./unified-stream.js";
+
+// When task starts:
+await subscribeTaskChannels(task.id, apiBaseUrl, apiKey);
+
+// When task completes/fails:
+await unsubscribeTaskChannels(task.id, apiBaseUrl, apiKey);
+```
+
+**Step 4: Commit**
 
 ```bash
-git add agent/src/unified-stream.ts agent/src/poller.ts agent/src/index.ts
-git commit -m "feat: agent unified SSE stream client with poll fallback"
+git add agent/src/unified-stream.ts agent/src/poller.ts agent/src/index.ts agent/src/spawner.ts
+git commit -m "feat: agent unified SSE stream client with cloud subscription management and poll fallback"
 ```
 
 ---
 
 ### Task 11: Agent Local API — Unified Stream for VS Code
 
-The agent local API mirrors the cloud unified stream to VS Code. VS Code connects to `GET /api/stream` on the agent's local HTTP server.
+The agent local API mirrors the cloud unified stream to VS Code. VS Code connects to `GET /api/stream` on the agent's local HTTP server. The agent bridges cloud SSE events to local VS Code clients.
 
 **Files:**
 - Modify: `agent/src/local-api.ts`
 
 **Context:**
-- Current SSE endpoints in local API: `GET /api/stream/tasks`, `GET /api/stream/logs/:taskId`, `GET /api/stream/coordination/:taskId`
+- Current SSE endpoints in local API: `GET /api/stream/tasks`, `GET /api/stream/logs/:taskId`, `GET /api/stream/coordination/:taskId`, `GET /api/stream/rag`
 - Current REST proxy endpoints: `GET /api/tasks/:id/logs`, `GET /api/tasks/:id/coordination`, `GET /api/tasks/:id/detail`, `GET /api/tasks/:id/code-events`
-- Broadcast pattern: `broadcastSSE(channel, event, data)` at line 152
+- Broadcast pattern: `broadcastSSE(channel, event, data)` at `local-api.ts:152`
+- Agent unified stream client: `agent/src/unified-stream.ts` (Task 10) — emits `stream-event` on `agentEvents`
 
 **Step 1: Add unified stream SSE endpoint**
 
-Add `GET /api/stream` handler to local API. Re-broadcasts all cloud unified stream events to connected VS Code clients using the existing `broadcastSSE` pattern.
+Add `GET /api/stream` handler to agent local API:
 
-Add `POST /api/stream/subscribe` and `POST /api/stream/unsubscribe` handlers. These translate VS Code subscription requests into cloud API subscription requests.
+```typescript
+// Unified SSE stream for VS Code — re-broadcasts cloud events
+app.get("/api/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
 
-Add backfill proxy endpoints: `GET /api/backfill/logs/:taskId`, `GET /api/backfill/coordination/:taskId`, `GET /api/backfill/code/:taskId` — proxy to cloud API.
+  // Generate local session ID
+  const localSessionId = crypto.randomUUID();
+  res.write(`event: session\ndata: ${JSON.stringify({ sessionId: localSessionId })}\n\n`);
 
-**Step 2: Keep old endpoints working**
+  // Listen for cloud stream events and forward to VS Code
+  const handler = (event: { ch: string; t: string; p: unknown }) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+  agentEvents.on("stream-event", handler);
 
-Don't remove existing SSE and REST proxy endpoints yet. Old VS Code extensions need them.
+  // Heartbeat every 30s
+  const heartbeat = setInterval(() => res.write(": keepalive\n\n"), 30000);
 
-**Step 3: Commit**
+  req.on("close", () => {
+    agentEvents.off("stream-event", handler);
+    clearInterval(heartbeat);
+  });
+});
+```
+
+**Step 2: Add subscribe/unsubscribe proxy endpoints**
+
+These translate VS Code subscription requests into cloud API subscription requests:
+
+```typescript
+// VS Code → agent → cloud subscribe
+app.post("/api/stream/subscribe", express.json(), async (req, res) => {
+  const { channels } = req.body;
+  if (!channels || !Array.isArray(channels)) {
+    return res.status(400).json({ error: "channels required" });
+  }
+
+  const cloudSessionId = getCloudSessionId();
+  if (!cloudSessionId) {
+    return res.status(503).json({ error: "Cloud stream not connected" });
+  }
+
+  try {
+    await fetch(`${apiBaseUrl}/api/stream/subscribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+      body: JSON.stringify({ sessionId: cloudSessionId, channels }),
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: "Failed to subscribe on cloud" });
+  }
+});
+
+// VS Code → agent → cloud unsubscribe
+app.post("/api/stream/unsubscribe", express.json(), async (req, res) => {
+  const { channels } = req.body;
+  if (!channels || !Array.isArray(channels)) {
+    return res.status(400).json({ error: "channels required" });
+  }
+
+  const cloudSessionId = getCloudSessionId();
+  if (!cloudSessionId) {
+    return res.status(503).json({ error: "Cloud stream not connected" });
+  }
+
+  try {
+    await fetch(`${apiBaseUrl}/api/stream/unsubscribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+      body: JSON.stringify({ sessionId: cloudSessionId, channels }),
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: "Failed to unsubscribe on cloud" });
+  }
+});
+```
+
+**Step 3: Add backfill proxy endpoints**
+
+```typescript
+// Proxy backfill requests to cloud API
+for (const type of ["logs", "coordination", "code"]) {
+  app.get(`/api/backfill/${type}/:taskId`, async (req, res) => {
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/api/backfill/${type}/${req.params.taskId}?${new URLSearchParams(req.query as Record<string, string>)}`,
+        { headers: { "x-api-key": apiKey } }
+      );
+      const data = await response.json();
+      res.json(data);
+    } catch (err) {
+      res.status(502).json({ error: `Failed to fetch ${type} backfill` });
+    }
+  });
+}
+```
+
+**Step 4: Keep old endpoints working**
+
+Don't remove existing SSE endpoints (`/api/stream/tasks`, `/api/stream/logs/:taskId`, etc.) or REST proxy endpoints. Old VS Code extensions need them. New endpoints coexist with old ones.
+
+**Step 5: Commit**
 
 ```bash
 git add agent/src/local-api.ts
-git commit -m "feat: agent local API unified SSE stream for VS Code"
+git commit -m "feat: agent local API unified SSE stream, subscribe/unsubscribe proxy, backfill proxy for VS Code"
 ```
 
 ---
 
 ### Task 12: VS Code Extension — Shared Subscription Layer
 
-Replace independent polling loops in all three panels with a shared subscription layer in `AgentClient`.
+Replace independent polling loops in all **four** panels with a shared subscription layer in `AgentClient`.
 
 **Files:**
 - Modify: `packages/vscode-workermill/src/agent-client.ts` (add unified stream + subscription management)
-- Modify: `packages/vscode-workermill/src/mission-control-panel.ts` (remove polling, use subscriptions)
-- Modify: `packages/vscode-workermill/src/feed-view.ts` (remove polling, use subscriptions)
-- Modify: `packages/vscode-workermill/src/task-detail-panel.ts` (remove polling, use subscriptions)
-- Modify: `packages/vscode-workermill/src/live-diff-manager.ts` (remove polling, use subscriptions)
+- Modify: `packages/vscode-workermill/src/mission-control-panel.ts` (remove polling at line 62, use subscriptions)
+- Modify: `packages/vscode-workermill/src/feed-view.ts` (remove polling at line 71, use subscriptions)
+- Modify: `packages/vscode-workermill/src/task-detail-panel.ts` (remove polling at line 121, use subscriptions)
+- Modify: `packages/vscode-workermill/src/live-diff-manager.ts` (remove polling at line 198, use subscriptions)
 
 **Context:**
 - `AgentClient` at `agent-client.ts` — HTTP client for agent local API
@@ -2701,6 +3021,323 @@ git commit -m "infra: Redis connection and memory CloudWatch alarms for instance
 
 ---
 
+### Task 29: Redis Subscriber Error Handling and Reconnect
+
+Per-session ioredis subscribers can be disconnected by Redis when they exceed the `client-output-buffer-limit` (64MB hard limit). Without handling, the SSE session stays connected but receives no events — a silent failure.
+
+**Files:**
+- Modify: `api/src/services/sse-session-manager.ts` (add subscriber error handling + reconnect logic)
+- Modify: `api/src/services/sse-metrics.ts` (add `RedisSubscriberReconnect` counter)
+- Test: `api/src/services/sse-session-manager.test.ts` (add reconnect tests)
+
+**Context:**
+- Each SSE session has its own ioredis subscriber (`session.redisSubscriber`)
+- ioredis emits `error` and `end` events when Redis disconnects the subscriber
+- SSE session manager stores active subscriptions in `session.dataSubscriptions`
+- `redis.createSubscriber()` creates a new subscriber connection (from Task 1)
+
+**Step 1: Add subscriber error handling to session manager**
+
+In `sse-session-manager.ts`, when creating a per-session subscriber, attach error/end handlers:
+
+```typescript
+const subscriber = redis.createSubscriber();
+await subscriber.connect();
+
+subscriber.on("error", async (err) => {
+  logger.warn("Redis subscriber error", { sessionId, error: err.message });
+  await reconnectSubscriber(sessionId);
+});
+
+subscriber.on("end", async () => {
+  logger.warn("Redis subscriber disconnected", { sessionId });
+  await reconnectSubscriber(sessionId);
+});
+```
+
+**Step 2: Implement reconnectSubscriber()**
+
+```typescript
+async function reconnectSubscriber(sessionId: string): Promise<void> {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+
+  const MAX_RETRIES = 3;
+  const channels = Array.from(session.dataSubscriptions);
+  const controlChannel = session.controlSubscription;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const delay = Math.min(1000 * Math.pow(2, attempt), 4000);
+    await new Promise(resolve => setTimeout(resolve, delay));
+
+    try {
+      // Destroy old subscriber
+      session.redisSubscriber.quit().catch(() => {});
+
+      // Create fresh subscriber
+      const newSub = redis.createSubscriber();
+      await newSub.connect();
+
+      // Re-subscribe to all data channels + control channel
+      if (controlChannel) await newSub.subscribe(controlChannel);
+      for (const ch of channels) await newSub.subscribe(`stream:${ch}`);
+
+      // Attach message handler (same as initial setup)
+      newSub.on("message", (_ch, msg) => handleSubscriberMessage(sessionId, _ch, msg));
+      newSub.on("error", async (err) => {
+        logger.warn("Redis subscriber error after reconnect", { sessionId, error: err.message });
+        await reconnectSubscriber(sessionId);
+      });
+
+      session.redisSubscriber = newSub;
+
+      // Emit metric
+      subscriberReconnectCount++;
+
+      // Send refresh event so client refetches backfill for the gap
+      writeEvent(session, "refresh", {
+        reason: "subscriber_reconnect",
+        channels,
+      });
+
+      logger.info("Redis subscriber reconnected", { sessionId, attempt: attempt + 1, channels: channels.length });
+      return;
+    } catch (err) {
+      logger.warn("Redis subscriber reconnect failed", { sessionId, attempt: attempt + 1, error: String(err) });
+    }
+  }
+
+  // All retries exhausted — disconnect SSE client
+  logger.error("Redis subscriber reconnect exhausted, disconnecting SSE client", { sessionId });
+  writeEvent(session, "reconnect", { reason: "subscriber_failed" });
+  destroySession(sessionId);
+}
+```
+
+**Step 3: Add RedisSubscriberReconnect metric**
+
+In `sse-metrics.ts`, add counter:
+
+```typescript
+let subscriberReconnectCount = 0;
+
+// In the EMF emission interval, add:
+{ Name: "RedisSubscriberReconnect", Unit: "Count" }
+// And: RedisSubscriberReconnect: subscriberReconnectCount
+
+// Reset after emission:
+subscriberReconnectCount = 0;
+```
+
+**Step 4: Write tests**
+
+```typescript
+describe("Redis subscriber reconnect", () => {
+  it("reconnects subscriber on error event", async () => {
+    // Create session, trigger subscriber error
+    // Verify new subscriber created, channels re-subscribed
+    // Verify refresh event sent to SSE client
+  });
+
+  it("disconnects SSE client after 3 failed reconnects", async () => {
+    // Mock createSubscriber to fail 3 times
+    // Verify reconnect event sent with reason: subscriber_failed
+    // Verify session destroyed
+  });
+
+  it("emits RedisSubscriberReconnect metric", async () => {
+    // Trigger reconnect, verify metric incremented
+  });
+});
+```
+
+**Step 5: Run tests**
+
+Run: `cd api && npx vitest run src/services/sse-session-manager.test.ts`
+
+**Step 6: Commit**
+
+```bash
+git add api/src/services/sse-session-manager.ts api/src/services/sse-metrics.ts api/src/services/sse-session-manager.test.ts
+git commit -m "feat: Redis subscriber error handling with reconnect, refresh event, and CloudWatch metric"
+```
+
+---
+
+### Task 30: Integration Test Suite
+
+End-to-end tests validating the full SSE pipeline. Run against local dev environment (API + Redis + PostgreSQL).
+
+**Files:**
+- Create: `api/src/routes/stream.integration.test.ts`
+
+**Context:**
+- Vitest integration test pattern: `api/src/routes/*.test.ts` with supertest
+- Redis mock or real Redis available in test env
+- Tests use `AppDataSource` for DB setup/teardown
+
+**Step 1: Write integration tests**
+
+```typescript
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import supertest from "supertest";
+import { app } from "../index.js";
+import { EventSource } from "eventsource";  // polyfill for Node.js
+
+describe("Unified SSE Integration", () => {
+  let authToken: string;
+  let taskId: string;
+
+  beforeAll(async () => {
+    // Create test org, user, get auth token
+    // Create test task in queued state
+  });
+
+  it("connects SSE, subscribes, receives log event", async () => {
+    // 1. Connect EventSource to GET /api/stream?token=...
+    // 2. Wait for session event
+    // 3. POST subscribe for logs:{taskId}
+    // 4. POST log via /api/control-center/logs
+    // 5. Verify SSE event received with correct channel, type, payload
+    // 6. Verify event received within 1s of POST
+  });
+
+  it("backfill + SSE dedup works correctly", async () => {
+    // 1. Insert 5 log rows in DB
+    // 2. Connect SSE, subscribe to logs:{taskId}
+    // 3. POST 1 more log (arrives via SSE)
+    // 4. Fetch backfill GET /api/backfill/logs/:taskId
+    // 5. Verify cursor is timestamp of row 5
+    // 6. Verify SSE event for row 6 has createdAt > cursor (no duplicate)
+  });
+
+  it("Last-Event-ID reconnect replays missed events", async () => {
+    // 1. Connect SSE, note last event ID
+    // 2. Disconnect
+    // 3. POST 3 logs while disconnected
+    // 4. Reconnect with Last-Event-ID header
+    // 5. Verify 3 catch-up events received before live events resume
+  });
+
+  it("cross-org channel subscription rejected", async () => {
+    // 1. Connect SSE as Org A user
+    // 2. Subscribe to logs:{orgB-taskId}
+    // 3. Verify error event on SSE stream (not subscription success)
+  });
+
+  it("graceful shutdown sends reconnect to all clients", async () => {
+    // 1. Connect 3 SSE clients
+    // 2. Call sessionManager.gracefulShutdown()
+    // 3. Verify all 3 receive reconnect event with stagger delay
+    // 4. Verify delays are different (random stagger)
+  });
+
+  afterAll(async () => {
+    // Cleanup test data
+  });
+});
+```
+
+**Step 2: Run integration tests**
+
+Run: `cd api && npx vitest run src/routes/stream.integration.test.ts`
+
+Note: Requires Redis running locally (port 6379) and PostgreSQL (port 5433). The local dev environment provides both.
+
+**Step 3: Commit**
+
+```bash
+git add api/src/routes/stream.integration.test.ts
+git commit -m "test: unified SSE integration tests — full pipeline, backfill dedup, reconnect, cross-org isolation"
+```
+
+---
+
+### Task 31: Load Test Plan and k6 Scripts
+
+Validate capacity projections before production rollout. k6 supports SSE natively via `k6/x/sse`.
+
+**Files:**
+- Create: `tests/load/sse-connections.js` (k6 script)
+- Create: `tests/load/reconnect-burst.js` (k6 script)
+- Create: `tests/load/log-storm.js` (k6 script)
+- Create: `tests/load/README.md`
+
+**Step 1: Create k6 SSE connection test**
+
+```javascript
+// tests/load/sse-connections.js
+import sse from "k6/x/sse";
+import { check } from "k6";
+
+export const options = {
+  scenarios: {
+    sse_connections: {
+      executor: "ramping-vus",
+      startVUs: 0,
+      stages: [
+        { duration: "30s", target: 100 },   // ramp to 100 connections
+        { duration: "2m", target: 100 },     // hold
+        { duration: "1m", target: 300 },     // ramp to 300
+        { duration: "2m", target: 300 },     // hold
+        { duration: "1m", target: 500 },     // ramp to 500
+        { duration: "2m", target: 500 },     // hold at target
+        { duration: "30s", target: 0 },      // ramp down
+      ],
+    },
+  },
+};
+
+export default function () {
+  const url = `${__ENV.API_URL}/api/stream?token=${__ENV.AUTH_TOKEN}`;
+  const response = sse.open(url, {}, function (client) {
+    client.on("event", function (event) {
+      // Measure event latency
+      if (event.name === "message") {
+        check(event, { "event received": (e) => e.data.length > 0 });
+      }
+    });
+    // Keep connection open for test duration
+    client.on("error", function (err) {
+      console.error("SSE error:", err);
+    });
+  });
+  check(response, { "connected": (r) => r.status === 200 });
+}
+```
+
+**Step 2: Create reconnection burst test**
+
+```javascript
+// tests/load/reconnect-burst.js
+// Simulates 300 SSE clients reconnecting simultaneously (rolling deploy scenario)
+// Each client: connect → subscribe → fetch 3 backfill endpoints → verify events
+```
+
+**Step 3: Create log storm test**
+
+```javascript
+// tests/load/log-storm.js
+// POST 1000 logs/sec across 50 tasks while 100 SSE clients are connected
+// Measure: Redis throughput, SSE delivery latency, DB write latency
+```
+
+**Step 4: Create README**
+
+Document how to run load tests, required env vars (`API_URL`, `AUTH_TOKEN`), staging environment setup, and success criteria:
+- 500 connections: 100% connect, <200ms p99 event latency
+- Reconnect burst: no pool exhaustion, p99 backfill <500ms
+- Log storm: all events delivered within 1s
+
+**Step 5: Commit**
+
+```bash
+git add tests/load/
+git commit -m "test: k6 load test scripts for SSE connections, reconnect burst, and log storm"
+```
+
+---
+
 ## Phase 6: Cleanup
 
 After all clients validated on unified stream.
@@ -2730,19 +3367,29 @@ Remove the conditional branches that used old SSE + polling. Keep unified stream
 
 Optionally keep them returning 301 redirects to `/api/stream` for a transition period, then remove entirely.
 
-**Step 3: Remove feature flag column**
+**Step 3: Remove old Redis channel publishes**
+
+Remove the dual-publish code added in Phase 1 (Task 1). Delete publishes to old channel names:
+- `events:code` — replaced by `stream:task:{taskId}:code`
+- `coordination:{parentTaskId}` — replaced by `stream:task:{taskId}:coordination`
+- `events:cost` — replaced by `stream:task:{taskId}:cost`
+- `events:planning` — replaced by `stream:task:{taskId}:planning`
+
+Verify no code still subscribes to old channel names before removing.
+
+**Step 4: Remove feature flag column**
 
 Migration: `ALTER TABLE organizations DROP COLUMN IF EXISTS unified_stream_enabled;`
 
-**Step 4: Run all tests**
+**Step 5: Run all tests**
 
 Run: `cd api && npm run test && cd ../frontend && npx tsc -b`
 
-**Step 5: Deploy**
+**Step 6: Deploy**
 
 Run: `./deploy.sh --all`
 
-**Step 6: Commit**
+**Step 7: Commit**
 
 ```bash
 git commit -m "chore: remove legacy SSE endpoints and polling code — unified stream is sole path"
@@ -2761,7 +3408,10 @@ git commit -m "chore: remove legacy SSE endpoints and polling code — unified s
 | 4: Worker batching | 14-16 | Transparent, backward compat | Deploy old worker |
 | 5: Infrastructure | 17-19 | Transparent | Revert Terraform |
 | **5B: Orchestrator scaling** | **21-28** | **Transparent — faster task pickup** | **Revert orchestrator.ts, revert Terraform, set poll back to 5s** |
+| **5C: Reliability + Testing** | **29-31** | **None — error handling + tests** | **Revert subscriber reconnect code** |
 | 6: Cleanup | 20 | N/A — old paths already unused | N/A |
+
+**Total: 32 tasks across 8 phases (0, 1, 2, 3, 4, 5, 5B, 5C, 6)**
 
 ### Database Scaling Roadmap
 

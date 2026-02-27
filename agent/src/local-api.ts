@@ -585,10 +585,22 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         if (settings?.planningApiKey) planningConfig.apiKey = settings.planningApiKey as string;
       } catch { /* fall back to defaults */ }
 
+      // Fetch PRD system prompt from the API (single source of truth)
+      let prdSystemPrompt: string | undefined;
+      try {
+        const promptData = await cloudProxy("GET", "/api/agent/prd-prompt") as { systemPrompt?: string };
+        if (promptData?.systemPrompt) {
+          prdSystemPrompt = promptData.systemPrompt;
+          sendEvent("progress", { message: `Fetched PRD prompt from server` });
+        }
+      } catch {
+        sendEvent("progress", { message: `Using local PRD prompt (server unavailable)` });
+      }
+
       sendEvent("progress", { message: `Starting PRD decomposition...` });
 
       // Decompose PRD locally — routes to Claude Agent SDK (Anthropic) or Vercel AI SDK (others)
-      const decomposed = await decomposePrdLocal(prdContent, planningConfig, (msg) => {
+      const decomposed = await decomposePrdLocal(prdContent, planningConfig, prdSystemPrompt, (msg) => {
         sendEvent("progress", { message: msg });
       });
 
@@ -938,6 +950,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
 // ── PRD Decomposition via Claude Agent SDK ────────────
 
+// Fallback prompt — used only when the server endpoint GET /api/agent/prd-prompt is unreachable.
+// The canonical prompt lives in api/src/services/prd-decomposer.ts (SYSTEM_PROMPT).
 const PRD_SYSTEM_PROMPT = `You are a senior technical program manager who decomposes Product Requirements Documents (PRDs) into implementation cards for AI coding agents.
 
 Each card represents ONE cohesive epic — a vertical slice or architectural layer that a single AI worker can execute independently (given its dependencies are met).
@@ -947,7 +961,8 @@ Each card represents ONE cohesive epic — a vertical slice or architectural lay
 - Target 7-12 deliverables per card. This is the sweet spot for AI worker execution.
 - Cards with >15 deliverables MUST be split into smaller cards.
 - Cards with <4 deliverables MUST be merged with related work.
-- Card 1 is ALWAYS "Project Setup & Dev Environment" — repo scaffolding, tooling, CI skeleton, environment config.
+- Card 1 is ALWAYS "Project Setup & Dev Environment" — repo scaffolding, tooling, environment config.
+- Card 2 is ALWAYS "CI/CD Pipeline & Quality Gates" — the FULL CI pipeline (lint, typecheck, test, build) must be created and verified green BEFORE any feature work begins. This card must include a trivial passing test so CI actually runs. Assigned to devops_engineer. ALL subsequent feature cards MUST depend on this card (directly or transitively).
 - The LAST card is ALWAYS "Production Deploy & Validation" — deployment pipeline, smoke tests, monitoring, go-live checklist.
 
 ***REMOVED******REMOVED*** Card Description Format (REQUIRED)
@@ -992,9 +1007,20 @@ Choose the persona whose primary skillset best matches the card's dominant work.
 - Card 0 (Project Setup) has no dependencies (empty array)
 - The last card (Production Deploy) typically depends on all or most preceding cards
 
+***REMOVED******REMOVED*** CI/CD Is a First-Class Citizen
+
+The CI/CD card (Card 2) is NOT a nice-to-have. It is the quality gate that proves code works. Every AI can generate code — the CI pipeline proves it compiles, passes lint, passes tests, and builds.
+
+Card 2 deliverables MUST include:
+1. CI workflow file (e.g., .github/workflows/ci.yml) with ALL quality steps (lint, typecheck, test, build)
+2. A trivial passing test file so the test step succeeds on first run
+3. Verification that the pipeline actually runs and passes (acceptance criterion, not just "file exists")
+
+ALL feature cards (Card 3+) MUST have Card 2 in their transitive dependency chain.
+
 ***REMOVED******REMOVED*** Priority Assignment
 
-- urgent: Blocking all other work (typically Card 0 — setup)
+- urgent: Blocking all other work (Card 0 — setup, Card 1 — CI/CD pipeline)
 - high: Core business logic, critical path items
 - medium: Important but not blocking — features, integrations
 - low: Nice-to-have, polish, documentation
@@ -1005,6 +1031,19 @@ Respond with ONLY a JSON object (no markdown fences, no explanation):
 
 {
   "boardName": "Short descriptive board name derived from the PRD title",
+  "qualityGates": [
+    {
+      "name": "backend",
+      "trigger": "api/**",
+      "commands": ["cd api && go vet ./...", "cd api && go test ./... -v -count=1", "cd api && go build -o /dev/null ./cmd/server"]
+    },
+    {
+      "name": "frontend",
+      "trigger": "web/**",
+      "commands": ["cd web && npm run lint", "cd web && npm run test", "cd web && npm run build"]
+    }
+  ],
+  "ciWorkflowPath": ".github/workflows/ci.yml",
   "cards": [
     {
       "title": "Card title (concise, action-oriented)",
@@ -1018,6 +1057,8 @@ Respond with ONLY a JSON object (no markdown fences, no explanation):
   ]
 }
 
+qualityGates: Extract pre-commit quality gate commands from the PRD. Each gate has a name (e.g., "backend", "frontend"), a file trigger glob (e.g., "api/**"), and the exact shell commands to run. These are the commands workers run BEFORE every commit to verify code quality. If the PRD doesn't specify quality gates, infer them from the tech stack (e.g., Go → "go vet", "go test", "go build"; Node.js → "npm run lint", "npm run test", "npm run build").
+ciWorkflowPath: The path to the CI workflow file in the repo (e.g., ".github/workflows/ci.yml"). Used to detect when CI becomes available.
 estimatedSteps is the number of deliverables in the card (used for progress tracking).
 labels should include relevant technology or domain tags (e.g., "react", "api", "terraform", "auth").`;
 
@@ -1031,17 +1072,19 @@ labels should include relevant technology or domain tags (e.g., "react", "api", 
 async function decomposePrdLocal(
   prdContent: string,
   planningConfig: { provider: string; model: string; apiKey?: string },
+  serverPrompt?: string,
   onProgress?: (message: string) => void,
 ): Promise<{ boardName: string; cards: unknown[] }> {
+  const systemPrompt = serverPrompt || PRD_SYSTEM_PROMPT;
   const startTime = Date.now();
   let resultText: string;
 
   if (planningConfig.provider === "anthropic" || !planningConfig.provider) {
     // Anthropic provider — use Claude Agent SDK with OAuth
-    resultText = await decomposePrdViaAgentSdk(prdContent, onProgress);
+    resultText = await decomposePrdViaAgentSdk(prdContent, systemPrompt, onProgress);
   } else {
     // Non-Anthropic provider — use Vercel AI SDK
-    resultText = await decomposePrdViaAiSdk(prdContent, planningConfig, onProgress);
+    resultText = await decomposePrdViaAiSdk(prdContent, planningConfig, systemPrompt, onProgress);
   }
 
   const elapsed = Math.round((Date.now() - startTime) / 1000);
@@ -1082,6 +1125,7 @@ async function decomposePrdLocal(
  */
 async function decomposePrdViaAgentSdk(
   prdContent: string,
+  systemPrompt: string,
   onProgress?: (message: string) => void,
 ): Promise<string> {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
@@ -1138,7 +1182,7 @@ async function decomposePrdViaAgentSdk(
       options: {
         pathToClaudeCodeExecutable: claudePath,
         env: cleanEnv,
-        systemPrompt: PRD_SYSTEM_PROMPT,
+        systemPrompt,
         tools: [],
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
@@ -1205,6 +1249,7 @@ async function decomposePrdViaAgentSdk(
 async function decomposePrdViaAiSdk(
   prdContent: string,
   config: { provider: string; model: string; apiKey?: string },
+  systemPrompt: string,
   onProgress?: (message: string) => void,
 ): Promise<string> {
   const { generateTextWithTools } = await import("./ai-sdk-generate.js");
@@ -1222,7 +1267,7 @@ async function decomposePrdViaAiSdk(
     model: config.model,
     apiKey,
     prompt: `Decompose this PRD into implementation cards:\n\n${prdContent}`,
-    systemPrompt: PRD_SYSTEM_PROMPT,
+    systemPrompt,
     enableTools: false,
     maxTokens: 16384,
     temperature: 0.7,

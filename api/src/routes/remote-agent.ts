@@ -1060,9 +1060,6 @@ router.get(
         autoFixEnabled: org.autoFixEnabled ?? false,
         autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
       },
-      // Pre-commit quality gate commands (org-level default for all task sources)
-      qualityGateCommands: org.qualityGateCommands,
-      ciWorkflowPath: org.ciWorkflowPath,
     });
   }),
 );
@@ -1281,6 +1278,17 @@ router.post(
     });
 
     res.json({ ok: true });
+  }),
+);
+
+// ─── GET /prd-prompt ────────────────────────────────────────────────────────
+// Returns the PRD decomposition system prompt.
+// Single source of truth — agent fetches this instead of hardcoding its own copy.
+router.get(
+  "/prd-prompt",
+  asyncHandler(async (_req: Request, res: Response) => {
+    const { SYSTEM_PROMPT } = await import("../services/prd-decomposer.js");
+    res.json({ systemPrompt: SYSTEM_PROMPT });
   }),
 );
 

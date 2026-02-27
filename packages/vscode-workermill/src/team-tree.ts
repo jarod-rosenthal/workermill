@@ -148,15 +148,17 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
         items.push(new InfoTreeItem("Backlog", "Connect a repo in Settings to see issues", "$(list-unordered)"));
       }
 
-      // PR Approved — tasks that completed successfully
+      // PR Approved — tasks that completed successfully (always visible)
       if (approved.length > 0) {
         items.push(new InfoTreeItem(
           `PR Approved (${approved.length})`,
           undefined,
           "$(check-all)",
-          vscode.TreeItemCollapsibleState.Collapsed,
+          vscode.TreeItemCollapsibleState.Expanded,
           approved.map((t) => new TaskTreeItem(t)),
         ));
+      } else {
+        items.push(new InfoTreeItem("PR Approved", "No completed tasks yet", "$(check-all)"));
       }
 
       // Needs Attention — failed, escalated, or cancelled tasks

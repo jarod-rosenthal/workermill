@@ -37,3 +37,4 @@ export { default as boardsRouter } from "./boards.js";
 export { default as issuesRouter } from "./issues.js";
 export { default as prdRouter } from "./prd.js";
 export { default as marketingRouter } from "./marketing.js";
+export { default as specsRouter } from "./specs.js";

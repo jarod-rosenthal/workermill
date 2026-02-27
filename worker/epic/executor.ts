@@ -552,8 +552,6 @@ export class StoryExecutor {
       return { passed: true, summary: "CI workflow not yet created" };
     }
 
-    await this.postLog(`[CI Gate] Waiting for CI to complete on branch ${branchName}...`, expert, "system");
-
     // Parse repo owner/name from targetRepo
     const repoMatch = this.config.targetRepo.match(/([^/]+)\/([^/]+?)(?:\.git)?$/);
     if (!repoMatch) {
@@ -562,7 +560,29 @@ export class StoryExecutor {
     }
     const [, owner, repo] = repoMatch;
 
-    // Poll GitHub Actions API for CI status (max 10 minutes)
+    const scmProvider = process.env.SCM_PROVIDER || "github";
+    await this.postLog(`[CI Gate] Waiting for CI to complete on branch ${branchName} (${scmProvider})...`, expert, "system");
+
+    switch (scmProvider) {
+      case "github":
+        return this.pollGitHubActionsCI(owner, repo, branchName, expert);
+      case "bitbucket":
+        return this.pollBitbucketPipelinesCI(owner, repo, branchName, expert);
+      default:
+        await this.postLog(`[CI Gate] CI polling not supported for ${scmProvider} — skipping`, expert, "system");
+        return { passed: true, summary: `CI polling not supported for ${scmProvider}` };
+    }
+  }
+
+  /**
+   * Poll GitHub Actions API for CI status.
+   */
+  private async pollGitHubActionsCI(
+    owner: string,
+    repo: string,
+    branchName: string,
+    expert: ExpertPersona
+  ): Promise<{ passed: boolean; log?: string; summary: string; infrastructureFailure?: boolean }> {
     const maxWaitMs = 600_000;
     const pollIntervalMs = 10_000;
     const startTime = Date.now();
@@ -616,12 +636,93 @@ export class StoryExecutor {
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       if (elapsed % 30 === 0) {
-        await this.postLog(`[CI Gate] Still waiting for CI... (${elapsed}s elapsed)`, expert, "system");
+        await this.postLog(`[CI Gate] Still waiting for GitHub Actions... (${elapsed}s elapsed)`, expert, "system");
       }
     }
 
-    // Timeout
     const summary = `CI did not complete within 10 minutes${lastRunId ? ` (run ***REMOVED***${lastRunId})` : ""}`;
+    await this.postLog(`[CI Gate] ⏰ ${summary}`, expert, "system");
+    return { passed: false, summary, infrastructureFailure: true };
+  }
+
+  /**
+   * Poll Bitbucket Pipelines API for CI status.
+   * Uses Bearer token auth (Repository Access Token).
+   */
+  private async pollBitbucketPipelinesCI(
+    workspace: string,
+    repoSlug: string,
+    branchName: string,
+    expert: ExpertPersona
+  ): Promise<{ passed: boolean; log?: string; summary: string; infrastructureFailure?: boolean }> {
+    const token = process.env.SCM_TOKEN || process.env.BITBUCKET_TOKEN || this.config.githubToken;
+    const maxWaitMs = 600_000;
+    const pollIntervalMs = 10_000;
+    const startTime = Date.now();
+    let lastPipelineUuid: string | undefined;
+
+    while (Date.now() - startTime < maxWaitMs) {
+      try {
+        const url = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pipelines/?target.branch=${encodeURIComponent(branchName)}&sort=-created_on&pagelen=1`;
+        const response = await axios.get(url, {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 15_000,
+        });
+
+        const pipeline = response.data?.values?.[0];
+        if (pipeline) {
+          lastPipelineUuid = pipeline.uuid;
+          const stateName = pipeline.state?.name;
+
+          if (stateName === "COMPLETED") {
+            const resultName = pipeline.state?.result?.name;
+
+            if (resultName === "SUCCESSFUL") {
+              await this.postLog(`[CI Gate] ✅ Bitbucket Pipeline passed (${pipeline.uuid})`, expert, "system");
+              return { passed: true, summary: `Pipeline passed (${pipeline.uuid})` };
+            }
+
+            // Pipeline failed — get step details
+            let failureLog = "";
+            try {
+              const stepsUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pipelines/${pipeline.uuid}/steps/`;
+              const stepsResp = await axios.get(stepsUrl, {
+                headers: { Authorization: `Bearer ${token}` },
+                timeout: 15_000,
+              });
+              const failedSteps = (stepsResp.data?.values || [])
+                .filter((s: { state?: { result?: { name: string } } }) => s.state?.result?.name === "FAILED")
+                .map((s: { name?: string }) => s.name || "unknown step");
+              failureLog = failedSteps.join(", ");
+            } catch { /* best effort */ }
+
+            const infraKeywords = ["runner", "unavailable", "service container", "rate limit", "no space", "timeout"];
+            const isInfra = resultName === "ERROR" || resultName === "STOPPED" ||
+              infraKeywords.some((k) => failureLog.toLowerCase().includes(k));
+
+            const summary = `Pipeline failed: ${failureLog || resultName} (${pipeline.uuid})`;
+            await this.postLog(`[CI Gate] ❌ ${summary}`, expert, "error");
+
+            return {
+              passed: false,
+              log: failureLog,
+              summary,
+              infrastructureFailure: isInfra,
+            };
+          }
+        }
+      } catch {
+        // API call failed — retry on next poll
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      if (elapsed % 30 === 0) {
+        await this.postLog(`[CI Gate] Still waiting for Bitbucket Pipeline... (${elapsed}s elapsed)`, expert, "system");
+      }
+    }
+
+    const summary = `Pipeline did not complete within 10 minutes${lastPipelineUuid ? ` (${lastPipelineUuid})` : ""}`;
     await this.postLog(`[CI Gate] ⏰ ${summary}`, expert, "system");
     return { passed: false, summary, infrastructureFailure: true };
   }

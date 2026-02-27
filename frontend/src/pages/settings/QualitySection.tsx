@@ -1,4 +1,4 @@
-import { Crown, Eye, Lock, Monitor, Rocket, Sparkles } from "lucide-react";
+import { Crown, Eye, FileText, Lock, Monitor, Rocket, Sparkles } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { Settings, ValidationErrors } from "./types";
 
@@ -575,6 +575,90 @@ export function QualitySection({
           </div>
         </>
       )}
+
+      {/* Spec Engineering */}
+      <div className="flex items-center gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground mb-1 flex items-center gap-2">
+            <FileText className="w-5 h-5 text-violet-400" />
+            Spec Engineering
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Configure governance rules for spec quality before decomposition into boards
+          </p>
+        </div>
+      </div>
+
+      <div className="bg-card rounded-lg border border-border p-6 space-y-6">
+        {/* Minimum Quality Score */}
+        <div>
+          <label className="block text-sm font-medium text-foreground mb-2">
+            Minimum Spec Quality Score
+          </label>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            value={settings.specMinQualityScore}
+            onChange={(e) => {
+              const value = parseInt(e.target.value, 10);
+              updateSetting("specMinQualityScore", isNaN(value) ? 0 : Math.max(0, Math.min(100, value)));
+            }}
+            className="w-full max-w-xs px-3 py-2 bg-background border border-border rounded-md text-foreground placeholder-muted-foreground"
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Specs must score at least this value before they can be decomposed into boards. Set to 0 to disable the quality gate.
+          </p>
+        </div>
+
+        {/* Required Sections */}
+        <div className="pt-4 border-t border-border">
+          <label className="block text-sm font-medium text-foreground mb-3">
+            Required Sections
+          </label>
+          <p className="text-xs text-muted-foreground mb-3">
+            Select which sections must be present in a spec before it can be decomposed.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[
+              "Overview",
+              "Technical Specification",
+              "Data Model",
+              "File Structure",
+              "API Specification",
+              "Component Specification",
+              "Quality Gates",
+              "Acceptance Criteria",
+              "Scope Boundary",
+            ].map((section) => {
+              const currentSections = settings.specRequiredSections ?? [];
+              const isChecked = currentSections.includes(section);
+              return (
+                <label
+                  key={section}
+                  className="flex items-center gap-2 px-3 py-2 bg-background border border-border rounded-md cursor-pointer hover:border-primary/50 transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={(e) => {
+                      let updated: string[];
+                      if (e.target.checked) {
+                        updated = [...currentSections, section];
+                      } else {
+                        updated = currentSections.filter((s) => s !== section);
+                      }
+                      updateSetting("specRequiredSections", updated.length > 0 ? updated : null);
+                    }}
+                    className="rounded border-border text-primary focus:ring-primary/20"
+                  />
+                  <span className="text-sm text-foreground">{section}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

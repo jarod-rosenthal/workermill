@@ -203,6 +203,9 @@ export default function Settings() {
     ],
     codebaseAutoIndexOnTask: true,
     codebaseMaxRetrievalChunks: 10,
+    // Spec Engineering defaults
+    specMinQualityScore: 0,
+    specRequiredSections: null,
   });
   const [originalSettings, setOriginalSettings] = useState<Settings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -542,6 +545,9 @@ export default function Settings() {
         ],
         codebaseAutoIndexOnTask: data.codebaseAutoIndexOnTask ?? true,
         codebaseMaxRetrievalChunks: data.codebaseMaxRetrievalChunks ?? 10,
+        // Spec Engineering settings
+        specMinQualityScore: data.specMinQualityScore ?? 0,
+        specRequiredSections: data.specRequiredSections ?? null,
       };
       setSettings(loadedSettings);
       setOriginalSettings(loadedSettings);

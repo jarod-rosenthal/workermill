@@ -610,69 +610,106 @@ async function finishSetup(
       await waitForAgentReady(log);
     }
   } else if (isDockerInstalled() && ramGB >= 8) {
-    // Docker installed but not running — prompt to start it
-    const action = await vscode.window.showWarningMessage(
-      "Docker Desktop is installed but not running. Start it to enable sandbox mode — " +
-        "WorkerMill will use it automatically.",
-      "Open Docker Desktop",
-      "Continue Without Docker",
-    );
-    if (action === "Open Docker Desktop") {
-      let launched = false;
-      try {
-        if (process.platform === "darwin") {
-          execFileSync("open", ["-a", "Docker"], { timeout: 5000, stdio: "pipe", windowsHide: true });
-          launched = true;
-        } else {
-          // Windows — try common Docker Desktop executable paths
-          const dockerPaths = [
-            "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe",
-            `${process.env.LOCALAPPDATA || ""}\\Docker\\Docker Desktop.exe`,
-            `${process.env.PROGRAMFILES || ""}\\Docker\\Docker\\Docker Desktop.exe`,
-          ];
-          for (const p of dockerPaths) {
-            try {
-              if (fs.existsSync(p)) {
-                execFileSync("cmd.exe", ["/c", "start", "", p], {
-                  timeout: 5000,
-                  stdio: "pipe",
-                  windowsHide: true,
-                });
-                launched = true;
-                break;
+    // Docker installed but not running — explain why Docker matters + confirm to skip
+    let showPrompt = true;
+    while (showPrompt) {
+      const action = await vscode.window.showWarningMessage(
+        "Docker Desktop is installed but not running. Without it, workers run as native processes " +
+          "without filesystem isolation. Start Docker and WorkerMill will use it automatically.",
+        "Open Docker Desktop",
+        "Continue Without Sandbox",
+      );
+      if (action === "Continue Without Sandbox") {
+        const confirm = await vscode.window.showInformationMessage(
+          "You can start Docker later and enable sandbox in WorkerMill Settings.",
+          "I Understand, Continue",
+          "Go Back",
+        );
+        if (confirm === "I Understand, Continue") {
+          showPrompt = false;
+        }
+        // "Go Back" or dismissed → loop back to step 1
+        if (confirm !== "I Understand, Continue") {
+          continue;
+        }
+      } else if (action === "Open Docker Desktop") {
+        showPrompt = false;
+        let launched = false;
+        try {
+          if (process.platform === "darwin") {
+            execFileSync("open", ["-a", "Docker"], { timeout: 5000, stdio: "pipe", windowsHide: true });
+            launched = true;
+          } else {
+            // Windows — try common Docker Desktop executable paths
+            const dockerPaths = [
+              "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe",
+              `${process.env.LOCALAPPDATA || ""}\\Docker\\Docker Desktop.exe`,
+              `${process.env.PROGRAMFILES || ""}\\Docker\\Docker\\Docker Desktop.exe`,
+            ];
+            for (const p of dockerPaths) {
+              try {
+                if (fs.existsSync(p)) {
+                  execFileSync("cmd.exe", ["/c", "start", "", p], {
+                    timeout: 5000,
+                    stdio: "pipe",
+                    windowsHide: true,
+                  });
+                  launched = true;
+                  break;
+                }
+              } catch {
+                /* try next path */
               }
-            } catch {
-              /* try next path */
             }
           }
+        } catch (err) {
+          log(`Failed to launch Docker Desktop: ${err instanceof Error ? err.message : String(err)}`);
         }
-      } catch (err) {
-        log(`Failed to launch Docker Desktop: ${err instanceof Error ? err.message : String(err)}`);
-      }
 
-      if (launched) {
-        vscode.window.showInformationMessage(
-          "Docker Desktop is starting. WorkerMill will use it automatically once it's ready.",
-        );
+        if (launched) {
+          vscode.window.showInformationMessage(
+            "Docker Desktop is starting. WorkerMill will use it automatically once it's ready.",
+          );
+        } else {
+          log("Could not find Docker Desktop executable — prompting manual start");
+          vscode.window.showWarningMessage(
+            "Could not launch Docker Desktop automatically. Please start it manually, then WorkerMill will use it automatically.",
+          );
+        }
       } else {
-        log("Could not find Docker Desktop executable — prompting manual start");
-        vscode.window.showWarningMessage(
-          "Could not launch Docker Desktop automatically. Please start it manually, then WorkerMill will use it automatically.",
-        );
+        // Dismissed — exit loop
+        showPrompt = false;
       }
     }
   } else {
-    // No Docker or insufficient RAM — warn the user
-    const action = await vscode.window.showWarningMessage(
-      "AI workers will run with full access to your filesystem and network. " +
-        "For isolated execution, install Docker Desktop — WorkerMill will use it automatically.",
-      "Install Docker Desktop",
-      "Continue Without Docker",
-    );
-    if (action === "Install Docker Desktop") {
-      vscode.env.openExternal(
-        vscode.Uri.parse("https://www.docker.com/products/docker-desktop/"),
+    // No Docker or insufficient RAM — two-step flow before native mode
+    let showPrompt = true;
+    while (showPrompt) {
+      const action = await vscode.window.showWarningMessage(
+        "Without Docker, AI workers run as native processes with the same permissions as any program " +
+          "on your machine. For filesystem and network isolation, install Docker Desktop.",
+        "Install Docker (Recommended)",
+        "Continue Without Sandbox",
       );
+      if (action === "Install Docker (Recommended)") {
+        showPrompt = false;
+        vscode.env.openExternal(
+          vscode.Uri.parse("https://www.docker.com/products/docker-desktop/"),
+        );
+      } else if (action === "Continue Without Sandbox") {
+        const confirm = await vscode.window.showInformationMessage(
+          "You can enable sandbox mode later in WorkerMill Settings if you install Docker.",
+          "I Understand, Continue",
+          "Go Back",
+        );
+        if (confirm === "I Understand, Continue") {
+          showPrompt = false;
+        }
+        // "Go Back" or dismissed → loop back to step 1
+      } else {
+        // Dismissed — exit loop
+        showPrompt = false;
+      }
     }
   }
 

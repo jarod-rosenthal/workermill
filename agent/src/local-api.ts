@@ -1058,7 +1058,7 @@ Respond with ONLY a JSON object (no markdown fences, no explanation):
 }
 
 qualityGates: Extract pre-commit quality gate commands from the PRD. Each gate has a name (e.g., "backend", "frontend"), a file trigger glob (e.g., "api/**"), and the exact shell commands to run. These are the commands workers run BEFORE every commit to verify code quality. If the PRD doesn't specify quality gates, infer them from the tech stack (e.g., Go → "go vet", "go test", "go build"; Node.js → "npm run lint", "npm run test", "npm run build").
-ciWorkflowPath: The path to the CI workflow file in the repo (e.g., ".github/workflows/ci.yml"). Used to detect when CI becomes available.
+ciWorkflowPath: The path to the CI workflow file in the repo. GitHub repos use ".github/workflows/ci.yml", Bitbucket repos use "bitbucket-pipelines.yml". Used to detect when CI becomes available and to verify CI passes after push.
 estimatedSteps is the number of deliverables in the card (used for progress tracking).
 labels should include relevant technology or domain tags (e.g., "react", "api", "terraform", "auth").`;
 

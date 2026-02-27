@@ -467,6 +467,72 @@ When summarizing your work at the end, describe decisions in plain language. The
   // ─── Quality Gate Methods ─────────────────────────────────────────────────
 
   /**
+   * Run a shell command with watch-mode detection. Uses `spawn` to monitor
+   * stdout in real-time. If the output matches watch-mode patterns (vitest/jest
+   * "Waiting for file changes"), kills the process after a 2s flush window
+   * instead of blocking for the full timeout.
+   */
+  private runGateCommand(
+    cmd: string,
+    cwd: string,
+    timeoutMs: number = 300_000
+  ): Promise<{ stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+      const child = spawn("sh", ["-c", cmd], {
+        cwd,
+        env: { ...process.env, CI: "true" },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      let stdout = "";
+      let stderr = "";
+      let watchModeKilled = false;
+
+      const overallTimer = setTimeout(() => {
+        child.kill("SIGTERM");
+      }, timeoutMs);
+
+      let watchModeTimer: ReturnType<typeof setTimeout> | null = null;
+
+      child.stdout?.on("data", (data: Buffer) => {
+        stdout += data.toString();
+        // Detect watch mode — kill early instead of waiting for full timeout
+        if (/waiting for file changes|press [hq] to/i.test(stdout) && !watchModeTimer) {
+          watchModeTimer = setTimeout(() => {
+            watchModeKilled = true;
+            child.kill("SIGTERM");
+          }, 2000);
+        }
+      });
+
+      child.stderr?.on("data", (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      child.on("close", (code) => {
+        clearTimeout(overallTimer);
+        if (watchModeTimer) clearTimeout(watchModeTimer);
+
+        if (watchModeKilled || code === 0) {
+          resolve({ stdout: stdout.slice(0, 4000), stderr: stderr.slice(0, 2000) });
+        } else {
+          const err = new Error(`Command failed with exit code ${code}`);
+          (err as any).stdout = stdout.slice(0, 4000);
+          (err as any).stderr = stderr.slice(0, 2000);
+          (err as any).code = code;
+          reject(err);
+        }
+      });
+
+      child.on("error", (err) => {
+        clearTimeout(overallTimer);
+        if (watchModeTimer) clearTimeout(watchModeTimer);
+        reject(err);
+      });
+    });
+  }
+
+  /**
    * [GATE 1] Pre-commit quality gate — runs matching quality gate commands
    * based on which files were changed. Commands come from board metadata
    * (extracted from PRD by the decomposer).
@@ -533,21 +599,36 @@ When summarizing your work at the end, describe decisions in plain language. The
         cmd = cmd.replace(/\bgofmt\b(.+?)\.\/([^\s]*)\.\.\./g, "gofmt$1./$2");
 
         try {
-          execSync(cmd, {
-            cwd: worktreePath,
-            encoding: "utf-8",
-            timeout: 300_000, // 5 min per command
-            stdio: ["pipe", "pipe", "pipe"],
-            env: { ...process.env, CI: "true" }, // Disable watch mode in vitest/jest/etc.
-          });
-          await this.postLog(`[Quality Gate] ✅ ${cmd}`, expert, "system");
+          const result = await this.runGateCommand(cmd, worktreePath, 300_000);
+          // runGateCommand resolves for both clean exits AND watch-mode kills.
+          // Check if this was a watch-mode kill where tests actually passed.
+          const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+          const wasWatchMode = /waiting for file changes|press [hq] to/i.test(output);
+          if (wasWatchMode) {
+            // Verify tests actually passed before treating as success
+            const testsPassedPatterns = [
+              /Tests?\s+\d+\s+passed/i,
+              /Test Files?\s+\d+\s+passed/i,
+              /Test Suites?:\s+\d+\s+passed/i,
+            ];
+            if (testsPassedPatterns.some((p) => p.test(output)) && !/\d+\s+failed/i.test(output)) {
+              await this.postLog(`[Quality Gate] ✅ ${cmd} (tests passed — killed watch-mode process)`, expert, "system");
+            } else {
+              await this.postLog(`[Quality Gate] ❌ ${cmd}\n${output}`, expert, "error");
+              return { passed: false, output, failedCommand: cmd };
+            }
+          } else {
+            await this.postLog(`[Quality Gate] ✅ ${cmd}`, expert, "system");
+          }
         } catch (error: unknown) {
-          const stderr = error instanceof Error && "stderr" in error
-            ? String((error as { stderr: unknown }).stderr).slice(0, 2000)
-            : String(error).slice(0, 2000);
-          const stdout = error instanceof Error && "stdout" in error
-            ? String((error as { stdout: unknown }).stdout).slice(0, 2000)
-            : "";
+          const stderr =
+            error instanceof Error && "stderr" in error
+              ? String((error as { stderr: unknown }).stderr).slice(0, 2000)
+              : String(error).slice(0, 2000);
+          const stdout =
+            error instanceof Error && "stdout" in error
+              ? String((error as { stdout: unknown }).stdout).slice(0, 2000)
+              : "";
           const output = [stdout, stderr].filter(Boolean).join("\n");
 
           // "No test files found" is NOT a real failure — it means the test runner

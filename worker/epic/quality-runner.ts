@@ -84,6 +84,7 @@ function runCommand(cmd: string, cwd: string, timeoutMs: number = 120000): Comma
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
       timeout: timeoutMs,
+      env: { ...process.env, CI: "true" }, // Prevent vitest/jest watch mode
     });
     return { stdout, stderr: "", exitCode: 0 };
   } catch (error: unknown) {

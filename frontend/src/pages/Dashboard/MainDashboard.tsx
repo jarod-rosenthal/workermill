@@ -47,6 +47,7 @@ import {
   FileSearch,
   LayoutGrid,
   FileCode,
+  FileText,
   ArrowRight,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../../components/RalphProgress";
@@ -2109,6 +2110,15 @@ export default function Dashboard() {
               <span className="text-sm font-medium">Boards</span>
             </Link>
 
+            {/* Specs Link */}
+            <Link
+              to="/specs"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <FileText className="w-4 h-4 text-violet-500" />
+              <span className="text-sm font-medium">Specs</span>
+            </Link>
+
             {/* Insights Dropdown */}
             <div ref={efficiencyDropdownRef} className="relative">
               <button
@@ -2648,7 +2658,7 @@ export default function Dashboard() {
                                 {/* Show revision counter under Tech Lead Review stage */}
                                 {step.isReviewStage && (
                                   <span className="text-xs text-amber-500 font-medium">
-                                    {(task.revisionCount ?? 0) + 1}/{task.maxReviewRevisions || 3}
+                                    {task.revisionCount ?? 0}/{task.maxReviewRevisions || 3}
                                   </span>
                                 )}
                               </div>
@@ -3368,7 +3378,7 @@ export default function Dashboard() {
                             {/* Show revision badge for tasks past execution */}
                             {["pr_created", "review_requested", "pr_approved", "reviewing", "consolidating", "deployed", "completed", "revision_needed"].includes(task.status) && (
                               <span className="text-xs text-amber-500">
-                                Rev {(task.revisionCount ?? 0) + 1}/{task.maxReviewRevisions || 3}
+                                Rev {task.revisionCount ?? 0}/{task.maxReviewRevisions || 3}
                               </span>
                             )}
                           </div>

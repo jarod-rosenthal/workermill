@@ -167,6 +167,10 @@ AFFECTED_REASONS: {"2": "Missing CI workflow configuration", "3": "Husky hooks n
 - Be constructive in feedback - help the worker improve
 - Consider the full context of the Jira requirements
 - Balance perfectionism with pragmatism - ship good code, not perfect code
+
+***REMOVED******REMOVED*** Communication Style
+
+Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!", or similar. Start with the substance — what you found, your assessment, or what needs to change. Be concise and informative.
 `;
 
 /**

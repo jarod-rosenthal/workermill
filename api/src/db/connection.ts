@@ -264,6 +264,9 @@ import { BlockOnTestFailuresDefault1741300000000 } from "./migrations/1741300000
 import { AddGithubAppInstallationId1741400000000 } from "./migrations/1741400000000-AddGithubAppInstallationId.js";
 import { AddBoardMetadata1741500000000 } from "./migrations/1741500000000-AddBoardMetadata.js";
 import { AddOrgQualityGateCommands1741600000000 } from "./migrations/1741600000000-AddOrgQualityGateCommands.js";
+import { RemoveOrgQualityGateColumns1741700000000 } from "./migrations/1741700000000-RemoveOrgQualityGateColumns.js";
+import { AddBoardEpicFields1741700000001 } from "./migrations/1741700000001-AddBoardEpicFields.js";
+import { AddSpecEngineering1741800000000 } from "./migrations/1741800000000-AddSpecEngineering.js";
 import { logger } from "../utils/logger.js";
 import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
@@ -567,6 +570,9 @@ export const AppDataSource = new DataSource({
     AddGithubAppInstallationId1741400000000,
     AddBoardMetadata1741500000000,
     AddOrgQualityGateCommands1741600000000,
+    RemoveOrgQualityGateColumns1741700000000,
+    AddBoardEpicFields1741700000001,
+    AddSpecEngineering1741800000000,
   ],
   subscribers: [
     OrganizationEncryptionSubscriber,

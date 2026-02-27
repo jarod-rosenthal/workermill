@@ -196,6 +196,8 @@ export class SettingsPanel {
         vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/dashboard`));
       } else if (msg.type === "save-repo") {
         await this.saveRepo(config, msg.defaultRepo);
+      } else if (msg.type === "save-scm") {
+        await this.saveScm(config, msg);
       } else if (msg.type === "open-web-settings") {
         vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/settings`));
       } else if (msg.type === "open-pricing") {
@@ -377,6 +379,74 @@ export class SettingsPanel {
     } catch (err) {
       this.postMessage({
         type: "repo-save-error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private async saveScm(
+    config: { apiUrl: string; apiKey: string },
+    msg: { provider: string; token?: string; reviewerToken?: string; username?: string; appPassword?: string },
+  ): Promise<void> {
+    try {
+      this.postMessage({ type: "scm-saving" });
+
+      const endpointMap: Record<string, string> = {
+        github: "/api/settings/integrations/github",
+        bitbucket: "/api/settings/integrations/bitbucket",
+        gitlab: "/api/settings/integrations/gitlab",
+      };
+      const endpoint = endpointMap[msg.provider];
+      if (!endpoint) {
+        this.postMessage({ type: "scm-save-error", message: `Unknown SCM provider: ${msg.provider}` });
+        return;
+      }
+
+      let body: Record<string, string> = {};
+      if (msg.provider === "github") {
+        if (!msg.token) {
+          this.postMessage({ type: "scm-save-error", message: "Token is required" });
+          return;
+        }
+        body = { token: msg.token };
+        if (msg.reviewerToken) body.reviewerToken = msg.reviewerToken;
+      } else if (msg.provider === "bitbucket") {
+        if (!msg.username || !msg.appPassword) {
+          this.postMessage({ type: "scm-save-error", message: "Username and token are required" });
+          return;
+        }
+        body = { username: msg.username, appPassword: msg.appPassword };
+      } else if (msg.provider === "gitlab") {
+        if (!msg.token) {
+          this.postMessage({ type: "scm-save-error", message: "Token is required" });
+          return;
+        }
+        body = { token: msg.token };
+      }
+
+      const { status, data } = await apiRequest<{ success?: boolean; error?: string }>(
+        "PUT",
+        `${config.apiUrl}${endpoint}`,
+        config.apiKey,
+        body,
+      );
+
+      if (status >= 200 && status < 300) {
+        // Also set this as the default SCM provider
+        await apiRequest("PUT", `${config.apiUrl}/api/settings`, config.apiKey, {
+          scmProvider: msg.provider,
+        });
+        this.postMessage({ type: "scm-saved", message: `${msg.provider} credentials saved` });
+        await this.loadIntegrations(config);
+      } else {
+        this.postMessage({
+          type: "scm-save-error",
+          message: (data as { error?: string }).error || `HTTP ${status}`,
+        });
+      }
+    } catch (err) {
+      this.postMessage({
+        type: "scm-save-error",
         message: err instanceof Error ? err.message : String(err),
       });
     }
@@ -1183,11 +1253,63 @@ export class SettingsPanel {
       </div>
     </div>
 
-    <!-- SCM Status -->
+    <!-- Source Control -->
     <div class="section">
       <h2>Source Control</h2>
-      <div id="scm-status"></div>
-      <div class="hint" style="margin-top: 8px;">Manage SCM tokens in <button class="btn-link" id="btn-web-settings-scm">web settings</button>.</div>
+      <div class="radio-group" style="flex-wrap: wrap;">
+        <label><input type="radio" name="scm" value="github" /> GitHub <span id="scm-github-badge"></span></label>
+        <label id="scm-bitbucket-label" class="locked-option"><input type="radio" name="scm" value="bitbucket" disabled /> Bitbucket <span class="pro-badge">MAX</span> <span id="scm-bitbucket-badge"></span></label>
+        <label id="scm-gitlab-label" class="locked-option"><input type="radio" name="scm" value="gitlab" disabled /> GitLab <span class="pro-badge">MAX</span> <span id="scm-gitlab-badge"></span></label>
+      </div>
+      <div id="scm-upgrade" class="upgrade-hint hidden">Upgrade to Max to unlock Bitbucket and GitLab. <a id="btn-upgrade-scm" href="#">View plans</a></div>
+
+      <!-- GitHub SCM fields -->
+      <div id="scm-github-fields" class="hidden">
+        <div class="field">
+          <label>Token</label>
+          <input type="password" id="scm-github-token" placeholder="GitHub personal access token" />
+          <div class="hint">Personal access token with repo scope</div>
+        </div>
+        <div class="field">
+          <label>Reviewer Token (optional)</label>
+          <input type="password" id="scm-github-reviewer-token" placeholder="GitHub personal access token" />
+          <div class="hint">Separate token for PR approvals (uses main token if blank)</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" id="btn-save-scm-github">Save</button>
+        </div>
+        <div id="scm-github-status" class="status"></div>
+      </div>
+
+      <!-- Bitbucket SCM fields -->
+      <div id="scm-bitbucket-fields" class="hidden">
+        <div class="field">
+          <label>Username</label>
+          <input type="text" id="scm-bb-username" placeholder="workspace/username" />
+        </div>
+        <div class="field">
+          <label>Repository Access Token</label>
+          <input type="password" id="scm-bb-token" placeholder="Repository access token" />
+          <div class="hint">Generate a Repository Access Token in Bitbucket repo settings</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" id="btn-save-scm-bitbucket">Save</button>
+        </div>
+        <div id="scm-bitbucket-status" class="status"></div>
+      </div>
+
+      <!-- GitLab SCM fields -->
+      <div id="scm-gitlab-fields" class="hidden">
+        <div class="field">
+          <label>Token</label>
+          <input type="password" id="scm-gitlab-token" placeholder="GitLab personal access token" />
+          <div class="hint">Personal access token with api scope</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" id="btn-save-scm-gitlab">Save</button>
+        </div>
+        <div id="scm-gitlab-status" class="status"></div>
+      </div>
     </div>
 
     <!-- Target Repository -->
@@ -1375,7 +1497,20 @@ export class SettingsPanel {
       }
     }
 
-    // Radio toggle — skip save during initial load
+    // SCM radio toggle — skip save during initial load
+    const scmRadios = document.querySelectorAll('input[name="scm"]');
+    const scmGithubFields = document.getElementById("scm-github-fields");
+    const scmBitbucketFields = document.getElementById("scm-bitbucket-fields");
+    const scmGitlabFields = document.getElementById("scm-gitlab-fields");
+    let scmInitialLoad = true;
+    scmRadios.forEach(r => r.addEventListener("change", () => {
+      const val = document.querySelector('input[name="scm"]:checked').value;
+      scmGithubFields.classList.toggle("hidden", val !== "github");
+      scmBitbucketFields.classList.toggle("hidden", val !== "bitbucket");
+      scmGitlabFields.classList.toggle("hidden", val !== "gitlab");
+    }));
+
+    // Issue tracker radio toggle — skip save during initial load
     let initialLoad = true;
     radios.forEach(r => r.addEventListener("change", () => {
       const val = document.querySelector('input[name="tracker"]:checked').value;
@@ -1414,6 +1549,29 @@ export class SettingsPanel {
         linearRadio.disabled = true;
         trackerUpgrade.classList.remove("hidden");
       }
+
+      // SCM: Bitbucket + GitLab = Max plan
+      const scmBbLabel = document.getElementById("scm-bitbucket-label");
+      const scmGlLabel = document.getElementById("scm-gitlab-label");
+      const scmBbRadio = scmBbLabel.querySelector("input");
+      const scmGlRadio = scmGlLabel.querySelector("input");
+      const scmUpgrade = document.getElementById("scm-upgrade");
+
+      if (isPaid) {
+        scmBbLabel.classList.remove("locked-option");
+        scmGlLabel.classList.remove("locked-option");
+        scmBbRadio.disabled = false;
+        scmGlRadio.disabled = false;
+        scmBbLabel.querySelectorAll(".pro-badge").forEach(b => b.classList.add("hidden"));
+        scmGlLabel.querySelectorAll(".pro-badge").forEach(b => b.classList.add("hidden"));
+        scmUpgrade.classList.add("hidden");
+      } else {
+        scmBbLabel.classList.add("locked-option");
+        scmGlLabel.classList.add("locked-option");
+        scmBbRadio.disabled = true;
+        scmGlRadio.disabled = true;
+        scmUpgrade.classList.remove("hidden");
+      }
     }
 
     // Buttons
@@ -1437,8 +1595,33 @@ export class SettingsPanel {
     document.getElementById("btn-web-settings-linear").addEventListener("click", () => {
       vscode.postMessage({ type: "open-web-settings" });
     });
-    document.getElementById("btn-web-settings-scm").addEventListener("click", () => {
-      vscode.postMessage({ type: "open-web-settings" });
+    // SCM save buttons
+    document.getElementById("btn-save-scm-github").addEventListener("click", () => {
+      vscode.postMessage({
+        type: "save-scm",
+        provider: "github",
+        token: document.getElementById("scm-github-token").value.trim(),
+        reviewerToken: document.getElementById("scm-github-reviewer-token").value.trim() || undefined,
+      });
+    });
+    document.getElementById("btn-save-scm-bitbucket").addEventListener("click", () => {
+      vscode.postMessage({
+        type: "save-scm",
+        provider: "bitbucket",
+        username: document.getElementById("scm-bb-username").value.trim(),
+        appPassword: document.getElementById("scm-bb-token").value.trim(),
+      });
+    });
+    document.getElementById("btn-save-scm-gitlab").addEventListener("click", () => {
+      vscode.postMessage({
+        type: "save-scm",
+        provider: "gitlab",
+        token: document.getElementById("scm-gitlab-token").value.trim(),
+      });
+    });
+    document.getElementById("btn-upgrade-scm").addEventListener("click", (e) => {
+      e.preventDefault();
+      vscode.postMessage({ type: "open-pricing" });
     });
     document.getElementById("btn-dashboard-boards").addEventListener("click", () => {
       vscode.postMessage({ type: "open-dashboard" });
@@ -1609,23 +1792,28 @@ export class SettingsPanel {
         document.getElementById("github-badge").innerHTML = badge(d.github?.configured);
         document.getElementById("linear-badge").innerHTML = badge(d.linear?.configured);
 
-        // Dynamic SCM rows — only show configured providers
-        const scmContainer = document.getElementById("scm-status");
-        const scmProviders = [
-          { key: "github", label: "GitHub" },
-          { key: "bitbucket", label: "Bitbucket" },
-          { key: "gitlab", label: "GitLab" },
-        ];
-        const configuredScm = scmProviders.filter(p => d[p.key]?.configured);
-        if (configuredScm.length > 0) {
-          scmContainer.innerHTML = configuredScm.map(p =>
-            '<div class="scm-row"><span>' + p.label + ':</span> ' + badge(true) + '</div>'
-          ).join("");
-        } else {
-          scmContainer.innerHTML = '<p style="color:var(--muted)">No source control connected. Configure in <a href="#" id="btn-scm-web-link" style="color:var(--vscode-textLink-foreground)">web settings</a>.</p>';
-          const scmLink = document.getElementById("btn-scm-web-link");
-          if (scmLink) scmLink.addEventListener("click", (e) => { e.preventDefault(); vscode.postMessage({ type: "open-web-settings" }); });
+        // Populate SCM section
+        document.getElementById("scm-github-badge").innerHTML = d.github?.configured ? badge(true) : "";
+        document.getElementById("scm-bitbucket-badge").innerHTML = d.bitbucket?.configured ? badge(true) : "";
+        document.getElementById("scm-gitlab-badge").innerHTML = d.gitlab?.configured ? badge(true) : "";
+
+        // Fill known Bitbucket username if available
+        if (d.bitbucket?.username) {
+          document.getElementById("scm-bb-username").value = d.bitbucket.username;
         }
+
+        // Select current SCM provider radio
+        let scmProvider = d.scmProvider || "github";
+        const scmIsPaid = orgPlan === "max" || orgPlan === "enterprise";
+        if (!scmIsPaid && (scmProvider === "bitbucket" || scmProvider === "gitlab")) {
+          scmProvider = "github";
+        }
+        const scmRadio = document.querySelector('input[name="scm"][value="' + scmProvider + '"]');
+        if (scmRadio) {
+          scmRadio.checked = true;
+          scmRadio.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        scmInitialLoad = false;
 
         // Populate target repo from SCM-specific default
         const scm = d.scmProvider || "github";
@@ -1705,6 +1893,23 @@ export class SettingsPanel {
       if (msg.type === "repo-save-error") {
         const repoStatus = document.getElementById("repo-status");
         showStatus(repoStatus, "error", msg.message || "Failed to save repository");
+      }
+
+      // SCM messages — target only the active provider's status div
+      if (msg.type === "scm-saving") {
+        const activeScm = (document.querySelector('input[name="scm"]:checked') || {}).value || "github";
+        const el = document.getElementById("scm-" + activeScm + "-status");
+        if (el) showStatus(el, "info", "Saving...");
+      }
+      if (msg.type === "scm-saved") {
+        const activeScm = (document.querySelector('input[name="scm"]:checked') || {}).value || "github";
+        const el = document.getElementById("scm-" + activeScm + "-status");
+        if (el) { showStatus(el, "success", msg.message || "Credentials saved"); setTimeout(() => el.classList.remove("visible"), 3000); }
+      }
+      if (msg.type === "scm-save-error") {
+        const activeScm = (document.querySelector('input[name="scm"]:checked') || {}).value || "github";
+        const el = document.getElementById("scm-" + activeScm + "-status");
+        if (el) showStatus(el, "error", msg.message || "Failed to save credentials");
       }
 
       // Sandbox messages

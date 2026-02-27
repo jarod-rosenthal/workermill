@@ -459,6 +459,7 @@ function loadMultiExpertConfig(repoDir: string) {
 async function main(): Promise<void> {
   console.log("=".repeat(60));
   console.log("REMOTE BOOTSTRAP - WorkerMill Epic Agent");
+  console.log("Worker Image Build: 2026-02-27-qg");  // Quality gate enforcement build marker
   console.log("=".repeat(60));
   console.log();
   console.log(`Parent Task ID: ${process.env.PARENT_TASK_ID || "not set"}`);

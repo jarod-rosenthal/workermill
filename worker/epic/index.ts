@@ -115,6 +115,7 @@ function loadResilienceConfig(): ResilienceConfig {
 async function main(): Promise<void> {
   console.log("=".repeat(60));
   console.log("EPIC EXECUTOR - Multi-Agent Collaboration Service");
+  console.log("Worker Image Build: 2026-02-27-qg");  // Quality gate enforcement build marker
   console.log("=".repeat(60));
 
   try {
@@ -134,6 +135,11 @@ async function main(): Promise<void> {
     console.log("  - File overlap gating: " + (resilience.fileOverlapGatingEnabled ?? true));
     console.log("  - Incremental rebase: " + (resilience.incrementalRebaseEnabled ?? true));
     console.log("  - Merge agent: " + (resilience.mergeAgentEnabled ?? false));
+    console.log("  - Quality gate max retries: " + resilience.qualityGateMaxRetries);
+    console.log("Quality Gate Config:");
+    console.log("  - Pre-commit gates: " + (config.qualityGateCommands ? config.qualityGateCommands.length + " configured" : "NONE"));
+    console.log("  - CI workflow path: " + (config.ciWorkflowPath || "NONE"));
+    console.log("  - Quality gate bypass: " + (config.qualityGateBypass ? "YES" : "NO"));
 
     const decisionClient = new DecisionClient({
       apiBaseUrl: config.apiBaseUrl,

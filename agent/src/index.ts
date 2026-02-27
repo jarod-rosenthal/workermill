@@ -95,18 +95,54 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
     }
 
     console.log(`  ${chalk.green("●")} Connected to ${chalk.cyan(config.apiUrl)}`);
-    console.log(`  ${chalk.dim("Agent:")}     ${config.agentId}`);
-    console.log(`  ${chalk.dim("Workers:")}   ${chalk.yellow(String(config.maxWorkers))} parallel`);
-    console.log(`  ${chalk.dim("SCM:")}       ${configResponse.data.scmProvider}`);
-    console.log(`  ${chalk.dim("Model:")}     ${chalk.yellow(configResponse.data.defaultWorkerModel)}`);
+    console.log();
+
+    const cloud = configResponse.data;
+
+    // ── Identity ──
+    console.log(`  ${chalk.dim("Agent:")}      ${config.agentId}`);
+    console.log(`  ${chalk.dim("Version:")}    ${AGENT_VERSION}`);
+    console.log();
+
+    // ── Capacity ──
+    console.log(`  ${chalk.dim("Workloads:")}  ${chalk.yellow(String(config.maxWorkers))} parallel`);
+    console.log(`  ${chalk.dim("Experts:")}    up to ${chalk.yellow(String(cloud.maxParallelExperts))} per workload`);
+    console.log(`  ${chalk.dim("SCM:")}        ${cloud.scmProvider}`);
+    console.log();
+
+    // ── Models ──
+    const workerProvider = cloud.primaryProvider ?? "anthropic";
+    const workerModel = cloud.defaultWorkerModel;
+    const plannerProvider = cloud.planningAgentProvider ?? workerProvider;
+    const plannerModel = cloud.planningAgentModel ?? workerModel;
+    const reviewerRouting = cloud.providerRouting?.tech_lead as
+      | { provider?: string; model?: string }
+      | undefined;
+    const reviewerProvider = reviewerRouting?.provider ?? workerProvider;
+    const reviewerModel = reviewerRouting?.model ?? workerModel;
+
+    console.log(`  ${chalk.dim("Models")}`);
+    console.log(`  ${chalk.dim("  Worker:")}   ${workerProvider} / ${chalk.yellow(workerModel)}`);
+    console.log(`  ${chalk.dim("  Planner:")}  ${plannerProvider} / ${chalk.yellow(plannerModel)}`);
+    console.log(`  ${chalk.dim("  Reviewer:")} ${reviewerProvider} / ${chalk.yellow(reviewerModel)}`);
+    console.log();
+
+    // ── Runtime ──
     if (config.sandbox === "docker") {
-      console.log(`  ${chalk.dim("Sandbox:")}   ${chalk.blue("Docker")} (${config.dockerImage})`);
+      console.log(`  ${chalk.dim("Sandbox:")}    ${chalk.blue("Docker")} (${config.dockerImage})`);
+    } else {
+      console.log(`  ${chalk.dim("Sandbox:")}    off`);
     }
+
+    // RAG status
+    const cloudRag = cloud.codebaseIndexingEnabled === true;
+    const ragLabel = config.localRag ? "local (Ollama)" : cloudRag ? "enabled" : "off";
+    console.log(`  ${chalk.dim("RAG:")}        ${ragLabel}`);
 
     // GPU detection
     const gpu = detectGpu();
     console.log(
-      `  ${chalk.dim("GPU:")}      ${gpu.available ? chalk.green("●") + ` ${gpu.vendor} ${gpu.model}` : chalk.yellow("None")}`,
+      `  ${chalk.dim("GPU:")}        ${gpu.available ? chalk.green("●") + ` ${gpu.vendor} ${gpu.model}` : chalk.yellow("None")}`,
     );
 
     // Local RAG: auto-install Ollama if needed, start it, pull embedding model

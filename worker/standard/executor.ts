@@ -159,27 +159,33 @@ export class StandardExecutor {
   }
 
   /**
-   * Check if CLAUDE.md exists in the repository.
+   * Check if AGENTS.md exists in the repository.
+   * Also checks for CLAUDE.md as a legacy fallback.
    */
-  private async hasClaudeMd(): Promise<boolean> {
+  private async hasAgentsMd(): Promise<boolean> {
     try {
-      await fs.access(`${this.repoPath}/CLAUDE.md`);
+      await fs.access(`${this.repoPath}/AGENTS.md`);
       return true;
     } catch {
-      return false;
+      try {
+        await fs.access(`${this.repoPath}/CLAUDE.md`);
+        return true;
+      } catch {
+        return false;
+      }
     }
   }
 
   /**
-   * Build instructions for generating CLAUDE.md if it doesn't exist.
+   * Build instructions for generating AGENTS.md if it doesn't exist.
    */
-  private buildClaudeMdInstructions(): string {
-    return `## 🚀 IMPORTANT: Generate CLAUDE.md First
+  private buildAgentsMdInstructions(): string {
+    return `## IMPORTANT: Generate AGENTS.md First
 
-This repository does not have a CLAUDE.md file. Before starting your main task, you MUST:
+This repository does not have an AGENTS.md file. Before starting your main task, you MUST:
 
 1. **Analyze the codebase structure** - Look at the project's directories, package.json/pyproject.toml, README.md, and key source files
-2. **Create a CLAUDE.md file** in the repository root with:
+2. **Create an AGENTS.md file** in the repository root with:
    - Project overview and purpose
    - Build/run commands (how to install, test, build, deploy)
    - Code architecture overview
@@ -187,9 +193,9 @@ This repository does not have a CLAUDE.md file. Before starting your main task, 
    - Any important patterns or conventions used
    - Environment setup requirements
 
-3. **Commit the CLAUDE.md** with message: "chore: Add CLAUDE.md for AI assistant context"
+3. **Commit the AGENTS.md** with message: "chore: Add AGENTS.md for AI agent context"
 
-This file helps AI assistants (including yourself) understand the codebase better.
+This file helps AI coding agents (including yourself) understand the codebase better.
 
 **Template structure:**
 \`\`\`markdown
@@ -221,7 +227,7 @@ Describe the main components and how they interact.
 Note any conventions, patterns, or gotchas that are important to understand.
 \`\`\`
 
-**After creating CLAUDE.md, proceed with your main task.**
+**After creating AGENTS.md, proceed with your main task.**
 
 ---
 
@@ -351,11 +357,11 @@ Note any conventions, patterns, or gotchas that are important to understand.
     const commonDirective = await this.loadCommonDirective();
     const agentsMd = await this.loadAgentsMd();
 
-    // Check if CLAUDE.md exists and build instructions if missing
-    const hasClaudeMd = await this.hasClaudeMd();
-    const claudeMdSection = hasClaudeMd ? "" : this.buildClaudeMdInstructions();
-    if (!hasClaudeMd) {
-      await this.postLog("CLAUDE.md not found - will instruct agent to create one", "system");
+    // Check if AGENTS.md (or legacy CLAUDE.md) exists and build instructions if missing
+    const hasAgentsMd = await this.hasAgentsMd();
+    const agentsMdSection = hasAgentsMd ? "" : this.buildAgentsMdInstructions();
+    if (!hasAgentsMd) {
+      await this.postLog("AGENTS.md not found - will instruct agent to create one", "system");
     }
 
     // Build target files section
@@ -396,7 +402,7 @@ ${this.config.reviewFeedback}
     }
 
     const prompt = `You are an AI Worker executing a task from WorkerMill.
-${claudeMdSection}
+${agentsMdSection}
 
 ## Task Information
 - **Ticket**: ${this.config.jiraIssueKey || "N/A"}

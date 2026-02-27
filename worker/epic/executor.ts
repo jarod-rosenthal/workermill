@@ -493,6 +493,22 @@ export class StoryExecutor {
 
     await this.postLog(`[Quality Gate] Checking ${changedFiles.length} changed files against ${gates.length} gate(s)`, expert, "system");
 
+    // Re-run tool installer against the worktree so tools created by the expert
+    // (e.g., go.mod) trigger installation of Go, golangci-lint, etc.
+    // install-tools.sh is idempotent — skips already-installed tools.
+    // Only exists in Docker containers (/app/install-tools.sh), not native agent.
+    try {
+      await fs.access("/app/install-tools.sh");
+      execSync(`/app/install-tools.sh "${worktreePath}"`, {
+        cwd: worktreePath,
+        encoding: "utf-8",
+        timeout: 120_000, // 2 min max for tool installs
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch {
+      // Best effort — script missing (native agent) or install failed
+    }
+
     for (const gate of gates) {
       // Match files against trigger glob (simple prefix match)
       const triggerPrefix = gate.trigger.replace(/\*\*/g, "").replace(/\*/g, "").replace(/\/+$/, "");

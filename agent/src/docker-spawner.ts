@@ -186,11 +186,13 @@ export async function ensureImage(config: AgentConfig): Promise<string> {
     try {
       execFileSync(docker, ["pull", imageTag], { stdio: "pipe", timeout: 300_000, windowsHide: true });
       lastPullTimestamp = Date.now();
+      logImageDigest(docker, imageTag);
       return imageTag;
     } catch {
       if (imageExists) {
         // Pull failed but we have a cached image — use it with a warning
         console.log(`${ts()} ${chalk.yellow("⚠")} Pull failed, using cached image`);
+        logImageDigest(docker, imageTag);
         return imageTag;
       }
       throw new Error(
@@ -200,7 +202,27 @@ export async function ensureImage(config: AgentConfig): Promise<string> {
     }
   }
 
+  logImageDigest(docker, imageTag);
   return imageTag;
+}
+
+/**
+ * Log the image digest and creation date so the user can verify which image is running.
+ */
+function logImageDigest(docker: string, imageTag: string): void {
+  try {
+    const info = execFileSync(
+      docker,
+      ["image", "inspect", imageTag, "--format", "{{.Id}} {{.Created}}"],
+      { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+    ).trim();
+    const [id, created] = info.split(" ", 2);
+    const shortId = id?.replace("sha256:", "").slice(0, 12) || "unknown";
+    const createdDate = created ? new Date(created).toISOString().replace("T", " ").slice(0, 19) : "unknown";
+    console.log(`${ts()} ${chalk.green("✓")} Docker image: ${chalk.cyan(shortId)} (built ${createdDate})`);
+  } catch {
+    // Non-critical — just skip the log
+  }
 }
 
 // ── Helper: self-review label detection ────────────────
@@ -579,8 +601,8 @@ export async function spawnDockerWorker(
     QUALITY_GATE_BYPASS: task.qualityGateBypass ? "true" : "false",
     QUALITY_GATE_COMMANDS: task.jiraFields?.qualityGates
       ? JSON.stringify(task.jiraFields.qualityGates)
-      : (orgConfig.qualityGateCommands ? JSON.stringify(orgConfig.qualityGateCommands) : ""),
-    CI_WORKFLOW_PATH: (task.jiraFields?.ciWorkflowPath as string) || (orgConfig.ciWorkflowPath as string) || "",
+      : "",
+    CI_WORKFLOW_PATH: (task.jiraFields?.ciWorkflowPath as string) || "",
     STANDARD_SDK_MODE: task.standardSdkMode ? "true" : "false",
     MAX_REVIEW_REVISIONS: String(orgConfig.maxReviewRevisions),
     MAX_PER_STORY_REVISIONS: String(orgConfig.maxPerStoryRevisions),

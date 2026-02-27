@@ -175,6 +175,7 @@ export class EpicCoordinator {
     this.resilience = resilience || {
       blockerMaxAutoRetries: 3,
       blockerAutoRetryEnabled: true,
+      qualityGateMaxRetries: 5,
       pushAfterCommit: true,
       gracefulShutdownEnabled: true,
     };

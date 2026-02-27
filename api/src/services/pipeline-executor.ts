@@ -581,6 +581,18 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     additionalEnv.PUSH_AFTER_COMMIT = org.pushAfterCommit !== false ? "true" : "false";
     additionalEnv.GRACEFUL_SHUTDOWN_ENABLED = org.gracefulShutdownEnabled !== false ? "true" : "false";
     additionalEnv.SELF_REVIEW_ENABLED = org.selfReviewEnabled === true ? "true" : "false";
+
+    // Quality gate commands: task-level (from board metadata) > org-level default
+    // This ensures Jira/Linear/GitHub tasks get quality gates even without a board.
+    const taskQualityGates = task.jiraFields?.qualityGates;
+    const qualityGates = taskQualityGates || org.qualityGateCommands;
+    if (qualityGates) {
+      additionalEnv.QUALITY_GATE_COMMANDS = JSON.stringify(qualityGates);
+    }
+    const ciPath = (task.jiraFields?.ciWorkflowPath as string) || org.ciWorkflowPath;
+    if (ciPath) {
+      additionalEnv.CI_WORKFLOW_PATH = ciPath;
+    }
   }
 
   const allProviders = new Set<string>();

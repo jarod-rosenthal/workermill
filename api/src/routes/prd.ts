@@ -480,9 +480,18 @@ router.post(
         const boardMetadata: Record<string, unknown> = {};
         if (decomposed.qualityGates && decomposed.qualityGates.length > 0) {
           boardMetadata.qualityGates = decomposed.qualityGates;
+
+          // Auto-save to org settings as default for future tasks from any tracker
+          const orgRepo = AppDataSource.getRepository(Organization);
+          await orgRepo.update({ id: org.id }, { qualityGateCommands: decomposed.qualityGates });
+          logger.info("Saved PRD quality gates to org settings", { orgId: org.id, gateCount: decomposed.qualityGates.length });
         }
         if (decomposed.ciWorkflowPath) {
           boardMetadata.ciWorkflowPath = decomposed.ciWorkflowPath;
+
+          // Auto-save to org settings
+          const orgRepo = AppDataSource.getRepository(Organization);
+          await orgRepo.update({ id: org.id }, { ciWorkflowPath: decomposed.ciWorkflowPath });
         }
         const board = boardRepo.create({
           orgId: org.id,

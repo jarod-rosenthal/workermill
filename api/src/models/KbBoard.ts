@@ -15,6 +15,9 @@ import type { KbColumn } from "./KbColumn.js";
 import type { KbStarredBoard } from "./KbStarredBoard.js";
 import type { KbActivity } from "./KbActivity.js";
 
+export type BoardPriority = "urgent" | "high" | "medium" | "low";
+export type BoardStatus = "active" | "completed" | "archived";
+
 @Entity("kb_boards")
 @Index(["orgId"])
 export class KbBoard {
@@ -61,6 +64,29 @@ export class KbBoard {
     ciWorkflowPath?: string;
   };
 
+  // First-class quality gate fields (migrated from metadata JSONB)
+  @Column({ name: "quality_gate_commands", type: "jsonb", nullable: true })
+  qualityGateCommands: Array<{ name: string; trigger: string; commands: string[] }> | null;
+
+  @Column({ name: "ci_workflow_path", type: "varchar", length: 500, nullable: true })
+  ciWorkflowPath: string | null;
+
+  // Epic ticket fields
+  @Column({ type: "varchar", length: 20, nullable: true })
+  priority: BoardPriority | null;
+
+  @Column({ name: "due_date", type: "timestamptz", nullable: true })
+  dueDate: Date | null;
+
+  @Column({ name: "assignee_id", type: "uuid", nullable: true })
+  assigneeId: string | null;
+
+  @Column({ type: "varchar", length: 50, default: "active" })
+  status: BoardStatus;
+
+  @Column({ name: "spec_id", type: "uuid", nullable: true })
+  specId: string | null;
+
   @Column({ name: "created_by", type: "uuid", nullable: true })
   createdById: string | null;
 
@@ -78,6 +104,10 @@ export class KbBoard {
   @ManyToOne(() => User, { onDelete: "SET NULL" })
   @JoinColumn({ name: "created_by" })
   createdBy: User | null;
+
+  @ManyToOne(() => User, { onDelete: "SET NULL" })
+  @JoinColumn({ name: "assignee_id" })
+  assignee: User | null;
 
   @OneToMany("KbColumn", "board")
   columns: KbColumn[];

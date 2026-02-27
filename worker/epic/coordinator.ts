@@ -94,6 +94,10 @@ export class EpicCoordinator {
   private blockedStoryIndices: Set<number> = new Set();
   // Resilience: Track failed stories (for auto-retry)
   private failedStoryIndices: Set<number> = new Set();
+  // Resilience: Track parked stories (quality gate retries exhausted, waiting for deferred retry)
+  private parkedStoryIndices: Set<number> = new Set();
+  // Resilience: Track stories that have already been through deferred retry (prevent infinite loops)
+  private deferredRetryUsed: Set<number> = new Set();
   // Resilience configuration
   private resilience: ResilienceConfig;
   // Active worktrees for graceful shutdown
@@ -2149,6 +2153,16 @@ export class EpicCoordinator {
         return;
       }
 
+      // Handle parked story — quality gate retries exhausted, waiting for deferred retry
+      if (result.parked) {
+        console.log(`[Epic] Story ${story.storyIndex} parked — quality gate retries exhausted, waiting for siblings`);
+        this.parkedStoryIndices.add(story.storyIndex);
+        this.unregisterRunningStory(story.storyIndex);
+        // Reset expert to idle so it can work on other stories
+        this.expertStates.set(expert, { persona: expert, status: "idle" });
+        return;
+      }
+
       // Unregister from mutex tracking now that execution is complete
       this.unregisterRunningStory(story.storyIndex);
 
@@ -2682,6 +2696,9 @@ export class EpicCoordinator {
       // Skip if blocked (dependency on a failed story)
       if (this.blockedStoryIndices.has(storyIndex)) return false;
 
+      // Skip if parked (waiting for deferred retry after siblings complete)
+      if (this.parkedStoryIndices.has(storyIndex)) return false;
+
       // Skip if no expert can handle this persona
       const hasMatchingExpert = matchPersonaToExpert(storyPersona) !== null;
       if (!hasMatchingExpert) {
@@ -2693,8 +2710,29 @@ export class EpicCoordinator {
       return true;
     });
 
+    // Deferred retry: if parked stories exist and all non-parked stories are done, retry them
+    if (allIdle && readyToClaim.length === 0 && this.parkedStoryIndices.size > 0 && completions.length > 0) {
+      const parkedList = Array.from(this.parkedStoryIndices).sort((a, b) => a - b);
+      this.postLog(
+        `All other stories complete — retrying ${parkedList.length} parked story(ies): [${parkedList.join(", ")}]`
+      );
+
+      for (const storyIndex of parkedList) {
+        // Move from parked back to claimable
+        this.parkedStoryIndices.delete(storyIndex);
+        // Track that this story has used its deferred retry
+        this.deferredRetryUsed.add(storyIndex);
+        this.executor.markDeferredRetryUsed(storyIndex);
+        // Reset quality gate retry counter so the deferred attempt gets fresh retries
+        this.executor.resetQualityGateRetries(storyIndex);
+      }
+      // Stories are now claimable again — the main loop will pick them up
+      return;
+    }
+
     // Deadlock detection: all experts idle, no claimable stories, but failed/blocked stories remain
-    if (allIdle && readyToClaim.length === 0 && (this.failedStoryIndices.size > 0 || this.blockedStoryIndices.size > 0) && completions.length > 0) {
+    // Don't trigger deadlock if parked stories are waiting for deferred retry
+    if (allIdle && readyToClaim.length === 0 && this.parkedStoryIndices.size === 0 && (this.failedStoryIndices.size > 0 || this.blockedStoryIndices.size > 0) && completions.length > 0) {
       const failedList = Array.from(this.failedStoryIndices).sort((a, b) => a - b);
       const blockedList = Array.from(this.blockedStoryIndices).sort((a, b) => a - b);
       console.log(`[Epic] Deadlock detected — failed stories: [${failedList}], blocked stories: [${blockedList}]`);

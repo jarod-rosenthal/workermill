@@ -15,6 +15,7 @@ import {
   KbLabel,
   KbCardLabel,
   KbCardDependency,
+  KbSpec,
   Organization,
 } from "../models/index.js";
 import { authenticateUser, authenticateApiKey } from "../middleware/auth.js";
@@ -238,6 +239,7 @@ router.post(
     .isString()
     .isLength({ max: 200 })
     .withMessage("boardName must be a string (max 200 chars)"),
+  body("specId").optional().isUUID(),
   body("syncToTracker")
     .optional()
     .isBoolean()
@@ -247,7 +249,7 @@ router.post(
     try {
       const org = req.organization!;
       const user = req.user; // may be undefined when using API key auth (agent)
-      const {
+      let {
         source,
         content,
         fileUrl,
@@ -256,6 +258,40 @@ router.post(
         boardName: boardNameOverride,
         syncToTracker,
       } = req.body;
+
+      // ---------------------------------------------------------------
+      // 0. If specId provided, load spec and validate quality gate
+      // ---------------------------------------------------------------
+      let specRecord: KbSpec | null = null;
+      if (req.body.specId) {
+        const specRepo = AppDataSource.getRepository(KbSpec);
+        specRecord = await specRepo.findOne({
+          where: { id: req.body.specId, orgId: org.id },
+        });
+        if (!specRecord) {
+          res.status(404).json({ error: "Spec not found" });
+          return;
+        }
+        if (!specRecord.content) {
+          res.status(400).json({ error: "Spec has no content" });
+          return;
+        }
+        // Check quality gate
+        if (
+          org.specMinQualityScore > 0 &&
+          (specRecord.qualityScore === null ||
+            specRecord.qualityScore < org.specMinQualityScore)
+        ) {
+          res.status(400).json({
+            error: `Spec quality score (${specRecord.qualityScore ?? "not scored"}) is below org minimum (${org.specMinQualityScore})`,
+          });
+          return;
+        }
+        // Use spec content for decomposition if no explicit content provided
+        if (!content) {
+          content = specRecord.content;
+        }
+      }
 
       // ---------------------------------------------------------------
       // 1. Resolve PRD content from the specified source
@@ -476,23 +512,7 @@ router.post(
 
         const prefix = await generateUniquePrefix(boardRepo, org.id, finalBoardName);
 
-        // Create board (with quality gates from PRD decomposition if available)
-        const boardMetadata: Record<string, unknown> = {};
-        if (decomposed.qualityGates && decomposed.qualityGates.length > 0) {
-          boardMetadata.qualityGates = decomposed.qualityGates;
-
-          // Auto-save to org settings as default for future tasks from any tracker
-          const orgRepo = AppDataSource.getRepository(Organization);
-          await orgRepo.update({ id: org.id }, { qualityGateCommands: decomposed.qualityGates });
-          logger.info("Saved PRD quality gates to org settings", { orgId: org.id, gateCount: decomposed.qualityGates.length });
-        }
-        if (decomposed.ciWorkflowPath) {
-          boardMetadata.ciWorkflowPath = decomposed.ciWorkflowPath;
-
-          // Auto-save to org settings
-          const orgRepo = AppDataSource.getRepository(Organization);
-          await orgRepo.update({ id: org.id }, { ciWorkflowPath: decomposed.ciWorkflowPath });
-        }
+        // Create board with quality gates as first-class columns
         const board = boardRepo.create({
           orgId: org.id,
           name: finalBoardName,
@@ -501,7 +521,8 @@ router.post(
           prefix,
           nextCardNumber: 1,
           createdById: user?.id || null,
-          metadata: boardMetadata as KbBoard["metadata"],
+          qualityGateCommands: decomposed.qualityGates?.length ? decomposed.qualityGates : null,
+          ciWorkflowPath: decomposed.ciWorkflowPath || null,
         });
         await boardRepo.save(board);
 
@@ -614,6 +635,20 @@ router.post(
 
         return { board, prefix, createdCards, decomposed };
       });
+
+      // ---------------------------------------------------------------
+      // 3b. Link spec to board (if spec-driven decomposition)
+      // ---------------------------------------------------------------
+      if (specRecord) {
+        await AppDataSource.getRepository(KbSpec).update(
+          { id: specRecord.id },
+          { boardId: result.board.id, status: "decomposed" as const },
+        );
+        await AppDataSource.getRepository(KbBoard).update(
+          { id: result.board.id },
+          { specId: specRecord.id },
+        );
+      }
 
       // ---------------------------------------------------------------
       // 4. Sync to external tracker if requested

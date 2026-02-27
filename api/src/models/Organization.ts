@@ -501,16 +501,6 @@ export class Organization {
   @Column({ name: "block_on_test_failures", type: "boolean", default: true })
   blockOnTestFailures: boolean;
 
-  // Pre-commit quality gate commands — org-level default for ALL task sources (boards, Jira, Linear, GitHub)
-  // Format: [{name: "backend", trigger: "api/**", commands: ["go vet ./...", "go test ./..."]}]
-  // Board-level quality gates (from PRD decomposition) override these when available.
-  @Column({ name: "quality_gate_commands", type: "jsonb", nullable: true })
-  qualityGateCommands: Array<{ name: string; trigger: string; commands: string[] }> | null;
-
-  // CI workflow path — org-level default (e.g., ".github/workflows/ci.yml")
-  @Column({ name: "ci_workflow_path", type: "varchar", length: 500, nullable: true })
-  ciWorkflowPath: string | null;
-
   // External Quality Tool Integrations
   @Column({ name: "sonarqube_url", type: "varchar", length: 500, nullable: true })
   sonarqubeUrl: string | null;
@@ -707,6 +697,13 @@ export class Organization {
 
   @Column({ name: "marketing_escalation_threshold_cents", type: "int", default: 10000 })
   marketingEscalationThresholdCents: number;
+
+  // Spec Engineering Settings
+  @Column({ name: "spec_min_quality_score", type: "int", default: 0 })
+  specMinQualityScore: number;
+
+  @Column({ name: "spec_required_sections", type: "jsonb", nullable: true })
+  specRequiredSections: string[] | null;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;

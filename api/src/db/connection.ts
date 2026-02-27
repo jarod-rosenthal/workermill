@@ -57,6 +57,9 @@ import {
   MarketingContent,
   MarketingAction,
   OrgCredential,
+  KbSpec,
+  KbSpecTemplate,
+  KbSpecVersion,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -362,6 +365,9 @@ export const AppDataSource = new DataSource({
     MarketingContent,
     MarketingAction,
     OrgCredential,
+    KbSpec,
+    KbSpecTemplate,
+    KbSpecVersion,
   ],
   migrations: [
     InitialSchema1704067200000,

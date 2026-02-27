@@ -502,7 +502,11 @@ export class StoryExecutor {
 
       await this.postLog(`[Quality Gate] Running ${gate.name} gate (${gate.commands.length} commands)`, expert, "system");
 
-      for (const cmd of gate.commands) {
+      for (let cmd of gate.commands) {
+        // Fix common LLM mistake: gofmt doesn't support Go's "..." wildcard.
+        // Rewrite "gofmt -w ./api/..." → "gofmt -w ./api/" etc.
+        cmd = cmd.replace(/\bgofmt\b(.+?)\.\/([^\s]*)\.\.\./g, "gofmt$1./$2");
+
         try {
           execSync(cmd, {
             cwd: worktreePath,

@@ -375,6 +375,23 @@ export function QualitySection({
               </div>
             )}
 
+            {/* Quality Gate Max Retries */}
+            <div className="flex items-center justify-between mb-4 pt-4 border-t border-border">
+              <div>
+                <span className="text-sm text-foreground">Quality Gate Max Retries</span>
+                <p className="text-xs text-muted-foreground">Max retries when pre-commit quality gates (lint, test, build) fail</p>
+              </div>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={settings.qualityGateMaxRetries}
+                onChange={(e) => updateSetting("qualityGateMaxRetries", parseInt(e.target.value, 10) || 5)}
+                className="w-20 px-3 py-2 bg-background border border-border rounded-md text-foreground text-center"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground -mt-3 mb-4 ml-0">1-20 attempts before escalating as blocker (default: 5). Separate from general auto-retry — quality gate failures give experts more chances since each retry re-runs the full code generation.</p>
+
             {/* Push After Commit */}
             <div className="flex items-center justify-between mb-4 pt-4 border-t border-border">
               <div>

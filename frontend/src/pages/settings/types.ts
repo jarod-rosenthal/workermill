@@ -114,6 +114,7 @@ export interface Settings {
   // Resilience settings
   blockerMaxAutoRetries: number;
   blockerAutoRetryEnabled: boolean;
+  qualityGateMaxRetries: number;
   pushAfterCommit: boolean;
   gracefulShutdownEnabled: boolean;
   selfReviewEnabled: boolean;

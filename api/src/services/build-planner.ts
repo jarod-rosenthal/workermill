@@ -104,16 +104,33 @@ Design the architecture, choose the tech stack, and break the work into executab
 - Each story should modify ≤3 files
 - Order by dependencies (foundation → backend → frontend, etc.)
 
+## CI/CD IS A FIRST-CLASS CITIZEN (MANDATORY)
+
+**CI/CD is NOT an afterthought tacked onto another story. It gets its own dedicated story early in the plan.**
+
+1. **Story 0**: Project scaffold (repo structure, package.json, go.mod, etc.)
+2. **Story 1 or 2**: CI/CD pipeline — this is a DEDICATED story assigned to \`devops_engineer\`
+   - Create the CI workflow file (e.g., \`.github/workflows/ci.yml\` or equivalent)
+   - Include ALL quality gate steps: lint, typecheck, test, build
+   - Add a trivial passing test so CI runs green immediately
+   - Acceptance criteria MUST include: "CI pipeline runs and passes on push to the feature branch"
+3. **ALL subsequent stories depend on the CI/CD story** — nothing proceeds until the pipeline is verified green
+
+The CI/CD story must produce a pipeline that actually runs and passes. A CI YAML file that has never been executed is NOT complete. The acceptance criteria must require verification that CI ran and passed.
+
+**Quality gate commands** (from the qualityGates output field) must match what the CI pipeline runs. If the CI runs \`npm run lint && npm run test && npm run build\`, those exact commands go in qualityGates.
+
 ## Dependency Rules - CREATE NATURAL FLOW
 
 **CRITICAL: The dependency graph must flow naturally. Tasks should chain together logically.**
 
 Good patterns:
-- **Foundation → Features**: Story 0 (project setup + models) → Story 1-3 (features using models)
-- **Backend → Frontend**: Story 1 (API) → Story 2 (UI that calls API)
+- **Foundation → CI/CD → Features**: Story 0 (scaffold) → Story 1 (CI/CD pipeline) → Story 2+ (features)
+- **Backend → Frontend**: Story N (API) → Story N+1 (UI that calls API)
 
 **Every story (except the very first) should have at least one dependency.**
 Multiple stories CAN depend on the same story (fan-out for parallel execution).
+**The CI/CD story MUST be in the dependency chain of every feature story** (directly or transitively).
 
 ## Acceptance Criteria Guidelines (CRITICAL)
 
@@ -150,7 +167,7 @@ You MUST specify techStack with at least: language, framework, rationale.
 {
   "strategy": "multi",
   "reasoning": "string - architectural approach and key decisions",
-  "qualityGates": ["gate1", "gate2"],
+  "qualityGates": ["npm run lint", "npm run test", "npm run build"],
   "techStack": {
     "language": "typescript|python|javascript",
     "framework": "react|express|none",

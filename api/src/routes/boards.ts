@@ -291,6 +291,10 @@ export async function runCardAsWorkerTask(
     criticEnabled: hasCriticLabel,
     ticketSystem: "internal",
     boardExecutionId: boardExecutionId || null,
+    jiraFields: {
+      ...(card.board?.metadata?.qualityGates ? { qualityGates: card.board.metadata.qualityGates } : {}),
+      ...(card.board?.metadata?.ciWorkflowPath ? { ciWorkflowPath: card.board.metadata.ciWorkflowPath } : {}),
+    },
   });
 
   await workerTaskRepo.save(workerTask);

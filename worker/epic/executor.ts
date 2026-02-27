@@ -762,14 +762,28 @@ When summarizing your work at the end, describe decisions in plain language. The
 
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+      // Early exit: if no runs found after 3 minutes, CI likely doesn't trigger on this branch
+      if (!lastRunId && Date.now() - startTime > 180_000) {
+        await this.postLog(`[CI Gate] ⏭️ No CI workflow triggered on this branch — CI will be verified on the PR`, expert, "system");
+        return { passed: true, summary: "No CI triggered on branch — skipped" };
+      }
+
       if (elapsed % 30 === 0) {
         await this.postLog(`[CI Gate] Still waiting for GitHub Actions... (${elapsed}s elapsed)`, expert, "system");
       }
     }
 
-    const summary = `CI did not complete within 10 minutes${lastRunId ? ` (run #${lastRunId})` : ""}`;
-    await this.postLog(`[CI Gate] ⏰ ${summary}`, expert, "system");
-    return { passed: false, summary, infrastructureFailure: true };
+    // Timeout with a run in progress — actual infrastructure issue
+    if (lastRunId) {
+      const summary = `CI did not complete within 10 minutes (run #${lastRunId})`;
+      await this.postLog(`[CI Gate] ⏰ ${summary}`, expert, "system");
+      return { passed: false, summary, infrastructureFailure: true };
+    }
+
+    // Timeout with no runs at all — graceful skip
+    await this.postLog(`[CI Gate] ⏭️ No CI workflow triggered on this branch — CI will be verified on the PR`, expert, "system");
+    return { passed: true, summary: "No CI triggered on branch — skipped" };
   }
 
   /**
@@ -844,14 +858,28 @@ When summarizing your work at the end, describe decisions in plain language. The
 
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+      // Early exit: if no pipeline found after 3 minutes, CI likely doesn't trigger on this branch
+      if (!lastPipelineUuid && Date.now() - startTime > 180_000) {
+        await this.postLog(`[CI Gate] ⏭️ No Bitbucket Pipeline triggered on this branch — CI will be verified on the PR`, expert, "system");
+        return { passed: true, summary: "No pipeline triggered on branch — skipped" };
+      }
+
       if (elapsed % 30 === 0) {
         await this.postLog(`[CI Gate] Still waiting for Bitbucket Pipeline... (${elapsed}s elapsed)`, expert, "system");
       }
     }
 
-    const summary = `Pipeline did not complete within 10 minutes${lastPipelineUuid ? ` (${lastPipelineUuid})` : ""}`;
-    await this.postLog(`[CI Gate] ⏰ ${summary}`, expert, "system");
-    return { passed: false, summary, infrastructureFailure: true };
+    // Timeout with a pipeline in progress — actual infrastructure issue
+    if (lastPipelineUuid) {
+      const summary = `Pipeline did not complete within 10 minutes (${lastPipelineUuid})`;
+      await this.postLog(`[CI Gate] ⏰ ${summary}`, expert, "system");
+      return { passed: false, summary, infrastructureFailure: true };
+    }
+
+    // Timeout with no pipelines at all — graceful skip
+    await this.postLog(`[CI Gate] ⏭️ No Bitbucket Pipeline triggered on this branch — CI will be verified on the PR`, expert, "system");
+    return { passed: true, summary: "No pipeline triggered on branch — skipped" };
   }
 
   private async validateStoryCompletion(

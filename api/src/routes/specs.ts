@@ -8,6 +8,7 @@ import { Router, Request, Response } from "express";
 import { AppDataSource } from "../db/connection.js";
 import { KbSpec, KbSpecTemplate, KbSpecVersion } from "../models/index.js";
 import { scoreSpec } from "../services/spec-scorer.js";
+import { ensureBuiltInTemplates } from "../services/spec-templates.js";
 import { authenticateUser } from "../middleware/auth.js";
 import { requireCurrentTos } from "../middleware/tos.js";
 import { logger } from "../utils/logger.js";
@@ -35,6 +36,8 @@ router.use(requireCurrentTos);
 router.get("/templates/list", async (req: Request, res: Response) => {
   try {
     const org = req.organization!;
+
+    await ensureBuiltInTemplates(org.id);
 
     const templates = await AppDataSource.getRepository(KbSpecTemplate)
       .createQueryBuilder("t")

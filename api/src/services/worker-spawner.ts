@@ -502,6 +502,7 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
       // Other resilience settings
       additionalEnv.BLOCKER_MAX_AUTO_RETRIES = String(org.blockerMaxAutoRetries);
       additionalEnv.BLOCKER_AUTO_RETRY_ENABLED = org.blockerAutoRetryEnabled !== false ? "true" : "false";
+      additionalEnv.QUALITY_GATE_MAX_RETRIES = String(org.qualityGateMaxRetries);
       additionalEnv.PUSH_AFTER_COMMIT = org.pushAfterCommit !== false ? "true" : "false";
       additionalEnv.GRACEFUL_SHUTDOWN_ENABLED = org.gracefulShutdownEnabled !== false ? "true" : "false";
       // Intent Engineering — org guidelines flow into worker system prompt

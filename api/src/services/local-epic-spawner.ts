@@ -795,6 +795,9 @@ class LocalEpicSpawner {
       // Resilience Settings (from org settings)
       BLOCKER_MAX_AUTO_RETRIES: String(task.organization?.blockerMaxAutoRetries),
       BLOCKER_AUTO_RETRY_ENABLED: task.organization?.blockerAutoRetryEnabled !== false ? "true" : "false",
+      QUALITY_GATE_MAX_RETRIES: String(task.organization?.qualityGateMaxRetries ?? 5),
+      QUALITY_GATE_COMMANDS: task.jiraFields?.qualityGates ? JSON.stringify(task.jiraFields.qualityGates) : "",
+      CI_WORKFLOW_PATH: (task.jiraFields?.ciWorkflowPath as string) || "",
       PUSH_AFTER_COMMIT: task.organization?.pushAfterCommit !== false ? "true" : "false",
       GRACEFUL_SHUTDOWN_ENABLED: task.organization?.gracefulShutdownEnabled !== false ? "true" : "false",
       SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (task.organization?.selfReviewEnabled === true) ? "true" : "false",

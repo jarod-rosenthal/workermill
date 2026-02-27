@@ -663,6 +663,9 @@ export class Organization {
   @Column({ name: "blocker_auto_retry_enabled", type: "boolean", default: true })
   blockerAutoRetryEnabled: boolean;
 
+  @Column({ name: "quality_gate_max_retries", type: "int", default: 5 })
+  qualityGateMaxRetries: number;
+
   @Column({ name: "push_after_commit", type: "boolean", default: true })
   pushAfterCommit: boolean;
 

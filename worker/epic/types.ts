@@ -180,6 +180,14 @@ export interface EpicConfig {
   reviewFeedback?: string;
   /** If true, bypass quality gate checks (bypass-quality-gate label) */
   qualityGateBypass?: boolean;
+  /** Pre-commit quality gate commands from board metadata (extracted from PRD) */
+  qualityGateCommands?: {
+    name: string;
+    trigger: string;
+    commands: string[];
+  }[];
+  /** CI workflow path for post-push verification (from board metadata) */
+  ciWorkflowPath?: string;
   /** Quality gate thresholds from organization settings */
   qualityThresholds?: {
     qualityGateEnabled: boolean;
@@ -332,6 +340,8 @@ export interface ResilienceConfig {
   blockerMaxAutoRetries: number;
   /** Whether auto-retry is enabled for fixable errors */
   blockerAutoRetryEnabled: boolean;
+  /** Maximum retries for quality gate failures (separate from general blocker retries) */
+  qualityGateMaxRetries: number;
   /** Push to remote after each agent commit */
   pushAfterCommit: boolean;
   /** Enable graceful shutdown on SIGTERM */

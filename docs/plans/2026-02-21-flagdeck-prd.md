@@ -81,6 +81,101 @@ After every `git push`, workers MUST:
 - Use `goimports` or `gofmt` to auto-sort
 - Package names: lowercase, single word, no underscores (`flagservice`, not `flag_service`)
 
+### Go Error Handling — EVERY Return Value MUST Be Checked (errcheck)
+
+`golangci-lint` enables the `errcheck` linter. **Every function that returns an error MUST have its error checked.** This is the #1 CI failure across all builds.
+
+```go
+// WRONG — errcheck violation, CI will fail:
+json.NewEncoder(w).Encode(response)
+collection.InsertOne(ctx, doc)
+cursor.Close(ctx)
+defer conn.Close()
+
+// RIGHT — always check or explicitly discard with _:
+if err := json.NewEncoder(w).Encode(response); err != nil {
+    return fmt.Errorf("encode response: %w", err)
+}
+_, err := collection.InsertOne(ctx, doc)
+if err != nil { ... }
+if err := cursor.Close(ctx); err != nil { ... }
+defer func() { _ = conn.Close() }()
+```
+
+**Common errcheck traps:**
+- `fmt.Fprintf(w, ...)` — returns `(int, error)`, must handle the error
+- `redis.Set(ctx, key, val, ttl)` — returns `*StatusCmd`, check `.Err()`
+- `json.NewEncoder(w).Encode(...)` — returns `error`, must check
+- `defer file.Close()` → `defer func() { _ = file.Close() }()` (explicit discard)
+- `io.Copy(dst, src)` — returns `(int64, error)`, must check
+
+### Go Import Cycle Prevention (MANDATORY)
+
+Go does NOT allow circular imports. Plan your package dependencies as a **DAG** (directed acyclic graph).
+
+```
+ALLOWED dependency direction (top → bottom):
+  cmd/server → internal/router → internal/handlers → internal/services → internal/models
+                                                   → internal/database
+                                                   → internal/middleware
+
+NEVER:
+  internal/models → internal/handlers  (models must NOT import handlers)
+  internal/services → internal/handlers (services must NOT import handlers)
+  internal/database → internal/services (database must NOT import services)
+```
+
+**Rules:**
+- `models/` imports NOTHING from this project (only stdlib + drivers)
+- `database/` imports only `models/` and `config/`
+- `services/` imports `models/` and `database/`
+- `handlers/` imports `services/`, `models/`, and `middleware/`
+- `router/` imports `handlers/` and `middleware/`
+- If you need a type in two packages, put it in `models/`
+- If two packages need each other, extract the shared interface into `models/` or a new `types/` package
+
+### Go Lint Patterns — gosimple (MANDATORY)
+
+`golangci-lint` enables `gosimple`. These patterns cause CI failures:
+
+```go
+// WRONG (S1002): if x == true { ... }
+// RIGHT:         if x { ... }
+
+// WRONG (S1039): fmt.Sprintf("simple string") with no format verbs
+// RIGHT:         "simple string"
+
+// WRONG (S1025): fmt.Sprintf("%s", someString)
+// RIGHT:         someString
+
+// WRONG (S1024): time.After in select without cancel
+// RIGHT:         Use time.NewTimer with defer timer.Stop()
+
+// WRONG: strings.Replace(s, old, new, -1)
+// RIGHT: strings.ReplaceAll(s, old, new)
+```
+
+### Redis Client — Use go-redis v9 API (NOT v8)
+
+The PRD specifies `github.com/redis/go-redis/v9`. Do NOT use deprecated v8 patterns:
+
+```go
+// WRONG (v8 patterns — will not compile with v9):
+rdb.Set(ctx, key, value, 0).Err()                    // v8 chaining
+rdb.Do(ctx, "SET", key, value)                        // raw command (use typed methods)
+redis.NewClient(&redis.Options{Addr: "localhost:6379"}) // missing TLS for Upstash
+
+// RIGHT (v9 patterns):
+err := rdb.Set(ctx, key, value, 0).Err()              // must capture error
+val, err := rdb.Get(ctx, key).Result()                 // always check Result()
+if errors.Is(err, redis.Nil) { /* key doesn't exist */ }
+
+// Upstash TLS connection (v9):
+opt, err := redis.ParseURL(os.Getenv("REDIS_URL"))    // rediss:// auto-enables TLS
+if err != nil { ... }
+rdb := redis.NewClient(opt)
+```
+
 ---
 
 ## Tech Stack
@@ -307,6 +402,7 @@ flagdeck/
 │       ├── ci.yml                       # Lint, test, build on push/PR
 │       └── deploy.yml                   # Deploy to Railway on CI success
 ├── .gitignore
+├── .prettierignore                      # Exclude non-JS files from Prettier
 ├── CLAUDE.md                            # Worker instructions for this repo
 └── README.md                            # Setup, architecture, API docs
 ```
@@ -968,6 +1064,16 @@ require (
 
 > **Testing deps are required:** `vitest`, `@testing-library/svelte`, `@testing-library/jest-dom`, and `jsdom` must be in devDependencies. The `test` and `test:watch` scripts must be present. Without these, frontend tests cannot run.
 
+> **Vitest requires at least one test file:** If `npm run test` is in the CI pipeline, there MUST be at least one `.test.ts` file when the test step runs. Vitest exits with a non-zero code when no test files are found, which fails CI. The CI/CD card MUST create a placeholder test:
+> ```typescript
+> // web/src/lib/utils/format.test.ts
+> import { describe, it, expect } from 'vitest';
+> describe('placeholder', () => {
+>   it('passes', () => { expect(true).toBe(true); });
+> });
+> ```
+> This file gets replaced by real tests in later cards. Do NOT remove it until real test files exist.
+
 ### docker-compose.yml (local development)
 
 ```yaml
@@ -1051,6 +1157,20 @@ web/build/
 Thumbs.db
 ```
 
+### .prettierignore (REQUIRED — prevents Prettier from formatting Go files)
+
+```
+api/
+*.go
+go.mod
+go.sum
+docker-compose.yml
+*.dockerfile
+Dockerfile
+```
+
+> **Why this is mandatory:** The frontend `npm run format` runs `prettier --write .` which, without this file, will attempt to reformat Go source files, `go.mod`, YAML, and Dockerfiles — corrupting their syntax. This caused 2 CI failures. Create this file in the repo root as part of the first card.
+
 ---
 
 ## Seed Data
@@ -1133,6 +1253,15 @@ Tests run against local MongoDB and Redis (docker-compose services or testcontai
 | `handlers_test.go` | HTTP handlers — CRUD, auth, evaluate endpoint |
 | `experiment_stats_test.go` | Chi-squared calculation, confidence intervals, minimum sample guard |
 | `auth_test.go` | JWT lifecycle, API key auth, role enforcement |
+
+> **Go test model construction — MUST match struct definitions exactly.** When constructing test models (e.g., `models.Flag{}`, `models.Segment{}`), every field name and type must match the struct definition in `models/*.go`. Common mistakes that cause compile errors:
+> - Using `Variations` instead of `Variants` on experiments
+> - Using `Conditions` as a direct field instead of `Rules[].Conditions`
+> - Mixing up `string` and `primitive.ObjectID` types for ID fields
+> - Using `time.Now()` where the struct expects `primitive.DateTime`
+> - Missing required fields (Go zero values may not satisfy business logic)
+>
+> **Rule:** After writing any `_test.go` file, run `go build ./...` and `go vet ./...` immediately. Do NOT wait until the end of the card to discover type mismatches.
 
 ### SvelteKit Frontend Tests
 
@@ -1335,6 +1464,8 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: railway up --service flagdeck-web --detach
 ```
+
+> **Railway service names are EXACT.** The `--service` flag must use the exact service name from Railway: `flagdeck-api` and `flagdeck-web`. Do NOT use `api`, `backend`, `web`, `frontend`, or any other name. These are the service IDs configured in Railway (see Pre-Provisioned Resources table). If you use the wrong name, `railway up` will create a **new** service instead of deploying to the existing one.
 
 ---
 
@@ -1629,3 +1760,17 @@ AFTER git push:
 ```
 
 **CRITICAL:** Workers MUST NOT move on to the next task until CI is green.
+
+### Cross-Card Compilation Rule (MANDATORY)
+
+Each card inherits ALL code from previous cards. When Card N pushes code, it MUST compile cleanly with all code already in the repo from Cards 1 through N-1.
+
+**Concrete rules:**
+
+1. **Pull before you start:** `git pull origin main` before writing any code. Your card depends on prior cards' code being present.
+2. **Run the FULL quality gate, not just your files:** `go build ./cmd/server` and `go test ./...` check ALL Go code in the repo — not just the files you touched. If your code breaks a function signature that Card N-1 created, you must fix the incompatibility.
+3. **Do not re-define types that already exist:** If `models/flag.go` was created by a previous card, do NOT create a conflicting `Flag` type. Import and use the existing one.
+4. **Do not change function signatures created by other cards** unless your card explicitly says to refactor them. If you need a new parameter, add it with a default or create a new function.
+5. **If tests from previous cards fail after your changes**, fix them. You own the full test suite, not just your new tests.
+
+> This is the #3 failure mode — Card 4 introduces handlers that reference services from Card 3, but with wrong parameter types or missing imports, causing `go build` to fail.

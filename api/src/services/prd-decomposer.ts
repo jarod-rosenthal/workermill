@@ -25,9 +25,17 @@ export interface DecomposedCard {
   estimatedSteps: number;
 }
 
+export interface QualityGateConfig {
+  name: string;
+  trigger: string;
+  commands: string[];
+}
+
 export interface DecomposedPrd {
   boardName: string;
   cards: DecomposedCard[];
+  qualityGates?: QualityGateConfig[];
+  ciWorkflowPath?: string;
 }
 
 // ============================================================================
@@ -43,7 +51,8 @@ Each card represents ONE cohesive epic — a vertical slice or architectural lay
 - Target 7-12 deliverables per card. This is the sweet spot for AI worker execution.
 - Cards with >15 deliverables MUST be split into smaller cards.
 - Cards with <4 deliverables MUST be merged with related work.
-- Card 1 is ALWAYS "Project Setup & Dev Environment" — repo scaffolding, tooling, CI skeleton, environment config.
+- Card 1 is ALWAYS "Project Setup & Dev Environment" — repo scaffolding, tooling, environment config.
+- Card 2 is ALWAYS "CI/CD Pipeline & Quality Gates" — the FULL CI pipeline (lint, typecheck, test, build) must be created and verified green BEFORE any feature work begins. This card must include a trivial passing test so CI actually runs. Assigned to devops_engineer. ALL subsequent feature cards MUST depend on this card (directly or transitively).
 - The LAST card is ALWAYS "Production Deploy & Validation" — deployment pipeline, smoke tests, monitoring, go-live checklist.
 
 ## Card Description Format (REQUIRED)
@@ -88,9 +97,20 @@ Choose the persona whose primary skillset best matches the card's dominant work.
 - Card 0 (Project Setup) has no dependencies (empty array)
 - The last card (Production Deploy) typically depends on all or most preceding cards
 
+## CI/CD Is a First-Class Citizen
+
+The CI/CD card (Card 2) is NOT a nice-to-have. It is the quality gate that proves code works. Every AI can generate code — the CI pipeline proves it compiles, passes lint, passes tests, and builds.
+
+Card 2 deliverables MUST include:
+1. CI workflow file (e.g., .github/workflows/ci.yml) with ALL quality steps (lint, typecheck, test, build)
+2. A trivial passing test file so the test step succeeds on first run
+3. Verification that the pipeline actually runs and passes (acceptance criterion, not just "file exists")
+
+ALL feature cards (Card 3+) MUST have Card 2 in their transitive dependency chain.
+
 ## Priority Assignment
 
-- urgent: Blocking all other work (typically Card 0 — setup)
+- urgent: Blocking all other work (Card 0 — setup, Card 1 — CI/CD pipeline)
 - high: Core business logic, critical path items
 - medium: Important but not blocking — features, integrations
 - low: Nice-to-have, polish, documentation
@@ -101,6 +121,19 @@ Respond with ONLY a JSON object (no markdown fences, no explanation):
 
 {
   "boardName": "Short descriptive board name derived from the PRD title",
+  "qualityGates": [
+    {
+      "name": "backend",
+      "trigger": "api/**",
+      "commands": ["cd api && go vet ./...", "cd api && go test ./... -v -count=1", "cd api && go build -o /dev/null ./cmd/server"]
+    },
+    {
+      "name": "frontend",
+      "trigger": "web/**",
+      "commands": ["cd web && npm run lint", "cd web && npm run test", "cd web && npm run build"]
+    }
+  ],
+  "ciWorkflowPath": ".github/workflows/ci.yml",
   "cards": [
     {
       "title": "Card title (concise, action-oriented)",
@@ -114,6 +147,8 @@ Respond with ONLY a JSON object (no markdown fences, no explanation):
   ]
 }
 
+qualityGates: Extract pre-commit quality gate commands from the PRD. Each gate has a name (e.g., "backend", "frontend"), a file trigger glob (e.g., "api/**"), and the exact shell commands to run. These are the commands workers run BEFORE every commit to verify code quality. If the PRD doesn't specify quality gates, infer them from the tech stack (e.g., Go → "go vet", "go test", "go build"; Node.js → "npm run lint", "npm run test", "npm run build").
+ciWorkflowPath: The path to the CI workflow file in the repo (e.g., ".github/workflows/ci.yml"). Used to detect when CI becomes available.
 estimatedSteps is the number of deliverables in the card (used for progress tracking).
 labels should include relevant technology or domain tags (e.g., "react", "api", "terraform", "auth").`;
 

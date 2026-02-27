@@ -77,8 +77,12 @@ export class StoryExecutor {
   private decisionClient: DecisionClient;
   // Resilience configuration (from org settings)
   private resilience: ResilienceConfig;
+  // True when the current story execution has active user feedback (Talk to Worker)
+  private hasActiveUserFeedback = false;
   // Track auto-retry attempts per story (for blocker handling)
   private retryCountByStory: Map<number, number> = new Map();
+  // Track quality gate retry attempts per story (separate limit from general retries)
+  private qualityGateRetryCountByStory: Map<number, number> = new Map();
   // Persona/provider icons loaded from Decision API
   private personaIcons: Record<string, string> = {};
   private providerIcons: Record<string, string> = {};
@@ -450,6 +454,177 @@ export class StoryExecutor {
    * Validate story completion before marking it done.
    * Checks acceptance criteria and verifies files were modified.
    */
+  // ─── Quality Gate Methods ─────────────────────────────────────────────────
+
+  /**
+   * [GATE 1] Pre-commit quality gate — runs matching quality gate commands
+   * based on which files were changed. Commands come from board metadata
+   * (extracted from PRD by the decomposer).
+   */
+  private async runPreCommitGate(
+    worktreePath: string,
+    expert: ExpertPersona
+  ): Promise<{ passed: boolean; output: string; failedCommand: string }> {
+    const gates = this.config.qualityGateCommands;
+    if (!gates || gates.length === 0) {
+      return { passed: true, output: "", failedCommand: "" };
+    }
+
+    // Determine which files changed to match against gate triggers
+    let changedFiles: string[] = [];
+    try {
+      const diffOutput = execSync(`git diff --name-only HEAD`, {
+        cwd: worktreePath,
+        encoding: "utf-8",
+        timeout: 10_000,
+      }).trim();
+      // Also include untracked files
+      const untrackedOutput = execSync(`git ls-files --others --exclude-standard`, {
+        cwd: worktreePath,
+        encoding: "utf-8",
+        timeout: 10_000,
+      }).trim();
+      changedFiles = [...diffOutput.split("\n"), ...untrackedOutput.split("\n")].filter(Boolean);
+    } catch {
+      // If we can't determine changed files, run all gates
+      changedFiles = ["*"];
+    }
+
+    await this.postLog(`[Quality Gate] Checking ${changedFiles.length} changed files against ${gates.length} gate(s)`, expert, "system");
+
+    for (const gate of gates) {
+      // Match files against trigger glob (simple prefix match)
+      const triggerPrefix = gate.trigger.replace(/\*\*/g, "").replace(/\*/g, "").replace(/\/+$/, "");
+      const matches = changedFiles.some((f) => f === "*" || f.startsWith(triggerPrefix));
+
+      if (!matches) continue;
+
+      await this.postLog(`[Quality Gate] Running ${gate.name} gate (${gate.commands.length} commands)`, expert, "system");
+
+      for (const cmd of gate.commands) {
+        try {
+          execSync(cmd, {
+            cwd: worktreePath,
+            encoding: "utf-8",
+            timeout: 300_000, // 5 min per command
+            stdio: ["pipe", "pipe", "pipe"],
+          });
+          await this.postLog(`[Quality Gate] ✅ ${cmd}`, expert, "system");
+        } catch (error: unknown) {
+          const stderr = error instanceof Error && "stderr" in error
+            ? String((error as { stderr: unknown }).stderr).slice(0, 2000)
+            : String(error).slice(0, 2000);
+          const stdout = error instanceof Error && "stdout" in error
+            ? String((error as { stdout: unknown }).stdout).slice(0, 2000)
+            : "";
+          const output = [stdout, stderr].filter(Boolean).join("\n");
+          await this.postLog(`[Quality Gate] ❌ ${cmd}\n${output}`, expert, "error");
+          return { passed: false, output, failedCommand: cmd };
+        }
+      }
+
+      await this.postLog(`[Quality Gate] ✅ ${gate.name} gate passed`, expert, "system");
+    }
+
+    return { passed: true, output: "", failedCommand: "" };
+  }
+
+  /**
+   * [GATE 2] Post-push CI verification — waits for CI pipeline to complete
+   * and verifies it passed. Only runs if CI workflow file exists in the worktree.
+   */
+  private async runPostPushCIGate(
+    worktreePath: string,
+    branchName: string,
+    expert: ExpertPersona
+  ): Promise<{ passed: boolean; log?: string; summary: string; infrastructureFailure?: boolean }> {
+    const ciPath = this.config.ciWorkflowPath;
+    if (!ciPath) {
+      return { passed: true, summary: "No CI workflow path configured" };
+    }
+
+    // Check if the CI workflow file exists in the worktree
+    try {
+      await fs.access(`${worktreePath}/${ciPath}`);
+    } catch {
+      await this.postLog(`[CI Gate] No CI workflow at ${ciPath} — skipping post-push CI gate`, expert, "system");
+      return { passed: true, summary: "CI workflow not yet created" };
+    }
+
+    await this.postLog(`[CI Gate] Waiting for CI to complete on branch ${branchName}...`, expert, "system");
+
+    // Parse repo owner/name from targetRepo
+    const repoMatch = this.config.targetRepo.match(/([^/]+)\/([^/]+?)(?:\.git)?$/);
+    if (!repoMatch) {
+      await this.postLog(`[CI Gate] Cannot parse repo from ${this.config.targetRepo} — skipping`, expert, "system");
+      return { passed: true, summary: "Cannot parse repository" };
+    }
+    const [, owner, repo] = repoMatch;
+
+    // Poll GitHub Actions API for CI status (max 10 minutes)
+    const maxWaitMs = 600_000;
+    const pollIntervalMs = 10_000;
+    const startTime = Date.now();
+    let lastRunId: number | undefined;
+
+    while (Date.now() - startTime < maxWaitMs) {
+      try {
+        const response = execSync(
+          `gh api repos/${owner}/${repo}/actions/runs?branch=${branchName}&per_page=1 --jq '.workflow_runs[0] | {id, status, conclusion}'`,
+          { encoding: "utf-8", timeout: 15_000 }
+        ).trim();
+
+        if (response) {
+          const run = JSON.parse(response);
+          lastRunId = run.id;
+
+          if (run.status === "completed") {
+            if (run.conclusion === "success") {
+              await this.postLog(`[CI Gate] ✅ CI passed (run ***REMOVED***${run.id})`, expert, "system");
+              return { passed: true, summary: `CI passed (run ***REMOVED***${run.id})` };
+            }
+
+            // CI failed — get the failure log
+            let failureLog = "";
+            try {
+              failureLog = execSync(
+                `gh api repos/${owner}/${repo}/actions/runs/${run.id}/jobs --jq '[.jobs[] | select(.conclusion == "failure") | .steps[] | select(.conclusion == "failure") | .name] | join(", ")'`,
+                { encoding: "utf-8", timeout: 15_000 }
+              ).trim();
+            } catch { /* best effort */ }
+
+            // Classify: infrastructure vs code failure
+            const infraKeywords = ["billing", "runner", "unavailable", "service container", "rate limit", "no space"];
+            const isInfra = infraKeywords.some((k) => failureLog.toLowerCase().includes(k) || run.conclusion === "cancelled");
+
+            const summary = `CI failed: ${failureLog || run.conclusion} (run ***REMOVED***${run.id})`;
+            await this.postLog(`[CI Gate] ❌ ${summary}`, expert, "error");
+
+            return {
+              passed: false,
+              log: failureLog,
+              summary,
+              infrastructureFailure: isInfra,
+            };
+          }
+        }
+      } catch {
+        // API call failed — retry on next poll
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      if (elapsed % 30 === 0) {
+        await this.postLog(`[CI Gate] Still waiting for CI... (${elapsed}s elapsed)`, expert, "system");
+      }
+    }
+
+    // Timeout
+    const summary = `CI did not complete within 10 minutes${lastRunId ? ` (run ***REMOVED***${lastRunId})` : ""}`;
+    await this.postLog(`[CI Gate] ⏰ ${summary}`, expert, "system");
+    return { passed: false, summary, infrastructureFailure: true };
+  }
+
   private async validateStoryCompletion(
     story: ReadyStory,
     worktreePath: string,
@@ -675,6 +850,7 @@ export class StoryExecutor {
     totalStories: number = 1,
     userFeedback?: string
   ): Promise<StoryResult> {
+    this.hasActiveUserFeedback = !!userFeedback;
     const prefix = this.getLogPrefix(expert);
     console.log(`${prefix} Starting story ${story.storyIndex}`);
     // story.title already contains "Story N:" or "[Phase X.Y]" from the planner
@@ -925,6 +1101,14 @@ ${parts.join("\n\n")}
         await this.runSelfReview(story, expert, worktreePath, currentChanges, acceptanceCriteria);
       }
 
+      // 4c. [GATE 1] Pre-commit quality gate — run matching quality gate commands
+      if (this.config.qualityGateCommands && !this.config.qualityGateBypass) {
+        const gateResult = await this.runPreCommitGate(worktreePath, expert);
+        if (!gateResult.passed) {
+          throw new Error(`Pre-commit quality gate failed (${gateResult.failedCommand}):\n${gateResult.output}`);
+        }
+      }
+
       // 5. Commit any uncommitted changes in worktree (if agent left changes unstaged/uncommitted)
       const uncommittedFiles = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
       if (uncommittedFiles.length > 0) {
@@ -975,6 +1159,28 @@ ${parts.join("\n\n")}
         await this.postLog(`Pushed branch to remote anyway`, expert, "system");
       } else {
         await this.postLog(`No changes to push (branch is up-to-date with main)`, expert, "system");
+      }
+
+      // 6b. [GATE 2] Post-push CI verification — wait for CI green if workflow exists
+      if (this.config.ciWorkflowPath && !this.config.qualityGateBypass && hasCommits) {
+        const ciResult = await this.runPostPushCIGate(worktreePath, branchName!, expert);
+        if (!ciResult.passed) {
+          if (ciResult.infrastructureFailure) {
+            await this.postLog(`CI infrastructure failure: ${ciResult.summary} — escalating as blocker`, expert, "system");
+            // Don't throw — infra failures are not the expert's fault, escalate but continue
+            const sessionId = `${expert}-story-${story.storyIndex}`;
+            await this.coordination.postContext(
+              "blocker",
+              `CI infrastructure failure on ${story.title}: ${ciResult.summary}`,
+              expert,
+              this.config.parentTaskId,
+              { storyIndex: story.storyIndex, ciInfraFailure: true },
+              sessionId
+            );
+          } else {
+            throw new Error(`Post-push CI failed:\n${ciResult.log || ciResult.summary}`);
+          }
+        }
       }
 
       // 6a. VALIDATION: Verify story completion before marking done
@@ -1032,6 +1238,51 @@ ${parts.join("\n\n")}
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[Executor] Story " + story.storyIndex + " failed:", errorMessage);
       await this.postLog(`${story.title} — FAILED: ${errorMessage}`, expert, "error");
+
+      // Quality gate failures use their own separate retry counter and limit
+      const isQualityGateError = errorMessage.startsWith("Pre-commit quality gate failed") || errorMessage.startsWith("Post-push CI failed");
+      if (isQualityGateError) {
+        const gateRetryCount = this.qualityGateRetryCountByStory.get(story.storyIndex) ?? 0;
+        const gateMaxRetries = this.resilience.qualityGateMaxRetries;
+        console.log(`[Executor] Quality gate failure — retry ${gateRetryCount + 1}/${gateMaxRetries}`);
+
+        if (gateRetryCount < gateMaxRetries) {
+          this.qualityGateRetryCountByStory.set(story.storyIndex, gateRetryCount + 1);
+          await this.postLog(
+            `[Quality Gate] Retry ${gateRetryCount + 1}/${gateMaxRetries} — feeding error back to expert`,
+            expert,
+            "system"
+          );
+          const fixFeedback = `***REMOVED******REMOVED*** QUALITY GATE FAILED — FIX REQUIRED\n\nYour code did not pass the quality gate. Fix the errors below and try again.\n\n${errorMessage}`;
+          return this.executeStory(story, expert, totalStories, fixFeedback);
+        }
+
+        // Gate retries exhausted — escalate
+        await this.postLog(
+          `[Quality Gate] All ${gateMaxRetries} retries exhausted — escalating as blocker`,
+          expert,
+          "system"
+        );
+        await this.coordination.postBlocker(
+          "Quality gate failed after " + gateMaxRetries + " retries: " + errorMessage.slice(0, 500),
+          expert,
+          this.config.parentTaskId,
+          undefined,
+          story.storyIndex,
+          {
+            storyTitle: story.title,
+            errorCategory: "quality_gate",
+            isFixable: false,
+            affectedFiles: [],
+            autoRetryAttempts: gateMaxRetries,
+            maxAutoRetries: gateMaxRetries,
+            escalationReason: `Quality gate failed after ${gateMaxRetries} retries`,
+          }
+        );
+
+        storyResult.error = errorMessage;
+        return storyResult;
+      }
 
       // Classify the error via Decision API to determine if it's auto-fixable
       const result = await this.decisionClient.classifyError({ errorOutput: errorMessage });
@@ -1989,10 +2240,12 @@ Be thorough — the tech lead will catch anything you miss, and that costs a ful
 
   /**
    * Answer a question from another expert.
+   * @param storyContext Optional context about the asking expert's current story
    */
   async answerQuestion(
     question: ContextMessage,
-    expert: ExpertPersona
+    expert: ExpertPersona,
+    storyContext?: string
   ): Promise<string | null> {
     const expertConfig = getExpertConfig(expert);
     // Use model from config (org settings) instead of hardcoded value
@@ -2000,11 +2253,32 @@ Be thorough — the tech lead will catch anything you miss, and that costs a ful
       expertConfig.model = this.config.model;
     }
 
-    const prompt = `A sibling expert (${question.persona}) asked:
+    // Fetch recent Q&A for coordination context
+    let recentContext = "";
+    try {
+      const recentQandA = await this.coordination.getRecentQandA(10);
+      if (recentQandA.length > 0) {
+        const contextLines = recentQandA.map(
+          (c) => `[${c.persona}] (${c.messageType}): ${c.content.substring(0, 200)}`
+        );
+        recentContext = `\nRecent coordination context:\n${contextLines.join("\n")}`;
+      }
+    } catch {
+      // Non-fatal — proceed without context
+    }
+
+    const storyBlock = storyContext ? `\n${storyContext}\n` : "";
+
+    const prompt = `You are a ${expert} answering a question from a sibling expert working on the same project.
+${storyBlock}
+A sibling expert (${question.persona}) asked:
 
 ${question.content}
+${recentContext}
 
 Provide a concise, helpful answer based on your expertise as a ${expert}.
+You have access to the codebase — use your tools to read relevant files before answering if the question involves specific code, architecture, or implementation details.
+Be concise and actionable. Focus on what the asker should DO, not background theory.
 
 Format your answer as:
 A-***REMOVED******REMOVED******REMOVED*** (re: Q-***REMOVED******REMOVED******REMOVED***): Your answer here
@@ -2047,18 +2321,22 @@ Where ***REMOVED******REMOVED******REMOVED*** matches the question ID if present
   }
 
   /**
-   * Spawn a lightweight Claude CLI process to answer a question when ALL experts are busy.
-   * Uses --print mode (no streaming, no tools) with a 2-minute timeout.
-   * This is a fire-and-forget pattern — the caller doesn't await the full result.
+   * Spawn a "virtual expert" to answer a question using a two-phase pattern:
+   *   Phase 1 — Quick take (~15s): --print CLI spawn, no tools, returns immediately
+   *   Phase 2 — Deep answer (1-3min): executeAgent with full tool access, runs async
+   *
+   * Returns the Phase 1 answer synchronously. Phase 2 fires in the background
+   * and posts a refined answer that supersedes Phase 1 when complete.
    */
-  async spawnQuickAnswer(
+  async spawnVirtualExpert(
     question: {
       id: string;
       content: string;
       fromPersona: string;
       metadata?: Record<string, unknown>;
     },
-    targetPersona: string
+    targetPersona: string,
+    storyContext?: string
   ): Promise<string | null> {
     const model = this.config.model || "sonnet";
     // Map to CLI shorthand
@@ -2070,7 +2348,7 @@ Where ***REMOVED******REMOVED******REMOVED*** matches the question ID if present
 
     const repoPath = this.gitOps.getRepoPath();
 
-    // Build a focused prompt with persona framing and recent context
+    // Build recent coordination context (shared by both phases)
     let recentContext = "";
     try {
       const recentQandA = await this.coordination.getRecentQandA(10);
@@ -2078,14 +2356,17 @@ Where ***REMOVED******REMOVED******REMOVED*** matches the question ID if present
         const contextLines = recentQandA.map(
           (c) => `[${c.persona}] (${c.messageType}): ${c.content.substring(0, 200)}`
         );
-        recentContext = `\n\nRecent coordination context:\n${contextLines.join("\n")}`;
+        recentContext = `\nRecent coordination context:\n${contextLines.join("\n")}`;
       }
     } catch {
       // Non-fatal — proceed without context
     }
 
-    const prompt = `You are a ${targetPersona} answering a question from a sibling expert.
+    const storyBlock = storyContext ? `\n${storyContext}\n` : "";
 
+    // ── Phase 1: Quick take via --print (no tools) ──
+    const phase1Prompt = `You are a ${targetPersona} answering a question from a sibling expert working on the same project.
+${storyBlock}
 A sibling expert (${question.fromPersona}) asked:
 
 ${question.content}
@@ -2110,10 +2391,10 @@ Where ***REMOVED******REMOVED******REMOVED*** matches the question ID if present
     const timeoutMs = 120_000; // 2 minutes
 
     console.log(
-      `[Executor] Quick-answering question ${question.id} as ${targetPersona} (all experts busy)`
+      `[Executor] Spawning virtual ${targetPersona} for question ${question.id} (Phase 1: quick take)`
     );
 
-    return new Promise((resolve) => {
+    const phase1Answer = await new Promise<string | null>((resolve) => {
       let proc: ReturnType<typeof spawn>;
       try {
         proc = spawn("claude", args, {
@@ -2123,12 +2404,12 @@ Where ***REMOVED******REMOVED******REMOVED*** matches the question ID if present
         });
 
         // Write prompt via stdin (same pattern as runAgent)
-        proc.stdin!.write(prompt);
+        proc.stdin!.write(phase1Prompt);
         proc.stdin!.end();
       } catch (spawnError) {
         const msg =
           spawnError instanceof Error ? spawnError.message : String(spawnError);
-        console.error(`[Executor] Failed to spawn quick-answer CLI: ${msg}`);
+        console.error(`[Executor] Failed to spawn virtual expert CLI: ${msg}`);
         resolve(null);
         return;
       }
@@ -2145,7 +2426,7 @@ Where ***REMOVED******REMOVED******REMOVED*** matches the question ID if present
 
       const timer = setTimeout(() => {
         console.warn(
-          `[Executor] Quick-answer timed out after ${timeoutMs / 1000}s for ${question.id}`
+          `[Executor] Virtual expert Phase 1 timed out after ${timeoutMs / 1000}s for ${question.id}`
         );
         proc.kill("SIGTERM");
       }, timeoutMs);
@@ -2155,7 +2436,7 @@ Where ***REMOVED******REMOVED******REMOVED*** matches the question ID if present
 
         if (code !== 0 || !stdout.trim()) {
           console.error(
-            `[Executor] Quick-answer failed (code=${code}) for ${question.id}: ${stderr.substring(0, 200)}`
+            `[Executor] Virtual expert Phase 1 failed (code=${code}) for ${question.id}: ${stderr.substring(0, 200)}`
           );
           resolve(null);
           return;
@@ -2165,26 +2446,97 @@ Where ***REMOVED******REMOVED******REMOVED*** matches the question ID if present
         try {
           await this.coordination.postAnswer(
             question.id,
-            answerText,
+            `[Quick take] ${answerText}`,
             targetPersona
           );
           console.log(
-            `[Executor] Quick-answer posted for ${question.id} (${answerText.length} chars)`
+            `[Executor] [Quick take] posted for ${question.id} (${answerText.length} chars)`
           );
           await this.postLog(
-            `Quick-answered ${question.id} from ${question.fromPersona}`,
+            `[Quick take] Answered ${question.id} from ${question.fromPersona}`,
             targetPersona as ExpertPersona,
             "system"
           );
           resolve(answerText);
         } catch (postError) {
           console.error(
-            `[Executor] Failed to post quick-answer for ${question.id}:`,
+            `[Executor] Failed to post Phase 1 answer for ${question.id}:`,
             postError
           );
           resolve(null);
         }
       });
     });
+
+    // ── Phase 2: Deep answer via executeAgent (fire-and-forget) ──
+    // Only fire if Phase 1 produced an answer
+    if (phase1Answer) {
+      const expertConfig = getExpertConfig(targetPersona);
+      if (this.config.model) {
+        expertConfig.model = this.config.model;
+      }
+
+      const phase2Prompt = `You are a ${targetPersona} answering a question from a sibling expert working on the same project.
+${storyBlock}
+A sibling expert (${question.fromPersona}) asked:
+
+${question.content}
+${recentContext}
+
+A quick take was already provided: "${phase1Answer.substring(0, 300)}..."
+
+Now provide a thorough, researched answer. Use your tools to read relevant files before answering.
+Be concise and actionable. Focus on what the asker should DO, not background theory.
+If the quick take was already correct, confirm it briefly rather than repeating everything.
+
+Format your answer as:
+A-***REMOVED******REMOVED******REMOVED*** (re: Q-***REMOVED******REMOVED******REMOVED***): [Researched] Your answer here
+
+Where ***REMOVED******REMOVED******REMOVED*** matches the question ID if present.`;
+
+      // Fire-and-forget — don't block the caller
+      this.executeAgent(
+        {
+          prompt: phase2Prompt,
+          expertConfig,
+          repoPath,
+          storyId: question.metadata?.fromStory?.toString() || "",
+          timeoutMs: 180_000, // 3-minute timeout
+        },
+        question.metadata?.fromStory?.toString() || ""
+      )
+        .then(async (result) => {
+          if (!result.success) {
+            console.error(`[Executor] Virtual expert Phase 2 failed for ${question.id}: ${result.error}`);
+            return;
+          }
+
+          const answerText = result.messages
+            .filter((m) => m.type === "text" && m.content)
+            .map((m) => m.content)
+            .join("\n");
+
+          if (answerText) {
+            await this.coordination.postAnswer(
+              question.id,
+              `[Researched] ${answerText}`,
+              targetPersona
+            );
+            console.log(
+              `[Executor] [Researched] answer posted for ${question.id} (${answerText.length} chars)`
+            );
+            await this.postLog(
+              `[Researched] Deep answer for ${question.id} from ${question.fromPersona}`,
+              targetPersona as ExpertPersona,
+              "system"
+            );
+          }
+        })
+        .catch((err) => {
+          console.error(`[Executor] Virtual expert Phase 2 error for ${question.id}:`, err);
+        });
+    }
+
+    return phase1Answer;
   }
 }

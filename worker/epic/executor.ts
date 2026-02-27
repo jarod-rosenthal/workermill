@@ -83,6 +83,10 @@ export class StoryExecutor {
   private retryCountByStory: Map<number, number> = new Map();
   // Track quality gate retry attempts per story (separate limit from general retries)
   private qualityGateRetryCountByStory: Map<number, number> = new Map();
+  // Track worktree paths per story (for sibling rebase on retry)
+  private worktreePathByStory: Map<number, string> = new Map();
+  // Track stories that have already been through deferred retry (prevent infinite park-retry loops)
+  private deferredRetryUsedByStory: Set<number> = new Set();
   // Persona/provider icons loaded from Decision API
   private personaIcons: Record<string, string> = {};
   private providerIcons: Record<string, string> = {};
@@ -145,6 +149,21 @@ export class StoryExecutor {
   setIcons(personaIcons: Record<string, string>, providerIcons: Record<string, string>): void {
     this.personaIcons = personaIcons;
     this.providerIcons = providerIcons;
+  }
+
+  /**
+   * Reset quality gate retry counter for a story (used by coordinator for deferred retry).
+   */
+  resetQualityGateRetries(storyIndex: number): void {
+    this.qualityGateRetryCountByStory.delete(storyIndex);
+  }
+
+  /**
+   * Mark a story as having used its deferred retry (prevents infinite park-retry loops).
+   * Called by coordinator when unparking a story for deferred retry.
+   */
+  markDeferredRetryUsed(storyIndex: number): void {
+    this.deferredRetryUsedByStory.add(storyIndex);
   }
 
   /**
@@ -530,6 +549,65 @@ When summarizing your work at the end, describe decisions in plain language. The
         reject(err);
       });
     });
+  }
+
+  /**
+   * Merge all completed sibling branches into the story worktree.
+   * Reuses the incremental rebase pattern — non-blocking on conflicts.
+   * Called at story start and before each quality gate retry.
+   */
+  private async rebaseSiblingBranches(
+    story: ReadyStory,
+    expert: ExpertPersona,
+    worktreePath?: string
+  ): Promise<void> {
+    if (!(this.resilience.incrementalRebaseEnabled ?? true)) return;
+    // Resolve worktree path from parameter or stored map
+    const wtPath = worktreePath || this.worktreePathByStory.get(story.storyIndex);
+    if (!wtPath) return;
+
+    try {
+      const allCompleted = await this.coordination.getAllCompletedBranchNames();
+      // Filter out branches already merged as declared dependencies and current story
+      const declaredDeps = new Set(story.dependencies || []);
+      const siblingBranches: string[] = [];
+      const sortedEntries = Array.from(allCompleted.entries()).sort(([a], [b]) => a - b);
+      for (const [idx, branch] of sortedEntries) {
+        if (idx === story.storyIndex) continue;
+        if (declaredDeps.has(idx)) continue;
+        siblingBranches.push(branch);
+      }
+
+      if (siblingBranches.length > 0) {
+        await this.postLog(
+          `Incremental rebase: merging ${siblingBranches.length} completed sibling branch(es)...`,
+          expert,
+          "system"
+        );
+        const siblingResult = await this.gitOps.mergeDependencyBranches(wtPath, siblingBranches);
+        if (siblingResult.merged.length > 0) {
+          await this.postLog(
+            `Incremental rebase: merged ${siblingResult.merged.length} sibling branch(es): ${siblingResult.merged.join(", ")}`,
+            expert,
+            "system"
+          );
+        }
+        if (siblingResult.conflicted.length > 0) {
+          await this.postLog(
+            `Incremental rebase: ${siblingResult.conflicted.length} sibling branch(es) had conflicts (non-blocking): ${siblingResult.conflicted.join(", ")}`,
+            expert,
+            "system"
+          );
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await this.postLog(
+        `Incremental rebase failed (non-blocking): ${msg}`,
+        expert,
+        "system"
+      );
+    }
   }
 
   /**
@@ -1149,6 +1227,8 @@ When summarizing your work at the end, describe decisions in plain language. The
       storyResult.worktreePath = worktreePath;
       // Notify coordinator immediately so graceful shutdown can save work
       this.onWorktreeCreated?.(story.storyIndex, worktreePath, branchName);
+      // Track worktree path for sibling rebase on quality gate retry
+      this.worktreePathByStory.set(story.storyIndex, worktreePath);
       await this.postLog(`Created branch: ${branchName}`, expert, "system");
       await this.postLog(`Worktree: ${worktreePath}`, expert, "system");
 
@@ -1244,50 +1324,7 @@ ${parts.join("\n\n")}
       }
 
       // 1c. Incremental rebase: merge all completed sibling branches (not just declared dependencies)
-      if (this.resilience.incrementalRebaseEnabled ?? true) {
-        try {
-          const allCompleted = await this.coordination.getAllCompletedBranchNames();
-          // Filter out branches already merged as declared dependencies and current story
-          const declaredDeps = new Set(story.dependencies || []);
-          const siblingBranches: string[] = [];
-          const sortedEntries = Array.from(allCompleted.entries()).sort(([a], [b]) => a - b);
-          for (const [idx, branch] of sortedEntries) {
-            if (idx === story.storyIndex) continue;
-            if (declaredDeps.has(idx)) continue;
-            siblingBranches.push(branch);
-          }
-
-          if (siblingBranches.length > 0) {
-            await this.postLog(
-              `Incremental rebase: merging ${siblingBranches.length} completed sibling branch(es)...`,
-              expert,
-              "system"
-            );
-            const siblingResult = await this.gitOps.mergeDependencyBranches(worktreePath, siblingBranches);
-            if (siblingResult.merged.length > 0) {
-              await this.postLog(
-                `Incremental rebase: merged ${siblingResult.merged.length} sibling branch(es): ${siblingResult.merged.join(", ")}`,
-                expert,
-                "system"
-              );
-            }
-            if (siblingResult.conflicted.length > 0) {
-              await this.postLog(
-                `Incremental rebase: ${siblingResult.conflicted.length} sibling branch(es) had conflicts (non-blocking): ${siblingResult.conflicted.join(", ")}`,
-                expert,
-                "system"
-              );
-            }
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          await this.postLog(
-            `Incremental rebase failed (non-blocking): ${msg}`,
-            expert,
-            "system"
-          );
-        }
-      }
+      await this.rebaseSiblingBranches(story, expert, worktreePath);
 
       // 1d. Record baseline SHA after all merges — tech lead review will diff from here
       let postRebaseBaseSha: string | undefined;
@@ -1491,6 +1528,8 @@ ${parts.join("\n\n")}
 
       console.log("[Executor] Story " + story.storyIndex + " completed successfully");
       await this.postLog(`${story.title} — completed!`, expert, "system");
+      // Clean up worktree path tracking (no longer needed for retry rebase)
+      this.worktreePathByStory.delete(story.storyIndex);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[Executor] Story " + story.storyIndex + " failed:", errorMessage);
@@ -1505,6 +1544,10 @@ ${parts.join("\n\n")}
 
         if (gateRetryCount < gateMaxRetries) {
           this.qualityGateRetryCountByStory.set(story.storyIndex, gateRetryCount + 1);
+
+          // Re-merge sibling branches before retry so expert has latest code
+          await this.rebaseSiblingBranches(story, expert);
+
           await this.postLog(
             `[Quality Gate] Retry ${gateRetryCount + 1}/${gateMaxRetries} — feeding error back to expert`,
             expert,
@@ -1514,14 +1557,36 @@ ${parts.join("\n\n")}
           return this.executeStory(story, expert, totalStories, fixFeedback);
         }
 
-        // Gate retries exhausted — escalate
+        // Gate retries exhausted — park for deferred retry or escalate
+        if (!this.deferredRetryUsedByStory.has(story.storyIndex)) {
+          // First exhaustion: park the story for deferred retry after siblings complete
+          await this.postLog(
+            `[Quality Gate] All ${gateMaxRetries} retries exhausted — parking story for deferred retry after siblings complete`,
+            expert,
+            "system"
+          );
+          await this.coordination.postContext(
+            "warning",
+            `Story ${story.storyIndex} parked — quality gate failed after ${gateMaxRetries} retries. Will retry after all siblings complete.`,
+            expert,
+            this.config.parentTaskId,
+            { storyIndex: story.storyIndex, messageType: "story_parked", errorMessage: errorMessage.slice(0, 500) },
+            `${expert}-story-${story.storyIndex}`
+          );
+
+          storyResult.error = errorMessage;
+          storyResult.parked = true;
+          return storyResult;
+        }
+
+        // Deferred retry also failed — escalate as blocker
         await this.postLog(
-          `[Quality Gate] All ${gateMaxRetries} retries exhausted — escalating as blocker`,
+          `[Quality Gate] All ${gateMaxRetries} retries exhausted (deferred retry also failed) — escalating as blocker`,
           expert,
           "system"
         );
         await this.coordination.postBlocker(
-          "Quality gate failed after " + gateMaxRetries + " retries: " + errorMessage.slice(0, 500),
+          "Quality gate failed after " + gateMaxRetries + " retries (including deferred retry): " + errorMessage.slice(0, 500),
           expert,
           this.config.parentTaskId,
           undefined,
@@ -1533,7 +1598,7 @@ ${parts.join("\n\n")}
             affectedFiles: [],
             autoRetryAttempts: gateMaxRetries,
             maxAutoRetries: gateMaxRetries,
-            escalationReason: `Quality gate failed after ${gateMaxRetries} retries`,
+            escalationReason: `Quality gate failed after ${gateMaxRetries} retries (including deferred retry)`,
           }
         );
 

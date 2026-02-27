@@ -3226,6 +3226,7 @@ export default function Dashboard() {
                                 {/* Communications Feed */}
                                 <EmbeddedCommunicationsFeed
                                   taskId={task.id}
+                                  parentTaskId={task.parentTaskId}
                                   isTerminal={TERMINAL_STATUSES.includes(task.status)}
                                   isChildTask={!!task.parentTaskId}
                                   onAnswerQuestion={handleAnswerQuestion}

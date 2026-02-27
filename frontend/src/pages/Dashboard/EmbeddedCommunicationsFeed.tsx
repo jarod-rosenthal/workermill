@@ -63,11 +63,13 @@ const COMMS_MESSAGE_TYPE_CONFIG: Record<
 // Embedded Communications Feed - compact version for the side panel
 export function EmbeddedCommunicationsFeed({
   taskId,
+  parentTaskId,
   isTerminal = false,
   isChildTask = false,
   onAnswerQuestion,
 }: {
   taskId: string;
+  parentTaskId?: string | null;
   isTerminal?: boolean;
   isChildTask?: boolean;
   onAnswerQuestion?: (messageId: string, answer: string) => void;
@@ -93,11 +95,14 @@ export function EmbeddedCommunicationsFeed({
     (s) => s.getMessagesForParentTask,
   );
 
+  // For child tasks, coordination messages are stored under the parent task ID
+  const coordinationTaskId = (isChildTask && parentTaskId) ? parentTaskId : taskId;
+
   // Filter messages for this specific task
   // Exclude story_ready -- internal coordination data, not team collaboration
   const taskMessages = messages.filter(
     (m) =>
-      m.parentTaskId === taskId && m.messageType !== "story_ready",
+      m.parentTaskId === coordinationTaskId && m.messageType !== "story_ready",
   );
 
   // Important types to highlight
@@ -138,7 +143,7 @@ export function EmbeddedCommunicationsFeed({
   useEffect(() => {
     if (fetchedRef.current) return;
 
-    const existingMessages = getMessagesForParentTask(taskId);
+    const existingMessages = getMessagesForParentTask(coordinationTaskId);
     if (existingMessages.length > 0) {
       fetchedRef.current = true;
       return;
@@ -151,7 +156,7 @@ export function EmbeddedCommunicationsFeed({
       fetchedRef.current = true;
       try {
         const response = await fetch(
-          `${API_BASE}/api/coordination/context/${taskId}`,
+          `${API_BASE}/api/coordination/context/${coordinationTaskId}`,
           { headers: { Authorization: `Bearer ${token}` } },
         );
         if (response.ok) {
@@ -159,7 +164,7 @@ export function EmbeddedCommunicationsFeed({
           const contexts =
             data.contexts || (Array.isArray(data) ? data : []);
           contexts.forEach((msg: ContextMessage) => {
-            addMessage(msg, taskId);
+            addMessage(msg, coordinationTaskId);
           });
         }
       } catch (err) {
@@ -172,18 +177,18 @@ export function EmbeddedCommunicationsFeed({
     };
     fetchMessages();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- getMessagesForParentTask is stable but not memoized
-  }, [taskId]);
+  }, [coordinationTaskId]);
 
   // Connect to SSE stream
-  // Skip for terminal tasks (no new messages expected) and child tasks
-  // (coordination messages live under the parent task ID, so this SSE would always be empty)
+  // Skip for terminal tasks (no new messages expected)
+  // For child tasks, subscribe to the parent's coordination stream
   useEffect(() => {
-    if (isTerminal || isChildTask) return;
+    if (isTerminal) return;
 
     const token = localStorage.getItem("accessToken");
     if (!token) return;
 
-    const url = `${API_BASE}/api/coordination/context/${taskId}/stream?token=${encodeURIComponent(token)}`;
+    const url = `${API_BASE}/api/coordination/context/${coordinationTaskId}/stream?token=${encodeURIComponent(token)}`;
     const eventSource = new EventSource(url);
     eventSourceRef.current = eventSource;
 
@@ -191,7 +196,7 @@ export function EmbeddedCommunicationsFeed({
     eventSource.addEventListener("context", (event) => {
       try {
         const msg = JSON.parse(event.data) as ContextMessage;
-        addMessage(msg, taskId);
+        addMessage(msg, coordinationTaskId);
       } catch (err) {
         console.error("Failed to parse context message:", err);
       }
@@ -202,7 +207,7 @@ export function EmbeddedCommunicationsFeed({
       eventSource.close();
       eventSourceRef.current = null;
     };
-  }, [taskId, addMessage, isTerminal, isChildTask]);
+  }, [coordinationTaskId, addMessage, isTerminal]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {

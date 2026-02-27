@@ -24,6 +24,7 @@ import BoardsList from "./pages/Boards/BoardsList";
 import BoardView from "./pages/Boards/BoardView";
 import BoardSettings from "./pages/Boards/BoardSettings";
 import SpecsList from "./pages/Specs/SpecsList";
+import SpecEditor from "./pages/Specs/SpecEditor";
 import Support from "./pages/Support";
 import SupportTicketDetail from "./pages/SupportTicketDetail";
 import Help from "./pages/Help";
@@ -392,6 +393,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <SpecsList />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/specs/:specId"
+            element={
+              <ProtectedRoute>
+                <SpecEditor />
               </ProtectedRoute>
             }
           />

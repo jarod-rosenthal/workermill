@@ -173,6 +173,7 @@ router.get("/", async (req: Request, res: Response) => {
       // Resilience Settings
       blockerMaxAutoRetries: org.blockerMaxAutoRetries,
       blockerAutoRetryEnabled: org.blockerAutoRetryEnabled,
+      qualityGateMaxRetries: org.qualityGateMaxRetries,
       pushAfterCommit: org.pushAfterCommit,
       gracefulShutdownEnabled: org.gracefulShutdownEnabled,
       selfReviewEnabled: org.selfReviewEnabled,
@@ -316,6 +317,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       // Resilience Settings
       blockerMaxAutoRetries,
       blockerAutoRetryEnabled,
+      qualityGateMaxRetries,
       pushAfterCommit,
       gracefulShutdownEnabled,
       selfReviewEnabled,
@@ -1112,6 +1114,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.blockerAutoRetryEnabled = blockerAutoRetryEnabled === true;
     }
 
+    if (qualityGateMaxRetries !== undefined) {
+      const maxRetries = parseInt(qualityGateMaxRetries, 10);
+      if (isNaN(maxRetries) || maxRetries < 1 || maxRetries > 20) {
+        res.status(400).json({ error: "qualityGateMaxRetries must be between 1 and 20" });
+        return;
+      }
+      org.qualityGateMaxRetries = maxRetries;
+    }
+
     if (pushAfterCommit !== undefined) {
       org.pushAfterCommit = pushAfterCommit === true;
     }
@@ -1266,6 +1277,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         // Resilience Settings
         blockerMaxAutoRetries: org.blockerMaxAutoRetries,
         blockerAutoRetryEnabled: org.blockerAutoRetryEnabled,
+        qualityGateMaxRetries: org.qualityGateMaxRetries,
         pushAfterCommit: org.pushAfterCommit,
         gracefulShutdownEnabled: org.gracefulShutdownEnabled,
         selfReviewEnabled: org.selfReviewEnabled,

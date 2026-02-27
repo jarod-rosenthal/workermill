@@ -176,6 +176,7 @@ export default function Settings() {
     // Resilience defaults
     blockerMaxAutoRetries: 3,
     blockerAutoRetryEnabled: true,
+    qualityGateMaxRetries: 5,
     pushAfterCommit: true,
     gracefulShutdownEnabled: true,
     selfReviewEnabled: false,
@@ -514,6 +515,7 @@ export default function Settings() {
         // Resilience settings
         blockerMaxAutoRetries: data.blockerMaxAutoRetries,
         blockerAutoRetryEnabled: data.blockerAutoRetryEnabled ?? true,
+        qualityGateMaxRetries: data.qualityGateMaxRetries ?? 5,
         pushAfterCommit: data.pushAfterCommit ?? true,
         gracefulShutdownEnabled: data.gracefulShutdownEnabled ?? true,
         selfReviewEnabled: data.selfReviewEnabled ?? false,

@@ -51,6 +51,16 @@ export class KbBoard {
   @Column({ name: "next_card_number", type: "int", default: 1 })
   nextCardNumber: number;
 
+  @Column({ type: "jsonb", default: () => "'{}'" })
+  metadata: {
+    qualityGates?: {
+      name: string;
+      trigger: string;
+      commands: string[];
+    }[];
+    ciWorkflowPath?: string;
+  };
+
   @Column({ name: "created_by", type: "uuid", nullable: true })
   createdById: string | null;
 

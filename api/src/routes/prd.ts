@@ -476,7 +476,14 @@ router.post(
 
         const prefix = await generateUniquePrefix(boardRepo, org.id, finalBoardName);
 
-        // Create board
+        // Create board (with quality gates from PRD decomposition if available)
+        const boardMetadata: Record<string, unknown> = {};
+        if (decomposed.qualityGates && decomposed.qualityGates.length > 0) {
+          boardMetadata.qualityGates = decomposed.qualityGates;
+        }
+        if (decomposed.ciWorkflowPath) {
+          boardMetadata.ciWorkflowPath = decomposed.ciWorkflowPath;
+        }
         const board = boardRepo.create({
           orgId: org.id,
           name: finalBoardName,
@@ -485,6 +492,7 @@ router.post(
           prefix,
           nextCardNumber: 1,
           createdById: user?.id || null,
+          metadata: boardMetadata as KbBoard["metadata"],
         });
         await boardRepo.save(board);
 

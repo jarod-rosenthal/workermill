@@ -75,6 +75,12 @@ function loadConfig(): EpicConfig {
     reviewFeedback: process.env.REVIEW_FEEDBACK || undefined,
     // Quality gate bypass (from bypass-quality-gate label)
     qualityGateBypass: process.env.QUALITY_GATE_BYPASS === "true",
+    // Pre-commit quality gate commands (from board metadata, extracted from PRD)
+    qualityGateCommands: process.env.QUALITY_GATE_COMMANDS
+      ? JSON.parse(process.env.QUALITY_GATE_COMMANDS)
+      : undefined,
+    // CI workflow path for post-push gate (from board metadata)
+    ciWorkflowPath: process.env.CI_WORKFLOW_PATH || undefined,
     // Max parallel experts cap
     maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10),
     // Intent Engineering — org guidelines from settings
@@ -93,6 +99,7 @@ function loadResilienceConfig(): ResilienceConfig {
   return {
     blockerMaxAutoRetries: parseInt(process.env.BLOCKER_MAX_AUTO_RETRIES || "3", 10),
     blockerAutoRetryEnabled: process.env.BLOCKER_AUTO_RETRY_ENABLED !== "false",
+    qualityGateMaxRetries: parseInt(process.env.QUALITY_GATE_MAX_RETRIES || "5", 10),
     pushAfterCommit: process.env.PUSH_AFTER_COMMIT !== "false",
     gracefulShutdownEnabled: process.env.GRACEFUL_SHUTDOWN_ENABLED !== "false",
     selfReviewEnabled: process.env.SELF_REVIEW_ENABLED === "true",

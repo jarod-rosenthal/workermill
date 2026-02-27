@@ -305,6 +305,8 @@ export async function spawnWorker(
     PRD_CHILD_TASK: task.parentTaskId ? "true" : "false",
     IMPROVEMENT_ENABLED: task.improvementEnabled ? "true" : "false",
     QUALITY_GATE_BYPASS: task.qualityGateBypass ? "true" : "false",
+    QUALITY_GATE_COMMANDS: task.jiraFields?.qualityGates ? JSON.stringify(task.jiraFields.qualityGates) : "",
+    CI_WORKFLOW_PATH: (task.jiraFields?.ciWorkflowPath as string) || "",
     STANDARD_SDK_MODE: task.standardSdkMode ? "true" : "false",
     MAX_REVIEW_REVISIONS: String(orgConfig.maxReviewRevisions),
     MAX_PER_STORY_REVISIONS: String(orgConfig.maxPerStoryRevisions),
@@ -351,6 +353,7 @@ export async function spawnWorker(
     // Resilience settings
     BLOCKER_MAX_AUTO_RETRIES: String(orgConfig.blockerMaxAutoRetries),
     BLOCKER_AUTO_RETRY_ENABLED: orgConfig.blockerAutoRetryEnabled !== false ? "true" : "false",
+    QUALITY_GATE_MAX_RETRIES: String(orgConfig.qualityGateMaxRetries ?? 5),
     PUSH_AFTER_COMMIT: orgConfig.pushAfterCommit !== false ? "true" : "false",
     GRACEFUL_SHUTDOWN_ENABLED: orgConfig.gracefulShutdownEnabled !== false ? "true" : "false",
     MAX_PARALLEL_EXPERTS: String(orgConfig.maxParallelExperts),

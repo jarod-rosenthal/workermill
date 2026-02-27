@@ -149,6 +149,8 @@ router.get("/", async (req: Request, res: Response) => {
       maxSecurityHighVulns: org.maxSecurityHighVulns,
       blockOnTypeErrors: org.blockOnTypeErrors ?? false,
       blockOnTestFailures: org.blockOnTestFailures ?? false,
+      qualityGateCommands: org.qualityGateCommands,
+      ciWorkflowPath: org.ciWorkflowPath,
 
       // External Quality Tool Integrations
       sonarqubeUrl: org.sonarqubeUrl || null,
@@ -301,6 +303,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       maxSecurityHighVulns,
       blockOnTypeErrors,
       blockOnTestFailures,
+      qualityGateCommands,
+      ciWorkflowPath,
 
       // External Quality Tool Integrations
       sonarqubeUrl,
@@ -1007,6 +1011,30 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.blockOnTestFailures = Boolean(blockOnTestFailures);
     }
 
+    // Quality gate commands — org-level default for all task sources
+    if (qualityGateCommands !== undefined) {
+      if (qualityGateCommands === null) {
+        org.qualityGateCommands = null;
+      } else if (Array.isArray(qualityGateCommands)) {
+        // Validate each gate entry
+        const validated: Array<{ name: string; trigger: string; commands: string[] }> = [];
+        for (const gate of qualityGateCommands) {
+          if (
+            typeof gate.name === "string" && gate.name.trim() &&
+            typeof gate.trigger === "string" && gate.trigger.trim() &&
+            Array.isArray(gate.commands) && gate.commands.every((c: unknown) => typeof c === "string")
+          ) {
+            validated.push({ name: gate.name.trim(), trigger: gate.trigger.trim(), commands: gate.commands });
+          }
+        }
+        org.qualityGateCommands = validated.length > 0 ? validated : null;
+      }
+    }
+
+    if (ciWorkflowPath !== undefined) {
+      org.ciWorkflowPath = ciWorkflowPath && typeof ciWorkflowPath === "string" ? ciWorkflowPath.trim() || null : null;
+    }
+
     // Validate and update External Quality Tool Integrations
     if (sonarqubeUrl !== undefined) {
       if (sonarqubeUrl === null || sonarqubeUrl === "") {
@@ -1263,6 +1291,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         maxSecurityHighVulns: org.maxSecurityHighVulns,
         blockOnTypeErrors: org.blockOnTypeErrors,
         blockOnTestFailures: org.blockOnTestFailures,
+        qualityGateCommands: org.qualityGateCommands,
+        ciWorkflowPath: org.ciWorkflowPath,
         sonarqubeUrl: org.sonarqubeUrl || null,
         sonarqubeToken: org.sonarqubeToken ? "***" : null,
         coderabbitEnabled: org.coderabbitEnabled,

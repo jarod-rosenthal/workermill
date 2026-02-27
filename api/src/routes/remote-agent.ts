@@ -1060,6 +1060,9 @@ router.get(
         autoFixEnabled: org.autoFixEnabled ?? false,
         autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
       },
+      // Pre-commit quality gate commands (org-level default for all task sources)
+      qualityGateCommands: org.qualityGateCommands,
+      ciWorkflowPath: org.ciWorkflowPath,
     });
   }),
 );

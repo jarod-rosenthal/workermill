@@ -145,6 +145,8 @@ export interface StoryResult {
   postRebaseBaseSha?: string;
   /** Dependency branches that had merge conflicts (missing from worktree) */
   depConflicts?: string[];
+  /** Story parked for deferred retry — quality gate retries exhausted, waiting for siblings to finish */
+  parked?: boolean;
 }
 
 /**

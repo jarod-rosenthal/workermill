@@ -400,8 +400,37 @@ export function validateDecomposedPrd(data: unknown): DecomposedPrd {
     });
   }
 
+  // Extract quality gate config (optional — LLM may or may not include them)
+  let qualityGates: QualityGateConfig[] | undefined;
+  if (Array.isArray(obj.qualityGates)) {
+    qualityGates = [];
+    for (const gate of obj.qualityGates) {
+      const g = gate as Record<string, unknown>;
+      if (
+        typeof g.name === "string" &&
+        typeof g.trigger === "string" &&
+        Array.isArray(g.commands) &&
+        g.commands.every((c: unknown) => typeof c === "string")
+      ) {
+        qualityGates.push({
+          name: g.name,
+          trigger: g.trigger,
+          commands: g.commands as string[],
+        });
+      }
+    }
+    if (qualityGates.length === 0) qualityGates = undefined;
+  }
+
+  const ciWorkflowPath =
+    typeof obj.ciWorkflowPath === "string" && obj.ciWorkflowPath.trim().length > 0
+      ? obj.ciWorkflowPath.trim()
+      : undefined;
+
   return {
     boardName: (obj.boardName as string).trim(),
     cards,
+    qualityGates,
+    ciWorkflowPath,
   };
 }

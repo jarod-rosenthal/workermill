@@ -1086,6 +1086,46 @@ export class EpicCoordinator {
   }
 
   /**
+   * Look up the asking expert's story context for enriching answer prompts.
+   * Returns a formatted string with story title, description, target files, and task summary.
+   */
+  private async getStoryContext(
+    question: { fromPersona: string; metadata?: Record<string, unknown> }
+  ): Promise<string> {
+    const fromStory = question.metadata?.fromStory as number | undefined;
+    if (fromStory === undefined) return "";
+    const stories = await this.coordination.getReadyStories();
+    const story = stories.find((s) => s.storyIndex === fromStory);
+    if (!story) return "";
+    let ctx = `The asking expert (${question.fromPersona}) is working on Story ${story.storyIndex}: "${story.title}"`;
+    if (story.description) ctx += `\nStory description: ${story.description}`;
+    if (story.targetFiles?.length) ctx += `\nTarget files: ${story.targetFiles.join(", ")}`;
+    if (this.config.taskSummary) ctx += `\nOverall task: ${this.config.taskSummary}`;
+    return ctx;
+  }
+
+  /**
+   * Write an "answer pending" placeholder to the asker's worktree.
+   * Tells the worker that a virtual expert is researching their question.
+   */
+  private writePendingPlaceholder(
+    question: { id: string; content: string; fromPersona: string; metadata?: Record<string, unknown> },
+    targetPersona: string
+  ): void {
+    const fromStory = question.metadata?.fromStory as number | undefined;
+    if (fromStory === undefined) return;
+    const worktreePath = this.activeWorktrees.get(fromStory);
+    if (!worktreePath) return;
+    const questionId = (question.metadata?.questionId as string) || question.id;
+    const content = `# Answer Pending\n\nA virtual **${targetPersona}** specialist is researching your question (${questionId}).\nA detailed answer will replace this file shortly.\n\n**Continue with work that doesn't depend on this answer.** Check back before finalizing related decisions.\n`;
+    try {
+      writeFileSync(`${worktreePath}/.workermill-answer.md`, content, "utf-8");
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  /**
    * Remove .workermill-message.md, .workermill-response.md, and .workermill-answer.md
    * from a story's worktree (cleanup after story completion).
    */
@@ -1632,6 +1672,7 @@ export class EpicCoordinator {
         console.log(`[Epic] ${expertPersona} answering question from ${question.fromPersona}`);
 
         try {
+          const storyCtx = await this.getStoryContext(question);
           const answerText = await this.executor.answerQuestion(
             {
               id: question.id,
@@ -1643,7 +1684,8 @@ export class EpicCoordinator {
               metadata: question.metadata,
               createdAt: question.createdAt,
             },
-            expertPersona
+            expertPersona,
+            storyCtx
           );
           answeredInPass.add(question.id);
 
@@ -1738,6 +1780,7 @@ export class EpicCoordinator {
       });
 
       try {
+        const storyCtx = await this.getStoryContext(question);
         const answerText = await this.executor.answerQuestion(
           {
             id: question.id,
@@ -1749,7 +1792,8 @@ export class EpicCoordinator {
             metadata: question.metadata,
             createdAt: question.createdAt,
           },
-          responder
+          responder,
+          storyCtx
         );
         answeredInPass.add(question.id);
 
@@ -2257,7 +2301,12 @@ export class EpicCoordinator {
 
   /**
    * Process unanswered questions and route to experts.
-   * Prioritizes explicit targetPersona from question metadata (Task 5: targeted routing).
+   * Routing tiers:
+   *   1. Target persona idle → route directly (with story context)
+   *   2. Decision API match idle → route (with story context)
+   *   3. Target known but busy → write placeholder + spawn virtual expert
+   *   4. No target match → any idle coding expert (for generic questions, with context)
+   *   5. ALL busy + no target → write placeholder + spawn virtual expert (catch-all)
    */
   private async processQuestions(): Promise<void> {
     const questions = await this.coordination.getUnansweredQuestions();
@@ -2291,6 +2340,7 @@ export class EpicCoordinator {
       // Tier 1: Target expert is idle — route directly
       const expertState = effectiveTarget ? this.expertStates.get(effectiveTarget) : undefined;
       if (expertState && expertState.status === "idle") {
+        const storyCtx = await this.getStoryContext(question);
         console.log(`[Epic] Routing question from ${question.fromPersona} to ${effectiveTarget} (tier ${routing.routingTier}: ${routing.reason})`);
         const answerText = await this.executor.answerQuestion(
           {
@@ -2303,17 +2353,19 @@ export class EpicCoordinator {
             metadata: question.metadata,
             createdAt: question.createdAt,
           },
-          effectiveTarget!
+          effectiveTarget!,
+          storyCtx
         );
         this.deliverAnswerToAsker(question, answerText, effectiveTarget!);
         continue;
       }
 
-      // Target expert is busy — try routing result's fallback target if different
+      // Tier 2: Target expert is busy — try routing result's fallback target if different and idle
       if (routing.targetExpert && routing.targetExpert !== effectiveTarget) {
         const routedTarget = routing.targetExpert as ExpertPersona;
         const routedState = this.expertStates.get(routedTarget);
         if (routedState && routedState.status === "idle") {
+          const storyCtx = await this.getStoryContext(question);
           console.log(
             `[Epic] Target ${effectiveTarget} busy — routing question from ${question.fromPersona} to ${routedTarget} (tier ${routing.routingTier}: ${routing.reason})`
           );
@@ -2331,72 +2383,104 @@ export class EpicCoordinator {
               metadata: question.metadata,
               createdAt: question.createdAt,
             },
-            routedTarget
+            routedTarget,
+            storyCtx
           );
           this.deliverAnswerToAsker(question, answerText2a, routedTarget);
           continue;
         }
       }
 
-      // Fallback: Any idle coding expert (excluding the question asker and non-coding personas)
-      const anyIdleExpert = Array.from(this.expertStates.entries()).find(
-        ([persona, state]) =>
-          state.status === "idle" &&
-          persona !== question.fromPersona &&
-          !QUESTION_INELIGIBLE_PERSONAS.has(persona)
-      );
-      if (anyIdleExpert) {
-        const [fallbackPersona] = anyIdleExpert;
-        console.log(
-          `[Epic] ${effectiveTarget ? `Target ${effectiveTarget} busy` : "No target match"} — routing question from ${question.fromPersona} to idle ${fallbackPersona}`
-        );
-        await this.postLog(
-          `Routing question to ${fallbackPersona} (${effectiveTarget ? `target ${effectiveTarget} busy` : "no target match"}, no specialty match)`
-        );
-        const answerText2b = await this.executor.answerQuestion(
-          {
-            id: question.id,
-            parentTaskId: question.parentTaskId,
-            taskId: undefined,
-            persona: question.fromPersona,
-            messageType: "question",
-            content: question.content,
-            metadata: question.metadata,
-            createdAt: question.createdAt,
-          },
-          fallbackPersona
-        );
-        this.deliverAnswerToAsker(question, answerText2b, fallbackPersona);
-        continue;
-      }
-
-      // Tier 3: ALL experts busy — spawn quick answerer
-      if (!this.inFlightQuickAnswers.has(question.id)) {
-        console.log(
-          `[Epic] All experts busy — spawning quick-answer for ${question.id} from ${question.fromPersona}`
-        );
-        await this.postLog(
-          `Quick-answering ${question.id} (all experts busy)`
-        );
+      // Tier 3: Target known but busy — spawn virtual expert with right persona
+      if (effectiveTarget && !this.inFlightQuickAnswers.has(question.id)) {
+        const storyCtx = await this.getStoryContext(question);
         this.inFlightQuickAnswers.add(question.id);
-
-        // Fire-and-forget: don't block the poll loop
-        const quickAnswerPersona = effectiveTarget || ("backend_developer" as ExpertPersona);
+        // Immediately tell the worker an answer is coming
+        this.writePendingPlaceholder(question, effectiveTarget);
+        await this.postLog(`Spawning virtual ${effectiveTarget} for ${question.fromPersona}'s question`);
         this.executor
-          .spawnQuickAnswer(
+          .spawnVirtualExpert(
             {
               id: question.id,
               content: question.content,
               fromPersona: question.fromPersona,
               metadata: question.metadata,
             },
-            quickAnswerPersona
+            effectiveTarget,
+            storyCtx
+          )
+          .then((answerText) => this.deliverAnswerToAsker(question, answerText, effectiveTarget!))
+          .catch((err) => console.error(`[Epic] Virtual expert failed for ${question.id}:`, err))
+          .finally(() => this.inFlightQuickAnswers.delete(question.id));
+        continue;
+      }
+
+      // Tier 4: No target specialty — fall back to any idle expert (for generic questions)
+      if (!effectiveTarget) {
+        const anyIdleExpert = Array.from(this.expertStates.entries()).find(
+          ([persona, state]) =>
+            state.status === "idle" &&
+            persona !== question.fromPersona &&
+            !QUESTION_INELIGIBLE_PERSONAS.has(persona)
+        );
+        if (anyIdleExpert) {
+          const [fallbackPersona] = anyIdleExpert;
+          const storyCtx = await this.getStoryContext(question);
+          console.log(
+            `[Epic] No target match — routing question from ${question.fromPersona} to idle ${fallbackPersona}`
+          );
+          await this.postLog(
+            `Routing question to ${fallbackPersona} (no target match, no specialty match)`
+          );
+          const answerText2b = await this.executor.answerQuestion(
+            {
+              id: question.id,
+              parentTaskId: question.parentTaskId,
+              taskId: undefined,
+              persona: question.fromPersona,
+              messageType: "question",
+              content: question.content,
+              metadata: question.metadata,
+              createdAt: question.createdAt,
+            },
+            fallbackPersona,
+            storyCtx
+          );
+          this.deliverAnswerToAsker(question, answerText2b, fallbackPersona);
+          continue;
+        }
+      }
+
+      // Tier 5: ALL busy + no target — spawn virtual expert (catch-all)
+      if (!this.inFlightQuickAnswers.has(question.id)) {
+        const storyCtx = await this.getStoryContext(question);
+        const bestGuessPersona = effectiveTarget || ("backend_developer" as ExpertPersona);
+        console.log(
+          `[Epic] All experts busy — spawning virtual ${bestGuessPersona} for ${question.id} from ${question.fromPersona}`
+        );
+        await this.postLog(
+          `Spawning virtual ${bestGuessPersona} for ${question.id} (all experts busy)`
+        );
+        this.inFlightQuickAnswers.add(question.id);
+        this.writePendingPlaceholder(question, bestGuessPersona);
+
+        // Fire-and-forget: don't block the poll loop
+        this.executor
+          .spawnVirtualExpert(
+            {
+              id: question.id,
+              content: question.content,
+              fromPersona: question.fromPersona,
+              metadata: question.metadata,
+            },
+            bestGuessPersona,
+            storyCtx
           )
           .then((answerText) => {
-            this.deliverAnswerToAsker(question, answerText, quickAnswerPersona);
+            this.deliverAnswerToAsker(question, answerText, bestGuessPersona);
           })
           .catch((err) => {
-            console.error(`[Epic] Quick-answer spawn failed for ${question.id}:`, err);
+            console.error(`[Epic] Virtual expert spawn failed for ${question.id}:`, err);
           })
           .finally(() => {
             this.inFlightQuickAnswers.delete(question.id);

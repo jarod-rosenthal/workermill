@@ -1917,7 +1917,9 @@ export class SettingsPanel {
         sandboxToggle.checked = msg.sandbox === "docker";
         if (msg.dockerAvailable) {
           sandboxToggle.disabled = false;
-          showStatus(sandboxStatus, "info", msg.sandbox === "docker" ? "Docker sandbox is active" : "Docker is available");
+          showStatus(sandboxStatus, "info", msg.sandbox === "docker"
+            ? "Docker sandbox is active"
+            : "Workers are running as native processes. Enable Docker sandbox above for filesystem and network isolation.");
         } else if (msg.dockerInstalled) {
           sandboxToggle.disabled = true;
           showStatus(sandboxStatus, "error", "Docker is installed but not running — start Docker Desktop to enable sandbox mode");

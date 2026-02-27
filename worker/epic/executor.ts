@@ -538,6 +538,7 @@ When summarizing your work at the end, describe decisions in plain language. The
             encoding: "utf-8",
             timeout: 300_000, // 5 min per command
             stdio: ["pipe", "pipe", "pipe"],
+            env: { ...process.env, CI: "true" }, // Disable watch mode in vitest/jest/etc.
           });
           await this.postLog(`[Quality Gate] ✅ ${cmd}`, expert, "system");
         } catch (error: unknown) {

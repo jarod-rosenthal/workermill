@@ -263,6 +263,7 @@ import { AddMaxTargetFiles1741200000000 } from "./migrations/1741200000000-AddMa
 import { BlockOnTestFailuresDefault1741300000000 } from "./migrations/1741300000000-BlockOnTestFailuresDefault.js";
 import { AddGithubAppInstallationId1741400000000 } from "./migrations/1741400000000-AddGithubAppInstallationId.js";
 import { AddBoardMetadata1741500000000 } from "./migrations/1741500000000-AddBoardMetadata.js";
+import { AddOrgQualityGateCommands1741600000000 } from "./migrations/1741600000000-AddOrgQualityGateCommands.js";
 import { logger } from "../utils/logger.js";
 import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
@@ -565,6 +566,7 @@ export const AppDataSource = new DataSource({
     BlockOnTestFailuresDefault1741300000000,
     AddGithubAppInstallationId1741400000000,
     AddBoardMetadata1741500000000,
+    AddOrgQualityGateCommands1741600000000,
   ],
   subscribers: [
     OrganizationEncryptionSubscriber,

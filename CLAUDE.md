@@ -22,6 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | **LLM Models** | NEVER change without approval | No default model changes, no provider switches, no model name changes in code/env/config |
 | **Coordination SSE** | Redis pub/sub with DB polling fallback | SSE endpoint subscribes to Redis for instant push. If Redis is down, falls back to 5s DB polling transparently. Fire-and-forget publishes never block writes. |
 | **Code events (Live Code View)** | Stateless API + client-side accumulation | API stores raw immutable events only. Clients (dashboard + VS Code) reconstruct file state. See "Code Events Architecture" below. |
+| **Quality gates** | Two-gate system (pre-commit + post-push CI) | Commands baked into board at PRD decomposition. Standard toolchain only — no third-party tools. See "Quality Gate Architecture" below. |
 
 **If you think something could be "better" (CloudWatch, WebSockets, etc.), ASK FIRST.**
 
@@ -171,6 +172,8 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 
 ***REMOVED******REMOVED*** Recent Changes (keep updated — max 10 entries, archive older to `docs/claude/changelog.md`)
 
+- 2026-02-27: Quality gates — first-class board columns (`quality_gate_commands`, `ci_workflow_path`), SCM-aware CI polling (GitHub Actions + Bitbucket Pipelines), standard toolchain restriction in PRD prompt, gofmt `./...` regex safety net, install-tools.sh re-run before gates.
+- 2026-02-27: CLAUDE.md → AGENTS.md — worker instructions now create provider-agnostic `AGENTS.md` in target repos (legacy `CLAUDE.md` still recognized as fallback).
 - 2026-02-23: Redis pub/sub for real-time coordination — ElastiCache `cache.t4g.micro`, SSE pushes instantly via Redis subscribe, falls back to 5s DB polling if Redis unavailable. Workers use SSE subscriber with event-driven coordinator loop.
 - 2026-02-23: bcrypt → bcryptjs (pure JS, no native deps) — eliminates Docker build warnings and `python3 make g++` from Dockerfile.
 - 2026-02-23: CloudFront origin timeouts increased (read 30→60s, keepalive 5→30s) to prevent 504s during coordination.
@@ -179,8 +182,6 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 - 2026-02-21: Billing tiers renamed: Free/Pro/Enterprise → **Pro/Max/Enterprise** (`e8928aa`).
 - 2026-02-21: Docker sandbox mode for remote agent workers (`agent/src/docker-spawner.ts`). Opt-in via VS Code settings. Four spawners now (see Agent Pitfalls).
 - 2026-02-20: Full Build (formerly "PRD") decomposition — `POST /api/prd/decompose` creates boards with dependency-ordered cards. Board execution engine (`api/src/services/board-execution.ts`) cascade-triggers dependent cards on completion.
-- 2026-02-20: Card dependencies (`KbCardDependency` model), run-all/cancel-all endpoints, external tracker sync (Jira/GitHub/Linear).
-- 2026-02-19: Rate limit detection — agent detects rate limits → blocker escalation → dashboard banner + VS Code notification.
 
 ---
 
@@ -384,6 +385,35 @@ There are TWO separate board/project systems — do NOT confuse them:
 ***REMOVED******REMOVED******REMOVED*** Board Execution Engine
 
 `api/src/services/board-execution.ts` handles dependency-ordered card execution. When a card completes, it cascade-triggers dependent cards (`KbCardDependency` model). PRD decomposition (`POST /api/prd/decompose`) creates boards with dependency-ordered cards that execute via this engine. Run-all and cancel-all endpoints operate on entire boards.
+
+***REMOVED******REMOVED******REMOVED*** Quality Gate Architecture (CRITICAL)
+
+Quality gates enforce code quality at two checkpoints during worker execution. Both are in `worker/epic/executor.ts`.
+
+**Gate 1 — Pre-Commit (SCM-agnostic):** Runs shell commands before every commit. Commands come from `quality_gate_commands` column on `kb_boards` (JSONB), populated at PRD decomposition time. Each gate has a `name`, `trigger` glob, and `commands` array. The executor matches changed files against trigger globs and runs matching gate commands.
+
+**Gate 2 — Post-Push CI Verification (SCM-aware):** After pushing a branch, polls the CI provider API to verify the pipeline passes. Dispatches by `SCM_PROVIDER` env var:
+- `github` → `pollGitHubActionsCI()` — uses `gh api` to check GitHub Actions workflow runs
+- `bitbucket` → `pollBitbucketPipelinesCI()` — uses Bitbucket Pipelines REST API with Bearer token auth
+- Other providers → skips CI polling gracefully
+
+**Quality gate commands are baked into the board at PRD decomposition time** and cannot be changed mid-run. If the PRD prompt generates bad commands (e.g., tools not installed), you must cancel the run, fix the prompt, and re-decompose.
+
+**PRD prompt is the single source of truth** for what commands the LLM generates. The canonical prompt lives in `api/src/services/prd-decomposer.ts` and is served to agents via `GET /api/agent/prd-prompt`. The agent fallback prompt in `agent/src/local-api.ts` must stay in sync.
+
+**Standard toolchain restriction:** Quality gate commands run in a minimal container. Only use tools from the standard toolchain:
+- **Go:** `go vet ./...`, `go test ./...`, `go build ./...`, `gofmt -w .` (NOT `gofmt ./...` — gofmt doesn't support `...`)
+- **Node.js:** `npm run lint`, `npm run test`, `npm run build`
+- **Python:** `python -m pytest`, `python -m mypy .`
+- Do NOT use `golangci-lint`, `staticcheck`, or other third-party tools — they may not be installed
+
+**Tool installation timing issue:** `worker/install-tools.sh` runs at container startup when the repo is bare (no go.mod yet). By the time experts create Go code, the installer has already finished. The executor re-runs `install-tools.sh` against the worktree before quality gates execute to pick up newly-created project files.
+
+**Key files:**
+- `worker/epic/executor.ts` — `runPreCommitGate()`, `runPostPushCIGate()`, `pollGitHubActionsCI()`, `pollBitbucketPipelinesCI()`
+- `api/src/services/prd-decomposer.ts` — PRD prompt + validation (canonical source)
+- `agent/src/local-api.ts` — Agent fallback PRD prompt (must match API prompt)
+- `api/src/routes/prd.ts` — Writes `quality_gate_commands` and `ci_workflow_path` to board
 
 ***REMOVED******REMOVED******REMOVED*** Orchestrator Module Architecture
 

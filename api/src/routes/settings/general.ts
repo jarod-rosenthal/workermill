@@ -149,8 +149,6 @@ router.get("/", async (req: Request, res: Response) => {
       maxSecurityHighVulns: org.maxSecurityHighVulns,
       blockOnTypeErrors: org.blockOnTypeErrors ?? false,
       blockOnTestFailures: org.blockOnTestFailures ?? false,
-      qualityGateCommands: org.qualityGateCommands,
-      ciWorkflowPath: org.ciWorkflowPath,
 
       // External Quality Tool Integrations
       sonarqubeUrl: org.sonarqubeUrl || null,
@@ -196,6 +194,10 @@ router.get("/", async (req: Request, res: Response) => {
       codebaseIncludeLanguages: org.codebaseIncludeLanguages ?? [],
       codebaseAutoIndexOnTask: org.codebaseAutoIndexOnTask ?? true,
       codebaseMaxRetrievalChunks: org.codebaseMaxRetrievalChunks ?? 10,
+
+      // Spec Engineering Settings
+      specMinQualityScore: org.specMinQualityScore ?? 0,
+      specRequiredSections: org.specRequiredSections ?? null,
     });
   } catch (error) {
     logger.error("Error getting settings", { error });
@@ -303,8 +305,6 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       maxSecurityHighVulns,
       blockOnTypeErrors,
       blockOnTestFailures,
-      qualityGateCommands,
-      ciWorkflowPath,
 
       // External Quality Tool Integrations
       sonarqubeUrl,
@@ -337,6 +337,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       codebaseIncludeLanguages,
       codebaseAutoIndexOnTask,
       codebaseMaxRetrievalChunks,
+
+      // Spec Engineering Settings
+      specMinQualityScore,
+      specRequiredSections,
     } = req.body;
 
     // Validate and update Data Management settings
@@ -1011,30 +1015,6 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.blockOnTestFailures = Boolean(blockOnTestFailures);
     }
 
-    // Quality gate commands — org-level default for all task sources
-    if (qualityGateCommands !== undefined) {
-      if (qualityGateCommands === null) {
-        org.qualityGateCommands = null;
-      } else if (Array.isArray(qualityGateCommands)) {
-        // Validate each gate entry
-        const validated: Array<{ name: string; trigger: string; commands: string[] }> = [];
-        for (const gate of qualityGateCommands) {
-          if (
-            typeof gate.name === "string" && gate.name.trim() &&
-            typeof gate.trigger === "string" && gate.trigger.trim() &&
-            Array.isArray(gate.commands) && gate.commands.every((c: unknown) => typeof c === "string")
-          ) {
-            validated.push({ name: gate.name.trim(), trigger: gate.trigger.trim(), commands: gate.commands });
-          }
-        }
-        org.qualityGateCommands = validated.length > 0 ? validated : null;
-      }
-    }
-
-    if (ciWorkflowPath !== undefined) {
-      org.ciWorkflowPath = ciWorkflowPath && typeof ciWorkflowPath === "string" ? ciWorkflowPath.trim() || null : null;
-    }
-
     // Validate and update External Quality Tool Integrations
     if (sonarqubeUrl !== undefined) {
       if (sonarqubeUrl === null || sonarqubeUrl === "") {
@@ -1225,6 +1205,44 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       }
     }
 
+    // Validate and update Spec Engineering Settings
+    if (specMinQualityScore !== undefined) {
+      const score = parseInt(specMinQualityScore, 10);
+      if (isNaN(score) || score < 0 || score > 100) {
+        res.status(400).json({ error: "specMinQualityScore must be between 0 and 100" });
+        return;
+      }
+      org.specMinQualityScore = score;
+    }
+
+    if (specRequiredSections !== undefined) {
+      if (specRequiredSections === null) {
+        org.specRequiredSections = null;
+      } else {
+        if (!Array.isArray(specRequiredSections)) {
+          res.status(400).json({ error: "specRequiredSections must be an array of strings or null" });
+          return;
+        }
+        const validSections = [
+          "Overview",
+          "Technical Specification",
+          "Data Model",
+          "File Structure",
+          "API Specification",
+          "Component Specification",
+          "Quality Gates",
+          "Acceptance Criteria",
+          "Scope Boundary",
+        ];
+        const invalid = specRequiredSections.filter((s: unknown) => typeof s !== "string" || !validSections.includes(s as string));
+        if (invalid.length > 0) {
+          res.status(400).json({ error: `Invalid spec sections: ${invalid.join(", ")}` });
+          return;
+        }
+        org.specRequiredSections = specRequiredSections.length > 0 ? specRequiredSections : null;
+      }
+    }
+
     await orgRepo.save(org);
 
     // Invalidate cached credentials so workers immediately pick up new settings
@@ -1291,8 +1309,6 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         maxSecurityHighVulns: org.maxSecurityHighVulns,
         blockOnTypeErrors: org.blockOnTypeErrors,
         blockOnTestFailures: org.blockOnTestFailures,
-        qualityGateCommands: org.qualityGateCommands,
-        ciWorkflowPath: org.ciWorkflowPath,
         sonarqubeUrl: org.sonarqubeUrl || null,
         sonarqubeToken: org.sonarqubeToken ? "***" : null,
         coderabbitEnabled: org.coderabbitEnabled,
@@ -1321,6 +1337,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         codebaseIncludeLanguages: org.codebaseIncludeLanguages ?? [],
         codebaseAutoIndexOnTask: org.codebaseAutoIndexOnTask ?? true,
         codebaseMaxRetrievalChunks: org.codebaseMaxRetrievalChunks ?? 10,
+        // Spec Engineering Settings
+        specMinQualityScore: org.specMinQualityScore ?? 0,
+        specRequiredSections: org.specRequiredSections ?? null,
       },
     });
   } catch (error) {

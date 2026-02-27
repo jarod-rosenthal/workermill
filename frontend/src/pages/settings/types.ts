@@ -128,6 +128,9 @@ export interface Settings {
   codebaseIncludeLanguages: string[];
   codebaseAutoIndexOnTask: boolean;
   codebaseMaxRetrievalChunks: number;
+  // Spec Engineering settings
+  specMinQualityScore: number;
+  specRequiredSections: string[] | null;
 }
 
 export interface ValidationErrors {

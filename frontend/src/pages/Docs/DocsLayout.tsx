@@ -23,6 +23,7 @@ import {
   FolderGit2,
   Radio,
   KeyRound,
+  FileText,
 } from "lucide-react";
 import { useAuthStore } from "../../store/auth-store";
 
@@ -36,6 +37,7 @@ const navItems = [
   { to: "/docs/credential-rotation", label: "Credential Rotation", icon: KeyRound },
   { to: "/docs/task-lifecycle", label: "Task Lifecycle", icon: Workflow },
   { to: "/docs/epics", label: "Epics & Stories", icon: Layers },
+  { to: "/docs/specifications", label: "Specifications", icon: FileText },
   { to: "/docs/advanced-features", label: "Advanced Features", icon: Zap },
   { to: "/docs/analytics", label: "Analytics", icon: TrendingUp },
   { to: "/docs/memory", label: "Memory System", icon: Brain },

@@ -539,6 +539,22 @@ export class StoryExecutor {
             ? String((error as { stdout: unknown }).stdout).slice(0, 2000)
             : "";
           const output = [stdout, stderr].filter(Boolean).join("\n");
+
+          // "No test files found" is NOT a real failure — it means the test runner
+          // (Vitest, Jest, pytest) found zero test files. This is expected when a
+          // feature card runs before the CI card creates the first test file.
+          const noTestsPatterns = [
+            /no test files found/i,
+            /no tests found/i,
+            /no test suites found/i,
+            /no tests to run/i,
+            /collected 0 items/i, // pytest
+          ];
+          if (noTestsPatterns.some((p) => p.test(output))) {
+            await this.postLog(`[Quality Gate] ⏭️ ${cmd} — no test files yet, skipping`, expert, "system");
+            continue;
+          }
+
           await this.postLog(`[Quality Gate] ❌ ${cmd}\n${output}`, expert, "error");
           return { passed: false, output, failedCommand: cmd };
         }

@@ -10,7 +10,7 @@
 - **Target repo**: `workermill-examples/flagdeck` (GitHub, public)
 - **Live URL**: https://flagdeck.workermill.com
 - **API compute**: Railway (Hobby plan, Docker container)
-- **Frontend compute**: Railway (static build or same service)
+- **Frontend compute**: Railway (SvelteKit with `adapter-node`, NOT adapter-static)
 - **Database**: MongoDB Atlas (M0 free tier, 512 MB)
 - **Cache**: Upstash Redis (free tier, 10K commands/day)
 - **CI/CD**: GitHub Actions → Railway CLI deploy
@@ -27,22 +27,23 @@ Before EVERY `git commit` that touches `api/` files, workers MUST run the follow
 
 ```bash
 # Step 1: Format all Go files
-gofmt -w ./api/...
+cd api && gofmt -w .
 
 # Step 2: Run static analysis
-go vet ./api/...
+cd api && go vet ./...
 
-# Step 3: Run linter (golangci-lint)
-golangci-lint run ./api/...
+# Step 3: Run tests (with race detector — MUST match CI exactly)
+cd api && go test ./... -v -count=1 -race
 
-# Step 4: Run tests
-cd api && go test ./... -v -count=1
-
-# Step 5: Verify build
+# Step 4: Verify build
 cd api && go build -o /dev/null ./cmd/server
 ```
 
-**If ANY of steps 2-5 produce errors, DO NOT commit.** Fix the errors and re-run from step 1.
+**If ANY step produces errors, DO NOT commit.** Fix the errors and re-run from step 1.
+
+**IMPORTANT — No third-party linters:** Do NOT use `golangci-lint`, `staticcheck`, or any third-party tool. Use only standard Go toolchain commands (`go vet`, `go test`, `go build`, `gofmt`). These commands run in a minimal container where third-party tools are not installed.
+
+**IMPORTANT — CI must use the EXACT same commands:** The CI workflow (`.github/workflows/ci.yml`) MUST run the exact same commands as this quality gate. No additional linters, no different flags. If the quality gate passes, CI must also pass. Any divergence is a bug.
 
 ### Pre-Commit Quality Gate — SvelteKit Frontend (MANDATORY)
 
@@ -81,9 +82,9 @@ After every `git push`, workers MUST:
 - Use `goimports` or `gofmt` to auto-sort
 - Package names: lowercase, single word, no underscores (`flagservice`, not `flag_service`)
 
-### Go Error Handling — EVERY Return Value MUST Be Checked (errcheck)
+### Go Error Handling — EVERY Return Value MUST Be Checked
 
-`golangci-lint` enables the `errcheck` linter. **Every function that returns an error MUST have its error checked.** This is the #1 CI failure across all builds.
+**Every function that returns an error MUST have its error checked.** `go vet` catches many of these, and unchecked errors cause runtime bugs. This is the #1 source of quality issues.
 
 ```go
 // WRONG — errcheck violation, CI will fail:
@@ -134,9 +135,9 @@ NEVER:
 - If you need a type in two packages, put it in `models/`
 - If two packages need each other, extract the shared interface into `models/` or a new `types/` package
 
-### Go Lint Patterns — gosimple (MANDATORY)
+### Go Code Style Patterns (MANDATORY)
 
-`golangci-lint` enables `gosimple`. These patterns cause CI failures:
+Avoid these common anti-patterns — they indicate code quality issues even if `go vet` doesn't flag them all:
 
 ```go
 // WRONG (S1002): if x == true { ... }
@@ -193,12 +194,12 @@ rdb := redis.NewClient(opt)
 | **Config** | envconfig | v1 | Simple, popular env-var-to-struct binding for Go. |
 | **Testing (Go)** | testing + testify | stdlib + v1 | Standard Go testing with testify assertions and mocks. |
 | **Testing (frontend)** | Vitest + Testing Library | latest | Fast Vite-native test runner with Svelte component testing. |
-| **Linting (Go)** | golangci-lint | latest | Meta-linter aggregating 50+ Go linters. |
+| **Linting (Go)** | go vet (stdlib) | — | Standard Go static analysis. Do NOT use golangci-lint — it is not available in worker containers. |
 | **Linting (frontend)** | ESLint + Prettier | latest | Standard JS/TS linting and formatting. |
-| **Container** | Docker (multi-stage) | — | Minimal scratch-based Go binary + nginx for frontend. |
+| **Container** | Docker (multi-stage) | — | Minimal scratch-based Go binary. Frontend uses adapter-node (NOT nginx). |
 | **Compute** | Railway | Hobby plan | Docker container hosting with auto-HTTPS. |
 | **CI/CD** | GitHub Actions | — | Automated test + deploy pipeline. |
-| **Hashing** | murmur3 | spaolacci/murmur3 | MurmurHash3 for deterministic percentage rollouts. Industry standard for feature flag SDKs (LaunchDarkly, Unleash). |
+| **Hashing** | FNV-1a | `hash/fnv` (stdlib) | FNV-1a 32-bit for deterministic percentage rollouts. Uses Go standard library — no unsafe pointer arithmetic, passes `-race` detector. |
 
 ---
 
@@ -242,6 +243,24 @@ All resources are **provisioned and ready**. Workers do NOT create accounts or s
 | `PORT` | `8080` | Railway injects PORT; set explicitly |
 | `ENVIRONMENT` | `production` | Runtime environment flag |
 | `CORS_ORIGINS` | `https://flagdeck-app.workermill.com,https://flagdeck.workermill.com` | Allowed CORS origins |
+
+**Railway environment variables (set on `flagdeck-web` service):**
+
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `PUBLIC_API_URL` | `https://flagdeck.workermill.com` | API base URL for the frontend |
+
+**Railway Deployment Requirements (CRITICAL):**
+
+1. **SvelteKit MUST use `@sveltejs/adapter-node`** — Railway requires a long-running process. `adapter-static` generates static HTML files with no server process, which causes Railway builds to fail with "no start command". The `svelte.config.js` must import `adapter-node`, NOT `adapter-static`.
+
+2. **`web/package.json` MUST include a `"start"` script:** `"start": "node build"` — Railway auto-detects the start command from package.json. Without it, the service won't start after build. The `adapter-node` output goes to the `build/` directory.
+
+3. **SvelteKit layout MUST use `ssr: true`** (NOT `prerender: true`) — `adapter-node` serves pages dynamically via SSR. Setting `export const prerender = true` in `+layout.ts` conflicts with adapter-node and causes build failures. Use `export const ssr = true` instead.
+
+4. **Railway project token is project-scoped** — The `RAILWAY_TOKEN` GitHub secret must be a project-scoped token generated from Railway project settings (Settings → Tokens → Create Token), NOT a personal API token. Project tokens have the format `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`.
+
+5. **Service names in `railway up` MUST be exact** — Use `--service flagdeck-api` and `--service flagdeck-web` (the exact names from the Railway dashboard). Using any other name creates a new service instead of deploying to the existing one.
 
 ### MongoDB Atlas (Database)
 
@@ -323,7 +342,7 @@ flagdeck/
 │   │   ├── services/
 │   │   │   ├── evaluator.go             # Core flag evaluation engine
 │   │   │   ├── targeting.go             # Targeting rule parser and matcher
-│   │   │   ├── rollout.go               # Percentage rollout (MurmurHash3)
+│   │   │   ├── rollout.go               # Percentage rollout (FNV-1a stdlib)
 │   │   │   ├── cache.go                 # Redis cache layer (get/set/invalidate)
 │   │   │   ├── experiment_stats.go      # Experiment statistics (chi-squared)
 │   │   │   └── audit.go                 # Audit log recording
@@ -390,12 +409,12 @@ flagdeck/
 │   │   └── app.css                      # TailwindCSS imports
 │   ├── static/
 │   │   └── favicon.png
-│   ├── svelte.config.js                 # SvelteKit config (adapter-static)
+│   ├── svelte.config.js                 # SvelteKit config (adapter-node — REQUIRED for Railway)
 │   ├── vite.config.ts                   # Vite config
 │   ├── tailwind.config.js               # Tailwind config
 │   ├── tsconfig.json
 │   ├── package.json
-│   └── Dockerfile                       # Build → nginx serve
+│   └── Dockerfile                       # Build → adapter-node (NOT nginx)
 ├── docker-compose.yml                   # Local dev (MongoDB + Redis)
 ├── .github/
 │   └── workflows/
@@ -634,14 +653,14 @@ Client sends: POST /api/v1/evaluate
         - If rule.logic == "or": ANY condition must match
      b. If conditions match:
         - If rule.rollout_percentage is set:
-          hash = MurmurHash3(flag_key + user_id) % 100
+          hash = FNV1a32(flag_key + ":" + user_id) % 100
           If hash < rollout_percentage → return rule.value
           Else → continue to next rule
         - If no rollout_percentage → return rule.value
      c. If conditions don't match → continue to next rule
   5. No rules matched → evaluate fallthrough:
      - If fallthrough.rollout_percentage is set:
-       hash = MurmurHash3(flag_key + user_id) % 100
+       hash = FNV1a32(flag_key + ":" + user_id) % 100
        If hash < rollout_percentage → return fallthrough.value
        Else → return default_value
      - If no rollout_percentage → return fallthrough.value
@@ -664,17 +683,20 @@ Client sends: POST /api/v1/evaluate
 | `lte` | Less than or equal | number | `usage lte 1000` |
 | `regex` | Regex match | string (regex) | `email regex ".*@company\\.com$"` |
 
-### Percentage Rollout — MurmurHash3
+### Percentage Rollout — FNV-1a (stdlib)
 
 ```go
-// Deterministic percentage rollout
-// CRITICAL: hash is based on flagKey + userID (NOT userID alone)
+// Deterministic percentage rollout using FNV-1a 32-bit (Go stdlib hash/fnv)
+// CRITICAL: hash is based on flagKey + ":" + userID (NOT userID alone)
 // This ensures a user in the 10% bucket for flag A is NOT necessarily
 // in the 10% bucket for flag B (statistical independence).
+// Do NOT use spaolacci/murmur3 — it uses unsafe pointer arithmetic that
+// crashes under Go's -race detector (checkptr violation).
 
 func isInRollout(flagKey, userID string, percentage int) bool {
-    h := murmur3.Sum32([]byte(flagKey + ":" + userID))
-    bucket := h % 100
+    h := fnv.New32a()
+    h.Write([]byte(flagKey + ":" + userID))
+    bucket := h.Sum32() % 100
     return int(bucket) < percentage
 }
 ```
@@ -1016,7 +1038,7 @@ require (
     github.com/golang-jwt/jwt/v5 v5.2.0
     github.com/kelseyhightower/envconfig v1.4.0
     github.com/redis/go-redis/v9 v9.7.0
-    github.com/spaolacci/murmur3 v1.1.0
+    // NOTE: Do NOT add spaolacci/murmur3 — use stdlib hash/fnv instead
     github.com/stretchr/testify v1.9.0
     go.mongodb.org/mongo-driver/v2 v2.0.0
     golang.org/x/crypto v0.31.0
@@ -1039,10 +1061,11 @@ require (
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "start": "node build"
   },
   "devDependencies": {
-    "@sveltejs/adapter-static": "^3.0.0",
+    "@sveltejs/adapter-node": "^5.0.0",
     "@sveltejs/kit": "^2.0.0",
     "@sveltejs/vite-plugin-svelte": "^4.0.0",
     "@testing-library/svelte": "^5.0.0",
@@ -1248,7 +1271,7 @@ Tests run against local MongoDB and Redis (docker-compose services or testcontai
 |------|--------------|
 | `evaluator_test.go` | Core evaluation logic — rule matching, priority ordering, default values |
 | `targeting_test.go` | All 11 operators, AND/OR logic, nested conditions, edge cases |
-| `rollout_test.go` | MurmurHash3 determinism, independence, uniformity (statistical), stability |
+| `rollout_test.go` | FNV-1a determinism, independence, uniformity (statistical), stability |
 | `cache_test.go` | Cache hit, cache miss, cache invalidation, Redis down fallback |
 | `handlers_test.go` | HTTP handlers — CRUD, auth, evaluate endpoint |
 | `experiment_stats_test.go` | Chi-squared calculation, confidence intervals, minimum sample guard |
@@ -1373,10 +1396,9 @@ jobs:
         with:
           go-version: "1.22"
 
-      - name: Lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          working-directory: api
+      - name: Vet
+        working-directory: api
+        run: go vet ./...
 
       - name: Test
         working-directory: api
@@ -1473,7 +1495,7 @@ jobs:
 
 | Gate | Threshold | Command |
 |------|-----------|---------|
-| Go lint | 0 errors | `golangci-lint run ./api/...` |
+| Go vet | 0 errors | `cd api && go vet ./...` |
 | Go format | Fully formatted | `gofmt -d ./api/` (no output) |
 | Go tests | 100% pass | `cd api && go test ./... -v -count=1 -race` |
 | Go build | Successful binary | `cd api && go build -o /dev/null ./cmd/server` |
@@ -1502,8 +1524,8 @@ Workers MUST create a `CLAUDE.md` in the root of `workermill-examples/flagdeck`:
 | Run frontend | `cd web && npm run dev` |
 | Run Go tests | `cd api && go test ./... -v` |
 | Run Go tests (race) | `cd api && go test ./... -v -race -count=1` |
-| Lint Go | `golangci-lint run ./api/...` |
-| Format Go | `gofmt -w ./api/...` |
+| Vet Go | `cd api && go vet ./...` |
+| Format Go | `cd api && gofmt -w .` |
 | Seed database | `cd api && go run ./cmd/seed` |
 | Frontend type check | `cd web && npm run check` |
 | Frontend lint | `cd web && npm run lint` |
@@ -1576,7 +1598,7 @@ Workers MUST create a `README.md` covering:
 - [ ] OR logic: any condition must match within a rule
 - [ ] Rules evaluated in priority order, first match wins
 - [ ] All 11 operators work correctly (eq, neq, contains, not_contains, in, not_in, gt, lt, gte, lte, regex)
-- [ ] Percentage rollout is deterministic (MurmurHash3 of flagKey + userID)
+- [ ] Percentage rollout is deterministic (FNV-1a of flagKey + ":" + userID)
 - [ ] Rollout is statistically independent across flags
 - [ ] Rollout distribution is uniform (10K users at 50% → ~5000 ± 2%)
 - [ ] Disabled flags return default value
@@ -1664,7 +1686,7 @@ Workers MUST create a `README.md` covering:
 - [ ] `npm run test` passes with 0 failures
 
 ### Quality
-- [ ] `golangci-lint run ./api/...` — 0 errors
+- [ ] `cd api && go vet ./...` — 0 errors
 - [ ] `gofmt -d ./api/` — no output (fully formatted)
 - [ ] Go build succeeds: `go build -o /dev/null ./cmd/server`
 - [ ] Docker image builds, size < 20 MB (scratch-based Go binary)
@@ -1694,7 +1716,7 @@ Workers MUST create a `README.md` covering:
 | **Upstash free tier limit (10K commands/day)** | Evaluation endpoint could exhaust daily limit under load | Acceptable for showcase traffic. Upgrade to paid ($10/mo for 10K commands/day → pay-as-you-go) if needed. |
 | **Go module version drift** | Workers generate code for wrong Go version or dependency version | Pin exact versions in `go.mod`. Use `go 1.22` directive. |
 | **SvelteKit 2 vs Svelte 5 confusion** | Workers mix SvelteKit 1 patterns (no runes) with SvelteKit 2 | PRD explicitly pins SvelteKit 2.x + Svelte 5 with runes. Workers should use `$state()`, `$derived()`, `$effect()`. |
-| **MurmurHash3 implementation differences** | Different libraries produce different hashes for same input | Pin `spaolacci/murmur3` specifically. Test with known input/output pairs. |
+| **Hashing library compatibility** | Third-party hash libs may use unsafe pointers that crash under `-race` | Use Go stdlib `hash/fnv` (FNV-1a 32-bit). Do NOT use `spaolacci/murmur3` — it crashes with Go's `-race` detector due to unsafe pointer arithmetic (`checkptr` violation). |
 | **Cross-story file conflicts** | Two workers edit same file | File cap enforced by planner. Max 5-8 files per story, no overlaps. |
 | **CI broken = deploy blocked** | Demo stays on last working version | `deploy.yml` uses `workflow_run` with `if: conclusion == 'success'`. Fix CI immediately. |
 | **MongoDB connection string in Atlas** | Workers might hardcode or expose credentials | Connection string is in Railway env vars only. Workers read `MONGODB_URI` from environment. |
@@ -1735,11 +1757,10 @@ All infrastructure is provisioned. Workers MUST NOT attempt to create or modify 
 ```
 BEFORE git push:
   Go files changed:
-    1. gofmt -w ./api/...                     ← Auto-fix formatting
-    2. go vet ./api/...                       ← Static analysis
-    3. golangci-lint run ./api/...            ← Lint
-    4. cd api && go test ./... -v -count=1    ← Tests
-    5. cd api && go build -o /dev/null ./cmd/server ← Build
+    1. cd api && gofmt -w .                        ← Auto-fix formatting
+    2. cd api && go vet ./...                      ← Static analysis
+    3. cd api && go test ./... -v -count=1 -race   ← Tests (with race detector — MUST match CI)
+    4. cd api && go build -o /dev/null ./cmd/server ← Build
 
   Frontend files changed:
     1. cd web && npm run lint                  ← Lint

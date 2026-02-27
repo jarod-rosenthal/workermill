@@ -23,7 +23,7 @@ const program = new Command();
 
 program
   .name("workermill-agent")
-  .description("WorkerMill Remote Agent - Run AI workers locally with your Claude Max subscription")
+  .description("WorkerMill Remote Agent - Run AI workers locally with your own AI provider credentials")
   .version(AGENT_VERSION);
 
 program

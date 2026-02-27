@@ -809,7 +809,7 @@ Follow these guidelines to minimize wasted time and token usage.
 **For existing codebases:**
 - Use `Glob` with targeted patterns instead of broad `find` commands
 - One well-crafted grep is better than 5 exploratory ones
-- Read CLAUDE.md/README first if they exist - they often explain structure
+- Read AGENTS.md/CLAUDE.md/README first if they exist - they often explain structure
 
 **What NOT to do:**
 ```bash

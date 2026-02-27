@@ -106,6 +106,8 @@ Card 2 deliverables MUST include:
 2. A trivial passing test file so the test step succeeds on first run
 3. Verification that the pipeline actually runs and passes (acceptance criterion, not just "file exists")
 
+CI workflow lint/test steps MUST use standard toolchain ONLY — the same restriction as quality gates. For Go: "go vet ./...", "go test ./...", "go build ./..." (NOT golangci-lint, staticcheck, or other third-party linters). For Node.js: "npm run lint", "npm run test", "npm run build". For Python: "python -m pytest", "python -m mypy .". Do NOT add third-party tools to CI that aren't already in the repo.
+
 ALL feature cards (Card 3+) MUST have Card 2 in their transitive dependency chain.
 
 ***REMOVED******REMOVED*** Priority Assignment

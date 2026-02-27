@@ -398,6 +398,15 @@ export class StoryExecutor {
     // Always add learning instructions so experts can report discoveries
     prompt += this.serverLearningInstructions ?? LEARNING_INSTRUCTIONS;
 
+    // Communication tone — keep status updates professional and direct
+    prompt += `
+
+## Communication Style
+
+Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!", or similar. Start with the substance — what you did, what you found, or what you need. Be concise and informative.
+
+When summarizing your work at the end, describe decisions in plain language. The internal DEC-xxx markers are parsed by the system automatically — your summary should restate decisions in readable form. For example, instead of repeating "DEC-001: Created repository-level config", write "Decision 1: Created a repository-level configuration file for..." with enough context for a non-technical reader to understand.`;
+
     return prompt;
   }
 

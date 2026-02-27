@@ -509,6 +509,22 @@ export async function spawnDockerWorker(
     }
   }
 
+  // Mount Docker socket so workers can spin up sibling containers (DBs, etc.)
+  // The sandbox still isolates the filesystem — only Docker API access is shared.
+  const dockerSocket = "/var/run/docker.sock";
+  if (fs.existsSync(dockerSocket)) {
+    dockerArgs.push("-v", `${dockerSocket}:${dockerSocket}`);
+    // Add the host's docker socket GID so the non-root worker user can access it
+    try {
+      const socketStat = fs.statSync(dockerSocket);
+      if (socketStat.gid > 0) {
+        dockerArgs.push("--group-add", String(socketStat.gid));
+      }
+    } catch {
+      // Socket exists but can't stat — proceed without group-add
+    }
+  }
+
   // Mount AWS credentials (read-only)
   const awsDir = path.join(os.homedir(), ".aws");
   if (fs.existsSync(awsDir)) {
@@ -704,6 +720,15 @@ export async function spawnDockerWorker(
   // Image
   dockerArgs.push(imageTag);
 
+  // Snapshot container IDs before spawn for cleanup (detect worker-spawned containers)
+  let preSpawnContainerIds = new Set<string>();
+  try {
+    const ids = execFileSync(dockerBin, ["ps", "-a", "-q"], {
+      encoding: "utf-8", stdio: "pipe", timeout: 10_000, windowsHide: true,
+    }).trim();
+    preSpawnContainerIds = new Set(ids ? ids.split("\n").filter(Boolean) : []);
+  } catch { /* non-critical */ }
+
   const reviewEnabled = task.skipManagerReview === false;
   console.log(
     `${ts()} ${taskLabel} ${chalk.blue("🐳")} Starting Docker worker`,
@@ -897,9 +922,41 @@ export async function spawnDockerWorker(
     // Clean up container and process reference after delay
     setTimeout(() => {
       activeProcesses.delete(task.id);
-      // Remove dead container
+      const docker = findDockerBin();
+
+      // Clean up sibling containers spawned by the worker (DBs, docker compose, etc.)
       try {
-        execFileSync(findDockerBin(), ["rm", "-f", containerName], { stdio: "pipe", windowsHide: true });
+        const currentIds = execFileSync(docker, ["ps", "-a", "-q"], {
+          encoding: "utf-8", stdio: "pipe", timeout: 10_000, windowsHide: true,
+        }).trim();
+        if (currentIds) {
+          const newIds = currentIds.split("\n").filter((id) => id && !preSpawnContainerIds.has(id));
+          for (const id of newIds) {
+            // Skip our own worker containers (wm-* prefix)
+            try {
+              const name = execFileSync(docker, ["inspect", "--format", "{{.Name}}", id], {
+                encoding: "utf-8", stdio: "pipe", timeout: 5_000, windowsHide: true,
+              }).trim();
+              if (name.startsWith("/wm-")) continue;
+            } catch { continue; }
+            try {
+              execFileSync(docker, ["rm", "-f", id], { stdio: "pipe", timeout: 15_000, windowsHide: true });
+            } catch { /* best effort */ }
+          }
+          if (newIds.length > 0) {
+            console.log(`${ts()} ${taskLabel} ${chalk.dim(`Cleaned up ${newIds.length} worker-spawned container(s)`)}`);
+          }
+        }
+      } catch { /* non-critical */ }
+
+      // Clean up dangling networks left by docker compose
+      try {
+        execFileSync(docker, ["network", "prune", "-f"], { stdio: "pipe", timeout: 10_000, windowsHide: true });
+      } catch { /* best effort */ }
+
+      // Remove dead worker container
+      try {
+        execFileSync(docker, ["rm", "-f", containerName], { stdio: "pipe", windowsHide: true });
       } catch {
         /* best effort cleanup */
       }

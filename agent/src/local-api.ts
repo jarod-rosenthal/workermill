@@ -20,6 +20,8 @@ import { triggerPoll } from "./poller.js";
 import { detectGpu } from "./gpu-detector.js";
 import { getOllamaStatus, generateEmbeddings, ensureOllamaRunning, pullModel, installOllama, findOllamaPath } from "./ollama-manager.js";
 import { indexRepositoryLocally } from "./local-indexer.js";
+import { getActiveBackend } from "./backends/selector.js";
+import { processQueuedTask, stopWorkerTask } from "./backends/local/orchestrator.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -498,8 +500,25 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   // ── POST commands ──
 
-  // POST /api/tasks/run — create a task via the cloud API
+  // POST /api/tasks/run — create a task via the cloud API or local backend
   if (req.method === "POST" && path === "/api/tasks/run") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const task = await backend.createTask({
+          summary: body.summary,
+          description: body.description,
+          githubRepo: body.githubRepo || body.repo,
+          scmProvider: body.scmProvider,
+          workerModel: body.workerModel,
+        });
+        processQueuedTask(task.id).catch(() => {});
+        return json(res, task, 201);
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
@@ -533,6 +552,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   // GET /api/repos — lightweight repos endpoint for VS Code repo picker
   if (req.method === "GET" && path === "/api/repos") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const repos = await backend.getRepos();
+        return json(res, {
+          repos: repos.map(r => r.url),
+          defaultRepo: repos.find(r => r.isDefault)?.url || null,
+          scmProvider: (await backend.getSettings()).scmProvider || "github",
+        });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const settings = await cloudProxy("GET", "/api/settings") as Record<string, unknown>;
@@ -718,6 +750,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     const localTask = localTasks.get(taskId);
     if (localTask) localTask.status = "failed";
     agentEvents.emit("task:failed", { id: taskId });
+
+    // Update local backend if in standalone mode
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      stopWorkerTask(taskId);
+      await backend.cancelTask(taskId);
+      return json(res, { success: true, message: "Task cancelled" });
+    }
 
     // Best-effort cloud status update — don't fail if cloud is stale
     if (cloudProxy) {
@@ -940,6 +980,116 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       });
 
       return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // ── Worker ingestion endpoints (standalone mode) ──
+
+  // POST /api/tasks/:id/logs — worker posts log entries
+  const workerLogMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/logs$/);
+  if (req.method === "POST" && workerLogMatch) {
+    const backend = getActiveBackend();
+    if (!backend || backend.mode !== "local") return notFound(res);
+    try {
+      const body = JSON.parse(await readBody(req));
+      await backend.postLog({
+        taskId: workerLogMatch[1],
+        type: body.type || "execution",
+        message: body.message,
+        severity: body.severity || "info",
+      });
+      return json(res, { success: true });
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // POST /api/coordination/messages — worker posts coordination messages
+  if (req.method === "POST" && path === "/api/coordination/messages") {
+    const backend = getActiveBackend();
+    if (!backend || backend.mode !== "local") return notFound(res);
+    try {
+      const body = JSON.parse(await readBody(req));
+      await backend.postCoordinationMessage({
+        parentTaskId: body.parentTaskId,
+        taskId: body.taskId,
+        messageType: body.messageType || body.type,
+        content: body.content,
+      });
+      return json(res, { success: true });
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // POST /api/control-center/code-events — worker posts code events
+  if (req.method === "POST" && path === "/api/control-center/code-events") {
+    const backend = getActiveBackend();
+    if (!backend || backend.mode !== "local") return notFound(res);
+    try {
+      const body = JSON.parse(await readBody(req));
+      await backend.postCodeEvent({
+        taskId: body.taskId,
+        filePath: body.filePath,
+        toolName: body.toolName,
+        expert: body.expert,
+        metadata: body.metadata,
+      });
+      return json(res, { success: true });
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // ── Board endpoints (standalone mode) ──
+
+  // GET /api/boards
+  if (req.method === "GET" && path === "/api/boards") {
+    const backend = getActiveBackend();
+    if (!backend || backend.mode !== "local") {
+      if (cloudProxy) {
+        try {
+          const result = await cloudProxy("GET", "/api/boards");
+          return json(res, result);
+        } catch (err) {
+          return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+        }
+      }
+      return json(res, { error: "No backend available" }, 503);
+    }
+    try {
+      const boards = await backend.getBoards();
+      return json(res, boards);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // GET /api/boards/:id/cards
+  const boardCardsMatch = path.match(/^\/api\/boards\/([a-f0-9]+)\/cards$/);
+  if (req.method === "GET" && boardCardsMatch) {
+    const backend = getActiveBackend();
+    if (!backend || backend.mode !== "local") return json(res, { error: "No backend available" }, 503);
+    try {
+      const cards = await backend.getBoardCards(boardCardsMatch[1]);
+      return json(res, cards);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // POST /api/boards/:id/cards/:cardId/run
+  const runCardMatch = path.match(/^\/api\/boards\/([a-f0-9]+)\/cards\/([a-f0-9]+)\/run$/);
+  if (req.method === "POST" && runCardMatch) {
+    const backend = getActiveBackend();
+    if (!backend || backend.mode !== "local") return json(res, { error: "No backend available" }, 503);
+    try {
+      const task = await backend.runCard(runCardMatch[1], runCardMatch[2]);
+      // Trigger orchestrator
+      processQueuedTask(task.id).catch(() => {});
+      return json(res, task, 201);
     } catch (err) {
       return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
     }

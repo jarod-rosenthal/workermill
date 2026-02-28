@@ -35,6 +35,8 @@ import {
 import {
   loadStandaloneConfig,
   saveStandaloneConfig,
+  getRoleConfig,
+  resolveApiKey,
 } from "./config.js";
 
 export class LocalBackend implements AgentBackend {
@@ -163,7 +165,7 @@ export class LocalBackend implements AgentBackend {
       task: task!,
       credentials: {
         scmToken: config.scm?.token || "",
-        anthropicApiKey: config.llm?.apiKey || "",
+        anthropicApiKey: resolveApiKey(config, "worker"),
       },
     };
   }
@@ -601,7 +603,7 @@ export class LocalBackend implements AgentBackend {
       description: card.description,
       githubRepo: config.defaultRepo,
       scmProvider: config.scm?.provider,
-      workerModel: config.llm?.model,
+      workerModel: getRoleConfig(config, "worker").model,
       boardId,
       cardId,
     });
@@ -628,10 +630,11 @@ export class LocalBackend implements AgentBackend {
 
   async getSettings(): Promise<AgentSettings> {
     const config = loadStandaloneConfig();
+    const workerRole = getRoleConfig(config, "worker");
     return {
       mode: config.mode,
-      llmProvider: config.llm?.provider,
-      llmModel: config.llm?.model,
+      llmProvider: workerRole.provider,
+      llmModel: workerRole.model,
       scmProvider: config.scm?.provider,
       defaultRepo: config.defaultRepo,
       maxParallelExperts: config.settings?.maxParallelExperts ?? 4,
@@ -641,10 +644,12 @@ export class LocalBackend implements AgentBackend {
 
   async updateSettings(input: Partial<AgentSettings>): Promise<void> {
     const config = loadStandaloneConfig();
-    if (input.llmProvider && config.llm)
-      config.llm.provider = input.llmProvider;
-    if (input.llmModel && config.llm)
-      config.llm.model = input.llmModel;
+    if (input.llmProvider || input.llmModel) {
+      if (!config.roles) config.roles = {};
+      if (!config.roles.worker) config.roles.worker = { provider: "anthropic", model: "claude-sonnet-4-6" };
+      if (input.llmProvider) config.roles.worker.provider = input.llmProvider;
+      if (input.llmModel) config.roles.worker.model = input.llmModel;
+    }
     if (input.scmProvider && config.scm)
       config.scm.provider = input.scmProvider;
     if (input.defaultRepo !== undefined)
@@ -701,10 +706,11 @@ export class LocalBackend implements AgentBackend {
     // Reuse the existing decomposePrdLocal function from local-api.ts
     const { decomposePrdLocal } = await import("../../local-api.js");
 
+    const plannerRole = getRoleConfig(config, "planner");
     const planningConfig = {
-      provider: config.llm?.provider || "anthropic",
-      model: config.llm?.model || "claude-sonnet-4-20250514",
-      apiKey: config.llm?.apiKey,
+      provider: plannerRole.provider,
+      model: plannerRole.model,
+      apiKey: resolveApiKey(config, "planner"),
     };
 
     const result = await decomposePrdLocal(

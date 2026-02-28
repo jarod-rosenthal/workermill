@@ -1,11 +1,11 @@
 /**
  * esbuild bundler for @workermill/agent
  *
- * Produces minified, mangled single-file bundles for CLI and library entry points,
+ * Produces single-file bundles for CLI and library entry points,
  * plus worker entry points (epic worker and manager worker).
  *
  * tsc runs first (via package.json "build" script) to generate dist/*.js,
- * then this script re-bundles those into minified output and additionally
+ * then this script re-bundles those into output files and additionally
  * bundles worker code from ../worker/ into dist/worker.js and dist/manager-worker.js.
  */
 
@@ -44,15 +44,13 @@ const shared = {
   target: "node20",
   format: "esm",
   bundle: true,
-  minify: true,
+  minify: false,
   treeShaking: true,
-  // Mangle all non-exported identifiers
-  mangleProps: /_$/,
   // Keep Node builtins external (fs, path, child_process, etc.)
   packages: "external",
-  // Banner to preserve shebang for CLI entry point
-  legalComments: "none",
-  sourcemap: false,
+  // Preserve license comments from bundled dependencies at end of file
+  legalComments: "eof",
+  sourcemap: true,
   // Drop console.debug calls (keep console.log/error/warn for user-facing output)
   drop: [],
   define: {
@@ -94,7 +92,7 @@ await build({
   ...shared,
   entryPoints: ["../worker/epic/remote-bootstrap.ts"],
   outfile: "dist/worker.js",
-  banner: { js: "// WorkerMill Worker - minified" },
+  banner: { js: "// WorkerMill Worker" },
 });
 console.log("✓ dist/worker.js bundled from worker/epic/remote-bootstrap.ts");
 
@@ -103,7 +101,7 @@ await build({
   ...shared,
   entryPoints: ["../worker/manager/index.ts"],
   outfile: "dist/manager-worker.js",
-  banner: { js: "// WorkerMill Manager - minified" },
+  banner: { js: "// WorkerMill Manager" },
 });
 console.log("✓ dist/manager-worker.js bundled from worker/manager/index.ts");
 
@@ -112,7 +110,7 @@ await build({
   ...shared,
   entryPoints: ["../worker/multi-expert/index.ts"],
   outfile: "dist/multi-expert-worker.js",
-  banner: { js: "// WorkerMill Multi-Expert - minified" },
+  banner: { js: "// WorkerMill Multi-Expert" },
 });
 console.log("✓ dist/multi-expert-worker.js bundled from worker/multi-expert/index.ts");
 
@@ -121,7 +119,7 @@ await build({
   ...shared,
   entryPoints: ["../worker/agents/ai-sdk-executor.js"],
   outfile: "dist/ai-sdk-executor.js",
-  banner: { js: "// WorkerMill AI SDK Executor - minified" },
+  banner: { js: "// WorkerMill AI SDK Executor" },
 });
 console.log("✓ dist/ai-sdk-executor.js bundled from worker/agents/ai-sdk-executor.js");
 
@@ -140,7 +138,6 @@ await build({
   outfile: "dist/entry.js",
   packages: undefined, // Override shared.packages: inline ALL npm packages
   external: nodeBuiltins, // Keep Node builtins external (provided by Bun & Node.js runtimes)
-  mangleProps: undefined, // Disable property mangling — breaks inlined SDKs (claude-agent-sdk RegExp crash)
   banner: {
     js: `import { createRequire as __createRequire } from "module";
 var require = (typeof globalThis.require !== "undefined") ? globalThis.require : __createRequire(import.meta.url);`,
@@ -178,4 +175,4 @@ function cleanUnbundled(dir) {
 cleanUnbundled("dist");
 cleanTypes("dist");
 
-console.log("✓ Agent bundled and minified");
+console.log("✓ Agent bundled");

@@ -600,11 +600,11 @@ export class GitOps {
       console.log("[GitOps] Repository is empty (no commits yet)");
     }
 
-    // Fetch from origin - may fail if remote branch doesn't exist (empty repo)
+    // Fetch all branches from origin (not just main) so story branch refs are up to date
     try {
-      await this.git.fetch(["origin", this.mainBranch]);
+      await this.git.fetch(["origin"]);
     } catch (fetchError) {
-      console.log(`[GitOps] Could not fetch origin/${this.mainBranch} - repo may be empty`);
+      console.log(`[GitOps] Could not fetch origin - repo may be empty`);
     }
 
     // For empty repos, create an initial commit so we have something to branch from
@@ -645,6 +645,24 @@ export class GitOps {
 
     if (branchExists) {
       console.log(`[GitOps] Branch ${branchName} exists, creating worktree from it...`);
+
+      // If branch exists on remote, reset local ref to match remote
+      // (prevents stale local branch from being used when remote was updated externally)
+      const remoteRef = `remotes/origin/${branchName}`;
+      if (branches.all.includes(remoteRef)) {
+        try {
+          execSync(`git branch -f "${branchName}" "origin/${branchName}"`, {
+            cwd: this.repoPath,
+            stdio: "pipe",
+            timeout: 30_000,
+          });
+          console.log(`[GitOps] Reset local branch ${branchName} to match remote`);
+        } catch (resetErr) {
+          // May fail if branch is checked out — will still use local ref
+          console.log(`[GitOps] Could not reset local branch to remote (non-blocking): ${resetErr instanceof Error ? resetErr.message : resetErr}`);
+        }
+      }
+
       // Create worktree with existing branch
       try {
         execSync(`git worktree add "${worktreePath}" "${branchName}"`, {

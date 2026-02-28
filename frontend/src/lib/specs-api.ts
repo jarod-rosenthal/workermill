@@ -80,17 +80,17 @@ export async function getSpecs(params?: {
   if (params?.templateId) searchParams.set("templateId", params.templateId);
   const qs = searchParams.toString();
   const response = await apiClient.get(`/specs${qs ? `?${qs}` : ""}`);
-  return response.data;
+  return response.data.specs;
 }
 
 export async function getSpec(specId: string): Promise<Spec> {
   const response = await apiClient.get(`/specs/${specId}`);
-  return response.data;
+  return response.data.spec;
 }
 
 export async function createSpec(data: CreateSpecData): Promise<Spec> {
   const response = await apiClient.post("/specs", data);
-  return response.data;
+  return response.data.spec;
 }
 
 export async function updateSpec(
@@ -98,7 +98,7 @@ export async function updateSpec(
   data: UpdateSpecData,
 ): Promise<Spec> {
   const response = await apiClient.put(`/specs/${specId}`, data);
-  return response.data;
+  return response.data.spec;
 }
 
 export async function deleteSpec(specId: string): Promise<void> {
@@ -107,19 +107,19 @@ export async function deleteSpec(specId: string): Promise<void> {
 
 export async function scoreSpec(specId: string): Promise<QualityFeedback> {
   const response = await apiClient.post(`/specs/${specId}/score`);
-  return response.data;
+  return response.data.spec?.qualityFeedback ?? response.data;
 }
 
 export async function getSpecVersions(
   specId: string,
 ): Promise<SpecVersion[]> {
   const response = await apiClient.get(`/specs/${specId}/versions`);
-  return response.data;
+  return response.data.versions;
 }
 
 export async function getSpecTemplates(): Promise<SpecTemplate[]> {
   const response = await apiClient.get("/specs/templates/list");
-  return response.data;
+  return response.data.templates;
 }
 
 export async function createSpecTemplate(data: {
@@ -130,5 +130,5 @@ export async function createSpecTemplate(data: {
   isDefault?: boolean;
 }): Promise<SpecTemplate> {
   const response = await apiClient.post("/specs/templates", data);
-  return response.data;
+  return response.data.template;
 }

@@ -66,6 +66,44 @@ cd web && npm run build
 
 **If ANY step fails, DO NOT commit.** Fix and re-run.
 
+### TypeScript & ESLint Strictness (ALL frontend cards)
+
+**These rules are non-negotiable. Every `web/` file must comply.**
+
+- `tsconfig.json` MUST use `"strict": true`
+- ESLint MUST be configured with `@typescript-eslint/no-explicit-any` as an error
+- **NEVER use `any` type** — use proper types, `unknown`, or generics instead
+- **NEVER leave unused imports or variables** — ESLint must flag `@typescript-eslint/no-unused-vars` as an error
+- Workers MUST run `npm run lint` after EVERY file creation/modification and fix all violations before moving to the next file — do NOT batch lint fixes at the end
+
+### Svelte 5 Syntax — Runes ONLY (ALL frontend cards)
+
+**ALL Svelte components MUST use Svelte 5 runes syntax exclusively.** Do NOT mix Svelte 4 and Svelte 5 patterns.
+
+```svelte
+<!-- WRONG — Svelte 4 syntax (DO NOT USE): -->
+<script>
+  export let value;
+  $: doubled = value * 2;
+</script>
+<form on:submit|preventDefault={handler}>
+
+<!-- RIGHT — Svelte 5 runes syntax (REQUIRED): -->
+<script>
+  let { value } = $props();
+  let doubled = $derived(value * 2);
+</script>
+<form onsubmit={(e) => { e.preventDefault(); handler(e); }}>
+```
+
+**Key Svelte 5 breaking changes:**
+- `export let` → `$props()` destructuring
+- `$:` reactive declarations → `$derived()` or `$effect()`
+- Event modifiers like `on:click|preventDefault` → `onclick={(e) => { e.preventDefault(); ... }}`
+- `on:event` → `onevent` (lowercase, no colon)
+
+If any component is found using Svelte 4 syntax, it MUST be rewritten before the card is complete.
+
 ### Post-Push Verification (MANDATORY)
 
 After every `git push`, workers MUST:
@@ -134,6 +172,48 @@ NEVER:
 - `router/` imports `handlers/` and `middleware/`
 - If you need a type in two packages, put it in `models/`
 - If two packages need each other, extract the shared interface into `models/` or a new `types/` package
+
+### Shared Service Interface Contracts (CRITICAL — Cross-Card)
+
+**These interfaces are consumed by multiple cards. The signatures below are the SINGLE SOURCE OF TRUTH.** Any card calling these methods MUST use the exact signature shown.
+
+**AuditService** (defined in `services/audit.go`, consumed by all handler files):
+
+```go
+type AuditEntryInput struct {
+    ActorID      string                 // User who performed the action
+    ActorEmail   string                 // Denormalized for display
+    Action       string                 // e.g., "flag.created", "segment.deleted"
+    ResourceType string                 // "flag", "segment", "experiment", "apikey", "environment"
+    ResourceID   string                 // MongoDB ObjectID as string
+    ResourceKey  string                 // Human-readable key (e.g., "dark-mode")
+    Changes      map[string]interface{} // Field-level diff (old/new values)
+    Environment  string                 // Optional — which environment was affected
+    IPAddress    string                 // Client IP
+}
+
+func (s *AuditService) LogAction(ctx context.Context, input AuditEntryInput) error
+```
+
+All handler files MUST call `LogAction` with an `AuditEntryInput` struct. Do NOT pass individual arguments.
+
+**FlagCacheInterface** (defined in `services/cache.go`, consumed by handlers):
+
+```go
+type FlagCacheInterface interface {
+    GetFlag(ctx context.Context, environment, flagKey string) (*models.Flag, error)
+    InvalidateFlag(ctx context.Context, environment, flagKey string) error
+}
+```
+
+**EvaluatorInterface** (defined in `services/evaluator.go`, consumed by handlers):
+
+```go
+type EvaluatorInterface interface {
+    Evaluate(ctx context.Context, flagKey string, context map[string]interface{}, environment string) (*EvalResult, error)
+    EvaluateBulk(ctx context.Context, flagKeys []string, context map[string]interface{}, environment string) ([]EvalResult, error)
+}
+```
 
 ### Go Code Style Patterns (MANDATORY)
 
@@ -1078,6 +1158,9 @@ require (
     "vitest": "^2.0.0",
     "tailwindcss": "^4.0.0",
     "eslint": "^9.0.0",
+    "eslint-plugin-svelte": "^2.0.0",
+    "typescript-eslint": "^8.0.0",
+    "globals": "^15.0.0",
     "prettier": "^3.0.0",
     "prettier-plugin-svelte": "^3.0.0"
   },
@@ -1096,6 +1179,56 @@ require (
 > });
 > ```
 > This file gets replaced by real tests in later cards. Do NOT remove it until real test files exist.
+
+### web/eslint.config.js
+
+ESLint 9 uses flat config. This config enforces strict TypeScript rules:
+
+```js
+import js from '@eslint/js';
+import ts from 'typescript-eslint';
+import svelte from 'eslint-plugin-svelte';
+import globals from 'globals';
+
+export default ts.config(
+  js.configs.recommended,
+  ...ts.configs.recommended,
+  ...svelte.configs['flat/recommended'],
+  {
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node }
+    }
+  },
+  {
+    files: ['**/*.svelte'],
+    languageOptions: {
+      parserOptions: { parser: ts.parser }
+    }
+  },
+  {
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }]
+    }
+  },
+  { ignores: ['build/', '.svelte-kit/', 'dist/'] }
+);
+```
+
+> **`no-explicit-any` is an error, not a warning.** Workers MUST use proper types instead of `any`. Use `unknown` for truly unknown values, or define an interface.
+
+### web/tsconfig.json
+
+```json
+{
+  "extends": "./.svelte-kit/tsconfig.json",
+  "compilerOptions": {
+    "strict": true
+  }
+}
+```
+
+> **`strict: true` is required.** This enables `noImplicitAny`, `strictNullChecks`, and other safety checks. Do NOT set `strict: false` or omit it.
 
 ### docker-compose.yml (local development)
 
@@ -1290,6 +1423,64 @@ Tests run against local MongoDB and Redis (docker-compose services or testcontai
 
 Tests use Vitest + `@testing-library/svelte` to mount and interact with real Svelte components. Tests MUST render actual Svelte components — not raw HTML strings. Each test file imports the component, mounts it with `render()`, and asserts on the rendered DOM.
 
+#### Vitest + Svelte 5 Configuration (MUST be set up before writing any component test)
+
+Svelte 5 components use runes (`$state`, `$props`, `$derived`) which are client-only APIs. Vitest defaults to SSR module resolution, which will cause `mount(...) is not available on the server` errors unless configured correctly.
+
+**`web/vite.config.ts`** — MUST include these test settings:
+
+```ts
+import { sveltekit } from '@sveltejs/kit/vite';
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  plugins: [sveltekit()],
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.test.ts'],
+    setupFiles: ['src/test/setup.ts']
+  },
+  resolve: {
+    // CRITICAL: Force browser (client) module resolution for Svelte 5 runes.
+    // Without this, Vitest loads SSR modules and mount() fails.
+    conditions: ['browser']
+  }
+});
+```
+
+**`web/src/test/setup.ts`** — Test setup file:
+
+```ts
+import '@testing-library/jest-dom/vitest';
+```
+
+**`web/src/app.d.ts`** — MUST include jest-dom type declarations:
+
+```ts
+/// <reference types="@testing-library/jest-dom" />
+```
+
+Without this line, TypeScript will report errors on matchers like `toBeInTheDocument()`, `toHaveTextContent()`, etc.
+
+#### Component Prop Interfaces (tests MUST only use props that exist)
+
+Tests MUST only reference props that are defined on the component. These are the prop interfaces for shared components:
+
+| Component | Props | Notes |
+|-----------|-------|-------|
+| `RolloutSlider` | `{ value: number, disabled?: boolean, label?: string, showPercentage?: boolean }` | No callback props — value is display-only |
+| `FlagCard` | `{ flag: Flag }` | Uses the `Flag` type from the domain model |
+| `FlagToggle` | `{ enabled: boolean, onToggle: (enabled: boolean) => void, disabled?: boolean }` | `onToggle` fires on click |
+| `TargetingRuleBuilder` | `{ rules: TargetingRule[], onUpdate: (rules: TargetingRule[]) => void, operators: string[] }` | `onUpdate` fires when rules change |
+| `EmptyState` | `{ title: string, description?: string, icon?: string }` | Decorative placeholder |
+| `Sidebar` | `{ items: NavItem[], activePath: string }` | Navigation sidebar |
+| `ExperimentChart` | `{ results: Record<string, VariantResult>, variants: Variant[] }` | Results visualization |
+| `AuditTimeline` | `{ entries: AuditEntry[] }` | Audit log timeline |
+
+Do NOT invent props that are not listed (e.g., do NOT use `onValueChange` on `RolloutSlider`).
+
+#### Test Files
+
 | File | What it tests |
 |------|--------------|
 | `flags.test.ts` | Flag list page — renders flag table, search input, tag filters, pagination |
@@ -1314,6 +1505,8 @@ cd web && npx vitest run src/routes/flags/flags.test.ts
 > - Experiments: Use `variants[].weight` (NOT `variations[].traffic`)
 > - Flags: Use `fallthrough.value` (NOT `fallthrough.variation`), and `rollout.attribute` is required on rollout objects
 > - Pagination: Use `total` (NOT `total_items`)
+
+> **Query selectors — use specific queries when multiple elements exist.** When a page renders multiple buttons, text labels, or similar elements, use `getAllByRole`/`getAllByText` and select the specific index, or use `getByRole` with `{ name: "..." }` to narrow the match. Do NOT use bare `getByText("Submit")` if multiple "Submit" elements exist — the test will fail with "found multiple elements."
 
 ### Key Test Scenarios
 
@@ -1487,6 +1680,8 @@ jobs:
         run: railway up --service flagdeck-web --detach
 ```
 
+> **Deploy commands are EXACT — do NOT add flags.** Use the `railway up` commands EXACTLY as shown above. Do NOT add `--environment production`, `--build`, or any other flags not present in this spec. Adding unspecified flags will cause deployment failures.
+>
 > **Railway service names are EXACT.** The `--service` flag must use the exact service name from Railway: `flagdeck-api` and `flagdeck-web`. Do NOT use `api`, `backend`, `web`, `frontend`, or any other name. These are the service IDs configured in Railway (see Pre-Provisioned Resources table). If you use the wrong name, `railway up` will create a **new** service instead of deploying to the existing one.
 
 ---

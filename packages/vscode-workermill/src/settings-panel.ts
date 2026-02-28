@@ -355,6 +355,7 @@ export class SettingsPanel {
         maxReviewRevisions: settings.maxReviewRevisions ?? 3,
         qualityGateMaxRetries: settings.qualityGateMaxRetries ?? 5,
         maxCiFixRetries: settings.maxCiFixRetries ?? 3,
+        blockerWaitTimeoutMinutes: settings.blockerWaitTimeoutMinutes ?? 20,
         pushAfterCommit: settings.pushAfterCommit ?? true,
         // No plan restrictions in standalone — all providers available
         plan: "max",
@@ -429,6 +430,7 @@ export class SettingsPanel {
     maxReviewRevisions: number;
     qualityGateMaxRetries: number;
     maxCiFixRetries: number;
+    blockerWaitTimeoutMinutes: number;
     pushAfterCommit: boolean;
   }): void {
     try {
@@ -438,6 +440,7 @@ export class SettingsPanel {
       settings.maxReviewRevisions = msg.maxReviewRevisions;
       settings.qualityGateMaxRetries = msg.qualityGateMaxRetries;
       settings.maxCiFixRetries = msg.maxCiFixRetries;
+      settings.blockerWaitTimeoutMinutes = msg.blockerWaitTimeoutMinutes;
       settings.pushAfterCommit = msg.pushAfterCommit;
       sc.settings = settings;
       writeStandaloneConfigFile(sc);
@@ -1530,6 +1533,11 @@ export class SettingsPanel {
         <div class="hint">Max attempts for CI Fix Agent to resolve PR CI failures before merging. 0 = disabled.</div>
       </div>
       <div class="field">
+        <label>Blocker Wait Timeout (minutes)</label>
+        <input type="number" id="wk-blocker-timeout" min="1" max="120" value="20" />
+        <div class="hint">Minutes to wait for human blocker resolution before aborting (1-120).</div>
+      </div>
+      <div class="field">
         <label style="display:flex;align-items:center;gap:8px;">
           <input type="checkbox" id="wk-push-after-commit" checked />
           Push after each commit
@@ -1868,6 +1876,7 @@ export class SettingsPanel {
         maxReviewRevisions: parseInt(document.getElementById("wk-pr-revisions").value) || 0,
         qualityGateMaxRetries: parseInt(document.getElementById("wk-qg-retries").value) || 0,
         maxCiFixRetries: parseInt(document.getElementById("wk-ci-fix-retries").value) || 0,
+        blockerWaitTimeoutMinutes: parseInt(document.getElementById("wk-blocker-timeout").value) || 20,
         pushAfterCommit: document.getElementById("wk-push-after-commit").checked,
       });
     });
@@ -2056,11 +2065,13 @@ export class SettingsPanel {
         const wkPr = document.getElementById("wk-pr-revisions");
         const wkQg = document.getElementById("wk-qg-retries");
         const wkCiFix = document.getElementById("wk-ci-fix-retries");
+        const wkBlockerTimeout = document.getElementById("wk-blocker-timeout");
         const wkPush = document.getElementById("wk-push-after-commit");
         if (wkPerStory) wkPerStory.value = String(d.maxPerStoryRevisions ?? 1);
         if (wkPr) wkPr.value = String(d.maxReviewRevisions ?? 3);
         if (wkQg) wkQg.value = String(d.qualityGateMaxRetries ?? 5);
         if (wkCiFix) wkCiFix.value = String(d.maxCiFixRetries ?? 3);
+        if (wkBlockerTimeout) wkBlockerTimeout.value = String(d.blockerWaitTimeoutMinutes ?? 20);
         if (wkPush) wkPush.checked = d.pushAfterCommit !== false;
 
         // Populate RAG index repo selector

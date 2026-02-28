@@ -101,8 +101,6 @@ export class EpicCoordinator {
   private failedStoryIndices: Set<number> = new Set();
   // Resilience: Track parked stories (quality gate retries exhausted, waiting for deferred retry)
   private parkedStoryIndices: Set<number> = new Set();
-  // Resilience: Track stories that have already been through deferred retry (prevent infinite loops)
-  private deferredRetryUsed: Set<number> = new Set();
   // Resilience configuration
   private resilience: ResilienceConfig;
   // Active worktrees for graceful shutdown
@@ -1379,9 +1377,10 @@ export class EpicCoordinator {
       blocker.errorMessage
     );
 
-    // Wait for human resolution (timeout after 1 hour)
-    console.log(`[Epic] Waiting for human resolution (retry/skip/abort)...`);
-    const response = await this.blockerManager.waitForBlockerResponse(blocker, 3600000);
+    // Wait for human resolution (timeout configurable, default 20 min)
+    const blockerTimeout = this.resilience.blockerWaitTimeoutMs ?? 20 * 60_000;
+    console.log(`[Epic] Waiting for human resolution (timeout: ${Math.round(blockerTimeout / 60_000)}min)...`);
+    const response = await this.blockerManager.waitForBlockerResponse(blocker, blockerTimeout);
 
     if (!response) {
       // Timeout - abort the mission
@@ -1893,6 +1892,11 @@ export class EpicCoordinator {
         continue;
       }
 
+      // Skip parked stories (quality gate retries exhausted, waiting for deferred retry)
+      if (this.parkedStoryIndices.has(story.storyIndex)) {
+        continue;
+      }
+
       console.log(`[Epic] Checking story ${story.storyIndex}: persona=${story.persona}, id=${story.id}`);
 
       // Check if story's dependencies are all completed
@@ -2163,6 +2167,7 @@ export class EpicCoordinator {
         console.log(`[Epic] Story ${story.storyIndex} parked — quality gate retries exhausted, waiting for siblings`);
         this.parkedStoryIndices.add(story.storyIndex);
         this.unregisterRunningStory(story.storyIndex);
+        await this.coordination.archiveStoryClaims([story.storyIndex]).catch(() => {});
         // Reset expert to idle so it can work on other stories
         this.expertStates.set(expert, { persona: expert, status: "idle" });
         return;
@@ -2725,8 +2730,6 @@ export class EpicCoordinator {
       for (const storyIndex of parkedList) {
         // Move from parked back to claimable
         this.parkedStoryIndices.delete(storyIndex);
-        // Track that this story has used its deferred retry
-        this.deferredRetryUsed.add(storyIndex);
         this.executor.markDeferredRetryUsed(storyIndex);
         // Reset quality gate retry counter so the deferred attempt gets fresh retries
         this.executor.resetQualityGateRetries(storyIndex);

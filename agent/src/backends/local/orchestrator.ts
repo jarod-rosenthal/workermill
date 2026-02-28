@@ -134,6 +134,7 @@ async function spawnLocalWorker(task: any): Promise<void> {
     MAX_REVIEW_REVISIONS: String(config.settings?.maxReviewRevisions ?? 3),
     QUALITY_GATE_MAX_RETRIES: String(config.settings?.qualityGateMaxRetries ?? 5),
     MAX_CI_FIX_RETRIES: String(config.settings?.maxCiFixRetries ?? 3),
+    BLOCKER_WAIT_TIMEOUT_MINUTES: String(config.settings?.blockerWaitTimeoutMinutes ?? 20),
     PUSH_AFTER_COMMIT: config.settings?.pushAfterCommit !== false ? "true" : "false",
   };
 

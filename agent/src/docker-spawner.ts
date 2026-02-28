@@ -698,6 +698,7 @@ export async function spawnDockerWorker(
     BLOCKER_AUTO_RETRY_ENABLED:
       orgConfig.blockerAutoRetryEnabled !== false ? "true" : "false",
     QUALITY_GATE_MAX_RETRIES: String(orgConfig.qualityGateMaxRetries ?? 5),
+    MAX_CI_FIX_RETRIES: String(orgConfig.maxCiFixRetries ?? 3),
     PUSH_AFTER_COMMIT:
       orgConfig.pushAfterCommit !== false ? "true" : "false",
     GRACEFUL_SHUTDOWN_ENABLED:

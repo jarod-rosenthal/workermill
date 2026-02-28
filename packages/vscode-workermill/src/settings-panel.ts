@@ -217,6 +217,8 @@ export class SettingsPanel {
           this.saveRepoStandalone(msg.defaultRepo);
         } else if (msg.type === "save-tracker") {
           this.saveTrackerStandalone(msg.tracker);
+        } else if (msg.type === "save-worker-behavior") {
+          this.saveWorkerBehaviorStandalone(msg);
         } else if (msg.type === "open-dashboard" || msg.type === "open-web-settings" || msg.type === "open-pricing") {
           this.postMessage({ type: "error", message: "Not available in standalone mode" });
         } else if (msg.type === "save-jira" || msg.type === "test-jira" || msg.type === "switch-org") {
@@ -332,6 +334,8 @@ export class SettingsPanel {
     const roles = (sc.roles || {}) as Record<string, { provider?: string; model?: string }>;
     const scm = (sc.scm || {}) as { provider?: string; token?: string };
 
+    const settings = (sc.settings || {}) as Record<string, unknown>;
+
     this.postMessage({
       type: "integrations-loaded",
       data: {
@@ -346,6 +350,12 @@ export class SettingsPanel {
         gitlab: { configured: scm.provider === "gitlab" && !!scm.token },
         // Tracker — standalone only supports internal boards
         defaultIssueTracker: "internal",
+        // Worker behavior settings
+        maxPerStoryRevisions: settings.maxPerStoryRevisions ?? 1,
+        maxReviewRevisions: settings.maxReviewRevisions ?? 3,
+        qualityGateMaxRetries: settings.qualityGateMaxRetries ?? 5,
+        maxCiFixRetries: settings.maxCiFixRetries ?? 3,
+        pushAfterCommit: settings.pushAfterCommit ?? true,
         // No plan restrictions in standalone — all providers available
         plan: "max",
         orgName: "Standalone",
@@ -412,6 +422,32 @@ export class SettingsPanel {
   private saveTrackerStandalone(tracker: string): void {
     // Standalone only supports internal boards — silently accept
     this.postMessage({ type: "tracker-saved", tracker: "internal" });
+  }
+
+  private saveWorkerBehaviorStandalone(msg: {
+    maxPerStoryRevisions: number;
+    maxReviewRevisions: number;
+    qualityGateMaxRetries: number;
+    maxCiFixRetries: number;
+    pushAfterCommit: boolean;
+  }): void {
+    try {
+      const sc = readStandaloneConfigFile();
+      const settings = (sc.settings || {}) as Record<string, unknown>;
+      settings.maxPerStoryRevisions = msg.maxPerStoryRevisions;
+      settings.maxReviewRevisions = msg.maxReviewRevisions;
+      settings.qualityGateMaxRetries = msg.qualityGateMaxRetries;
+      settings.maxCiFixRetries = msg.maxCiFixRetries;
+      settings.pushAfterCommit = msg.pushAfterCommit;
+      sc.settings = settings;
+      writeStandaloneConfigFile(sc);
+      this.postMessage({ type: "worker-behavior-saved" });
+    } catch (err) {
+      this.postMessage({
+        type: "worker-behavior-save-error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   // ── Cloud mode handlers ──
@@ -1470,6 +1506,42 @@ export class SettingsPanel {
       <div id="repo-status" class="status"></div>
     </div>
 
+    <!-- Worker Behavior -->
+    <div class="section">
+      <h2>Worker Behavior</h2>
+      <div class="field">
+        <label>Per-Story Review Max Revisions</label>
+        <input type="number" id="wk-per-story-revisions" min="0" max="10" value="1" />
+        <div class="hint">Max tech lead review revisions per story. Set to 0 to skip per-story review.</div>
+      </div>
+      <div class="field">
+        <label>Per-PR Review Max Revisions</label>
+        <input type="number" id="wk-pr-revisions" min="0" max="10" value="3" />
+        <div class="hint">Max tech lead review revisions on the consolidated PR. Set to 0 to skip PR review.</div>
+      </div>
+      <div class="field">
+        <label>Quality Gate Max Retries</label>
+        <input type="number" id="wk-qg-retries" min="0" max="20" value="5" />
+        <div class="hint">Max quality gate retry attempts before failing.</div>
+      </div>
+      <div class="field">
+        <label>CI Fix Max Retries</label>
+        <input type="number" id="wk-ci-fix-retries" min="0" max="10" value="3" />
+        <div class="hint">Max attempts for CI Fix Agent to resolve PR CI failures before merging. 0 = disabled.</div>
+      </div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="wk-push-after-commit" checked />
+          Push after each commit
+        </label>
+        <div class="hint">Push to remote immediately after each commit.</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" id="btn-save-worker-behavior">Save</button>
+      </div>
+      <div id="worker-behavior-status" class="status"></div>
+    </div>
+
     <!-- Docker Sandbox -->
     <div class="section">
       <h2>Docker Sandbox</h2>
@@ -1788,6 +1860,18 @@ export class SettingsPanel {
       vscode.postMessage({ type: "save-repo", defaultRepo: document.getElementById("default-repo").value.trim() });
     });
 
+    // Worker behavior save
+    document.getElementById("btn-save-worker-behavior").addEventListener("click", () => {
+      vscode.postMessage({
+        type: "save-worker-behavior",
+        maxPerStoryRevisions: parseInt(document.getElementById("wk-per-story-revisions").value) || 0,
+        maxReviewRevisions: parseInt(document.getElementById("wk-pr-revisions").value) || 0,
+        qualityGateMaxRetries: parseInt(document.getElementById("wk-qg-retries").value) || 0,
+        maxCiFixRetries: parseInt(document.getElementById("wk-ci-fix-retries").value) || 0,
+        pushAfterCommit: document.getElementById("wk-push-after-commit").checked,
+      });
+    });
+
     // Org switcher
     const orgSelect = document.getElementById("org-select");
     let currentOrgId = "";
@@ -1967,6 +2051,18 @@ export class SettingsPanel {
         const repoInput = document.getElementById("default-repo");
         if (repoInput) repoInput.value = defaultRepo;
 
+        // Populate worker behavior settings
+        const wkPerStory = document.getElementById("wk-per-story-revisions");
+        const wkPr = document.getElementById("wk-pr-revisions");
+        const wkQg = document.getElementById("wk-qg-retries");
+        const wkCiFix = document.getElementById("wk-ci-fix-retries");
+        const wkPush = document.getElementById("wk-push-after-commit");
+        if (wkPerStory) wkPerStory.value = String(d.maxPerStoryRevisions ?? 1);
+        if (wkPr) wkPr.value = String(d.maxReviewRevisions ?? 3);
+        if (wkQg) wkQg.value = String(d.qualityGateMaxRetries ?? 5);
+        if (wkCiFix) wkCiFix.value = String(d.maxCiFixRetries ?? 3);
+        if (wkPush) wkPush.checked = d.pushAfterCommit !== false;
+
         // Populate RAG index repo selector
         if (indexRepoSelect && defaultRepo) {
           indexRepoSelect.innerHTML = '<option value="' + defaultRepo + '">' + defaultRepo + '</option>';
@@ -2001,6 +2097,16 @@ export class SettingsPanel {
       if (msg.type === "tracker-saved") {
         showStatus(trackerStatus, "success", "Issue tracker updated");
         setTimeout(() => trackerStatus.classList.remove("visible"), 3000);
+      }
+
+      if (msg.type === "worker-behavior-saved") {
+        const ws = document.getElementById("worker-behavior-status");
+        showStatus(ws, "success", "Worker behavior settings saved");
+        setTimeout(() => ws.classList.remove("visible"), 3000);
+      }
+      if (msg.type === "worker-behavior-save-error") {
+        const ws = document.getElementById("worker-behavior-status");
+        showStatus(ws, "error", msg.message || "Failed to save worker behavior settings");
       }
 
       if (msg.type === "error") {

@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.2.67",
+  "version": "0.2.68",
   "publisher": "workermill",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -273,6 +273,39 @@
           "type": "string",
           "default": "",
           "description": "Only show issues with this status in the Backlog. Leave empty to show all open issues."
+        },
+        "workermill.maxPerStoryRevisions": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Max tech lead review revisions per story. Set to 0 to skip per-story review."
+        },
+        "workermill.maxReviewRevisions": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Max tech lead review revisions on the consolidated PR. Set to 0 to skip PR review."
+        },
+        "workermill.maxCiFixRetries": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Max attempts for the CI Fix Agent to resolve CI failures on PRs before merging. Set to 0 to disable CI verification."
+        },
+        "workermill.qualityGateMaxRetries": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "maximum": 20,
+          "description": "Max quality gate retry attempts before failing."
+        },
+        "workermill.pushAfterCommit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Push to remote after each commit."
         }
       }
     },

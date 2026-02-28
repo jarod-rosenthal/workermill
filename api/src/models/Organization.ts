@@ -666,6 +666,9 @@ export class Organization {
   @Column({ name: "quality_gate_max_retries", type: "int", default: 5 })
   qualityGateMaxRetries: number;
 
+  @Column({ name: "max_ci_fix_retries", type: "int", default: 3 })
+  maxCiFixRetries: number;
+
   @Column({ name: "push_after_commit", type: "boolean", default: true })
   pushAfterCommit: boolean;
 

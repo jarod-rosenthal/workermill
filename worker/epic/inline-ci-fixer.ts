@@ -1,0 +1,312 @@
+/**
+ * Inline CI Fix Agent for Epic Mode
+ *
+ * Runs CI failure diagnosis and surgical fixes inline after PR CI check fails.
+ * Follows the InlineDeployer/InlineReviewer pattern.
+ */
+
+import axios from "axios";
+import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
+import type { EpicConfig, StreamMessage } from "./types.js";
+import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
+
+/**
+ * CI fix decision from the agent.
+ */
+export type CIFixDecision = "fixed" | "unfixable";
+
+/**
+ * Result of an inline CI fix attempt.
+ */
+export interface CIFixResult {
+  success: boolean;
+  decision: CIFixDecision;
+  summary: string;
+  error?: string;
+}
+
+/**
+ * System prompt for the CI Fix Agent.
+ */
+const CI_FIX_SYSTEM_PROMPT = `You are a CI Fix Agent. A CI pipeline has failed on a pull request.
+Your job is to make the MINIMUM surgical fix to make CI pass.
+
+You have the CI failure output below. Diagnose the exact issue and fix it.
+
+***REMOVED******REMOVED*** Rules
+
+- Only fix what CI is complaining about. Do NOT refactor or improve other code.
+- Common fixes: remove unused imports/variables, fix type errors, fix lint errors, fix build errors.
+- Run the failing command locally to verify your fix before committing.
+- Commit with message "fix: resolve CI failure — <brief description>"
+- Push to the PR branch.
+
+***REMOVED******REMOVED*** Organization Guidelines
+
+If the following org-level guidelines were provided, follow them:
+
+{{ORG_GUIDELINES}}
+
+***REMOVED******REMOVED*** Output Format
+
+After fixing (or determining it's unfixable), you MUST output these markers:
+
+\`\`\`
+CI_FIX_DECISION: fixed
+\`\`\`
+OR
+\`\`\`
+CI_FIX_DECISION: unfixable
+\`\`\`
+
+Then add:
+\`\`\`
+CI_FIX_SUMMARY: <what you fixed or why it's unfixable>
+\`\`\`
+
+***REMOVED******REMOVED*** Communication Style
+
+Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!", or similar. Start with the substance — what you found, your assessment, or what needs to change. Be concise and informative.
+`;
+
+/**
+ * Inline CI Fix Agent for Epic mode.
+ */
+export class InlineCIFixer {
+  private config: EpicConfig;
+  private repoPath: string;
+  private logsApi: ReturnType<typeof axios.create>;
+  private allOutput: string = "";
+  private aiClient: AIClient | null = null;
+  private model: string;
+
+  constructor(config: EpicConfig, repoPath: string) {
+    this.config = config;
+    this.repoPath = repoPath;
+    this.model = process.env.MANAGER_MODEL || config.model || "";
+
+    // Create axios instance for posting logs
+    this.logsApi = axios.create({
+      baseURL: config.apiBaseUrl,
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": config.orgApiKey,
+      },
+      timeout: 5000,
+    });
+
+    // Initialize AIClient if unified client is enabled
+    if (config.useUnifiedClient) {
+      this.aiClient = createAIClient({
+        provider: "anthropic",
+        apiKeys: { anthropic: config.anthropicApiKey },
+        apiConfig: { baseUrl: config.apiBaseUrl, orgApiKey: config.orgApiKey },
+        useAgentSdk: true,
+        githubToken: config.githubToken,
+      });
+    }
+  }
+
+  /**
+   * Execute an agent using either the unified AIClient or legacy runAgent.
+   */
+  private async executeAgent(
+    options: AgentOptions,
+    storyId: string,
+    onMessage?: (msg: StreamMessage) => void
+  ): Promise<AgentResult> {
+    if (this.config.useUnifiedClient && this.aiClient && options.expertConfig) {
+      const clientOptions: AIClientOptions = {
+        prompt: options.prompt,
+        systemPrompt: options.expertConfig.systemPrompt,
+        persona: options.expertConfig.persona,
+        model: options.expertConfig.model,
+        workingDir: options.repoPath,
+        storyId,
+        parentTaskId: this.config.parentTaskId,
+        env: options.env,
+        tools: options.expertConfig.tools,
+        onMessage,
+      };
+      const result = await this.aiClient.execute(clientOptions);
+      return {
+        success: result.success,
+        messages: result.messages,
+        error: result.error,
+        structuredOutput: result.structuredOutput,
+      };
+    }
+    return runAgent(this.config, { ...options, onMessage });
+  }
+
+  /**
+   * Post a log message to the WorkerMill dashboard.
+   */
+  private async postLog(
+    message: string,
+    type: "system" | "manager" | "tool" | "output" | "error" = "output"
+  ): Promise<void> {
+    const prefix = "[🔬 qa_engineer 🤖]";
+    console.log(`${prefix} ${message}`);
+
+    try {
+      await this.logsApi.post("/api/control-center/logs", {
+        taskId: this.config.parentTaskId,
+        type,
+        message: `${prefix} ${message}`,
+        severity: type === "error" ? "error" : "info",
+      });
+    } catch {
+      // Fire and forget - don't block on log failures
+    }
+  }
+
+  /**
+   * Attempt to fix CI failures on a PR.
+   */
+  async fix(prNumber: number, ciFailureLog: string): Promise<CIFixResult> {
+    this.allOutput = ""; // Reset output accumulator
+
+    await this.postLog("Starting CI Fix Agent", "system");
+    await this.postLog(`PR ***REMOVED***${prNumber}`, "system");
+
+    try {
+      const prompt = this.buildPrompt(prNumber, ciFailureLog);
+
+      const systemPrompt = CI_FIX_SYSTEM_PROMPT.replace(
+        "{{ORG_GUIDELINES}}",
+        this.config.orgGuidelines
+          ? this.config.orgGuidelines
+          : "(none set — skip this section)"
+      );
+
+      const ciFixConfig = {
+        persona: "qa_engineer" as const,
+        description: "QA specialist - CI failure diagnosis and fix",
+        systemPrompt,
+        tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
+        model: this.model,
+        specialties: ["testing", "ci", "quality"],
+        maxTurns: 15,
+      };
+
+      const result = await this.executeAgent(
+        {
+          prompt,
+          expertConfig: ciFixConfig,
+          repoPath: this.repoPath,
+          storyId: `ci-fix-${prNumber}`,
+        },
+        `ci-fix-${prNumber}`,
+        (msg) => this.handleMessage(msg)
+      );
+
+      if (!result.success) {
+        await this.postLog(`CI Fix Agent failed: ${result.error}`, "error");
+        return {
+          success: false,
+          decision: "unfixable",
+          summary: `Agent execution failed: ${result.error}`,
+          error: result.error,
+        };
+      }
+
+      const decision = this.parseDecision();
+      const summary = this.parseSummary();
+
+      await this.postLog(`Decision: ${decision}`, "system");
+      await this.postLog(`Summary: ${summary}`, "system");
+
+      return {
+        success: decision === "fixed",
+        decision,
+        summary,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await this.postLog(`CI Fix failed: ${errorMessage}`, "error");
+
+      return {
+        success: false,
+        decision: "unfixable",
+        summary: `CI fix error: ${errorMessage}`,
+        error: errorMessage,
+      };
+    }
+  }
+
+  /**
+   * Build the user prompt with CI failure context.
+   */
+  private buildPrompt(prNumber: number, ciFailureLog: string): string {
+    // Truncate CI log to 8KB to stay within context limits
+    const maxLogLength = 8 * 1024;
+    const truncatedLog = ciFailureLog.length > maxLogLength
+      ? ciFailureLog.substring(ciFailureLog.length - maxLogLength)
+      : ciFailureLog;
+
+    return `***REMOVED******REMOVED*** CI Failure on PR ***REMOVED***${prNumber}
+
+**Repository:** ${this.config.targetRepo}
+
+***REMOVED******REMOVED******REMOVED*** CI Failure Output
+
+\`\`\`
+${truncatedLog}
+\`\`\`
+
+Diagnose the failure and make the minimum surgical fix to make CI pass. Then commit and push to the PR branch.`;
+  }
+
+  /**
+   * Parse CI_FIX_DECISION from agent output.
+   */
+  private parseDecision(): CIFixDecision {
+    const match = this.allOutput.match(/CI_FIX_DECISION:\s*(fixed|unfixable)/i);
+    if (match) {
+      return match[1].toLowerCase() as CIFixDecision;
+    }
+    // Default to unfixable if no marker found
+    return "unfixable";
+  }
+
+  /**
+   * Parse CI_FIX_SUMMARY from agent output.
+   */
+  private parseSummary(): string {
+    const match = this.allOutput.match(/CI_FIX_SUMMARY:\s*(.+)/i);
+    if (match) {
+      return match[1].trim();
+    }
+    return "No summary provided";
+  }
+
+  /**
+   * Handle streaming messages from the agent.
+   */
+  private handleMessage(msg: StreamMessage): void {
+    if (msg.type === "thinking" && msg.content) {
+      // postLog handles both console.log and API POST — don't double-log
+      this.postLog(`[THINKING] ${msg.content}`, "output");
+    } else if (msg.type === "tool_use" && msg.toolName) {
+      let toolMsg = `Tool: ${msg.toolName}`;
+      if (msg.toolInput) {
+        const input = msg.toolInput;
+        if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 500)}`;
+        else if (input.file_path) toolMsg += ` -> ${input.file_path}`;
+      }
+      this.postLog(toolMsg, "tool");
+    } else if (msg.type === "text" && msg.content) {
+      // Accumulate all text output for decision parsing
+      this.allOutput += msg.content + "\n";
+
+      // Log meaningful output
+      if (msg.content.length > 20) {
+        this.postLog(msg.content, "output");
+      }
+    } else if (msg.type === "result" && msg.content) {
+      this.allOutput += msg.content + "\n";
+      this.postLog(msg.content, "output");
+    }
+  }
+}

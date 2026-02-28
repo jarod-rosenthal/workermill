@@ -1047,6 +1047,7 @@ router.get(
       // Review workflow settings
       maxReviewRevisions: org.maxReviewRevisions,
       maxPerStoryRevisions: org.maxPerStoryRevisions,
+      maxCiFixRetries: org.maxCiFixRetries,
       // Codebase RAG
       codebaseIndexingEnabled: org.codebaseIndexingEnabled === true,
       // Quality gate thresholds (passed through to worker via QUALITY_THRESHOLDS env var)

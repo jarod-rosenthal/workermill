@@ -271,6 +271,7 @@ import { RemoveOrgQualityGateColumns1741700000000 } from "./migrations/174170000
 import { AddBoardEpicFields1741700000001 } from "./migrations/1741700000001-AddBoardEpicFields.js";
 import { AddSpecEngineering1741800000000 } from "./migrations/1741800000000-AddSpecEngineering.js";
 import { AddMaxCiFixRetries1741900000000 } from "./migrations/1741900000000-AddMaxCiFixRetries.js";
+import { AddBlockerWaitTimeoutMinutes1742000000000 } from "./migrations/1742000000000-AddBlockerWaitTimeoutMinutes.js";
 import { logger } from "../utils/logger.js";
 import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
@@ -581,6 +582,7 @@ export const AppDataSource = new DataSource({
     AddBoardEpicFields1741700000001,
     AddSpecEngineering1741800000000,
     AddMaxCiFixRetries1741900000000,
+    AddBlockerWaitTimeoutMinutes1742000000000,
   ],
   subscribers: [
     OrganizationEncryptionSubscriber,

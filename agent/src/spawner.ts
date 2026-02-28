@@ -357,6 +357,7 @@ export async function spawnWorker(
     BLOCKER_AUTO_RETRY_ENABLED: orgConfig.blockerAutoRetryEnabled !== false ? "true" : "false",
     QUALITY_GATE_MAX_RETRIES: String(orgConfig.qualityGateMaxRetries ?? 5),
     MAX_CI_FIX_RETRIES: String(orgConfig.maxCiFixRetries ?? 3),
+    BLOCKER_WAIT_TIMEOUT_MINUTES: String(orgConfig.blockerWaitTimeoutMinutes),
     PUSH_AFTER_COMMIT: orgConfig.pushAfterCommit !== false ? "true" : "false",
     GRACEFUL_SHUTDOWN_ENABLED: orgConfig.gracefulShutdownEnabled !== false ? "true" : "false",
     MAX_PARALLEL_EXPERTS: String(orgConfig.maxParallelExperts),

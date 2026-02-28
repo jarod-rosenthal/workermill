@@ -409,6 +409,23 @@ export function QualitySection({
             </div>
             <p className="text-xs text-muted-foreground -mt-3 mb-4 ml-0">0-10 attempts (default: 3). After CI fails on a PR, the CI Fix Agent makes surgical fixes (unused imports, type errors, lint). Set to 0 to skip CI verification and merge immediately.</p>
 
+            {/* Blocker Wait Timeout */}
+            <div className="flex items-center justify-between mb-4 pt-4 border-t border-border">
+              <div>
+                <span className="text-sm text-foreground">Blocker Wait Timeout (minutes)</span>
+                <p className="text-xs text-muted-foreground">How long to wait for human blocker resolution before aborting</p>
+              </div>
+              <input
+                type="number"
+                min="1"
+                max="120"
+                value={settings.blockerWaitTimeoutMinutes}
+                onChange={(e) => updateSetting("blockerWaitTimeoutMinutes", parseInt(e.target.value, 10) || 20)}
+                className="w-20 px-3 py-2 bg-background border border-border rounded-md text-foreground text-center"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground -mt-3 mb-4 ml-0">1-120 minutes (default: 20). After escalating a blocker, workers wait this long for human response before aborting the run.</p>
+
             {/* Push After Commit */}
             <div className="flex items-center justify-between mb-4 pt-4 border-t border-border">
               <div>

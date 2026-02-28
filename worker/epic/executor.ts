@@ -26,6 +26,7 @@ import type { DecisionClient } from "./decision-client.js";
 import { createRetryableApi } from "./api-retry.js";
 import axios from "axios";
 import * as fs from "fs/promises";
+import { existsSync, readdirSync, statSync } from "fs";
 import { execSync, spawn } from "child_process";
 
 // Persona and provider icons are loaded from the Decision API at runtime
@@ -662,6 +663,40 @@ When summarizing your work at the end, describe decisions in plain language. The
       // Best effort — script missing (native agent) or install failed
     }
 
+    // Install npm/yarn/pnpm dependencies in subdirectories that have package.json but no node_modules.
+    // Quality gate commands (eslint, tsc, jest) fail if deps aren't installed in newly-created subdirs.
+    try {
+      const dirsToInstall = this.findSubdirsNeedingInstall(worktreePath, 3);
+      for (const dir of dirsToInstall) {
+        const lockType = existsSync(`${dir}/pnpm-lock.yaml`)
+          ? "pnpm"
+          : existsSync(`${dir}/yarn.lock`)
+            ? "yarn"
+            : "npm";
+        const installCmd =
+          lockType === "pnpm"
+            ? "pnpm install --frozen-lockfile"
+            : lockType === "yarn"
+              ? "yarn install --frozen-lockfile"
+              : "npm ci";
+        const relDir = dir.replace(worktreePath + "/", "");
+        await this.postLog(`[Quality Gate] Installing deps in ${relDir} (${lockType})`, expert, "system");
+        try {
+          execSync(installCmd, {
+            cwd: dir,
+            encoding: "utf-8",
+            timeout: 120_000,
+            stdio: ["pipe", "pipe", "pipe"],
+          });
+        } catch {
+          // Non-fatal — the gate itself will surface the real error
+          await this.postLog(`[Quality Gate] Warning: dep install failed in ${relDir} — gate will report actual error`, expert, "system");
+        }
+      }
+    } catch {
+      // Scan itself failed — proceed without installing
+    }
+
     for (const gate of gates) {
       // Match files against trigger glob (simple prefix match)
       const triggerPrefix = gate.trigger.replace(/\*\*/g, "").replace(/\*/g, "").replace(/\/+$/, "");
@@ -745,6 +780,38 @@ When summarizing your work at the end, describe decisions in plain language. The
     }
 
     return { passed: true, output: "", failedCommand: "" };
+  }
+
+  /**
+   * Recursively find subdirectories with package.json but no node_modules.
+   * Skips node_modules and .git directories. Limits depth to avoid deep traversal.
+   */
+  private findSubdirsNeedingInstall(root: string, maxDepth: number): string[] {
+    const results: string[] = [];
+    const scan = (dir: string, depth: number) => {
+      if (depth > maxDepth) return;
+      let entries: string[];
+      try {
+        entries = readdirSync(dir);
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        if (entry === "node_modules" || entry === ".git") continue;
+        const full = `${dir}/${entry}`;
+        try {
+          if (!statSync(full).isDirectory()) continue;
+        } catch {
+          continue;
+        }
+        if (existsSync(`${full}/package.json`) && !existsSync(`${full}/node_modules`)) {
+          results.push(full);
+        }
+        scan(full, depth + 1);
+      }
+    };
+    scan(root, 1);
+    return results;
   }
 
   /**

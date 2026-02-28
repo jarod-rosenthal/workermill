@@ -18,6 +18,9 @@ import { selfUpdate, restartAgent } from "./updater.js";
 import { startLocalApi, stopLocalApi } from "./local-api.js";
 import { detectGpu } from "./gpu-detector.js";
 import { ensureOllamaRunning, pullModel, stopOllama, findOllamaPath, installOllama } from "./ollama-manager.js";
+import { getBackend, resetBackend } from "./backends/selector.js";
+import { initOrchestrator, shutdownOrchestrator } from "./backends/local/orchestrator.js";
+import { isCloudMode } from "./backends/local/config.js";
 
 // ── Single-instance enforcement via PID file ────────────────────────────
 const PID_FILE = path.join(os.homedir(), ".workermill", "agent.pid");
@@ -75,6 +78,54 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
   // Kill any existing agent process to prevent double-polling
   killExistingAgent();
   writePidFile();
+
+  const standaloneMode = !isCloudMode();
+
+  if (standaloneMode) {
+    console.log();
+    console.log(chalk.bold.cyan("  WorkerMill Agent (Standalone)"));
+    console.log(chalk.dim("  ─────────────────────────────────────"));
+    console.log();
+    console.log(`  ${chalk.dim("Version:")}    ${AGENT_VERSION}`);
+    console.log(`  ${chalk.dim("Mode:")}       ${chalk.green("Standalone")} (local SQLite)`);
+    console.log();
+
+    // Initialize backend
+    const backend = await getBackend();
+    const settings = await backend.getSettings();
+
+    console.log(`  ${chalk.dim("LLM:")}        ${settings.llmProvider || "anthropic"} / ${chalk.yellow(settings.llmModel || "not configured")}`);
+    console.log(`  ${chalk.dim("Repo:")}       ${settings.defaultRepo || chalk.yellow("not configured")}`);
+    console.log(`  ${chalk.dim("SCM:")}        ${settings.scmProvider || "github"}`);
+    console.log();
+
+    // Start local API server
+    let localApiPort: number | undefined;
+    try {
+      localApiPort = await startLocalApi(config);
+      console.log(`  ${chalk.dim("Local API:")} http://127.0.0.1:${localApiPort}/api/status`);
+
+      // Initialize local orchestrator
+      initOrchestrator(localApiPort);
+    } catch (err) {
+      console.log(`  ${chalk.yellow("⚠")} Local API failed to start: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    console.log(chalk.dim("  ─────────────────────────────────────"));
+    console.log(`  ${chalk.green("●")} Agent is running (standalone). ${chalk.dim("Press Ctrl+C to stop.")}`);
+    console.log();
+
+    // Return cleanup function
+    return async () => {
+      console.log();
+      console.log(chalk.dim("  Shutting down..."));
+      shutdownOrchestrator();
+      await stopLocalApi();
+      await resetBackend();
+      removePidFile();
+      console.log(`  ${chalk.red("●")} Agent stopped.`);
+    };
+  }
 
   console.log();
   console.log(chalk.bold.cyan("  WorkerMill Remote Agent"));

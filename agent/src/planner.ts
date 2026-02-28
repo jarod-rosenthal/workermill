@@ -35,6 +35,7 @@ import {
   stripFalsePersonaRisks,
   getCriticConfig,
   AUTO_APPROVAL_THRESHOLD,
+  SIMPLIFIED_FLOOR,
   type ExecutionPlan,
 } from "./plan-validator.js";
 import { generateText, type AIProvider } from "./providers.js";
@@ -1181,8 +1182,15 @@ export async function planTask(
       return await postValidatedPlan(task.id, plan, config.agentId, taskLabel, elapsed, undefined, undefined, criticHistory, totalFileCapTruncations, planningDurationMs, iteration);
     }
 
-    if (isSimplifiedMode || criticResult.approved || criticResult.score >= AUTO_APPROVAL_THRESHOLD) {
-      // In simplified mode: always treat as approved regardless of score
+    if (isSimplifiedMode && criticResult.score < SIMPLIFIED_FLOOR) {
+      const msg = `${PREFIX} Simplified mode — score ${criticResult.score}/100 below floor (${SIMPLIFIED_FLOOR}). Iterating.`;
+      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
+      await postLog(task.id, msg, "system", "warning");
+    }
+
+    if (criticResult.approved || criticResult.score >= AUTO_APPROVAL_THRESHOLD ||
+        (isSimplifiedMode && criticResult.score >= SIMPLIFIED_FLOOR)) {
+      // In simplified mode: auto-approve if score >= floor (60)
       // In strict mode: only approved if score >= threshold
       const modeLabel = isSimplifiedMode && !criticResult.approved && criticResult.score < AUTO_APPROVAL_THRESHOLD
         ? "Simplified mode — auto-approved"

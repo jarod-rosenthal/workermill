@@ -29,6 +29,7 @@ import { InlineDeployer } from "./inline-deployer.js";
 import { InlineImprover } from "./inline-improver.js";
 import { InlineCIFixer } from "./inline-ci-fixer.js";
 import { InlineIntegrationFixer } from "./inline-integration-fixer.js";
+import { InlineReviewFixer } from "./inline-review-fixer.js";
 import { createMemoryClient, type MemoryClient, type MemoryContext, type EnhancedContext } from "./memory-client.js";
 import { CredentialRotator } from "./credential-rotator.js";
 import { spawn, execSync } from "child_process";
@@ -2619,42 +2620,82 @@ export class EpicCoordinator {
           console.log(`[Epic] Story ${storyIndex} needs revision (${newCount}/${this.maxPerStoryRevisions}): ${reviewResult.feedback}`);
           this.postDashboardLog(`Story ${storyIndex} revision ${newCount}/${this.maxPerStoryRevisions} requested`);
 
-          // Targeted per-story revision — does NOT reset all expert states or
-          // delete all story branches (triggerRevision is too broad for mid-flight use)
+          // Targeted per-story revision — try surgical inline fix first,
+          // fall back to destructive delete-and-requeue if fixer fails
           this.config.reviewFeedback = reviewResult.feedback;
-          this.completedStoryIndices.delete(storyIndex);
 
-          // Archive claim so the story can be re-claimed
-          await this.coordination.archiveStoryClaims([storyIndex]);
+          // Attempt inline review fix on the existing worktree
+          let inlineFixSucceeded = false;
+          const existingWorktree = this.activeWorktrees.get(storyIndex);
+          if (existingWorktree && reviewResult.feedback) {
+            try {
+              console.log(`[Epic] Attempting inline review fix for story ${storyIndex}...`);
+              this.postDashboardLog(`Story ${storyIndex} — attempting inline review fix`);
 
-          // Clean up worktree and branch for fresh revision
-          try {
-            const storyBranch = this.storyBranchNames.get(storyIndex);
-            if (storyBranch) {
-              // 1. Remove the worktree FIRST (must happen before branch delete)
-              const worktreePath = this.activeWorktrees.get(storyIndex);
-              if (worktreePath) {
-                await this.gitOps.forceRemoveWorktree(worktreePath);
-                this.activeWorktrees.delete(storyIndex);
+              const reviewFixer = new InlineReviewFixer(
+                this.config,
+                existingWorktree,
+                reviewResult.feedback,
+                story.persona,
+                story.title,
+              );
+              const fixResult = await reviewFixer.fix();
+
+              if (fixResult.success) {
+                console.log(`[Epic] Inline review fix succeeded for story ${storyIndex}: ${fixResult.summary}`);
+                this.postDashboardLog(`Story ${storyIndex} review fix applied — re-entering review cycle`);
+                inlineFixSucceeded = true;
+
+                // Mark as completed again so it re-enters the review cycle
+                this.completedStoryIndices.add(storyIndex);
+
+                // Post revision request to coordination feed for tracking
+                await this.coordination.postRevisionRequest(newCount, reviewResult.feedback);
+              } else {
+                console.log(`[Epic] Inline review fix failed for story ${storyIndex}: ${fixResult.summary} — falling back to full re-execution`);
+                this.postDashboardLog(`Story ${storyIndex} inline fix failed — falling back to full re-execution`);
               }
-              // 2. Now safe to delete the branch (no longer checked out)
-              const repoPath = this.gitOps.getRepoPath();
-              execSync(`git -C "${repoPath}" branch -D "${storyBranch}" 2>/dev/null || true`);
-              execSync(`git -C "${repoPath}" push origin --delete "${storyBranch}" 2>/dev/null || true`);
-              this.storyBranchNames.delete(storyIndex);
+            } catch (e) {
+              console.warn(`[Epic] Inline review fix error for story ${storyIndex}: ${e} — falling back to full re-execution`);
             }
-          } catch (e) {
-            console.warn(`[Epic] Could not clean up story ${storyIndex} worktree/branch: ${e}`);
           }
 
-          // Post revision request to coordination feed for tracking
-          await this.coordination.postRevisionRequest(newCount, reviewResult.feedback);
+          // Fallback: destructive delete-and-requeue if inline fix failed or wasn't possible
+          if (!inlineFixSucceeded) {
+            this.completedStoryIndices.delete(storyIndex);
 
-          // Queue just this story for re-execution
-          const allStories = await this.coordination.getReadyStories();
-          const storyToRevise = allStories.find((s) => s.storyIndex === storyIndex);
-          if (storyToRevise) {
-            this.revisionStoriesQueued.push(storyToRevise);
+            // Archive claim so the story can be re-claimed
+            await this.coordination.archiveStoryClaims([storyIndex]);
+
+            // Clean up worktree and branch for fresh revision
+            try {
+              const storyBranch = this.storyBranchNames.get(storyIndex);
+              if (storyBranch) {
+                // 1. Remove the worktree FIRST (must happen before branch delete)
+                const fallbackWorktree = this.activeWorktrees.get(storyIndex);
+                if (fallbackWorktree) {
+                  await this.gitOps.forceRemoveWorktree(fallbackWorktree);
+                  this.activeWorktrees.delete(storyIndex);
+                }
+                // 2. Now safe to delete the branch (no longer checked out)
+                const repoPath = this.gitOps.getRepoPath();
+                execSync(`git -C "${repoPath}" branch -D "${storyBranch}" 2>/dev/null || true`);
+                execSync(`git -C "${repoPath}" push origin --delete "${storyBranch}" 2>/dev/null || true`);
+                this.storyBranchNames.delete(storyIndex);
+              }
+            } catch (e) {
+              console.warn(`[Epic] Could not clean up story ${storyIndex} worktree/branch: ${e}`);
+            }
+
+            // Post revision request to coordination feed for tracking
+            await this.coordination.postRevisionRequest(newCount, reviewResult.feedback);
+
+            // Queue just this story for re-execution
+            const allStories = await this.coordination.getReadyStories();
+            const storyToRevise = allStories.find((s) => s.storyIndex === storyIndex);
+            if (storyToRevise) {
+              this.revisionStoriesQueued.push(storyToRevise);
+            }
           }
         } else {
           // Rejected — approve anyway for per-story (final review will catch)

@@ -24,6 +24,8 @@ import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 import type { DecisionClient } from "./decision-client.js";
 import { createRetryableApi } from "./api-retry.js";
+import { InlineGateFixer } from "./inline-gate-fixer.js";
+import { runGateCommand } from "./gate-utils.js";
 import axios from "axios";
 import * as fs from "fs/promises";
 import { existsSync, readdirSync, statSync } from "fs";
@@ -84,6 +86,11 @@ export class StoryExecutor {
   private retryCountByStory: Map<number, number> = new Map();
   // Track quality gate retry attempts per story (separate limit from general retries)
   private qualityGateRetryCountByStory: Map<number, number> = new Map();
+  // Track quality gate error history per story (for detecting repeated identical failures)
+  private gateErrorHistoryByStory: Map<
+    number,
+    Array<{ attempt: number; errorSnippet: string; failedCommand: string; timestamp: number }>
+  > = new Map();
   // Track worktree paths per story (for sibling rebase on retry)
   private worktreePathByStory: Map<number, string> = new Map();
   // Track stories that have already been through deferred retry (prevent infinite park-retry loops)
@@ -157,6 +164,7 @@ export class StoryExecutor {
    */
   resetQualityGateRetries(storyIndex: number): void {
     this.qualityGateRetryCountByStory.delete(storyIndex);
+    this.gateErrorHistoryByStory.delete(storyIndex);
   }
 
   /**
@@ -497,59 +505,7 @@ When summarizing your work at the end, describe decisions in plain language. The
     cwd: string,
     timeoutMs: number = 300_000
   ): Promise<{ stdout: string; stderr: string }> {
-    return new Promise((resolve, reject) => {
-      const child = spawn("sh", ["-c", cmd], {
-        cwd,
-        env: { ...process.env, CI: "true" },
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-
-      let stdout = "";
-      let stderr = "";
-      let watchModeKilled = false;
-
-      const overallTimer = setTimeout(() => {
-        child.kill("SIGTERM");
-      }, timeoutMs);
-
-      let watchModeTimer: ReturnType<typeof setTimeout> | null = null;
-
-      child.stdout?.on("data", (data: Buffer) => {
-        stdout += data.toString();
-        // Detect watch mode — kill early instead of waiting for full timeout
-        if (/waiting for file changes|press [hq] to/i.test(stdout) && !watchModeTimer) {
-          watchModeTimer = setTimeout(() => {
-            watchModeKilled = true;
-            child.kill("SIGTERM");
-          }, 2000);
-        }
-      });
-
-      child.stderr?.on("data", (data: Buffer) => {
-        stderr += data.toString();
-      });
-
-      child.on("close", (code) => {
-        clearTimeout(overallTimer);
-        if (watchModeTimer) clearTimeout(watchModeTimer);
-
-        if (watchModeKilled || code === 0) {
-          resolve({ stdout: stdout.slice(0, 4000), stderr: stderr.slice(0, 2000) });
-        } else {
-          const err = new Error(`Command failed with exit code ${code}`);
-          (err as any).stdout = stdout.slice(0, 4000);
-          (err as any).stderr = stderr.slice(0, 2000);
-          (err as any).code = code;
-          reject(err);
-        }
-      });
-
-      child.on("error", (err) => {
-        clearTimeout(overallTimer);
-        if (watchModeTimer) clearTimeout(watchModeTimer);
-        reject(err);
-      });
-    });
+    return runGateCommand(cmd, cwd, timeoutMs);
   }
 
   /**
@@ -783,7 +739,10 @@ When summarizing your work at the end, describe decisions in plain language. The
   }
 
   /**
-   * Recursively find subdirectories with package.json but no node_modules.
+   * Recursively find subdirectories with package.json that need dep installation.
+   * Always includes directories with package.json — even if node_modules/ exists —
+   * because a partial node_modules (e.g. expert ran `npm install <pkg>` without
+   * devDependencies) causes gate tools like eslint to be missing.
    * Skips node_modules and .git directories. Limits depth to avoid deep traversal.
    */
   private findSubdirsNeedingInstall(root: string, maxDepth: number): string[] {
@@ -804,7 +763,7 @@ When summarizing your work at the end, describe decisions in plain language. The
         } catch {
           continue;
         }
-        if (existsSync(`${full}/package.json`) && !existsSync(`${full}/node_modules`)) {
+        if (existsSync(`${full}/package.json`)) {
           results.push(full);
         }
         scan(full, depth + 1);
@@ -1650,16 +1609,163 @@ ${parts.join("\n\n")}
         if (gateRetryCount < gateMaxRetries) {
           this.qualityGateRetryCountByStory.set(story.storyIndex, gateRetryCount + 1);
 
+          // Record error in gate history for repeated-failure detection
+          const history = this.gateErrorHistoryByStory.get(story.storyIndex) ?? [];
+          const failedCmdMatch = errorMessage.match(/\(([^)]+)\):/);
+          const failedCmd = failedCmdMatch?.[1] ?? "unknown";
+          history.push({
+            attempt: gateRetryCount + 1,
+            errorSnippet: errorMessage.slice(0, 1500),
+            failedCommand: failedCmd,
+            timestamp: Date.now(),
+          });
+          this.gateErrorHistoryByStory.set(story.storyIndex, history);
+
+          // Detect repeated identical failures (same command + same error pattern 2+ times in a row)
+          const isRepeatedFailure =
+            history.length >= 2 &&
+            history
+              .slice(-2)
+              .every(
+                (h) =>
+                  h.failedCommand === failedCmd &&
+                  h.errorSnippet.slice(0, 200) === errorMessage.slice(0, 200)
+              );
+
+          // After 3+ identical failures, escalate to full re-execution with approach-change instructions
+          if (isRepeatedFailure && history.length >= 3) {
+            await this.postLog(
+              `[Quality Gate] Same error ${history.length} times — telling expert to change approach entirely`,
+              expert,
+              "system"
+            );
+            const approachChangeFeedback = `***REMOVED******REMOVED*** QUALITY GATE FAILED — CHANGE YOUR APPROACH
+
+Your code has failed the same quality gate ${history.length} times with the same error.
+The previous approach is fundamentally wrong — DO NOT try the same pattern again.
+
+**Failed command:** ${failedCmd}
+
+**Error (latest):**
+${errorMessage.slice(0, 2000)}
+
+**What to do differently:**
+- If writing tests: use a completely different testing strategy (e.g. integration tests
+  instead of unit mocks, or table-driven tests instead of mocking a complex interface)
+- If a library/pattern keeps failing to compile: use a simpler alternative
+- If stuck on the same type error: reconsider the API design, not just the test
+- It is acceptable to simplify scope — a passing simpler test is better than a failing complex one`;
+            return this.executeStory(story, expert, totalStories, approachChangeFeedback);
+          }
+
           // Re-merge sibling branches before retry so expert has latest code
           await this.rebaseSiblingBranches(story, expert);
 
-          await this.postLog(
-            `[Quality Gate] Retry ${gateRetryCount + 1}/${gateMaxRetries} — feeding error back to expert`,
-            expert,
-            "system"
-          );
-          const fixFeedback = `***REMOVED******REMOVED*** QUALITY GATE FAILED — FIX REQUIRED\n\nYour code did not pass the quality gate. Fix the errors below and try again.\n\n${errorMessage}`;
-          return this.executeStory(story, expert, totalStories, fixFeedback);
+          const isPreCommitGate = errorMessage.startsWith("Pre-commit quality gate failed");
+          const worktreePath = this.worktreePathByStory.get(story.storyIndex);
+
+          if (isPreCommitGate && worktreePath && this.config.qualityGateCommands) {
+            // Use InlineGateFixer for surgical fix instead of re-executing entire story
+            await this.postLog(
+              `[Quality Gate] Retry ${gateRetryCount + 1}/${gateMaxRetries} — spawning inline gate fixer`,
+              expert,
+              "system"
+            );
+
+            // Extract the specific failed command from the error message for targeted fixing
+            // Error format: "Pre-commit quality gate failed (cmd):\n..."
+            // Pass all gate commands for verification (fixer re-runs all to confirm fix doesn't break others)
+            const gateCommands = failedCmd !== "unknown"
+              ? [failedCmd, ...this.config.qualityGateCommands.flatMap((g) => g.commands).filter((c) => c !== failedCmd)]
+              : this.config.qualityGateCommands.flatMap((g) => g.commands);
+            const fixer = new InlineGateFixer(
+              this.config,
+              worktreePath,
+              errorMessage,
+              gateCommands,
+              expert,
+              history.length > 0 ? history : undefined
+            );
+            const fixResult = await fixer.run();
+
+            if (fixResult.success) {
+              // Gate fixer committed the fix in-place — finalize directly without re-running expert
+              await this.postLog(
+                `[Quality Gate] Inline gate fixer succeeded — finalizing story`,
+                expert,
+                "system"
+              );
+
+              // Commit any remaining uncommitted changes (safety net)
+              const uncommitted = await this.gitOps.getModifiedFilesInWorktree(worktreePath!);
+              if (uncommitted.length > 0) {
+                const commitMsg = "fix: quality gate — Story " + story.storyIndex + " - " + story.title;
+                await this.gitOps.commitChangesInWorktree(worktreePath!, commitMsg, expert, story.storyIndex);
+              }
+
+              // Push branch
+              await this.gitOps.pushBranchFromWorktree(worktreePath!, branchName!);
+              await this.postLog(`Pushed branch to remote after gate fix`, expert, "system");
+
+              // Post-push CI gate (if configured)
+              if (this.config.ciWorkflowPath && !this.config.qualityGateBypass) {
+                const ciResult = await this.runPostPushCIGate(worktreePath!, branchName!, expert);
+                if (!ciResult.passed && !ciResult.infrastructureFailure) {
+                  throw new Error(`Post-push CI failed:\n${ciResult.log || ciResult.summary}`);
+                }
+              }
+
+              // Get changed files and validate
+              const changedFiles = await this.gitOps.getFilesChangedVsMainInWorktree(worktreePath!);
+              const validation = await this.validateStoryCompletion(story, worktreePath!, changedFiles, expert);
+
+              // Post completion to coordination feed
+              const currentRevision = await this.coordination.getCurrentRevision();
+              await this.coordination.postCompletion(
+                story.storyIndex,
+                story.title,
+                expert,
+                this.config.parentTaskId,
+                {
+                  branchName: branchName!,
+                  filesModified: changedFiles,
+                  revisionNumber: currentRevision,
+                  validation: {
+                    passed: validation.valid,
+                    issues: validation.issues,
+                    criteriaMetRatio: `${validation.acceptanceCriteriaMet}/${validation.acceptanceCriteriaTotal}`,
+                  },
+                }
+              );
+
+              await this.ticketOps.postComment(
+                `**${story.title}** — completed by ${expert} (quality gate fix applied)\n\n${changedFiles.length} file${changedFiles.length !== 1 ? "s" : ""} changed.`
+              );
+
+              storyResult.success = true;
+              storyResult.filesModified = changedFiles;
+              storyResult.branchName = branchName;
+              storyResult.worktreePath = worktreePath;
+              this.worktreePathByStory.delete(story.storyIndex);
+              return storyResult;
+            }
+
+            await this.postLog(
+              `[Quality Gate] Inline gate fixer could not fix: ${fixResult.summary}`,
+              expert,
+              "system"
+            );
+            // Fall through to park/escalate logic below
+          } else {
+            // Post-push CI failures or missing worktree — fall back to full re-execution
+            await this.postLog(
+              `[Quality Gate] Retry ${gateRetryCount + 1}/${gateMaxRetries} — feeding error back to expert`,
+              expert,
+              "system"
+            );
+            const fixFeedback = `***REMOVED******REMOVED*** QUALITY GATE FAILED — FIX REQUIRED\n\nYour code did not pass the quality gate. Fix the errors below and try again.\n\n${errorMessage}`;
+            return this.executeStory(story, expert, totalStories, fixFeedback);
+          }
         }
 
         // Gate retries exhausted — park for deferred retry or escalate

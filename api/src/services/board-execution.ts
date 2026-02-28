@@ -25,6 +25,63 @@ function isTaskDoneForCascade(task: WorkerTask): boolean {
   return true;
 }
 
+/**
+ * Safety-net sweep for stalled board cascades.
+ * Finds boards where completed tasks exist but no next card was triggered,
+ * and no active (running/queued) tasks remain. Calls processUnblockedCards
+ * to kick the cascade back into motion.
+ */
+export async function sweepStalledBoards(): Promise<number> {
+  const cardRepo = AppDataSource.getRepository(KbCard);
+
+  try {
+    // Find distinct boards that have:
+    // 1. At least one card with a completed worker task (cascade should have continued)
+    // 2. At least one card with NO worker task whose deps might be met
+    // 3. NO currently active (non-terminal) worker tasks
+    //
+    // We use a raw query to efficiently filter across joins.
+    const stalledBoards: { board_id: string; org_id: string }[] =
+      await cardRepo.query(
+        `
+        SELECT DISTINCT b.id AS board_id, b.org_id
+        FROM kb_boards b
+        JOIN kb_cards c_done ON c_done.board_id = b.id
+        JOIN worker_tasks wt_done ON wt_done.id = c_done.worker_task_id
+          AND wt_done.status IN ('completed', 'deployed', 'pr_approved', 'review_approved')
+        JOIN kb_cards c_pending ON c_pending.board_id = b.id
+          AND c_pending.worker_task_id IS NULL
+        WHERE b.status = 'active'
+          AND NOT EXISTS (
+            SELECT 1 FROM kb_cards c_active
+            JOIN worker_tasks wt_active ON wt_active.id = c_active.worker_task_id
+            WHERE c_active.board_id = b.id
+              AND wt_active.status NOT IN ('completed', 'deployed', 'pr_approved', 'review_approved', 'failed', 'cancelled')
+          )
+        LIMIT 10
+        `,
+      );
+
+    let unstuckCount = 0;
+    for (const row of stalledBoards) {
+      logger.info("Board cascade safety net: triggered stalled board", {
+        boardId: row.board_id,
+      });
+      const result = await processUnblockedCards(row.board_id, row.org_id);
+      if (result.triggered > 0) {
+        unstuckCount++;
+      }
+    }
+
+    return unstuckCount;
+  } catch (error) {
+    logger.error("Error in sweepStalledBoards", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 0;
+  }
+}
+
 export async function processUnblockedCards(
   boardId: string,
   orgId: string,

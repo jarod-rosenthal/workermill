@@ -11,6 +11,7 @@ import axios from "axios";
 import { execSync, spawn } from "child_process";
 import { existsSync, readdirSync, statSync } from "fs";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
+import { runGateCommand } from "./gate-utils.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
 import {
   createAIClient,
@@ -345,72 +346,14 @@ export class InlineIntegrationFixer {
   }
 
   /**
-   * Spawn a gate command as a child process with timeout and watch-mode detection.
-   * Copied from executor.ts runGateCommand.
+   * Delegate to shared gate-utils.ts runGateCommand.
    */
   private runGateCommand(
     cmd: string,
     cwd: string,
     timeoutMs: number = 300_000
   ): Promise<{ stdout: string; stderr: string }> {
-    return new Promise((resolve, reject) => {
-      const child = spawn("sh", ["-c", cmd], {
-        cwd,
-        env: { ...process.env, CI: "true" },
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-
-      let stdout = "";
-      let stderr = "";
-      let watchModeKilled = false;
-
-      const overallTimer = setTimeout(() => {
-        child.kill("SIGTERM");
-      }, timeoutMs);
-
-      let watchModeTimer: ReturnType<typeof setTimeout> | null = null;
-
-      child.stdout?.on("data", (data: Buffer) => {
-        stdout += data.toString();
-        if (
-          /waiting for file changes|press [hq] to/i.test(stdout) &&
-          !watchModeTimer
-        ) {
-          watchModeTimer = setTimeout(() => {
-            watchModeKilled = true;
-            child.kill("SIGTERM");
-          }, 2000);
-        }
-      });
-
-      child.stderr?.on("data", (data: Buffer) => {
-        stderr += data.toString();
-      });
-
-      child.on("close", (code) => {
-        clearTimeout(overallTimer);
-        if (watchModeTimer) clearTimeout(watchModeTimer);
-
-        if (watchModeKilled || code === 0) {
-          resolve({
-            stdout: stdout.slice(0, 4000),
-            stderr: stderr.slice(0, 2000),
-          });
-        } else {
-          const err = new Error(`Command failed with exit code ${code}`);
-          (err as any).stdout = stdout.slice(0, 4000);
-          (err as any).stderr = stderr.slice(0, 2000);
-          (err as any).code = code;
-          reject(err);
-        }
-      });
-
-      child.on("error", (err) => {
-        clearTimeout(overallTimer);
-        if (watchModeTimer) clearTimeout(watchModeTimer);
-        reject(err);
-      });
-    });
+    return runGateCommand(cmd, cwd, timeoutMs);
   }
 
   /**
@@ -451,7 +394,9 @@ export class InlineIntegrationFixer {
   }
 
   /**
-   * Find subdirectories with package.json but no node_modules.
+   * Find subdirectories with package.json that need dep installation.
+   * Always includes directories with package.json — even if node_modules/ exists —
+   * because a partial node_modules can leave gate tools like eslint missing.
    */
   private findSubdirsNeedingInstall(
     root: string,
@@ -474,10 +419,7 @@ export class InlineIntegrationFixer {
         } catch {
           continue;
         }
-        if (
-          existsSync(`${full}/package.json`) &&
-          !existsSync(`${full}/node_modules`)
-        ) {
+        if (existsSync(`${full}/package.json`)) {
           results.push(full);
         }
         scan(full, depth + 1);

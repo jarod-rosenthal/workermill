@@ -278,7 +278,7 @@ rdb := redis.NewClient(opt)
 | **Testing (frontend)** | Vitest + Testing Library | latest | Fast Vite-native test runner with Svelte component testing. |
 | **Linting (Go)** | go vet (stdlib) | — | Standard Go static analysis. Do NOT use golangci-lint — it is not available in worker containers. |
 | **Linting (frontend)** | ESLint + Prettier | latest | Standard JS/TS linting and formatting. |
-| **Container** | Docker (multi-stage) | — | Minimal scratch-based Go binary. Frontend uses adapter-node (NOT nginx). |
+| **Container** | Docker (multi-stage) | — | API: scratch-based Go binary. Frontend: `adapter-static` build served by nginx (NOT adapter-node). |
 | **Compute** | Railway | Hobby plan | Docker container hosting with auto-HTTPS. |
 | **CI/CD** | GitHub Actions | — | Automated test + deploy pipeline. |
 | **Hashing** | FNV-1a | `hash/fnv` (stdlib) | FNV-1a 32-bit for deterministic percentage rollouts. Uses Go standard library — no unsafe pointer arithmetic, passes `-race` detector. |
@@ -330,19 +330,24 @@ All resources are **provisioned and ready**. Workers do NOT create accounts or s
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
+| `PORT` | `80` | **REQUIRED** — tells Railway which port nginx listens on |
 | `PUBLIC_API_URL` | `https://flagdeck.workermill.com` | API base URL for the frontend |
 
 **Railway Deployment Requirements (CRITICAL):**
 
-1. **SvelteKit MUST use `@sveltejs/adapter-node`** — Railway requires a long-running process. `adapter-static` generates static HTML files with no server process, which causes Railway builds to fail with "no start command". The `svelte.config.js` must import `adapter-node`, NOT `adapter-static`.
+1. **Frontend uses `adapter-static` + nginx Dockerfile** — The `web/Dockerfile` builds SvelteKit with `adapter-static`, then serves the static output via nginx. This is the correct approach — Railway detects the Dockerfile and uses it. Do NOT switch to `adapter-node` (the original PRD spec was wrong — `adapter-static` + nginx works perfectly with Railway's Docker builder).
 
-2. **`web/package.json` MUST include a `"start"` script:** `"start": "node build"` — Railway auto-detects the start command from package.json. Without it, the service won't start after build. The `adapter-node` output goes to the `build/` directory.
+2. **`PORT=80` MUST be set as an env var on the web service** — The nginx Dockerfile exposes port 80, but Railway may not auto-detect it. Explicitly set `PORT=80` in the web service's environment variables, otherwise Railway returns HTTP 502 "Application failed to respond".
 
-3. **SvelteKit layout MUST use `ssr: true`** (NOT `prerender: true`) — `adapter-node` serves pages dynamically via SSR. Setting `export const prerender = true` in `+layout.ts` conflicts with adapter-node and causes build failures. Use `export const ssr = true` instead.
+3. **API Dockerfile Go version MUST match `go.mod`** — The `FROM golang:X.XX-alpine` in `api/Dockerfile` MUST use the exact same Go version as `api/go.mod`. A mismatch causes Railway builds to fail with `go.mod requires go >= X.XX (running go Y.YY; GOTOOLCHAIN=local)`. This project uses **Go 1.24** — all three locations (`go.mod`, `Dockerfile`, `ci.yml`) must agree.
 
 4. **Railway project token is project-scoped** — The `RAILWAY_TOKEN` GitHub secret must be a project-scoped token generated from Railway project settings (Settings → Tokens → Create Token), NOT a personal API token. Project tokens have the format `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`.
 
 5. **Service names in `railway up` MUST be exact** — Use `--service flagdeck-api` and `--service flagdeck-web` (the exact names from the Railway dashboard). Using any other name creates a new service instead of deploying to the existing one.
+
+6. **Deploy workflow must NOT include Docker build steps** — The deploy job runs inside the `ghcr.io/railwayapp/cli:latest` container, which has NO Docker daemon. Any `docker build` or `docker run` commands will fail with `docker: not found`. The deploy workflow should ONLY do `checkout` + `railway up --service <name> --detach`. Railway handles the Docker build on its own infrastructure.
+
+7. **CI workflow must NOT use `golangci-lint`** — Use only standard Go toolchain: `go vet ./...`, `go test ./...`, `go build`. `golangci-lint` has version-coupling issues with Go (older versions produce false type-check errors on newer Go code) and is not available in worker containers. It is BANNED from this project.
 
 ### MongoDB Atlas (Database)
 
@@ -350,6 +355,7 @@ All resources are **provisioned and ready**. Workers do NOT create accounts or s
 |----------|---------|
 | Plan | M0 free tier (512 MB storage, shared cluster) |
 | Cluster | `flagdeck` (Atlas project: Flagdeck) |
+| Atlas Project ID | `699b3e8707cbf03e603e6a74` |
 | Region | `us-east-1` (AWS) |
 | Database | `flagdeck` |
 | DB user | `rosenthaljarod_db_user` |
@@ -360,6 +366,10 @@ All resources are **provisioned and ready**. Workers do NOT create accounts or s
 ```
 mongodb+srv://rosenthaljarod_db_user:<password>@flagdeck.rakqc31.mongodb.net/flagdeck?retryWrites=true&w=majority&appName=Flagdeck
 ```
+
+**CRITICAL — IP Access List:** MongoDB Atlas blocks all connections from IPs not in the project's IP Access List. Railway uses dynamic outbound IPs, so `0.0.0.0/0` (allow from anywhere) MUST be added to the Atlas Network Access → IP Access List. Without this, the Go API crashes on startup with `tls: internal error` on every MongoDB connection attempt. Atlas terminates the TLS handshake before authentication when the source IP is not whitelisted.
+
+**To configure:** Atlas dashboard → Security → Database & Network Access → Network Access → IP Access List → Add IP Address → `0.0.0.0/0` with comment "Allow access from anywhere (Railway deployment)".
 
 ### Upstash Redis (Cache)
 
@@ -379,14 +389,36 @@ rediss://default:<password>@credible-falcon-44150.upstash.io:6379
 
 > **NOTE**: Upstash uses `rediss://` (double-s, TLS). The `go-redis` client handles TLS automatically when the URL scheme is `rediss`.
 
-### DNS (Custom Domains)
+### DNS (Custom Domains) — Route53
 
-| Record | Type | Value | Status |
-|--------|------|-------|--------|
-| `flagdeck.workermill.com` | CNAME | `flagdeck-api-production.up.railway.app` | **Ready** (Route53) |
-| `flagdeck-app.workermill.com` | CNAME | `flagdeck-web-production.up.railway.app` | **Ready** (Route53) |
+**CRITICAL — Railway custom domains require TWO DNS records each: a CNAME and a TXT verification record.** The CNAME must point to Railway's per-domain verification target (NOT the service's default `*-production.up.railway.app` domain). The TXT record proves domain ownership so Railway can provision an SSL certificate.
 
-Custom domains are also registered in Railway for automatic TLS certificate provisioning.
+**How to get the correct CNAME and TXT values:** After adding a custom domain in Railway (via dashboard or API), query the domain status via the Railway GraphQL API:
+
+```bash
+curl -s -H "Authorization: Bearer $RAILWAY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -X POST https://backboard.railway.app/graphql/v2 \
+  -d '{"query":"{ project(id: \"PROJECT_ID\") { services { edges { node { name serviceInstances { edges { node { domains { customDomains { domain status { verified certificateStatus verificationDnsHost verificationToken dnsRecords { hostlabel requiredValue } } } } } } } } } } } }"}'
+```
+
+The response contains:
+- `dnsRecords[0].requiredValue` — the CNAME target (e.g., `grwr06qy.up.railway.app`)
+- `verificationDnsHost` — the TXT record hostname prefix (e.g., `_railway-verify.flagdeck`)
+- `verificationToken` — the TXT record value (e.g., `railway-verify=14558bad...`)
+
+**Current DNS records (Route53, hosted zone `Z0049130JRIXFAC8U9AH`):**
+
+| Hostname | Type | Value | Purpose |
+|----------|------|-------|---------|
+| `flagdeck.workermill.com` | CNAME | `uewe43o0.up.railway.app` | Routes traffic to Railway API service |
+| `flagdeck-app.workermill.com` | CNAME | `978huubd.up.railway.app` | Routes traffic to Railway web service |
+| `_railway-verify.flagdeck.workermill.com` | TXT | `railway-verify=14558bad3077e586db7b4fa09e260bef60009f2cfb6e1c9bfaf46fdde5777314` | Proves domain ownership for SSL cert |
+| `_railway-verify.flagdeck-app.workermill.com` | TXT | `railway-verify=094654c42cfcd40ca96a8a073468b9e53dbd4ea4530f1a9bd955a5964a4348cd` | Proves domain ownership for SSL cert |
+
+> **NOTE:** The CNAME targets above are specific to the current Railway custom domain registrations. If you delete and re-create a custom domain in Railway, it generates a NEW CNAME target. You must query the Railway API (see above) to get the new target and update DNS accordingly. The TXT verification tokens remain stable across re-creations for the same domain.
+
+**Common mistake:** Pointing CNAMEs to the service's default Railway domain (e.g., `flagdeck-api-production.up.railway.app`). This resolves via DNS but Railway returns HTTP 404 "Application not found" because it can't match the custom hostname. You MUST use the per-domain CNAME target from the API response above.
 
 ---
 

@@ -2732,25 +2732,27 @@ export class EpicCoordinator {
 
     // Deadlock detection: all experts idle, no claimable stories, but failed/blocked stories remain
     // Don't trigger deadlock if parked stories are waiting for deferred retry
+    // Instead of failing the entire task, proceed with partial completion (create PR with completed stories)
     if (allIdle && readyToClaim.length === 0 && this.parkedStoryIndices.size === 0 && (this.failedStoryIndices.size > 0 || this.blockedStoryIndices.size > 0) && completions.length > 0) {
       const failedList = Array.from(this.failedStoryIndices).sort((a, b) => a - b);
       const blockedList = Array.from(this.blockedStoryIndices).sort((a, b) => a - b);
-      console.log(`[Epic] Deadlock detected — failed stories: [${failedList}], blocked stories: [${blockedList}]`);
+      console.log(`[Epic] Partial completion — ${completions.length} stories done, ${failedList.length} failed, ${blockedList.length} blocked`);
       this.postLog(
-        `Task cannot proceed — story ${failedList.join(", ")} failed and stories ${blockedList.join(", ")} are blocked. ` +
-        `${completions.length} of ${readyStories.length} stories completed successfully.`
+        `${completions.length} of ${readyStories.length} stories completed. ` +
+        `Story ${failedList.join(", ")} failed, stories ${blockedList.join(", ")} blocked. ` +
+        `Proceeding with partial completion — creating PR with completed work.`
       );
-      this.missionActive = false;
-      await this.updateTaskStatus(
-        "failed",
-        undefined,
-        `Stories ${failedList.join(", ")} failed (blocker not resolved). ${completions.length}/${readyStories.length} stories completed.`
-      );
-      return;
+      // Fall through to the completion path below instead of failing
     }
 
     if (allIdle && readyToClaim.length === 0 && completions.length > 0) {
-      console.log("[Epic] All stories finished. Processing completion...");
+      // Determine if this is a partial completion (some stories failed/blocked)
+      const isPartialCompletion = this.failedStoryIndices.size > 0 || this.blockedStoryIndices.size > 0;
+      if (isPartialCompletion) {
+        console.log("[Epic] Partial completion — proceeding with completed stories...");
+      } else {
+        console.log("[Epic] All stories finished. Processing completion...");
+      }
 
       // Extract story completion details for PR description
       const storyCompletions = completions.map((c) => ({
@@ -2760,7 +2762,18 @@ export class EpicCoordinator {
       }));
 
       const summaryParts = storyCompletions.map((s) => `S${s.storyIndex}`);
-      const storyList = storyCompletions.map((s) => `- **${s.title}**`).join("\n");
+      let storyList = storyCompletions.map((s) => `- **${s.title}**`).join("\n");
+
+      // Append failed/blocked story info to the story list for PR description
+      if (isPartialCompletion) {
+        const failedList = Array.from(this.failedStoryIndices).sort((a, b) => a - b);
+        const blockedList = Array.from(this.blockedStoryIndices).sort((a, b) => a - b);
+        storyList += `\n\n⚠️ **Failed stories:** ${failedList.join(", ")}`;
+        if (blockedList.length > 0) {
+          storyList += `\n⚠️ **Blocked stories:** ${blockedList.join(", ")}`;
+        }
+        storyList += `\n\n*${completions.length} of ${readyStories.length} stories completed. The above stories failed quality gates or were blocked by dependency failures.*`;
+      }
 
       // Run quality verification and epic validation in parallel (both are independent)
       this.postDashboardLog("Running quality checks and epic validation...");
@@ -3080,6 +3093,11 @@ export class EpicCoordinator {
       let jiraComment: string;
       let errorMessage: string | undefined;
 
+      const completionLabel = isPartialCompletion
+        ? `${completions.length} of ${readyStories.length} stories completed`
+        : `All ${completions.length} stories completed`;
+      const completionEmoji = isPartialCompletion ? "⚠️" : "✅";
+
       if (this.deploymentSucceeded) {
         // Deployment completed successfully - Jira comment already posted by deployer
         taskStatus = "deployed";
@@ -3088,18 +3106,18 @@ export class EpicCoordinator {
         if (this.reviewSkipped) {
           // Review was enabled but crashed (OAuth, CLI failure, etc.) — escalate for human review
           taskStatus = "escalated";
-          jiraComment = `⚠️ **All ${completions.length} stories completed**, but Tech Lead review could not complete.\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Please review the PR manually.*`;
+          jiraComment = `⚠️ **${completionLabel}**, but Tech Lead review could not complete.\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Please review the PR manually.*`;
         } else if (this.config.reviewEnabled) {
           // Review was approved by inline Tech Lead
-          taskStatus = "pr_approved";
+          taskStatus = isPartialCompletion ? "escalated" : "pr_approved";
           jiraComment = this.config.prdChildTask
-            ? `✅ **All ${completions.length} stories completed**, approved by Tech Lead, and PR merged.\n\n${storyList}\n\n📝 **PR**: ${prUrl}`
-            : `✅ **All ${completions.length} stories completed** and approved by Tech Lead.\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Ready for merge.*`;
+            ? `${completionEmoji} **${completionLabel}**, approved by Tech Lead, and PR merged.\n\n${storyList}\n\n📝 **PR**: ${prUrl}`
+            : `${completionEmoji} **${completionLabel}** and approved by Tech Lead.\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Ready for merge.*`;
         } else {
           // No review label: PR created, waiting for human approval
           // Use review_requested so GitHub webhook approval triggers deployment
-          taskStatus = "review_requested";
-          jiraComment = `✅ **All ${completions.length} stories completed.**\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Ready for review and merge.*`;
+          taskStatus = isPartialCompletion ? "escalated" : "review_requested";
+          jiraComment = `${completionEmoji} **${completionLabel}.**\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Ready for review and merge.*`;
         }
       } else if (noChangesNeeded) {
         // Stories completed but determined no code changes were required
@@ -3124,9 +3142,10 @@ export class EpicCoordinator {
       }
 
       // Build result summary based on status
+      const partialTag = isPartialCompletion ? " (partial)" : "";
       let resultSummary: string;
       if (prUrl) {
-        resultSummary = `Epic ${taskStatus}: ${summaryParts.join(", ")} (${completions.length} stories) - PR: ${prUrl}`;
+        resultSummary = `Epic ${taskStatus}${partialTag}: ${summaryParts.join(", ")} (${completions.length}/${readyStories.length} stories) - PR: ${prUrl}`;
       } else if (taskStatus === "failed") {
         resultSummary = `Epic failed: ${summaryParts.join(", ")} (${completions.length} stories) - PR creation failed`;
       } else if (noChangesNeeded) {

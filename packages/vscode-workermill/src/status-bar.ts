@@ -15,6 +15,7 @@ export class StatusBar {
   private connected = false;
   private tasks: TaskInfo[] = [];
   private sandbox: "none" | "docker" = "none";
+  private mode: "local" | "cloud" = "cloud";
   private orgName: string | undefined;
 
   constructor(private client: AgentClient) {
@@ -36,6 +37,7 @@ export class StatusBar {
     client.on("connected", (status: AgentStatus) => {
       this.connected = true;
       if (status?.sandbox) this.sandbox = status.sandbox;
+      if (status?.mode) this.mode = status.mode;
       // Refresh org name from config (may have changed during org switch)
       try {
         const cfgPath = path.join(os.homedir(), ".workermill", "config.json");
@@ -70,6 +72,7 @@ export class StatusBar {
       const status = await this.client.getStatus();
       this.tasks = status.tasks || [];
       if (status.sandbox) this.sandbox = status.sandbox;
+      if (status.mode) this.mode = status.mode;
     } catch {
       try {
         this.tasks = await this.client.getTasks();
@@ -92,11 +95,12 @@ export class StatusBar {
     const attention = this.tasks.filter((t) => t.status === "failed" || t.status === "escalated");
 
     const sandboxTag = this.sandbox === "docker" ? " $(shield) Docker" : "";
-    const orgTag = this.orgName ? ` [${this.orgName}]` : "";
+    const modeTag = this.mode === "local" ? " Standalone" : "";
+    const orgTag = this.mode !== "local" && this.orgName ? ` [${this.orgName}]` : "";
 
     if (active.length === 0) {
-      this.item.text = `$(rocket) WorkerMill${orgTag}: Idle${sandboxTag}`;
-      this.item.tooltip = `WorkerMill agent connected — no active tasks${this.orgName ? `\nOrganization: ${this.orgName}` : ""}${this.sandbox === "docker" ? "\nDocker sandbox enabled" : ""}`;
+      this.item.text = `$(rocket) WorkerMill${orgTag}:${modeTag} Idle${sandboxTag}`;
+      this.item.tooltip = `WorkerMill agent connected — no active tasks${this.mode === "local" ? "\nMode: Standalone (offline)" : ""}${this.orgName && this.mode !== "local" ? `\nOrganization: ${this.orgName}` : ""}${this.sandbox === "docker" ? "\nDocker sandbox enabled" : ""}`;
       this.item.backgroundColor = undefined;
       return;
     }
@@ -110,7 +114,7 @@ export class StatusBar {
       this.item.backgroundColor = undefined;
     }
 
-    this.item.text = `$(rocket) WorkerMill${orgTag}: ${parts.join(" · ")}${sandboxTag}`;
+    this.item.text = `$(rocket) WorkerMill${orgTag}:${modeTag} ${parts.join(" · ")}${sandboxTag}`;
     this.item.tooltip = active.map((t) => `${t.status === "planning" ? "Planning" : "Running"}: ${t.summary}`).join("\n") + (this.sandbox === "docker" ? "\nDocker sandbox enabled" : "");
   }
 

@@ -348,13 +348,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   // ── GET endpoints ──
 
   if (req.method === "GET" && path === "/api/status") {
-    const state: AgentState = {
+    const backend = getActiveBackend();
+    const state: AgentState & { mode?: string } = {
       version: AGENT_VERSION,
       agentId: agentConfig?.agentId || "unknown",
       apiUrl: agentConfig?.apiUrl || "unknown",
       uptime: Math.round((Date.now() - startTime) / 1000),
       sandbox: agentConfig?.sandbox || "none",
       tasks: Array.from(localTasks.values()),
+      mode: backend?.mode || "cloud",
     };
     return json(res, state);
   }

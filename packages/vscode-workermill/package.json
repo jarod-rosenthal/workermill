@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.2.64",
+  "version": "0.2.65",
   "publisher": "workermill",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -279,7 +279,7 @@
     "viewsWelcome": [
       {
         "view": "workermill.teamPanel",
-        "contents": "WorkerMill assigns Jira and GitHub issues to AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Get Started with GitHub](command:workermill.signUpWithGitHub)\n\nAlready have an account?\n[Email & Password](command:workermill.signInWithEmail) · [Google](command:workermill.signInWithGoogle) · [GitHub](command:workermill.signInWithGitHub) · [Use API key](command:workermill.manualSetup)\n\n---\n\n[Use Standalone Mode (BYOK)](command:workermill.setupStandalone)\nRun fully offline with your own API keys",
+        "contents": "WorkerMill assigns Jira and GitHub issues to AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Get Started — Standalone Mode (BYOK)](command:workermill.setupStandalone)\nRun with your own API keys. No account required.\n\n---\n\nHave a WorkerMill Cloud account?\n[Sign in with GitHub](command:workermill.signUpWithGitHub) · [Email](command:workermill.signInWithEmail) · [Google](command:workermill.signInWithGoogle) · [API key](command:workermill.manualSetup)",
         "when": "!workermill.agentConfigured"
       },
       {

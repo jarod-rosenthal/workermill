@@ -41,9 +41,11 @@ cd api && go build -o /dev/null ./cmd/server
 
 **If ANY step produces errors, DO NOT commit.** Fix the errors and re-run from step 1.
 
-**IMPORTANT — No third-party linters:** Do NOT use `golangci-lint`, `staticcheck`, or any third-party tool. Use only standard Go toolchain commands (`go vet`, `go test`, `go build`, `gofmt`). These commands run in a minimal container where third-party tools are not installed.
+**IMPORTANT — No third-party linters:** Do NOT use `golangci-lint`, `staticcheck`, or any third-party tool. Use only standard Go toolchain commands (`go vet`, `go test`, `go build`, `gofmt`). These commands run in a minimal container where third-party tools are not installed. `golangci-lint` in particular has version-coupling issues with Go — older versions misreport errors on newer Go code. It is BANNED from this project entirely (quality gates, CI, and local development).
 
 **IMPORTANT — CI must use the EXACT same commands:** The CI workflow (`.github/workflows/ci.yml`) MUST run the exact same commands as this quality gate. No additional linters, no different flags. If the quality gate passes, CI must also pass. Any divergence is a bug.
+
+**IMPORTANT — Go version must be IDENTICAL everywhere:** The Go version in `api/go.mod`, `api/Dockerfile` (`FROM golang:X.XX-alpine`), and `.github/workflows/ci.yml` (`go-version: "X.XX"`) MUST all specify the EXACT same version. This project uses **Go 1.22**. Do NOT upgrade `go.mod` to a newer Go version (e.g., 1.23, 1.24) without also updating the Dockerfile and CI workflow. A version mismatch causes CI failures because the CI Go toolchain cannot compile code that requires a newer Go version than it has installed.
 
 ### Pre-Commit Quality Gate — SvelteKit Frontend (MANDATORY)
 
@@ -263,7 +265,7 @@ rdb := redis.NewClient(opt)
 
 | Layer | Technology | Version | Rationale |
 |-------|-----------|---------|-----------|
-| **Backend framework** | Go + Fiber | Go 1.22+, Fiber v2 | High-performance, Express-like API for Go. Fiber is the most starred Go web framework after Gin, with familiar middleware patterns. |
+| **Backend framework** | Go + Fiber | Go 1.22 (exact), Fiber v2 | High-performance, Express-like API for Go. Fiber is the most starred Go web framework after Gin, with familiar middleware patterns. **Go version is pinned — do NOT upgrade.** |
 | **Database** | MongoDB | 7.x (Atlas M0) | Document-based storage fits schema-flexible flag configs. Targeting rules vary per flag — documents model this naturally. |
 | **Cache** | Redis | 7+ (Upstash) | Sub-millisecond flag evaluation caching. Upstash provides serverless Redis with REST API fallback. |
 | **Frontend framework** | SvelteKit | 2.x (Svelte 5) | Compiled reactivity, file-based routing, SSR/SPA flexibility. Stack diversity from existing Next.js showcases. |
@@ -1111,7 +1113,7 @@ For each variant pair (control vs treatment):
 ```go
 module github.com/workermill-examples/flagdeck/api
 
-go 1.22
+go 1.22  // PINNED — must match Dockerfile (golang:1.22-alpine) and CI (go-version: "1.22")
 
 require (
     github.com/gofiber/fiber/v2 v2.52.0
@@ -1266,7 +1268,7 @@ volumes:
 
 ```dockerfile
 # Stage 1: Build
-FROM golang:1.22-alpine AS builder
+FROM golang:1.22-alpine AS builder  # MUST match go.mod and CI go-version
 WORKDIR /app
 
 COPY go.mod go.sum ./
@@ -1587,11 +1589,13 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.22"  # MUST match api/go.mod AND api/Dockerfile
 
       - name: Vet
         working-directory: api
         run: go vet ./...
+        # Do NOT add golangci-lint, staticcheck, or any third-party linter step.
+        # Use ONLY go vet, go test, go build (standard toolchain).
 
       - name: Test
         working-directory: api

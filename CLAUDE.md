@@ -404,6 +404,8 @@ Quality gates enforce code quality at two checkpoints during worker execution. B
 **Standard toolchain restriction:** Quality gate commands run in a minimal container. Only use tools from the standard toolchain:
 - **Go:** `go vet ./...`, `go test ./... -v -count=1 -race`, `go build -o /dev/null ./cmd/server`, `gofmt -w .` (NOT `gofmt ./...` — gofmt doesn't support `...`)
 - **Node.js:** `npm run lint`, `npm run test`, `npm run build`
+- **TypeScript:** `npx tsc --noEmit`
+- **SvelteKit:** `npx svelte-check`
 - **Python:** `python -m pytest`, `python -m mypy .`
 - Do NOT use `golangci-lint`, `staticcheck`, or other third-party tools — they may not be installed
 
@@ -428,7 +430,7 @@ The orchestrator is **stateless** — all state lives in the database, and every
 - **Cleanup**: All cleanup functions are DB-driven and idempotent.
 - **Cron jobs**: Periodic jobs (stale coordination cleanup, orphaned task detection, warm pools, trial reminders, marketing agent, hourly cleanup) are guarded by Redis `SETNX` distributed locks so only one instance runs each job per interval. If Redis is down, all instances run (graceful degradation to old behavior).
 
-**Lock keys** (in `orchestrator.ts` and `task-cleanup.ts`): `orchestrator:lock:stale-coordination` (55s), `orchestrator:lock:orphaned-tasks` (280s), `orchestrator:lock:warm-pools` (25s), `orchestrator:lock:trial-reminders` (1h), `orchestrator:lock:marketing-agent` (configurable), `orchestrator:lock:hourly-cleanup` (~1h).
+**Lock keys** (in `orchestrator.ts` and `task-cleanup.ts`): `orchestrator:lock:stale-coordination` (55s), `orchestrator:lock:board-cascade-sweep` (55s), `orchestrator:lock:orphaned-tasks` (280s), `orchestrator:lock:warm-pools` (25s), `orchestrator:lock:trial-reminders` (1h), `orchestrator:lock:marketing-agent` (configurable), `orchestrator:lock:hourly-cleanup` (~1h).
 
 **In-memory state** (`orchestrator-utils.ts`): `state` (running/poll counters — local bookkeeping only), `activeOps` (in-flight promise cap of 10 per instance — prevents one instance from over-spawning). Neither requires cross-instance coordination.
 

@@ -103,6 +103,7 @@ export interface CriticResult {
 // Defaults — overridden by server config when available
 let MAX_TARGET_FILES = 5;
 let AUTO_APPROVAL_THRESHOLD = 85;
+const SIMPLIFIED_FLOOR = 60;
 
 // ============================================================================
 // PLAN PARSING
@@ -820,4 +821,4 @@ export function stripFalsePersonaRisks(
   return { stripped, details };
 }
 
-export { AUTO_APPROVAL_THRESHOLD };
+export { AUTO_APPROVAL_THRESHOLD, SIMPLIFIED_FLOOR };

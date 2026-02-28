@@ -346,8 +346,8 @@ export function AIWorkersSection({
                 <div className="flex items-center gap-4">
                   <input
                     type="range"
-                    min="1"
-                    max="5"
+                    min="0"
+                    max="10"
                     value={settings.maxPerStoryRevisions}
                     onChange={(e) => updateSetting("maxPerStoryRevisions", parseInt(e.target.value))}
                     className="flex-1 h-2 bg-background/50 rounded-lg appearance-none cursor-pointer accent-indigo-500"
@@ -357,7 +357,7 @@ export function AIWorkersSection({
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Maximum revision attempts per individual story before auto-approving. The consolidated PR review at the end catches remaining issues.
+                  Maximum revision attempts per individual story before auto-approving. Set to 0 to skip per-story review entirely. The consolidated PR review at the end catches remaining issues.
                 </p>
               </div>
 

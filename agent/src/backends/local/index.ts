@@ -684,23 +684,115 @@ export class LocalBackend implements AgentBackend {
     });
   }
 
-  // ── PRD (stub — implemented in Task 12) ──
+  // ── PRD ──
 
   async getPrdPrompt(): Promise<string> {
-    // Will be implemented in Phase E
-    throw new Error(
-      "PRD not yet implemented for standalone mode",
-    );
+    // Return the bundled PRD system prompt (same as local-api.ts fallback)
+    const { PRD_SYSTEM_PROMPT } = await import("../../local-api.js");
+    return PRD_SYSTEM_PROMPT;
   }
 
   async decomposePrd(
-    _input: PrdInput,
-    _onProgress?: (msg: string) => void,
+    input: PrdInput,
+    onProgress?: (msg: string) => void,
   ): Promise<Board> {
-    // Will be implemented in Phase E
-    throw new Error(
-      "PRD decomposition not yet implemented for standalone mode",
+    const config = loadStandaloneConfig();
+
+    // Reuse the existing decomposePrdLocal function from local-api.ts
+    const { decomposePrdLocal } = await import("../../local-api.js");
+
+    const planningConfig = {
+      provider: config.llm?.provider || "anthropic",
+      model: config.llm?.model || "claude-sonnet-4-20250514",
+      apiKey: config.llm?.apiKey,
+    };
+
+    const result = await decomposePrdLocal(
+      input.content,
+      planningConfig,
+      undefined,
+      onProgress,
     );
+
+    // Create board from decomposition result
+    const boardId = generateId();
+    const now = new Date().toISOString();
+    const db = getDb();
+
+    db.prepare(
+      "INSERT INTO boards (id, name, description, quality_gate_commands, ci_workflow_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      boardId,
+      result.boardName,
+      `Generated from PRD`,
+      (result as any).qualityGates
+        ? JSON.stringify((result as any).qualityGates)
+        : null,
+      (result as any).ciWorkflowPath || null,
+      now,
+      now,
+    );
+
+    // Create columns
+    const colBacklog = generateId();
+    const colInProgress = generateId();
+    const colDone = generateId();
+    db.prepare(
+      "INSERT INTO board_columns (id, board_id, name, position, is_done_column) VALUES (?, ?, ?, ?, ?)",
+    ).run(colBacklog, boardId, "Backlog", 0, 0);
+    db.prepare(
+      "INSERT INTO board_columns (id, board_id, name, position, is_done_column) VALUES (?, ?, ?, ?, ?)",
+    ).run(colInProgress, boardId, "In Progress", 1, 0);
+    db.prepare(
+      "INSERT INTO board_columns (id, board_id, name, position, is_done_column) VALUES (?, ?, ?, ?, ?)",
+    ).run(colDone, boardId, "Done", 2, 1);
+
+    // Create cards
+    const cardIds: string[] = [];
+    for (let i = 0; i < result.cards.length; i++) {
+      const card = result.cards[i] as any;
+      const cardId = generateId();
+      cardIds.push(cardId);
+
+      db.prepare(
+        `
+        INSERT INTO cards (id, board_id, column_id, card_number, title, description, priority, position, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      ).run(
+        cardId,
+        boardId,
+        colBacklog,
+        i + 1,
+        card.title,
+        card.description,
+        card.priority || "medium",
+        i,
+        now,
+        now,
+      );
+    }
+
+    // Create dependencies
+    for (let i = 0; i < result.cards.length; i++) {
+      const card = result.cards[i] as any;
+      if (Array.isArray(card.dependencyIndices)) {
+        for (const depIdx of card.dependencyIndices) {
+          if (depIdx >= 0 && depIdx < cardIds.length) {
+            const depId = generateId();
+            db.prepare(
+              "INSERT INTO card_dependencies (id, card_id, depends_on_card_id) VALUES (?, ?, ?)",
+            ).run(depId, cardIds[i], cardIds[depIdx]);
+          }
+        }
+      }
+    }
+
+    onProgress?.(
+      `Board "${result.boardName}" created with ${result.cards.length} cards`,
+    );
+
+    return (await this.getBoard(boardId))!;
   }
 }
 

@@ -1102,7 +1102,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
 // Fallback prompt — used only when the server endpoint GET /api/agent/prd-prompt is unreachable.
 // The canonical prompt lives in api/src/services/prd-decomposer.ts (SYSTEM_PROMPT).
-const PRD_SYSTEM_PROMPT = `You are a senior technical program manager who decomposes Product Requirements Documents (PRDs) into implementation cards for AI coding agents.
+export const PRD_SYSTEM_PROMPT = `You are a senior technical program manager who decomposes Product Requirements Documents (PRDs) into implementation cards for AI coding agents.
 
 Each card represents ONE cohesive epic — a vertical slice or architectural layer that a single AI worker can execute independently (given its dependencies are met).
 
@@ -1223,7 +1223,7 @@ labels should include relevant technology or domain tags (e.g., "react", "api", 
  * - Anthropic: Claude Agent SDK (query() async generator with OAuth)
  * - OpenAI/Google/Ollama: Vercel AI SDK (generateTextWithTools())
  */
-async function decomposePrdLocal(
+export async function decomposePrdLocal(
   prdContent: string,
   planningConfig: { provider: string; model: string; apiKey?: string },
   serverPrompt?: string,

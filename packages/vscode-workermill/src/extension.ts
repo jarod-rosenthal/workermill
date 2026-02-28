@@ -1061,6 +1061,41 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
+    vscode.commands.registerCommand("workermill.setupStandalone", async () => {
+      if (!isAgentInstalled()) {
+        const choice = await vscode.window.showInformationMessage(
+          "WorkerMill agent binary is required. Install it first?",
+          "Install",
+        );
+        if (choice === "Install") {
+          vscode.commands.executeCommand("workermill.installAgent");
+        }
+        return;
+      }
+      // Launch standalone init in a terminal
+      const terminal = vscode.window.createTerminal("WorkerMill Standalone Setup");
+      terminal.show();
+      terminal.sendText("workermill-agent init --standalone");
+      // Listen for config file creation
+      const configPath = path.join(os.homedir(), ".workermill", "config.json");
+      const checkInterval = setInterval(() => {
+        if (fs.existsSync(configPath)) {
+          clearInterval(checkInterval);
+          treeProvider.agentConfigured = true;
+          vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
+          vscode.window.showInformationMessage(
+            "Standalone mode configured! Starting agent...",
+          );
+          startAgentProcess(log);
+          waitForAgentReady(log, 10_000).then((port) => {
+            if (port) client.connect();
+          });
+        }
+      }, 2000);
+      // Stop checking after 5 minutes
+      setTimeout(() => clearInterval(checkInterval), 300_000);
+    }),
+
     vscode.commands.registerCommand("workermill.configureScm", async () => {
       // Read API key from keychain first, then fall back to config file
       let apiKey = await getApiKey();

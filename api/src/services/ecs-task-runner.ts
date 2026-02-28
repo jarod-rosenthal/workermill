@@ -185,11 +185,11 @@ export class ECSTaskRunner {
         name: "QUALITY_GATE_COMMANDS",
         value: task.jiraFields?.qualityGates
           ? JSON.stringify(task.jiraFields.qualityGates)
-          : (task.organization?.qualityGateCommands ? JSON.stringify(task.organization.qualityGateCommands) : ""),
+          : "",
       },
       {
         name: "CI_WORKFLOW_PATH",
-        value: (task.jiraFields?.ciWorkflowPath as string) || task.organization?.ciWorkflowPath || "",
+        value: (task.jiraFields?.ciWorkflowPath as string) || "",
       },
       // Standard SDK mode: Use Agent SDK-based executor for single tasks
       // Provides Epic-level functionality (inline review/deploy/improve) without multi-story coordination

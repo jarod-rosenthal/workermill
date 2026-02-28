@@ -292,8 +292,8 @@ export async function runCardAsWorkerTask(
     ticketSystem: "internal",
     boardExecutionId: boardExecutionId || null,
     jiraFields: {
-      ...(card.board?.metadata?.qualityGates ? { qualityGates: card.board.metadata.qualityGates } : {}),
-      ...(card.board?.metadata?.ciWorkflowPath ? { ciWorkflowPath: card.board.metadata.ciWorkflowPath } : {}),
+      ...(card.board?.qualityGateCommands ? { qualityGates: card.board.qualityGateCommands } : {}),
+      ...(card.board?.ciWorkflowPath ? { ciWorkflowPath: card.board.ciWorkflowPath } : {}),
     },
   });
 
@@ -392,6 +392,13 @@ router.get("/", async (req: Request, res: Response) => {
         position: board.position,
         template: board.template,
         metadata: board.metadata,
+        qualityGateCommands: board.qualityGateCommands,
+        ciWorkflowPath: board.ciWorkflowPath,
+        priority: board.priority,
+        dueDate: board.dueDate,
+        assigneeId: board.assigneeId,
+        status: board.status,
+        prdSource: board.prdSource,
         columnCount: board.columns?.length || 0,
         cardCount: countMap.get(board.id) || 0,
         isStarred: starredIds.has(board.id),
@@ -691,6 +698,13 @@ router.get(
           prdSource: board.prdSource,
           githubRepo: board.githubRepo,
           metadata: board.metadata,
+          qualityGateCommands: board.qualityGateCommands,
+          ciWorkflowPath: board.ciWorkflowPath,
+          priority: board.priority,
+          dueDate: board.dueDate,
+          assigneeId: board.assigneeId,
+          status: board.status,
+          columnsLocked: !!board.prdSource,
           isStarred: !!star,
           createdAt: board.createdAt,
           updatedAt: board.updatedAt,
@@ -764,12 +778,21 @@ router.put(
   param("boardId").isUUID(),
   body("name").optional().isString().isLength({ max: 200 }),
   body("description").optional().isString().isLength({ max: 2000 }),
+  body("priority").optional({ nullable: true }).isIn(["urgent", "high", "medium", "low", null]),
+  body("dueDate").optional({ nullable: true }),
+  body("assigneeId").optional({ nullable: true }),
+  body("status").optional().isIn(["active", "completed", "archived"]),
+  body("qualityGateCommands").optional({ nullable: true }),
+  body("ciWorkflowPath").optional({ nullable: true }).isString().isLength({ max: 500 }),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
       const org = req.organization!;
       const boardId = req.params.boardId as string;
-      const { name, description } = req.body;
+      const {
+        name, description, priority, dueDate, assigneeId, status,
+        qualityGateCommands, ciWorkflowPath,
+      } = req.body;
 
       const boardRepo = AppDataSource.getRepository(KbBoard);
       const board = await boardRepo.findOne({ where: { id: boardId, orgId: org.id } });
@@ -781,11 +804,49 @@ router.put(
 
       if (name !== undefined) board.name = name;
       if (description !== undefined) board.description = description || null;
+      if (priority !== undefined) board.priority = priority;
+      if (dueDate !== undefined) board.dueDate = dueDate ? new Date(dueDate) : null;
+      if (assigneeId !== undefined) board.assigneeId = assigneeId;
+      if (status !== undefined) board.status = status;
+      if (ciWorkflowPath !== undefined) {
+        board.ciWorkflowPath = ciWorkflowPath && typeof ciWorkflowPath === "string" ? ciWorkflowPath.trim() || null : null;
+      }
+      if (qualityGateCommands !== undefined) {
+        if (qualityGateCommands === null) {
+          board.qualityGateCommands = null;
+        } else if (Array.isArray(qualityGateCommands)) {
+          const validated: Array<{ name: string; trigger: string; commands: string[] }> = [];
+          for (const gate of qualityGateCommands) {
+            if (
+              typeof gate.name === "string" && gate.name.trim() &&
+              typeof gate.trigger === "string" && gate.trigger.trim() &&
+              Array.isArray(gate.commands) && gate.commands.every((c: unknown) => typeof c === "string")
+            ) {
+              validated.push({ name: gate.name.trim(), trigger: gate.trigger.trim(), commands: gate.commands });
+            }
+          }
+          board.qualityGateCommands = validated.length > 0 ? validated : null;
+        }
+      }
+
       await boardRepo.save(board);
 
-      await logActivity(boardId, req.user!.id, "updated", "board", boardId, { name, description });
+      await logActivity(boardId, req.user!.id, "updated", "board", boardId, { name, description, priority, status });
 
-      res.json({ board: { id: board.id, name: board.name, description: board.description, updatedAt: board.updatedAt } });
+      res.json({
+        board: {
+          id: board.id,
+          name: board.name,
+          description: board.description,
+          priority: board.priority,
+          dueDate: board.dueDate,
+          assigneeId: board.assigneeId,
+          status: board.status,
+          qualityGateCommands: board.qualityGateCommands,
+          ciWorkflowPath: board.ciWorkflowPath,
+          updatedAt: board.updatedAt,
+        },
+      });
     } catch (error) {
       logger.error("Error updating board", { error });
       res.status(500).json({ error: "Failed to update board" });

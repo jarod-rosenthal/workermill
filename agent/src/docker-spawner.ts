@@ -18,7 +18,7 @@ import { findDockerBin } from "./config.js";
 import type { SpawnableTask, ClaimCredentials } from "./spawner.js";
 import { activeProcesses, type ActiveProcess } from "./active-processes.js";
 import { agentEvents } from "./local-api.js";
-import { AGENT_VERSION } from "./version.js";
+import { AGENT_VERSION, DOCKER_IMAGE_TAG } from "./version.js";
 import { getGpuInfo } from "./gpu-detector.js";
 import { getOllamaStatus } from "./ollama-manager.js";
 import {
@@ -158,14 +158,15 @@ function redactSecrets(text: string): string {
 
 /** Track when we last pulled the image to avoid re-pulling on every spawn. */
 let lastPullTimestamp = 0;
-const PULL_INTERVAL_MS = 4 * 60 * 60 * 1000; // Re-pull :latest every 4 hours
+const PULL_INTERVAL_MS = 4 * 60 * 60 * 1000; // Re-pull every 4 hours
 
 /**
  * Ensure the Docker image is available and up-to-date.
- * For :latest tags, periodically re-pulls to pick up entrypoint and worker fixes.
+ * Image tag is pinned to the agent version at build time (e.g. :v0.10.117).
+ * Falls back to :latest in dev mode.
  */
 export async function ensureImage(config: AgentConfig): Promise<string> {
-  const imageTag = `${config.dockerImage}:latest`;
+  const imageTag = `${config.dockerImage}:${DOCKER_IMAGE_TAG}`;
   const docker = findDockerBin();
 
   // Check if image exists locally

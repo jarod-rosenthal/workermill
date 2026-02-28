@@ -166,45 +166,65 @@ const PULL_INTERVAL_MS = 4 * 60 * 60 * 1000; // Re-pull every 4 hours
  * Falls back to :latest in dev mode.
  */
 export async function ensureImage(config: AgentConfig): Promise<string> {
-  const imageTag = `${config.dockerImage}:${DOCKER_IMAGE_TAG}`;
+  const versionedTag = `${config.dockerImage}:${DOCKER_IMAGE_TAG}`;
+  const latestTag = `${config.dockerImage}:latest`;
   const docker = findDockerBin();
+  const hasLatestFallback = versionedTag !== latestTag;
 
-  // Check if image exists locally
-  let imageExists = false;
-  try {
-    execFileSync(docker, ["image", "inspect", imageTag], { stdio: "pipe", windowsHide: true });
-    imageExists = true;
-  } catch {
-    // Not found locally
-  }
+  // Try versioned tag first, fall back to :latest if versioned isn't available
+  const candidates = [versionedTag, ...(hasLatestFallback ? [latestTag] : [])];
 
-  // Re-pull if image is missing OR if we haven't pulled recently (picks up :latest updates)
-  const needsPull = !imageExists || (Date.now() - lastPullTimestamp > PULL_INTERVAL_MS);
+  for (const imageTag of candidates) {
+    const isVersioned = imageTag === versionedTag && hasLatestFallback;
+    // Short timeout for versioned tag (fails fast if tag doesn't exist in registry),
+    // long timeout for :latest (large image download can take a while)
+    const pullTimeout = isVersioned ? 30_000 : 300_000;
 
-  if (needsPull) {
-    const reason = imageExists ? "checking for updates" : "not found locally";
-    console.log(`${ts()} ${chalk.dim(`Pulling Docker sandbox image ${imageTag} (${reason})...`)}`);
+    // Check if image exists locally
+    let imageExists = false;
     try {
-      execFileSync(docker, ["pull", imageTag], { stdio: "pipe", timeout: 300_000, windowsHide: true });
-      lastPullTimestamp = Date.now();
-      logImageDigest(docker, imageTag);
-      return imageTag;
+      execFileSync(docker, ["image", "inspect", imageTag], { stdio: "pipe", windowsHide: true });
+      imageExists = true;
     } catch {
-      if (imageExists) {
-        // Pull failed but we have a cached image — use it with a warning
-        console.log(`${ts()} ${chalk.yellow("⚠")} Pull failed, using cached image`);
+      // Not found locally
+    }
+
+    // Re-pull if image is missing OR if we haven't pulled recently (picks up :latest updates)
+    const needsPull = !imageExists || (Date.now() - lastPullTimestamp > PULL_INTERVAL_MS);
+
+    if (needsPull) {
+      const reason = imageExists ? "checking for updates" : "not found locally";
+      console.log(`${ts()} ${chalk.dim(`Pulling Docker sandbox image ${imageTag} (${reason})...`)}`);
+      try {
+        execFileSync(docker, ["pull", imageTag], { stdio: "pipe", timeout: pullTimeout, windowsHide: true });
+        lastPullTimestamp = Date.now();
         logImageDigest(docker, imageTag);
         return imageTag;
+      } catch {
+        if (imageExists) {
+          // Pull failed but we have a cached image — use it with a warning
+          console.log(`${ts()} ${chalk.yellow("⚠")} Pull failed, using cached image`);
+          logImageDigest(docker, imageTag);
+          return imageTag;
+        }
+        // If versioned tag failed and we have a :latest fallback, try that next
+        if (imageTag !== latestTag) {
+          console.log(`${ts()} ${chalk.dim(`Versioned image ${imageTag} not available, trying :latest...`)}`);
+          continue;
+        }
+        throw new Error(
+          `Failed to pull Docker sandbox image ${imageTag}.\n` +
+            `Ensure Docker is running and you have access to the image registry.`,
+        );
       }
-      throw new Error(
-        `Failed to pull Docker sandbox image ${imageTag}.\n` +
-          `Ensure Docker is running and you have access to the image registry.`,
-      );
     }
+
+    logImageDigest(docker, imageTag);
+    return imageTag;
   }
 
-  logImageDigest(docker, imageTag);
-  return imageTag;
+  // Should not reach here, but satisfy TypeScript
+  return versionedTag;
 }
 
 /**

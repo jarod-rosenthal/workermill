@@ -1,89 +1,53 @@
 /**
  * workermill-agent init --standalone
  *
- * Interactive setup for standalone (non-cloud) mode.
- * Configures per-role LLM providers/models, default repo, and SCM token.
+ * Zero-friction setup for standalone mode.
+ * Auto-detects Claude OAuth + GitHub credentials.
+ * Only prompts when something is genuinely missing.
  */
 
 import chalk from "chalk";
 import inquirer from "inquirer";
+import { execFileSync } from "child_process";
 import {
   loadStandaloneConfig,
   saveStandaloneConfig,
   detectExistingKey,
   type StandaloneConfig,
-  type RoleConfig,
 } from "../backends/local/config.js";
 
-const PROVIDERS = [
-  { name: "Anthropic (Claude)", value: "anthropic" },
-  { name: "OpenAI (GPT)", value: "openai" },
-  { name: "Google (Gemini)", value: "google" },
-];
-
-// Model choices per provider — mirrored from VS Code extension settings-panel.ts
-const MODELS: Record<string, Array<{ name: string; value: string }>> = {
-  anthropic: [
-    { name: "Claude Opus 4.6", value: "claude-opus-4-6" },
-    { name: "Claude Sonnet 4.6", value: "claude-sonnet-4-6" },
-    { name: "Claude Haiku 4.5", value: "claude-haiku-4-5-20251001" },
-  ],
-  openai: [
-    { name: "GPT-5.2", value: "gpt-5.2" },
-    { name: "o3 Pro (Reasoning)", value: "o3-pro" },
-    { name: "GPT-5 Mini", value: "gpt-5-mini" },
-  ],
-  google: [
-    { name: "Gemini 3.1 Pro", value: "gemini-3.1-pro-preview" },
-    { name: "Gemini 3 Pro", value: "gemini-3-pro-preview" },
-    { name: "Gemini 3 Flash", value: "gemini-3-flash-preview" },
-  ],
-};
-
-function defaultModel(provider: string): string {
-  return MODELS[provider]?.[0]?.value || "";
+/** Try to detect the git remote URL from the current directory. */
+function detectRepoFromCwd(): string | null {
+  try {
+    const url = execFileSync("git", ["remote", "get-url", "origin"], {
+      encoding: "utf-8",
+      timeout: 5000,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    }).trim();
+    if (url) return url;
+  } catch { /* not a git repo or no origin */ }
+  return null;
 }
 
-function providerLabel(provider: string): string {
-  switch (provider) {
-    case "anthropic": return "Anthropic";
-    case "openai": return "OpenAI";
-    case "google": return "Google";
-    default: return provider;
-  }
-}
+/** Try to get a GitHub token from `gh auth token`, then env vars. */
+function detectGitHubToken(): string | null {
+  // 1. gh CLI (most reliable)
+  try {
+    const token = execFileSync("gh", ["auth", "token"], {
+      encoding: "utf-8",
+      timeout: 5000,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    }).trim();
+    if (token) return token;
+  } catch { /* gh not installed or not authed */ }
 
-/** Prompt for a single role's provider + model. */
-async function promptRole(
-  roleName: string,
-  roleLabel: string,
-  existing: RoleConfig | undefined,
-): Promise<RoleConfig> {
-  console.log(chalk.bold(`  ${roleLabel}`));
+  // 2. GH_TOKEN / GITHUB_TOKEN env vars
+  if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
 
-  const { provider } = await inquirer.prompt([
-    {
-      type: "list",
-      name: "provider",
-      message: `${roleLabel} — AI provider:`,
-      choices: PROVIDERS,
-      default: existing?.provider || "anthropic",
-    },
-  ]);
-
-  const modelChoices = MODELS[provider] || [{ name: defaultModel(provider), value: defaultModel(provider) }];
-  const { model } = await inquirer.prompt([
-    {
-      type: "list",
-      name: "model",
-      message: `${roleLabel} — Model:`,
-      choices: modelChoices,
-      default: existing?.model || defaultModel(provider),
-    },
-  ]);
-
-  console.log();
-  return { provider, model };
+  return null;
 }
 
 export async function initStandaloneCommand(): Promise<void> {
@@ -91,130 +55,80 @@ export async function initStandaloneCommand(): Promise<void> {
   console.log(chalk.bold.cyan("  WorkerMill Standalone Setup"));
   console.log(chalk.dim("  ─────────────────────────────────────"));
   console.log();
-  console.log("  Configure WorkerMill to run fully offline with your own AI keys.");
-  console.log("  Each role can use a different AI provider and model.");
-  console.log();
 
   const existing = loadStandaloneConfig();
+  let needsPrompt = false;
 
-  // ── Step 1: Per-role provider + model ──
-
-  console.log(chalk.bold.white("  Step 1: Configure AI models per role"));
-  console.log(chalk.dim("  Choose a provider and model for each role."));
-  console.log();
-
-  const planner = await promptRole(
-    "planner",
-    "Planning Agent (decomposes PRDs, creates plans)",
-    existing.roles?.planner,
-  );
-
-  const worker = await promptRole(
-    "worker",
-    "Workers (AI experts that write code)",
-    existing.roles?.worker,
-  );
-
-  const techLead = await promptRole(
-    "techLead",
-    "Tech Lead (reviews work, coordinates)",
-    existing.roles?.techLead,
-  );
-
-  // ── Step 2: Collect API keys (only for providers that need them) ──
-
-  console.log(chalk.bold.white("  Step 2: API keys"));
-  console.log(chalk.dim("  Keys are only needed if not already set via environment variables or OAuth."));
-  console.log();
-
-  // Deduplicate providers across roles
-  const uniqueProviders = [...new Set([planner.provider, worker.provider, techLead.provider])];
-  const apiKeys: Record<string, string> = {};
-
-  for (const provider of uniqueProviders) {
-    const existingKey = detectExistingKey(provider);
-    if (existingKey) {
-      const masked = existingKey.slice(0, 8) + "..." + existingKey.slice(-4);
-      console.log(`  ${chalk.green("✓")} ${providerLabel(provider)}: detected existing key (${masked})`);
-      apiKeys[provider] = existingKey;
-    } else {
-      // Check if we had a key in old config for this provider
-      const oldKey =
-        existing.roles?.planner?.provider === provider ? existing.roles.planner.apiKey :
-        existing.roles?.worker?.provider === provider ? existing.roles.worker.apiKey :
-        existing.roles?.techLead?.provider === provider ? existing.roles.techLead.apiKey :
-        existing.llm?.provider === provider ? existing.llm.apiKey :
-        undefined;
-
-      const { key } = await inquirer.prompt([
-        {
-          type: "password",
-          name: "key",
-          message: `${providerLabel(provider)} API key:`,
-          mask: "*",
-          default: oldKey || undefined,
-          validate: (input: string) => input.length > 0 || `${providerLabel(provider)} API key is required`,
-        },
-      ]);
-      apiKeys[provider] = key;
-    }
+  // ── AI provider: auto-detect Claude OAuth or ANTHROPIC_API_KEY ──
+  const aiKey = detectExistingKey("anthropic");
+  if (aiKey) {
+    const masked = aiKey.slice(0, 12) + "..." + aiKey.slice(-4);
+    console.log(`  ${chalk.green("✓")} AI provider: Anthropic (${masked})`);
+  } else {
+    console.log(`  ${chalk.yellow("⚠")} No Claude OAuth or ANTHROPIC_API_KEY found`);
+    needsPrompt = true;
   }
+
+  // ── GitHub: auto-detect from gh CLI or env ──
+  const ghToken = existing.scm?.token || detectGitHubToken();
+  if (ghToken) {
+    const masked = ghToken.slice(0, 8) + "..." + ghToken.slice(-4);
+    console.log(`  ${chalk.green("✓")} GitHub token: ${masked}`);
+  } else {
+    console.log(`  ${chalk.yellow("⚠")} No GitHub token found`);
+    needsPrompt = true;
+  }
+
+  // ── Default repo: auto-detect from cwd, not required ──
+  const defaultRepo = existing.defaultRepo || detectRepoFromCwd() || "";
+  if (defaultRepo) {
+    console.log(`  ${chalk.green("✓")} Target repo: ${defaultRepo}`);
+  }
+
   console.log();
 
-  // Assign keys to roles
-  planner.apiKey = apiKeys[planner.provider];
-  worker.apiKey = apiKeys[worker.provider];
-  techLead.apiKey = apiKeys[techLead.provider];
+  // ── Only prompt for what's missing ──
+  let finalAiKey = aiKey || "";
+  let finalGhToken = ghToken || "";
 
-  // ── Step 3: Repository + SCM ──
-
-  console.log(chalk.bold.white("  Step 3: Repository"));
-  console.log();
-
-  const repoAnswers = await inquirer.prompt([
-    {
-      type: "input",
-      name: "defaultRepo",
-      message: "Default repository (e.g., https://github.com/user/repo):",
-      default: existing.defaultRepo || "",
-    },
-    {
-      type: "list",
-      name: "scmProvider",
-      message: "SCM provider:",
-      choices: [
-        { name: "GitHub", value: "github" },
-        { name: "Bitbucket", value: "bitbucket" },
-      ],
-      default: existing.scm?.provider || "github",
-    },
-    {
+  if (!aiKey) {
+    const { key } = await inquirer.prompt([{
       type: "password",
-      name: "scmToken",
-      message: "SCM token (for pushing branches/PRs):",
+      name: "key",
+      message: "Anthropic API key (or run 'claude' to set up OAuth first):",
       mask: "*",
-      default: existing.scm?.token || undefined,
-    },
-  ]);
+      validate: (v: string) => v.length > 0 || "API key is required",
+    }]);
+    finalAiKey = key;
+  }
 
-  // ── Save config ──
+  if (!ghToken) {
+    console.log(chalk.dim("  Tip: Run 'gh auth login' first for automatic detection."));
+    const { token } = await inquirer.prompt([{
+      type: "password",
+      name: "token",
+      message: "GitHub token (for pushing branches/PRs):",
+      mask: "*",
+      validate: (v: string) => v.length > 0 || "Token is required to push code",
+    }]);
+    finalGhToken = token;
+  }
 
+  // ── Save config with defaults ──
   const config: StandaloneConfig = {
     mode: "standalone",
     roles: {
-      planner,
-      worker,
-      techLead,
+      planner: { provider: "anthropic", model: "claude-opus-4-6", ...(finalAiKey && !aiKey ? { apiKey: finalAiKey } : {}) },
+      worker: { provider: "anthropic", model: "claude-sonnet-4-6", ...(finalAiKey && !aiKey ? { apiKey: finalAiKey } : {}) },
+      techLead: { provider: "anthropic", model: "claude-opus-4-6", ...(finalAiKey && !aiKey ? { apiKey: finalAiKey } : {}) },
     },
     scm: {
-      provider: repoAnswers.scmProvider,
-      token: repoAnswers.scmToken || "",
+      provider: "github",
+      token: finalGhToken,
     },
-    defaultRepo: repoAnswers.defaultRepo || undefined,
-    settings: existing.settings || {
-      maxParallelExperts: 4,
-      maxStories: 8,
-    },
+    defaultRepo: defaultRepo || undefined,
+    sandbox: "docker",
+    settings: existing.settings || { maxStories: 8 },
   };
 
   saveStandaloneConfig(config);
@@ -222,11 +136,11 @@ export async function initStandaloneCommand(): Promise<void> {
   console.log();
   console.log(`  ${chalk.green("✓")} Configuration saved to ~/.workermill/config.json`);
   console.log();
-  console.log(chalk.dim("  Roles:"));
-  console.log(`    Planning Agent: ${chalk.cyan(planner.provider)} / ${planner.model}`);
-  console.log(`    Workers:        ${chalk.cyan(worker.provider)} / ${worker.model}`);
-  console.log(`    Tech Lead:      ${chalk.cyan(techLead.provider)} / ${techLead.model}`);
+  if (!needsPrompt) {
+    console.log(chalk.green("  All credentials auto-detected — zero prompts needed!"));
+    console.log();
+  }
+  console.log(`  Run ${chalk.cyan("workermill-agent start")} to launch.`);
   console.log();
-  console.log(`  Run ${chalk.cyan("workermill-agent")} to start the agent.`);
-  console.log();
+  process.exit(0);
 }

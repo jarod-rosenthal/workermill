@@ -81,6 +81,10 @@ export interface IssueInfo {
   blockedByCount?: number;
   /** Total dependency count. Only set for board cards. */
   dependencyCount?: number;
+  /** Internal card ID (standalone mode board cards). */
+  _cardId?: string;
+  /** Internal board ID (standalone mode board cards). */
+  _boardId?: string;
 }
 
 export interface CodeEventRecord {
@@ -219,9 +223,9 @@ export class AgentClient extends EventEmitter {
     return this.get<{ projects: Array<{ key: string; name: string }> }>("/api/issues/projects");
   }
 
-  /** Run a Jira issue as a WorkerMill task */
-  async runIssue(issueKey: string): Promise<unknown> {
-    return this.post("/api/tasks/run", { jiraIssueKey: issueKey });
+  /** Run a Jira issue or board card as a WorkerMill task */
+  async runIssue(issueKey: string, cardId?: string, boardId?: string): Promise<unknown> {
+    return this.post("/api/tasks/run", { jiraIssueKey: issueKey, _cardId: cardId, _boardId: boardId });
   }
 
   /** Run a markdown file as a single worker task (creates a Quick Tasks card) */
@@ -321,11 +325,6 @@ export class AgentClient extends EventEmitter {
         },
       );
       req.on("error", reject);
-      // 5 minute timeout for full decomposition
-      req.setTimeout(300_000, () => {
-        req.destroy();
-        reject(new Error("Full Build timed out (5 minutes)"));
-      });
       req.write(body);
       req.end();
     });
@@ -565,8 +564,6 @@ export class AgentClient extends EventEmitter {
         });
       });
       req.on("error", reject);
-      // Full Build via Agent SDK can take 2+ minutes — use 5min timeout for POST
-      req.setTimeout(300_000, () => { req.destroy(); reject(new Error("Timeout")); });
       req.write(body);
       req.end();
     });

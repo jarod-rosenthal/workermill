@@ -18,7 +18,7 @@ export const AGENT_VERSION: string =
 
 /**
  * Docker image tag — pinned to the agent version at build time.
- * In production builds: "v0.10.117" (matches GHCR tag).
+ * In production builds: "0.10.118" (matches GHCR tag, no "v" prefix).
  * In dev mode: "latest" (no pinned version available).
  */
 export const DOCKER_IMAGE_TAG: string =

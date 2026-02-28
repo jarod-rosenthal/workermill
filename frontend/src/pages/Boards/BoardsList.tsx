@@ -11,10 +11,22 @@ import {
   ArrowLeft,
   LayoutGrid,
   CreditCard,
+  Pencil,
+  AlertTriangle,
+  ArrowUp,
+  ArrowDown,
+  Minus,
+  Shield,
+  Calendar,
+  User,
+  CheckCircle2,
+  Archive,
 } from "lucide-react";
 import { useBoardsStore } from "../../store/boards-store";
 import { useAuthStore } from "../../store/auth-store";
+import type { Board, UpdateBoardData } from "../../lib/boards-api";
 import CreateBoardDialog from "./CreateBoardDialog";
+import EditBoardDialog from "./EditBoardDialog";
 
 export default function BoardsList() {
   const navigate = useNavigate();
@@ -26,6 +38,7 @@ export default function BoardsList() {
     createBoard,
     deleteBoard,
     starBoard,
+    updateBoard,
   } = useBoardsStore();
   const organization = useAuthStore((state) => state.organization);
 
@@ -34,6 +47,7 @@ export default function BoardsList() {
     null,
   );
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [editingBoard, setEditingBoard] = useState<Board | null>(null);
 
   useEffect(() => {
     fetchBoards();
@@ -51,6 +65,11 @@ export default function BoardsList() {
     } catch {
       // handled by store
     }
+  };
+
+  const handleEditSave = async (boardId: string, data: UpdateBoardData) => {
+    await updateBoard(boardId, data);
+    await fetchBoards();
   };
 
   const handleStar = async (id: string, e: React.MouseEvent) => {
@@ -158,6 +177,10 @@ export default function BoardsList() {
                         setOpenMenuId(openMenuId === id ? null : id)
                       }
                       isMenuOpen={openMenuId === board.id}
+                      onEdit={(b) => {
+                        setEditingBoard(b);
+                        setOpenMenuId(null);
+                      }}
                       onDelete={(id) => {
                         setShowDeleteConfirm(id);
                         setOpenMenuId(null);
@@ -185,6 +208,10 @@ export default function BoardsList() {
                       setOpenMenuId(openMenuId === id ? null : id)
                     }
                     isMenuOpen={openMenuId === board.id}
+                    onEdit={(b) => {
+                      setEditingBoard(b);
+                      setOpenMenuId(null);
+                    }}
                     onDelete={(id) => {
                       setShowDeleteConfirm(id);
                       setOpenMenuId(null);
@@ -202,6 +229,14 @@ export default function BoardsList() {
         open={showCreateDialog}
         onClose={() => setShowCreateDialog(false)}
         onCreate={handleCreate}
+      />
+
+      {/* Edit dialog */}
+      <EditBoardDialog
+        open={!!editingBoard}
+        board={editingBoard}
+        onClose={() => setEditingBoard(null)}
+        onSave={handleEditSave}
       />
 
       {/* Delete confirmation */}
@@ -263,29 +298,40 @@ function getBoardAccent(name: string): string {
 }
 
 interface BoardCardProps {
-  board: {
-    id: string;
-    name: string;
-    description: string | null;
-    isStarred: boolean;
-    columnCount: number;
-    cardCount: number;
-    updatedAt: string;
-  };
+  board: Board;
   onStar: (id: string, e: React.MouseEvent) => void;
   onMenuOpen: (id: string) => void;
   isMenuOpen: boolean;
+  onEdit: (board: Board) => void;
   onDelete: (id: string) => void;
 }
+
+const PRIORITY_ICONS: Record<string, { icon: typeof AlertTriangle; color: string }> = {
+  urgent: { icon: AlertTriangle, color: "text-red-500" },
+  high: { icon: ArrowUp, color: "text-orange-500" },
+  medium: { icon: Minus, color: "text-yellow-500" },
+  low: { icon: ArrowDown, color: "text-blue-500" },
+};
+
+const STATUS_BADGES: Record<string, { label: string; color: string; icon: typeof CheckCircle2 }> = {
+  completed: { label: "Completed", color: "text-green-500 bg-green-500/10", icon: CheckCircle2 },
+  archived: { label: "Archived", color: "text-muted-foreground bg-muted", icon: Archive },
+};
 
 function BoardCard({
   board,
   onStar,
   onMenuOpen,
   isMenuOpen,
+  onEdit,
   onDelete,
 }: BoardCardProps) {
   const accent = getBoardAccent(board.name);
+  const priorityInfo = board.priority ? PRIORITY_ICONS[board.priority] : null;
+  const statusBadge = board.status && board.status !== "active" ? STATUS_BADGES[board.status] : null;
+  const hasQualityGates = board.qualityGateCommands && board.qualityGateCommands.length > 0;
+  const hasDueDate = !!board.dueDate;
+  const hasEnrichment = board.priority || hasDueDate || board.assigneeId || hasQualityGates || statusBadge;
 
   return (
     <div className="relative group rounded-xl border border-border/60 bg-card hover:border-primary/40 hover:shadow-[0_4px_16px_rgba(0,0,0,0.15)] transition-all duration-200" data-testid="board-card">
@@ -306,6 +352,41 @@ function BoardCard({
             )}
           </div>
         </div>
+
+        {/* Visual indicators for enriched epic fields */}
+        {hasEnrichment && (
+          <div className="flex items-center gap-2 mb-2.5 flex-wrap">
+            {statusBadge && (
+              <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${statusBadge.color}`}>
+                <statusBadge.icon className="w-2.5 h-2.5" />
+                {statusBadge.label}
+              </span>
+            )}
+            {priorityInfo && (
+              <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium ${priorityInfo.color}`} title={`Priority: ${board.priority}`}>
+                <priorityInfo.icon className="w-3 h-3" />
+                {board.priority}
+              </span>
+            )}
+            {hasDueDate && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground" title={`Due: ${new Date(board.dueDate!).toLocaleDateString()}`}>
+                <Calendar className="w-2.5 h-2.5" />
+                {new Date(board.dueDate!).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+            )}
+            {board.assigneeId && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground" title="Assigned">
+                <User className="w-2.5 h-2.5" />
+              </span>
+            )}
+            {hasQualityGates && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-500" title={`${board.qualityGateCommands!.length} quality gate(s)`}>
+                <Shield className="w-2.5 h-2.5" />
+                {board.qualityGateCommands!.length}
+              </span>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center gap-3 text-[11px] text-muted-foreground/70">
           <span className="flex items-center gap-1">
@@ -354,6 +435,17 @@ function BoardCard({
 
         {isMenuOpen && (
           <div className="absolute right-0 top-full mt-1 w-40 rounded-lg border border-border bg-card shadow-xl py-1 z-50">
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onEdit(board);
+              }}
+              className="flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors w-full text-left"
+            >
+              <Pencil className="w-4 h-4" />
+              Edit
+            </button>
             <button
               onClick={(e) => {
                 e.preventDefault();

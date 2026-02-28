@@ -2,6 +2,15 @@ import apiClient from "./api-client";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
+export type BoardPriority = "urgent" | "high" | "medium" | "low";
+export type BoardStatus = "active" | "completed" | "archived";
+
+export interface QualityGate {
+  name: string;
+  trigger: string;
+  commands: string[];
+}
+
 export interface Board {
   id: string;
   name: string;
@@ -10,6 +19,13 @@ export interface Board {
   isStarred: boolean;
   columnCount: number;
   cardCount: number;
+  qualityGateCommands: QualityGate[] | null;
+  ciWorkflowPath: string | null;
+  priority: BoardPriority | null;
+  dueDate: string | null;
+  assigneeId: string | null;
+  status: BoardStatus;
+  prdSource: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -106,6 +122,13 @@ export interface BoardDetail {
   prdContent: string | null;
   prdSource: string | null;
   githubRepo: string | null;
+  qualityGateCommands: QualityGate[] | null;
+  ciWorkflowPath: string | null;
+  priority: BoardPriority | null;
+  dueDate: string | null;
+  assigneeId: string | null;
+  status: BoardStatus;
+  columnsLocked: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -182,9 +205,20 @@ export async function getBoard(boardId: string): Promise<BoardDetail> {
   return response.data.board ?? response.data;
 }
 
+export interface UpdateBoardData {
+  name?: string;
+  description?: string | null;
+  priority?: BoardPriority | null;
+  dueDate?: string | null;
+  assigneeId?: string | null;
+  status?: BoardStatus;
+  qualityGateCommands?: QualityGate[] | null;
+  ciWorkflowPath?: string | null;
+}
+
 export async function updateBoard(
   boardId: string,
-  data: Partial<Pick<Board, "name" | "description">>,
+  data: UpdateBoardData,
 ): Promise<Board> {
   const response = await apiClient.put(`/boards/${boardId}`, data);
   return response.data.board ?? response.data;

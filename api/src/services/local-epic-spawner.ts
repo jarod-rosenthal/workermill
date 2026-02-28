@@ -798,8 +798,8 @@ class LocalEpicSpawner {
       QUALITY_GATE_MAX_RETRIES: String(task.organization?.qualityGateMaxRetries ?? 5),
       QUALITY_GATE_COMMANDS: task.jiraFields?.qualityGates
         ? JSON.stringify(task.jiraFields.qualityGates)
-        : (task.organization?.qualityGateCommands ? JSON.stringify(task.organization.qualityGateCommands) : ""),
-      CI_WORKFLOW_PATH: (task.jiraFields?.ciWorkflowPath as string) || task.organization?.ciWorkflowPath || "",
+        : "",
+      CI_WORKFLOW_PATH: (task.jiraFields?.ciWorkflowPath as string) || "",
       PUSH_AFTER_COMMIT: task.organization?.pushAfterCommit !== false ? "true" : "false",
       GRACEFUL_SHUTDOWN_ENABLED: task.organization?.gracefulShutdownEnabled !== false ? "true" : "false",
       SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (task.organization?.selfReviewEnabled === true) ? "true" : "false",

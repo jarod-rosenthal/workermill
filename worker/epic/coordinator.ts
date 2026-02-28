@@ -3284,6 +3284,9 @@ export class EpicCoordinator {
 
     console.log(`[Epic] Review decision: ${reviewResult.decision}, score: ${reviewResult.codeQualityScore}`);
 
+    // Ensure the review is posted to the GitHub PR (agent may or may not have done it)
+    await this.ensureGitHubReviewPosted(prNumber, reviewResult);
+
     switch (reviewResult.decision) {
       case "approved":
         console.log("[Epic] PR approved by Tech Lead!");
@@ -3370,6 +3373,89 @@ export class EpicCoordinator {
         console.error(`[Epic] Unknown review decision: ${reviewResult.decision}`);
         await this.handleEscalation(prUrl, summaryParts, `Unknown review decision: ${reviewResult.decision}`);
         return "done";
+    }
+  }
+
+  /**
+   * Ensure the Tech Lead review is posted to the GitHub PR.
+   * The reviewer agent may or may not have run `gh pr review` or `gh pr comment`.
+   * This checks for existing recent review content and posts if missing.
+   */
+  private async ensureGitHubReviewPosted(
+    prNumber: number,
+    reviewResult: InlineReviewResult
+  ): Promise<void> {
+    const token = this.config.githubReviewerToken || this.config.githubToken;
+    if (!token || !this.config.targetRepo) return;
+
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+    };
+
+    try {
+      // Check for existing review content on the PR (comments + formal reviews)
+      const [commentsRes, reviewsRes] = await Promise.all([
+        axios.get(
+          `https://api.github.com/repos/${this.config.targetRepo}/issues/${prNumber}/comments`,
+          { headers, params: { per_page: 10, sort: "created", direction: "desc" }, timeout: 10000 }
+        ).catch(() => ({ data: [] })),
+        axios.get(
+          `https://api.github.com/repos/${this.config.targetRepo}/pulls/${prNumber}/reviews`,
+          { headers, params: { per_page: 10 }, timeout: 10000 }
+        ).catch(() => ({ data: [] })),
+      ]);
+
+      // Check if agent already posted a review comment in the last 10 minutes
+      const cutoff = Date.now() - 10 * 60 * 1000;
+      const hasRecentComment = (commentsRes.data as Array<{ created_at: string; body: string }>).some(
+        (c) =>
+          new Date(c.created_at).getTime() > cutoff &&
+          /code review|review complete|approved|revision needed|request.changes/i.test(c.body)
+      );
+      const hasRecentReview = (reviewsRes.data as Array<{ submitted_at: string }>).some(
+        (r) => new Date(r.submitted_at).getTime() > cutoff
+      );
+
+      if (hasRecentComment || hasRecentReview) {
+        console.log("[Epic] Review already posted to PR by agent — skipping programmatic post");
+        return;
+      }
+
+      // Build review body
+      const emoji = reviewResult.decision === "approved" ? "✅"
+        : reviewResult.decision === "revision_needed" ? "🔄" : "❌";
+      const body = `## ${emoji} Tech Lead Review — ${reviewResult.decision.replace("_", " ").toUpperCase()}\n\n` +
+        `**Code Quality Score:** ${reviewResult.codeQualityScore}/10\n\n` +
+        `${reviewResult.feedback || "No detailed feedback."}`;
+
+      // Try formal PR review first (gives the Approved/Changes Requested badge)
+      const event = reviewResult.decision === "approved" ? "APPROVE"
+        : reviewResult.decision === "revision_needed" ? "REQUEST_CHANGES"
+        : "COMMENT";
+
+      try {
+        await axios.post(
+          `https://api.github.com/repos/${this.config.targetRepo}/pulls/${prNumber}/reviews`,
+          { body, event },
+          { headers, timeout: 10000 }
+        );
+        console.log(`[Epic] Posted formal PR review (${event}) to PR #${prNumber}`);
+      } catch (reviewErr: unknown) {
+        // Formal review may fail due to self-approval restriction — fall back to issue comment
+        const msg = reviewErr instanceof Error ? reviewErr.message : String(reviewErr);
+        console.log(`[Epic] Formal PR review failed (${msg}) — posting as comment`);
+        await axios.post(
+          `https://api.github.com/repos/${this.config.targetRepo}/issues/${prNumber}/comments`,
+          { body },
+          { headers, timeout: 10000 }
+        );
+        console.log(`[Epic] Posted review as issue comment on PR #${prNumber}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[Epic] Failed to ensure GitHub review posted: ${msg}`);
+      // Non-fatal — don't crash the epic
     }
   }
 

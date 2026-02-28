@@ -10,6 +10,7 @@ import type {
   UpdateColumnData,
   CreateCardData,
   UpdateCardData,
+  UpdateBoardData,
 } from "../lib/boards-api";
 import * as boardsApi from "../lib/boards-api";
 
@@ -30,7 +31,7 @@ interface BoardsState {
   fetchBoardDetail: (boardId: string) => Promise<void>;
   updateBoard: (
     boardId: string,
-    data: Partial<Pick<Board, "name" | "description">>,
+    data: UpdateBoardData,
   ) => Promise<void>;
 
   // Column management

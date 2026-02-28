@@ -402,7 +402,9 @@ router.post("/:id/worker-progress", authenticateApiKey, async (req: Request, res
     logger.info("Worker progress update", { taskId, fromStatus: task.status, toStatus: status, prUrl });
 
     // Atomic update — only set the fields that changed (avoids clobbering concurrent writes)
-    const updateFields: Record<string, unknown> = { status };
+    // Always bump updatedAt so intermediate statuses pass the dashboard recency filter
+    // (createQueryBuilder().update() does NOT trigger @UpdateDateColumn)
+    const updateFields: Record<string, unknown> = { status, updatedAt: new Date() };
     if (prUrl) {
       updateFields.githubPrUrl = prUrl;
     }

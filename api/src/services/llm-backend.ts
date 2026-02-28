@@ -240,7 +240,7 @@ class ClaudeCliBackend implements LLMBackend {
         "--permission-mode", "bypassPermissions",
       ];
       if (options.maxOutputTokens) {
-        args.push("--max-tokens", String(options.maxOutputTokens));
+        args.push("--max-output-tokens", String(options.maxOutputTokens));
       }
 
       const claude = spawn(

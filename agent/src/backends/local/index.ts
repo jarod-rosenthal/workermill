@@ -530,6 +530,12 @@ export class LocalBackend implements AgentBackend {
     );
   }
 
+  async deleteCard(cardId: string): Promise<void> {
+    // Delete dependencies first, then the card itself
+    getDb().prepare("DELETE FROM card_dependencies WHERE card_id = ? OR depends_on_card_id = ?").run(cardId, cardId);
+    getDb().prepare("DELETE FROM cards WHERE id = ?").run(cardId);
+  }
+
   async updateCard(
     cardId: string,
     input: Partial<Card>,

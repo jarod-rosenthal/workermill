@@ -223,6 +223,11 @@ export class AgentClient extends EventEmitter {
     return this.get<{ projects: Array<{ key: string; name: string }> }>("/api/issues/projects");
   }
 
+  /** Delete a board card from the backlog */
+  async deleteCard(boardId: string, cardId: string): Promise<void> {
+    await this.del(`/api/boards/${boardId}/cards/${cardId}`);
+  }
+
   /** Run a Jira issue or board card as a WorkerMill task */
   async runIssue(issueKey: string, cardId?: string, boardId?: string): Promise<unknown> {
     return this.post("/api/tasks/run", { jiraIssueKey: issueKey, _cardId: cardId, _boardId: boardId });
@@ -565,6 +570,38 @@ export class AgentClient extends EventEmitter {
       });
       req.on("error", reject);
       req.write(body);
+      req.end();
+    });
+  }
+
+  private del(urlPath: string): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      if (!this.port) return reject(new Error("Not connected"));
+      const headers: Record<string, string> = {};
+      if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+      const req = http.request({
+        hostname: "127.0.0.1",
+        port: this.port,
+        path: urlPath,
+        method: "DELETE",
+        headers,
+      }, (res) => {
+        let respBody = "";
+        res.on("data", (c) => respBody += c);
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(respBody);
+            if (res.statusCode && res.statusCode >= 400) {
+              reject(new Error((parsed as { error?: string })?.error || `HTTP ${res.statusCode}`));
+              return;
+            }
+            resolve(parsed);
+          } catch {
+            resolve(respBody);
+          }
+        });
+      });
+      req.on("error", reject);
       req.end();
     });
   }

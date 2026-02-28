@@ -349,6 +349,41 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
 
+    // Delete a card from the backlog
+    vscode.commands.registerCommand(
+      "workermill.deleteCard",
+      async (issueItem?: { issue?: { key: string; summary: string; _cardId?: string; _boardId?: string } }) => {
+        if (!client.isConnected()) {
+          vscode.window.showErrorMessage("WorkerMill agent is not running.");
+          return;
+        }
+
+        const cardId = issueItem?.issue?._cardId;
+        const boardId = issueItem?.issue?._boardId;
+        if (!cardId || !boardId) {
+          vscode.window.showWarningMessage("Cannot delete — card info missing.");
+          return;
+        }
+
+        const confirm = await vscode.window.showWarningMessage(
+          `Delete "${issueItem?.issue?.key}: ${issueItem?.issue?.summary}" from the backlog?`,
+          { modal: true },
+          "Delete",
+        );
+        if (confirm !== "Delete") return;
+
+        try {
+          await client.deleteCard(boardId, cardId);
+          vscode.window.showInformationMessage(`Card ${issueItem?.issue?.key} deleted.`);
+          treeProvider.refresh();
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed to delete card: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      },
+    ),
+
     // Search and run via quick pick (command palette)
     vscode.commands.registerCommand("workermill.runTask", async () => {
       if (!client.isConnected()) {

@@ -129,6 +129,7 @@ export type MissionControlTaskStatus =
   | 'review_approved'
   | 'deployment_pending'
   | 'deploying'
+  | 'integration_check'
   | 'deployed'
   | 'completed'
   | 'failed'

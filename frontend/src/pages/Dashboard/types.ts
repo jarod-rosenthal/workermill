@@ -61,6 +61,7 @@ export interface TaskStep {
     | "epic"
     | "planning"
     | "steps"
+    | "integration_check"
     | "tech_lead_review";
   isParallelStage?: boolean;
   isReviewStage?: boolean;

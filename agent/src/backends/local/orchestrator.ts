@@ -15,7 +15,7 @@ import * as os from "os";
 import { fileURLToPath } from "url";
 import { getDb, generateId, getSettingInt } from "./db.js";
 import { emitStreamEvent } from "./event-bus.js";
-import { loadStandaloneConfig } from "./config.js";
+import { loadStandaloneConfig, getRoleConfig, resolveApiKey } from "./config.js";
 
 interface ActiveWorker {
   taskId: string;
@@ -128,17 +128,20 @@ async function spawnLocalWorker(task: any): Promise<void> {
     TASK_DESCRIPTION: task.description || "",
     GITHUB_REPO: task.github_repo || config.defaultRepo || "",
     SCM_PROVIDER: task.scm_provider || config.scm?.provider || "github",
-    WORKER_MODEL: task.worker_model || config.llm?.model || "claude-sonnet-4-20250514",
+    WORKER_MODEL: task.worker_model || getRoleConfig(config, "worker").model,
     SCM_TOKEN: config.scm?.token || "",
   };
 
-  // LLM API key
-  if (config.llm?.provider === "anthropic" || !config.llm?.provider) {
-    env.ANTHROPIC_API_KEY = config.llm?.apiKey || "";
-  } else if (config.llm?.provider === "openai") {
-    env.OPENAI_API_KEY = config.llm?.apiKey || "";
-  } else if (config.llm?.provider === "google") {
-    env.GOOGLE_API_KEY = config.llm?.apiKey || "";
+  // LLM API keys — set all providers that have keys so workers can use any
+  const workerKey = resolveApiKey(config, "worker");
+  const workerProvider = getRoleConfig(config, "worker").provider;
+  if (workerProvider === "anthropic") {
+    env.ANTHROPIC_API_KEY = workerKey;
+  } else if (workerProvider === "openai") {
+    env.OPENAI_API_KEY = workerKey;
+  } else if (workerProvider === "google") {
+    env.GOOGLE_API_KEY = workerKey;
+    env.GOOGLE_GENERATIVE_AI_API_KEY = workerKey;
   }
 
   // Execution plan (if this is a sub-task of a planned epic)
@@ -270,7 +273,7 @@ function triggerDependentCards(completedTaskId: string): void {
         `).run(
           taskId, depCard.title, depCard.description,
           config.defaultRepo || null, config.scm?.provider || null,
-          config.llm?.model || null, depCard.board_id, depCard.id,
+          getRoleConfig(config, "worker").model, depCard.board_id, depCard.id,
           now, now,
         );
 

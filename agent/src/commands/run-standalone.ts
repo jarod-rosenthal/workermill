@@ -8,7 +8,7 @@ import chalk from "chalk";
 import { getBackend, resetBackend } from "../backends/selector.js";
 import { initOrchestrator, shutdownOrchestrator, processQueuedTask } from "../backends/local/orchestrator.js";
 import { startLocalApi, stopLocalApi } from "../local-api.js";
-import { loadStandaloneConfig, isStandaloneReady } from "../backends/local/config.js";
+import { loadStandaloneConfig, isStandaloneReady, getRoleConfig } from "../backends/local/config.js";
 
 export async function runStandaloneCommand(opts: {
   repo?: string;
@@ -41,7 +41,7 @@ export async function runStandaloneCommand(opts: {
     heartbeatIntervalMs: 30000,
     githubToken: config.scm?.token || "",
     bitbucketToken: config.scm?.token || "",
-    gitlabToken: config.scm?.token || "",
+    gitlabToken: "",
     githubReviewerToken: "",
     sandbox: "none" as const,
     dockerImage: "",
@@ -58,7 +58,7 @@ export async function runStandaloneCommand(opts: {
     summary: opts.task,
     githubRepo: opts.repo || config.defaultRepo,
     scmProvider: config.scm?.provider,
-    workerModel: config.llm?.model,
+    workerModel: getRoleConfig(config, "worker").model,
   });
 
   console.log(`  ${chalk.dim("Task:")}  ${task.id.slice(0, 8)} — ${task.summary}`);

@@ -70,8 +70,9 @@ export type WorkerTaskStatus =
   | "claimed"          // Worker claimed task from queue
   | "environment_setup" // Fargate container starting
   | "executing"        // Claude agent actively running
-  | "consolidating"    // Stories done, creating PR
-  | "deploying"        // Agent is deploying changes
+  | "consolidating"       // Stories done, creating PR
+  | "integration_check"  // Running quality gates on consolidated branch
+  | "deploying"          // Agent is deploying changes
 
   // Waiting states (agent stopped, waiting for external action)
   | "blocked"          // Story waiting for dependencies to complete

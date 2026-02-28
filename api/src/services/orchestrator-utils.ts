@@ -48,7 +48,8 @@ export const VALID_TRANSITIONS: Record<WorkerTaskStatus, WorkerTaskStatus[]> = {
     "pr_created", "review_requested", "deploying", "completed",
     "escalated", "failed", "cancelled", "manager_review"
   ],
-  consolidating: ["pr_created", "review_requested", "completed", "failed", "cancelled"],
+  consolidating: ["pr_created", "review_requested", "integration_check", "completed", "failed", "cancelled"],
+  integration_check: ["review_requested", "completed", "failed", "cancelled"],
   deploying: ["deployed", "completed", "failed", "cancelled"],
 
   // Waiting states

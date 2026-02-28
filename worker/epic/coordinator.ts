@@ -28,6 +28,7 @@ import { InlineReviewer, type InlineReviewResult } from "./inline-reviewer.js";
 import { InlineDeployer } from "./inline-deployer.js";
 import { InlineImprover } from "./inline-improver.js";
 import { InlineCIFixer } from "./inline-ci-fixer.js";
+import { InlineIntegrationFixer } from "./inline-integration-fixer.js";
 import { createMemoryClient, type MemoryClient, type MemoryContext, type EnhancedContext } from "./memory-client.js";
 import { CredentialRotator } from "./credential-rotator.js";
 import { spawn, execSync } from "child_process";
@@ -3075,6 +3076,39 @@ export class EpicCoordinator {
         }
       }
 
+      // Run integration quality gates on consolidated branch before Tech Lead review
+      if (prUrl && prNumber && (this.config.qualityGateCommands?.length ?? 0) > 0) {
+        await this.postProgressUpdate("integration_check", prUrl, prNumber);
+        this.postDashboardLog("Running integration quality gates on consolidated branch...");
+
+        // Ensure we're on the PR's head branch
+        await this.gitOps.checkoutForReview(prNumber);
+
+        const integrationFixer = new InlineIntegrationFixer(
+          this.config,
+          this.gitOps.getRepoPath()
+        );
+
+        const gateResult = await integrationFixer.fix(
+          prNumber,
+          this.config.qualityGateCommands!
+        );
+
+        if (gateResult.decision === "passed") {
+          this.postDashboardLog("Integration gates passed — no cross-story issues");
+        } else if (gateResult.decision === "fixed") {
+          this.postDashboardLog("Integration issues auto-fixed — gates now passing");
+          await this.ticketOps.postComment(
+            `🔧 Integration Fix Agent resolved cross-story issues:\n\n${gateResult.summary}`
+          );
+        } else {
+          this.postDashboardLog(`Integration gates failed (unfixable): ${gateResult.summary}`);
+          await this.ticketOps.postComment(
+            `⚠️ Integration issues could not be auto-fixed:\n\n${gateResult.summary}\n\nTech Lead will assess.`
+          );
+        }
+      }
+
       // If PR created and review enabled, run inline Tech Lead review
       if (prUrl && prNumber && this.config.reviewEnabled) {
         // Update status so dashboard progress bar advances to "Tech Lead Review"
@@ -4580,7 +4614,7 @@ Begin your review now. Start by fetching the code changes.`;
    * (e.g. PR created, review started) without triggering terminal logic.
    */
   private async postProgressUpdate(
-    status: "review_requested" | "reviewing" | "consolidating" | "deploying",
+    status: "review_requested" | "reviewing" | "consolidating" | "deploying" | "integration_check",
     prUrl?: string,
     prNumber?: number,
     revisionCount?: number

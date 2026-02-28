@@ -57,6 +57,7 @@ const shared = {
   drop: [],
   define: {
     __AGENT_VERSION__: JSON.stringify(pkg.version),
+    __DOCKER_IMAGE_TAG__: JSON.stringify(`v${pkg.version}`),
   },
 };
 

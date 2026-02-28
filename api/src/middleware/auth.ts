@@ -26,12 +26,14 @@ declare global {
   }
 }
 
-// Create Cognito JWT verifier
-const verifier = CognitoJwtVerifier.create({
-  userPoolId: config.cognito.userPoolId,
-  tokenUse: "access",
-  clientId: config.cognito.clientId,
-});
+// Create Cognito JWT verifier (lazy — skip if credentials not configured)
+const verifier = config.cognito.userPoolId
+  ? CognitoJwtVerifier.create({
+      userPoolId: config.cognito.userPoolId,
+      tokenUse: "access",
+      clientId: config.cognito.clientId,
+    })
+  : null;
 
 /**
  * Authenticate user via Cognito JWT
@@ -73,6 +75,10 @@ export async function authenticateUser(
     const token = authHeader.slice(7);
 
     // Verify JWT with Cognito
+    if (!verifier) {
+      res.status(401).json({ error: "Cognito not configured" });
+      return;
+    }
     const payload = await verifier.verify(token);
 
     req.cognitoUser = {
@@ -159,6 +165,10 @@ export async function authenticateUserAllowNoOrg(
     const token = authHeader.slice(7);
 
     // Verify JWT with Cognito
+    if (!verifier) {
+      res.status(401).json({ error: "Cognito not configured" });
+      return;
+    }
     const payload = await verifier.verify(token);
 
     req.cognitoUser = {
@@ -378,6 +388,10 @@ export async function authenticateCognitoOnly(
     const token = authHeader.slice(7);
 
     // Verify JWT with Cognito
+    if (!verifier) {
+      res.status(401).json({ error: "Cognito not configured" });
+      return;
+    }
     const payload = await verifier.verify(token);
 
     req.cognitoUser = {
@@ -494,6 +508,10 @@ export async function authenticateSSE(
     }
 
     // --- JWT path (dashboard) ---
+    if (!verifier) {
+      res.status(401).json({ error: "Cognito not configured" });
+      return;
+    }
     const payload = await verifier.verify(token);
 
     req.cognitoUser = {

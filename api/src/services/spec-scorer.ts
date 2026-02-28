@@ -1,4 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { spawn } from "child_process";
+import { existsSync } from "fs";
+import { ensureValidOAuthToken } from "./llm-backend.js";
 import { logger } from "../utils/logger.js";
 import type { QualityFeedback } from "../models/KbSpec.js";
 
@@ -68,31 +70,32 @@ Return ONLY valid JSON matching this schema:
 
 Return 3-5 suggestions, ordered by impact. Each suggestion must be actionable (tell the user exactly what to add or change).`;
 
+/**
+ * Score a spec via Claude CLI (local dev with OAuth) or Anthropic SDK (cloud with API key).
+ * Follows the same auth pattern as prd-decomposer.ts.
+ */
 export async function scoreSpec(
   specContent: string,
   orgRequiredSections?: string[] | null,
 ): Promise<QualityFeedback> {
-  const anthropic = new Anthropic();
-
   let systemPrompt = SCORING_RUBRIC;
   if (orgRequiredSections?.length) {
     systemPrompt += `\n\n***REMOVED******REMOVED*** Organization Required Sections\nThis organization requires these additional sections: ${orgRequiredSections.join(", ")}. Penalize completeness if missing.`;
   }
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 2000,
-    system: systemPrompt,
-    messages: [
-      {
-        role: "user",
-        content: `Score this specification:\n\n${specContent}`,
-      },
-    ],
-  });
+  const prompt = `${systemPrompt}\n\n---\n\nScore this specification:\n\n${specContent}`;
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  // Use Claude CLI if available (local dev with OAuth), otherwise fall back to SDK
+  const claudePath =
+    process.env.CLAUDE_CLI_PATH || "/home/user/.local/bin/claude";
+  const hasClaudeCli = existsSync(claudePath);
+
+  let text: string;
+  if (hasClaudeCli) {
+    text = await callClaudeCli(claudePath, prompt);
+  } else {
+    text = await callAnthropicSdk(prompt, systemPrompt, specContent);
+  }
 
   // Extract JSON from response (handle markdown code blocks)
   const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -112,10 +115,143 @@ export async function scoreSpec(
       d.constraints.score * 0.15 +
       d.testability.score * 0.15,
   );
-  // Use the LLM's overall if close, recalculate if off by more than 5
   if (Math.abs(feedback.overall - expectedOverall) > 5) {
     feedback.overall = expectedOverall;
   }
 
   return feedback;
+}
+
+/** Call Claude CLI with OAuth — same pattern as ClaudeCliBackend in llm-backend.ts */
+async function callClaudeCli(
+  claudePath: string,
+  prompt: string,
+): Promise<string> {
+  await ensureValidOAuthToken();
+
+  return new Promise((resolve, reject) => {
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+    delete cleanEnv.CLAUDECODE;
+    delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
+
+    const claude = spawn(
+      claudePath,
+      [
+        "--print",
+        "--verbose",
+        "--output-format",
+        "stream-json",
+        "--model",
+        "claude-sonnet-4-6",
+        "--permission-mode",
+        "bypassPermissions",
+      ],
+      { env: cleanEnv, stdio: ["pipe", "pipe", "pipe"] },
+    );
+
+    claude.stdin.write(prompt);
+    claude.stdin.end();
+
+    let lineBuffer = "";
+    let resultText = "";
+    let fullText = "";
+    let stderr = "";
+
+    claude.stdout.on("data", (data: Buffer) => {
+      lineBuffer += data.toString();
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const event = JSON.parse(trimmed);
+          if (event.type === "assistant" && event.message?.content) {
+            const content = event.message.content;
+            if (typeof content === "string") {
+              fullText += content;
+            } else if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block.type === "text" && block.text) fullText += block.text;
+              }
+            }
+          } else if (
+            event.type === "content_block_delta" &&
+            event.delta?.text
+          ) {
+            fullText += event.delta.text;
+          } else if (event.type === "result" && event.result) {
+            resultText =
+              typeof event.result === "string" ? event.result : "";
+          }
+        } catch {
+          fullText += trimmed + "\n";
+        }
+      }
+    });
+
+    claude.stderr.on("data", (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    claude.on("close", (code) => {
+      if (lineBuffer.trim()) {
+        try {
+          const event = JSON.parse(lineBuffer.trim());
+          if (event.type === "result" && event.result) {
+            resultText =
+              typeof event.result === "string" ? event.result : "";
+          }
+        } catch {
+          fullText += lineBuffer;
+        }
+      }
+
+      if (code !== 0) {
+        reject(
+          new Error(
+            `Claude CLI exited with code ${code}: ${stderr || fullText}`.substring(0, 500),
+          ),
+        );
+        return;
+      }
+      resolve(resultText || fullText);
+    });
+
+    claude.on("error", (err) => {
+      reject(err);
+    });
+  });
+}
+
+/** Fall back to Anthropic SDK for cloud/production (requires ANTHROPIC_API_KEY) */
+async function callAnthropicSdk(
+  _prompt: string,
+  systemPrompt: string,
+  specContent: string,
+): Promise<string> {
+  const Anthropic = (await import("@anthropic-ai/sdk")).default;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "No ANTHROPIC_API_KEY configured. Set it in environment or use Claude CLI locally.",
+    );
+  }
+
+  const anthropic = new Anthropic({ apiKey });
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 2000,
+    system: systemPrompt,
+    messages: [
+      {
+        role: "user",
+        content: `Score this specification:\n\n${specContent}`,
+      },
+    ],
+  });
+
+  return response.content[0].type === "text" ? response.content[0].text : "";
 }

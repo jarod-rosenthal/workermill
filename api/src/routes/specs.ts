@@ -391,10 +391,15 @@ router.post(
         orgId: org.id,
       });
 
-      res.json({ spec: { ...spec, qualityScore: feedback.overall, qualityFeedback: feedback } });
+      if (!res.headersSent) {
+        res.json({ spec: { ...spec, qualityScore: feedback.overall, qualityFeedback: feedback } });
+      }
     } catch (error) {
-      logger.error("Error scoring spec", { error });
-      res.status(500).json({ error: "Failed to score spec" });
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error("Error scoring spec", { errorMessage: msg });
+      if (!res.headersSent) {
+        res.status(500).json({ error: `Failed to score spec: ${msg}` });
+      }
     }
   },
 );

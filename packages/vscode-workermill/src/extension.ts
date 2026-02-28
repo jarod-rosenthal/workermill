@@ -310,7 +310,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // Run a Jira issue from the tree view (inline play button)
     vscode.commands.registerCommand(
       "workermill.runIssue",
-      async (issueItem?: { issue?: { key: string; summary: string; blockedByCount?: number } }) => {
+      async (issueItem?: { issue?: { key: string; summary: string; blockedByCount?: number; _cardId?: string; _boardId?: string } }) => {
         if (!client.isConnected()) {
           vscode.window.showErrorMessage(
             "WorkerMill agent is not running. Start with: workermill-agent start",
@@ -336,7 +336,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (confirm !== "Run") return;
 
         try {
-          await client.runIssue(issueKey);
+          await client.runIssue(issueKey, issueItem?.issue?._cardId, issueItem?.issue?._boardId);
           vscode.window.showInformationMessage(`WorkerMill: ${issueKey} submitted`);
           treeProvider.refresh();
           // Reveal sidebar so user sees the task appear

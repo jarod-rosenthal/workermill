@@ -46,6 +46,7 @@ export interface StandaloneConfig {
     token: string;
   };
   defaultRepo?: string;
+  sandbox?: "docker" | "none";
   settings?: {
     maxParallelExperts?: number;
     maxStories?: number;
@@ -60,7 +61,6 @@ const DEFAULT_CONFIG: StandaloneConfig = {
     techLead: { provider: "anthropic", model: "claude-opus-4-6" },
   },
   settings: {
-    maxParallelExperts: 4,
     maxStories: 8,
   },
 };

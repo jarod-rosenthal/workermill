@@ -23,8 +23,16 @@ import {
   getConfigFile,
   getPortFile,
 } from "../config.js";
+import type { AgentConfig } from "../config.js";
 import { rotateLogs } from "../log-rotation.js";
 import { startAgent } from "../index.js";
+import {
+  isStandaloneReady,
+  isCloudMode,
+  loadStandaloneConfig,
+  getRoleConfig,
+  resolveApiKey,
+} from "../backends/local/config.js";
 
 /**
  * Check if an agent is already running by probing its local API port.
@@ -87,7 +95,36 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     process.exit(1);
   }
 
-  const config = loadConfigFromFile();
+  // ── Standalone mode detection ──
+  // Standalone config has `mode: "standalone"` with `roles` but no `apiUrl`.
+  // Detect it early to skip cloud-specific validation.
+  // Use loadStandaloneConfig() directly — don't gate on isStandaloneReady()
+  // which validates API keys (may fail if OAuth token is expired/missing).
+  let config: AgentConfig;
+  const standaloneCheck = loadStandaloneConfig();
+
+  if (standaloneCheck.mode === "standalone" && !isCloudMode()) {
+    const sc = standaloneCheck;
+    config = {
+      apiUrl: "",
+      apiKey: "",
+      agentId: "standalone",
+      maxWorkers: sc.settings?.maxParallelExperts ?? 0,
+      pollIntervalMs: 5000,
+      heartbeatIntervalMs: 30000,
+      githubToken: sc.scm?.token || "",
+      bitbucketToken: sc.scm?.token || "",
+      gitlabToken: "",
+      githubReviewerToken: "",
+      sandbox: (sc.sandbox === "docker" ? "docker" : "none") as "docker" | "none",
+      dockerImage: "ghcr.io/workermill/worker",
+      dockerMemoryGb: 4,
+      localRag: false,
+      ollamaPort: 11434,
+    };
+  } else {
+    config = loadConfigFromFile();
+  }
 
   // Validate prerequisites (Git, Claude CLI, Claude auth, Node.js)
   const prereqs = checkPrerequisites();
@@ -113,7 +150,7 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     }
   }
 
-  // Docker sandbox pre-flight check
+  // Docker sandbox pre-flight check (skip pre-pull in detach mode — child does its own)
   if (config.sandbox === "docker") {
     if (!checkDockerAvailable()) {
       if (isDockerInstalled()) {
@@ -126,13 +163,15 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
       process.exit(1);
     }
 
-    // Pre-pull image at startup
-    try {
-      const { ensureImage } = await import("../docker-spawner.js");
-      await ensureImage(config);
-    } catch (err) {
-      console.log(chalk.yellow(`  ⚠ Docker image pull failed: ${err instanceof Error ? err.message : String(err)}`));
-      console.log(chalk.yellow("    Workers will attempt to pull on first task."));
+    if (!options.detach) {
+      // Pre-pull image at startup (foreground only — detached child will pull on its own start)
+      try {
+        const { ensureImage } = await import("../docker-spawner.js");
+        await ensureImage(config);
+      } catch (err) {
+        console.log(chalk.yellow(`  ⚠ Docker image pull failed: ${err instanceof Error ? err.message : String(err)}`));
+        console.log(chalk.yellow("    Workers will attempt to pull on first task."));
+      }
     }
   }
 

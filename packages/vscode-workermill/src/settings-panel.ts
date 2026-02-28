@@ -57,6 +57,33 @@ function readAgentConfig(): {
   return null;
 }
 
+/** Check if the agent is running in standalone mode (no cloud API). */
+function isStandaloneMode(): boolean {
+  try {
+    const configPath = path.join(os.homedir(), ".workermill", "config.json");
+    const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    return raw.mode === "standalone";
+  } catch {
+    return false;
+  }
+}
+
+/** Read the full standalone config from disk. */
+function readStandaloneConfigFile(): Record<string, unknown> {
+  try {
+    const configPath = path.join(os.homedir(), ".workermill", "config.json");
+    return JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+/** Write updated standalone config to disk. */
+function writeStandaloneConfigFile(config: Record<string, unknown>): void {
+  const configPath = path.join(os.homedir(), ".workermill", "config.json");
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+}
+
 function apiRequest<T>(
   method: string,
   url: string,
@@ -178,6 +205,27 @@ export class SettingsPanel {
         return;
       }
 
+      // ── Standalone mode: handle settings locally ──
+      if (isStandaloneMode()) {
+        if (msg.type === "load-integrations") {
+          this.loadIntegrationsStandalone();
+        } else if (msg.type === "save-models") {
+          this.saveModelsStandalone(msg);
+        } else if (msg.type === "save-scm") {
+          this.saveScmStandalone(msg);
+        } else if (msg.type === "save-repo") {
+          this.saveRepoStandalone(msg.defaultRepo);
+        } else if (msg.type === "save-tracker") {
+          this.saveTrackerStandalone(msg.tracker);
+        } else if (msg.type === "open-dashboard" || msg.type === "open-web-settings" || msg.type === "open-pricing") {
+          this.postMessage({ type: "error", message: "Not available in standalone mode" });
+        } else if (msg.type === "save-jira" || msg.type === "test-jira" || msg.type === "switch-org") {
+          this.postMessage({ type: "error", message: "Not available in standalone mode" });
+        }
+        return;
+      }
+
+      // ── Cloud mode: requires API credentials ──
       const config = readAgentConfig();
       if (!config) {
         this.postMessage({ type: "error", message: "Agent not configured. Please sign in first." });
@@ -210,9 +258,13 @@ export class SettingsPanel {
     });
 
     // Auto-load integrations on open
-    const config = readAgentConfig();
-    if (config) {
-      this.loadIntegrations(config);
+    if (isStandaloneMode()) {
+      this.loadIntegrationsStandalone();
+    } else {
+      const config = readAgentConfig();
+      if (config) {
+        this.loadIntegrations(config);
+      }
     }
   }
 
@@ -272,6 +324,97 @@ export class SettingsPanel {
       });
     }
   }
+
+  // ── Standalone mode handlers (read/write ~/.workermill/config.json) ──
+
+  private loadIntegrationsStandalone(): void {
+    const sc = readStandaloneConfigFile();
+    const roles = (sc.roles || {}) as Record<string, { provider?: string; model?: string }>;
+    const scm = (sc.scm || {}) as { provider?: string; token?: string };
+
+    this.postMessage({
+      type: "integrations-loaded",
+      data: {
+        // Models — map standalone roles to cloud field names
+        defaultWorkerModel: roles.worker?.model || "claude-sonnet-4-6",
+        managerModelId: roles.techLead?.model || "claude-opus-4-6",
+        planningAgentModel: roles.planner?.model || "claude-opus-4-6",
+        // SCM
+        scmProvider: scm.provider || "github",
+        github: { configured: scm.provider === "github" && !!scm.token, defaultRepo: sc.defaultRepo || "" },
+        bitbucket: { configured: scm.provider === "bitbucket" && !!scm.token },
+        gitlab: { configured: scm.provider === "gitlab" && !!scm.token },
+        // Tracker — standalone only supports internal boards
+        defaultIssueTracker: "internal",
+        // No plan restrictions in standalone — all providers available
+        plan: "max",
+        orgName: "Standalone",
+        organizations: [],
+      },
+    });
+  }
+
+  private saveModelsStandalone(msg: { workerModel: string; reviewerModel: string; plannerModel: string }): void {
+    try {
+      this.postMessage({ type: "models-saving" });
+      const sc = readStandaloneConfigFile();
+      const roles = ((sc.roles || {}) as Record<string, Record<string, string>>);
+
+      // Preserve existing apiKey fields, only update model
+      roles.worker = { ...roles.worker, model: msg.workerModel };
+      roles.techLead = { ...roles.techLead, model: msg.reviewerModel };
+      roles.planner = { ...roles.planner, model: msg.plannerModel };
+      sc.roles = roles;
+
+      writeStandaloneConfigFile(sc);
+      this.postMessage({ type: "models-saved" });
+    } catch (err) {
+      this.postMessage({ type: "models-save-error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private saveScmStandalone(msg: { provider: string; token?: string; reviewerToken?: string; username?: string; appPassword?: string }): void {
+    try {
+      this.postMessage({ type: "scm-saving" });
+      const sc = readStandaloneConfigFile();
+
+      let token = "";
+      if (msg.provider === "github") {
+        token = msg.token || "";
+      } else if (msg.provider === "bitbucket") {
+        token = msg.appPassword || "";
+      } else if (msg.provider === "gitlab") {
+        token = msg.token || "";
+      }
+
+      sc.scm = { provider: msg.provider, token };
+      writeStandaloneConfigFile(sc);
+      this.postMessage({ type: "scm-saved", message: `${msg.provider} credentials saved` });
+      // Reload to reflect new state
+      this.loadIntegrationsStandalone();
+    } catch (err) {
+      this.postMessage({ type: "scm-save-error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private saveRepoStandalone(defaultRepo: string): void {
+    try {
+      const sc = readStandaloneConfigFile();
+      sc.defaultRepo = defaultRepo;
+      writeStandaloneConfigFile(sc);
+      this.postMessage({ type: "repo-saved", message: "Target repository saved" });
+      this.loadIntegrationsStandalone();
+    } catch (err) {
+      this.postMessage({ type: "repo-save-error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private saveTrackerStandalone(tracker: string): void {
+    // Standalone only supports internal boards — silently accept
+    this.postMessage({ type: "tracker-saved", tracker: "internal" });
+  }
+
+  // ── Cloud mode handlers ──
 
   private async saveJira(
     config: { apiUrl: string; apiKey: string },

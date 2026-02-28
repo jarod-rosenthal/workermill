@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.2.69",
+  "version": "0.2.70",
   "publisher": "workermill",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -126,6 +126,11 @@
         "icon": "$(debug-stop)"
       },
       {
+        "command": "workermill.deleteCard",
+        "title": "WorkerMill: Delete Card",
+        "icon": "$(trash)"
+      },
+      {
         "command": "workermill.signUpWithGitHub",
         "title": "WorkerMill: Sign Up with GitHub"
       },
@@ -216,7 +221,17 @@
         {
           "command": "workermill.runIssue",
           "when": "viewItem == issue",
-          "group": "inline"
+          "group": "inline@1"
+        },
+        {
+          "command": "workermill.deleteCard",
+          "when": "viewItem == issue || viewItem == issue-blocked",
+          "group": "inline@2"
+        },
+        {
+          "command": "workermill.deleteCard",
+          "when": "viewItem == issue || viewItem == issue-blocked",
+          "group": "destructive"
         },
         {
           "command": "workermill.openLiveDiff",

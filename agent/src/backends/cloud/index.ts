@@ -45,6 +45,7 @@ export class CloudBackend implements AgentBackend {
   deleteBoard(): Promise<any> { throw new Error("Not implemented"); }
   getBoardCards(): Promise<any> { throw new Error("Not implemented"); }
   createCard(): Promise<any> { throw new Error("Not implemented"); }
+  deleteCard(): Promise<any> { throw new Error("Not implemented"); }
   updateCard(): Promise<any> { throw new Error("Not implemented"); }
   moveCard(): Promise<any> { throw new Error("Not implemented"); }
   runCard(): Promise<any> { throw new Error("Not implemented"); }

@@ -55,9 +55,9 @@ export interface StandaloneConfig {
 const DEFAULT_CONFIG: StandaloneConfig = {
   mode: "standalone",
   roles: {
-    planner: { provider: "anthropic", model: "claude-sonnet-4-6" },
+    planner: { provider: "anthropic", model: "claude-opus-4-6" },
     worker: { provider: "anthropic", model: "claude-sonnet-4-6" },
-    techLead: { provider: "anthropic", model: "claude-sonnet-4-6" },
+    techLead: { provider: "anthropic", model: "claude-opus-4-6" },
   },
   settings: {
     maxParallelExperts: 4,
@@ -213,8 +213,7 @@ function readClaudeOAuthKey(): string | null {
     const credsPath = join(homedir(), ".claude", ".credentials.json");
     if (!existsSync(credsPath)) return null;
     const creds = JSON.parse(readFileSync(credsPath, "utf-8"));
-    // credentials.json has { claudeAiOauth: { token } } or similar
-    return creds?.claudeAiOauth?.token || creds?.apiKey || null;
+    return creds?.claudeAiOauth?.accessToken || creds?.apiKey || null;
   } catch {
     return null;
   }

@@ -1183,7 +1183,7 @@ export async function planTask(
     }
 
     if (isSimplifiedMode && criticResult.score < SIMPLIFIED_FLOOR) {
-      const msg = `${PREFIX} Simplified mode — score ${criticResult.score}/100 below floor (${SIMPLIFIED_FLOOR}). Iterating.`;
+      const msg = `${PREFIX} Simplified mode — score ${criticResult.score}/100 below floor (${SIMPLIFIED_FLOOR}). Will reject unless critic explicitly approved.`;
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
       await postLog(task.id, msg, "system", "warning");
     }

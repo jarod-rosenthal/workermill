@@ -2643,6 +2643,18 @@ export class EpicCoordinator {
 
               if (fixResult.success) {
                 console.log(`[Epic] Inline review fix succeeded for story ${storyIndex}: ${fixResult.summary}`);
+
+                // Verify push landed on remote (review fixer prompt says to push,
+                // but verify explicitly in case the agent failed to push)
+                const storyBranch = this.storyBranchNames.get(storyIndex);
+                if (existingWorktree && storyBranch) {
+                  try {
+                    await this.gitOps.pushBranchFromWorktree(existingWorktree, storyBranch);
+                  } catch {
+                    // Push may fail if agent already pushed — that's fine
+                  }
+                }
+
                 this.postDashboardLog(`Story ${storyIndex} review fix applied — re-entering review cycle`);
                 inlineFixSucceeded = true;
 

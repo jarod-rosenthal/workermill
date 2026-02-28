@@ -1025,6 +1025,72 @@ When summarizing your work at the end, describe decisions in plain language. The
     return { passed: true, summary: "No pipeline triggered on branch — skipped" };
   }
 
+  /**
+   * Shared finalization path for inline fixers (gate fixer, escalation agent).
+   * Commits remaining changes, pushes, runs CI gate, validates, posts completion.
+   */
+  private async finalizeFixerResult(
+    story: ReadyStory,
+    expert: ExpertPersona,
+    worktreePath: string,
+    branchName: string,
+    storyResult: StoryResult,
+    commentSuffix: string,
+  ): Promise<StoryResult> {
+    // Commit any remaining uncommitted changes (safety net)
+    const uncommitted = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
+    if (uncommitted.length > 0) {
+      const commitMsg = `fix: ${commentSuffix} — Story ${story.storyIndex} - ${story.title}`;
+      await this.gitOps.commitChangesInWorktree(worktreePath, commitMsg, expert, story.storyIndex);
+    }
+
+    // Push branch
+    await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
+    await this.postLog(`Pushed branch to remote after ${commentSuffix}`, expert, "system");
+
+    // Post-push CI gate (if configured)
+    if (this.config.ciWorkflowPath && !this.config.qualityGateBypass) {
+      const ciResult = await this.runPostPushCIGate(worktreePath, branchName, expert);
+      if (!ciResult.passed && !ciResult.infrastructureFailure) {
+        throw new Error(`Post-push CI failed:\n${ciResult.log || ciResult.summary}`);
+      }
+    }
+
+    // Get changed files and validate
+    const changedFiles = await this.gitOps.getFilesChangedVsMainInWorktree(worktreePath);
+    const validation = await this.validateStoryCompletion(story, worktreePath, changedFiles, expert);
+
+    // Post completion to coordination feed
+    const currentRevision = await this.coordination.getCurrentRevision();
+    await this.coordination.postCompletion(
+      story.storyIndex,
+      story.title,
+      expert,
+      this.config.parentTaskId,
+      {
+        branchName,
+        filesModified: changedFiles,
+        revisionNumber: currentRevision,
+        validation: {
+          passed: validation.valid,
+          issues: validation.issues,
+          criteriaMetRatio: `${validation.acceptanceCriteriaMet}/${validation.acceptanceCriteriaTotal}`,
+        },
+      }
+    );
+
+    await this.ticketOps.postComment(
+      `**${story.title}** — completed by ${expert} (${commentSuffix})\n\n${changedFiles.length} file${changedFiles.length !== 1 ? "s" : ""} changed.`
+    );
+
+    storyResult.success = true;
+    storyResult.filesModified = changedFiles;
+    storyResult.branchName = branchName;
+    storyResult.worktreePath = worktreePath;
+    this.worktreePathByStory.delete(story.storyIndex);
+    return storyResult;
+  }
+
   private async validateStoryCompletion(
     story: ReadyStory,
     worktreePath: string,
@@ -1675,59 +1741,7 @@ ${parts.join("\n\n")}
                 expert,
                 "system"
               );
-
-              // Commit any remaining uncommitted changes (safety net)
-              const uncommitted = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
-              if (uncommitted.length > 0) {
-                const commitMsg = "fix: escalation rewrite — Story " + story.storyIndex + " - " + story.title;
-                await this.gitOps.commitChangesInWorktree(worktreePath, commitMsg, expert, story.storyIndex);
-              }
-
-              // Push branch
-              await this.gitOps.pushBranchFromWorktree(worktreePath, branchName!);
-              await this.postLog(`Pushed branch to remote after escalation fix`, expert, "system");
-
-              // Post-push CI gate (if configured)
-              if (this.config.ciWorkflowPath && !this.config.qualityGateBypass) {
-                const ciResult = await this.runPostPushCIGate(worktreePath, branchName!, expert);
-                if (!ciResult.passed && !ciResult.infrastructureFailure) {
-                  throw new Error(`Post-push CI failed:\n${ciResult.log || ciResult.summary}`);
-                }
-              }
-
-              // Get changed files and validate
-              const changedFiles = await this.gitOps.getFilesChangedVsMainInWorktree(worktreePath);
-              const validation = await this.validateStoryCompletion(story, worktreePath, changedFiles, expert);
-
-              // Post completion to coordination feed
-              const currentRevision = await this.coordination.getCurrentRevision();
-              await this.coordination.postCompletion(
-                story.storyIndex,
-                story.title,
-                expert,
-                this.config.parentTaskId,
-                {
-                  branchName: branchName!,
-                  filesModified: changedFiles,
-                  revisionNumber: currentRevision,
-                  validation: {
-                    passed: validation.valid,
-                    issues: validation.issues,
-                    criteriaMetRatio: `${validation.acceptanceCriteriaMet}/${validation.acceptanceCriteriaTotal}`,
-                  },
-                }
-              );
-
-              await this.ticketOps.postComment(
-                `**${story.title}** — completed by ${expert} (escalation agent rewrote approach)\n\n${changedFiles.length} file${changedFiles.length !== 1 ? "s" : ""} changed.`
-              );
-
-              storyResult.success = true;
-              storyResult.filesModified = changedFiles;
-              storyResult.branchName = branchName;
-              storyResult.worktreePath = worktreePath;
-              this.worktreePathByStory.delete(story.storyIndex);
-              return storyResult;
+              return this.finalizeFixerResult(story, expert, worktreePath, branchName!, storyResult, "escalation rewrite");
             }
 
             await this.postLog(
@@ -1761,65 +1775,12 @@ ${parts.join("\n\n")}
             const fixResult = await fixer.run();
 
             if (fixResult.success) {
-              // Gate fixer committed the fix in-place — finalize directly without re-running expert
               await this.postLog(
                 `[Quality Gate] Inline gate fixer succeeded — finalizing story`,
                 expert,
                 "system"
               );
-
-              // Commit any remaining uncommitted changes (safety net)
-              const uncommitted = await this.gitOps.getModifiedFilesInWorktree(worktreePath!);
-              if (uncommitted.length > 0) {
-                const commitMsg = "fix: quality gate — Story " + story.storyIndex + " - " + story.title;
-                await this.gitOps.commitChangesInWorktree(worktreePath!, commitMsg, expert, story.storyIndex);
-              }
-
-              // Push branch
-              await this.gitOps.pushBranchFromWorktree(worktreePath!, branchName!);
-              await this.postLog(`Pushed branch to remote after gate fix`, expert, "system");
-
-              // Post-push CI gate (if configured)
-              if (this.config.ciWorkflowPath && !this.config.qualityGateBypass) {
-                const ciResult = await this.runPostPushCIGate(worktreePath!, branchName!, expert);
-                if (!ciResult.passed && !ciResult.infrastructureFailure) {
-                  throw new Error(`Post-push CI failed:\n${ciResult.log || ciResult.summary}`);
-                }
-              }
-
-              // Get changed files and validate
-              const changedFiles = await this.gitOps.getFilesChangedVsMainInWorktree(worktreePath!);
-              const validation = await this.validateStoryCompletion(story, worktreePath!, changedFiles, expert);
-
-              // Post completion to coordination feed
-              const currentRevision = await this.coordination.getCurrentRevision();
-              await this.coordination.postCompletion(
-                story.storyIndex,
-                story.title,
-                expert,
-                this.config.parentTaskId,
-                {
-                  branchName: branchName!,
-                  filesModified: changedFiles,
-                  revisionNumber: currentRevision,
-                  validation: {
-                    passed: validation.valid,
-                    issues: validation.issues,
-                    criteriaMetRatio: `${validation.acceptanceCriteriaMet}/${validation.acceptanceCriteriaTotal}`,
-                  },
-                }
-              );
-
-              await this.ticketOps.postComment(
-                `**${story.title}** — completed by ${expert} (quality gate fix applied)\n\n${changedFiles.length} file${changedFiles.length !== 1 ? "s" : ""} changed.`
-              );
-
-              storyResult.success = true;
-              storyResult.filesModified = changedFiles;
-              storyResult.branchName = branchName;
-              storyResult.worktreePath = worktreePath;
-              this.worktreePathByStory.delete(story.storyIndex);
-              return storyResult;
+              return this.finalizeFixerResult(story, expert, worktreePath!, branchName!, storyResult, "quality gate fix");
             }
 
             await this.postLog(

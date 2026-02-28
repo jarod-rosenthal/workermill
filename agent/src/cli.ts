@@ -16,6 +16,7 @@ import { statusCommand } from "./commands/status.js";
 import { logsCommand } from "./commands/logs.js";
 import { pullCommand } from "./commands/pull.js";
 import { updateCommand } from "./commands/update.js";
+import { initStandaloneCommand } from "./commands/init-standalone.js";
 import { getConfigFile } from "./config.js";
 import { AGENT_VERSION } from "./version.js";
 
@@ -62,6 +63,18 @@ program
   .command("update")
   .description("Update the agent to the latest version")
   .action(updateCommand);
+
+program
+  .command("init")
+  .description("Initialize standalone mode - configure LLM keys and repo")
+  .option("--standalone", "Run in standalone mode (no cloud API)")
+  .action(async (opts) => {
+    if (opts.standalone) {
+      await initStandaloneCommand();
+    } else {
+      console.log("Use --standalone for offline mode, or 'workermill-agent setup' for cloud mode.");
+    }
+  });
 
 // If no command given, auto-detect: run setup if no config, otherwise start
 if (process.argv.length <= 2) {

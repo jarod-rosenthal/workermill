@@ -45,6 +45,7 @@ export interface AgentStatus {
   uptime: number;
   tasks: TaskInfo[];
   sandbox?: "none" | "docker";
+  mode?: "local" | "cloud";
 }
 
 export interface TaskInfo {

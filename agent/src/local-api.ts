@@ -1253,6 +1253,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
+  // DELETE /api/boards/:id/cards/:cardId
+  const deleteCardMatch = path.match(/^\/api\/boards\/([a-f0-9]+)\/cards\/([a-f0-9]+)$/);
+  if (req.method === "DELETE" && deleteCardMatch) {
+    const backend = getActiveBackend();
+    if (!backend || backend.mode !== "local") return json(res, { error: "No backend available" }, 503);
+    try {
+      await backend.deleteCard(deleteCardMatch[2]);
+      return json(res, { ok: true });
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
   // POST /api/boards/:id/cards/:cardId/run
   const runCardMatch = path.match(/^\/api\/boards\/([a-f0-9]+)\/cards\/([a-f0-9]+)\/run$/);
   if (req.method === "POST" && runCardMatch) {

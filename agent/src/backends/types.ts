@@ -226,6 +226,7 @@ export interface AgentBackend {
   deleteBoard(id: string): Promise<void>;
   getBoardCards(boardId: string): Promise<Card[]>;
   createCard(boardId: string, input: CreateCardInput): Promise<Card>;
+  deleteCard(cardId: string): Promise<void>;
   updateCard(cardId: string, input: Partial<Card>): Promise<Card>;
   moveCard(cardId: string, columnId: string, position: number): Promise<void>;
   runCard(boardId: string, cardId: string): Promise<TaskInfo>;

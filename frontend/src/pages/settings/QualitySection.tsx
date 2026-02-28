@@ -392,6 +392,23 @@ export function QualitySection({
             </div>
             <p className="text-xs text-muted-foreground -mt-3 mb-4 ml-0">1-20 attempts before escalating as blocker (default: 5). Separate from general auto-retry — quality gate failures give experts more chances since each retry re-runs the full code generation.</p>
 
+            {/* CI Fix Max Retries */}
+            <div className="flex items-center justify-between mb-4 pt-4 border-t border-border">
+              <div>
+                <span className="text-sm text-foreground">CI Fix Max Retries</span>
+                <p className="text-xs text-muted-foreground">Max attempts for the CI Fix Agent to resolve PR CI failures before merging</p>
+              </div>
+              <input
+                type="number"
+                min="0"
+                max="10"
+                value={settings.maxCiFixRetries}
+                onChange={(e) => updateSetting("maxCiFixRetries", parseInt(e.target.value, 10) || 3)}
+                className="w-20 px-3 py-2 bg-background border border-border rounded-md text-foreground text-center"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground -mt-3 mb-4 ml-0">0-10 attempts (default: 3). After CI fails on a PR, the CI Fix Agent makes surgical fixes (unused imports, type errors, lint). Set to 0 to skip CI verification and merge immediately.</p>
+
             {/* Push After Commit */}
             <div className="flex items-center justify-between mb-4 pt-4 border-t border-border">
               <div>

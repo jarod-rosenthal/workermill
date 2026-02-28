@@ -115,6 +115,7 @@ export interface Settings {
   blockerMaxAutoRetries: number;
   blockerAutoRetryEnabled: boolean;
   qualityGateMaxRetries: number;
+  maxCiFixRetries: number;
   pushAfterCommit: boolean;
   gracefulShutdownEnabled: boolean;
   selfReviewEnabled: boolean;

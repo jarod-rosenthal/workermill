@@ -27,6 +27,7 @@ import { TicketOps } from "./ticket-ops.js";
 import { InlineReviewer, type InlineReviewResult } from "./inline-reviewer.js";
 import { InlineDeployer } from "./inline-deployer.js";
 import { InlineImprover } from "./inline-improver.js";
+import { InlineCIFixer } from "./inline-ci-fixer.js";
 import { createMemoryClient, type MemoryClient, type MemoryContext, type EnhancedContext } from "./memory-client.js";
 import { CredentialRotator } from "./credential-rotator.js";
 import { spawn, execSync } from "child_process";
@@ -69,6 +70,10 @@ export class EpicCoordinator {
   private revisionStoriesQueued: ReadyStory[] = [];  // Stories queued for revision re-execution
   private deploymentSucceeded: boolean = false;  // Track if deployment completed successfully
   private reviewSkipped: boolean = false;  // Track if review was skipped due to failure (OAuth, crash, etc.)
+
+  // CI Fix Agent tracking
+  private ciFixRetryCount: number = 0;
+  private maxCiFixRetries: number = parseInt(process.env.MAX_CI_FIX_RETRIES || "3", 10);
   private totalStories: number = 0;  // Total stories in the Epic (for lazy coordination loading)
 
   // Memory system (REQ-19) with Codebase RAG
@@ -3309,12 +3314,11 @@ export class EpicCoordinator {
             return "done";
           }
         } else {
-          // Default: merge the PR after Tech Lead approval
+          // Default: merge the PR after Tech Lead approval (with CI verification)
           const mergeLabel = this.config.prdChildTask ? "PRD auto-run" : "Tech Lead approved";
-          console.log(`[Epic] ${mergeLabel} — auto-merging PR #${prNumber}`);
-          await this.postLog(`Merging PR #${prNumber} (${mergeLabel})...`);
-          const merged = await this.gitOps.mergePR(prUrl, prNumber);
-          if (merged) {
+          console.log(`[Epic] ${mergeLabel} — auto-merging PR #${prNumber} with CI verification`);
+          const mergeResult = await this.mergeWithCIVerification(prUrl, prNumber, mergeLabel);
+          if (mergeResult.merged) {
             console.log(`[Epic] PR #${prNumber} merged successfully`);
             await this.postLog(`PR #${prNumber} merged successfully`);
             await this.ticketOps.postComment(`🔀 PR #${prNumber} auto-merged (${mergeLabel})`);
@@ -3848,6 +3852,186 @@ Begin your review now. Start by fetching the code changes.`;
   }
 
   /**
+   * Poll CI check-runs on a PR's head commit.
+   * Uses the GitHub Check Runs API which covers all CI providers (Actions, third-party).
+   */
+  private async pollPrCI(prNumber: number): Promise<{ passed: boolean; pending: boolean; log?: string }> {
+    const scmProvider = process.env.SCM_PROVIDER || "github";
+    if (scmProvider !== "github") {
+      // For non-GitHub providers, skip CI polling — Bitbucket/GitLab CI is checked in Gate 2
+      await this.postLog(`[CI Gate] SCM provider "${scmProvider}" — skipping PR CI poll`);
+      return { passed: true, pending: false };
+    }
+
+    const [owner, repo] = this.config.targetRepo.split("/");
+    const token = this.config.githubToken;
+
+    try {
+      // Get PR head SHA
+      const prRes = execSync(
+        `gh api repos/${owner}/${repo}/pulls/${prNumber} --jq '.head.sha'`,
+        { env: { ...process.env, GH_TOKEN: token }, encoding: "utf-8", timeout: 15000 }
+      ).trim();
+      const headSha = prRes;
+      if (!headSha) {
+        await this.postLog("[CI Gate] Could not determine PR head SHA — skipping CI check");
+        return { passed: true, pending: false };
+      }
+
+      // Poll check-runs every 15 seconds, up to 8 minutes
+      const maxWaitMs = 8 * 60 * 1000;
+      const pollIntervalMs = 15 * 1000;
+      const noChecksGraceMs = 3 * 60 * 1000;
+      const startTime = Date.now();
+
+      await this.postLog(`[CI Gate] Polling CI checks on PR #${prNumber} (SHA: ${headSha.substring(0, 7)})...`);
+
+      while (Date.now() - startTime < maxWaitMs) {
+        const checksJson = execSync(
+          `gh api repos/${owner}/${repo}/commits/${headSha}/check-runs --jq '{total: .total_count, runs: [.check_runs[] | {name: .name, status: .status, conclusion: .conclusion, url: .html_url}]}'`,
+          { env: { ...process.env, GH_TOKEN: token }, encoding: "utf-8", timeout: 15000 }
+        ).trim();
+        const checks = JSON.parse(checksJson);
+
+        if (checks.total === 0) {
+          if (Date.now() - startTime > noChecksGraceMs) {
+            await this.postLog("[CI Gate] No CI checks found after 3 minutes — proceeding without CI verification");
+            return { passed: true, pending: false };
+          }
+          // Wait for checks to appear
+          await new Promise(r => setTimeout(r, pollIntervalMs));
+          continue;
+        }
+
+        const pending = checks.runs.some((r: { status: string }) => r.status !== "completed");
+        if (pending) {
+          const completedCount = checks.runs.filter((r: { status: string }) => r.status === "completed").length;
+          await this.postLog(`[CI Gate] ${completedCount}/${checks.total} checks completed — waiting...`);
+          await new Promise(r => setTimeout(r, pollIntervalMs));
+          continue;
+        }
+
+        // All checks completed
+        const failed = checks.runs.filter((r: { conclusion: string }) =>
+          r.conclusion !== "success" && r.conclusion !== "skipped" && r.conclusion !== "neutral"
+        );
+
+        if (failed.length === 0) {
+          await this.postLog(`[CI Gate] All ${checks.total} CI checks passed`);
+          return { passed: true, pending: false };
+        }
+
+        // Collect failure details
+        const failureLog = failed.map((r: { name: string; conclusion: string; url: string }) =>
+          `${r.name}: ${r.conclusion} (${r.url})`
+        ).join("\n");
+
+        // Try to get detailed failure output from the first failed check
+        let detailedLog = failureLog;
+        try {
+          const failedRun = failed[0];
+          const runId = failedRun.url?.match(/\/runs\/(\d+)/)?.[1];
+          if (runId) {
+            const logOutput = execSync(
+              `gh api repos/${owner}/${repo}/actions/runs/${runId}/jobs --jq '[.jobs[] | select(.conclusion != "success") | .steps[] | select(.conclusion == "failure") | "Step: " + .name + "\\nConclusion: " + .conclusion] | join("\\n---\\n")'`,
+              { env: { ...process.env, GH_TOKEN: token }, encoding: "utf-8", timeout: 15000 }
+            ).trim();
+            if (logOutput) {
+              detailedLog = `${failureLog}\n\nFailed steps:\n${logOutput}`;
+            }
+          }
+        } catch {
+          // Detailed log fetch is best-effort
+        }
+
+        await this.postLog(`[CI Gate] ${failed.length} CI check(s) failed:\n${failureLog}`);
+        return { passed: false, pending: false, log: detailedLog };
+      }
+
+      // Timeout with still-pending checks — don't block
+      await this.postLog("[CI Gate] CI checks still pending after 8 minutes — proceeding without waiting");
+      return { passed: true, pending: true };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      await this.postLog(`[CI Gate] Error polling CI: ${msg} — skipping CI check`);
+      return { passed: true, pending: false };
+    }
+  }
+
+  /**
+   * Merge a PR with CI verification and automatic fix attempts.
+   * Polls PR CI, launches CI Fix Agent on failures, retries up to maxCiFixRetries.
+   * Always merges eventually (never blocks the run).
+   */
+  private async mergeWithCIVerification(
+    prUrl: string,
+    prNumber: number,
+    mergeLabel: string
+  ): Promise<{ merged: boolean }> {
+    // If CI fix retries disabled, merge directly
+    if (this.maxCiFixRetries <= 0) {
+      await this.postLog(`Merging PR #${prNumber} (${mergeLabel}, CI check disabled)...`);
+      const merged = await this.gitOps.mergePR(prUrl, prNumber);
+      return { merged };
+    }
+
+    // Reset CI fix counter for this merge attempt
+    this.ciFixRetryCount = 0;
+
+    // Initial CI check
+    let ciResult = await this.pollPrCI(prNumber);
+
+    if (ciResult.passed) {
+      await this.postLog(`Merging PR #${prNumber} (${mergeLabel})...`);
+      const merged = await this.gitOps.mergePR(prUrl, prNumber);
+      return { merged };
+    }
+
+    // CI failed — enter fix loop
+    while (this.ciFixRetryCount < this.maxCiFixRetries) {
+      this.ciFixRetryCount++;
+      await this.postLog(
+        `[CI Gate] CI failed on PR #${prNumber} — launching CI Fix Agent (attempt ${this.ciFixRetryCount}/${this.maxCiFixRetries})`
+      );
+
+      const fixer = new InlineCIFixer(this.config, this.gitOps.getRepoPath());
+      const fixResult = await fixer.fix(prNumber, ciResult.log || "No detailed failure log available");
+
+      if (fixResult.decision === "unfixable") {
+        await this.postLog(`[CI Gate] CI Fix Agent reports issue is unfixable: ${fixResult.summary}`);
+        break;
+      }
+
+      if (fixResult.success) {
+        await this.postLog(`[CI Gate] CI Fix Agent applied fix: ${fixResult.summary} — waiting for CI re-run...`);
+
+        // Wait a moment for CI to trigger on new push
+        await new Promise(r => setTimeout(r, 10000));
+
+        // Re-poll CI
+        ciResult = await this.pollPrCI(prNumber);
+
+        if (ciResult.passed) {
+          await this.postLog(`[CI Gate] CI now passing after fix — merging PR #${prNumber}`);
+          const merged = await this.gitOps.mergePR(prUrl, prNumber);
+          return { merged };
+        }
+        // Still failing — loop continues
+      } else {
+        await this.postLog(`[CI Gate] CI Fix Agent failed: ${fixResult.summary}`);
+        break;
+      }
+    }
+
+    // All retries exhausted or unfixable — merge anyway with warning
+    await this.postLog(
+      `⚠️ CI still failing after ${this.ciFixRetryCount} fix attempt(s) — merging PR #${prNumber} with warning`
+    );
+    const merged = await this.gitOps.mergePR(prUrl, prNumber);
+    return { merged };
+  }
+
+  /**
    * Run inline DevOps deployment after Tech Lead approval.
    * Merges the PR and triggers GitHub Actions deployment.
    * Returns true if deployment succeeded, false if it failed.
@@ -3972,10 +4156,9 @@ Begin your review now. Start by fetching the code changes.`;
         ).catch(() => {});
         // PRD auto-run: merge the PR so dependent stories don't stack up conflicts
         if (this.config.prdChildTask) {
-          console.log(`[Epic] PRD child task — auto-merging PR #${prNumber} after review-only approval`);
-          await this.postLog(`Merging PR #${prNumber} (PRD auto-run)...`);
-          const merged = await this.gitOps.mergePR(prUrl, prNumber);
-          if (merged) {
+          console.log(`[Epic] PRD child task — auto-merging PR #${prNumber} with CI verification`);
+          const mergeResult = await this.mergeWithCIVerification(prUrl, prNumber, "PRD auto-run");
+          if (mergeResult.merged) {
             await this.postLog(`PR #${prNumber} merged successfully`);
             await this.ticketOps.postComment(`🔀 PR #${prNumber} auto-merged (PRD workflow)`);
           } else {

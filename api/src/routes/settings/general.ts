@@ -174,6 +174,7 @@ router.get("/", async (req: Request, res: Response) => {
       blockerMaxAutoRetries: org.blockerMaxAutoRetries,
       blockerAutoRetryEnabled: org.blockerAutoRetryEnabled,
       qualityGateMaxRetries: org.qualityGateMaxRetries,
+      maxCiFixRetries: org.maxCiFixRetries,
       pushAfterCommit: org.pushAfterCommit,
       gracefulShutdownEnabled: org.gracefulShutdownEnabled,
       selfReviewEnabled: org.selfReviewEnabled,
@@ -322,6 +323,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       blockerMaxAutoRetries,
       blockerAutoRetryEnabled,
       qualityGateMaxRetries,
+      maxCiFixRetries,
       pushAfterCommit,
       gracefulShutdownEnabled,
       selfReviewEnabled,
@@ -1131,6 +1133,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.qualityGateMaxRetries = maxRetries;
     }
 
+    if (maxCiFixRetries !== undefined) {
+      const retries = parseInt(maxCiFixRetries, 10);
+      if (isNaN(retries) || retries < 0 || retries > 10) {
+        res.status(400).json({ error: "maxCiFixRetries must be between 0 and 10" });
+        return;
+      }
+      org.maxCiFixRetries = retries;
+    }
+
     if (pushAfterCommit !== undefined) {
       org.pushAfterCommit = pushAfterCommit === true;
     }
@@ -1324,6 +1335,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         blockerMaxAutoRetries: org.blockerMaxAutoRetries,
         blockerAutoRetryEnabled: org.blockerAutoRetryEnabled,
         qualityGateMaxRetries: org.qualityGateMaxRetries,
+        maxCiFixRetries: org.maxCiFixRetries,
         pushAfterCommit: org.pushAfterCommit,
         gracefulShutdownEnabled: org.gracefulShutdownEnabled,
         selfReviewEnabled: org.selfReviewEnabled,

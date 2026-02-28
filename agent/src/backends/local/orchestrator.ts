@@ -130,6 +130,11 @@ async function spawnLocalWorker(task: any): Promise<void> {
     SCM_PROVIDER: task.scm_provider || config.scm?.provider || "github",
     WORKER_MODEL: task.worker_model || getRoleConfig(config, "worker").model,
     SCM_TOKEN: config.scm?.token || "",
+    MAX_PER_STORY_REVISIONS: String(config.settings?.maxPerStoryRevisions ?? 1),
+    MAX_REVIEW_REVISIONS: String(config.settings?.maxReviewRevisions ?? 3),
+    QUALITY_GATE_MAX_RETRIES: String(config.settings?.qualityGateMaxRetries ?? 5),
+    MAX_CI_FIX_RETRIES: String(config.settings?.maxCiFixRetries ?? 3),
+    PUSH_AFTER_COMMIT: config.settings?.pushAfterCommit !== false ? "true" : "false",
   };
 
   // LLM API keys — set all providers that have keys so workers can use any

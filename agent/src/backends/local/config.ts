@@ -50,6 +50,11 @@ export interface StandaloneConfig {
   settings?: {
     maxParallelExperts?: number;
     maxStories?: number;
+    maxPerStoryRevisions?: number;
+    maxReviewRevisions?: number;
+    qualityGateMaxRetries?: number;
+    maxCiFixRetries?: number;
+    pushAfterCommit?: boolean;
   };
 }
 

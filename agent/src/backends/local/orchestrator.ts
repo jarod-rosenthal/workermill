@@ -61,7 +61,7 @@ export async function processQueuedTask(taskId: string): Promise<void> {
   const db = getDb();
 
   // Check concurrency limit
-  const maxParallel = getSettingInt("max_parallel_experts", 4);
+  const maxParallel = getSettingInt("max_parallel_experts", 8);
   const config = loadStandaloneConfig();
   const limit = config.settings?.maxParallelExperts ?? maxParallel;
 

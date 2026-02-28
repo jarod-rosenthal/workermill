@@ -63,12 +63,18 @@ const shared = {
 const cliContent = readFileSync("dist/cli.js", "utf-8");
 writeFileSync("dist/cli.js", cliContent.replace(/^#!.*\n/, ""), "utf-8");
 
+// createRequire banner — provides a `require` function in ESM mode so that
+// native CJS modules (better-sqlite3, etc.) can be loaded at runtime.
+// Without this, esbuild's __require shim throws "Dynamic require of X is not supported".
+const createRequireBanner = `import { createRequire as __createRequire } from "module";
+var require = (typeof globalThis.require !== "undefined") ? globalThis.require : __createRequire(import.meta.url);`;
+
 // Step 1: Bundle CLI entry point (bin)
 await build({
   ...shared,
   entryPoints: ["dist/cli.js"],
   outfile: "dist/cli.bundle.js",
-  banner: { js: "#!/usr/bin/env node" },
+  banner: { js: `#!/usr/bin/env node\n${createRequireBanner}` },
 });
 
 // Step 2: Bundle library entry point
@@ -76,6 +82,7 @@ await build({
   ...shared,
   entryPoints: ["dist/index.js"],
   outfile: "dist/index.bundle.js",
+  banner: { js: createRequireBanner },
 });
 
 // Replace original files with bundles
@@ -138,10 +145,7 @@ await build({
   outfile: "dist/entry.js",
   packages: undefined, // Override shared.packages: inline ALL npm packages
   external: nodeBuiltins, // Keep Node builtins external (provided by Bun & Node.js runtimes)
-  banner: {
-    js: `import { createRequire as __createRequire } from "module";
-var require = (typeof globalThis.require !== "undefined") ? globalThis.require : __createRequire(import.meta.url);`,
-  },
+  banner: { js: createRequireBanner },
 });
 console.log("✓ dist/entry.js unified bundle (for binary compilation)");
 

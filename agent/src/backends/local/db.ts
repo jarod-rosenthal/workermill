@@ -150,16 +150,19 @@ export function getDb(): any {
     mkdirSync(DATA_DIR, { recursive: true });
   }
 
-  // Dynamic import of bun:sqlite — this is a Bun built-in
-  // In Node.js environments (dev/test), this will fail gracefully
+  // Try bun:sqlite first (Bun runtime), fall back to better-sqlite3 (Node.js)
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     Database = require("bun:sqlite").Database;
   } catch {
-    throw new Error(
-      "bun:sqlite is not available. Standalone mode requires the Bun runtime. " +
-        "Install the agent binary (which embeds Bun) or run via 'bun' instead of 'node'.",
-    );
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      Database = require("better-sqlite3");
+    } catch {
+      throw new Error(
+        "No SQLite driver available. Install better-sqlite3: npm install better-sqlite3",
+      );
+    }
   }
 
   dbInstance = new Database(DB_PATH);

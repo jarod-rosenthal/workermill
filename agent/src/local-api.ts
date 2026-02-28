@@ -508,6 +508,32 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (backend?.mode === "local") {
       try {
         const body = JSON.parse(await readBody(req));
+
+        // Handle card run via jiraIssueKey (standalone: "#N" or card/board IDs)
+        if (body.jiraIssueKey || body._cardId) {
+          const cardId = body._cardId;
+          const boardId = body._boardId;
+          if (cardId && boardId) {
+            const task = await backend.runCard(boardId, cardId);
+            processQueuedTask(task.id).catch(() => {});
+            return json(res, task, 201);
+          }
+          // Fallback: find card by key like "#3"
+          const keyMatch = String(body.jiraIssueKey).match(/^#(\d+)$/);
+          if (keyMatch) {
+            const db = (await import("./backends/local/db.js")).getDb();
+            const card = db.prepare(
+              "SELECT c.id, c.board_id FROM cards c WHERE c.card_number = ?",
+            ).get(parseInt(keyMatch[1], 10)) as any;
+            if (card) {
+              const task = await backend.runCard(card.board_id, card.id);
+              processQueuedTask(task.id).catch(() => {});
+              return json(res, task, 201);
+            }
+          }
+          return json(res, { error: "Card not found" }, 404);
+        }
+
         const task = await backend.createTask({
           summary: body.summary,
           description: body.description,
@@ -588,7 +614,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   // POST /api/prd/build — decompose PRD locally with SSE streaming
   if (req.method === "POST" && path === "/api/prd/build") {
-    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    const backend = getActiveBackend();
+    if (!backend && !cloudProxy) return json(res, { error: "No backend available" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
       const prdContent = body.content;
@@ -607,28 +634,39 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         res.write(`data: ${JSON.stringify({ type, ...data as Record<string, unknown> })}\n\n`);
       };
 
-      // Fetch planning agent config from the API (provider, model, API key)
+      // Fetch planning agent config
       let planningConfig: { provider: string; model: string; apiKey?: string } = {
         provider: "anthropic",
         model: "",
       };
-      try {
-        const settings = await cloudProxy("GET", "/api/settings") as Record<string, unknown>;
-        if (settings?.planningAgentProvider) planningConfig.provider = settings.planningAgentProvider as string;
-        if (settings?.planningAgentModel) planningConfig.model = settings.planningAgentModel as string;
-        if (settings?.planningApiKey) planningConfig.apiKey = settings.planningApiKey as string;
-      } catch { /* fall back to defaults */ }
+      if (backend?.mode === "local") {
+        // Standalone: read from local config
+        const { loadStandaloneConfig: lsc, getRoleConfig: grc, resolveApiKey: rak } = await import("./backends/local/config.js");
+        const sc = lsc();
+        const plannerRole = grc(sc, "planner");
+        planningConfig = { provider: plannerRole.provider, model: plannerRole.model, apiKey: rak(sc, "planner") };
+      } else if (cloudProxy) {
+        // Cloud: fetch from server
+        try {
+          const settings = await cloudProxy("GET", "/api/settings") as Record<string, unknown>;
+          if (settings?.planningAgentProvider) planningConfig.provider = settings.planningAgentProvider as string;
+          if (settings?.planningAgentModel) planningConfig.model = settings.planningAgentModel as string;
+          if (settings?.planningApiKey) planningConfig.apiKey = settings.planningApiKey as string;
+        } catch { /* fall back to defaults */ }
+      }
 
       // Fetch PRD system prompt from the API (single source of truth)
       let prdSystemPrompt: string | undefined;
-      try {
-        const promptData = await cloudProxy("GET", "/api/agent/prd-prompt") as { systemPrompt?: string };
-        if (promptData?.systemPrompt) {
-          prdSystemPrompt = promptData.systemPrompt;
-          sendEvent("progress", { message: `Fetched PRD prompt from server` });
+      if (cloudProxy) {
+        try {
+          const promptData = await cloudProxy("GET", "/api/agent/prd-prompt") as { systemPrompt?: string };
+          if (promptData?.systemPrompt) {
+            prdSystemPrompt = promptData.systemPrompt;
+            sendEvent("progress", { message: `Fetched PRD prompt from server` });
+          }
+        } catch {
+          sendEvent("progress", { message: `Using local PRD prompt (server unavailable)` });
         }
-      } catch {
-        sendEvent("progress", { message: `Using local PRD prompt (server unavailable)` });
       }
 
       sendEvent("progress", { message: `Starting PRD decomposition...` });
@@ -640,13 +678,61 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
       sendEvent("progress", { message: `Creating board with ${decomposed.cards.length} cards...` });
 
-      // Send pre-decomposed cards to cloud API to create the board
-      const result = await cloudProxy("POST", "/api/prd/decompose", {
-        ...body,
-        preDecomposed: decomposed,
-      });
+      if (backend?.mode === "local") {
+        // Standalone: create board directly in SQLite
+        const board = await backend.createBoard({ name: decomposed.boardName, description: `Generated from PRD` });
+        const backlogCol = board.columns.find(c => c.name === "Backlog")!;
+        const cardIds: string[] = [];
 
-      sendEvent("done", { result });
+        for (let i = 0; i < decomposed.cards.length; i++) {
+          const c = decomposed.cards[i] as any;
+          const card = await backend.createCard(board.id, {
+            columnId: backlogCol.id,
+            title: c.title,
+            description: c.description,
+            priority: c.priority || "medium",
+            position: i,
+          });
+          cardIds.push(card.id);
+        }
+
+        // Create dependencies
+        const db = (await import("./backends/local/db.js")).getDb();
+        for (let i = 0; i < decomposed.cards.length; i++) {
+          const c = decomposed.cards[i] as any;
+          if (Array.isArray(c.dependencyIndices)) {
+            for (const depIdx of c.dependencyIndices) {
+              if (depIdx >= 0 && depIdx < cardIds.length) {
+                const { generateId } = await import("./backends/local/db.js");
+                db.prepare(
+                  "INSERT INTO card_dependencies (id, card_id, depends_on_card_id) VALUES (?, ?, ?)",
+                ).run(generateId(), cardIds[i], cardIds[depIdx]);
+              }
+            }
+          }
+        }
+
+        // Store quality gates on board
+        if ((decomposed as any).qualityGates) {
+          db.prepare("UPDATE boards SET quality_gate_commands = ? WHERE id = ?")
+            .run(JSON.stringify((decomposed as any).qualityGates), board.id);
+        }
+        if ((decomposed as any).ciWorkflowPath) {
+          db.prepare("UPDATE boards SET ci_workflow_path = ? WHERE id = ?")
+            .run((decomposed as any).ciWorkflowPath, board.id);
+        }
+
+        sendEvent("done", {
+          result: { boardId: board.id, boardName: board.name, cardCount: cardIds.length },
+        });
+      } else {
+        // Cloud: send pre-decomposed cards to cloud API to create the board
+        const result = await cloudProxy!("POST", "/api/prd/decompose", {
+          ...body,
+          preDecomposed: decomposed,
+        });
+        sendEvent("done", { result });
+      }
       res.end();
     } catch (err: unknown) {
       const e = err as { status?: number; data?: unknown; message?: string };
@@ -784,8 +870,57 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // GET /api/issues — search Jira issues (proxied from cloud API)
+  // GET /api/issues — search issues (board cards in standalone, Jira in cloud)
   if (req.method === "GET" && path === "/api/issues") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const { params: qp } = parseUrl(req.url || "");
+        const statusFilter = qp.status?.toLowerCase();
+        const projectFilter = qp.project;
+        const boards = await backend.getBoards();
+        const issues: unknown[] = [];
+        for (const board of boards) {
+          if (projectFilter && board.id !== projectFilter) continue;
+          const cards = await backend.getBoardCards(board.id);
+          const colMap = new Map(board.columns.map(c => [c.id, c.name]));
+          const db = (await import("./backends/local/db.js")).getDb();
+          for (const card of cards) {
+            const colName = colMap.get(card.columnId) || "Backlog";
+            if (statusFilter && colName.toLowerCase() !== statusFilter) continue;
+            const totalDeps = (db.prepare(
+              "SELECT COUNT(*) as cnt FROM card_dependencies WHERE card_id = ?",
+            ).get(card.id) as any)?.cnt || 0;
+            const unmetDeps = totalDeps > 0
+              ? (db.prepare(`
+                  SELECT COUNT(*) as cnt FROM card_dependencies cd
+                  JOIN cards dep ON dep.id = cd.depends_on_card_id
+                  LEFT JOIN tasks t ON t.id = dep.task_id
+                  WHERE cd.card_id = ? AND (t.id IS NULL OR t.status != 'completed')
+                `).get(card.id) as any)?.cnt || 0
+              : 0;
+            issues.push({
+              key: `#${card.cardNumber || card.id.slice(0, 6)}`,
+              summary: card.title,
+              description: card.description || null,
+              status: colName,
+              issueType: "Story",
+              priority: card.priority || "medium",
+              labels: [board.name],
+              project: { key: board.id, name: board.name },
+              assignee: null,
+              blockedByCount: unmetDeps,
+              dependencyCount: totalDeps,
+              _cardId: card.id,
+              _boardId: board.id,
+            });
+          }
+        }
+        return json(res, { issues });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const { params: qp } = parseUrl(req.url || "");
@@ -800,8 +935,17 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // GET /api/issues/projects — list Jira projects (proxied from cloud API)
+  // GET /api/issues/projects — list projects (boards in standalone, Jira in cloud)
   if (req.method === "GET" && path === "/api/issues/projects") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const boards = await backend.getBoards();
+        return json(res, { projects: boards.map(b => ({ key: b.id, name: b.name })) });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("GET", "/api/issues/projects");
@@ -1069,6 +1213,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
+  // POST /api/boards
+  if (req.method === "POST" && path === "/api/boards") {
+    const backend = getActiveBackend();
+    if (!backend || backend.mode !== "local") return json(res, { error: "No backend available" }, 503);
+    try {
+      const body = JSON.parse(await readBody(req));
+      const board = await backend.createBoard(body as { name: string; description?: string });
+      return json(res, board, 201);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
   // GET /api/boards/:id/cards
   const boardCardsMatch = path.match(/^\/api\/boards\/([a-f0-9]+)\/cards$/);
   if (req.method === "GET" && boardCardsMatch) {
@@ -1077,6 +1234,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     try {
       const cards = await backend.getBoardCards(boardCardsMatch[1]);
       return json(res, cards);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // POST /api/boards/:id/cards
+  const addCardMatch = path.match(/^\/api\/boards\/([a-f0-9]+)\/cards$/);
+  if (req.method === "POST" && addCardMatch) {
+    const backend = getActiveBackend();
+    if (!backend || backend.mode !== "local") return json(res, { error: "No backend available" }, 503);
+    try {
+      const body = JSON.parse(await readBody(req));
+      const card = await backend.createCard(addCardMatch[1], body as { columnId: string; title: string; description?: string; priority?: string; position?: number });
+      return json(res, card, 201);
     } catch (err) {
       return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
     }

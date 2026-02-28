@@ -669,6 +669,9 @@ export class Organization {
   @Column({ name: "max_ci_fix_retries", type: "int", default: 3 })
   maxCiFixRetries: number;
 
+  @Column({ name: "blocker_wait_timeout_minutes", type: "int", default: 20 })
+  blockerWaitTimeoutMinutes: number;
+
   @Column({ name: "push_after_commit", type: "boolean", default: true })
   pushAfterCommit: boolean;
 

@@ -106,6 +106,7 @@ function loadResilienceConfig(): ResilienceConfig {
     fileOverlapGatingEnabled: process.env.FILE_OVERLAP_GATING_ENABLED !== "false",
     incrementalRebaseEnabled: process.env.INCREMENTAL_REBASE_ENABLED !== "false",
     mergeAgentEnabled: process.env.MERGE_AGENT_ENABLED !== "false",
+    blockerWaitTimeoutMs: parseInt(process.env.BLOCKER_WAIT_TIMEOUT_MINUTES || "20", 10) * 60_000,
   };
 }
 

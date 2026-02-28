@@ -175,6 +175,7 @@ router.get("/", async (req: Request, res: Response) => {
       blockerAutoRetryEnabled: org.blockerAutoRetryEnabled,
       qualityGateMaxRetries: org.qualityGateMaxRetries,
       maxCiFixRetries: org.maxCiFixRetries,
+      blockerWaitTimeoutMinutes: org.blockerWaitTimeoutMinutes,
       pushAfterCommit: org.pushAfterCommit,
       gracefulShutdownEnabled: org.gracefulShutdownEnabled,
       selfReviewEnabled: org.selfReviewEnabled,
@@ -324,6 +325,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       blockerAutoRetryEnabled,
       qualityGateMaxRetries,
       maxCiFixRetries,
+      blockerWaitTimeoutMinutes,
       pushAfterCommit,
       gracefulShutdownEnabled,
       selfReviewEnabled,
@@ -1142,6 +1144,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.maxCiFixRetries = retries;
     }
 
+    if (blockerWaitTimeoutMinutes !== undefined) {
+      const timeout = parseInt(blockerWaitTimeoutMinutes, 10);
+      if (isNaN(timeout) || timeout < 1 || timeout > 120) {
+        res.status(400).json({ error: "blockerWaitTimeoutMinutes must be between 1 and 120" });
+        return;
+      }
+      org.blockerWaitTimeoutMinutes = timeout;
+    }
+
     if (pushAfterCommit !== undefined) {
       org.pushAfterCommit = pushAfterCommit === true;
     }
@@ -1336,6 +1347,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         blockerAutoRetryEnabled: org.blockerAutoRetryEnabled,
         qualityGateMaxRetries: org.qualityGateMaxRetries,
         maxCiFixRetries: org.maxCiFixRetries,
+        blockerWaitTimeoutMinutes: org.blockerWaitTimeoutMinutes,
         pushAfterCommit: org.pushAfterCommit,
         gracefulShutdownEnabled: org.gracefulShutdownEnabled,
         selfReviewEnabled: org.selfReviewEnabled,

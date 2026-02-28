@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.2.68",
+  "version": "0.2.69",
   "publisher": "workermill",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -301,6 +301,13 @@
           "minimum": 0,
           "maximum": 20,
           "description": "Max quality gate retry attempts before failing."
+        },
+        "workermill.blockerWaitTimeoutMinutes": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 120,
+          "description": "Minutes to wait for human blocker resolution before aborting (1-120)."
         },
         "workermill.pushAfterCommit": {
           "type": "boolean",

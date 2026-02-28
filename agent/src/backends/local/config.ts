@@ -54,6 +54,7 @@ export interface StandaloneConfig {
     maxReviewRevisions?: number;
     qualityGateMaxRetries?: number;
     maxCiFixRetries?: number;
+    blockerWaitTimeoutMinutes?: number;
     pushAfterCommit?: boolean;
   };
 }

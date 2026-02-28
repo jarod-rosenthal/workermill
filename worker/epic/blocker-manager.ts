@@ -198,7 +198,7 @@ export class BlockerManager {
    */
   async waitForBlockerResponse(
     blocker: BlockerInfo,
-    timeoutMs: number = 3600000 // 1 hour default
+    timeoutMs: number = 20 * 60_000 // 20 min default
   ): Promise<BlockerResponse | null> {
     const startTime = Date.now();
     const pollInterval = 5000; // Poll every 5 seconds

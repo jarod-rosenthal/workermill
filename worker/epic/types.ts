@@ -356,6 +356,8 @@ export interface ResilienceConfig {
   incrementalRebaseEnabled?: boolean;
   /** Spawn Claude to intelligently resolve rebase conflicts during consolidation */
   mergeAgentEnabled?: boolean;
+  /** Timeout in ms for waiting on human blocker resolution (default: 20 min) */
+  blockerWaitTimeoutMs?: number;
 }
 
 /**

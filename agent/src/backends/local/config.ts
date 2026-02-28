@@ -20,8 +20,22 @@ import { homedir } from "os";
 const CONFIG_DIR = join(homedir(), ".workermill");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
+/** Per-role LLM configuration. Each role can use a different provider/model. */
+export interface RoleConfig {
+  provider: string;
+  model: string;
+  apiKey?: string;
+}
+
 export interface StandaloneConfig {
   mode: "standalone" | "cloud";
+  /** Per-role LLM configuration (planner, worker, techLead). */
+  roles?: {
+    planner?: RoleConfig;
+    worker?: RoleConfig;
+    techLead?: RoleConfig;
+  };
+  /** @deprecated Use `roles` instead. Kept for backward compatibility. */
   llm?: {
     provider: string;
     model: string;
@@ -40,10 +54,10 @@ export interface StandaloneConfig {
 
 const DEFAULT_CONFIG: StandaloneConfig = {
   mode: "standalone",
-  llm: {
-    provider: "anthropic",
-    model: "claude-sonnet-4-20250514",
-    apiKey: "",
+  roles: {
+    planner: { provider: "anthropic", model: "claude-sonnet-4-6" },
+    worker: { provider: "anthropic", model: "claude-sonnet-4-6" },
+    techLead: { provider: "anthropic", model: "claude-sonnet-4-6" },
   },
   settings: {
     maxParallelExperts: 4,
@@ -81,10 +95,68 @@ export function saveStandaloneConfig(config: StandaloneConfig): void {
   }
 }
 
-/** Check if standalone mode is configured (has LLM API key). */
+/**
+ * Get the effective config for a role, with fallback chain:
+ * roles.<role> → legacy llm → defaults
+ */
+export function getRoleConfig(config: StandaloneConfig, role: "planner" | "worker" | "techLead"): RoleConfig {
+  // New per-role config
+  const roleConf = config.roles?.[role];
+  if (roleConf?.provider && roleConf?.model) return roleConf;
+
+  // Legacy flat llm config (backward compat)
+  if (config.llm?.provider && config.llm?.model) {
+    return {
+      provider: config.llm.provider,
+      model: config.llm.model,
+      apiKey: config.llm.apiKey,
+    };
+  }
+
+  // Defaults
+  return { provider: "anthropic", model: "claude-sonnet-4-6" };
+}
+
+/**
+ * Resolve the API key for a role. Priority:
+ * 1. Explicit key in role config
+ * 2. Legacy llm.apiKey
+ * 3. Environment variable (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)
+ * 4. Claude OAuth credentials (~/.claude/.credentials.json)
+ */
+export function resolveApiKey(config: StandaloneConfig, role: "planner" | "worker" | "techLead"): string {
+  const rc = getRoleConfig(config, role);
+
+  // Explicit key in config
+  if (rc.apiKey) return rc.apiKey;
+
+  // Legacy flat key
+  if (config.llm?.apiKey && config.llm?.provider === rc.provider) return config.llm.apiKey;
+
+  // Environment variable
+  const envKey = getEnvKeyForProvider(rc.provider);
+  if (envKey && process.env[envKey]) return process.env[envKey]!;
+
+  // Claude OAuth token (Anthropic only)
+  if (rc.provider === "anthropic") {
+    const oauthKey = readClaudeOAuthKey();
+    if (oauthKey) return oauthKey;
+  }
+
+  return "";
+}
+
+/** Check if standalone mode is configured (has at least one role with a resolvable API key). */
 export function isStandaloneReady(): boolean {
   const config = loadStandaloneConfig();
-  return config.mode === "standalone" && !!config.llm?.apiKey;
+  if (config.mode !== "standalone") return false;
+
+  // Check if any role has a key (config, env var, or OAuth)
+  return (
+    !!resolveApiKey(config, "planner") ||
+    !!resolveApiKey(config, "worker") ||
+    !!resolveApiKey(config, "techLead")
+  );
 }
 
 /**
@@ -121,4 +193,44 @@ export function getStandaloneConfigDir(): string {
 /** Get the config file path. */
 export function getStandaloneConfigFile(): string {
   return CONFIG_FILE;
+}
+
+// ── Internal helpers ──
+
+/** Map provider name to environment variable. */
+function getEnvKeyForProvider(provider: string): string | null {
+  switch (provider) {
+    case "anthropic": return "ANTHROPIC_API_KEY";
+    case "openai": return "OPENAI_API_KEY";
+    case "google": return "GOOGLE_GENERATIVE_AI_API_KEY";
+    default: return null;
+  }
+}
+
+/** Read the OAuth API key from ~/.claude/.credentials.json if it exists. */
+function readClaudeOAuthKey(): string | null {
+  try {
+    const credsPath = join(homedir(), ".claude", ".credentials.json");
+    if (!existsSync(credsPath)) return null;
+    const creds = JSON.parse(readFileSync(credsPath, "utf-8"));
+    // credentials.json has { claudeAiOauth: { token } } or similar
+    return creds?.claudeAiOauth?.token || creds?.apiKey || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Check if an API key is available for a provider (env var, OAuth, etc.) without config. */
+export function detectExistingKey(provider: string): string | null {
+  // Environment variable
+  const envKey = getEnvKeyForProvider(provider);
+  if (envKey && process.env[envKey]) return process.env[envKey]!;
+
+  // Claude OAuth (Anthropic only)
+  if (provider === "anthropic") {
+    const oauth = readClaudeOAuthKey();
+    if (oauth) return oauth;
+  }
+
+  return null;
 }

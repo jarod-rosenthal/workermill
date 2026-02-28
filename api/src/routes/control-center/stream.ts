@@ -95,7 +95,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       const intermediateDisplayMinutes = freshOrg.intermediateTaskDisplayMinutes || 15;
       const intermediateCutoff = new Date(Date.now() - intermediateDisplayMinutes * 60 * 1000);
       // Statuses that always indicate active work
-      const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing", "planning", "pending_plan_approval", "dispatching", "reviewing", "consolidating"];
+      const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing", "planning", "pending_plan_approval", "dispatching", "reviewing", "consolidating", "integration_check"];
       // Intermediate statuses that should only show if recent (configurable, default 60 min)
       const intermediateStatuses = [
         "pr_created", "review_requested", "manager_review", "review_pending",
@@ -137,7 +137,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
         .reduce((sum, t) => sum + (Number(t.estimatedCostUsd) || 0), 0);
 
       // "Active" = tasks where a worker is actually executing (not queued, not waiting)
-      const executingStatuses = ["claimed", "environment_setup", "executing", "planning", "dispatching", "pending_plan_approval", "reviewing", "consolidating"];
+      const executingStatuses = ["claimed", "environment_setup", "executing", "planning", "dispatching", "pending_plan_approval", "reviewing", "consolidating", "integration_check"];
       const stats = {
         totalWorkers: 7,
         activeWorkers: displayableTasks.filter(t => executingStatuses.includes(t.status)).length,

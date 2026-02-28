@@ -373,7 +373,7 @@ router.post("/:id/worker-progress", authenticateApiKey, async (req: Request, res
     const { status, prUrl, prNumber, revisionCount } = req.body;
 
     // Only allow known non-terminal progress statuses
-    const allowedStatuses = ["pr_created", "review_requested", "reviewing", "consolidating", "deploying"];
+    const allowedStatuses = ["pr_created", "review_requested", "reviewing", "consolidating", "deploying", "integration_check"];
     if (!allowedStatuses.includes(status)) {
       res.status(400).json({ error: `Invalid progress status: ${status}. Allowed: ${allowedStatuses.join(", ")}` });
       return;

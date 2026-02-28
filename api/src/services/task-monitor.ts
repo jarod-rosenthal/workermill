@@ -1937,6 +1937,7 @@ export async function syncKbCardColumn(
     case "executing":
     case "planning":
     case "environment_setup":
+    case "integration_check":
       targetColumnNames = ["In Progress"];
       break;
     case "review_requested":

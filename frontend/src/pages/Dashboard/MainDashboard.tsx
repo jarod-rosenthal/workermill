@@ -49,6 +49,7 @@ import {
   FileCode,
   FileText,
   ArrowRight,
+  ShieldCheck,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../../components/RalphProgress";
 import type { PlanningProgressData } from "../../components/PlanningProgress";
@@ -1909,6 +1910,8 @@ export default function Dashboard() {
         return "text-blue-500";
       case "review_rejected":
         return "text-red-400";
+      case "integration_check":
+        return "text-teal-500";
       case "deployment_pending":
       case "deploying":
         return "text-blue-400";
@@ -2615,6 +2618,7 @@ export default function Dashboard() {
                                           step.icon === "epic" ? Zap :
                                           step.icon === "planning" ? PlanningIcon :
                                           step.icon === "steps" ? StepsIcon :
+                                          step.icon === "integration_check" ? ShieldCheck :
                                           step.icon === "tech_lead_review" ? TechLeadReviewIcon :
                                           CheckCircle;
                           const isActive = step.status === "active";

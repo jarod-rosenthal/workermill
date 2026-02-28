@@ -156,6 +156,7 @@ export function getTaskSteps(
       { name: "Planning", icon: "planning", statuses: ["planning"] },
       { name: "Steps", icon: "steps", statuses: ["pending_plan_approval", "queued", "claimed", "environment_setup", "executing", "dispatching", "consolidating"], isParallelStage: true },
       { name: "PR Created", icon: "pr_created", statuses: ["pr_created", "review_requested"] },
+      { name: "Integration Check", icon: "integration_check", statuses: ["integration_check"] },
       { name: "Tech Lead Review", icon: "tech_lead_review", statuses: ["reviewing", "pr_approved"], isReviewStage: true },
       { name: "Deployed", icon: "deployed", statuses: ["deploying", "deployed", "completed"] },
     ];

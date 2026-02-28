@@ -25,6 +25,7 @@ import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client
 import type { DecisionClient } from "./decision-client.js";
 import { createRetryableApi } from "./api-retry.js";
 import { InlineGateFixer } from "./inline-gate-fixer.js";
+import { InlineEscalationFixer } from "./inline-escalation-fixer.js";
 import { runGateCommand } from "./gate-utils.js";
 import axios from "axios";
 import * as fs from "fs/promises";
@@ -1632,39 +1633,110 @@ ${parts.join("\n\n")}
                   h.errorSnippet.slice(0, 200) === errorMessage.slice(0, 200)
               );
 
-          // After 3+ identical failures, escalate to full re-execution with approach-change instructions
-          if (isRepeatedFailure && history.length >= 3) {
-            await this.postLog(
-              `[Quality Gate] Same error ${history.length} times — telling expert to change approach entirely`,
-              expert,
-              "system"
-            );
-            const approachChangeFeedback = `## QUALITY GATE FAILED — CHANGE YOUR APPROACH
-
-Your code has failed the same quality gate ${history.length} times with the same error.
-The previous approach is fundamentally wrong — DO NOT try the same pattern again.
-
-**Failed command:** ${failedCmd}
-
-**Error (latest):**
-${errorMessage.slice(0, 2000)}
-
-**What to do differently:**
-- If writing tests: use a completely different testing strategy (e.g. integration tests
-  instead of unit mocks, or table-driven tests instead of mocking a complex interface)
-- If a library/pattern keeps failing to compile: use a simpler alternative
-- If stuck on the same type error: reconsider the API design, not just the test
-- It is acceptable to simplify scope — a passing simpler test is better than a failing complex one`;
-            return this.executeStory(story, expert, totalStories, approachChangeFeedback);
-          }
-
-          // Re-merge sibling branches before retry so expert has latest code
+          // Re-merge sibling branches BEFORE any retry so agent has latest code from other experts
           await this.rebaseSiblingBranches(story, expert);
 
           const isPreCommitGate = errorMessage.startsWith("Pre-commit quality gate failed");
           const worktreePath = this.worktreePathByStory.get(story.storyIndex);
 
-          if (isPreCommitGate && worktreePath && this.config.qualityGateCommands) {
+          // After 2+ identical failures, escalate to full-context escalation agent
+          // This agent sees: story requirements, full error history, coordination context,
+          // and works in the existing worktree with authority to rewrite the approach entirely.
+          if (isRepeatedFailure && history.length >= 2 && isPreCommitGate && worktreePath && this.config.qualityGateCommands) {
+            await this.postLog(
+              `[Quality Gate] Same error ${history.length} times — spawning escalation agent with full context`,
+              expert,
+              "system"
+            );
+
+            // Gather coordination context so escalation agent sees what siblings built
+            const coordinationContext = await this.coordination.getContextsByTypes([
+              "completion", "decision", "file_created", "file_modified",
+            ]);
+
+            const gateCommands = failedCmd !== "unknown"
+              ? [failedCmd, ...this.config.qualityGateCommands.flatMap((g) => g.commands).filter((c) => c !== failedCmd)]
+              : this.config.qualityGateCommands.flatMap((g) => g.commands);
+
+            const escalationFixer = new InlineEscalationFixer(
+              this.config,
+              worktreePath,
+              story,
+              gateCommands,
+              expert,
+              history,
+              coordinationContext,
+            );
+            const escalationResult = await escalationFixer.run();
+
+            if (escalationResult.success) {
+              await this.postLog(
+                `[Quality Gate] Escalation agent succeeded — finalizing story`,
+                expert,
+                "system"
+              );
+
+              // Commit any remaining uncommitted changes (safety net)
+              const uncommitted = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
+              if (uncommitted.length > 0) {
+                const commitMsg = "fix: escalation rewrite — Story " + story.storyIndex + " - " + story.title;
+                await this.gitOps.commitChangesInWorktree(worktreePath, commitMsg, expert, story.storyIndex);
+              }
+
+              // Push branch
+              await this.gitOps.pushBranchFromWorktree(worktreePath, branchName!);
+              await this.postLog(`Pushed branch to remote after escalation fix`, expert, "system");
+
+              // Post-push CI gate (if configured)
+              if (this.config.ciWorkflowPath && !this.config.qualityGateBypass) {
+                const ciResult = await this.runPostPushCIGate(worktreePath, branchName!, expert);
+                if (!ciResult.passed && !ciResult.infrastructureFailure) {
+                  throw new Error(`Post-push CI failed:\n${ciResult.log || ciResult.summary}`);
+                }
+              }
+
+              // Get changed files and validate
+              const changedFiles = await this.gitOps.getFilesChangedVsMainInWorktree(worktreePath);
+              const validation = await this.validateStoryCompletion(story, worktreePath, changedFiles, expert);
+
+              // Post completion to coordination feed
+              const currentRevision = await this.coordination.getCurrentRevision();
+              await this.coordination.postCompletion(
+                story.storyIndex,
+                story.title,
+                expert,
+                this.config.parentTaskId,
+                {
+                  branchName: branchName!,
+                  filesModified: changedFiles,
+                  revisionNumber: currentRevision,
+                  validation: {
+                    passed: validation.valid,
+                    issues: validation.issues,
+                    criteriaMetRatio: `${validation.acceptanceCriteriaMet}/${validation.acceptanceCriteriaTotal}`,
+                  },
+                }
+              );
+
+              await this.ticketOps.postComment(
+                `**${story.title}** — completed by ${expert} (escalation agent rewrote approach)\n\n${changedFiles.length} file${changedFiles.length !== 1 ? "s" : ""} changed.`
+              );
+
+              storyResult.success = true;
+              storyResult.filesModified = changedFiles;
+              storyResult.branchName = branchName;
+              storyResult.worktreePath = worktreePath;
+              this.worktreePathByStory.delete(story.storyIndex);
+              return storyResult;
+            }
+
+            await this.postLog(
+              `[Quality Gate] Escalation agent could not fix: ${escalationResult.summary}`,
+              expert,
+              "system"
+            );
+            // Fall through to park/escalate logic below
+          } else if (isPreCommitGate && worktreePath && this.config.qualityGateCommands) {
             // Use InlineGateFixer for surgical fix instead of re-executing entire story
             await this.postLog(
               `[Quality Gate] Retry ${gateRetryCount + 1}/${gateMaxRetries} — spawning inline gate fixer`,

@@ -676,6 +676,18 @@ When summarizing your work at the end, describe decisions in plain language. The
         // Rewrite "gofmt -w ./api/..." → "gofmt -w ./api/" etc.
         cmd = cmd.replace(/\bgofmt\b(.+?)\.\/([^\s]*)\.\.\./g, "gofmt$1./$2");
 
+        // Auto-fix step: attempt to fix trivially fixable issues before checking.
+        // This handles eslint --fix, gofmt, prettier, etc. Best-effort — failures are ignored.
+        const autoFixCmd = this.getAutoFixCommand(cmd);
+        if (autoFixCmd) {
+          try {
+            await this.runGateCommand(autoFixCmd, worktreePath, 120_000);
+            await this.postLog(`[Quality Gate] 🔧 Auto-fix: ${autoFixCmd}`, expert, "system");
+          } catch {
+            // Auto-fix failure is non-blocking — we'll catch real errors in the gate check
+          }
+        }
+
         try {
           const result = await this.runGateCommand(cmd, worktreePath, 300_000);
           // runGateCommand resolves for both clean exits AND watch-mode kills.
@@ -733,6 +745,32 @@ When summarizing your work at the end, describe decisions in plain language. The
     }
 
     return { passed: true, output: "", failedCommand: "" };
+  }
+
+  /**
+   * Derive an auto-fix command from a gate check command.
+   * Returns null if no auto-fix is available for the given command.
+   */
+  private getAutoFixCommand(cmd: string): string | null {
+    // ESLint: "npm run lint" or "npx eslint" → add --fix
+    // Match "cd <dir> && npm run lint" or bare "npm run lint"
+    if (/\bnpm run lint\b/.test(cmd) && !cmd.includes("--fix")) {
+      return cmd.replace(/\bnpm run lint\b/, "npm run lint -- --fix");
+    }
+    if (/\bnpx eslint\b/.test(cmd) && !cmd.includes("--fix")) {
+      return cmd + " --fix";
+    }
+    // Prettier: "npx prettier --check" → "--write"
+    if (/\bprettier\b.*--check\b/.test(cmd)) {
+      return cmd.replace("--check", "--write");
+    }
+    // gofmt: already writes in-place with -w, but "gofmt -l" (list) → "gofmt -w"
+    if (/\bgofmt\s+-l\b/.test(cmd)) {
+      return cmd.replace("-l", "-w");
+    }
+    // Python: autopep8/black/ruff format — these are already fixers, skip
+    // Go vet, go test, go build — no auto-fix available
+    return null;
   }
 
   /**

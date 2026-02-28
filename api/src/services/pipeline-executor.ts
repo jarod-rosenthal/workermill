@@ -578,6 +578,7 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     additionalEnv.BLOCKER_MAX_AUTO_RETRIES = String(org.blockerMaxAutoRetries);
     additionalEnv.BLOCKER_AUTO_RETRY_ENABLED = org.blockerAutoRetryEnabled !== false ? "true" : "false";
     additionalEnv.QUALITY_GATE_MAX_RETRIES = String(org.qualityGateMaxRetries);
+    additionalEnv.MAX_CI_FIX_RETRIES = String(org.maxCiFixRetries);
     additionalEnv.PUSH_AFTER_COMMIT = org.pushAfterCommit !== false ? "true" : "false";
     additionalEnv.GRACEFUL_SHUTDOWN_ENABLED = org.gracefulShutdownEnabled !== false ? "true" : "false";
     additionalEnv.SELF_REVIEW_ENABLED = org.selfReviewEnabled === true ? "true" : "false";

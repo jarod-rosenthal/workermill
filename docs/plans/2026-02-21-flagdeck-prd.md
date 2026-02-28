@@ -45,7 +45,7 @@ cd api && go build -o /dev/null ./cmd/server
 
 **IMPORTANT — CI must use the EXACT same commands:** The CI workflow (`.github/workflows/ci.yml`) MUST run the exact same commands as this quality gate. No additional linters, no different flags. If the quality gate passes, CI must also pass. Any divergence is a bug.
 
-**IMPORTANT — Go version must be IDENTICAL everywhere:** The Go version in `api/go.mod`, `api/Dockerfile` (`FROM golang:X.XX-alpine`), and `.github/workflows/ci.yml` (`go-version: "X.XX"`) MUST all specify the EXACT same version. This project uses **Go 1.22**. Do NOT upgrade `go.mod` to a newer Go version (e.g., 1.23, 1.24) without also updating the Dockerfile and CI workflow. A version mismatch causes CI failures because the CI Go toolchain cannot compile code that requires a newer Go version than it has installed.
+**IMPORTANT — Go version must be IDENTICAL everywhere:** The Go version in `api/go.mod`, `api/Dockerfile` (`FROM golang:X.XX-alpine`), and `.github/workflows/ci.yml` (`go-version: "X.XX"`) MUST all specify the EXACT same version. This project uses **Go 1.24**. Do NOT change the Go version in any one location without updating all three. A version mismatch causes CI failures because the CI Go toolchain cannot compile code that requires a newer Go version than it has installed.
 
 ### Pre-Commit Quality Gate — SvelteKit Frontend (MANDATORY)
 
@@ -265,7 +265,7 @@ rdb := redis.NewClient(opt)
 
 | Layer | Technology | Version | Rationale |
 |-------|-----------|---------|-----------|
-| **Backend framework** | Go + Fiber | Go 1.22 (exact), Fiber v2 | High-performance, Express-like API for Go. Fiber is the most starred Go web framework after Gin, with familiar middleware patterns. **Go version is pinned — do NOT upgrade.** |
+| **Backend framework** | Go + Fiber | Go 1.24 (exact), Fiber v2 | High-performance, Express-like API for Go. Fiber is the most starred Go web framework after Gin, with familiar middleware patterns. **Go version is pinned — do NOT change without updating Dockerfile and CI.** |
 | **Database** | MongoDB | 7.x (Atlas M0) | Document-based storage fits schema-flexible flag configs. Targeting rules vary per flag — documents model this naturally. |
 | **Cache** | Redis | 7+ (Upstash) | Sub-millisecond flag evaluation caching. Upstash provides serverless Redis with REST API fallback. |
 | **Frontend framework** | SvelteKit | 2.x (Svelte 5) | Compiled reactivity, file-based routing, SSR/SPA flexibility. Stack diversity from existing Next.js showcases. |
@@ -1113,7 +1113,7 @@ For each variant pair (control vs treatment):
 ```go
 module github.com/workermill-examples/flagdeck/api
 
-go 1.22  // PINNED — must match Dockerfile (golang:1.22-alpine) and CI (go-version: "1.22")
+go 1.24  // PINNED — must match Dockerfile (golang:1.24-alpine) and CI (go-version: "1.24")
 
 require (
     github.com/gofiber/fiber/v2 v2.52.0
@@ -1268,7 +1268,7 @@ volumes:
 
 ```dockerfile
 # Stage 1: Build
-FROM golang:1.22-alpine AS builder  # MUST match go.mod and CI go-version
+FROM golang:1.24-alpine AS builder  # MUST match go.mod and CI go-version
 WORKDIR /app
 
 COPY go.mod go.sum ./
@@ -1589,7 +1589,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"  # MUST match api/go.mod AND api/Dockerfile
+          go-version: "1.24"  # MUST match api/go.mod AND api/Dockerfile
 
       - name: Vet
         working-directory: api
@@ -1913,7 +1913,7 @@ Workers MUST create a `README.md` covering:
 |------|--------|------------|
 | **MongoDB Atlas M0 limitations** | 512 MB storage, 100 connections, no change streams | Sufficient for showcase — 10 flags + audit logs is < 1 MB. Use polling for dashboard refresh, not change streams. |
 | **Upstash free tier limit (10K commands/day)** | Evaluation endpoint could exhaust daily limit under load | Acceptable for showcase traffic. Upgrade to paid ($10/mo for 10K commands/day → pay-as-you-go) if needed. |
-| **Go module version drift** | Workers generate code for wrong Go version or dependency version | Pin exact versions in `go.mod`. Use `go 1.22` directive. |
+| **Go module version drift** | Workers generate code for wrong Go version or dependency version | Pin exact versions in `go.mod`. Use `go 1.24` directive. |
 | **SvelteKit 2 vs Svelte 5 confusion** | Workers mix SvelteKit 1 patterns (no runes) with SvelteKit 2 | PRD explicitly pins SvelteKit 2.x + Svelte 5 with runes. Workers should use `$state()`, `$derived()`, `$effect()`. |
 | **Hashing library compatibility** | Third-party hash libs may use unsafe pointers that crash under `-race` | Use Go stdlib `hash/fnv` (FNV-1a 32-bit). Do NOT use `spaolacci/murmur3` — it crashes with Go's `-race` detector due to unsafe pointer arithmetic (`checkptr` violation). |
 | **Cross-story file conflicts** | Two workers edit same file | File cap enforced by planner. Max 5-8 files per story, no overlaps. |

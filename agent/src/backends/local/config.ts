@@ -16,7 +16,7 @@ import {
 } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { readApiKeyFromKeychain } from "../../keychain.js";
+
 
 const CONFIG_DIR = join(homedir(), ".workermill");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -186,11 +186,16 @@ export function isCloudMode(): boolean {
     const raw = readFileSync(CONFIG_FILE, "utf-8");
     const parsed = JSON.parse(raw);
 
-    // Resolve API key: config file first, then OS keychain
-    const hasApiKey = !!parsed.apiKey || !!readApiKeyFromKeychain();
+    // Explicit cloud mode — trust the config.
+    if (parsed.mode === "cloud") return true;
 
-    // If user has an API key, they're signed in — always use cloud mode
-    if (hasApiKey) return true;
+    // Config has apiUrl — this is a cloud setup. The API key lives in the OS
+    // keychain or in the config file. Don't re-verify the key here because
+    // keychain reads can intermittently fail (e.g., PowerShell CredManager on
+    // WSL) and config.json may have apiKey: "" when the key is keychain-only.
+    // The API key is validated at agent startup; by the time the backend
+    // selector calls this, connectivity is already confirmed.
+    if (parsed.apiUrl) return true;
 
     return false;
   } catch {

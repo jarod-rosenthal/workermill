@@ -46,9 +46,25 @@ export interface CriticResult {
  * Format critic feedback as a refinement prompt for the planner.
  * Used when the critic APPROVED the plan but has suggestions worth incorporating.
  */
-export function formatLocalRefinementFeedback(critic: CriticResult, maxTargetFiles = 5): string {
+export function formatLocalRefinementFeedback(critic: CriticResult, maxTargetFiles = 5, plan?: { summary: string; stories: unknown[]; risks: string[]; assumptions: string[] }): string {
   const lines: string[] = [
     "",
+  ];
+
+  if (plan) {
+    lines.push(
+      "***REMOVED******REMOVED*** YOUR APPROVED PLAN",
+      "",
+      "Below is the plan you generated that was approved by the reviewer. Refine it based on the suggestions that follow.",
+      "",
+      "```json",
+      JSON.stringify(plan, null, 2),
+      "```",
+      "",
+    );
+  }
+
+  lines.push(
     "***REMOVED******REMOVED*** REVIEWER NOTES — Your plan was APPROVED, but the reviewer has suggestions",
     "",
     `Score: ${critic.score}/100 (approved)`,
@@ -57,7 +73,7 @@ export function formatLocalRefinementFeedback(critic: CriticResult, maxTargetFil
     "Review each suggestion and incorporate the ones that genuinely improve the plan.",
     "You may reject suggestions that would reduce quality or don't apply.",
     "",
-  ];
+  );
 
   if (critic.risks.length > 0) {
     lines.push("***REMOVED******REMOVED******REMOVED*** Risks Identified:");

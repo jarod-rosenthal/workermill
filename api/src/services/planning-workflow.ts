@@ -1019,7 +1019,7 @@ async function processLocalPlanningAgent(
         );
 
         try {
-          const refinementFeedback = formatLocalRefinementFeedback(criticResult, maxFiles);
+          const refinementFeedback = formatLocalRefinementFeedback(criticResult, maxFiles, plan);
           const refinedPlan = await runLocalPlanningAgent(
             {
               ...planningInput,

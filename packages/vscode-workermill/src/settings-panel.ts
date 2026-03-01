@@ -260,6 +260,8 @@ export class SettingsPanel {
         vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/pricing`));
       } else if (msg.type === "save-models") {
         await this.saveModels(config, msg);
+      } else if (msg.type === "save-worker-behavior") {
+        await this.saveWorkerBehavior(config, msg);
       } else if (msg.type === "switch-org") {
         await this.switchOrg(config, msg.orgId);
       }
@@ -621,6 +623,42 @@ export class SettingsPanel {
       }
     } catch (err) {
       this.postMessage({ type: "models-save-error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async saveWorkerBehavior(
+    config: { apiUrl: string; apiKey: string },
+    msg: {
+      maxPerStoryRevisions: number;
+      maxReviewRevisions: number;
+      qualityGateMaxRetries: number;
+      maxCiFixRetries: number;
+      blockerWaitTimeoutMinutes: number;
+      pushAfterCommit: boolean;
+    },
+  ): Promise<void> {
+    try {
+      this.postMessage({ type: "saving" });
+      const { status, data } = await apiRequest<{ success?: boolean; error?: string }>(
+        "PUT",
+        `${config.apiUrl}/api/settings`,
+        config.apiKey,
+        {
+          maxPerStoryRevisions: msg.maxPerStoryRevisions,
+          maxReviewRevisions: msg.maxReviewRevisions,
+          qualityGateMaxRetries: msg.qualityGateMaxRetries,
+          maxCiFixRetries: msg.maxCiFixRetries,
+          blockerWaitTimeoutMinutes: msg.blockerWaitTimeoutMinutes,
+          pushAfterCommit: msg.pushAfterCommit,
+        },
+      );
+      if (status >= 200 && status < 300) {
+        this.postMessage({ type: "worker-behavior-saved" });
+      } else {
+        this.postMessage({ type: "worker-behavior-save-error", message: data?.error || `HTTP ${status}` });
+      }
+    } catch (err) {
+      this.postMessage({ type: "worker-behavior-save-error", message: err instanceof Error ? err.message : String(err) });
     }
   }
 

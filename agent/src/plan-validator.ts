@@ -621,11 +621,19 @@ export function formatCriticFeedback(critic: CriticResult): string {
  * suggestions worth incorporating. Unlike rejection feedback, this is
  * collaborative — the planner should consider suggestions, not blindly apply them.
  */
-export function formatRefinementFeedback(critic: CriticResult): string {
+export function formatRefinementFeedback(critic: CriticResult, plan: ExecutionPlan): string {
   if (cachedCriticConfig?.refinementFeedbackTemplate) {
     return interpolateFeedbackTemplate(cachedCriticConfig.refinementFeedbackTemplate, critic);
   }
   const lines: string[] = [
+    "",
+    "## YOUR APPROVED PLAN",
+    "",
+    "Below is the plan you generated that was approved by the reviewer. Refine it based on the suggestions that follow.",
+    "",
+    "```json",
+    JSON.stringify(plan, null, 2),
+    "```",
     "",
     "## REVIEWER NOTES — Your plan was APPROVED, but the reviewer has suggestions",
     "",

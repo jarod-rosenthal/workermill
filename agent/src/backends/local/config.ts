@@ -189,11 +189,8 @@ export function isCloudMode(): boolean {
     // Resolve API key: config file first, then OS keychain
     const hasApiKey = !!parsed.apiKey || !!readApiKeyFromKeychain();
 
-    // Explicit cloud mode
-    if (parsed.mode === "cloud" && hasApiKey) return true;
-
-    // Backward compat: existing cloud config has apiUrl + apiKey but no mode field
-    if (!parsed.mode && !!parsed.apiUrl && hasApiKey) return true;
+    // If user has an API key, they're signed in — always use cloud mode
+    if (hasApiKey) return true;
 
     return false;
   } catch {

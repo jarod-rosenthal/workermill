@@ -3225,10 +3225,9 @@ export class EpicCoordinator {
         errorMessage = "PR creation failed after stories completed";
         jiraComment = `⚠️ **${completions.length} stories completed**, but PR creation failed.\n\n${storyList}\n\n*Please check the worker logs and retry.*`;
       } else {
-        // No Jira key, so no PR was attempted - unusual case
-        taskStatus = "failed";
-        errorMessage = "No Jira key provided, cannot create PR";
-        jiraComment = `✅ **${completions.length} stories completed.**\n\n${storyList}\n\n*No ticket key was provided, so no PR was created.*`;
+        // No Jira key, so no PR was attempted — standalone mode or direct task
+        taskStatus = "completed";
+        jiraComment = `✅ **${completions.length} stories completed.**\n\n${storyList}\n\n*No ticket key was provided, so no PR was created. Story branches have been pushed.*`;
       }
 
       // Post comment to Jira (skip if already posted by deployer)

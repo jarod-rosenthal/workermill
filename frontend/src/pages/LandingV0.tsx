@@ -6,7 +6,7 @@ import { Header } from "./Home/v0/Header";
 import ShowcaseGallery from "../components/ShowcaseGallery";
 import TrustCallout from "../components/TrustCallout";
 import ExecutionShowcase from "../components/ExecutionShowcase";
-import { Pricing } from "./Home/Pricing";
+
 import { getFeaturedPost } from "../content/blog/posts";
 
 // ─── Featured Article ────────────────────────────────────────────────────────
@@ -332,10 +332,7 @@ export default function LandingV0() {
           {/* Now they're convinced — show how to get started */}
           <InstallSection />
 
-          {/* Pricing Section */}
-          <section id="pricing">
-            <Pricing />
-          </section>
+
         </div>
       </div>
     </main>

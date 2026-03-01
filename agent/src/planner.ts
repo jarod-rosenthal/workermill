@@ -261,6 +261,7 @@ function runClaudeCli(
   taskId: string,
   startTime: number,
   cwd?: string,
+  extraArgs?: string[],
 ): Promise<string> {
   const taskLabel = chalk.cyan(taskId.slice(0, 8));
 
@@ -271,6 +272,7 @@ function runClaudeCli(
         "--output-format", "stream-json",
         "--model", model,
         "--permission-mode", "bypassPermissions",
+        ...(extraArgs || []),
       ];
 
     const proc = spawn(
@@ -1222,13 +1224,14 @@ export async function planTask(
         await postLog(task.id, `${PREFIX} Running refinement pass — incorporating reviewer suggestions...`);
         console.log(`${ts()} ${taskLabel} Running refinement pass...`);
 
-        const refinementPrompt = basePrompt + formatRefinementFeedback(criticResult);
+        const refinementPrompt = basePrompt + formatRefinementFeedback(criticResult, plan);
 
         try {
           let refinedOutput: string;
           if (isAnthropicPlanning) {
-            // No repo access for refinement — planner already explored on first pass.
-            // Passing cwd would cause redundant repo scanning.
+            // No tools for refinement — the approved plan is in the prompt,
+            // critic feedback is appended, just emit the refined JSON.
+            // Without --tools "" Claude CLI re-explores the repo (47+ tool calls).
             refinedOutput = await runClaudeCli(
               claudePath,
               cliModel,
@@ -1236,6 +1239,8 @@ export async function planTask(
               cleanEnv,
               task.id,
               startTime,
+              undefined,
+              ["--tools", ""],
             );
           } else {
             if (!providerApiKey) {

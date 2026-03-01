@@ -3406,6 +3406,9 @@ export class EpicCoordinator {
             this.missionActive = false;
             return "done";
           }
+          if (this.config.jiraIssueKey) {
+            await this.gitOps.postMergeCleanup(this.config.jiraIssueKey);
+          }
         } else {
           // Default: merge the PR after Tech Lead approval (with CI verification)
           const mergeLabel = this.config.prdChildTask ? "PRD auto-run" : "Tech Lead approved";
@@ -3415,6 +3418,9 @@ export class EpicCoordinator {
             console.log(`[Epic] PR #${prNumber} merged successfully`);
             await this.postLog(`PR #${prNumber} merged successfully`);
             await this.ticketOps.postComment(`🔀 PR #${prNumber} auto-merged (${mergeLabel})`);
+            if (this.config.jiraIssueKey) {
+              await this.gitOps.postMergeCleanup(this.config.jiraIssueKey);
+            }
           } else {
             console.warn(`[Epic] PR #${prNumber} merge failed — manual merge required`);
             await this.postLog(`⚠️ PR #${prNumber} auto-merge failed — manual merge required`);
@@ -4254,6 +4260,9 @@ Begin your review now. Start by fetching the code changes.`;
           if (mergeResult.merged) {
             await this.postLog(`PR #${prNumber} merged successfully`);
             await this.ticketOps.postComment(`🔀 PR #${prNumber} auto-merged (PRD workflow)`);
+            if (this.config.jiraIssueKey) {
+              await this.gitOps.postMergeCleanup(this.config.jiraIssueKey);
+            }
           } else {
             await this.postLog(`⚠️ PR #${prNumber} auto-merge failed — manual merge required`);
           }

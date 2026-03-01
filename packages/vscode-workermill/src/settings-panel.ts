@@ -262,6 +262,8 @@ export class SettingsPanel {
         await this.saveModels(config, msg);
       } else if (msg.type === "save-worker-behavior") {
         await this.saveWorkerBehavior(config, msg);
+      } else if (msg.type === "save-linear") {
+        await this.saveLinear(config, msg);
       } else if (msg.type === "switch-org") {
         await this.switchOrg(config, msg.orgId);
       }
@@ -310,14 +312,16 @@ export class SettingsPanel {
           orgsResult.status >= 200 && orgsResult.status < 300
             ? orgsResult.data
             : [];
+        const s = settingsResult.data || {};
         const merged = {
+          ...s,
           ...intResult.data,
-          orgName: settingsResult.data?.name,
-          orgSlug: settingsResult.data?.slug,
-          orgId: settingsResult.data?.id || config.orgId,
-          defaultWorkerModel: settingsResult.data?.defaultWorkerModel,
-          managerModelId: settingsResult.data?.managerModelId,
-          planningAgentModel: settingsResult.data?.planningAgentModel,
+          orgName: s.name,
+          orgSlug: s.slug,
+          orgId: s.id || config.orgId,
+          defaultWorkerModel: s.defaultWorkerModel,
+          managerModelId: s.managerModelId,
+          planningAgentModel: s.planningAgentModel,
           organizations: orgs,
         };
         this.postMessage({ type: "integrations-loaded", data: merged });
@@ -659,6 +663,29 @@ export class SettingsPanel {
       }
     } catch (err) {
       this.postMessage({ type: "worker-behavior-save-error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async saveLinear(
+    config: { apiUrl: string; apiKey: string },
+    msg: { apiKey: string },
+  ): Promise<void> {
+    try {
+      this.postMessage({ type: "saving" });
+      const { status, data } = await apiRequest<{ success?: boolean; error?: string }>(
+        "PUT",
+        `${config.apiUrl}/api/settings/integrations/linear`,
+        config.apiKey,
+        { api_key: msg.apiKey },
+      );
+      if (status >= 200 && status < 300) {
+        this.postMessage({ type: "save-success", message: "Linear API key saved" });
+        await this.loadIntegrations(config);
+      } else {
+        this.postMessage({ type: "save-error", message: (data as { error?: string }).error || `HTTP ${status}` });
+      }
+    } catch (err) {
+      this.postMessage({ type: "save-error", message: err instanceof Error ? err.message : String(err) });
     }
   }
 

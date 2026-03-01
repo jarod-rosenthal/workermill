@@ -2778,7 +2778,8 @@ export class EpicCoordinator {
     });
 
     // Deferred retry: if parked stories exist and all non-parked stories are done, retry them
-    if (allIdle && readyToClaim.length === 0 && this.parkedStoryIndices.size > 0 && completions.length > 0) {
+    // Also trigger when ALL stories are parked (completions === 0) — otherwise coordinator hangs forever
+    if (allIdle && readyToClaim.length === 0 && this.parkedStoryIndices.size > 0 && (completions.length > 0 || this.parkedStoryIndices.size >= readyStories.length)) {
       const parkedList = Array.from(this.parkedStoryIndices).sort((a, b) => a - b);
       this.postLog(
         `All other stories complete — retrying ${parkedList.length} parked story(ies): [${parkedList.join(", ")}]`

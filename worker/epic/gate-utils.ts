@@ -17,9 +17,20 @@ export function runGateCommand(
   return new Promise((resolve, reject) => {
     const shell = process.platform === "win32" ? "cmd" : "/bin/sh";
     const shellArgs = process.platform === "win32" ? ["/c", cmd] : ["-c", cmd];
+    // On Windows (Git Bash / MSYS2), the Bun-compiled agent binary may not inherit
+    // Windows user env vars like APPDATA, LOCALAPPDATA, GOCACHE. Go toolchain needs
+    // these to locate the build cache. Inject sensible defaults if missing.
+    const env: Record<string, string | undefined> = { ...process.env, CI: "true" };
+    if (process.platform === "win32" || process.env.MSYSTEM) {
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      if (!env.APPDATA && home) env.APPDATA = `${home}/AppData/Roaming`;
+      if (!env.LOCALAPPDATA && home) env.LOCALAPPDATA = `${home}/AppData/Local`;
+      if (!env.GOCACHE && home) env.GOCACHE = `${home}/.cache/go-build`;
+    }
+
     const child = spawn(shell, shellArgs, {
       cwd,
-      env: { ...process.env, CI: "true" },
+      env,
       stdio: ["pipe", "pipe", "pipe"],
     });
 

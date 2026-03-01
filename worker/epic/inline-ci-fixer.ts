@@ -38,6 +38,7 @@ You have the CI failure output below. Diagnose the exact issue and fix it.
 - Only fix what CI is complaining about. Do NOT refactor or improve other code.
 - Common fixes: remove unused imports/variables, fix type errors, fix lint errors, fix build errors.
 - Run the failing command locally to verify your fix before committing.
+- You have \`docker\` and \`docker compose\` available. If CI tests need service dependencies (MongoDB, Redis, Postgres, etc.), spin them up locally as sibling containers to reproduce and fix failures (e.g. \`docker run -d --rm -p 27017:27017 --name mongo-test mongo:7\`). Clean up when done.
 - Commit with message "fix: resolve CI failure — <brief description>"
 - Push to the PR branch.
 

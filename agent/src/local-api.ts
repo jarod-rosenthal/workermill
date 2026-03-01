@@ -20,8 +20,22 @@ import { triggerPoll } from "./poller.js";
 import { detectGpu } from "./gpu-detector.js";
 import { getOllamaStatus, generateEmbeddings, ensureOllamaRunning, pullModel, installOllama, findOllamaPath } from "./ollama-manager.js";
 import { indexRepositoryLocally } from "./local-indexer.js";
-import { getActiveBackend } from "./backends/selector.js";
+import { getActiveBackend, getBackend } from "./backends/selector.js";
 import { processQueuedTask, stopWorkerTask } from "./backends/local/orchestrator.js";
+import { loadStandaloneConfig } from "./backends/local/config.js";
+import { getDb as getLocalDb } from "./backends/local/db.js";
+import { onStreamEvent } from "./backends/local/event-bus.js";
+import {
+  searchJiraIssues,
+  listJiraProjects,
+  searchLinearIssues,
+  listLinearTeams,
+  searchGitHubIssues,
+  listGitHubRepos,
+} from "./issue-fetchers.js";
+// Decision engine — pure functions from the API service, bundled by esbuild.
+// @ts-ignore — esbuild resolves cross-package imports at bundle time (outside tsc rootDir)
+import { classifyError, evaluateQuality, parseReviewOutcome, routeQuestion, routeProvider, getWorkerConfig } from "../../api/src/services/worker-decision-engine.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -80,6 +94,260 @@ agentEvents.setMaxListeners(100);
  */
 const localTasks = new Map<string, LocalTaskInfo>();
 
+// ── Coordination Store (standalone mode) ──────────────
+// In-memory context store per task. Mirrors the cloud coordination API.
+// When first queried, hydrates story_ready messages from:
+//   1. EXECUTION_PLAN (if task was decomposed) — full stories with personas,
+//      dependencies, targetFiles, mutexGroups (same logic as publishStoriesReady)
+//   2. Task summary/description (single-story fallback)
+
+interface CoordContext {
+  id: string;
+  parentTaskId: string;
+  taskId: string;
+  persona: string;
+  messageType: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+interface CoordStore {
+  contexts: CoordContext[];
+  initialized: boolean;
+}
+
+const coordStores = new Map<string, CoordStore>();
+
+// SSE clients subscribed to coordination streams (for real-time push)
+const coordSseClients = new Map<string, Set<ServerResponse>>();
+
+function getCoordStore(taskId: string): CoordStore {
+  let store = coordStores.get(taskId);
+  if (store) return store;
+
+  store = { contexts: [], initialized: false };
+  coordStores.set(taskId, store);
+
+  try {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      const db = getLocalDb();
+      const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as Record<string, unknown> | undefined;
+      if (task) {
+        // Check for execution plan (from PRD decomposition or planning)
+        let plan: { steps?: Array<Record<string, unknown>> } | null = null;
+        if (task.execution_plan) {
+          try {
+            plan = JSON.parse(String(task.execution_plan));
+          } catch { /* invalid JSON, fall through to single-story */ }
+        }
+
+        if (plan?.steps?.length) {
+          // Hydrate stories from execution plan — same logic as publishStoriesReady()
+          hydrateStoriesFromPlan(store, taskId, plan.steps);
+        } else {
+          // Single story fallback — use task summary/description
+          store.contexts.push({
+            id: `story-${taskId.slice(0, 8)}`,
+            parentTaskId: taskId,
+            taskId,
+            persona: "backend_developer",
+            messageType: "story_ready",
+            content: String(task.summary || "Implement task"),
+            metadata: {
+              storyIndex: 0,
+              persona: "backend_developer",
+              description: String(task.description || task.summary || ""),
+              dependencies: [],
+              targetFiles: [],
+              mutexGroups: [],
+            },
+            createdAt: new Date().toISOString(),
+          });
+        }
+        store.initialized = true;
+      }
+    }
+  } catch {
+    // If we can't read the task, create a minimal story
+    if (!store.initialized) {
+      store.contexts.push({
+        id: `story-${taskId.slice(0, 8)}`,
+        parentTaskId: taskId,
+        taskId,
+        persona: "backend_developer",
+        messageType: "story_ready",
+        content: "Implement task",
+        metadata: {
+          storyIndex: 0,
+          persona: "backend_developer",
+          description: "",
+          dependencies: [],
+          targetFiles: [],
+          mutexGroups: [],
+        },
+        createdAt: new Date().toISOString(),
+      });
+      store.initialized = true;
+    }
+  }
+
+  return store;
+}
+
+/**
+ * Hydrate story_ready messages from an execution plan.
+ * Mirrors publishStoriesReady() in api/src/services/pipeline-executor.ts:
+ * - Computes file-level overlap mutex groups across stories
+ * - Derives directory-level mutex groups from targetFiles
+ * - Assigns __unscoped__ mutex to stories without targetFiles
+ * - Publishes ALL stories upfront with dependencies in metadata
+ */
+function hydrateStoriesFromPlan(
+  store: CoordStore,
+  taskId: string,
+  steps: Array<Record<string, unknown>>,
+): void {
+  // Pre-compute file-level overlap mutex groups across all stories
+  const fileOverlapMutexByStep = new Map<number, string[]>();
+  for (let i = 0; i < steps.length; i++) {
+    const stepA = steps[i];
+    const idxA = (stepA.index as number) ?? i;
+    const filesA = (stepA.targetFiles as string[]) || [];
+    if (filesA.length === 0) continue;
+    for (let j = i + 1; j < steps.length; j++) {
+      const stepB = steps[j];
+      const idxB = (stepB.index as number) ?? j;
+      const filesB = (stepB.targetFiles as string[]) || [];
+      if (filesB.length === 0) continue;
+      const shared = filesA.filter((f) => filesB.includes(f));
+      if (shared.length > 0) {
+        const fileMutexes = shared.map((f) => `file:${f}`);
+        fileOverlapMutexByStep.set(
+          idxA,
+          [...(fileOverlapMutexByStep.get(idxA) || []), ...fileMutexes],
+        );
+        fileOverlapMutexByStep.set(
+          idxB,
+          [...(fileOverlapMutexByStep.get(idxB) || []), ...fileMutexes],
+        );
+      }
+    }
+  }
+
+  for (let si = 0; si < steps.length; si++) {
+    const step = steps[si];
+    const index = (step.index as number) ?? si;
+    const persona = (step.persona as string) || "backend_developer";
+    const title = (step.title as string) || "Implement step";
+    const description = (step.description as string) || title;
+    const targetFiles = (step.targetFiles as string[]) || [];
+    const referenceFiles = (step.referenceFiles as string[]) || [];
+    const verificationType = (step.verificationType as string) || undefined;
+    const dependencies = (step.dependsOn as number[]) || (step.dependencies as number[]) || [];
+
+    // Compute mutex groups (same logic as publishStoriesReady)
+    let mutexGroups = (step.mutexGroups as string[]) || [];
+    if (mutexGroups.length === 0 && targetFiles.length > 0) {
+      const dirs = new Set<string>();
+      for (const file of targetFiles) {
+        const lastSlash = file.lastIndexOf("/");
+        const dir = lastSlash > 0 ? file.substring(0, lastSlash) : "root";
+        dirs.add(`dir:${dir}`);
+      }
+      mutexGroups = Array.from(dirs);
+    } else if (mutexGroups.length === 0) {
+      mutexGroups = ["__unscoped__"];
+    }
+
+    // Merge in file-level overlap mutex groups
+    const overlapMutexes = fileOverlapMutexByStep.get(index) || [];
+    if (overlapMutexes.length > 0) {
+      mutexGroups = [...new Set([...mutexGroups, ...overlapMutexes])];
+    }
+
+    store.contexts.push({
+      id: `story-${taskId.slice(0, 8)}-${index}`,
+      parentTaskId: taskId,
+      taskId,
+      persona,
+      messageType: "story_ready",
+      content: title,
+      metadata: {
+        storyIndex: index,
+        persona,
+        title,
+        description,
+        targetFiles,
+        referenceFiles,
+        verificationType,
+        dependencies,
+        mutexGroups,
+      },
+      createdAt: new Date().toISOString(),
+    });
+  }
+}
+
+/**
+ * Push a coordination event to all SSE subscribers for a task.
+ */
+function pushCoordEvent(taskId: string, context: CoordContext): void {
+  const clients = coordSseClients.get(taskId);
+  if (!clients || clients.size === 0) return;
+  const payload = JSON.stringify({ type: "context", data: context });
+  for (const res of clients) {
+    try {
+      res.write(`data: ${payload}\n\n`);
+    } catch {
+      clients.delete(res);
+    }
+  }
+}
+
+/**
+ * Fallback worker config when getWorkerConfig() fails (bundled binary
+ * won't have api/data/ on disk). Same values as the decision engine constants.
+ */
+async function getWorkerConfigFallback(): Promise<Record<string, unknown>> {
+  return {
+    agentsMd: "",
+    personaIcons: {
+      architect: "\uD83C\uDFD7\uFE0F",
+      frontend_developer: "\uD83C\uDFA8",
+      backend_developer: "\uD83D\uDCBB",
+      devops_engineer: "\uD83D\uDD27",
+      security_engineer: "\uD83D\uDEE1\uFE0F",
+      qa_engineer: "\uD83E\uDDEA",
+      tech_writer: "\uD83D\uDCDD",
+      project_manager: "\uD83D\uDCCB",
+      data_ml_engineer: "\uD83D\uDCCA",
+      mobile_developer: "\uD83D\uDCF1",
+      tech_lead: "\uD83D\uDC51",
+      planning_agent: "\uD83D\uDCA1",
+      manager: "\uD83D\uDC54",
+    },
+    providerIcons: {
+      anthropic: "\uD83E\uDD16",
+      openai: "\uD83D\uDD37",
+      google: "\uD83D\uDD35",
+      gemini: "\uD83D\uDD35",
+      ollama: "\uD83C\uDFE0",
+    },
+    reviewSchema: {
+      decision: ["approved", "revision_needed", "rejected"],
+      scoreRange: [1, 10],
+    },
+    claudeMdTemplate: "***REMOVED*** Project\n\nThis project uses TypeScript and follows standard patterns.\n",
+    defaults: {
+      blockerMaxAutoRetries: 3,
+      maxReviewRevisions: 3,
+      maxPerStoryRevisions: 1, // matches org DB default and worker env fallback
+    },
+  };
+}
+
 agentEvents.on("task:started", (info: { id: string; parentTaskId?: string; summary: string; description?: string; persona?: string; model?: string; repo?: string }) => {
   localTasks.set(info.id, {
     id: info.id,
@@ -131,6 +399,13 @@ let cleanupInterval: ReturnType<typeof setInterval> | null = setInterval(() => {
     if ((task.status === "completed" || task.status === "failed" || task.status === "pr_approved" || task.status === "cancelled") &&
         new Date(task.startedAt).getTime() < cutoff) {
       localTasks.delete(id);
+      coordStores.delete(id);
+      // Close and remove any lingering coordination SSE clients
+      const coordClients = coordSseClients.get(id);
+      if (coordClients) {
+        for (const c of coordClients) { try { c.end(); } catch { /* ignore */ } }
+        coordSseClients.delete(id);
+      }
       didDelete = true;
     }
   }
@@ -173,6 +448,15 @@ agentEvents.on("task:planning", (info) => broadcastSSE("tasks", "task:planning",
 agentEvents.on("task:plan_done", (info) => broadcastSSE("tasks", "task:plan_done", info));
 agentEvents.on("task:log", (info) => broadcastSSE(`logs:${info.id}`, "log", info));
 agentEvents.on("state:changed", () => broadcastSSE("tasks", "state:changed", {}));
+
+// Forward local event bus (orchestrator/worker) to SSE clients
+onStreamEvent((event) => {
+  broadcastSSE(event.ch, event.t, event.p);
+  // Also broadcast task state changes as agentEvents-style events
+  if (event.ch === "org:local:tasks" && event.t === "task_state") {
+    broadcastSSE("tasks", "state:changed", {});
+  }
+});
 
 // ── Cloud Task Merging ─────────────────────────────────
 
@@ -218,6 +502,75 @@ function mapCloudStatus(
  * Cloud tasks fill in gaps — queued tasks, tasks where events were missed, etc.
  * Falls back to local-only on any cloud fetch error.
  */
+/**
+ * Get all visible tasks: in-memory + SQLite (local backend) + cloud.
+ * Deduplicates by ID, with in-memory tasks taking priority.
+ */
+async function getAllVisibleTasks(): Promise<LocalTaskInfo[]> {
+  const seenIds = new Set<string>();
+  const result: LocalTaskInfo[] = [];
+
+  // 1. In-memory tasks (real-time from event bus)
+  for (const task of localTasks.values()) {
+    seenIds.add(task.id);
+    result.push(task);
+  }
+
+  // 2. SQLite tasks (standalone mode — orchestrator writes here)
+  const backend = getActiveBackend();
+  if (backend?.mode === "local") {
+    try {
+      const db = getLocalDb();
+      const rows = db.prepare(
+        "SELECT id, summary, description, status, github_repo, worker_model, created_at FROM tasks WHERE status IN ('queued','executing','completed','failed','cancelled','escalated') ORDER BY created_at DESC LIMIT 50"
+      ).all() as Array<Record<string, unknown>>;
+      for (const row of rows) {
+        const id = String(row.id);
+        if (seenIds.has(id)) continue;
+        seenIds.add(id);
+        result.push({
+          id,
+          summary: String(row.summary || ""),
+          description: row.description ? String(row.description) : undefined,
+          status: mapLocalStatus(String(row.status || "queued")),
+          model: row.worker_model ? String(row.worker_model) : undefined,
+          repo: row.github_repo ? String(row.github_repo) : undefined,
+          startedAt: row.created_at ? String(row.created_at) : new Date().toISOString(),
+        });
+      }
+    } catch {
+      // SQLite not available — continue with what we have
+    }
+  }
+
+  // 3. Cloud tasks (if cloud proxy is available)
+  if (cloudProxy) {
+    try {
+      const merged = await getMergedTasks();
+      for (const task of merged) {
+        if (!seenIds.has(task.id)) {
+          seenIds.add(task.id);
+          result.push(task);
+        }
+      }
+    } catch { /* ignore cloud failures */ }
+  }
+
+  return result;
+}
+
+function mapLocalStatus(status: string): LocalTaskInfo["status"] {
+  switch (status) {
+    case "queued": return "running";
+    case "executing": return "running";
+    case "completed": return "completed";
+    case "failed": return "failed";
+    case "cancelled": return "cancelled";
+    case "escalated": return "escalated";
+    default: return "running";
+  }
+}
+
 async function getMergedTasks(): Promise<LocalTaskInfo[]> {
   const localList = Array.from(localTasks.values());
 
@@ -270,6 +623,13 @@ async function getMergedTasks(): Promise<LocalTaskInfo[]> {
 }
 
 // ── HTTP Routing ───────────────────────────────────────
+
+/** Get active backend, lazy-initializing if needed (handles startup race). */
+async function ensureBackend() {
+  const b = getActiveBackend();
+  if (b) return b;
+  try { return await getBackend(); } catch { return null; }
+}
 
 function parseUrl(url: string): { path: string; params: Record<string, string> } {
   const [pathPart, queryPart] = url.split("?");
@@ -335,10 +695,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return;
   }
 
-  // Authenticate: require Bearer token from ~/.workermill/agent.token
+  // Authenticate: require Bearer token or x-api-key matching agent.token
   if (authToken) {
     const authHeader = req.headers.authorization;
-    if (!authHeader || authHeader !== `Bearer ${authToken}`) {
+    const apiKey = req.headers["x-api-key"] as string | undefined;
+    if (authHeader === `Bearer ${authToken}` || apiKey === authToken) {
+      // Authenticated
+    } else {
       return json(res, { error: "Unauthorized" }, 401);
     }
   }
@@ -349,21 +712,21 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   if (req.method === "GET" && path === "/api/status") {
     const backend = getActiveBackend();
+    const tasks = await getAllVisibleTasks();
     const state: AgentState & { mode?: string } = {
       version: AGENT_VERSION,
       agentId: agentConfig?.agentId || "unknown",
       apiUrl: agentConfig?.apiUrl || "unknown",
       uptime: Math.round((Date.now() - startTime) / 1000),
       sandbox: agentConfig?.sandbox || "none",
-      tasks: Array.from(localTasks.values()),
+      tasks,
       mode: backend?.mode || "cloud",
     };
     return json(res, state);
   }
 
   if (req.method === "GET" && path === "/api/tasks") {
-    // Merge local tasks (real-time) with cloud tasks (queued, missed events, etc.)
-    const merged = await getMergedTasks();
+    const merged = await getAllVisibleTasks();
     return json(res, merged);
   }
 
@@ -371,8 +734,25 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   const taskMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)$/);
   if (req.method === "GET" && taskMatch) {
     const task = localTasks.get(taskMatch[1]);
-    if (!task) return json(res, { error: "Task not found" }, 404);
-    return json(res, task);
+    if (task) return json(res, task);
+    // Fall through to SQLite for worker-spawned tasks
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const row = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskMatch[1]) as Record<string, unknown> | undefined;
+        if (row) {
+          return json(res, {
+            id: row.id,
+            summary: row.summary || "",
+            description: row.description || "",
+            status: row.status,
+            github_repo: row.github_repo,
+          });
+        }
+      } catch { /* fall through to 404 */ }
+    }
+    return json(res, { error: "Task not found" }, 404);
   }
 
   // GET /api/tasks/:id/coordination — proxy coordination feed from cloud
@@ -409,9 +789,23 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // GET /api/tasks/:id/logs — proxy logs from cloud API
+  // GET /api/tasks/:id/logs — local SQLite or cloud proxy
   const logsMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/logs$/);
   if (req.method === "GET" && logsMatch) {
+    const backend = getActiveBackend();
+    // Standalone mode — read from SQLite task_logs
+    if (backend?.mode === "local") {
+      try {
+        const { params: qp } = parseUrl(req.url || "");
+        const since = qp.since || undefined;
+        const lim = parseInt(qp.limit || "500", 10);
+        const result = await backend.getLogBackfill(logsMatch[1], since, lim);
+        return json(res, result.data);
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    // Cloud mode — proxy to cloud API
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const { params: qp } = parseUrl(req.url || "");
@@ -447,8 +841,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   if (req.method === "GET" && path === "/api/stream/tasks") {
     sseHeaders(res);
     addSSEClient(res, "tasks");
-    // Send initial state (merged with cloud tasks so completed/failed show up)
-    getMergedTasks().then((merged) => {
+    // Send initial state (includes SQLite + in-memory + cloud tasks)
+    getAllVisibleTasks().then((merged) => {
       try { res.write(`event: snapshot\ndata: ${JSON.stringify(merged)}\n\n`); } catch { /* client gone */ }
     }).catch(() => {
       try { res.write(`event: snapshot\ndata: ${JSON.stringify(Array.from(localTasks.values()))}\n\n`); } catch { /* client gone */ }
@@ -504,7 +898,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   // POST /api/tasks/run — create a task via the cloud API or local backend
   if (req.method === "POST" && path === "/api/tasks/run") {
-    const backend = getActiveBackend();
+    const backend = await ensureBackend();
     if (backend?.mode === "local") {
       try {
         const body = JSON.parse(await readBody(req));
@@ -515,7 +909,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
           const boardId = body._boardId;
           if (cardId && boardId) {
             const task = await backend.runCard(boardId, cardId);
-            processQueuedTask(task.id).catch(() => {});
+            processQueuedTask(task.id).catch((e) => console.error("[orchestrator] processQueuedTask failed:", e));
             return json(res, task, 201);
           }
           // Fallback: find card by key like "***REMOVED***3"
@@ -527,7 +921,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
             ).get(parseInt(keyMatch[1], 10)) as any;
             if (card) {
               const task = await backend.runCard(card.board_id, card.id);
-              processQueuedTask(task.id).catch(() => {});
+              processQueuedTask(task.id).catch((e) => console.error("[orchestrator] processQueuedTask failed:", e));
               return json(res, task, 201);
             }
           }
@@ -541,7 +935,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
           scmProvider: body.scmProvider,
           workerModel: body.workerModel,
         });
-        processQueuedTask(task.id).catch(() => {});
+        processQueuedTask(task.id).catch((e) => console.error("[orchestrator] processQueuedTask failed:", e));
         return json(res, task, 201);
       } catch (err) {
         return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
@@ -564,6 +958,25 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   // POST /api/tasks/run-file — create a Quick Tasks card + run as worker task
   if (req.method === "POST" && path === "/api/tasks/run-file") {
+    const backend = await ensureBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const config = (await import("./backends/local/config.js")).loadStandaloneConfig();
+        const workerConfig = (await import("./backends/local/config.js")).getRoleConfig(config, "worker");
+        const task = await backend.createTask({
+          summary: body.summary,
+          description: body.description,
+          githubRepo: body.githubRepo || config.defaultRepo,
+          scmProvider: config.scm?.provider,
+          workerModel: workerConfig.model,
+        });
+        processQueuedTask(task.id).catch((e) => console.error("[run-file] processQueuedTask failed:", e));
+        return json(res, task, 201);
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
@@ -580,7 +993,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   // GET /api/repos — lightweight repos endpoint for VS Code repo picker
   if (req.method === "GET" && path === "/api/repos") {
-    const backend = getActiveBackend();
+    const backend = await ensureBackend();
     if (backend?.mode === "local") {
       try {
         const repos = await backend.getRepos();
@@ -857,6 +1270,66 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return json(res, { success: true, message: "Task cancelled" });
   }
 
+  // DELETE /api/tasks/:id — remove a completed/failed/cancelled task from SQLite
+  const deleteTaskMatch = path.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)$/);
+  if (req.method === "DELETE" && deleteTaskMatch) {
+    const taskId = deleteTaskMatch[1];
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const task = db.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as { status: string } | undefined;
+        if (!task) return json(res, { error: "Task not found" }, 404);
+        if (task.status === "executing" || task.status === "queued") {
+          return json(res, { error: "Cannot delete an active task — cancel it first" }, 400);
+        }
+        db.prepare("DELETE FROM tasks WHERE id = ?").run(taskId);
+        localTasks.delete(taskId);
+        coordStores.delete(taskId);
+        const coordClients = coordSseClients.get(taskId);
+        if (coordClients) {
+          for (const c of coordClients) { try { c.end(); } catch { /* ignore */ } }
+          coordSseClients.delete(taskId);
+        }
+        broadcastSSE("tasks", "state:changed", {});
+        return json(res, { success: true });
+      } catch (err: unknown) {
+        return json(res, { error: String(err) }, 500);
+      }
+    }
+    return json(res, { error: "Delete not supported in cloud mode" }, 400);
+  }
+
+  // POST /api/tasks/clear — bulk delete completed/failed/cancelled tasks
+  if (req.method === "POST" && path === "/api/tasks/clear") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const result = db.prepare(
+          "DELETE FROM tasks WHERE status IN ('completed', 'failed', 'cancelled')"
+        ).run();
+        // Clear matching entries from in-memory maps
+        for (const [id, task] of localTasks) {
+          if (["completed", "failed"].includes(task.status)) {
+            localTasks.delete(id);
+            coordStores.delete(id);
+            const coordClients = coordSseClients.get(id);
+            if (coordClients) {
+              for (const c of coordClients) { try { c.end(); } catch { /* ignore */ } }
+              coordSseClients.delete(id);
+            }
+          }
+        }
+        broadcastSSE("tasks", "state:changed", {});
+        return json(res, { success: true, deleted: result.changes });
+      } catch (err: unknown) {
+        return json(res, { error: String(err) }, 500);
+      }
+    }
+    return json(res, { error: "Clear not supported in cloud mode" }, 400);
+  }
+
   // POST /api/tasks/:id/retry — proxy retry to cloud API
   const retryMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/retry$/);
   if (req.method === "POST" && retryMatch) {
@@ -876,47 +1349,90 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (backend?.mode === "local") {
       try {
         const { params: qp } = parseUrl(req.url || "");
-        const statusFilter = qp.status?.toLowerCase();
-        const projectFilter = qp.project;
-        const boards = await backend.getBoards();
-        const issues: unknown[] = [];
-        for (const board of boards) {
-          if (projectFilter && board.id !== projectFilter) continue;
-          const cards = await backend.getBoardCards(board.id);
-          const colMap = new Map(board.columns.map(c => [c.id, c.name]));
-          const db = (await import("./backends/local/db.js")).getDb();
-          for (const card of cards) {
-            const colName = colMap.get(card.columnId) || "Backlog";
-            if (statusFilter && colName.toLowerCase() !== statusFilter) continue;
-            const totalDeps = (db.prepare(
-              "SELECT COUNT(*) as cnt FROM card_dependencies WHERE card_id = ?",
-            ).get(card.id) as any)?.cnt || 0;
-            const unmetDeps = totalDeps > 0
-              ? (db.prepare(`
-                  SELECT COUNT(*) as cnt FROM card_dependencies cd
-                  JOIN cards dep ON dep.id = cd.depends_on_card_id
-                  LEFT JOIN tasks t ON t.id = dep.task_id
-                  WHERE cd.card_id = ? AND (t.id IS NULL OR t.status != 'completed')
-                `).get(card.id) as any)?.cnt || 0
-              : 0;
-            issues.push({
-              key: `***REMOVED***${card.cardNumber || card.id.slice(0, 6)}`,
-              summary: card.title,
-              description: card.description || null,
-              status: colName,
-              issueType: "Story",
-              priority: card.priority || "medium",
-              labels: [board.name],
-              project: { key: board.id, name: board.name },
-              assignee: null,
-              blockedByCount: unmetDeps,
-              dependencyCount: totalDeps,
-              _cardId: card.id,
-              _boardId: board.id,
-            });
+        const config = loadStandaloneConfig();
+        const provider = config.issueTracker?.provider || "internal";
+        const filters = {
+          q: qp.q,
+          project: qp.project,
+          status: qp.status,
+          maxResults: Math.min(Number(qp.maxResults) || 20, 50),
+        };
+
+        switch (provider) {
+          case "jira": {
+            const creds = config.issueTracker?.jira;
+            if (!creds?.baseUrl || !creds.email || !creds.apiToken) {
+              return json(res, { error: "Jira not configured. Open Settings to add credentials." }, 400);
+            }
+            const issues = await searchJiraIssues(creds, filters);
+            return json(res, { issues });
+          }
+          case "linear": {
+            const apiKey = config.issueTracker?.linear?.apiKey;
+            if (!apiKey) {
+              return json(res, { error: "Linear not configured. Open Settings to add your API key." }, 400);
+            }
+            const issues = await searchLinearIssues(apiKey, filters);
+            return json(res, { issues });
+          }
+          case "github-issues": {
+            const token = config.scm?.token;
+            const repo = config.defaultRepo;
+            if (!token) {
+              return json(res, { error: "GitHub token not configured. Open Settings to add your SCM token." }, 400);
+            }
+            if (!repo) {
+              return json(res, { error: "No default repository configured. Set a target repo in Settings." }, 400);
+            }
+            const issues = await searchGitHubIssues(token, repo, filters);
+            return json(res, { issues });
+          }
+          case "internal":
+          default: {
+            // Existing board cards logic
+            const statusFilter = qp.status?.toLowerCase();
+            const projectFilter = qp.project;
+            const boards = await backend.getBoards();
+            const issues: unknown[] = [];
+            for (const board of boards) {
+              if (projectFilter && board.id !== projectFilter) continue;
+              const cards = await backend.getBoardCards(board.id);
+              const colMap = new Map(board.columns.map(c => [c.id, c.name]));
+              const db = (await import("./backends/local/db.js")).getDb();
+              for (const card of cards) {
+                const colName = colMap.get(card.columnId) || "Backlog";
+                if (statusFilter && colName.toLowerCase() !== statusFilter) continue;
+                const totalDeps = (db.prepare(
+                  "SELECT COUNT(*) as cnt FROM card_dependencies WHERE card_id = ?",
+                ).get(card.id) as any)?.cnt || 0;
+                const unmetDeps = totalDeps > 0
+                  ? (db.prepare(`
+                      SELECT COUNT(*) as cnt FROM card_dependencies cd
+                      JOIN cards dep ON dep.id = cd.depends_on_card_id
+                      LEFT JOIN tasks t ON t.id = dep.task_id
+                      WHERE cd.card_id = ? AND (t.id IS NULL OR t.status != 'completed')
+                    `).get(card.id) as any)?.cnt || 0
+                  : 0;
+                issues.push({
+                  key: `***REMOVED***${card.cardNumber || card.id.slice(0, 6)}`,
+                  summary: card.title,
+                  description: card.description || null,
+                  status: colName,
+                  issueType: "Story",
+                  priority: card.priority || "medium",
+                  labels: [board.name],
+                  project: { key: board.id, name: board.name },
+                  assignee: null,
+                  blockedByCount: unmetDeps,
+                  dependencyCount: totalDeps,
+                  _cardId: card.id,
+                  _boardId: board.id,
+                });
+              }
+            }
+            return json(res, { issues });
           }
         }
-        return json(res, { issues });
       } catch (err) {
         return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
       }
@@ -940,8 +1456,45 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     const backend = getActiveBackend();
     if (backend?.mode === "local") {
       try {
-        const boards = await backend.getBoards();
-        return json(res, { projects: boards.map(b => ({ key: b.id, name: b.name })) });
+        const config = loadStandaloneConfig();
+        const provider = config.issueTracker?.provider || "internal";
+
+        switch (provider) {
+          case "jira": {
+            const creds = config.issueTracker?.jira;
+            if (!creds?.baseUrl || !creds.email || !creds.apiToken) {
+              return json(res, { error: "Jira not configured" }, 400);
+            }
+            const projects = await listJiraProjects(creds);
+            return json(res, { projects });
+          }
+          case "linear": {
+            const apiKey = config.issueTracker?.linear?.apiKey;
+            if (!apiKey) {
+              return json(res, { error: "Linear not configured" }, 400);
+            }
+            const projects = await listLinearTeams(apiKey);
+            return json(res, { projects });
+          }
+          case "github-issues": {
+            const token = config.scm?.token;
+            if (!token) {
+              return json(res, { error: "GitHub token not configured" }, 400);
+            }
+            // If a default repo is set, return just that; otherwise list user repos
+            const repo = config.defaultRepo;
+            if (repo) {
+              return json(res, { projects: [{ key: repo, name: repo }] });
+            }
+            const projects = await listGitHubRepos(token);
+            return json(res, { projects });
+          }
+          case "internal":
+          default: {
+            const boards = await backend.getBoards();
+            return json(res, { projects: boards.map(b => ({ key: b.id, name: b.name })) });
+          }
+        }
       } catch (err) {
         return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
       }
@@ -1131,6 +1684,389 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
+  // ── Worker API stubs (standalone mode) ──
+  // These endpoints are called by the worker process. In cloud mode they go
+  // to the real API; in standalone we return sensible defaults so the worker
+  // can operate without a cloud backend.
+
+  // GET /api/worker-decisions/worker-config — real worker config (same as cloud API)
+  if (req.method === "GET" && path === "/api/worker-decisions/worker-config") {
+    try {
+      const config = await getWorkerConfig();
+      return json(res, config);
+    } catch (err) {
+      // Fallback to defaults if file read fails (bundled binary won't have api/data/)
+      return json(res, await getWorkerConfigFallback());
+    }
+  }
+
+  // POST /api/worker-decisions/* — real decision engine (same pure functions as cloud API)
+  if (req.method === "POST" && path.startsWith("/api/worker-decisions/")) {
+    const action = path.split("/").pop();
+    try {
+      const body = JSON.parse(await readBody(req));
+      const standaloneConfig = loadStandaloneConfig();
+
+      if (action === "evaluate-quality") {
+        // Normalize: if client sends flat { diff, storyDescription } instead of { metrics, ... }
+        let normalized = body;
+        if (body.diff !== undefined && body.metrics === undefined) {
+          const diffStr = String(body.diff);
+          const scoreMatch = diffStr.match(/score=(\d+)/);
+          const typeErrorsMatch = diffStr.match(/typeErrors=(true|false)/);
+          const testsFailedMatch = diffStr.match(/testsFailed=(\d+|true|false)/);
+          normalized = {
+            metrics: {
+              qualityScore: scoreMatch ? parseInt(scoreMatch[1], 10) : undefined,
+              typeErrors: typeErrorsMatch ? typeErrorsMatch[1] === "true" : false,
+              testFailures: testsFailedMatch
+                ? testsFailedMatch[1] === "true" || parseInt(testsFailedMatch[1], 10) > 0
+                : false,
+            },
+            taskId: body.taskId,
+            bypassRequested: false,
+            qualityGateEnabled: true,
+            thresholds: body.thresholds,
+          };
+        }
+        // Default thresholds if not provided
+        if (!normalized.thresholds) {
+          normalized.thresholds = {
+            blockOnTestFailures: true,
+            blockOnTypeErrors: false,
+          };
+        }
+        if (normalized.qualityGateEnabled === undefined) normalized.qualityGateEnabled = true;
+        if (normalized.bypassRequested === undefined) normalized.bypassRequested = false;
+        return json(res, evaluateQuality(normalized));
+      }
+
+      if (action === "classify-error") {
+        const normalized = {
+          errorText: body.errorText || body.errorOutput || "",
+          retryCount: body.retryCount ?? 0,
+          maxAutoRetries: body.maxAutoRetries ?? standaloneConfig.settings?.qualityGateMaxRetries ?? 3,
+          storyContext:
+            body.storyContext && typeof body.storyContext === "object"
+              ? body.storyContext
+              : {
+                  title: typeof body.storyContext === "string" ? body.storyContext : "",
+                  persona: body.persona || "",
+                  targetFiles: body.affectedFiles || [],
+                },
+        };
+        return json(res, classifyError(normalized));
+      }
+
+      if (action === "review-outcome") {
+        const normalized = {
+          reviewerOutput: body.reviewerOutput || body.reviewOutput || "",
+          revisionCount: body.revisionCount ?? body.revisionNumber ?? 0,
+          maxRevisions: body.maxRevisions ?? standaloneConfig.settings?.maxReviewRevisions ?? 3,
+          perStoryRevisionCount: body.perStoryRevisionCount ?? 0,
+          maxPerStoryRevisions: body.maxPerStoryRevisions ?? standaloneConfig.settings?.maxPerStoryRevisions ?? 1,
+        };
+        return json(res, parseReviewOutcome(normalized));
+      }
+
+      if (action === "route-question") {
+        return json(res, routeQuestion(body));
+      }
+
+      if (action === "route-provider") {
+        return json(res, routeProvider(body));
+      }
+
+      return json(res, {});
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // POST /api/coordination/heartbeat — worker heartbeat (fire-and-forget)
+  if (req.method === "POST" && path === "/api/coordination/heartbeat") {
+    return json(res, { success: true });
+  }
+
+  // ── Coordination API (standalone mode) ──
+  // The epic worker uses these endpoints for story claiming, context posting,
+  // and multi-expert coordination. In standalone mode we serve a single story
+  // derived from the task's summary/description.
+
+  // GET /api/coordination/context/:taskId — get coordination contexts
+  const coordCtxMatch = path.match(/^\/api\/coordination\/context\/([a-zA-Z0-9_-]+)$/);
+  if (req.method === "GET" && coordCtxMatch) {
+    const taskId = coordCtxMatch[1];
+    const store = getCoordStore(taskId);
+    const { params: coordParams } = parseUrl(req.url || "");
+    const messageType = coordParams.messageType;
+    const messageTypes = coordParams.messageTypes;
+    const types = messageType
+      ? [messageType]
+      : messageTypes
+        ? messageTypes.split(",")
+        : null;
+
+    const contexts = types
+      ? store.contexts.filter((c) => types.includes(c.messageType))
+      : store.contexts;
+
+    return json(res, { contexts });
+  }
+
+  // GET /api/coordination/context/:taskId/stream — SSE coordination stream
+  // Real-time push when coordination contexts are posted (mirrors cloud Redis pub/sub)
+  const workerSseMatch = path.match(
+    /^\/api\/coordination\/context\/([a-zA-Z0-9_-]+)\/stream$/,
+  );
+  if (req.method === "GET" && workerSseMatch) {
+    const sseTaskId = workerSseMatch[1];
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    res.write("data: {\"type\":\"connected\"}\n\n");
+
+    // Register this client for coordination event push
+    if (!coordSseClients.has(sseTaskId)) {
+      coordSseClients.set(sseTaskId, new Set());
+    }
+    coordSseClients.get(sseTaskId)!.add(res);
+
+    // Keep alive every 30s
+    const keepAlive = setInterval(() => {
+      try {
+        res.write(": keepalive\n\n");
+      } catch {
+        clearInterval(keepAlive);
+      }
+    }, 30_000);
+    req.on("close", () => {
+      clearInterval(keepAlive);
+      coordSseClients.get(sseTaskId)?.delete(res);
+    });
+    return; // Keep connection open
+  }
+
+  // POST /api/coordination/context — post a coordination context message
+  if (req.method === "POST" && path === "/api/coordination/context") {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const taskId = body.parentTaskId || "";
+      const store = getCoordStore(taskId);
+      const msg: CoordContext = {
+        id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        parentTaskId: taskId,
+        taskId: body.taskId || taskId,
+        persona: body.persona || "",
+        messageType: body.messageType || "context",
+        content: body.content || "",
+        metadata: body.metadata || {},
+        createdAt: new Date().toISOString(),
+      };
+      store.contexts.push(msg);
+      // Push to SSE subscribers (mirrors cloud Redis pub/sub)
+      pushCoordEvent(taskId, msg);
+      return json(res, msg, 201);
+    } catch {
+      return json(res, { success: true });
+    }
+  }
+
+  // POST /api/coordination/claim — claim a story
+  if (req.method === "POST" && path === "/api/coordination/claim") {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const parentTaskId = body.parentTaskId || "";
+      const store = getCoordStore(parentTaskId);
+      // Mark story as claimed
+      const claimed: CoordContext = {
+        id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        parentTaskId,
+        taskId: parentTaskId,
+        persona: body.claimedBy || "",
+        messageType: "story_claimed",
+        content: `Story claimed by ${body.claimedBy}`,
+        metadata: {
+          storyId: body.storyId,
+          claimedBy: body.claimedBy,
+          storyIndex: store.contexts.find(
+            (c) => c.id === body.storyId,
+          )?.metadata?.storyIndex ?? 0,
+        },
+        createdAt: new Date().toISOString(),
+      };
+      store.contexts.push(claimed);
+      // Push to SSE subscribers
+      pushCoordEvent(parentTaskId, claimed);
+      return json(res, { success: true, claimedBy: body.claimedBy });
+    } catch {
+      return json(res, { success: true });
+    }
+  }
+
+  // POST /api/coordination/answer — post an answer to a question
+  if (req.method === "POST" && path === "/api/coordination/answer") {
+    try {
+      const body = JSON.parse(await readBody(req));
+      return json(res, {
+        success: true,
+        context: {
+          id: `ctx-${Date.now()}`,
+          messageType: "answer",
+          content: body.answer || "",
+          persona: body.persona || "",
+          metadata: { questionId: body.messageId },
+          createdAt: new Date().toISOString(),
+        },
+      });
+    } catch {
+      return json(res, { success: true });
+    }
+  }
+
+  // POST /api/coordination/archive-claims — archive stale claims
+  if (
+    req.method === "POST" &&
+    path === "/api/coordination/archive-claims"
+  ) {
+    return json(res, { success: true });
+  }
+
+  // GET /api/coordination/commands/:taskId/pending — dashboard commands
+  const coordCmdMatch = path.match(
+    /^\/api\/coordination\/commands\/([a-zA-Z0-9_-]+)\/pending$/,
+  );
+  if (req.method === "GET" && coordCmdMatch) {
+    return json(res, { commands: [] });
+  }
+
+  // GET /api/coordination/blockers/:taskId — blocker contexts
+  const coordBlockerMatch = path.match(
+    /^\/api\/coordination\/blockers\/([a-zA-Z0-9_-]+)$/,
+  );
+  if (req.method === "GET" && coordBlockerMatch) {
+    return json(res, { contexts: [] });
+  }
+
+  // POST /api/tasks/:id/worker-complete — worker signals task completion
+  const workerCompleteMatch = path.match(
+    /^\/api\/tasks\/([a-f0-9-]+)\/worker-complete$/,
+  );
+  if (req.method === "POST" && workerCompleteMatch) {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const backend = getActiveBackend();
+      if (backend?.mode === "local") {
+        const db = (await import("./backends/local/db.js")).getDb();
+        const status =
+          body.exitCode === 0 ? (body.result || "completed") : "failed";
+        db.prepare(
+          "UPDATE tasks SET status = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
+        ).run(status, workerCompleteMatch[1]);
+        const { emitStreamEvent } = await import(
+          "./backends/local/event-bus.js"
+        );
+        emitStreamEvent("org:local:tasks", "task_state", {
+          taskId: workerCompleteMatch[1],
+          status,
+        });
+      }
+      return json(res, { success: true });
+    } catch {
+      return json(res, { success: true });
+    }
+  }
+
+  // POST /api/tasks/:id/worker-progress — mid-task status update (non-terminal)
+  const workerProgressMatch = path.match(
+    /^\/api\/tasks\/([a-f0-9-]+)\/worker-progress$/,
+  );
+  if (req.method === "POST" && workerProgressMatch) {
+    return json(res, { success: true });
+  }
+
+  // POST /api/control-center/logs/:id/classify-errors — no-op
+  const classifyMatch = path.match(
+    /^\/api\/control-center\/logs\/([a-f0-9-]+)\/classify-errors$/,
+  );
+  if (req.method === "POST" && classifyMatch) {
+    return json(res, { success: true });
+  }
+
+  // POST /api/control-center/logs — worker log posting (alias)
+  if (req.method === "POST" && path === "/api/control-center/logs") {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const backend = getActiveBackend();
+      if (backend?.mode === "local" && body.taskId) {
+        await backend.postLog({
+          taskId: body.taskId,
+          type: body.type || "execution",
+          message: body.message || body.log,
+          severity: body.severity || "info",
+        });
+        // Broadcast to SSE so VS Code terminal sees the log in real-time
+        broadcastSSE(`logs:${body.taskId}`, "log", {
+          taskId: body.taskId,
+          type: body.type || "execution",
+          message: body.message || body.log,
+          severity: body.severity || "info",
+          createdAt: new Date().toISOString(),
+        });
+      }
+      return json(res, { success: true });
+    } catch { return json(res, { success: true }); }
+  }
+
+  // GET /api/tasks/:id/expert-registry — return empty registry
+  const expertRegMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/expert-registry$/);
+  if (req.method === "GET" && expertRegMatch) {
+    return json(res, { experts: [] });
+  }
+
+  // POST /api/tasks/:id/status — worker updates task status
+  const taskStatusMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/status$/);
+  if (req.method === "POST" && taskStatusMatch) {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const backend = getActiveBackend();
+      if (backend?.mode === "local") {
+        const db = (await import("./backends/local/db.js")).getDb();
+        if (body.status) {
+          db.prepare("UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?")
+            .run(body.status, taskStatusMatch[1]);
+        }
+      }
+      return json(res, { success: true });
+    } catch { return json(res, { success: true }); }
+  }
+
+  // POST /api/directives/usage — no-op in standalone
+  if (req.method === "POST" && path === "/api/directives/usage") {
+    return json(res, { success: true });
+  }
+
+  // POST /api/tasks/:id/ticket-comment — internal ticket comment (no-op standalone)
+  const ticketCommentMatch = path.match(
+    /^\/api\/tasks\/([a-f0-9-]+)\/ticket-comment$/,
+  );
+  if (req.method === "POST" && ticketCommentMatch) {
+    return json(res, { success: true });
+  }
+
+  // GET /api/memory/* — memory API stubs (standalone has no memory service)
+  if (path.startsWith("/api/memory/")) {
+    if (req.method === "GET") return json(res, { skills: [], memories: [], results: [] });
+    if (req.method === "POST") return json(res, { success: true, id: "none" });
+  }
+
+  // POST /api/codebase/* — codebase RAG stubs
+  if (req.method === "POST" && path.startsWith("/api/codebase/")) {
+    return json(res, { snippets: [], totalSnippets: 0 });
+  }
+
   // ── Worker ingestion endpoints (standalone mode) ──
 
   // POST /api/tasks/:id/logs — worker posts log entries
@@ -1140,11 +2076,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (!backend || backend.mode !== "local") return notFound(res);
     try {
       const body = JSON.parse(await readBody(req));
+      const taskId = workerLogMatch[1];
       await backend.postLog({
-        taskId: workerLogMatch[1],
+        taskId,
         type: body.type || "execution",
         message: body.message,
         severity: body.severity || "info",
+      });
+      broadcastSSE(`logs:${taskId}`, "log", {
+        taskId,
+        type: body.type || "execution",
+        message: body.message,
+        severity: body.severity || "info",
+        createdAt: new Date().toISOString(),
       });
       return json(res, { success: true });
     } catch (err) {
@@ -1274,7 +2218,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     try {
       const task = await backend.runCard(runCardMatch[1], runCardMatch[2]);
       // Trigger orchestrator
-      processQueuedTask(task.id).catch(() => {});
+      processQueuedTask(task.id).catch((e) => console.error("[orchestrator] processQueuedTask failed:", e));
       return json(res, task, 201);
     } catch (err) {
       return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
@@ -1573,7 +2517,8 @@ async function decomposePrdViaAgentSdk(
           const errors = "errors" in message ? (message.errors as string[]).join("; ") : "Unknown error";
           throw new Error(`Claude Agent SDK error: ${errors}`);
         }
-        if ("result" in message && message.result) {
+        // Only use result as fallback — streaming already captured the raw JSON
+        if ("result" in message && message.result && !resultText) {
           resultText = message.result as string;
         }
       }
@@ -1761,6 +2706,13 @@ export function stopLocalApi(): Promise<void> {
     try { client.res.end(); } catch { /* ignore */ }
   }
   sseClients.clear();
+
+  // Close all coordination SSE connections and clear stores
+  for (const [, clients] of coordSseClients) {
+    for (const c of clients) { try { c.end(); } catch { /* ignore */ } }
+  }
+  coordSseClients.clear();
+  coordStores.clear();
 
   return new Promise((resolve) => {
     if (!server) { resolve(); return; }

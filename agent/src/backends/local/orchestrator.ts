@@ -118,18 +118,42 @@ async function spawnLocalWorker(task: any): Promise<void> {
   }
 
   // Environment for the worker
+  const apiUrl = `http://127.0.0.1:${localApiPort}`;
+  // Worker expects owner/repo format — strip full URLs like https://github.com/owner/repo.git
+  const rawRepo = task.github_repo || config.defaultRepo || "";
+  const repoSlug = rawRepo.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "") || rawRepo;
+  // Read agent auth token so worker can authenticate to local API
+  const agentToken = (() => {
+    try { return fs.readFileSync(path.join(os.homedir(), ".workermill", "agent.token"), "utf-8").trim(); } catch { return "standalone"; }
+  })();
+  // Copy process.env but strip Claude Code session vars to prevent
+  // "cannot be launched inside another Claude Code session" error
+  const cleanEnv: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v === undefined) continue;
+    if (k === "CLAUDECODE" || k === "CLAUDE_CODE_ENTRYPOINT" || k.startsWith("CLAUDE_CODE_")) continue;
+    // Strip inherited ANTHROPIC_API_KEY — Claude CLI reads ~/.claude/.credentials.json directly.
+    // OAuth tokens (sk-ant-oat*) fail when passed as API keys. Real API keys (sk-ant-api*) are
+    // set explicitly below if configured.
+    if (k === "ANTHROPIC_API_KEY") continue;
+    cleanEnv[k] = v;
+  }
+
   const env: Record<string, string> = {
-    ...process.env as Record<string, string>,
+    ...cleanEnv,
     __WORKERMILL_MODE: "worker",
-    WORKERMILL_API_URL: `http://127.0.0.1:${localApiPort}`,
+    WORKERMILL_API_URL: apiUrl,
+    API_BASE_URL: apiUrl,
+    ORG_API_KEY: agentToken,
     TASK_ID: taskId,
     PARENT_TASK_ID: task.parent_task_id || taskId,
     TASK_SUMMARY: task.summary || "",
     TASK_DESCRIPTION: task.description || "",
-    GITHUB_REPO: task.github_repo || config.defaultRepo || "",
+    GITHUB_REPO: repoSlug,
     SCM_PROVIDER: task.scm_provider || config.scm?.provider || "github",
     WORKER_MODEL: task.worker_model || getRoleConfig(config, "worker").model,
     SCM_TOKEN: config.scm?.token || "",
+    GITHUB_TOKEN: config.scm?.token || "",
     MAX_PER_STORY_REVISIONS: String(config.settings?.maxPerStoryRevisions ?? 1),
     MAX_REVIEW_REVISIONS: String(config.settings?.maxReviewRevisions ?? 3),
     QUALITY_GATE_MAX_RETRIES: String(config.settings?.qualityGateMaxRetries ?? 5),
@@ -142,7 +166,11 @@ async function spawnLocalWorker(task: any): Promise<void> {
   const workerKey = resolveApiKey(config, "worker");
   const workerProvider = getRoleConfig(config, "worker").provider;
   if (workerProvider === "anthropic") {
-    env.ANTHROPIC_API_KEY = workerKey;
+    // Only set ANTHROPIC_API_KEY if user explicitly configured a real API key in config.json.
+    // Otherwise Claude CLI reads ~/.claude/.credentials.json directly.
+    if (workerKey && config.roles?.worker?.apiKey) {
+      env.ANTHROPIC_API_KEY = workerKey;
+    }
   } else if (workerProvider === "openai") {
     env.OPENAI_API_KEY = workerKey;
   } else if (workerProvider === "google") {
@@ -156,6 +184,8 @@ async function spawnLocalWorker(task: any): Promise<void> {
       ? task.execution_plan
       : JSON.stringify(JSON.parse(task.execution_plan));
   }
+
+  console.log(`[orchestrator] Spawning worker: ${command} ${args.join(" ")} (cwd: ${workDir}, task: ${taskId})`);
 
   const child = spawn(command, args, {
     env,
@@ -175,10 +205,16 @@ async function spawnLocalWorker(task: any): Promise<void> {
     startedAt: Date.now(),
   });
 
-  // Pipe stdout/stderr as log events
+  // Pipe stdout/stderr as log events (store in SQLite + SSE broadcast)
   child.stdout?.on("data", (data: Buffer) => {
     const line = data.toString("utf-8").trim();
     if (line) {
+      // Store in SQLite so polling terminals can read them
+      try {
+        getDb().prepare(
+          "INSERT INTO task_logs (task_id, type, message, severity) VALUES (?, ?, ?, ?)"
+        ).run(taskId, "execution", line, "info");
+      } catch { /* ignore db errors */ }
       emitStreamEvent(`logs:${taskId}`, "log", {
         taskId,
         message: line,
@@ -191,6 +227,11 @@ async function spawnLocalWorker(task: any): Promise<void> {
   child.stderr?.on("data", (data: Buffer) => {
     const line = data.toString("utf-8").trim();
     if (line) {
+      try {
+        getDb().prepare(
+          "INSERT INTO task_logs (task_id, type, message, severity) VALUES (?, ?, ?, ?)"
+        ).run(taskId, "execution", line, "error");
+      } catch { /* ignore db errors */ }
       emitStreamEvent(`logs:${taskId}`, "log", {
         taskId,
         message: line,
@@ -200,8 +241,13 @@ async function spawnLocalWorker(task: any): Promise<void> {
     }
   });
 
+  child.on("error", (err) => {
+    console.error(`[orchestrator] Worker spawn error for task ${taskId}:`, err.message);
+  });
+
   // Handle worker exit
   child.on("exit", (exitCode) => {
+    console.log(`[orchestrator] Worker exited for task ${taskId} with code ${exitCode}`);
     activeWorkers.delete(taskId);
 
     const db = getDb();

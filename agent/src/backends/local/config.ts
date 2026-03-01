@@ -45,6 +45,12 @@ export interface StandaloneConfig {
     provider: string;
     token: string;
   };
+  issueTracker?: {
+    provider: "internal" | "jira" | "linear" | "github-issues";
+    jira?: { baseUrl: string; email: string; apiToken: string };
+    linear?: { apiKey: string };
+    // github-issues uses scm.token — no extra credentials needed
+  };
   defaultRepo?: string;
   sandbox?: "docker" | "none";
   settings?: {

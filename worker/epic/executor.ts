@@ -436,6 +436,18 @@ Write in a professional, direct tone. Do NOT open messages with filler words or 
 
 When summarizing your work at the end, describe decisions in plain language. The internal DEC-xxx markers are parsed by the system automatically — your summary should restate decisions in readable form. For example, instead of repeating "DEC-001: Created repository-level config", write "Decision 1: Created a repository-level configuration file for..." with enough context for a non-technical reader to understand.`;
 
+    // Docker environment — let experts know they can spin up services
+    prompt += `
+
+***REMOVED******REMOVED*** Development Environment
+
+You have \`docker\` and \`docker compose\` available. You can spin up service dependencies (databases, caches, message queues, etc.) as sibling containers for integration testing. For example:
+- \`docker run -d --rm -p 27017:27017 --name mongo-test mongo:7\`
+- \`docker run -d --rm -p 6379:6379 --name redis-test redis:7-alpine\`
+- \`docker compose up -d\` (if the project has a docker-compose.yml)
+
+Clean up any containers you start when you're done (\`docker stop <name>\`).`;
+
     return prompt;
   }
 

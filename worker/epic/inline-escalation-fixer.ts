@@ -71,6 +71,7 @@ You have FULL AUTHORITY to rewrite the expert's approach. You are not limited to
 - If a library or import keeps causing issues, find an alternative or simplify
 - A passing simple implementation is better than a failing complex one
 - It is acceptable to reduce scope to make gates pass — document what was simplified and why
+- You have \`docker\` and \`docker compose\` available. If tests need service dependencies (MongoDB, Redis, Postgres, etc.), spin them up as sibling containers (e.g. \`docker run -d --rm -p 27017:27017 --name mongo-test mongo:7\`). This is often better than complex mocking. Clean up containers when done.
 
 ***REMOVED******REMOVED*** Organization Guidelines
 

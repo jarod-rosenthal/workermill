@@ -466,7 +466,7 @@ router.post(
               model,
               system: SYSTEM_PROMPT,
               prompt: `Decompose this PRD into implementation cards:\n\n${prdContent}`,
-              maxOutputTokens: 16384,
+              maxOutputTokens: 128000,
             });
 
             const { validateDecomposedPrd } = await import("../services/prd-decomposer.js");

@@ -175,29 +175,15 @@ export function isStandaloneReady(): boolean {
 /**
  * Check if the config file indicates cloud mode.
  *
- * Detects two cases:
- * 1. Explicit: config has `mode: "cloud"` with an `apiKey` field
- * 2. Backward compat: config has `apiUrl` + `apiKey` but no explicit `mode`
- *    (existing cloud setups written by agent/src/config.ts before standalone mode)
+ * Simple: `mode: "cloud"` in config = cloud. Everything else = not cloud.
+ * No keychain reads, no apiUrl sniffing, no heuristics.
  */
 export function isCloudMode(): boolean {
   if (!existsSync(CONFIG_FILE)) return false;
   try {
     const raw = readFileSync(CONFIG_FILE, "utf-8");
     const parsed = JSON.parse(raw);
-
-    // Explicit cloud mode — trust the config.
-    if (parsed.mode === "cloud") return true;
-
-    // Config has apiUrl — this is a cloud setup. The API key lives in the OS
-    // keychain or in the config file. Don't re-verify the key here because
-    // keychain reads can intermittently fail (e.g., PowerShell CredManager on
-    // WSL) and config.json may have apiKey: "" when the key is keychain-only.
-    // The API key is validated at agent startup; by the time the backend
-    // selector calls this, connectivity is already confirmed.
-    if (parsed.apiUrl) return true;
-
-    return false;
+    return parsed.mode === "cloud";
   } catch {
     return false;
   }

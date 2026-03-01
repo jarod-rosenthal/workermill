@@ -185,6 +185,9 @@ export class SettingsPanel {
       } else if (msg.type === "pull-sandbox-image") {
         this.pullSandboxImage();
         return;
+      } else if (msg.type === "switch-mode") {
+        await this.switchMode(msg.mode);
+        return;
       } else if (msg.type === "sign-out") {
         vscode.commands.executeCommand("workermill.signOut");
         return;
@@ -282,6 +285,37 @@ export class SettingsPanel {
 
   private postMessage(msg: unknown): void {
     if (!this.disposed) this.panel.webview.postMessage(msg);
+  }
+
+  private async switchMode(mode: "cloud" | "standalone"): Promise<void> {
+    try {
+      const sc = readStandaloneConfigFile();
+
+      if (mode === "cloud" && !sc.apiUrl) {
+        this.postMessage({ type: "mode-switch-error", message: "Sign in first to use cloud mode." });
+        return;
+      }
+
+      sc.mode = mode;
+      writeStandaloneConfigFile(sc);
+
+      // Restart agent to pick up new mode
+      await stopAgentProcess();
+      startAgentProcess();
+      await waitForAgentReady(undefined, 20_000);
+
+      this.postMessage({ type: "mode-switched", message: `Switched to ${mode} mode` });
+
+      // Reload integrations for new mode
+      if (mode === "standalone") {
+        this.loadIntegrationsStandalone();
+      } else {
+        const config = readAgentConfig();
+        if (config) await this.loadIntegrations(config);
+      }
+    } catch (err) {
+      this.postMessage({ type: "mode-switch-error", message: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   private async loadIntegrations(config: {
@@ -1496,6 +1530,17 @@ export class SettingsPanel {
   <div id="loading" class="loading">Loading settings...</div>
 
   <div id="content" class="hidden">
+    <!-- Workspace Mode -->
+    <div class="section" style="border-bottom: 2px solid var(--border); padding-bottom: 16px;">
+      <h2>Workspace Mode</h2>
+      <div class="radio-group">
+        <label><input type="radio" name="workspace-mode" value="cloud" id="mode-cloud" /> Cloud</label>
+        <label><input type="radio" name="workspace-mode" value="standalone" id="mode-standalone" /> Standalone</label>
+      </div>
+      <div id="mode-hint" class="hint">Cloud: managed by WorkerMill. Standalone: runs locally with your own API keys.</div>
+      <div id="mode-status" class="status"></div>
+    </div>
+
     <!-- Organization (only visible for multi-org users) -->
     <div id="org-section" class="section hidden">
       <h2>Organization</h2>
@@ -2052,6 +2097,11 @@ export class SettingsPanel {
     document.getElementById("btn-sign-out").addEventListener("click", () => {
       vscode.postMessage({ type: "sign-out" });
     });
+    document.querySelectorAll('input[name="workspace-mode"]').forEach(function(radio) {
+      radio.addEventListener("change", function() {
+        vscode.postMessage({ type: "switch-mode", mode: this.value });
+      });
+    });
     document.getElementById("btn-save-repo").addEventListener("click", () => {
       vscode.postMessage({ type: "save-repo", defaultRepo: document.getElementById("default-repo").value.trim() });
     });
@@ -2199,6 +2249,23 @@ export class SettingsPanel {
           if (el) el.classList.toggle("hidden", isStandalone);
         });
 
+        // Set workspace mode radio to match current mode
+        var modeCloud = document.getElementById("mode-cloud");
+        var modeStandalone = document.getElementById("mode-standalone");
+        if (isStandalone) {
+          modeStandalone.checked = true;
+        } else {
+          modeCloud.checked = true;
+        }
+
+        // Hide cloud-only account buttons in standalone mode
+        var accountBtns = ["btn-dashboard", "btn-web-settings"];
+        accountBtns.forEach(function(id) {
+          var el = document.getElementById(id);
+          if (el) el.classList.toggle("hidden", isStandalone);
+        });
+        document.getElementById("plan-info").classList.toggle("hidden", isStandalone);
+
         // Populate model dropdowns
         populateModelSelect("model-worker", d.defaultWorkerModel || "claude-sonnet-4-6", false);
         populateModelSelect("model-reviewer", d.managerModelId || "claude-opus-4-6", true);
@@ -2327,6 +2394,14 @@ export class SettingsPanel {
       if (msg.type === "worker-behavior-save-error") {
         const ws = document.getElementById("worker-behavior-status");
         showStatus(ws, "error", msg.message || "Failed to save worker behavior settings");
+      }
+
+      if (msg.type === "mode-switched") {
+        showStatus(document.getElementById("mode-status"), "success", msg.message);
+        setTimeout(function() { vscode.postMessage({ type: "load-integrations" }); }, 1500);
+      }
+      if (msg.type === "mode-switch-error") {
+        showStatus(document.getElementById("mode-status"), "error", msg.message);
       }
 
       if (msg.type === "error") {

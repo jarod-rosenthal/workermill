@@ -922,6 +922,7 @@ export function writeAgentConfig(opts: {
 
   const config: Record<string, unknown> = {
     ...existing,
+    mode: "cloud",
     apiUrl: opts.apiUrl,
     agentId: (existing.agentId as string) || `agent-${os.hostname()}`,
     maxWorkers: (existing.maxWorkers as number) || 1,

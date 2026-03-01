@@ -15,7 +15,9 @@ export function runGateCommand(
   timeoutMs: number = 300_000
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn("sh", ["-c", cmd], {
+    const shell = process.platform === "win32" ? "cmd" : "/bin/sh";
+    const shellArgs = process.platform === "win32" ? ["/c", cmd] : ["-c", cmd];
+    const child = spawn(shell, shellArgs, {
       cwd,
       env: { ...process.env, CI: "true" },
       stdio: ["pipe", "pipe", "pipe"],

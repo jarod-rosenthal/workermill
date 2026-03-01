@@ -2519,6 +2519,9 @@ export class EpicCoordinator {
   private async checkCompletions(): Promise<void> {
     if (!this.config.reviewEnabled) return;
 
+    // maxPerStoryRevisions: 0 means skip per-story review entirely
+    if (this.maxPerStoryRevisions <= 0) return;
+
     // Find newly completed stories that haven't been reviewed yet
     for (const storyIndex of this.completedStoryIndices) {
       if (this.reviewedStoryIndices.has(storyIndex)) continue;

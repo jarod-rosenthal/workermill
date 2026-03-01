@@ -16,6 +16,7 @@ import {
 } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { readApiKeyFromKeychain } from "../../keychain.js";
 
 const CONFIG_DIR = join(homedir(), ".workermill");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -185,11 +186,14 @@ export function isCloudMode(): boolean {
     const raw = readFileSync(CONFIG_FILE, "utf-8");
     const parsed = JSON.parse(raw);
 
+    // Resolve API key: config file first, then OS keychain
+    const hasApiKey = !!parsed.apiKey || !!readApiKeyFromKeychain();
+
     // Explicit cloud mode
-    if (parsed.mode === "cloud" && !!parsed.apiKey) return true;
+    if (parsed.mode === "cloud" && hasApiKey) return true;
 
     // Backward compat: existing cloud config has apiUrl + apiKey but no mode field
-    if (!parsed.mode && !!parsed.apiUrl && !!parsed.apiKey) return true;
+    if (!parsed.mode && !!parsed.apiUrl && hasApiKey) return true;
 
     return false;
   } catch {

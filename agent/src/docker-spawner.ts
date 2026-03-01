@@ -545,9 +545,7 @@ export async function spawnDockerWorker(
     // Add the host's docker socket GID so the non-root worker user can access it
     try {
       const socketStat = fs.statSync(dockerSocket);
-      if (socketStat.gid > 0) {
-        dockerArgs.push("--group-add", String(socketStat.gid));
-      }
+      dockerArgs.push("--group-add", String(socketStat.gid));
     } catch {
       // Socket exists but can't stat — proceed without group-add
     }

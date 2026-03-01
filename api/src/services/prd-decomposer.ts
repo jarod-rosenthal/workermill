@@ -211,7 +211,7 @@ export async function decomposePrd(
   try {
     response = await client.messages.create({
       model: resolvedModel,
-      max_tokens: 16384,
+      max_tokens: 128000,
       system: SYSTEM_PROMPT,
       messages: [
         {

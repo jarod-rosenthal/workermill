@@ -40,6 +40,8 @@ export async function sweepStalledBoards(): Promise<number> {
     // 1. At least one card with a completed worker task (cascade should have continued)
     // 2. At least one card with NO worker task whose deps might be met
     // 3. NO currently active (non-terminal) worker tasks
+    // 4. The MOST RECENT terminal task was a success — NOT cancelled or failed
+    //    (if the user cancelled a task, they don't want the next one to auto-start)
     //
     // We use a raw query to efficiently filter across joins.
     const stalledBoards: { board_id: string; org_id: string }[] =
@@ -58,6 +60,14 @@ export async function sweepStalledBoards(): Promise<number> {
             JOIN worker_tasks wt_active ON wt_active.id = c_active.worker_task_id
             WHERE c_active.board_id = b.id
               AND wt_active.status NOT IN ('completed', 'deployed', 'pr_approved', 'review_approved', 'failed', 'cancelled')
+          )
+          -- Exclude boards where any card was cancelled or failed — the user
+          -- deliberately stopped execution, so the sweep should not restart it.
+          AND NOT EXISTS (
+            SELECT 1 FROM kb_cards c_stopped
+            JOIN worker_tasks wt_stopped ON wt_stopped.id = c_stopped.worker_task_id
+            WHERE c_stopped.board_id = b.id
+              AND wt_stopped.status IN ('cancelled', 'failed')
           )
         LIMIT 10
         `,

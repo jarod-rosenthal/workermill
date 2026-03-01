@@ -2477,6 +2477,7 @@ async function decomposePrdViaAgentSdk(
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         maxTurns: 1,
+        thinking: { type: "disabled" },
         includePartialMessages: true,
         persistSession: false,
         stderr: (data: string) => {

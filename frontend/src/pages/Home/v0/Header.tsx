@@ -5,7 +5,6 @@ import { Menu, X } from "lucide-react";
 
 const navItems: Array<{ label: string; href: string; isRoute?: boolean }> = [
   { label: "Showcase", href: "#showcase" },
-  { label: "Pricing", href: "#pricing" },
   { label: "Docs", href: "/docs", isRoute: true },
   { label: "Blog", href: "/blog", isRoute: true },
 ];

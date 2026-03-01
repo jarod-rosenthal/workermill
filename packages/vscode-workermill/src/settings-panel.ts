@@ -219,9 +219,15 @@ export class SettingsPanel {
           this.saveTrackerStandalone(msg.tracker);
         } else if (msg.type === "save-worker-behavior") {
           this.saveWorkerBehaviorStandalone(msg);
+        } else if (msg.type === "save-jira") {
+          this.saveJiraStandalone(msg);
+        } else if (msg.type === "test-jira") {
+          this.testJiraStandalone();
+        } else if (msg.type === "save-linear") {
+          this.saveLinearStandalone(msg);
         } else if (msg.type === "open-dashboard" || msg.type === "open-web-settings" || msg.type === "open-pricing") {
           this.postMessage({ type: "error", message: "Not available in standalone mode" });
-        } else if (msg.type === "save-jira" || msg.type === "test-jira" || msg.type === "switch-org") {
+        } else if (msg.type === "switch-org") {
           this.postMessage({ type: "error", message: "Not available in standalone mode" });
         }
         return;
@@ -348,8 +354,14 @@ export class SettingsPanel {
         github: { configured: scm.provider === "github" && !!scm.token, defaultRepo: sc.defaultRepo || "" },
         bitbucket: { configured: scm.provider === "bitbucket" && !!scm.token },
         gitlab: { configured: scm.provider === "gitlab" && !!scm.token },
-        // Tracker — standalone only supports internal boards
-        defaultIssueTracker: "internal",
+        // Tracker — standalone supports all providers
+        defaultIssueTracker: (sc.issueTracker as Record<string, unknown>)?.provider || "internal",
+        jira: {
+          configured: !!(sc.issueTracker as Record<string, unknown>)?.jira,
+          baseUrl: ((sc.issueTracker as Record<string, unknown>)?.jira as Record<string, string>)?.baseUrl,
+          email: ((sc.issueTracker as Record<string, unknown>)?.jira as Record<string, string>)?.email,
+        },
+        linear: { configured: !!(sc.issueTracker as Record<string, unknown>)?.linear },
         // Worker behavior settings
         maxPerStoryRevisions: settings.maxPerStoryRevisions ?? 1,
         maxReviewRevisions: settings.maxReviewRevisions ?? 3,
@@ -421,8 +433,82 @@ export class SettingsPanel {
   }
 
   private saveTrackerStandalone(tracker: string): void {
-    // Standalone only supports internal boards — silently accept
-    this.postMessage({ type: "tracker-saved", tracker: "internal" });
+    try {
+      const sc = readStandaloneConfigFile();
+      const existing = (sc.issueTracker || {}) as Record<string, unknown>;
+      existing.provider = tracker;
+      sc.issueTracker = existing;
+      writeStandaloneConfigFile(sc);
+      this.postMessage({ type: "tracker-saved", tracker });
+    } catch (err) {
+      this.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private saveJiraStandalone(msg: { baseUrl: string; email: string; apiToken: string }): void {
+    try {
+      this.postMessage({ type: "saving" });
+      const sc = readStandaloneConfigFile();
+      const tracker = (sc.issueTracker || { provider: "jira" }) as Record<string, unknown>;
+      tracker.provider = "jira";
+      tracker.jira = { baseUrl: msg.baseUrl, email: msg.email, apiToken: msg.apiToken };
+      sc.issueTracker = tracker;
+      writeStandaloneConfigFile(sc);
+      this.postMessage({ type: "save-success", message: "Jira credentials saved" });
+      this.loadIntegrationsStandalone();
+    } catch (err) {
+      this.postMessage({ type: "save-error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async testJiraStandalone(): Promise<void> {
+    try {
+      this.postMessage({ type: "testing" });
+      const sc = readStandaloneConfigFile();
+      const jira = (sc.issueTracker as Record<string, unknown>)?.jira as
+        | { baseUrl: string; email: string; apiToken: string }
+        | undefined;
+      if (!jira?.baseUrl || !jira.email || !jira.apiToken) {
+        this.postMessage({ type: "test-error", message: "Save Jira credentials first" });
+        return;
+      }
+      // Call Jira /myself endpoint directly
+      const url = `${jira.baseUrl}/rest/api/3/myself`;
+      const resp = await fetch(url, {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${jira.email}:${jira.apiToken}`).toString("base64")}`,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!resp.ok) {
+        const msg = resp.status === 401
+          ? "Jira authentication failed. Check your credentials."
+          : `Jira connection failed (HTTP ${resp.status})`;
+        this.postMessage({ type: "test-error", message: msg });
+        return;
+      }
+      const data = (await resp.json()) as { displayName?: string };
+      this.postMessage({ type: "test-success", message: `Connected as ${data.displayName || "unknown"}` });
+    } catch (err) {
+      this.postMessage({ type: "test-error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private saveLinearStandalone(msg: { apiKey: string }): void {
+    try {
+      this.postMessage({ type: "saving" });
+      const sc = readStandaloneConfigFile();
+      const tracker = (sc.issueTracker || { provider: "linear" }) as Record<string, unknown>;
+      tracker.provider = "linear";
+      tracker.linear = { apiKey: msg.apiKey };
+      sc.issueTracker = tracker;
+      writeStandaloneConfigFile(sc);
+      this.postMessage({ type: "save-success", message: "Linear API key saved" });
+      this.loadIntegrationsStandalone();
+    } catch (err) {
+      this.postMessage({ type: "save-error", message: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   private saveWorkerBehaviorStandalone(msg: {
@@ -1416,22 +1502,47 @@ export class SettingsPanel {
         <div id="jira-status" class="status"></div>
       </div>
 
-      <!-- GitHub Issues info -->
-      <div id="github-fields" class="hidden">
-        <p>GitHub Issues uses your GitHub token from sign-in. <span id="github-badge"></span></p>
-        <div class="hint">No additional configuration needed — your SCM credentials were saved during onboarding.</div>
+      <!-- Linear info (cloud) -->
+      <div id="linear-fields" class="hidden">
+        <div id="linear-cloud-section">
+          <p>Linear integration status: <span id="linear-badge"></span></p>
+          <div class="hint">Configure Linear API key and webhook in <button class="btn-link" id="btn-web-settings-linear">web settings</button>.</div>
+        </div>
+        <div id="linear-standalone-section" class="hidden">
+          <div class="field">
+            <label>Linear API Key</label>
+            <input type="password" id="linear-api-key" placeholder="lin_api_..." />
+            <div class="hint">Generate at <a href="https://linear.app/settings/api">linear.app/settings/api</a></div>
+          </div>
+          <div class="btn-row">
+            <button class="btn-primary" id="btn-save-linear">Save</button>
+          </div>
+          <div id="linear-status" class="status"></div>
+        </div>
       </div>
 
-      <!-- Linear info -->
-      <div id="linear-fields" class="hidden">
-        <p>Linear integration status: <span id="linear-badge"></span></p>
-        <div class="hint">Configure Linear API key and webhook in <button class="btn-link" id="btn-web-settings-linear">web settings</button>.</div>
+      <!-- GitHub Issues info -->
+      <div id="github-fields" class="hidden">
+        <div id="github-cloud-section">
+          <p>GitHub Issues uses your GitHub token from sign-in. <span id="github-badge"></span></p>
+          <div class="hint">No additional configuration needed — your SCM credentials were saved during onboarding.</div>
+        </div>
+        <div id="github-standalone-section" class="hidden">
+          <p>Uses your GitHub token from Source Control settings above.</p>
+          <div class="hint">Issues from your default repository will appear in the sidebar backlog.</div>
+        </div>
       </div>
 
       <!-- Internal boards info -->
       <div id="boards-fields" class="hidden">
-        <p>Using WorkerMill internal boards — no external issue tracker needed.</p>
-        <div class="hint">Create and manage boards from the <button class="btn-link" id="btn-dashboard-boards">dashboard</button>.</div>
+        <div id="boards-cloud-section">
+          <p>Using WorkerMill internal boards — no external issue tracker needed.</p>
+          <div class="hint">Create and manage boards from the <button class="btn-link" id="btn-dashboard-boards">dashboard</button>.</div>
+        </div>
+        <div id="boards-standalone-section" class="hidden">
+          <p>Using local boards — no external issue tracker needed.</p>
+          <div class="hint">Create boards via Full Build or add cards manually.</div>
+        </div>
       </div>
     </div>
 
@@ -1815,9 +1926,21 @@ export class SettingsPanel {
     document.getElementById("btn-web-settings").addEventListener("click", () => {
       vscode.postMessage({ type: "open-web-settings" });
     });
-    document.getElementById("btn-web-settings-linear").addEventListener("click", () => {
-      vscode.postMessage({ type: "open-web-settings" });
-    });
+    const btnWebSettingsLinear = document.getElementById("btn-web-settings-linear");
+    if (btnWebSettingsLinear) {
+      btnWebSettingsLinear.addEventListener("click", () => {
+        vscode.postMessage({ type: "open-web-settings" });
+      });
+    }
+    const btnSaveLinear = document.getElementById("btn-save-linear");
+    if (btnSaveLinear) {
+      btnSaveLinear.addEventListener("click", () => {
+        vscode.postMessage({
+          type: "save-linear",
+          apiKey: document.getElementById("linear-api-key").value.trim(),
+        });
+      });
+    }
     // SCM save buttons
     document.getElementById("btn-save-scm-github").addEventListener("click", () => {
       vscode.postMessage({
@@ -1998,6 +2121,19 @@ export class SettingsPanel {
         // Apply plan restrictions before selecting radios
         applyPlanRestrictions(d.plan || "pro");
 
+        // Toggle standalone vs cloud sub-sections
+        const isStandalone = d.orgName === "Standalone";
+        var standaloneEls = ["linear-standalone-section", "github-standalone-section", "boards-standalone-section"];
+        var cloudEls = ["linear-cloud-section", "github-cloud-section", "boards-cloud-section"];
+        standaloneEls.forEach(function(id) {
+          var el = document.getElementById(id);
+          if (el) el.classList.toggle("hidden", !isStandalone);
+        });
+        cloudEls.forEach(function(id) {
+          var el = document.getElementById(id);
+          if (el) el.classList.toggle("hidden", isStandalone);
+        });
+
         // Populate model dropdowns
         populateModelSelect("model-worker", d.defaultWorkerModel || "claude-sonnet-4-6", false);
         populateModelSelect("model-reviewer", d.managerModelId || "claude-opus-4-6", true);
@@ -2024,9 +2160,17 @@ export class SettingsPanel {
           if (d.jira.configured) showStatus(jiraStatus, "success", "Jira is configured");
         }
 
-        // Badges (issue tracker)
-        document.getElementById("github-badge").innerHTML = badge(d.github?.configured);
-        document.getElementById("linear-badge").innerHTML = badge(d.linear?.configured);
+        // Badges (issue tracker) — elements may not exist in standalone mode
+        var ghBadge = document.getElementById("github-badge");
+        if (ghBadge) ghBadge.innerHTML = badge(d.github?.configured);
+        var lnBadge = document.getElementById("linear-badge");
+        if (lnBadge) lnBadge.innerHTML = badge(d.linear?.configured);
+
+        // Show Linear configured status in standalone mode
+        if (isStandalone && d.linear?.configured) {
+          var linearStatus = document.getElementById("linear-status");
+          if (linearStatus) showStatus(linearStatus, "success", "Linear API key configured");
+        }
 
         // Populate SCM section
         document.getElementById("scm-github-badge").innerHTML = d.github?.configured ? badge(true) : "";

@@ -183,6 +183,15 @@ export async function processUnblockedCards(
 
     // Check if all dependencies are satisfied
     const depCardIds = depsMap.get(card.id) || [];
+
+    // Cards with NO dependencies should only run when explicitly triggered
+    // (via run-all or the /run endpoint). Without this check, the sweep
+    // auto-triggers manually created cards on boards that have completed cards.
+    if (depCardIds.length === 0 && !boardExecutionId) {
+      stillBlocked++;
+      continue;
+    }
+
     const allDepsMet = depCardIds.every((depId) => {
       const depCard = cardMap.get(depId);
       return depCard?.workerTask && isTaskDoneForCascade(depCard.workerTask);

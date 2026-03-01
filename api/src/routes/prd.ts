@@ -664,24 +664,9 @@ router.post(
       }
 
       // ---------------------------------------------------------------
-      // 5. Optionally trigger auto-run for unblocked cards
+      // 5. Board is ready — user kicks off the first card manually
+      //    (prdAutoRun only controls cascade AFTER a card completes)
       // ---------------------------------------------------------------
-      if (org.prdAutoRun) {
-        try {
-          const { processUnblockedCards } = await import("../services/board-execution.js");
-          await processUnblockedCards(result.board.id, org.id);
-          logger.info("PRD auto-run triggered for board", {
-            boardId: result.board.id,
-            orgId: org.id,
-          });
-        } catch (err) {
-          // Auto-run failure should not fail the decompose response
-          logger.error("PRD auto-run failed (non-fatal)", {
-            boardId: result.board.id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
 
       // ---------------------------------------------------------------
       // 6. Return response

@@ -1,6 +1,7 @@
 import { AppDataSource } from "../db/connection.js";
 import { KbCard } from "../models/KbCard.js";
 import { KbCardDependency } from "../models/KbCardDependency.js";
+import { Organization } from "../models/Organization.js";
 import { WorkerTask } from "../models/WorkerTask.js";
 import { logger } from "../utils/logger.js";
 
@@ -63,7 +64,12 @@ export async function sweepStalledBoards(): Promise<number> {
       );
 
     let unstuckCount = 0;
+    const orgRepo = AppDataSource.getRepository(Organization);
     for (const row of stalledBoards) {
+      // Respect org setting — only cascade if prdAutoRun is enabled
+      const org = await orgRepo.findOne({ where: { id: row.org_id } });
+      if (!org?.prdAutoRun) continue;
+
       logger.info("Board cascade safety net: triggered stalled board", {
         boardId: row.board_id,
       });

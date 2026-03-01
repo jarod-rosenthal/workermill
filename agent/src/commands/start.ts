@@ -30,6 +30,7 @@ import {
   isStandaloneReady,
   isCloudMode,
   loadStandaloneConfig,
+  saveStandaloneConfig,
   getRoleConfig,
   resolveApiKey,
 } from "../backends/local/config.js";
@@ -93,6 +94,15 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     console.log(chalk.yellow(`Agent is already running (${existing.detail}).`));
     console.log(`Stop it first with: ${chalk.cyan("workermill-agent stop")}`);
     process.exit(1);
+  }
+
+  // ── Auto-migrate: old configs with apiUrl but no explicit mode ──
+  // Existing cloud users have apiUrl but no mode field. Set mode: "cloud"
+  // so isCloudMode() works without heuristics.
+  const rawConfig = loadStandaloneConfig();
+  if ((rawConfig as unknown as Record<string, unknown>).apiUrl && !rawConfig.mode) {
+    rawConfig.mode = "cloud";
+    saveStandaloneConfig(rawConfig);
   }
 
   // ── Standalone mode detection ──

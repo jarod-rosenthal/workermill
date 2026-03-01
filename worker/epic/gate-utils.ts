@@ -19,13 +19,22 @@ export function runGateCommand(
     const shellArgs = process.platform === "win32" ? ["/c", cmd] : ["-c", cmd];
     // On Windows (Git Bash / MSYS2), the Bun-compiled agent binary may not inherit
     // Windows user env vars like APPDATA, LOCALAPPDATA, GOCACHE. Go toolchain needs
-    // these to locate the build cache. Inject sensible defaults if missing.
+    // these to locate the build cache. Also ensure ~/bin is in PATH so user wrapper
+    // scripts (e.g. go wrapper with gcc PATH for -race flag) are discoverable.
     const env: Record<string, string | undefined> = { ...process.env, CI: "true" };
     if (process.platform === "win32" || process.env.MSYSTEM) {
       const home = process.env.HOME || process.env.USERPROFILE || "";
       if (!env.APPDATA && home) env.APPDATA = `${home}/AppData/Roaming`;
       if (!env.LOCALAPPDATA && home) env.LOCALAPPDATA = `${home}/AppData/Local`;
       if (!env.GOCACHE && home) env.GOCACHE = `${home}/.cache/go-build`;
+      // Enable CGO so -race flag works (requires gcc — if missing, Go gives
+      // a clear "gcc not found" error the gate fixer can address)
+      if (!env.CGO_ENABLED) env.CGO_ENABLED = "1";
+      // Ensure ~/bin is in PATH — gate fixers create wrapper scripts there
+      // (e.g. go wrapper that sets CGO_ENABLED and adds gcc to PATH for -race)
+      if (home && env.PATH && !env.PATH.includes(`${home}/bin`)) {
+        env.PATH = `${home}/bin:${env.PATH}`;
+      }
     }
 
     const child = spawn(shell, shellArgs, {

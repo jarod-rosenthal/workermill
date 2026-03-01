@@ -10,7 +10,7 @@
 - **Target repo**: `workermill-examples/flagdeck` (GitHub, public)
 - **Live URL**: https://flagdeck.workermill.com
 - **API compute**: Railway (Hobby plan, Docker container)
-- **Frontend compute**: Railway (SvelteKit with `adapter-node`, NOT adapter-static)
+- **Frontend compute**: Railway (SvelteKit with `adapter-static` + nginx Dockerfile)
 - **Database**: MongoDB Atlas (M0 free tier, 512 MB)
 - **Cache**: Upstash Redis (free tier, 10K commands/day)
 - **CI/CD**: GitHub Actions → Railway CLI deploy
@@ -1426,6 +1426,50 @@ Each flag has targeting rules in at least the `production` environment:
 
 Mix of flag created/updated/toggled events over the past 14 days.
 
+### Post-Deployment Seeding (MANDATORY)
+
+**This is a demo/showcase application. Without seed data, the dashboard is empty and useless.** The seed script MUST be run against production MongoDB after the first successful deployment.
+
+**How to run the seed script:**
+
+```bash
+cd api && \
+  MONGODB_URI="<atlas_connection_string>" \
+  REDIS_URL="<upstash_redis_url>" \
+  JWT_SECRET="<jwt_secret>" \
+  go run cmd/seed/main.go
+```
+
+Get the connection strings from Railway environment variables (see "Railway environment variables" section above). The script is idempotent — running it multiple times does not create duplicates.
+
+**After seeding, verify:**
+1. Log in at `https://flagdeck-app.workermill.com` with `demo@workermill.com` / `demo1234`
+2. Dashboard shows 10 feature flags with targeting rules and rollouts
+3. Segments page shows 3 segments (Beta Users, Enterprise, Internal Team)
+4. Experiments page shows 2 experiments (1 running with data, 1 draft)
+5. Audit log shows 30 entries spanning 14 days
+
+**Demo credentials:**
+
+| Field | Value |
+|-------|-------|
+| Email | `demo@workermill.com` |
+| Password | `demo1234` |
+| Role | Admin |
+
+**SDK API keys for testing flag evaluation:**
+
+| Key | Environment |
+|-----|-------------|
+| `fd_live_demo_flagdeck_production_key_01` | Production |
+| `fd_test_demo_flagdeck_development_key_01` | Development |
+
+### Auth API Endpoint Paths (CRITICAL — Frontend Integration)
+
+The Go backend routes auth endpoints at `/auth/*` (NO `/api` prefix), while protected dashboard API endpoints are at `/api/v1/*`. The frontend auth store MUST use direct `fetch()` calls to `/auth/login`, `/auth/refresh`, `/auth/logout` — NOT `/api/auth/*`.
+
+The auth response returns snake_case fields (`access_token`, `refresh_token`, `expires_in`, `token_type`) with NO `user` object. User data must be decoded from the JWT payload.
+
 ---
 
 ## Testing
@@ -1930,6 +1974,9 @@ Workers MUST create a `README.md` covering:
 - [ ] `https://flagdeck.workermill.com/api/v1/health` returns 200
 - [ ] CI workflow runs on push/PR (lint, test, build for both API and frontend)
 - [ ] Deploy workflow triggers on CI success
+- [ ] **Seed script run against production MongoDB** — `MONGODB_URI=<atlas_uri> REDIS_URL=<upstash_url> JWT_SECRET=<secret> go run cmd/seed/main.go`
+- [ ] Demo user can log in at `https://flagdeck-app.workermill.com` with `demo@workermill.com` / `demo1234`
+- [ ] Dashboard shows 10 feature flags, 3 segments, 2 experiments after seeding
 
 ### Cost
 - [ ] Railway: ~$5-10/month (Hobby plan, two services)

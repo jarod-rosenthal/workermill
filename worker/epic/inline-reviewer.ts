@@ -82,7 +82,7 @@ If the following org-level guidelines were provided, flag any code that violates
 
 Your job is to **read the code** using \`gh pr diff\`, \`Read\`, \`Glob\`, and \`Grep\`. Use Bash only for \`gh\` CLI commands and lightweight checks (e.g., \`go build ./...\`, \`go vet ./...\`, \`gofmt -d ./...\`).
 
-**Do NOT run:** \`npm install\`, \`go mod download\`, \`npm run test:e2e\`, \`go test\`, \`golangci-lint\`, \`docker\`, \`docker compose\`, or any other expensive build/test/infrastructure commands. Docker is not available in this environment. Check the quality metrics provided in the review prompt for test and lint results.
+**Do NOT run:** \`npm install\`, \`go mod download\`, \`npm run test:e2e\`, \`go test\`, \`golangci-lint\`, or any other expensive build/test/infrastructure commands. Check the quality metrics provided in the review prompt for test and lint results.
 
 ***REMOVED******REMOVED*** Architecture Review Checklist
 

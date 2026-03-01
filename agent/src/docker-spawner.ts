@@ -532,9 +532,16 @@ export async function spawnDockerWorker(
 
   // Mount Docker socket so workers can spin up sibling containers (DBs, etc.)
   // The sandbox still isolates the filesystem — only Docker API access is shared.
-  const dockerSocket = "/var/run/docker.sock";
-  if (fs.existsSync(dockerSocket)) {
-    dockerArgs.push("-v", `${dockerSocket}:${dockerSocket}`);
+  // Check multiple paths: standard Linux, Docker Desktop for WSL, user-level
+  const dockerSocketCandidates = [
+    "/var/run/docker.sock",
+    "/mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.sock",
+    path.join(os.homedir(), ".docker/run/docker.sock"),
+  ];
+  const dockerSocket = dockerSocketCandidates.find((s) => fs.existsSync(s));
+  if (dockerSocket) {
+    console.log(chalk.dim(`  Docker socket: ${dockerSocket}`));
+    dockerArgs.push("-v", `${dockerSocket}:/var/run/docker.sock`);
     // Add the host's docker socket GID so the non-root worker user can access it
     try {
       const socketStat = fs.statSync(dockerSocket);
@@ -544,6 +551,8 @@ export async function spawnDockerWorker(
     } catch {
       // Socket exists but can't stat — proceed without group-add
     }
+  } else {
+    console.log(chalk.yellow("  ⚠ No Docker socket found — workers cannot run docker/docker-compose"));
   }
 
   // Mount AWS credentials (read-only)

@@ -616,19 +616,67 @@ export class LocalBackend implements AgentBackend {
   }
 
   async runAllCards(boardId: string): Promise<void> {
-    // Get all cards in the first column (backlog) that don't have tasks
-    const board = await this.getBoard(boardId);
-    if (!board || board.columns.length === 0) return;
+    const db = getDb();
 
-    const backlogCol = board.columns[0];
-    const cards = getDb()
+    // Get all cards that don't have tasks yet, in position order
+    const cards = db
       .prepare(
-        "SELECT * FROM cards WHERE board_id = ? AND column_id = ? AND task_id IS NULL ORDER BY position ASC",
+        "SELECT * FROM cards WHERE board_id = ? AND task_id IS NULL ORDER BY position ASC",
       )
-      .all(boardId, backlogCol.id) as any[];
+      .all(boardId) as any[];
 
+    if (cards.length === 0) return;
+
+    // Load all dependencies for this board
+    const allDeps = db
+      .prepare(
+        "SELECT cd.card_id, cd.depends_on_card_id FROM card_dependencies cd JOIN cards c ON c.id = cd.card_id WHERE c.board_id = ?",
+      )
+      .all(boardId) as { card_id: string; depends_on_card_id: string }[];
+
+    const depsMap = new Map<string, string[]>();
+    for (const dep of allDeps) {
+      const list = depsMap.get(dep.card_id) || [];
+      list.push(dep.depends_on_card_id);
+      depsMap.set(dep.card_id, list);
+    }
+
+    // Only trigger cards whose dependencies are ALL already completed
+    // (or cards with no dependencies). The cascade trigger handles the rest.
+    let triggered = false;
     for (const card of cards) {
-      await this.runCard(boardId, card.id);
+      const deps = depsMap.get(card.id) || [];
+
+      if (deps.length === 0) {
+        // No dependencies — safe to start
+        await this.runCard(boardId, card.id);
+        triggered = true;
+        // Serial execution — only start one card at a time for boards
+        // (the cascade trigger will start the next when this completes)
+        break;
+      }
+
+      // Check if all dependencies have completed tasks
+      const allMet = deps.every((depCardId) => {
+        const depCard = db.prepare("SELECT task_id FROM cards WHERE id = ?").get(depCardId) as any;
+        if (!depCard?.task_id) return false;
+        const depTask = db.prepare("SELECT status FROM tasks WHERE id = ?").get(depCard.task_id) as any;
+        return depTask?.status === "completed";
+      });
+
+      if (allMet) {
+        await this.runCard(boardId, card.id);
+        triggered = true;
+        break; // Serial — one at a time
+      }
+    }
+
+    // If no card was triggered and we have cards with no deps, trigger the first
+    if (!triggered && cards.length > 0) {
+      const noDeps = cards.find((c) => !depsMap.has(c.id) || depsMap.get(c.id)!.length === 0);
+      if (noDeps) {
+        await this.runCard(boardId, noDeps.id);
+      }
     }
   }
 

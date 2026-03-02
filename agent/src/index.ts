@@ -105,6 +105,9 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
       localApiPort = await startLocalApi(config);
       console.log(`  ${chalk.dim("Local API:")} http://127.0.0.1:${localApiPort}/api/status`);
 
+      // Initialize API client pointed at local API (enables planner to work in standalone)
+      initApi(`http://127.0.0.1:${localApiPort}`, "standalone");
+
       // Initialize local orchestrator
       initOrchestrator(localApiPort);
     } catch (err) {

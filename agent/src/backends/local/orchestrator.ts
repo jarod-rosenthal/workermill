@@ -98,8 +98,10 @@ async function spawnLocalWorker(task: any): Promise<void> {
   const config = loadStandaloneConfig();
   const taskId = task.id;
 
-  // Working directory
-  const workDir = path.join(os.tmpdir(), `workermill-${taskId.slice(0, 8)}`);
+  // Working directory — shared per board so sequential cards see each other's work
+  const workDir = task.board_id
+    ? path.join(os.tmpdir(), `workermill-board-${task.board_id.slice(0, 12)}`)
+    : path.join(os.tmpdir(), `workermill-${taskId.slice(0, 8)}`);
   fs.mkdirSync(workDir, { recursive: true });
 
   // Resolve spawn command (same pattern as spawner.ts:37-49)
@@ -185,6 +187,19 @@ async function spawnLocalWorker(task: any): Promise<void> {
       : JSON.stringify(JSON.parse(task.execution_plan));
   }
 
+  // Quality gates — read from the board if this task is linked to a card
+  if (task.board_id) {
+    try {
+      const board = getDb().prepare("SELECT quality_gate_commands, ci_workflow_path FROM boards WHERE id = ?").get(task.board_id) as any;
+      if (board?.quality_gate_commands) {
+        env.QUALITY_GATE_COMMANDS = board.quality_gate_commands;
+      }
+      if (board?.ci_workflow_path) {
+        env.CI_WORKFLOW_PATH = board.ci_workflow_path;
+      }
+    } catch { /* board lookup failed — proceed without gates */ }
+  }
+
   console.log(`[orchestrator] Spawning worker: ${command} ${args.join(" ")} (cwd: ${workDir}, task: ${taskId})`);
 
   const child = spawn(command, args, {
@@ -252,22 +267,43 @@ async function spawnLocalWorker(task: any): Promise<void> {
 
     const db = getDb();
     if (exitCode === 0) {
-      db.prepare(
-        "UPDATE tasks SET status = 'completed', completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-      ).run(taskId);
-      emitStreamEvent("org:local:tasks", "task_state", { taskId, status: "completed" });
+      // Check if worker created a PR — if so, mark as reviewing and spawn manager
+      const updatedTask = db.prepare("SELECT github_pr_url FROM tasks WHERE id = ?").get(taskId) as any;
+      const hasPr = !!updatedTask?.github_pr_url;
 
-      // Trigger dependency cascade
-      triggerDependentCards(taskId);
+      if (hasPr && config.settings?.maxReviewRevisions !== 0) {
+        // Worker completed with a PR — spawn manager review
+        db.prepare(
+          "UPDATE tasks SET status = 'reviewing', updated_at = datetime('now') WHERE id = ?"
+        ).run(taskId);
+        emitStreamEvent("org:local:tasks", "task_state", { taskId, status: "reviewing" });
+        spawnManagerReview(task, updatedTask.github_pr_url).catch((err) => {
+          console.error(`[orchestrator] Manager spawn failed for task ${taskId}:`, err);
+          // Fall through to completed
+          db.prepare(
+            "UPDATE tasks SET status = 'completed', completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+          ).run(taskId);
+          emitStreamEvent("org:local:tasks", "task_state", { taskId, status: "completed" });
+          triggerDependentCards(taskId);
+          processNextQueued();
+        });
+      } else {
+        db.prepare(
+          "UPDATE tasks SET status = 'completed', completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+        ).run(taskId);
+        emitStreamEvent("org:local:tasks", "task_state", { taskId, status: "completed" });
+        triggerDependentCards(taskId);
+        processNextQueued();
+      }
     } else {
       db.prepare(
         "UPDATE tasks SET status = 'failed', completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
       ).run(taskId);
       emitStreamEvent("org:local:tasks", "task_state", { taskId, status: "failed", exitCode });
-    }
 
-    // Check if there are queued tasks waiting for a slot
-    processNextQueued();
+      // Check if there are queued tasks waiting for a slot
+      processNextQueued();
+    }
   });
 }
 
@@ -336,6 +372,238 @@ function triggerDependentCards(completedTaskId: string): void {
         processQueuedTask(taskId).catch(() => {});
       }
     }
+  }
+}
+
+/**
+ * Spawn a manager review process for a completed task with a PR.
+ * The manager reviews the PR and posts the result via POST /api/tasks/:id/manager-complete.
+ */
+async function spawnManagerReview(task: any, prUrl: string): Promise<void> {
+  if (!localApiPort) return;
+
+  const config = loadStandaloneConfig();
+  const taskId = task.id;
+  const techLeadConfig = getRoleConfig(config, "techLead");
+
+  // Extract PR number from URL
+  const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
+  const prNumber = prNumberMatch ? prNumberMatch[1] : "";
+
+  // Working directory — reuse the task's workspace
+  const workDir = task.board_id
+    ? path.join(os.tmpdir(), `workermill-board-${task.board_id.slice(0, 12)}`)
+    : path.join(os.tmpdir(), `workermill-${taskId.slice(0, 8)}`);
+  fs.mkdirSync(workDir, { recursive: true });
+
+  const execName = path.basename(process.execPath).replace(/\.exe$/i, "");
+  let command: string;
+  let args: string[];
+  if (execName === "node" || execName === "nodejs") {
+    const thisFile = fileURLToPath(import.meta.url);
+    const distDir = path.resolve(path.dirname(thisFile), "../..");
+    const entryScript = path.join(distDir, "entry.js");
+    command = process.execPath;
+    args = [entryScript];
+  } else {
+    command = process.execPath;
+    args = [];
+  }
+
+  const apiUrl = `http://127.0.0.1:${localApiPort}`;
+  const rawRepo = task.github_repo || config.defaultRepo || "";
+  const repoSlug = rawRepo.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "") || rawRepo;
+  const agentToken = (() => {
+    try { return fs.readFileSync(path.join(os.homedir(), ".workermill", "agent.token"), "utf-8").trim(); } catch { return "standalone"; }
+  })();
+
+  // Clean environment (same as spawnLocalWorker)
+  const cleanEnv: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v === undefined) continue;
+    if (k === "CLAUDECODE" || k === "CLAUDE_CODE_ENTRYPOINT" || k.startsWith("CLAUDE_CODE_")) continue;
+    if (k === "ANTHROPIC_API_KEY") continue;
+    cleanEnv[k] = v;
+  }
+
+  const env: Record<string, string> = {
+    ...cleanEnv,
+    __WORKERMILL_MODE: "manager",
+    TASK_ID: taskId,
+    MANAGER_ACTION: "review_pr",
+    GITHUB_REPO: repoSlug,
+    PR_URL: prUrl,
+    PR_NUMBER: prNumber,
+    API_BASE_URL: apiUrl,
+    ORG_API_KEY: agentToken,
+    SCM_PROVIDER: task.scm_provider || config.scm?.provider || "github",
+    SCM_TOKEN: config.scm?.token || "",
+    GITHUB_TOKEN: config.scm?.token || "",
+    GH_TOKEN: config.scm?.token || "",
+    MANAGER_PROVIDER: techLeadConfig.provider,
+    MANAGER_MODEL: techLeadConfig.model,
+    JIRA_SUMMARY: task.summary || "",
+    JIRA_DESCRIPTION: task.description || "",
+  };
+
+  // Set LLM API key for the tech lead role
+  const techLeadKey = resolveApiKey(config, "techLead");
+  if (techLeadConfig.provider === "anthropic" && techLeadKey && config.roles?.techLead?.apiKey) {
+    env.ANTHROPIC_API_KEY = techLeadKey;
+  } else if (techLeadConfig.provider === "openai") {
+    env.OPENAI_API_KEY = techLeadKey;
+  } else if (techLeadConfig.provider === "google") {
+    env.GOOGLE_API_KEY = techLeadKey;
+  }
+
+  console.log(`[orchestrator] Spawning manager review: ${command} (task: ${taskId}, PR: ${prUrl})`);
+
+  const child = spawn(command, args, {
+    env,
+    cwd: workDir,
+    stdio: ["pipe", "pipe", "pipe"],
+    detached: false,
+  });
+
+  // Track as active worker (using manager- prefix to avoid collision)
+  const managerKey = `manager-${taskId}`;
+  activeWorkers.set(managerKey, {
+    taskId: managerKey,
+    process: child,
+    startedAt: Date.now(),
+  });
+
+  child.stdout?.on("data", (data: Buffer) => {
+    const line = data.toString("utf-8").trim();
+    if (line) {
+      try {
+        getDb().prepare(
+          "INSERT INTO task_logs (task_id, type, message, severity) VALUES (?, ?, ?, ?)"
+        ).run(taskId, "manager_review", line, "info");
+      } catch { /* ignore */ }
+      emitStreamEvent(`logs:${taskId}`, "log", {
+        taskId,
+        message: `[Manager] ${line}`,
+        severity: "info",
+        createdAt: new Date().toISOString(),
+      });
+    }
+  });
+
+  child.stderr?.on("data", (data: Buffer) => {
+    const line = data.toString("utf-8").trim();
+    if (line) {
+      try {
+        getDb().prepare(
+          "INSERT INTO task_logs (task_id, type, message, severity) VALUES (?, ?, ?, ?)"
+        ).run(taskId, "manager_review", line, "error");
+      } catch { /* ignore */ }
+    }
+  });
+
+  child.on("exit", (exitCode) => {
+    console.log(`[orchestrator] Manager review exited for task ${taskId} with code ${exitCode}`);
+    activeWorkers.delete(managerKey);
+
+    const db = getDb();
+    // Manager exit handling — check what the manager decided
+    // The manager-complete endpoint updates the task status already,
+    // so we only handle the case where the manager crashed
+    const currentTask = db.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as any;
+    if (currentTask?.status === "reviewing") {
+      // Manager didn't update status — treat as completed (review skipped)
+      db.prepare(
+        "UPDATE tasks SET status = 'completed', completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+      ).run(taskId);
+      emitStreamEvent("org:local:tasks", "task_state", { taskId, status: "completed" });
+    }
+
+    // Trigger cascade and next queued
+    triggerDependentCards(taskId);
+    processNextQueued();
+  });
+}
+
+/**
+ * Process a task through the planning pipeline before execution.
+ * Transitions: queued → planning → (planner runs) → queued (with plan) → executing
+ *
+ * The planner talks to the local API endpoints:
+ * - GET /api/agent/planning-prompt (returns assembled prompt)
+ * - POST /api/agent/plan-result (stores approved plan, re-queues task)
+ * - POST /api/agent/plan-failed (marks task as failed)
+ *
+ * After planning completes, the plan-result endpoint sets the task back to 'queued'
+ * with an execution_plan, and calls processQueuedTask() to resume normal execution.
+ */
+export async function planAndProcessTask(taskId: string): Promise<void> {
+  const db = getDb();
+
+  // Transition to planning
+  const result = db.prepare(
+    "UPDATE tasks SET status = 'planning', updated_at = datetime('now') WHERE id = ? AND status = 'queued'",
+  ).run(taskId);
+
+  if (result.changes === 0) return;
+
+  emitStreamEvent("org:local:tasks", "task_state", { taskId, status: "planning" });
+
+  const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as any;
+  if (!task) return;
+
+  try {
+    // Dynamic import to avoid circular dependency (planner imports api, api may not be initialized at import time)
+    const { planTask } = await import("../../planner.js");
+    const { loadConfig: loadAgentConfig } = await import("../../config.js");
+
+    // Build a minimal PlanningTask for the planner
+    const planningTask = {
+      id: taskId,
+      summary: task.summary || "",
+      description: task.description || "",
+      githubRepo: task.github_repo || undefined,
+      scmProvider: task.scm_provider || undefined,
+    };
+
+    // Load agent config (needed for Claude CLI path, tokens, etc.)
+    let agentConfig;
+    try {
+      agentConfig = loadAgentConfig();
+    } catch {
+      // Standalone may not have full agent config — build minimal one
+      const config = loadStandaloneConfig();
+      agentConfig = {
+        apiUrl: `http://127.0.0.1:${localApiPort}`,
+        apiKey: "standalone",
+        agentId: "standalone",
+        maxWorkers: config.settings?.maxParallelExperts ?? 8,
+        pollIntervalMs: 5000,
+        heartbeatIntervalMs: 30000,
+        githubToken: config.scm?.token || "",
+        bitbucketToken: config.scm?.token || "",
+        gitlabToken: "",
+        githubReviewerToken: "",
+        sandbox: "none" as const,
+        dockerImage: "",
+        dockerMemoryGb: 4,
+        localRag: false,
+        ollamaPort: 11434,
+      };
+    }
+
+    const success = await planTask(planningTask, agentConfig);
+
+    if (!success) {
+      console.log(`[orchestrator] Planning failed for task ${taskId}`);
+      // planTask already called plan-failed endpoint which updated status
+    }
+    // On success, plan-result endpoint already set task back to queued and called processQueuedTask
+  } catch (err) {
+    console.error(`[orchestrator] Planning error for task ${taskId}:`, err);
+    db.prepare(
+      "UPDATE tasks SET status = 'failed', updated_at = datetime('now') WHERE id = ?",
+    ).run(taskId);
+    emitStreamEvent("org:local:tasks", "task_state", { taskId, status: "failed", error: String(err) });
   }
 }
 

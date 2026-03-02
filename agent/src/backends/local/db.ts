@@ -19,7 +19,7 @@ let dbInstance: any = null;
 const DATA_DIR = join(homedir(), ".workermill");
 const DB_PATH = join(DATA_DIR, "data.db");
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 4;
 
 const SCHEMA_SQL = `
 PRAGMA journal_mode=WAL;
@@ -135,6 +135,153 @@ CREATE TABLE IF NOT EXISTS code_events (
 CREATE INDEX IF NOT EXISTS idx_code_events_task ON code_events(task_id, created_at);
 `;
 
+/** Migration v2: Add token usage columns to tasks + error_type to task_logs. */
+function migrateToV2(db: any): void {
+  // Add token usage columns — idempotent (ALTER TABLE ADD COLUMN IF NOT EXISTS not in SQLite,
+  // so we check the schema first)
+  const cols = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
+  const colNames = new Set(cols.map((c: { name: string }) => c.name));
+
+  if (!colNames.has("input_tokens")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN input_tokens INTEGER DEFAULT 0");
+  }
+  if (!colNames.has("output_tokens")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN output_tokens INTEGER DEFAULT 0");
+  }
+  if (!colNames.has("cache_creation_tokens")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN cache_creation_tokens INTEGER DEFAULT 0");
+  }
+  if (!colNames.has("cache_read_tokens")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN cache_read_tokens INTEGER DEFAULT 0");
+  }
+  if (!colNames.has("estimated_cost_usd")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN estimated_cost_usd REAL DEFAULT 0");
+  }
+  if (!colNames.has("github_pr_url")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN github_pr_url TEXT");
+  }
+
+  // Add error_type column to task_logs for error classification
+  const logCols = db.prepare("PRAGMA table_info(task_logs)").all() as { name: string }[];
+  const logColNames = new Set(logCols.map((c: { name: string }) => c.name));
+  if (!logColNames.has("error_type")) {
+    db.exec("ALTER TABLE task_logs ADD COLUMN error_type TEXT");
+  }
+}
+
+/** Migration v3: Add personas and persona_directives tables. */
+function migrateToV3(db: any): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS personas (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      slug TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      emoji TEXT,
+      color TEXT,
+      short_label TEXT,
+      description TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      is_system INTEGER NOT NULL DEFAULT 0,
+      priority INTEGER NOT NULL DEFAULT 0,
+      skills TEXT,
+      risk_level TEXT DEFAULT 'medium',
+      keyword_pattern TEXT,
+      label_shortcuts TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS persona_directives (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      persona_id TEXT NOT NULL REFERENCES personas(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      filename TEXT,
+      content TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      change_summary TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_persona_directives_persona ON persona_directives(persona_id, type, is_active);
+  `);
+}
+
+/** Migration v4: Add directive_usage + memory tables for Phase 6. */
+function migrateToV4(db: any): void {
+  db.exec(`
+    -- Directive usage tracking
+    CREATE TABLE IF NOT EXISTS directive_usage (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      task_id TEXT NOT NULL,
+      directive_id TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      type TEXT NOT NULL,
+      persona_slug TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_directive_usage_task ON directive_usage(task_id);
+    CREATE INDEX IF NOT EXISTS idx_directive_usage_directive ON directive_usage(directive_id);
+
+    -- Semantic memory (conventions, patterns, rules)
+    CREATE TABLE IF NOT EXISTS semantic_memories (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      repository TEXT,
+      scope TEXT NOT NULL DEFAULT 'repository',
+      category TEXT NOT NULL DEFAULT 'convention',
+      subject TEXT NOT NULL,
+      knowledge TEXT NOT NULL,
+      confidence REAL DEFAULT 0.5,
+      source TEXT DEFAULT 'explicit',
+      evidence_count INTEGER DEFAULT 1,
+      retrieval_count INTEGER DEFAULT 0,
+      last_retrieved_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_semantic_repo ON semantic_memories(repository, scope, category);
+
+    -- Episodic memory (task outcomes, events)
+    CREATE TABLE IF NOT EXISTS episodic_memories (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      task_id TEXT,
+      repository TEXT,
+      event_type TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      details TEXT,
+      outcome TEXT NOT NULL DEFAULT 'success',
+      outcome_details TEXT,
+      persona TEXT,
+      model TEXT,
+      retrieval_count INTEGER DEFAULT 0,
+      last_retrieved_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_episodic_repo ON episodic_memories(repository, event_type);
+
+    -- Procedural memory (learned skills/procedures)
+    CREATE TABLE IF NOT EXISTS procedural_memories (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      name TEXT NOT NULL,
+      slug TEXT UNIQUE,
+      description TEXT,
+      insight TEXT,
+      repository TEXT,
+      applicable_to TEXT,
+      steps TEXT NOT NULL,
+      prerequisites TEXT,
+      source_task_id TEXT,
+      success_count INTEGER DEFAULT 0,
+      failure_count INTEGER DEFAULT 0,
+      retrieval_count INTEGER DEFAULT 0,
+      last_retrieved_at TEXT,
+      last_used_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_procedural_repo ON procedural_memories(repository);
+  `);
+}
+
 /** Generate a random hex ID (same format as PostgreSQL UUIDs but shorter). */
 export function generateId(): string {
   const bytes = new Uint8Array(16);
@@ -170,16 +317,46 @@ export function getDb(): any {
   // Run schema — all CREATE IF NOT EXISTS, safe to re-run
   dbInstance.exec(SCHEMA_SQL);
 
-  // Track schema version
+  // Track schema version and run migrations
   const existing = dbInstance
     .prepare("SELECT value FROM schema_info WHERE key = 'version'")
-    .get();
+    .get() as { value: string } | undefined;
+  const currentVersion = existing ? parseInt(existing.value, 10) : 0;
+
   if (!existing) {
     dbInstance
       .prepare(
         "INSERT INTO schema_info (key, value) VALUES ('version', ?)",
       )
       .run(String(SCHEMA_VERSION));
+  }
+
+  // Run incremental migrations
+  if (currentVersion < 2) {
+    migrateToV2(dbInstance);
+    dbInstance
+      .prepare(
+        "INSERT INTO schema_info (key, value) VALUES ('version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(String(2));
+  }
+
+  if (currentVersion < 3) {
+    migrateToV3(dbInstance);
+    dbInstance
+      .prepare(
+        "INSERT INTO schema_info (key, value) VALUES ('version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(String(3));
+  }
+
+  if (currentVersion < 4) {
+    migrateToV4(dbInstance);
+    dbInstance
+      .prepare(
+        "INSERT INTO schema_info (key, value) VALUES ('version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(String(4));
   }
 
   return dbInstance;

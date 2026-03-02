@@ -458,8 +458,7 @@ flagdeck/
 │   │   │   │   ├── new/
 │   │   │   │   │   └── +page.svelte     # Create flag form
 │   │   │   │   └── [id]/
-│   │   │   │       ├── +page.svelte     # Flag detail (targeting, rollout, history)
-│   │   │   │       └── +page.server.ts  # Flag detail loader
+│   │   │   │       └── +page.svelte     # Flag detail (targeting, rollout, history) — client-side fetch via $effect
 │   │   │   ├── segments/
 │   │   │   │   ├── +page.svelte         # Segment list
 │   │   │   │   ├── new/
@@ -524,6 +523,8 @@ flagdeck/
 ├── CLAUDE.md                            # Worker instructions for this repo
 └── README.md                            # Setup, architecture, API docs
 ```
+
+> **`adapter-static` and dynamic routes:** Since this project uses `adapter-static`, ALL pages are prerendered at build time. Dynamic routes like `flags/[id]` CANNOT use `+page.server.ts` (it runs at build time, not request time, so it doesn't know the `id`). Instead, use **client-side fetching** in `+page.svelte` via `$effect` or in `+page.ts` with `export const ssr = false`. The `+layout.server.ts` at the root is acceptable because it only sets `prerender = false` and `ssr = false` for the SPA mode. Do NOT create `+page.server.ts` files for any dynamic route.
 
 ---
 
@@ -864,6 +865,8 @@ const API_BASE = 'https://flagdeck.workermill.com';  // From PUBLIC_API_URL env 
 ```
 
 > **CRITICAL — Auth routes are at `/auth/*`, NOT `/api/v1/auth/*`.** This is the single most common frontend integration bug. The Go router mounts auth routes at the root, not under the `/api/v1` group.
+>
+> **CRITICAL — All dashboard/SDK endpoints use `/api/v1/` prefix.** The `api.ts` fetch wrapper MUST prepend `${PUBLIC_API_URL}/api/v1` to all non-auth requests. Using `/api/` without `/v1` will return 404. Use the exact paths from the API Endpoints section below — do NOT invent shorter paths.
 
 ### List Response Wrapper
 
@@ -978,6 +981,7 @@ interface Segment {
     description?: string;
     rules: SegmentRule[];        // TOP-LEVEL is `rules`, NOT `conditions`
     created_by: string;
+    updated_by: string;
     created_at: string;
     updated_at: string;
 }
@@ -986,6 +990,29 @@ interface SegmentRule {
     conditions: RuleCondition[];  // Same RuleCondition as flag targeting rules (property, operator, value)
     operator: 'and' | 'or';      // How conditions combine (NOT "logic")
 }
+
+// Segment document example (MongoDB):
+// {
+//   "_id": ObjectId("..."),
+//   "key": "beta-users",
+//   "name": "Beta Users",
+//   "rules": [
+//     {
+//       "conditions": [
+//         { "property": "email", "operator": "contains", "value": "@beta.com" }
+//       ],
+//       "operator": "or"
+//     },
+//     {
+//       "conditions": [
+//         { "property": "tag", "operator": "in", "value": ["beta-tester"] }
+//       ],
+//       "operator": "and"
+//     }
+//   ],
+//   "created_by": "...", "updated_by": "...", "created_at": "...", "updated_at": "..."
+// }
+// Access pattern: segment.rules[0].conditions[0].property → "email"
 
 // === Experiment ===
 interface Experiment {
@@ -1075,7 +1102,7 @@ interface ApiKey {
 const flags: Flag[] = response.data;
 const totalFlags = flags.length;
 const activeFlags = flags.filter(f =>
-    Object.values(f.environments).some(env => env.enabled)
+    f.is_active && Object.values(f.environments).some(env => env.enabled)
 ).length;
 const inactiveFlags = totalFlags - activeFlags;
 ```
@@ -1155,6 +1182,8 @@ Client sends: POST /api/v1/evaluate
 ```
 
 > **Evaluation precedence:** `is_active` (global) → `environments[env].enabled` (per-env) → `targeting_enabled` (per-env) → `targeting_rules` → environment `value` (fallback). If `is_active` is false, nothing else matters. If `enabled` is false for the environment, targeting rules are not evaluated.
+
+> **Experiments are SEPARATE from flag evaluation.** The evaluate endpoint does NOT check for running experiments or assign experiment variants. Experiments are a standalone analytics system — they track which variant a user saw and whether they converted, but the variant assignment itself is done by the caller (client-side or via a separate SDK call). The `POST /experiments/:key/track` endpoint records conversion events for statistical analysis. This separation keeps the evaluation engine simple and fast.
 
 ### Targeting Rule Operators
 
@@ -1237,6 +1266,8 @@ Cache DOWN flow (Redis unreachable):
 }
 ```
 
+> **EXACT format above.** Use flat `"status": "ok"`, `"mongodb": "connected"`, `"redis": "connected"` — NOT a nested structure like `{"status": "healthy", "services": {"mongodb": {"status": "healthy"}}}`. The flat format is simpler to check in CI smoke tests (`curl ... | jq .status`) and matches the flat error response pattern. When MongoDB or Redis is unreachable, set their value to `"disconnected"` but still return 200 with `"status": "degraded"`. Only return 503 if BOTH are down.
+
 ### Authentication (Dashboard)
 
 | Endpoint | Method | Auth | Rate Limit | Description |
@@ -1244,7 +1275,29 @@ Cache DOWN flow (Redis unreachable):
 | `POST /auth/register` | POST | None | 5/min per IP | Create dashboard user |
 | `POST /auth/login` | POST | None | 10/min per IP | Get JWT tokens |
 | `POST /auth/refresh` | POST | Refresh token | 30/min per IP | Refresh access token |
+| `POST /auth/logout` | POST | JWT | 100/min | Logout (client-side token clear) |
 | `GET /auth/me` | GET | JWT | 100/min | Current user profile |
+
+**POST /auth/register — Request:**
+```json
+{
+  "email": "user@example.com",
+  "password": "securepass123",
+  "name": "Jane Doe"
+}
+```
+
+> **No `role` field in registration.** All self-registered users are assigned `viewer` role. Only the seed script can create `admin` users. This prevents privilege escalation via the public registration endpoint.
+
+**POST /auth/register — Response (200):** Same shape as login — auto-login after successful registration:
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+  "expires_in": 1800,
+  "token_type": "Bearer"
+}
+```
 
 **POST /auth/login — Request:**
 ```json
@@ -1264,6 +1317,17 @@ Cache DOWN flow (Redis unreachable):
 }
 ```
 
+**POST /auth/logout — Request:** No body required.
+
+**POST /auth/logout — Response (200):**
+```json
+{
+  "message": "Logged out"
+}
+```
+
+> **Logout is stateless for this showcase.** The server does NOT maintain a token blacklist — JWTs are self-contained and expire after 30 minutes. The frontend MUST clear `flagdeck_access_token`, `flagdeck_refresh_token`, and `flagdeck_user` from localStorage on logout. The server endpoint exists for API completeness but is essentially a no-op.
+
 > **No `user` object in auth response.** User data (id, email, name, role) must be decoded from the JWT `access_token` payload. The frontend should decode the JWT, extract user fields, and store as `flagdeck_user` in localStorage.
 
 **JWT Implementation:**
@@ -1280,10 +1344,49 @@ Cache DOWN flow (Redis unreachable):
 | `GET /api/v1/flags` | GET | JWT | List flags (paginated, filterable by tag/status) |
 | `POST /api/v1/flags` | POST | JWT (editor+) | Create flag |
 | `GET /api/v1/flags/:key` | GET | JWT | Flag detail with all environments |
-| `PUT /api/v1/flags/:key` | PUT | JWT (editor+) | Update flag (name, description, tags) |
+| `PUT /api/v1/flags/:key` | PUT | JWT (editor+) | Partial update flag (name, description, tags, is_active) |
 | `DELETE /api/v1/flags/:key` | DELETE | JWT (admin) | Delete flag |
 | `PUT /api/v1/flags/:key/environments/:env` | PUT | JWT (editor+) | Update flag config for specific environment |
 | `POST /api/v1/flags/:key/toggle` | POST | JWT (editor+) | Toggle flag on/off for a specific environment |
+
+**POST /api/v1/flags — Request (create flag):**
+```json
+{
+  "key": "dark-mode",
+  "name": "Dark Mode",
+  "type": "boolean",
+  "default_value": false,
+  "description": "Enable dark mode UI theme",
+  "tags": ["ui", "theme"]
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `key` | Yes | Unique identifier, lowercase with hyphens |
+| `name` | Yes | Human-readable display name |
+| `type` | Yes | `boolean`, `string`, `number`, or `json` |
+| `default_value` | Yes | Value returned when flag is disabled |
+| `description` | No | Defaults to empty string |
+| `tags` | No | Defaults to empty array |
+| `environments` | No | If omitted, auto-populate from all existing environments with `enabled: false`, `value: default_value`, `targeting_enabled: false`, `targeting_rules: []` |
+
+Auto-generated fields (do NOT include in request): `id`, `is_active` (defaults to `true`), `created_by` (from JWT), `updated_by`, `created_at`, `updated_at`.
+
+**POST /api/v1/flags — Response (201):** Returns the full flag document.
+
+**PUT /api/v1/flags/:key — Request (partial update):**
+
+> **Partial update** — only fields present in the request body are changed. Omitted fields are NOT cleared. This applies to top-level fields only (`name`, `description`, `tags`, `is_active`, `default_value`). To update per-environment config, use `PUT /flags/:key/environments/:env`.
+
+```json
+{
+  "name": "Dark Mode v2",
+  "tags": ["ui", "theme", "v2"]
+}
+```
+
+**PUT /api/v1/flags/:key — Response (200):** Returns the full updated flag document.
 
 **POST /flags/:key/toggle — Request:**
 
@@ -1384,6 +1487,49 @@ The `environment` query parameter specifies which environment to toggle. The han
 > **`reason` values:** `"rule_match"` (a targeting rule matched), `"default"` (no rules matched or targeting disabled — returned environment value), `"disabled"` (flag killed via `is_active` or environment `enabled` is false — returned `default_value`).
 > **`rule_id` field:** Contains the matching rule's `name` (not a UUID). Empty string when reason is not `"rule_match"`. Field is kept as `rule_id` in the JSON response for SDK compatibility.
 
+**POST /evaluate/bulk — Request:**
+```json
+{
+  "flag_keys": ["dark-mode", "new-checkout", "premium-features"],
+  "context": {
+    "user_id": "u_abc123",
+    "email": "jane@company.com",
+    "country": "US",
+    "plan": "pro"
+  }
+}
+```
+
+> **Same context for all flags.** The bulk endpoint evaluates multiple flags against a single user context in one request. This reduces HTTP round-trips for client SDKs that need to check many flags at page load.
+
+**POST /evaluate/bulk — Response (200):**
+```json
+{
+  "evaluations": [
+    {
+      "key": "dark-mode",
+      "value": true,
+      "type": "boolean",
+      "reason": "rule_match",
+      "rule_id": "pro-users",
+      "environment": "production",
+      "evaluation_ms": 1.2
+    },
+    {
+      "key": "new-checkout",
+      "value": false,
+      "type": "boolean",
+      "reason": "disabled",
+      "rule_id": "",
+      "environment": "production",
+      "evaluation_ms": 0.8
+    }
+  ]
+}
+```
+
+> **Each evaluation has the same shape as the single evaluate response.** If a `flag_key` doesn't exist, omit it from the results (do NOT return an error for individual missing flags).
+
 ### Segments
 
 | Endpoint | Method | Auth | Description |
@@ -1406,6 +1552,38 @@ The `environment` query parameter specifies which environment to toggle. The han
 | `POST /api/v1/experiments/:key/stop` | POST | JWT (editor+) | Stop experiment |
 | `POST /api/v1/experiments/:key/track` | POST | API Key | Track conversion event |
 
+**POST /experiments/:key/track — Request:**
+```json
+{
+  "variant_key": "variant_a",
+  "metric_key": "conversion",
+  "value": 1,
+  "context": {
+    "user_id": "u_abc123"
+  }
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `variant_key` | Yes | Which variant the user saw (must exist on the experiment) |
+| `metric_key` | Yes | Which metric to record (must match an experiment metric key) |
+| `value` | No | Defaults to `1`. For `conversion` metrics: 1 = converted. For `revenue` metrics: the dollar amount. For `count` metrics: the count to add. |
+| `context.user_id` | Yes | Used to deduplicate conversions per user (one conversion per user per variant) |
+
+**POST /experiments/:key/track — Response (200):**
+```json
+{
+  "tracked": true
+}
+```
+
+> **Tracking increments `impressions` on every call** and increments `conversions` (for conversion metrics) or adds to `revenue` (for revenue metrics) based on the metric type. Deduplication by `user_id` prevents counting the same user's conversion twice for the same variant.
+
+**POST /experiments/:key/start — Response (200):** Returns the full experiment document with `status: "running"` and `started_at` set.
+
+**POST /experiments/:key/stop — Response (200):** Returns the full experiment document with `status: "completed"` and `ended_at` set.
+
 ### Environments
 
 | Endpoint | Method | Auth | Description |
@@ -1417,6 +1595,30 @@ The `environment` query parameter specifies which environment to toggle. The han
 
 > **Response format:** `GET /api/v1/environments` returns the standard paginated envelope `{"data": [...], "pagination": {...}}` — same as all other list endpoints.
 
+**POST /api/v1/environments — Request:**
+```json
+{
+  "key": "staging",
+  "name": "Staging",
+  "color": "#f59e0b",
+  "description": "Pre-production testing environment",
+  "sort_order": 2
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `key` | Yes | Unique identifier, lowercase (e.g., `production`, `staging`, `development`) |
+| `name` | Yes | Display name |
+| `color` | Yes | Hex color for UI badges (e.g., `#22c55e`) |
+| `description` | No | Defaults to empty string |
+| `sort_order` | No | Display order (lower = first). Defaults to next available. |
+| `is_active` | No | Defaults to `true` |
+
+Auto-generated: `id`, `created_by` (from JWT), `created_at`, `updated_at`.
+
+**POST /api/v1/environments — Response (201):** Returns the full environment document.
+
 ### API Keys
 
 | Endpoint | Method | Auth | Description |
@@ -1424,6 +1626,39 @@ The `environment` query parameter specifies which environment to toggle. The han
 | `GET /api/v1/api-keys` | GET | JWT (admin) | List API keys (masked) |
 | `POST /api/v1/api-keys` | POST | JWT (admin) | Create API key (returns raw key once) |
 | `DELETE /api/v1/api-keys/:id` | DELETE | JWT (admin) | Revoke API key |
+
+**POST /api/v1/api-keys — Request:**
+```json
+{
+  "name": "Production Backend",
+  "environment": "production",
+  "permissions": ["evaluate", "read"]
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `name` | Yes | Human-readable label for this key |
+| `environment` | Yes | Which environment this key grants access to |
+| `permissions` | Yes | Array of `"evaluate"`, `"read"`, `"write"` |
+
+**POST /api/v1/api-keys — Response (201):**
+```json
+{
+  "id": "64a1b2c3d4e5f6...",
+  "name": "Production Backend",
+  "key_prefix": "fd_live_",
+  "raw_key": "fd_live_abc123def456ghi789...",
+  "environment": "production",
+  "permissions": ["evaluate", "read"],
+  "last_used_at": null,
+  "created_by": "user-id",
+  "created_at": "2026-03-01T00:00:00Z",
+  "revoked_at": null
+}
+```
+
+> **`raw_key` is returned ONLY on creation.** After this response, the key is stored hashed and can never be retrieved again. The frontend MUST display the raw key to the user with a "copy to clipboard" button and a warning that it won't be shown again. `GET /api/v1/api-keys` returns keys with `key_prefix` only (masked).
 
 ### Audit Log
 
@@ -1595,6 +1830,44 @@ Mix of `create`, `update`, `enable`, `disable`, `view` events over the past 14 d
 
 ## Testing
 
+### Go Test Infrastructure — Skip When Services Unavailable (CRITICAL)
+
+**Go tests that require MongoDB or Redis MUST skip gracefully when those services are not running.** Workers run quality gates in environments where Docker is not available (remote agent native mode). If tests hang for 30 seconds per MongoDB connection attempt, the entire gate times out.
+
+**Every test setup function that connects to MongoDB or Redis MUST:**
+
+```go
+func setupTestDB(t *testing.T) (*mongo.Client, func()) {
+    t.Helper()
+    ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)  // SHORT timeout
+    defer cancel()
+
+    client, err := mongo.Connect(options.Client().ApplyURI("mongodb://localhost:27017").SetServerSelectionTimeout(2*time.Second))
+    if err != nil {
+        t.Skipf("MongoDB not available: %v", err)
+        return nil, func() {}
+    }
+
+    // Verify actual connectivity (not just client creation)
+    if err := client.Ping(ctx, nil); err != nil {
+        t.Skipf("MongoDB not reachable: %v", err)
+        return nil, func() {}
+    }
+
+    cleanup := func() { _ = client.Disconnect(context.Background()) }
+    return client, cleanup
+}
+```
+
+**Key patterns:**
+- Use `t.Skipf` (NOT `t.Fatalf`) when services are unavailable — skipping is expected, failing blocks the gate
+- Set `ServerSelectionTimeout(2*time.Second)` — default is 30s, which hangs the gate
+- Always `Ping()` after `Connect()` — `Connect()` succeeds even if MongoDB is down
+- Return a no-op cleanup function when skipping — prevents nil pointer in `defer cleanup()`
+- Redis tests: check `rdb.Ping(ctx).Err()` and skip if non-nil
+
+**Why this matters:** The quality gate runs `go test ./... -v -count=1 -race`. If ANY test hangs for 30 seconds waiting for MongoDB, and there are 30+ tests, the gate takes 15+ minutes and eventually times out. With `t.Skipf` and short timeouts, the gate completes in seconds.
+
 ### Go Backend Tests
 
 | File | What it tests |
@@ -1606,6 +1879,16 @@ Mix of `create`, `update`, `enable`, `disable`, `view` events over the past 14 d
 | `handlers_test.go` | HTTP handlers — CRUD, toggle (per-environment `enabled`), auth, evaluate endpoint |
 | `experiment_stats_test.go` | Chi-squared calculation, confidence intervals, minimum sample guard |
 | `auth_test.go` | JWT lifecycle, API key auth, role enforcement |
+
+#### Experiment Statistics — Chi-Squared Test
+
+The `experiment_stats.go` service computes statistical significance for A/B experiments using the chi-squared test for independence:
+
+1. **Minimum sample:** Do NOT compute statistics until every variant has at least **100 impressions**. Before that, return `confidence: 0` for all variants.
+2. **Chi-squared formula:** Standard 2x2 contingency table (converted vs not-converted) across variants. Use the chi-squared distribution with `(variants - 1)` degrees of freedom.
+3. **Confidence calculation:** `confidence = 1 - p_value` (0 to 1 scale). A confidence of `0.95` or higher indicates the result is statistically significant at the 95% level.
+4. **Conversion rate:** `conversions / impressions` per variant (0 to 1, NOT 0 to 100).
+5. **Implementation:** Use a lookup table or approximation for the chi-squared CDF — do NOT import a stats library. For 1 degree of freedom (2 variants): `p < 0.05` when `chi2 > 3.841`, `p < 0.01` when `chi2 > 6.635`.
 
 ### SvelteKit Frontend Tests
 
@@ -2190,6 +2473,10 @@ Every card that produces code MUST verify:
 | Skip the seed step on deploy | Dashboard is empty | Dockerfile runs `/seed && /main` |
 | Add E2E job to ci.yml before Card 5 | E2E fails (no full stack yet) → CI fails → worker retries forever | Card 1 creates ci.yml with api+web ONLY. Card 5 adds e2e. |
 | Add deploy.yml before Card 6 | Intermediate deploys of incomplete code to Railway | Card 6 creates deploy.yml. No deploys until then. |
+| Use `t.Fatalf` when MongoDB/Redis unavailable in tests | Tests hang for 30s each, gate times out | Use `t.Skipf` + `ServerSelectionTimeout(2s)` (see Testing section) |
+| Use `/api/` prefix instead of `/api/v1/` in frontend | All dashboard API calls return 404 | Always use `/api/v1/` — see API Contract section |
+| Use `+page.server.ts` for dynamic routes with `adapter-static` | Server load functions don't run at request time with static adapter | Use client-side `$effect` or `+page.ts` with `ssr: false` |
+| Build health endpoint with nested JSON structure | Smoke tests fail on response format mismatch | Use flat `{status, mongodb, redis}` — see Health Check section |
 
 ---
 
@@ -2293,6 +2580,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+ARG PUBLIC_API_URL
+ENV PUBLIC_API_URL=$PUBLIC_API_URL
 RUN npm run build
 
 # Runtime stage — nginx serves static files
@@ -2314,6 +2603,8 @@ CMD ["nginx", "-g", "daemon off;"]
 ```
 
 > **Uses `adapter-static`, NOT `adapter-node`.** SvelteKit builds to static HTML/JS/CSS, served by nginx. Railway detects the Dockerfile and uses it. `PORT=80` MUST be set as a Railway environment variable so Railway routes traffic correctly.
+>
+> **`PUBLIC_API_URL` is a build-time variable.** SvelteKit's `adapter-static` bakes environment variables into the static output at build time. The `ARG`/`ENV` in the Dockerfile makes `PUBLIC_API_URL` available during `npm run build`. Railway sets this variable in the service's environment, and Docker passes it as a build arg. In the deploy workflow, Railway handles this automatically since `PUBLIC_API_URL` is set as a Railway env var on the web service.
 
 ### .gitignore
 

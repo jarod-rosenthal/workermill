@@ -477,7 +477,51 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 ```
 
-The `nginx.conf` must include `try_files $uri $uri/ /index.html;` for SPA routing.
+### `web/nginx.conf`
+
+```nginx
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Cache static assets aggressively
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}
+```
+
+### Railway Deployment
+
+Railway deploys from the `main` branch automatically on push. The project has **two services** configured in the Railway dashboard:
+
+| Railway Service | Root Directory | Dockerfile | Port | Domain |
+|----------------|---------------|------------|------|--------|
+| `api` | `/api` | `api/Dockerfile` | 8080 | `flagdeck.workermill.com` |
+| `web` | `/web` | `web/Dockerfile` | 80 | `flagdeck-app.workermill.com` |
+
+**Environment variables** (already configured in Railway dashboard — do NOT hardcode in code):
+
+| Service | Variable | Source |
+|---------|----------|--------|
+| `api` | `MONGODB_URI` | MongoDB Atlas connection string |
+| `api` | `REDIS_URL` | Upstash Redis connection string |
+| `api` | `JWT_SECRET` | Random 64-char secret |
+| `api` | `PORT` | `8080` (Railway default) |
+| `web` | `PUBLIC_API_URL` | `https://flagdeck.workermill.com` (build arg) |
+
+**Workers do NOT need to configure Railway.** Railway services and env vars are pre-configured in the dashboard. Workers just push code to `main` — Railway detects the Dockerfiles and deploys automatically. The deployment card's job is to:
+1. Verify Dockerfiles build correctly (`docker build api/`, `docker build web/`)
+2. Verify seed runs against cloud MongoDB (happens automatically via Dockerfile CMD)
+3. Run smoke tests against the live URLs after Railway deploys
+
+**Do NOT** create `railway.json`, `railway.toml`, `Procfile`, or `nixpacks.toml` — Railway uses the Dockerfiles directly.
 
 ### `docker-compose.yml` (full local stack)
 

@@ -21,9 +21,9 @@ import { detectGpu } from "./gpu-detector.js";
 import { getOllamaStatus, generateEmbeddings, ensureOllamaRunning, pullModel, installOllama, findOllamaPath } from "./ollama-manager.js";
 import { indexRepositoryLocally } from "./local-indexer.js";
 import { getActiveBackend, getBackend } from "./backends/selector.js";
-import { processQueuedTask, stopWorkerTask } from "./backends/local/orchestrator.js";
-import { loadStandaloneConfig } from "./backends/local/config.js";
-import { getDb as getLocalDb } from "./backends/local/db.js";
+import { processQueuedTask, planAndProcessTask, stopWorkerTask } from "./backends/local/orchestrator.js";
+import { loadStandaloneConfig, getRoleConfig } from "./backends/local/config.js";
+import { getDb as getLocalDb, generateId } from "./backends/local/db.js";
 import { onStreamEvent } from "./backends/local/event-bus.js";
 import {
   searchJiraIssues,
@@ -166,6 +166,31 @@ function getCoordStore(taskId: string): CoordStore {
             createdAt: new Date().toISOString(),
           });
         }
+
+        // Hydrate persisted coordination messages from SQLite
+        // These are messages posted during previous execution (survives restarts)
+        try {
+          const persisted = db.prepare(
+            "SELECT * FROM coordination_messages WHERE parent_task_id = ? ORDER BY created_at ASC",
+          ).all(taskId) as any[];
+          for (const row of persisted) {
+            // Avoid duplicating story_ready messages already hydrated from execution_plan
+            if (row.message_type === "story_ready") continue;
+            let content = row.content || "";
+            try { content = JSON.parse(content); content = JSON.stringify(content); } catch { /* keep as-is */ }
+            store.contexts.push({
+              id: `db-${row.id}`,
+              parentTaskId: row.parent_task_id,
+              taskId: row.task_id || taskId,
+              persona: "",
+              messageType: row.message_type,
+              content: typeof content === "string" ? content : JSON.stringify(content),
+              metadata: {},
+              createdAt: row.created_at,
+            });
+          }
+        } catch { /* SQLite read failed — proceed with what we have */ }
+
         store.initialized = true;
       }
     }
@@ -767,9 +792,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // GET /api/tasks/:id/detail — proxy rich task detail from cloud control center
+  // GET /api/tasks/:id/detail — local SQLite or cloud control center
   const detailMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/detail$/);
   if (req.method === "GET" && detailMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const task = await backend.getTask(detailMatch[1]);
+        if (!task) return json(res, { error: "Task not found" }, 404);
+        return json(res, task);
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const dashboard = await cloudProxy("GET", "/api/control-center") as {
@@ -820,9 +855,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // GET /api/tasks/:id/code-events — proxy code events from cloud API
+  // GET /api/tasks/:id/code-events — local SQLite or cloud proxy
   const codeEventsMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/code-events$/);
   if (req.method === "GET" && codeEventsMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const { params: qp } = parseUrl(req.url || "");
+        const since = qp.since || undefined;
+        const result = await backend.getCodeBackfill(codeEventsMatch[1], since);
+        return json(res, result.data);
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const { params: qp } = parseUrl(req.url || "");
@@ -935,7 +981,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
           scmProvider: body.scmProvider,
           workerModel: body.workerModel,
         });
-        processQueuedTask(task.id).catch((e) => console.error("[orchestrator] processQueuedTask failed:", e));
+        // If plan=true, run through planner first; otherwise execute directly
+        if (body.plan) {
+          planAndProcessTask(task.id).catch((e) => console.error("[orchestrator] planAndProcessTask failed:", e));
+        } else {
+          processQueuedTask(task.id).catch((e) => console.error("[orchestrator] processQueuedTask failed:", e));
+        }
         return json(res, task, 201);
       } catch (err) {
         return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
@@ -1116,7 +1167,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
           if (Array.isArray(c.dependencyIndices)) {
             for (const depIdx of c.dependencyIndices) {
               if (depIdx >= 0 && depIdx < cardIds.length) {
-                const { generateId } = await import("./backends/local/db.js");
                 db.prepare(
                   "INSERT INTO card_dependencies (id, card_id, depends_on_card_id) VALUES (?, ?, ?)",
                 ).run(generateId(), cardIds[i], cardIds[depIdx]);
@@ -1168,13 +1218,285 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return; // Response already ended in try or catch
   }
 
+  // ── Agent Planning Endpoints (standalone mode) ──
+
+  // GET /api/agent/planning-prompt — assemble planning prompt for a task
+  if (req.method === "GET" && path === "/api/agent/planning-prompt") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const taskId = new URL(req.url || "", "http://localhost").searchParams.get("taskId");
+        if (!taskId) return json(res, { error: "taskId query parameter is required" }, 400);
+
+        const db = getLocalDb();
+        const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as any;
+        if (!task) return json(res, { error: "Task not found" }, 404);
+        if (task.status !== "planning") {
+          return json(res, { error: `Task is in '${task.status}' state, expected 'planning'` }, 409);
+        }
+
+        const config = loadStandaloneConfig();
+        const maxStories = config.settings?.maxStories ?? 8;
+        const plannerConfig = getRoleConfig(config, "planner");
+
+        // Get available personas from worker-config
+        let validPersonas: string[] = [];
+        try {
+          const wc = await getWorkerConfig();
+          validPersonas = Object.keys(wc.personaIcons || {});
+        } catch { /* use defaults below */ }
+
+        // Build a planning prompt from task data
+        const prompt = `You are a technical planning agent. Your job is to analyze a task and break it down into executable stories.
+
+## Task Details
+
+**Title:** ${task.summary || "Unnamed Task"}
+
+**Description:**
+${task.description || "No description provided."}
+
+## Instructions
+
+**EXPLORE FIRST:** Before creating your plan, use your tools to explore the repository. Run Glob to see the directory structure, read key files (package.json, README, config files), and search for code related to the task. Ground your targetFiles in actual paths you discovered — do NOT guess file paths.
+
+Then analyze this task and create an execution plan with stories. For each story, provide: id, title, a 2-3 line scope description, persona, priority, estimatedEffort, dependencies, and targetFiles.
+
+## Available Personas
+
+You MUST use one of these exact persona values for each story:
+
+- \`architect\` — System decomposition, task planning, architecture design
+- \`backend_developer\` — REST APIs, database, server-side logic, GraphQL, OpenAPI, query optimization
+- \`frontend_developer\` — React, TypeScript, Tailwind, UI components, accessibility
+- \`mobile_developer\` — iOS (Swift, SwiftUI), Android (Kotlin, Jetpack Compose), React Native
+- \`devops_engineer\` — Terraform, Docker, CI/CD, AWS, infrastructure
+- \`security_engineer\` — OWASP, vulnerability assessment, security auditing
+- \`qa_engineer\` — Test automation, Playwright, Jest, quality assurance
+- \`data_ml_engineer\` — ETL/ELT, data pipelines, ML model training, MLOps
+- \`tech_writer\` — Documentation, API docs, technical guides
+- \`tech_lead\` — Code review, architecture review, quality gate
+- \`project_manager\` — Task breakdown, planning, coordination
+
+Do NOT invent personas (e.g., "fullstack_developer" does not exist). For full-stack work, split into \`backend_developer\` and \`frontend_developer\` stories.
+
+## Planning Advice
+
+- **No circular dependencies.** If A depends on B, B must not depend on A (directly or transitively).
+- **No operational stories.** \`npm install\`, etc. are NOT stories — include them as pre-step instructions in the story that needs the output.
+- **Maximize parallelism via persona diversity.** Each unique persona runs as a separate parallel expert.
+- **targetFiles must be COMPLETE.** List EVERY file the story will create or modify.
+- **No overlapping targetFiles.** Two stories MUST NOT list the same file in their targetFiles.
+- **Target ${Math.max(1, Math.round(maxStories * 0.7))}-${maxStories} stories.** Prefer fewer, well-scoped stories over many small ones.
+
+## Output Format — YOU MUST OUTPUT THIS JSON
+
+After exploring the repo, output a \`\`\`json code block with this EXACT structure:
+
+\`\`\`json
+{
+  "summary": "Brief summary of the overall plan",
+  "stories": [
+    {
+      "id": "story-0",
+      "title": "Foundation — shared types and config",
+      "description": "Shared layout and type definitions.",
+      "persona": "backend_developer",
+      "priority": 1,
+      "estimatedEffort": "small",
+      "dependencies": [],
+      "targetFiles": ["src/types/feature.ts", "src/config.ts"]
+    }
+  ],
+  "risks": ["Risk 1"],
+  "assumptions": ["Assumption 1"]
+}
+\`\`\`
+`;
+
+        return json(res, {
+          taskId,
+          prompt,
+          model: plannerConfig.model,
+          provider: plannerConfig.provider,
+          maxStories,
+          maxTargetFiles: 8,
+          planningMode: "strict",
+          validPersonas,
+        });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    // Cloud proxy fallback
+    if (cloudProxy) {
+      try {
+        const qs = new URL(req.url || "", "http://localhost").search;
+        const data = await cloudProxy("GET", `/api/agent/planning-prompt${qs}`);
+        return json(res, data);
+      } catch (err: any) {
+        return json(res, err.data || { error: String(err) }, err.status || 503);
+      }
+    }
+    return json(res, { error: "No backend available" }, 503);
+  }
+
+  // POST /api/agent/plan-result — store approved plan on task
+  if (req.method === "POST" && path === "/api/agent/plan-result") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const { taskId, rawOutput, criticScore, criticIterations } = body;
+        if (!taskId || !rawOutput) return json(res, { error: "taskId and rawOutput are required" }, 400);
+
+        const db = getLocalDb();
+
+        // Parse execution plan from raw output (reuse plan-validator.ts logic)
+        const { parseExecutionPlan, applyFileCap, applyStoryCap, resolveFileOverlaps, fixInvalidPersonas } = await import("./plan-validator.js");
+        const rawPlan = parseExecutionPlan(rawOutput);
+
+        // Apply safety caps
+        const config = loadStandaloneConfig();
+        const maxStories = config.settings?.maxStories ?? 8;
+        applyStoryCap(rawPlan, maxStories);
+        applyFileCap(rawPlan);
+        resolveFileOverlaps(rawPlan);
+        fixInvalidPersonas(rawPlan, [
+          "architect", "backend_developer", "frontend_developer", "mobile_developer",
+          "devops_engineer", "security_engineer", "qa_engineer", "data_ml_engineer",
+          "tech_writer", "tech_lead", "project_manager",
+        ]);
+
+        // Store execution plan and transition to queued
+        const planJson = JSON.stringify(rawPlan);
+        const result = db.prepare(
+          "UPDATE tasks SET execution_plan = ?, status = 'queued', updated_at = datetime('now') WHERE id = ? AND status = 'planning'",
+        ).run(planJson, taskId);
+
+        if (result.changes === 0) {
+          return json(res, { error: "Task not in planning status" }, 409);
+        }
+
+        broadcastSSE("tasks", "state:changed", { taskId, status: "queued" });
+
+        // Re-trigger processing — task is now queued with a plan
+        processQueuedTask(taskId).catch(() => {});
+
+        return json(res, { success: true, taskId, stories: rawPlan.stories.length, criticScore });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    // Cloud proxy fallback
+    if (cloudProxy) {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const data = await cloudProxy("POST", "/api/agent/plan-result", body);
+        return json(res, data);
+      } catch (err: any) {
+        return json(res, err.data || { error: String(err) }, err.status || 503);
+      }
+    }
+    return json(res, { error: "No backend available" }, 503);
+  }
+
+  // POST /api/agent/plan-failed — mark planning as failed
+  if (req.method === "POST" && path === "/api/agent/plan-failed") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const { taskId, reason, status } = body;
+        if (!taskId) return json(res, { error: "taskId is required" }, 400);
+
+        const db = getLocalDb();
+        const finalStatus = status === "escalated" ? "failed" : (status || "failed");
+        db.prepare(
+          "UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?",
+        ).run(finalStatus, taskId);
+        broadcastSSE("tasks", "state:changed", { taskId, status: finalStatus, error: reason });
+
+        return json(res, { success: true });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    // Cloud proxy fallback
+    if (cloudProxy) {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const data = await cloudProxy("POST", "/api/agent/plan-failed", body);
+        return json(res, data);
+      } catch (err: any) {
+        return json(res, err.data || { error: String(err) }, err.status || 503);
+      }
+    }
+    return json(res, { error: "No backend available" }, 503);
+  }
+
+  // POST /api/agent/planning-progress — log planning progress (no-op in standalone, planner prints to console)
+  if (req.method === "POST" && path === "/api/agent/planning-progress") {
+    return json(res, { success: true });
+  }
+
+  // POST /api/control-center/logs/batch — batch log posting from planner
+  if (req.method === "POST" && path === "/api/control-center/logs/batch") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const entries = body.entries || [];
+        for (const entry of entries) {
+          if (entry.taskId && entry.message) {
+            await backend.postLog({
+              taskId: entry.taskId,
+              type: entry.type || "execution",
+              message: entry.message,
+              severity: entry.severity || "info",
+            });
+          }
+        }
+      } catch { /* best-effort */ }
+    }
+    return json(res, { success: true });
+  }
+
   // POST /api/tasks/:id/talk — send message to worker
   const talkMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/talk$/);
   if (req.method === "POST" && talkMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const taskId = talkMatch[1];
+        // Resolve parentTaskId — Epic workers poll PARENT_TASK_ID for commands
+        const localTask = localTasks.get(taskId);
+        const parentId = localTask?.parentTaskId || taskId;
+        // Post as user_message to in-memory coordination store + SSE push
+        const store = getCoordStore(parentId);
+        const ctx: CoordContext = {
+          id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          parentTaskId: parentId,
+          taskId: parentId,
+          persona: "",
+          messageType: "user_message",
+          content: JSON.stringify({ message: body.message || body.content }),
+          metadata: {},
+          createdAt: new Date().toISOString(),
+        };
+        store.contexts.push(ctx);
+        pushCoordEvent(parentId, ctx);
+        // Also persist to SQLite coordination_messages
+        await backend.talkToWorker(parentId, body.message || body.content);
+        return json(res, { success: true });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
-      // Use parentTaskId if available — Epic workers poll PARENT_TASK_ID for commands
       const localTask = localTasks.get(talkMatch[1]);
       const commandTaskId = localTask?.parentTaskId || talkMatch[1];
       const result = await cloudProxy("POST", "/api/coordination/commands", {
@@ -1191,16 +1513,51 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   // POST /api/tasks/:id/blocker — respond to blocker
   const blockerMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/blocker$/);
   if (req.method === "POST" && blockerMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const taskId = blockerMatch[1];
+        const localTask = localTasks.get(taskId);
+        const parentId = localTask?.parentTaskId || taskId;
+        // Post blocker_resolved to in-memory coordination store + SSE push
+        const store = getCoordStore(parentId);
+        const ctx: CoordContext = {
+          id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          parentTaskId: parentId,
+          taskId: parentId,
+          persona: "",
+          messageType: "blocker_resolved",
+          content: JSON.stringify({
+            blockerId: body.blockerId,
+            action: body.action,
+            guidance: body.guidance,
+          }),
+          metadata: {},
+          createdAt: new Date().toISOString(),
+        };
+        store.contexts.push(ctx);
+        pushCoordEvent(parentId, ctx);
+        // Also persist to SQLite
+        await backend.respondToBlocker(parentId, {
+          blockerId: body.blockerId,
+          action: body.action,
+          guidance: body.guidance,
+        });
+        return json(res, { success: true });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
-      // Use parentTaskId — Epic workers poll PARENT_TASK_ID for blocker responses
       const localTask = localTasks.get(blockerMatch[1]);
       const parentId = localTask?.parentTaskId || blockerMatch[1];
       const result = await cloudProxy("POST", "/api/coordination/blocker-response", {
         parentTaskId: parentId,
         blockerId: body.blockerId,
-        action: body.action, // retry | skip | abort
+        action: body.action,
         guidance: body.guidance,
       });
       return json(res, result);
@@ -1209,9 +1566,33 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // POST /api/tasks/:id/plan/approve
+  // POST /api/tasks/:id/plan/approve — local backend or cloud proxy
   const approveMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/plan\/approve$/);
   if (req.method === "POST" && approveMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const taskId = approveMatch[1];
+        await backend.approvePlan(taskId);
+        // Also push to in-memory coordination store so worker picks it up
+        const store = getCoordStore(taskId);
+        const ctx: CoordContext = {
+          id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          parentTaskId: taskId,
+          taskId,
+          persona: "",
+          messageType: "plan_approved",
+          content: JSON.stringify({ approved: true }),
+          metadata: {},
+          createdAt: new Date().toISOString(),
+        };
+        store.contexts.push(ctx);
+        pushCoordEvent(taskId, ctx);
+        return json(res, { success: true });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("POST", `/api/tasks/${approveMatch[1]}/plan/approve`, {});
@@ -1221,9 +1602,33 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // POST /api/tasks/:id/plan/reject
+  // POST /api/tasks/:id/plan/reject — local backend or cloud proxy
   const rejectMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/plan\/reject$/);
   if (req.method === "POST" && rejectMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const taskId = rejectMatch[1];
+        await backend.rejectPlan(taskId, body.feedback || "");
+        const store = getCoordStore(taskId);
+        const ctx: CoordContext = {
+          id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          parentTaskId: taskId,
+          taskId,
+          persona: "",
+          messageType: "plan_rejected",
+          content: JSON.stringify({ feedback: body.feedback }),
+          metadata: {},
+          createdAt: new Date().toISOString(),
+        };
+        store.contexts.push(ctx);
+        pushCoordEvent(taskId, ctx);
+        return json(res, { success: true });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
@@ -1330,9 +1735,24 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return json(res, { error: "Clear not supported in cloud mode" }, 400);
   }
 
-  // POST /api/tasks/:id/retry — proxy retry to cloud API
+  // POST /api/tasks/:id/retry — local SQLite or cloud proxy
   const retryMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/retry$/);
   if (req.method === "POST" && retryMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const taskId = retryMatch[1];
+        await backend.retryTask(taskId);
+        // Clear in-memory coordination state for a fresh start
+        coordStores.delete(taskId);
+        // Re-process the now-queued task
+        const { processQueuedTask } = await import("./backends/local/orchestrator.js");
+        await processQueuedTask(taskId);
+        return json(res, { success: true });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("POST", `/api/tasks/${retryMatch[1]}/retry`, {});
@@ -1508,11 +1928,536 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // GET /api/personas
+  // ── Persona CRUD endpoints ──
+
+  // Seed system personas into SQLite if not yet present.
+  // Idempotent — only inserts missing slugs.
+  function seedSystemPersonas(): void {
+    const db = getLocalDb();
+    const existing = db.prepare("SELECT slug FROM personas WHERE is_system = 1").all() as { slug: string }[];
+    const existingSlugs = new Set(existing.map((r: { slug: string }) => r.slug));
+
+    const SYSTEM_PERSONAS: Record<string, { name: string; emoji: string; color: string; shortLabel: string; description: string; skills: string; riskLevel: string; priority: number }> = {
+      architect: { name: "Architect", emoji: "🏗️", color: "purple-500", shortLabel: "Arch", description: "Designs system architecture, defines component boundaries, and ensures scalability.", skills: "Architecture,System Design,Scalability", riskLevel: "high", priority: 1 },
+      frontend_developer: { name: "Frontend Developer", emoji: "🎨", color: "pink-500", shortLabel: "Frontend", description: "Builds user interfaces with React, CSS, and modern frontend frameworks.", skills: "React,TypeScript,CSS,UI/UX", riskLevel: "low", priority: 2 },
+      backend_developer: { name: "Backend Developer", emoji: "💻", color: "blue-500", shortLabel: "Backend", description: "Implements server-side logic, APIs, and database operations.", skills: "Node.js,TypeScript,APIs,Databases", riskLevel: "medium", priority: 3 },
+      devops_engineer: { name: "DevOps Engineer", emoji: "🔧", color: "orange-500", shortLabel: "DevOps", description: "Manages infrastructure, CI/CD pipelines, and deployment automation.", skills: "Docker,Kubernetes,CI/CD,Infrastructure", riskLevel: "high", priority: 4 },
+      security_engineer: { name: "Security Engineer", emoji: "🛡️", color: "red-500", shortLabel: "Security", description: "Performs security audits, implements auth, and hardens systems.", skills: "Security,Auth,Encryption,OWASP", riskLevel: "high", priority: 5 },
+      qa_engineer: { name: "QA Engineer", emoji: "🧪", color: "green-500", shortLabel: "QA", description: "Writes tests, performs quality assurance, and validates features.", skills: "Testing,E2E,Unit Tests,QA", riskLevel: "low", priority: 6 },
+      tech_writer: { name: "Tech Writer", emoji: "📝", color: "yellow-500", shortLabel: "Docs", description: "Creates documentation, API references, and technical guides.", skills: "Documentation,API Docs,Technical Writing", riskLevel: "low", priority: 7 },
+      project_manager: { name: "Project Manager", emoji: "📋", color: "gray-500", shortLabel: "PM", description: "Coordinates tasks, manages project timelines, and stakeholder communication.", skills: "Project Management,Planning,Coordination", riskLevel: "low", priority: 8 },
+      data_ml_engineer: { name: "Data/ML Engineer", emoji: "📊", color: "teal-500", shortLabel: "Data/ML", description: "Builds data pipelines, ML models, and analytics systems.", skills: "Python,ML,Data Pipelines,Analytics", riskLevel: "medium", priority: 9 },
+      mobile_developer: { name: "Mobile Developer", emoji: "📱", color: "indigo-500", shortLabel: "Mobile", description: "Develops mobile applications with React Native or native platforms.", skills: "React Native,Mobile,iOS,Android", riskLevel: "medium", priority: 10 },
+      tech_lead: { name: "Tech Lead", emoji: "👑", color: "amber-500", shortLabel: "Lead", description: "Reviews code, provides technical guidance, and ensures quality standards.", skills: "Code Review,Architecture,Mentoring", riskLevel: "medium", priority: 11 },
+      planning_agent: { name: "Planning Agent", emoji: "💡", color: "cyan-500", shortLabel: "Planner", description: "Decomposes tasks into stories, assigns experts, and creates execution plans.", skills: "Planning,Decomposition,Estimation", riskLevel: "low", priority: 12 },
+      manager: { name: "Manager", emoji: "👔", color: "slate-500", shortLabel: "Manager", description: "Manages review cycles, approves PRs, and coordinates team output.", skills: "Management,Review,Coordination", riskLevel: "low", priority: 13 },
+    };
+
+    const insert = db.prepare(
+      "INSERT INTO personas (id, slug, name, emoji, color, short_label, description, enabled, is_system, priority, skills, risk_level) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?)"
+    );
+    for (const [slug, p] of Object.entries(SYSTEM_PERSONAS)) {
+      if (!existingSlugs.has(slug)) {
+        insert.run(generateId(), slug, p.name, p.emoji, p.color, p.shortLabel, p.description, p.priority, p.skills, p.riskLevel);
+      }
+    }
+  }
+
+  // GET /api/personas — list all personas (system + user-created), cloud proxy in cloud mode
   if (req.method === "GET" && path === "/api/personas") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        seedSystemPersonas();
+        const personas = db.prepare(
+          "SELECT id, slug, name, emoji, color, short_label, description, enabled, is_system, priority, skills, risk_level, keyword_pattern, label_shortcuts, created_at, updated_at FROM personas WHERE slug != '__common__' ORDER BY priority ASC, name ASC"
+        ).all() as any[];
+        return json(res, personas.map((p: any) => ({
+          ...p,
+          enabled: !!p.enabled,
+          isSystem: !!p.is_system,
+          skills: p.skills ? p.skills.split(",").map((s: string) => s.trim()).filter(Boolean) : [],
+          labelShortcuts: p.label_shortcuts ? p.label_shortcuts.split(",").map((s: string) => s.trim()).filter(Boolean) : [],
+        })));
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
-      const result = await cloudProxy("GET", "/api/worker-decisions/worker-config", undefined);
+      const result = await cloudProxy("GET", "/api/personas");
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // POST /api/personas — create a new persona (standalone only)
+  if (req.method === "POST" && path === "/api/personas") {
+    const body = JSON.parse(await readBody(req));
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        seedSystemPersonas();
+        const { slug, name, emoji, color, shortLabel, description, skills, riskLevel, keywordPattern, labelShortcuts, priority } = body;
+        if (!slug || !name) return json(res, { error: "slug and name are required" }, 400);
+        if (!/^[a-z][a-z0-9_]*$/.test(slug)) return json(res, { error: "slug must match /^[a-z][a-z0-9_]*$/" }, 400);
+        const existing = db.prepare("SELECT id FROM personas WHERE slug = ?").get(slug);
+        if (existing) return json(res, { error: `Persona with slug '${slug}' already exists` }, 409);
+        const id = generateId();
+        db.prepare(
+          "INSERT INTO personas (id, slug, name, emoji, color, short_label, description, enabled, is_system, priority, skills, risk_level, keyword_pattern, label_shortcuts) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)"
+        ).run(
+          id, slug, name,
+          emoji || null, color || null, shortLabel || null, description || null,
+          priority ?? 0,
+          Array.isArray(skills) ? skills.join(",") : (skills || null),
+          riskLevel || "medium",
+          keywordPattern || null,
+          Array.isArray(labelShortcuts) ? labelShortcuts.join(",") : (labelShortcuts || null),
+        );
+        const created = db.prepare("SELECT * FROM personas WHERE id = ?").get(id) as any;
+        return json(res, { ...created, enabled: !!created.enabled, isSystem: false }, 201);
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("POST", "/api/personas", body);
+      return json(res, result, 201);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // GET /api/personas/worker/:slug/bundle — persona bundle for worker directive injection
+  if (req.method === "GET" && /^\/api\/personas\/worker\/[^/]+\/bundle$/.test(path)) {
+    const slug = path.split("/")[5];
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        seedSystemPersonas();
+        const persona = db.prepare("SELECT * FROM personas WHERE slug = ? AND enabled = 1").get(slug) as any;
+        if (!persona) return json(res, { error: `Persona '${slug}' not found` }, 404);
+
+        // Get active readme directive
+        const readmeDirective = db.prepare(
+          "SELECT id, content, version FROM persona_directives WHERE persona_id = ? AND type = 'readme' AND is_active = 1 ORDER BY version DESC LIMIT 1"
+        ).get(persona.id) as any;
+
+        // Get active common directives for this persona
+        const personaCommon = db.prepare(
+          "SELECT id, filename, content, version FROM persona_directives WHERE persona_id = ? AND type = 'common' AND is_active = 1"
+        ).all(persona.id) as any[];
+
+        // Also get global __common__ directives
+        const commonPersona = db.prepare("SELECT id FROM personas WHERE slug = '__common__'").get() as any;
+        let globalCommon: any[] = [];
+        if (commonPersona) {
+          globalCommon = db.prepare(
+            "SELECT id, filename, content, version FROM persona_directives WHERE persona_id = ? AND type = 'common' AND is_active = 1"
+          ).all(commonPersona.id) as any[];
+        }
+
+        // Merge: global common first, persona-specific overrides by filename
+        const commonMap: Record<string, string> = {};
+        const commonMeta: Record<string, { id: string; version: number }> = {};
+        for (const d of globalCommon) {
+          if (d.filename) {
+            commonMap[d.filename] = d.content;
+            commonMeta[d.filename] = { id: d.id, version: d.version };
+          }
+        }
+        for (const d of personaCommon) {
+          if (d.filename) {
+            commonMap[d.filename] = d.content;
+            commonMeta[d.filename] = { id: d.id, version: d.version };
+          }
+        }
+
+        return json(res, {
+          persona: {
+            id: persona.id,
+            slug: persona.slug,
+            name: persona.name,
+            emoji: persona.emoji,
+            color: persona.color,
+            description: persona.description,
+          },
+          directives: {
+            readme: readmeDirective?.content ?? null,
+            readmeMeta: readmeDirective ? { id: readmeDirective.id, version: readmeDirective.version } : null,
+            common: commonMap,
+            commonMeta,
+          },
+          scripts: {},
+        });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("GET", path);
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // GET /api/personas/worker/experts — expert registry for workers
+  if (req.method === "GET" && path === "/api/personas/worker/experts") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        seedSystemPersonas();
+        const personas = db.prepare(
+          "SELECT id, slug, name, emoji, color, description, skills FROM personas WHERE enabled = 1 AND slug != '__common__' ORDER BY priority ASC"
+        ).all() as any[];
+
+        const experts = personas.map((p: any) => {
+          // Get readme directive as systemPrompt
+          const readmeDirective = db.prepare(
+            "SELECT content FROM persona_directives WHERE persona_id = ? AND type = 'readme' AND is_active = 1 ORDER BY version DESC LIMIT 1"
+          ).get(p.id) as any;
+
+          return {
+            slug: p.slug,
+            name: p.name,
+            emoji: p.emoji,
+            color: p.color,
+            description: p.description,
+            systemPrompt: readmeDirective?.content || `You are a ${p.name}. ${p.description || ""}`,
+            specialties: p.skills ? p.skills.split(",").map((s: string) => s.trim()).filter(Boolean) : [],
+            tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch", "TodoWrite"],
+            reviewOnly: p.slug === "tech_lead" || p.slug === "manager",
+          };
+        });
+        return json(res, { experts });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("GET", "/api/personas/worker/experts");
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // PUT /api/personas/:id — update persona metadata (standalone only)
+  if (req.method === "PUT" && /^\/api\/personas\/[^/]+$/.test(path) && !path.includes("/worker/")) {
+    const body = JSON.parse(await readBody(req));
+    const personaId = path.split("/")[3];
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const persona = db.prepare("SELECT * FROM personas WHERE id = ?").get(personaId) as any;
+        if (!persona) return json(res, { error: "Persona not found" }, 404);
+
+        const { name, emoji, color, shortLabel, description, enabled, priority, skills, riskLevel, keywordPattern, labelShortcuts } = body;
+        const updates: string[] = [];
+        const values: any[] = [];
+
+        if (name !== undefined) { updates.push("name = ?"); values.push(name); }
+        if (emoji !== undefined) { updates.push("emoji = ?"); values.push(emoji); }
+        if (color !== undefined) { updates.push("color = ?"); values.push(color); }
+        if (shortLabel !== undefined) { updates.push("short_label = ?"); values.push(shortLabel); }
+        if (description !== undefined) { updates.push("description = ?"); values.push(description); }
+        if (enabled !== undefined) { updates.push("enabled = ?"); values.push(enabled ? 1 : 0); }
+        if (priority !== undefined) { updates.push("priority = ?"); values.push(priority); }
+        if (skills !== undefined) { updates.push("skills = ?"); values.push(Array.isArray(skills) ? skills.join(",") : skills); }
+        if (riskLevel !== undefined) { updates.push("risk_level = ?"); values.push(riskLevel); }
+        if (keywordPattern !== undefined) { updates.push("keyword_pattern = ?"); values.push(keywordPattern); }
+        if (labelShortcuts !== undefined) { updates.push("label_shortcuts = ?"); values.push(Array.isArray(labelShortcuts) ? labelShortcuts.join(",") : labelShortcuts); }
+
+        if (updates.length > 0) {
+          updates.push("updated_at = datetime('now')");
+          db.prepare(`UPDATE personas SET ${updates.join(", ")} WHERE id = ?`).run(...values, personaId);
+        }
+
+        const updated = db.prepare("SELECT * FROM personas WHERE id = ?").get(personaId) as any;
+        return json(res, { ...updated, enabled: !!updated.enabled, isSystem: !!updated.is_system });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("PUT", path, body);
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // DELETE /api/personas/:id — delete a user-created persona (standalone only, system personas blocked)
+  if (req.method === "DELETE" && /^\/api\/personas\/[^/]+$/.test(path) && !path.includes("/worker/") && !path.includes("/directives")) {
+    const personaId = path.split("/")[3];
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const persona = db.prepare("SELECT * FROM personas WHERE id = ?").get(personaId) as any;
+        if (!persona) return json(res, { error: "Persona not found" }, 404);
+        if (persona.is_system) return json(res, { error: "Cannot delete system personas" }, 403);
+        db.prepare("DELETE FROM personas WHERE id = ?").run(personaId);
+        return json(res, { success: true });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("DELETE", path);
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // GET /api/personas/:personaId/directives — list active directives for a persona
+  if (req.method === "GET" && /^\/api\/personas\/[^/]+\/directives$/.test(path) && !path.includes("/worker/") && !path.includes("/common/")) {
+    const personaId = path.split("/")[3];
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const persona = db.prepare("SELECT id FROM personas WHERE id = ?").get(personaId) as any;
+        if (!persona) return json(res, { error: "Persona not found" }, 404);
+        const directives = db.prepare(
+          "SELECT id, persona_id, type, filename, version, is_active, change_summary, created_at, length(content) as content_length FROM persona_directives WHERE persona_id = ? AND is_active = 1 ORDER BY type, filename"
+        ).all(personaId) as any[];
+        return json(res, directives.map((d: any) => ({
+          ...d,
+          isActive: !!d.is_active,
+          contentPreview: undefined,
+          contentLength: d.content_length,
+        })));
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("GET", path);
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // GET /api/personas/:personaId/directives/:id — get full directive content
+  if (req.method === "GET" && /^\/api\/personas\/[^/]+\/directives\/[^/]+$/.test(path) && !path.includes("/worker/")) {
+    const directiveId = path.split("/")[5];
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const directive = db.prepare("SELECT * FROM persona_directives WHERE id = ?").get(directiveId) as any;
+        if (!directive) return json(res, { error: "Directive not found" }, 404);
+        return json(res, { ...directive, isActive: !!directive.is_active });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("GET", path);
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // POST /api/personas/:personaId/directives — create new directive version
+  if (req.method === "POST" && /^\/api\/personas\/[^/]+\/directives$/.test(path) && !path.includes("/worker/") && !path.includes("/common/")) {
+    const body = JSON.parse(await readBody(req));
+    const personaId = path.split("/")[3];
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const persona = db.prepare("SELECT id FROM personas WHERE id = ?").get(personaId) as any;
+        if (!persona) return json(res, { error: "Persona not found" }, 404);
+
+        const { type, filename, content, changeSummary } = body;
+        if (!type || !content) return json(res, { error: "type and content are required" }, 400);
+        if (type !== "readme" && type !== "common") return json(res, { error: "type must be 'readme' or 'common'" }, 400);
+        if (type === "common" && !filename) return json(res, { error: "filename is required for common directives" }, 400);
+
+        // Get current max version for this type+filename
+        const maxRow = db.prepare(
+          "SELECT MAX(version) as maxVer FROM persona_directives WHERE persona_id = ? AND type = ? AND (filename = ? OR (filename IS NULL AND ? IS NULL))"
+        ).get(personaId, type, filename || null, filename || null) as any;
+        const nextVersion = (maxRow?.maxVer ?? 0) + 1;
+
+        // Deactivate previous active versions for this type+filename
+        db.prepare(
+          "UPDATE persona_directives SET is_active = 0 WHERE persona_id = ? AND type = ? AND (filename = ? OR (filename IS NULL AND ? IS NULL)) AND is_active = 1"
+        ).run(personaId, type, filename || null, filename || null);
+
+        // Insert new version
+        const id = generateId();
+        db.prepare(
+          "INSERT INTO persona_directives (id, persona_id, type, filename, content, version, is_active, change_summary) VALUES (?, ?, ?, ?, ?, ?, 1, ?)"
+        ).run(id, personaId, type, filename || null, content, nextVersion, changeSummary || null);
+
+        const created = db.prepare("SELECT * FROM persona_directives WHERE id = ?").get(id) as any;
+        return json(res, { ...created, isActive: true }, 201);
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("POST", path, body);
+      return json(res, result, 201);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // DELETE /api/personas/:personaId/directives/:id — delete all versions of a directive
+  if (req.method === "DELETE" && /^\/api\/personas\/[^/]+\/directives\/[^/]+$/.test(path) && !path.includes("/worker/")) {
+    const directiveId = path.split("/")[5];
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const directive = db.prepare("SELECT * FROM persona_directives WHERE id = ?").get(directiveId) as any;
+        if (!directive) return json(res, { error: "Directive not found" }, 404);
+        // Delete all versions with same persona_id + type + filename
+        db.prepare(
+          "DELETE FROM persona_directives WHERE persona_id = ? AND type = ? AND (filename = ? OR (filename IS NULL AND ? IS NULL))"
+        ).run(directive.persona_id, directive.type, directive.filename, directive.filename);
+        return json(res, { success: true });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("DELETE", path);
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // GET /api/personas/common/directives — list global common directives
+  if (req.method === "GET" && path === "/api/personas/common/directives") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        seedSystemPersonas();
+        // Ensure __common__ pseudo-persona exists
+        let commonPersona = db.prepare("SELECT id FROM personas WHERE slug = '__common__'").get() as any;
+        if (!commonPersona) {
+          const id = generateId();
+          db.prepare("INSERT INTO personas (id, slug, name, enabled, is_system, priority) VALUES (?, '__common__', 'Common Directives', 1, 1, 0)").run(id);
+          commonPersona = { id };
+        }
+        const directives = db.prepare(
+          "SELECT id, persona_id, type, filename, version, is_active, change_summary, created_at, length(content) as content_length FROM persona_directives WHERE persona_id = ? AND is_active = 1 ORDER BY filename"
+        ).all(commonPersona.id) as any[];
+        return json(res, directives.map((d: any) => ({ ...d, isActive: !!d.is_active, contentLength: d.content_length })));
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("GET", "/api/personas/common/directives");
+      return json(res, result);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // POST /api/personas/common/directives — create/update a common directive
+  if (req.method === "POST" && path === "/api/personas/common/directives") {
+    const body = JSON.parse(await readBody(req));
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        seedSystemPersonas();
+        // Ensure __common__ pseudo-persona
+        let commonPersona = db.prepare("SELECT id FROM personas WHERE slug = '__common__'").get() as any;
+        if (!commonPersona) {
+          const id = generateId();
+          db.prepare("INSERT INTO personas (id, slug, name, enabled, is_system, priority) VALUES (?, '__common__', 'Common Directives', 1, 1, 0)").run(id);
+          commonPersona = { id };
+        }
+        const { filename, content, changeSummary } = body;
+        if (!filename || !content) return json(res, { error: "filename and content are required" }, 400);
+
+        const maxRow = db.prepare(
+          "SELECT MAX(version) as maxVer FROM persona_directives WHERE persona_id = ? AND type = 'common' AND filename = ?"
+        ).get(commonPersona.id, filename) as any;
+        const nextVersion = (maxRow?.maxVer ?? 0) + 1;
+
+        db.prepare(
+          "UPDATE persona_directives SET is_active = 0 WHERE persona_id = ? AND type = 'common' AND filename = ? AND is_active = 1"
+        ).run(commonPersona.id, filename);
+
+        const id = generateId();
+        db.prepare(
+          "INSERT INTO persona_directives (id, persona_id, type, filename, content, version, is_active, change_summary) VALUES (?, ?, 'common', ?, ?, ?, 1, ?)"
+        ).run(id, commonPersona.id, filename, content, nextVersion, changeSummary || null);
+
+        const created = db.prepare("SELECT * FROM persona_directives WHERE id = ?").get(id) as any;
+        return json(res, { ...created, isActive: true }, 201);
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("POST", "/api/personas/common/directives", body);
+      return json(res, result, 201);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // GET /api/personas/:id — get single persona with directives (standalone only)
+  if (req.method === "GET" && /^\/api\/personas\/[^/]+$/.test(path) && !path.includes("/worker/") && !path.includes("/common")) {
+    const personaId = path.split("/")[3];
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        seedSystemPersonas();
+        const persona = db.prepare("SELECT * FROM personas WHERE id = ?").get(personaId) as any;
+        if (!persona) return json(res, { error: "Persona not found" }, 404);
+        const directives = db.prepare(
+          "SELECT id, type, filename, version, is_active, change_summary, created_at, length(content) as content_length FROM persona_directives WHERE persona_id = ? AND is_active = 1 ORDER BY type, filename"
+        ).all(personaId) as any[];
+        return json(res, {
+          ...persona,
+          enabled: !!persona.enabled,
+          isSystem: !!persona.is_system,
+          skills: persona.skills ? persona.skills.split(",").map((s: string) => s.trim()).filter(Boolean) : [],
+          directives: directives.map((d: any) => ({ ...d, isActive: !!d.is_active, contentLength: d.content_length })),
+        });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
+    try {
+      const result = await cloudProxy("GET", path);
       return json(res, result);
     } catch (err) {
       return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
@@ -1868,6 +2813,29 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       store.contexts.push(msg);
       // Push to SSE subscribers (mirrors cloud Redis pub/sub)
       pushCoordEvent(taskId, msg);
+      // Emit prominent blocker notification so VS Code can show a dialog
+      if (msg.messageType === "blocker_detected") {
+        broadcastSSE("tasks", "blocker:detected", {
+          taskId: msg.taskId,
+          parentTaskId: taskId,
+          persona: msg.persona,
+          content: msg.content,
+          metadata: msg.metadata,
+          createdAt: msg.createdAt,
+        });
+      }
+      // Write-through to SQLite for persistence across agent restarts
+      const backend = getActiveBackend();
+      if (backend?.mode === "local") {
+        try {
+          await backend.postCoordinationMessage({
+            parentTaskId: taskId,
+            taskId: body.taskId || taskId,
+            messageType: msg.messageType,
+            content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
+          });
+        } catch { /* best-effort persistence */ }
+      }
       return json(res, msg, 201);
     } catch {
       return json(res, { success: true });
@@ -1900,6 +2868,18 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       store.contexts.push(claimed);
       // Push to SSE subscribers
       pushCoordEvent(parentTaskId, claimed);
+      // Write-through to SQLite
+      const backend = getActiveBackend();
+      if (backend?.mode === "local") {
+        try {
+          await backend.postCoordinationMessage({
+            parentTaskId,
+            taskId: parentTaskId,
+            messageType: "story_claimed",
+            content: claimed.content,
+          });
+        } catch { /* best-effort */ }
+      }
       return json(res, { success: true, claimedBy: body.claimedBy });
     } catch {
       return json(res, { success: true });
@@ -1960,16 +2940,21 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       const backend = getActiveBackend();
       if (backend?.mode === "local") {
         const db = (await import("./backends/local/db.js")).getDb();
+        const taskId = workerCompleteMatch[1];
         const status =
           body.exitCode === 0 ? (body.result || "completed") : "failed";
         db.prepare(
           "UPDATE tasks SET status = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
-        ).run(status, workerCompleteMatch[1]);
+        ).run(status, taskId);
+        // Store PR URL if provided
+        if (body.prUrl || body.githubPrUrl) {
+          db.prepare("UPDATE tasks SET github_pr_url = ? WHERE id = ?").run(body.prUrl || body.githubPrUrl, taskId);
+        }
         const { emitStreamEvent } = await import(
           "./backends/local/event-bus.js"
         );
         emitStreamEvent("org:local:tasks", "task_state", {
-          taskId: workerCompleteMatch[1],
+          taskId,
           status,
         });
       }
@@ -1979,19 +2964,124 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
+  // POST /api/tasks/:id/manager-complete — manager review result
+  const managerCompleteMatch = path.match(
+    /^\/api\/tasks\/([a-f0-9-]+)\/manager-complete$/,
+  );
+  if (req.method === "POST" && managerCompleteMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const taskId = managerCompleteMatch[1];
+        const { getDb } = await import("./backends/local/db.js");
+        const db = getDb();
+        const decision = body.decision || body.result || "approved";
+
+        if (decision === "approved" || decision === "approve") {
+          db.prepare(
+            "UPDATE tasks SET status = 'completed', completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
+          ).run(taskId);
+          broadcastSSE("tasks", "state:changed", { taskId, status: "completed" });
+        } else if (decision === "revision_needed" || decision === "revise") {
+          // Manager wants revisions — re-queue the task for another worker run
+          db.prepare(
+            "UPDATE tasks SET status = 'queued', updated_at = datetime('now') WHERE id = ?",
+          ).run(taskId);
+          broadcastSSE("tasks", "state:changed", { taskId, status: "queued" });
+          // Store review feedback in coordination context
+          if (body.feedback) {
+            try {
+              await backend.postCoordinationMessage({
+                parentTaskId: taskId,
+                taskId,
+                messageType: "manager_feedback",
+                content: JSON.stringify({ decision, feedback: body.feedback }),
+              });
+            } catch { /* best-effort */ }
+          }
+          processQueuedTask(taskId).catch(() => {});
+        } else {
+          // Rejected — mark as failed
+          db.prepare(
+            "UPDATE tasks SET status = 'failed', completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
+          ).run(taskId);
+          broadcastSSE("tasks", "state:changed", { taskId, status: "failed" });
+        }
+      } catch { /* best-effort */ }
+    }
+    return json(res, { success: true });
+  }
+
   // POST /api/tasks/:id/worker-progress — mid-task status update (non-terminal)
   const workerProgressMatch = path.match(
     /^\/api\/tasks\/([a-f0-9-]+)\/worker-progress$/,
   );
   if (req.method === "POST" && workerProgressMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const taskId = workerProgressMatch[1];
+        const status = body.status || body.result;
+        if (status) {
+          const { getDb } = await import("./backends/local/db.js");
+          const db = getDb();
+          db.prepare(
+            "UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?",
+          ).run(status, taskId);
+          // Store PR URL if provided (used by manager review after completion)
+          if (body.prUrl || body.githubPrUrl) {
+            db.prepare("UPDATE tasks SET github_pr_url = ? WHERE id = ?").run(body.prUrl || body.githubPrUrl, taskId);
+          }
+          broadcastSSE("tasks", "state:changed", { taskId, status });
+        }
+      } catch { /* best-effort */ }
+    }
     return json(res, { success: true });
   }
 
-  // POST /api/control-center/logs/:id/classify-errors — no-op
+  // POST /api/control-center/logs/:id/classify-errors — mark errors as fatal/recoverable
   const classifyMatch = path.match(
     /^\/api\/control-center\/logs\/([a-f0-9-]+)\/classify-errors$/,
   );
   if (req.method === "POST" && classifyMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const taskId = classifyMatch[1];
+        const exitCode = Number(body.exitCode);
+        const { getDb } = await import("./backends/local/db.js");
+        const db = getDb();
+
+        // Get all error logs for this task, ordered by creation time
+        const errorLogs = db.prepare(
+          "SELECT id FROM task_logs WHERE task_id = ? AND severity = 'error' ORDER BY created_at ASC",
+        ).all(taskId) as { id: number }[];
+
+        if (errorLogs.length > 0) {
+          let fatalCount = 0;
+          let recoverableCount = 0;
+
+          for (let i = 0; i < errorLogs.length; i++) {
+            const isLastError = i === errorLogs.length - 1;
+            const errorType = (exitCode !== 0 && isLastError) ? "fatal" : "recoverable";
+            db.prepare("UPDATE task_logs SET error_type = ? WHERE id = ?").run(errorType, errorLogs[i].id);
+            if (errorType === "fatal") fatalCount++;
+            else recoverableCount++;
+          }
+
+          return json(res, {
+            taskId,
+            classified: errorLogs.length,
+            fatal: fatalCount,
+            recoverable: recoverableCount,
+          });
+        }
+        return json(res, { taskId, classified: 0, message: "No error logs to classify" });
+      } catch { /* non-fatal */ }
+    }
     return json(res, { success: true });
   }
 
@@ -2043,28 +3133,566 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     } catch { return json(res, { success: true }); }
   }
 
-  // POST /api/directives/usage — no-op in standalone
-  if (req.method === "POST" && path === "/api/directives/usage") {
+  // POST /api/tasks/:id/usage/partial — incremental token usage from workers
+  const usagePartialMatch = path.match(
+    /^\/api\/tasks\/([a-f0-9]+)\/usage\/partial$/,
+  );
+  if (req.method === "POST" && usagePartialMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const taskId = usagePartialMatch[1];
+        const { getDb } = await import("./backends/local/db.js");
+        const db = getDb();
+        const mode = body.mode || "greatest";
+
+        if (mode === "add") {
+          db.prepare(`
+            UPDATE tasks SET
+              input_tokens = COALESCE(input_tokens, 0) + ?,
+              output_tokens = COALESCE(output_tokens, 0) + ?,
+              cache_creation_tokens = COALESCE(cache_creation_tokens, 0) + ?,
+              cache_read_tokens = COALESCE(cache_read_tokens, 0) + ?,
+              updated_at = datetime('now')
+            WHERE id = ?
+          `).run(
+            Number(body.inputTokens) || 0,
+            Number(body.outputTokens) || 0,
+            Number(body.cacheCreationTokens) || 0,
+            Number(body.cacheReadTokens) || 0,
+            taskId,
+          );
+        } else {
+          db.prepare(`
+            UPDATE tasks SET
+              input_tokens = MAX(COALESCE(input_tokens, 0), ?),
+              output_tokens = MAX(COALESCE(output_tokens, 0), ?),
+              cache_creation_tokens = MAX(COALESCE(cache_creation_tokens, 0), ?),
+              cache_read_tokens = MAX(COALESCE(cache_read_tokens, 0), ?),
+              updated_at = datetime('now')
+            WHERE id = ?
+          `).run(
+            Number(body.inputTokens) || 0,
+            Number(body.outputTokens) || 0,
+            Number(body.cacheCreationTokens) || 0,
+            Number(body.cacheReadTokens) || 0,
+            taskId,
+          );
+        }
+
+        // Calculate estimated cost (Sonnet 3.5 pricing as reasonable default)
+        const task = db.prepare("SELECT input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens FROM tasks WHERE id = ?").get(taskId) as any;
+        if (task) {
+          const cost =
+            ((task.input_tokens || 0) * 3.0 / 1_000_000) +
+            ((task.output_tokens || 0) * 15.0 / 1_000_000) +
+            ((task.cache_creation_tokens || 0) * 3.75 / 1_000_000) +
+            ((task.cache_read_tokens || 0) * 0.30 / 1_000_000);
+          db.prepare("UPDATE tasks SET estimated_cost_usd = ? WHERE id = ?").run(cost, taskId);
+          broadcastSSE("tasks", "usage:updated", { taskId, estimatedCostUsd: cost });
+        }
+      } catch { /* fire-and-forget */ }
+    }
     return json(res, { success: true });
   }
 
-  // POST /api/tasks/:id/ticket-comment — internal ticket comment (no-op standalone)
+  // POST /api/tasks/:id/usage — final token usage report
+  const usageFinalMatch = path.match(
+    /^\/api\/tasks\/([a-f0-9]+)\/usage$/,
+  );
+  if (req.method === "POST" && usageFinalMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const taskId = usageFinalMatch[1];
+        const { getDb } = await import("./backends/local/db.js");
+        const db = getDb();
+        // Final usage — always overwrite (this is the definitive count)
+        db.prepare(`
+          UPDATE tasks SET
+            input_tokens = ?,
+            output_tokens = ?,
+            cache_creation_tokens = ?,
+            cache_read_tokens = ?,
+            updated_at = datetime('now')
+          WHERE id = ?
+        `).run(
+          Number(body.inputTokens) || 0,
+          Number(body.outputTokens) || 0,
+          Number(body.cacheCreationTokens) || 0,
+          Number(body.cacheReadTokens) || 0,
+          taskId,
+        );
+        // Calculate final cost
+        const cost =
+          ((Number(body.inputTokens) || 0) * 3.0 / 1_000_000) +
+          ((Number(body.outputTokens) || 0) * 15.0 / 1_000_000) +
+          ((Number(body.cacheCreationTokens) || 0) * 3.75 / 1_000_000) +
+          ((Number(body.cacheReadTokens) || 0) * 0.30 / 1_000_000);
+        db.prepare("UPDATE tasks SET estimated_cost_usd = ? WHERE id = ?").run(cost, taskId);
+        broadcastSSE("tasks", "usage:updated", { taskId, estimatedCostUsd: cost });
+      } catch { /* fire-and-forget */ }
+    }
+    return json(res, { success: true });
+  }
+
+  // POST /api/tasks/:id/usage/phase — phase-level token usage (store as partial)
+  const usagePhaseMatch = path.match(
+    /^\/api\/tasks\/([a-f0-9]+)\/usage\/phase$/,
+  );
+  if (req.method === "POST" && usagePhaseMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const taskId = usagePhaseMatch[1];
+        const { getDb } = await import("./backends/local/db.js");
+        const db = getDb();
+        // Phase usage is additive (each phase is a separate session)
+        db.prepare(`
+          UPDATE tasks SET
+            input_tokens = COALESCE(input_tokens, 0) + ?,
+            output_tokens = COALESCE(output_tokens, 0) + ?,
+            cache_creation_tokens = COALESCE(cache_creation_tokens, 0) + ?,
+            cache_read_tokens = COALESCE(cache_read_tokens, 0) + ?,
+            updated_at = datetime('now')
+          WHERE id = ?
+        `).run(
+          Number(body.inputTokens) || 0,
+          Number(body.outputTokens) || 0,
+          Number(body.cacheCreationTokens) || 0,
+          Number(body.cacheReadTokens) || 0,
+          taskId,
+        );
+      } catch { /* fire-and-forget */ }
+    }
+    return json(res, { success: true });
+  }
+
+  // GET /api/tasks/:id/usage/by-persona — usage breakdown (stub — full analytics not implemented)
+  const usageByPersonaMatch = path.match(
+    /^\/api\/tasks\/([a-f0-9]+)\/usage\/by-persona$/,
+  );
+  if (req.method === "GET" && usageByPersonaMatch) {
+    return json(res, { breakdown: [] });
+  }
+
+  // GET /api/tasks/:id/usage/by-operation-type — usage breakdown (stub)
+  const usageByOpMatch = path.match(
+    /^\/api\/tasks\/([a-f0-9]+)\/usage\/by-operation-type$/,
+  );
+  if (req.method === "GET" && usageByOpMatch) {
+    return json(res, { breakdown: [] });
+  }
+
+  // POST /api/directives/usage — track directive usage per task
+  if (req.method === "POST" && path === "/api/directives/usage") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const { taskId, directives } = body;
+        if (taskId && Array.isArray(directives)) {
+          const db = getLocalDb();
+          const insert = db.prepare(
+            "INSERT INTO directive_usage (id, task_id, directive_id, version, type, persona_slug) VALUES (?, ?, ?, ?, ?, ?)"
+          );
+          for (const d of directives) {
+            insert.run(generateId(), taskId, d.directiveId || "", d.version || 1, d.type || "readme", d.personaSlug || "");
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+    return json(res, { success: true });
+  }
+
+  // GET /api/directives/effectiveness — directive effectiveness metrics
+  if (req.method === "GET" && path === "/api/directives/effectiveness") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const metrics = db.prepare(`
+          SELECT
+            du.directive_id,
+            du.persona_slug,
+            du.type,
+            COUNT(DISTINCT du.task_id) as usage_count,
+            COUNT(DISTINCT CASE WHEN t.status = 'completed' THEN du.task_id END) as success_count,
+            COUNT(DISTINCT CASE WHEN t.status = 'failed' THEN du.task_id END) as failure_count
+          FROM directive_usage du
+          LEFT JOIN tasks t ON du.task_id = t.id
+          GROUP BY du.directive_id, du.persona_slug, du.type
+          ORDER BY usage_count DESC
+        `).all() as any[];
+        return json(res, { metrics });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    return json(res, { metrics: [] });
+  }
+
+  // POST /api/tasks/:id/ticket-comment — store as log entry in standalone
   const ticketCommentMatch = path.match(
     /^\/api\/tasks\/([a-f0-9-]+)\/ticket-comment$/,
   );
   if (req.method === "POST" && ticketCommentMatch) {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const taskId = ticketCommentMatch[1];
+        const comment = body.comment;
+        if (comment) {
+          // Store as a log entry so it's visible in the task log stream
+          await backend.postLog({
+            taskId,
+            type: "ticket_comment",
+            message: comment,
+            severity: "info",
+          });
+          broadcastSSE(`logs:${taskId}`, "log", {
+            taskId,
+            type: "ticket_comment",
+            message: comment,
+            severity: "info",
+            createdAt: new Date().toISOString(),
+          });
+        }
+      } catch { /* non-fatal */ }
+    }
     return json(res, { success: true });
   }
 
-  // GET /api/memory/* — memory API stubs (standalone has no memory service)
-  if (path.startsWith("/api/memory/")) {
-    if (req.method === "GET") return json(res, { skills: [], memories: [], results: [] });
-    if (req.method === "POST") return json(res, { success: true, id: "none" });
+  // ── Memory API (SQLite-backed) ──
+
+  // POST /api/memory/search — search across all memory types by text
+  if (req.method === "POST" && path === "/api/memory/search") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const { query, repository, memoryTypes, limit } = body;
+        const searchLimit = limit || 10;
+        const types = memoryTypes || ["semantic", "episodic", "procedural"];
+        const db = getLocalDb();
+        const likeQuery = `%${(query || "").replace(/[%_]/g, "")}%`;
+
+        const semantic = types.includes("semantic") ? db.prepare(
+          `SELECT * FROM semantic_memories WHERE (subject LIKE ? OR knowledge LIKE ?) ${repository ? "AND repository = ?" : ""} ORDER BY confidence DESC, evidence_count DESC LIMIT ?`
+        ).all(...(repository ? [likeQuery, likeQuery, repository, searchLimit] : [likeQuery, likeQuery, searchLimit])) as any[] : [];
+
+        const episodic = types.includes("episodic") ? db.prepare(
+          `SELECT * FROM episodic_memories WHERE (summary LIKE ? OR outcome_details LIKE ?) ${repository ? "AND repository = ?" : ""} ORDER BY created_at DESC LIMIT ?`
+        ).all(...(repository ? [likeQuery, likeQuery, repository, searchLimit] : [likeQuery, likeQuery, searchLimit])) as any[] : [];
+
+        const procedural = types.includes("procedural") ? db.prepare(
+          `SELECT * FROM procedural_memories WHERE (name LIKE ? OR description LIKE ? OR insight LIKE ?) ${repository ? "AND repository = ?" : ""} ORDER BY success_count DESC LIMIT ?`
+        ).all(...(repository ? [likeQuery, likeQuery, likeQuery, repository, searchLimit] : [likeQuery, likeQuery, likeQuery, searchLimit])) as any[] : [];
+
+        // Bump retrieval counts
+        for (const m of semantic) { db.prepare("UPDATE semantic_memories SET retrieval_count = retrieval_count + 1, last_retrieved_at = datetime('now') WHERE id = ?").run(m.id); }
+        for (const m of episodic) { db.prepare("UPDATE episodic_memories SET retrieval_count = retrieval_count + 1, last_retrieved_at = datetime('now') WHERE id = ?").run(m.id); }
+        for (const m of procedural) { db.prepare("UPDATE procedural_memories SET retrieval_count = retrieval_count + 1, last_retrieved_at = datetime('now') WHERE id = ?").run(m.id); }
+
+        return json(res, {
+          query, repository,
+          results: { semantic, episodic, procedural },
+          totalResults: semantic.length + episodic.length + procedural.length,
+        });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    return json(res, { query: "", results: { semantic: [], episodic: [], procedural: [] }, totalResults: 0 });
   }
 
-  // POST /api/codebase/* — codebase RAG stubs
+  // POST /api/memory/similar-tasks — find similar past tasks
+  if (req.method === "POST" && path === "/api/memory/similar-tasks") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const { description, limit } = body;
+        const searchLimit = limit || 10;
+        const db = getLocalDb();
+        const likeQuery = `%${(description || "").substring(0, 100).replace(/[%_]/g, "")}%`;
+        const results = db.prepare(
+          "SELECT * FROM episodic_memories WHERE (summary LIKE ? OR outcome_details LIKE ?) AND event_type IN ('task_completed', 'task_failed') ORDER BY created_at DESC LIMIT ?"
+        ).all(likeQuery, likeQuery, searchLimit) as any[];
+        return json(res, { query: description, totalResults: results.length, results });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    return json(res, { query: "", totalResults: 0, results: [] });
+  }
+
+  // GET /api/memory/semantic — list semantic memories
+  if (req.method === "GET" && path === "/api/memory/semantic") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const params = new URL(req.url || "", "http://localhost").searchParams;
+        const repository = params.get("repository");
+        const category = params.get("category");
+        const limit = parseInt(params.get("limit") || "50", 10);
+        const offset = parseInt(params.get("offset") || "0", 10);
+
+        let sql = "SELECT * FROM semantic_memories WHERE 1=1";
+        const args: any[] = [];
+        if (repository) { sql += " AND repository = ?"; args.push(repository); }
+        if (category) { sql += " AND category = ?"; args.push(category); }
+        sql += " ORDER BY updated_at DESC LIMIT ? OFFSET ?";
+        args.push(limit, offset);
+
+        const memories = db.prepare(sql).all(...args) as any[];
+        const countSql = sql.replace(/SELECT \*/, "SELECT COUNT(*) as total").replace(/ ORDER BY.*$/, "");
+        const countArgs = args.slice(0, -2);
+        const countRow = db.prepare(countSql).get(...countArgs) as any;
+        return json(res, { memories, pagination: { total: countRow?.total || 0, limit, offset } });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    return json(res, { memories: [], pagination: { total: 0, limit: 50, offset: 0 } });
+  }
+
+  // POST /api/memory/semantic — store semantic memory (upserts on subject+scope+category)
+  if (req.method === "POST" && path === "/api/memory/semantic") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const { repository, scope, category, subject, knowledge, confidence, source } = body;
+        if (!subject || !knowledge) return json(res, { error: "subject and knowledge are required" }, 400);
+
+        const db = getLocalDb();
+        const existing = db.prepare(
+          "SELECT id, evidence_count FROM semantic_memories WHERE subject = ? AND scope = ? AND category = ? AND (repository = ? OR (repository IS NULL AND ? IS NULL))"
+        ).get(subject, scope || "repository", category || "convention", repository || null, repository || null) as any;
+
+        if (existing) {
+          db.prepare(
+            "UPDATE semantic_memories SET knowledge = ?, confidence = ?, evidence_count = evidence_count + 1, updated_at = datetime('now') WHERE id = ?"
+          ).run(knowledge, confidence ?? 0.5, existing.id);
+          const updated = db.prepare("SELECT * FROM semantic_memories WHERE id = ?").get(existing.id);
+          return json(res, { memory: updated, updated: true });
+        }
+
+        const id = generateId();
+        db.prepare(
+          "INSERT INTO semantic_memories (id, repository, scope, category, subject, knowledge, confidence, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(id, repository || null, scope || "repository", category || "convention", subject, knowledge, confidence ?? 0.5, source || "explicit");
+        const created = db.prepare("SELECT * FROM semantic_memories WHERE id = ?").get(id);
+        return json(res, { memory: created, updated: false });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    return json(res, { success: true, id: "none" });
+  }
+
+  // GET /api/memory/episodic — list episodic memories
+  if (req.method === "GET" && path === "/api/memory/episodic") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const params = new URL(req.url || "", "http://localhost").searchParams;
+        const repository = params.get("repository");
+        const eventType = params.get("eventType");
+        const limit = parseInt(params.get("limit") || "50", 10);
+        const offset = parseInt(params.get("offset") || "0", 10);
+
+        let sql = "SELECT * FROM episodic_memories WHERE 1=1";
+        const args: any[] = [];
+        if (repository) { sql += " AND repository = ?"; args.push(repository); }
+        if (eventType) { sql += " AND event_type = ?"; args.push(eventType); }
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+        args.push(limit, offset);
+
+        const memories = db.prepare(sql).all(...args) as any[];
+        return json(res, { memories, pagination: { total: memories.length, limit, offset } });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    return json(res, { memories: [], pagination: { total: 0, limit: 50, offset: 0 } });
+  }
+
+  // POST /api/memory/episodic — store episodic memory
+  if (req.method === "POST" && path === "/api/memory/episodic") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const { repository, eventType, summary, details, outcome, outcomeDetails, taskId, persona, model } = body;
+        if (!eventType || !summary) return json(res, { error: "eventType and summary are required" }, 400);
+
+        const db = getLocalDb();
+        const id = generateId();
+        db.prepare(
+          "INSERT INTO episodic_memories (id, task_id, repository, event_type, summary, details, outcome, outcome_details, persona, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(id, taskId || null, repository || null, eventType, summary, details ? JSON.stringify(details) : null, outcome || "success", outcomeDetails || null, persona || null, model || null);
+        const created = db.prepare("SELECT * FROM episodic_memories WHERE id = ?").get(id);
+        return json(res, { memory: created });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    return json(res, { success: true, id: "none" });
+  }
+
+  // GET /api/memory/procedural — list procedural memories (skills)
+  if (req.method === "GET" && path === "/api/memory/procedural") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const params = new URL(req.url || "", "http://localhost").searchParams;
+        const repository = params.get("repository");
+        const limit = parseInt(params.get("limit") || "50", 10);
+        const offset = parseInt(params.get("offset") || "0", 10);
+
+        let sql = "SELECT * FROM procedural_memories WHERE 1=1";
+        const args: any[] = [];
+        if (repository) { sql += " AND repository = ?"; args.push(repository); }
+        sql += " ORDER BY success_count DESC, updated_at DESC LIMIT ? OFFSET ?";
+        args.push(limit, offset);
+
+        const skills = db.prepare(sql).all(...args) as any[];
+        return json(res, { skills, pagination: { total: skills.length, limit, offset } });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    return json(res, { skills: [], pagination: { total: 0, limit: 50, offset: 0 } });
+  }
+
+  // POST /api/memory/procedural — store procedural memory (skill)
+  if (req.method === "POST" && path === "/api/memory/procedural") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const { name, description, steps, repository, applicableTo, prerequisites, sourceTaskId, insight } = body;
+        if (!name || !steps) return json(res, { error: "name and steps are required" }, 400);
+
+        const db = getLocalDb();
+        const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+        const id = generateId();
+        db.prepare(
+          "INSERT INTO procedural_memories (id, name, slug, description, insight, repository, applicable_to, steps, prerequisites, source_task_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(id, name, slug, description || null, insight || null, repository || null, applicableTo ? JSON.stringify(applicableTo) : null, JSON.stringify(steps), prerequisites ? JSON.stringify(prerequisites) : null, sourceTaskId || null);
+        const created = db.prepare("SELECT * FROM procedural_memories WHERE id = ?").get(id);
+        return json(res, { skill: created });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    return json(res, { success: true, id: "none" });
+  }
+
+  // DELETE /api/memory/:type/:id — delete a specific memory
+  if (req.method === "DELETE" && /^\/api\/memory\/(semantic|episodic|procedural)\/[^/]+$/.test(path)) {
+    const parts = path.split("/");
+    const memoryType = parts[3];
+    const memoryId = parts[4];
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const table = memoryType === "semantic" ? "semantic_memories" : memoryType === "episodic" ? "episodic_memories" : "procedural_memories";
+        db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(memoryId);
+        return json(res, { deleted: true });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    return json(res, { deleted: true });
+  }
+
+  // Catch-all for other memory sub-routes (feedback, routing, knowledge)
+  if (path.startsWith("/api/memory/")) {
+    if (req.method === "GET") return json(res, { skills: [], memories: [], results: [], scores: [], history: [] });
+    if (req.method === "POST") return json(res, { success: true });
+  }
+
+  // POST /api/codebase/search — search code via cloud proxy (standalone returns empty)
+  if (req.method === "POST" && path === "/api/codebase/search") {
+    if (cloudProxy) {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const result = await cloudProxy("POST", "/api/codebase/search", body);
+        return json(res, result);
+      } catch (err) {
+        return json(res, { snippets: [], formattedText: "", totalSnippets: 0, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return json(res, { snippets: [], formattedText: "", totalSnippets: 0 });
+  }
+
+  // POST /api/codebase/search-with-embedding — search code by embedding vector
+  if (req.method === "POST" && path === "/api/codebase/search-with-embedding") {
+    if (cloudProxy) {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const result = await cloudProxy("POST", "/api/codebase/search-with-embedding", body);
+        return json(res, result);
+      } catch (err) {
+        return json(res, { snippets: [], formattedText: "", totalSnippets: 0, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return json(res, { snippets: [], formattedText: "", totalSnippets: 0 });
+  }
+
+  // POST /api/codebase/ingest — accept code chunks from local indexer
+  if (req.method === "POST" && path === "/api/codebase/ingest") {
+    if (cloudProxy) {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const result = await cloudProxy("POST", "/api/codebase/ingest", body);
+        return json(res, result);
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    // Standalone: acknowledge the ingest but don't store (no local vector DB yet)
+    return json(res, { ingested: 0, message: "Codebase indexing not available in standalone mode" });
+  }
+
+  // GET /api/codebase/status/* — indexing status
+  if (req.method === "GET" && path.startsWith("/api/codebase/status/")) {
+    if (cloudProxy) {
+      try {
+        const result = await cloudProxy("GET", path);
+        return json(res, result);
+      } catch { /* fall through */ }
+    }
+    return json(res, { status: "not_indexed", totalFiles: 0, indexedFiles: 0, totalChunks: 0 });
+  }
+
+  // GET /api/codebase/stats — aggregate stats
+  if (req.method === "GET" && path === "/api/codebase/stats") {
+    if (cloudProxy) {
+      try { return json(res, await cloudProxy("GET", "/api/codebase/stats")); } catch { /* fall through */ }
+    }
+    return json(res, { totalRepositories: 0, totalChunks: 0, repositories: [] });
+  }
+
+  // POST /api/codebase/* — catch-all for remaining endpoints
   if (req.method === "POST" && path.startsWith("/api/codebase/")) {
     return json(res, { snippets: [], totalSnippets: 0 });
+  }
+
+  // GET /api/codebase/* — catch-all
+  if (req.method === "GET" && path.startsWith("/api/codebase/")) {
+    return json(res, { snippets: [], chunks: [], total: 0 });
   }
 
   // ── Worker ingestion endpoints (standalone mode) ──
@@ -2225,6 +3853,314 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
+  // ── Analytics endpoints (standalone — query SQLite) ──
+
+  // GET /api/analytics/tasks — task stats and daily breakdown
+  if (req.method === "GET" && path === "/api/analytics/tasks") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const params = new URL(req.url || "", "http://localhost").searchParams;
+        const range = params.get("range") || "30d";
+        const days = parseInt(range.replace("d", ""), 10) || 30;
+
+        const stats = db.prepare(`
+          SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+            SUM(CASE WHEN status IN ('running', 'planning') THEN 1 ELSE 0 END) as in_progress,
+            SUM(estimated_cost_usd) as total_cost
+          FROM tasks
+          WHERE created_at >= datetime('now', ?)
+        `).get(`-${days} days`) as any;
+
+        const daily = db.prepare(`
+          SELECT
+            date(created_at) as date,
+            COUNT(*) as tasks,
+            SUM(estimated_cost_usd) as cost
+          FROM tasks
+          WHERE created_at >= datetime('now', ?)
+          GROUP BY date(created_at)
+          ORDER BY date ASC
+        `).all(`-${days} days`) as any[];
+
+        return json(res, {
+          stats: {
+            total: stats?.total || 0,
+            completed: stats?.completed || 0,
+            failed: stats?.failed || 0,
+            inProgress: stats?.in_progress || 0,
+          },
+          daily,
+          summary: {
+            totalTasks: stats?.total || 0,
+            totalCost: stats?.total_cost || 0,
+            successRate: stats?.total > 0 ? ((stats?.completed || 0) / stats.total * 100).toFixed(1) : "0.0",
+          },
+        });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (cloudProxy) {
+      try { return json(res, await cloudProxy("GET", path + "?" + (new URL(req.url || "", "http://localhost").search || ""))); } catch { /* fall through */ }
+    }
+    return json(res, { stats: { total: 0, completed: 0, failed: 0, inProgress: 0 }, daily: [], summary: { totalTasks: 0, totalCost: 0, successRate: "0.0" } });
+  }
+
+  // GET /api/analytics/workers — per-persona worker stats
+  if (req.method === "GET" && path === "/api/analytics/workers") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const params = new URL(req.url || "", "http://localhost").searchParams;
+        const range = params.get("range") || "30d";
+        const days = parseInt(range.replace("d", ""), 10) || 30;
+
+        const workers = db.prepare(`
+          SELECT
+            worker_persona as persona,
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as success,
+            ROUND(SUM(CASE WHEN status = 'completed' THEN 1.0 ELSE 0 END) / COUNT(*) * 100, 1) as success_rate,
+            AVG(CASE WHEN completed_at IS NOT NULL AND started_at IS NOT NULL
+              THEN (julianday(completed_at) - julianday(started_at)) * 86400
+              ELSE NULL END) as avg_duration_seconds,
+            SUM(estimated_cost_usd) as total_cost
+          FROM tasks
+          WHERE created_at >= datetime('now', ?) AND worker_persona IS NOT NULL
+          GROUP BY worker_persona
+          ORDER BY total DESC
+        `).all(`-${days} days`) as any[];
+
+        return json(res, {
+          workers: workers.map((w: any) => ({
+            persona: w.persona,
+            total: w.total,
+            success: w.success,
+            successRate: w.success_rate || 0,
+            avgDuration: w.avg_duration_seconds ? Math.round(w.avg_duration_seconds) : null,
+            totalCost: w.total_cost || 0,
+          })),
+        });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (cloudProxy) {
+      try { return json(res, await cloudProxy("GET", path)); } catch { /* fall through */ }
+    }
+    return json(res, { workers: [] });
+  }
+
+  // GET /api/analytics/costs — cost breakdown by model
+  if (req.method === "GET" && path === "/api/analytics/costs") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const params = new URL(req.url || "", "http://localhost").searchParams;
+        const range = params.get("range") || "30d";
+        const days = parseInt(range.replace("d", ""), 10) || 30;
+
+        const totals = db.prepare(`
+          SELECT
+            SUM(estimated_cost_usd) as total_cost,
+            COUNT(*) as total_tasks,
+            SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) as total_tokens
+          FROM tasks
+          WHERE created_at >= datetime('now', ?)
+        `).get(`-${days} days`) as any;
+
+        const byModel = db.prepare(`
+          SELECT
+            worker_model as model,
+            COUNT(*) as tasks,
+            SUM(estimated_cost_usd) as cost,
+            SUM(input_tokens) as input_tokens,
+            SUM(output_tokens) as output_tokens
+          FROM tasks
+          WHERE created_at >= datetime('now', ?) AND worker_model IS NOT NULL
+          GROUP BY worker_model
+          ORDER BY cost DESC
+        `).all(`-${days} days`) as any[];
+
+        const daily = db.prepare(`
+          SELECT
+            date(created_at) as date,
+            SUM(estimated_cost_usd) as cost,
+            COUNT(*) as tasks
+          FROM tasks
+          WHERE created_at >= datetime('now', ?)
+          GROUP BY date(created_at)
+          ORDER BY date ASC
+        `).all(`-${days} days`) as any[];
+
+        return json(res, {
+          totalCost: totals?.total_cost || 0,
+          totalTasks: totals?.total_tasks || 0,
+          totalTokens: totals?.total_tokens || 0,
+          byModel,
+          daily,
+        });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (cloudProxy) {
+      try { return json(res, await cloudProxy("GET", path)); } catch { /* fall through */ }
+    }
+    return json(res, { totalCost: 0, totalTasks: 0, totalTokens: 0, byModel: [], daily: [] });
+  }
+
+  // GET /api/analytics/failures — failure analysis
+  if (req.method === "GET" && path === "/api/analytics/failures") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const params = new URL(req.url || "", "http://localhost").searchParams;
+        const range = params.get("range") || "30d";
+        const days = parseInt(range.replace("d", ""), 10) || 30;
+
+        const summary = db.prepare(`
+          SELECT
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as total_failures,
+            COUNT(*) as total_tasks,
+            ROUND(SUM(CASE WHEN status = 'failed' THEN 1.0 ELSE 0 END) / MAX(COUNT(*), 1) * 100, 1) as failure_rate
+          FROM tasks
+          WHERE created_at >= datetime('now', ?)
+        `).get(`-${days} days`) as any;
+
+        const byPersona = db.prepare(`
+          SELECT worker_persona as persona, COUNT(*) as count
+          FROM tasks
+          WHERE status = 'failed' AND created_at >= datetime('now', ?) AND worker_persona IS NOT NULL
+          GROUP BY worker_persona ORDER BY count DESC
+        `).all(`-${days} days`) as any[];
+
+        const byModel = db.prepare(`
+          SELECT worker_model as model, COUNT(*) as count
+          FROM tasks
+          WHERE status = 'failed' AND created_at >= datetime('now', ?) AND worker_model IS NOT NULL
+          GROUP BY worker_model ORDER BY count DESC
+        `).all(`-${days} days`) as any[];
+
+        return json(res, {
+          period: `${days}d`,
+          summary: {
+            totalFailures: summary?.total_failures || 0,
+            totalTasks: summary?.total_tasks || 0,
+            failureRate: summary?.failure_rate || 0,
+          },
+          byPersona,
+          byModel,
+        });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (cloudProxy) {
+      try { return json(res, await cloudProxy("GET", path)); } catch { /* fall through */ }
+    }
+    return json(res, { period: "30d", summary: { totalFailures: 0, totalTasks: 0, failureRate: 0 }, byPersona: [], byModel: [] });
+  }
+
+  // GET /api/analytics/token-usage — token breakdown
+  if (req.method === "GET" && path === "/api/analytics/token-usage") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const params = new URL(req.url || "", "http://localhost").searchParams;
+        const range = params.get("range") || "30d";
+        const days = parseInt(range.replace("d", ""), 10) || 30;
+
+        const totals = db.prepare(`
+          SELECT
+            SUM(input_tokens) as input_tokens,
+            SUM(output_tokens) as output_tokens,
+            SUM(cache_creation_tokens) as cache_creation_tokens,
+            SUM(cache_read_tokens) as cache_read_tokens,
+            SUM(estimated_cost_usd) as total_cost
+          FROM tasks
+          WHERE created_at >= datetime('now', ?)
+        `).get(`-${days} days`) as any;
+
+        return json(res, {
+          inputTokens: totals?.input_tokens || 0,
+          outputTokens: totals?.output_tokens || 0,
+          cacheCreationTokens: totals?.cache_creation_tokens || 0,
+          cacheReadTokens: totals?.cache_read_tokens || 0,
+          totalCost: totals?.total_cost || 0,
+        });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (cloudProxy) {
+      try { return json(res, await cloudProxy("GET", path)); } catch { /* fall through */ }
+    }
+    return json(res, { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalCost: 0 });
+  }
+
+  // GET /api/analytics/effectiveness — success and completion metrics
+  if (req.method === "GET" && path === "/api/analytics/effectiveness") {
+    const backend = getActiveBackend();
+    if (backend?.mode === "local") {
+      try {
+        const db = getLocalDb();
+        const params = new URL(req.url || "", "http://localhost").searchParams;
+        const range = params.get("range") || "30d";
+        const days = parseInt(range.replace("d", ""), 10) || 30;
+
+        const stats = db.prepare(`
+          SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+            SUM(CASE WHEN github_pr_url IS NOT NULL THEN 1 ELSE 0 END) as prs_created,
+            SUM(CASE WHEN status = 'pr_approved' THEN 1 ELSE 0 END) as prs_approved
+          FROM tasks
+          WHERE created_at >= datetime('now', ?)
+        `).get(`-${days} days`) as any;
+
+        const total = stats?.total || 0;
+        return json(res, {
+          successRate: total > 0 ? ((stats?.completed || 0) / total * 100).toFixed(1) : "0.0",
+          prCreationRate: total > 0 ? ((stats?.prs_created || 0) / total * 100).toFixed(1) : "0.0",
+          prApprovalRate: (stats?.prs_created || 0) > 0 ? ((stats?.prs_approved || 0) / stats.prs_created * 100).toFixed(1) : "0.0",
+          totalTasks: total,
+          completedTasks: stats?.completed || 0,
+          failedTasks: stats?.failed || 0,
+          prsCreated: stats?.prs_created || 0,
+          prsApproved: stats?.prs_approved || 0,
+        });
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
+    }
+    if (cloudProxy) {
+      try { return json(res, await cloudProxy("GET", path)); } catch { /* fall through */ }
+    }
+    return json(res, { successRate: "0.0", totalTasks: 0, completedTasks: 0, failedTasks: 0 });
+  }
+
+  // Catch-all for other analytics endpoints — proxy or empty response
+  if (path.startsWith("/api/analytics/")) {
+    if (cloudProxy) {
+      try {
+        const result = await cloudProxy(req.method || "GET", path);
+        return json(res, result);
+      } catch { /* fall through */ }
+    }
+    return json(res, {});
+  }
+
   return notFound(res);
 }
 
@@ -2294,8 +4230,9 @@ The CI/CD card (Card 2) is NOT a nice-to-have. It is the quality gate that prove
 Card 2 deliverables MUST include:
 1. CI workflow file (e.g., .github/workflows/ci.yml) with ALL quality steps (lint, typecheck, test, build)
 2. A trivial passing test file so the test step succeeds on first run
-3. Verification that the pipeline actually runs and passes (acceptance criterion, not just "file exists")
-4. CI workflow triggers MUST include BOTH \`push: [main]\` AND \`pull_request: [main]\` events. Without \`pull_request\` triggers, CI won't run on PRs and code merges without verification.
+3. CI workflow triggers MUST include BOTH \`push: [main]\` AND \`pull_request: [main]\` events. Without \`pull_request\` triggers, CI won't run on PRs and code merges without verification.
+
+IMPORTANT: Do NOT create a separate "CI verification" story that pushes to main to test the pipeline. CI verification happens automatically when the PR is created — the \`pull_request\` trigger handles it. Workers must NEVER push directly to main. All code goes through story branches → consolidated PR → merge. A story that pushes to main bypasses the PR workflow and causes the task to complete without a PR.
 
 CI workflow steps MUST run the EXACT SAME commands as the quality gates — no additions, no differences. This is critical: if the quality gate runs "go vet ./..." and "go test ./... -v -count=1 -race", the CI workflow MUST run those same commands, NOT golangci-lint or any other tool. The quality gates are the single source of truth for what "passing" means. Any divergence between the quality gates and CI creates a gap where code passes one but fails the other.
 

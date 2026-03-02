@@ -322,7 +322,7 @@ router.post(
       const user = req.user; // may be undefined when using API key auth (agent)
       const {
         source,
-        content,
+        content: contentFromBody,
         fileUrl,
         repoPath,
         githubRepo,
@@ -330,6 +330,7 @@ router.post(
         syncToTracker,
         decompositionId,
       } = req.body;
+      let content = contentFromBody;
 
       const emitDecomp = decompositionId
         ? (event: import("../services/decomposition-events.js").DecompositionEvent) =>

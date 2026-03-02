@@ -10,20 +10,12 @@ const DONE_STATUSES = ["completed", "deployed", "pr_approved", "review_approved"
 
 /**
  * Check if a task is truly done for cascade purposes.
- * "completed" with an unmerged PR is NOT done — the code never landed on main,
- * so dependent tasks would build on stale code.
- * "completed" without a PR (no-code/analysis tasks) IS done.
+ * Any task in a DONE_STATUS is considered complete — board card workers
+ * auto-merge their PRs before reaching "completed", so a PR URL being
+ * present does NOT mean the code hasn't landed on main.
  */
 function isTaskDoneForCascade(task: WorkerTask): boolean {
-  if (!DONE_STATUSES.includes(task.status)) return false;
-  if (task.status === "completed" && task.githubPrUrl) {
-    logger.warn("Cascade blocked: task completed with unmerged PR", {
-      taskId: task.id,
-      prUrl: task.githubPrUrl,
-    });
-    return false;
-  }
-  return true;
+  return DONE_STATUSES.includes(task.status);
 }
 
 /**

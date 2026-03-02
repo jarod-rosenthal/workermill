@@ -104,6 +104,10 @@ Check the quality metrics for E2E test results (do NOT re-run tests yourself):
 - [ ] ARIA attributes are valid for the target element's role (e.g., no \`aria-expanded\` on \`type="search"\` inputs)
 - [ ] Text queries use \`{ exact: true }\` to avoid substring matching issues
 
+***REMOVED******REMOVED*** Important: Do NOT Second-Guess Language Versions
+
+The current date is ${new Date().toISOString().split("T")[0]}. Do NOT flag language or runtime versions as invalid based on your training data. Your knowledge may be outdated — newer versions of Go, Node.js, Python, etc. may have been released after your training cutoff. If the project uses a version you don't recognize (e.g. Go 1.24, Node 23), assume it is valid. The project authors chose it deliberately.
+
 ***REMOVED******REMOVED*** Go Project Verification
 
 If the repo has Go code (\`go.mod\` exists), run these lightweight checks:

@@ -47,6 +47,38 @@ need_awscli() {
   return 1
 }
 
+# Returns target Node.js major version if upgrade needed, empty string otherwise.
+# Checks package.json engines, .nvmrc, .node-version files for a required version
+# higher than the currently installed major version.
+detect_node_upgrade() {
+  local current_major
+  current_major=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/')
+  [ -z "$current_major" ] && return
+
+  local target=""
+
+  # Check .nvmrc or .node-version in repo root
+  if [ -n "$REPO_DIR" ]; then
+    for f in .nvmrc .node-version; do
+      if [ -f "$REPO_DIR/$f" ]; then
+        target=$(head -1 "$REPO_DIR/$f" 2>/dev/null | tr -d 'v \n\r' | sed 's/\([0-9]*\).*/\1/')
+        break
+      fi
+    done
+
+    # Check root package.json engines.node (e.g. ">=22", "22", "^22")
+    if [ -z "$target" ] && [ -f "$REPO_DIR/package.json" ]; then
+      target=$(grep -oP '"node"\s*:\s*"[^"]*"' "$REPO_DIR/package.json" 2>/dev/null \
+        | grep -oP '[0-9]+' | head -1)
+    fi
+  fi
+
+  # Only upgrade if target is higher than current
+  if [ -n "$target" ] && [ "$target" -gt "$current_major" ] 2>/dev/null; then
+    echo "$target"
+  fi
+}
+
 # ── Install Functions (all pull from official sources) ───────────────────────
 # Note: Kaniko is baked into the Docker image (no standalone download exists).
 
@@ -63,15 +95,6 @@ install_go() {
   export GOPATH="/home/worker/go"
   export GOMODCACHE="/home/worker/go/pkg/mod"
   log "Go installed: $(go version)"
-
-  # Also install golangci-lint
-  if ! command -v golangci-lint &>/dev/null; then
-    log "Installing golangci-lint from GitHub..."
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b /tmp/golangci-lint-bin v1.63.4
-    sudo install -m 755 /tmp/golangci-lint-bin/golangci-lint /usr/local/bin/golangci-lint
-    rm -rf /tmp/golangci-lint-bin
-    log "golangci-lint installed: $(golangci-lint --version)"
-  fi
   INSTALLED="${INSTALLED} go"
 }
 
@@ -141,6 +164,37 @@ install_bun() {
   INSTALLED="${INSTALLED} bun"
 }
 
+install_railway() {
+  if command -v railway &>/dev/null; then
+    log "Railway CLI already installed ($(railway --version))"
+    return 0
+  fi
+  log "Installing Railway CLI..."
+  curl -fsSL https://railway.com/install.sh | sh 2>/dev/null
+  log "Railway CLI installed: $(railway --version 2>/dev/null || echo 'unknown')"
+  INSTALLED="${INSTALLED} railway"
+}
+
+install_node_version() {
+  local target_version="$1"
+  local current_major
+  current_major=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/')
+  local target_major
+  target_major=$(echo "$target_version" | sed 's/\([0-9]*\).*/\1/')
+
+  if [ "$current_major" = "$target_major" ]; then
+    log "Node.js $target_major already installed ($(node --version))"
+    return 0
+  fi
+
+  log "Upgrading Node.js from v${current_major} to v${target_major}..."
+  # Use NodeSource for major version upgrades
+  curl -fsSL "https://deb.nodesource.com/setup_${target_major}.x" | sudo -E bash - 2>/dev/null
+  sudo apt-get install -y -qq nodejs 2>/dev/null
+  log "Node.js upgraded: $(node --version)"
+  INSTALLED="${INSTALLED} node${target_major}"
+}
+
 # ── Dynamic Fallback (Pass 3) ────────────────────────────────────────────────
 # Scans Makefiles, CI configs, etc. for tool references that Pass 1/2 missed.
 
@@ -189,6 +243,25 @@ fallback_scan() {
       install_deno
     fi
   fi
+
+  if ! command -v railway &>/dev/null; then
+    if echo "$scan_text" | grep -qiE 'railway up|railway deploy|railway run|railwayapp'; then
+      log "Fallback: detected Railway CLI references in config files"
+      install_railway
+    fi
+  fi
+
+  # Check CI configs for Node.js version requirements higher than current
+  local ci_node_version
+  ci_node_version=$(echo "$scan_text" | grep -oP 'node-version:\s*"?\K[0-9]+' | sort -rn | head -1)
+  if [ -n "$ci_node_version" ]; then
+    local current_major
+    current_major=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/')
+    if [ -n "$current_major" ] && [ "$ci_node_version" -gt "$current_major" ] 2>/dev/null; then
+      log "Fallback: CI requires Node.js $ci_node_version (currently v$current_major)"
+      install_node_version "$ci_node_version"
+    fi
+  fi
 }
 
 # ── Pass 4: .tool-versions / mise.toml parser ───────────────────────────────
@@ -204,8 +277,9 @@ resolve_tool() {
     rust|rustup)     install_rust "$version" ;;
     deno)            install_deno "$version" ;;
     bun)             install_bun ;;
+    railway)         install_railway ;;
     python)          ;; # Python 3 already in base image
-    nodejs|node)     ;; # Node 20 already in base image
+    nodejs|node)     [ -n "$version" ] && install_node_version "$version" ;;
     *)
       # Unknown tool — try apt as generic fallback
       try_apt_install "$tool"
@@ -294,6 +368,12 @@ try_apt_install() {
 need_go && install_go
 need_terraform && install_terraform
 need_awscli && install_awscli
+
+# Pass 2b: Node.js version upgrade (if repo declares a higher version than installed)
+NODE_TARGET=$(detect_node_upgrade)
+if [ -n "$NODE_TARGET" ]; then
+  install_node_version "$NODE_TARGET"
+fi
 
 # Pass 3: scan config files for references we missed
 fallback_scan

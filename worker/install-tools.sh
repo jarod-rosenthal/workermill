@@ -55,8 +55,8 @@ install_go() {
     log "Go already installed ($(go version))"
     return 0
   fi
-  log "Installing Go 1.23.6 from go.dev..."
-  curl -fsSL https://go.dev/dl/go1.23.6.linux-amd64.tar.gz -o /tmp/go.tar.gz
+  log "Installing Go 1.24.1 from go.dev..."
+  curl -fsSL https://go.dev/dl/go1.24.1.linux-amd64.tar.gz -o /tmp/go.tar.gz
   sudo tar -C /usr/local -xzf /tmp/go.tar.gz
   rm -f /tmp/go.tar.gz
   export PATH="/usr/local/go/bin:${PATH}"

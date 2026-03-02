@@ -222,6 +222,8 @@ export class SettingsPanel {
           this.saveTrackerStandalone(msg.tracker);
         } else if (msg.type === "save-worker-behavior") {
           this.saveWorkerBehaviorStandalone(msg);
+        } else if (msg.type === "save-api-key") {
+          this.saveApiKeyStandalone(msg);
         } else if (msg.type === "save-jira") {
           this.saveJiraStandalone(msg);
         } else if (msg.type === "test-jira") {
@@ -377,10 +379,14 @@ export class SettingsPanel {
 
   private loadIntegrationsStandalone(): void {
     const sc = readStandaloneConfigFile();
-    const roles = (sc.roles || {}) as Record<string, { provider?: string; model?: string }>;
+    const roles = (sc.roles || {}) as Record<string, { provider?: string; model?: string; apiKey?: string }>;
     const scm = (sc.scm || {}) as { provider?: string; token?: string };
 
     const settings = (sc.settings || {}) as Record<string, unknown>;
+
+    // Determine LLM provider and masked key status from worker role
+    const llmProvider = roles.worker?.provider || "anthropic";
+    const hasApiKey = !!(roles.worker?.apiKey);
 
     this.postMessage({
       type: "integrations-loaded",
@@ -389,6 +395,9 @@ export class SettingsPanel {
         defaultWorkerModel: roles.worker?.model || "claude-sonnet-4-6",
         managerModelId: roles.techLead?.model || "claude-opus-4-6",
         planningAgentModel: roles.planner?.model || "claude-opus-4-6",
+        // LLM provider + key status for standalone API key section
+        llmProvider,
+        hasApiKey,
         // SCM
         scmProvider: scm.provider || "github",
         github: { configured: scm.provider === "github" && !!scm.token, defaultRepo: sc.defaultRepo || "" },
@@ -433,6 +442,27 @@ export class SettingsPanel {
       this.postMessage({ type: "models-saved" });
     } catch (err) {
       this.postMessage({ type: "models-save-error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private saveApiKeyStandalone(msg: { provider: string; apiKey: string }): void {
+    try {
+      this.postMessage({ type: "api-key-saving" });
+      const sc = readStandaloneConfigFile();
+      const roles = ((sc.roles || {}) as Record<string, Record<string, string>>);
+
+      // Set provider and API key on all three roles
+      roles.worker = { ...roles.worker, provider: msg.provider, apiKey: msg.apiKey };
+      roles.techLead = { ...roles.techLead, provider: msg.provider, apiKey: msg.apiKey };
+      roles.planner = { ...roles.planner, provider: msg.provider, apiKey: msg.apiKey };
+      sc.roles = roles;
+
+      writeStandaloneConfigFile(sc);
+      this.postMessage({ type: "api-key-saved" });
+      // Reload so model dropdowns update for the new provider
+      this.loadIntegrationsStandalone();
+    } catch (err) {
+      this.postMessage({ type: "api-key-save-error", message: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -1400,15 +1430,72 @@ export class SettingsPanel {
       --error: var(--vscode-errorForeground, ***REMOVED***f85149);
       --muted: var(--vscode-descriptionForeground);
       --separator: var(--vscode-widget-border, ***REMOVED***333);
+      --accent-setup: var(--vscode-textLink-foreground, ***REMOVED***4da6ff);
+      --accent-integration: var(--vscode-charts-green, ***REMOVED***3fb950);
+      --accent-advanced: var(--vscode-charts-orange, ***REMOVED***d29922);
+      --accent-account: var(--vscode-descriptionForeground, ***REMOVED***888);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
     body {
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
       background: var(--bg);
       color: var(--fg);
       padding: 24px;
-      max-width: 640px;
+    }
+    .settings-layout {
+      display: flex;
+      gap: 24px;
+      max-width: 920px;
+    }
+    .settings-nav {
+      position: sticky;
+      top: 0;
+      align-self: flex-start;
+      width: 180px;
+      min-width: 180px;
+      padding-top: 8px;
+    }
+    .settings-nav a {
+      display: block;
+      padding: 5px 12px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.85em;
+      border-left: 2px solid transparent;
+      margin-bottom: 2px;
+      border-radius: 0 3px 3px 0;
+    }
+    .settings-nav a:hover {
+      color: var(--fg);
+      background: color-mix(in srgb, var(--fg) 5%, transparent);
+    }
+    .settings-nav a.active {
+      color: var(--fg);
+      font-weight: 600;
+      border-left-color: var(--btn-bg);
+    }
+    .settings-nav .nav-group {
+      margin-bottom: 12px;
+    }
+    .settings-nav .nav-group-label {
+      font-size: 0.7em;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      padding: 0 12px;
+      margin-bottom: 4px;
+    }
+    .settings-content {
+      flex: 1;
+      max-width: 720px;
+      min-width: 0;
+    }
+    @media (max-width: 500px) {
+      .settings-nav { display: none; }
+      .settings-layout { max-width: 100%; }
+      .settings-content { max-width: 100%; }
     }
     h1 { font-size: 1.4em; margin-bottom: 4px; }
     .subtitle { color: var(--muted); margin-bottom: 24px; }
@@ -1417,7 +1504,12 @@ export class SettingsPanel {
       border-radius: 6px;
       padding: 16px;
       margin-bottom: 16px;
+      border-left: 3px solid transparent;
     }
+    .section-setup { border-left-color: var(--accent-setup); }
+    .section-integration { border-left-color: var(--accent-integration); }
+    .section-advanced { border-left-color: var(--accent-advanced); }
+    .section-account { border-left-color: var(--accent-account); }
     .section h2 { font-size: 1.1em; margin-bottom: 12px; }
     .field { margin-bottom: 12px; }
     .field label {
@@ -1521,6 +1613,19 @@ export class SettingsPanel {
       text-decoration: underline;
       cursor: pointer;
     }
+    .sandbox-warning {
+      padding: 10px 14px;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      font-size: 0.9em;
+      line-height: 1.4;
+      background: color-mix(in srgb, var(--vscode-charts-orange, ***REMOVED***d29922) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--vscode-charts-orange, ***REMOVED***d29922) 30%, transparent);
+      color: var(--fg);
+    }
+    .sandbox-warning strong {
+      color: var(--vscode-charts-orange, ***REMOVED***d29922);
+    }
   </style>
 </head>
 <body>
@@ -1529,31 +1634,107 @@ export class SettingsPanel {
 
   <div id="loading" class="loading">Loading settings...</div>
 
+  <div class="settings-layout">
+  <nav class="settings-nav hidden" id="settings-nav">
+    <div class="nav-group">
+      <div class="nav-group-label">Setup</div>
+      <a href="***REMOVED***section-repo" data-section="section-repo">Target Repository</a>
+      <a href="***REMOVED***section-scm" data-section="section-scm">Source Control</a>
+      <a href="***REMOVED***section-models" data-section="section-models">AI Models</a>
+      <a href="***REMOVED***section-api-key" data-section="section-api-key" id="nav-api-key" class="hidden">LLM API Key</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Integrations</div>
+      <a href="***REMOVED***section-tracker" data-section="section-tracker">Issue Tracker</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Advanced</div>
+      <a href="***REMOVED***section-worker" data-section="section-worker">Worker Behavior</a>
+      <a href="***REMOVED***section-docker" data-section="section-docker">Docker Sandbox</a>
+      <a href="***REMOVED***section-rag" data-section="section-rag">Local RAG</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Account</div>
+      <a href="***REMOVED***section-mode" data-section="section-mode">Workspace Mode</a>
+      <a href="***REMOVED***section-account" data-section="section-account">Account</a>
+    </div>
+  </nav>
+
+  <div class="settings-content">
   <div id="content" class="hidden">
-    <!-- Workspace Mode -->
-    <div class="section" style="border-bottom: 2px solid var(--border); padding-bottom: 16px;">
-      <h2>Workspace Mode</h2>
-      <div class="radio-group">
-        <label><input type="radio" name="workspace-mode" value="cloud" id="mode-cloud" /> Cloud</label>
-        <label><input type="radio" name="workspace-mode" value="standalone" id="mode-standalone" /> Standalone</label>
+    <!-- Target Repository -->
+    <div class="section section-setup" id="section-repo">
+      <h2>Target Repository</h2>
+      <p>The repository AI workers will target when running tasks.</p>
+      <div class="field">
+        <label>Default Repository</label>
+        <input type="text" id="default-repo" placeholder="owner/repo" />
+        <div class="hint">Format: <code>owner/repo</code> (e.g. workermill-examples/flagdeck)</div>
       </div>
-      <div id="mode-hint" class="hint">Cloud: managed by WorkerMill. Standalone: runs locally with your own API keys.</div>
-      <div id="mode-status" class="status"></div>
+      <div id="repo-status" class="status"></div>
     </div>
 
-    <!-- Organization (only visible for multi-org users) -->
-    <div id="org-section" class="section hidden">
-      <h2>Organization</h2>
-      <div class="field">
-        <label>Active Organization</label>
-        <select id="org-select"></select>
-        <div class="hint">Switch your workspace to a different organization</div>
+    <!-- Source Control -->
+    <div class="section section-setup" id="section-scm">
+      <h2>Source Control</h2>
+      <div class="radio-group" style="flex-wrap: wrap;">
+        <label><input type="radio" name="scm" value="github" /> GitHub <span id="scm-github-badge"></span></label>
+        <label id="scm-bitbucket-label" class="locked-option"><input type="radio" name="scm" value="bitbucket" disabled /> Bitbucket <span class="pro-badge">MAX</span> <span id="scm-bitbucket-badge"></span></label>
+        <label id="scm-gitlab-label" class="locked-option"><input type="radio" name="scm" value="gitlab" disabled /> GitLab <span class="pro-badge">MAX</span> <span id="scm-gitlab-badge"></span></label>
       </div>
-      <div id="org-status" class="status"></div>
+      <div id="scm-upgrade" class="upgrade-hint hidden">Upgrade to Max to unlock Bitbucket and GitLab. <a id="btn-upgrade-scm" href="***REMOVED***">View plans</a></div>
+
+      <!-- GitHub SCM fields -->
+      <div id="scm-github-fields" class="hidden">
+        <div class="field">
+          <label>Token</label>
+          <input type="password" id="scm-github-token" placeholder="GitHub personal access token" />
+          <div class="hint">Personal access token with repo scope</div>
+        </div>
+        <div class="field">
+          <label>Reviewer Token (optional)</label>
+          <input type="password" id="scm-github-reviewer-token" placeholder="GitHub personal access token" />
+          <div class="hint">Separate token for PR approvals (uses main token if blank)</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" id="btn-save-scm-github">Save</button>
+        </div>
+        <div id="scm-github-status" class="status"></div>
+      </div>
+
+      <!-- Bitbucket SCM fields -->
+      <div id="scm-bitbucket-fields" class="hidden">
+        <div class="field">
+          <label>Username</label>
+          <input type="text" id="scm-bb-username" placeholder="workspace/username" />
+        </div>
+        <div class="field">
+          <label>Repository Access Token</label>
+          <input type="password" id="scm-bb-token" placeholder="Repository access token" />
+          <div class="hint">Generate a Repository Access Token in Bitbucket repo settings</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" id="btn-save-scm-bitbucket">Save</button>
+        </div>
+        <div id="scm-bitbucket-status" class="status"></div>
+      </div>
+
+      <!-- GitLab SCM fields -->
+      <div id="scm-gitlab-fields" class="hidden">
+        <div class="field">
+          <label>Token</label>
+          <input type="password" id="scm-gitlab-token" placeholder="GitLab personal access token" />
+          <div class="hint">Personal access token with api scope</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" id="btn-save-scm-gitlab">Save</button>
+        </div>
+        <div id="scm-gitlab-status" class="status"></div>
+      </div>
     </div>
 
     <!-- AI Models -->
-    <div class="section">
+    <div class="section section-setup" id="section-models">
       <h2>AI Models</h2>
       <div class="field">
         <label>Expert Workers</label>
@@ -1570,14 +1751,34 @@ export class SettingsPanel {
         <select id="model-planner"></select>
         <div class="hint">Model used by the planning agent</div>
       </div>
-      <div class="btn-row">
-        <button class="btn-primary" id="btn-save-models">Save</button>
-      </div>
       <div id="models-status" class="status"></div>
     </div>
 
+    <!-- LLM API Key (standalone mode only) -->
+    <div class="section section-setup hidden" id="section-api-key">
+      <h2>LLM API Key</h2>
+      <div class="field">
+        <label>Provider</label>
+        <select id="api-key-provider">
+          <option value="anthropic">Anthropic</option>
+          <option value="openai">OpenAI</option>
+          <option value="google">Google</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>API Key</label>
+        <input type="password" id="api-key-input" placeholder="Enter your API key" />
+        <div class="hint" id="api-key-hint">For Anthropic, you can skip this if Claude Code OAuth is configured (~/.claude/.credentials.json)</div>
+      </div>
+      <div id="api-key-status-label" class="hint" style="margin-bottom:8px;"></div>
+      <div class="btn-row">
+        <button class="btn-primary" id="btn-save-api-key">Save</button>
+      </div>
+      <div id="api-key-status" class="status"></div>
+    </div>
+
     <!-- Issue Tracker -->
-    <div class="section">
+    <div class="section section-integration" id="section-tracker">
       <h2>Issue Tracker</h2>
       <div class="radio-group" style="flex-wrap: wrap;">
         <label><input type="radio" name="tracker" value="internal" /> Internal Boards</label>
@@ -1656,102 +1857,18 @@ export class SettingsPanel {
       </div>
     </div>
 
-    <!-- Source Control -->
-    <div class="section">
-      <h2>Source Control</h2>
-      <div class="radio-group" style="flex-wrap: wrap;">
-        <label><input type="radio" name="scm" value="github" /> GitHub <span id="scm-github-badge"></span></label>
-        <label id="scm-bitbucket-label" class="locked-option"><input type="radio" name="scm" value="bitbucket" disabled /> Bitbucket <span class="pro-badge">MAX</span> <span id="scm-bitbucket-badge"></span></label>
-        <label id="scm-gitlab-label" class="locked-option"><input type="radio" name="scm" value="gitlab" disabled /> GitLab <span class="pro-badge">MAX</span> <span id="scm-gitlab-badge"></span></label>
-      </div>
-      <div id="scm-upgrade" class="upgrade-hint hidden">Upgrade to Max to unlock Bitbucket and GitLab. <a id="btn-upgrade-scm" href="***REMOVED***">View plans</a></div>
-
-      <!-- GitHub SCM fields -->
-      <div id="scm-github-fields" class="hidden">
-        <div class="field">
-          <label>Token</label>
-          <input type="password" id="scm-github-token" placeholder="GitHub personal access token" />
-          <div class="hint">Personal access token with repo scope</div>
-        </div>
-        <div class="field">
-          <label>Reviewer Token (optional)</label>
-          <input type="password" id="scm-github-reviewer-token" placeholder="GitHub personal access token" />
-          <div class="hint">Separate token for PR approvals (uses main token if blank)</div>
-        </div>
-        <div class="btn-row">
-          <button class="btn-primary" id="btn-save-scm-github">Save</button>
-        </div>
-        <div id="scm-github-status" class="status"></div>
-      </div>
-
-      <!-- Bitbucket SCM fields -->
-      <div id="scm-bitbucket-fields" class="hidden">
-        <div class="field">
-          <label>Username</label>
-          <input type="text" id="scm-bb-username" placeholder="workspace/username" />
-        </div>
-        <div class="field">
-          <label>Repository Access Token</label>
-          <input type="password" id="scm-bb-token" placeholder="Repository access token" />
-          <div class="hint">Generate a Repository Access Token in Bitbucket repo settings</div>
-        </div>
-        <div class="btn-row">
-          <button class="btn-primary" id="btn-save-scm-bitbucket">Save</button>
-        </div>
-        <div id="scm-bitbucket-status" class="status"></div>
-      </div>
-
-      <!-- GitLab SCM fields -->
-      <div id="scm-gitlab-fields" class="hidden">
-        <div class="field">
-          <label>Token</label>
-          <input type="password" id="scm-gitlab-token" placeholder="GitLab personal access token" />
-          <div class="hint">Personal access token with api scope</div>
-        </div>
-        <div class="btn-row">
-          <button class="btn-primary" id="btn-save-scm-gitlab">Save</button>
-        </div>
-        <div id="scm-gitlab-status" class="status"></div>
-      </div>
-    </div>
-
-    <!-- Target Repository -->
-    <div class="section">
-      <h2>Target Repository</h2>
-      <p>The repository AI workers will target when running tasks.</p>
-      <div class="field">
-        <label>Default Repository</label>
-        <input type="text" id="default-repo" placeholder="owner/repo" />
-        <div class="hint">Format: <code>owner/repo</code> (e.g. workermill-examples/flagdeck)</div>
-      </div>
-      <div class="btn-row">
-        <button class="btn-primary" id="btn-save-repo">Save</button>
-      </div>
-      <div id="repo-status" class="status"></div>
-    </div>
-
     <!-- Worker Behavior -->
-    <div class="section">
+    <div class="section section-advanced" id="section-worker">
       <h2>Worker Behavior</h2>
       <div class="field">
-        <label>Per-Story Review Max Revisions</label>
-        <input type="number" id="wk-per-story-revisions" min="0" max="10" value="1" />
-        <div class="hint">Max tech lead review revisions per story. Set to 0 to skip per-story review.</div>
-      </div>
-      <div class="field">
-        <label>Per-PR Review Max Revisions</label>
+        <label>PR Review Max Revisions</label>
         <input type="number" id="wk-pr-revisions" min="0" max="10" value="3" />
-        <div class="hint">Max tech lead review revisions on the consolidated PR. Set to 0 to skip PR review.</div>
+        <div class="hint">Max tech lead review rounds on the PR. Set to 0 to skip review.</div>
       </div>
       <div class="field">
-        <label>Quality Gate Max Retries</label>
-        <input type="number" id="wk-qg-retries" min="0" max="20" value="5" />
-        <div class="hint">Max quality gate retry attempts before failing.</div>
-      </div>
-      <div class="field">
-        <label>CI Fix Max Retries</label>
-        <input type="number" id="wk-ci-fix-retries" min="0" max="10" value="3" />
-        <div class="hint">Max attempts for CI Fix Agent to resolve PR CI failures before merging. 0 = disabled.</div>
+        <label>Fix Retries</label>
+        <input type="number" id="wk-fix-retries" min="0" max="10" value="5" />
+        <div class="hint">Max retry attempts for quality gate failures and CI fix. 0 = no retries.</div>
       </div>
       <div class="field">
         <label>Blocker Wait Timeout (minutes)</label>
@@ -1765,16 +1882,16 @@ export class SettingsPanel {
         </label>
         <div class="hint">Push to remote immediately after each commit.</div>
       </div>
-      <div class="btn-row">
-        <button class="btn-primary" id="btn-save-worker-behavior">Save</button>
-      </div>
       <div id="worker-behavior-status" class="status"></div>
     </div>
 
     <!-- Docker Sandbox -->
-    <div class="section">
+    <div class="section section-advanced" id="section-docker">
       <h2>Docker Sandbox</h2>
       <p>Run AI workers inside Docker containers for filesystem and network isolation.</p>
+      <div id="sandbox-warning" class="sandbox-warning hidden">
+        <strong>WARNING: Sandbox disabled.</strong> Workers run as native processes with unrestricted access to your filesystem, network, and shell. Any code the AI generates will execute directly on your machine. Enable sandbox mode to contain workers in isolated containers.
+      </div>
       <div id="sandbox-status" class="status"></div>
       <div class="field">
         <label style="display:flex;align-items:center;gap:8px;">
@@ -1798,7 +1915,7 @@ export class SettingsPanel {
     </div>
 
     <!-- Local RAG -->
-    <div class="section">
+    <div class="section section-advanced" id="section-rag">
       <h2>Local RAG <span class="badge" style="background:color-mix(in srgb, var(--vscode-textLink-foreground) 15%, transparent);color:var(--vscode-textLink-foreground);">Experimental</span></h2>
       <div class="field">
         <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
@@ -1826,20 +1943,39 @@ export class SettingsPanel {
         <input type="number" id="ollama-port" value="11434" min="1024" max="65535" />
       </div>
       <div class="field">
-        <label>Repository</label>
-        <select id="index-repo-select" style="width:100%;padding:4px 8px;margin-bottom:6px;">
-          <option value="">Loading repositories...</option>
-        </select>
-      </div>
-      <div class="field">
-        <button class="btn-primary" id="btn-index-repo" disabled>Index Repository</button>
-        <span id="index-status" class="hint" style="margin-left:8px;"></span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button class="btn-primary" id="btn-index-repo" disabled>Index Repository</button>
+          <span id="index-repo-label" style="font-size:0.9em;color:var(--muted);"></span>
+        </div>
+        <span id="index-status" class="hint" style="margin-top:4px;display:block;"></span>
       </div>
       <div id="rag-status" class="status"></div>
     </div>
 
+    <!-- Workspace Mode -->
+    <div class="section section-account" id="section-mode">
+      <h2>Workspace Mode</h2>
+      <div class="radio-group">
+        <label><input type="radio" name="workspace-mode" value="cloud" id="mode-cloud" /> Cloud</label>
+        <label><input type="radio" name="workspace-mode" value="standalone" id="mode-standalone" /> Standalone</label>
+      </div>
+      <div id="mode-hint" class="hint">Cloud: managed by WorkerMill. Standalone: runs locally with your own API keys.</div>
+      <div id="mode-status" class="status"></div>
+    </div>
+
+    <!-- Organization (only visible for multi-org users) -->
+    <div id="org-section" class="section section-account hidden">
+      <h2>Organization</h2>
+      <div class="field">
+        <label>Active Organization</label>
+        <select id="org-select"></select>
+        <div class="hint">Switch your workspace to a different organization</div>
+      </div>
+      <div id="org-status" class="status"></div>
+    </div>
+
     <!-- Account -->
-    <div class="section">
+    <div class="section section-account" id="section-account">
       <h2>Account</h2>
       <div id="plan-info" class="hidden" style="margin-bottom: 12px;">
         <span>Plan: </span><span id="plan-name" class="badge configured">Free</span>
@@ -1851,6 +1987,8 @@ export class SettingsPanel {
       </div>
     </div>
   </div>
+  </div><!-- .settings-content -->
+  </div><!-- .settings-layout -->
 
   <div class="footer">
     WorkerMill &mdash; <a href="https://workermill.com/docs">Documentation</a>
@@ -1939,6 +2077,50 @@ export class SettingsPanel {
           sel.appendChild(o);
         });
       }
+    }
+
+    // Populate standalone model selects — only show models for the selected provider
+    let standaloneProvider = "anthropic";
+    function populateStandaloneModels(provider, defaults) {
+      const models = { anthropic: ANTHROPIC_MODELS, openai: OPENAI_MODELS, google: GOOGLE_MODELS };
+      const premiumModels = { anthropic: ANTHROPIC_PREMIUM, openai: OPENAI_PREMIUM, google: GOOGLE_PREMIUM };
+      const list = models[provider] || ANTHROPIC_MODELS;
+      const premList = premiumModels[provider] || ANTHROPIC_PREMIUM;
+      const defaultMap = defaults || {};
+      ["model-worker", "model-reviewer", "model-planner"].forEach(function(id) {
+        const sel = document.getElementById(id);
+        const cur = defaultMap[id] || sel.value;
+        const isPremium = id !== "model-worker";
+        const items = isPremium ? premList : list;
+        sel.innerHTML = "";
+        items.forEach(function(m) {
+          const o = document.createElement("option");
+          o.value = m.value;
+          o.textContent = m.label;
+          if (m.value === cur) o.selected = true;
+          sel.appendChild(o);
+        });
+      });
+    }
+
+    // Sidebar nav: IntersectionObserver for active section highlighting
+    const settingsNav = document.getElementById("settings-nav");
+    const navLinks = settingsNav.querySelectorAll("a[data-section]");
+    const sectionObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          navLinks.forEach(function(link) { link.classList.remove("active"); });
+          const activeLink = settingsNav.querySelector('a[data-section="' + entry.target.id + '"]');
+          if (activeLink) activeLink.classList.add("active");
+        }
+      });
+    }, { rootMargin: "-20% 0px -60% 0px", threshold: 0 });
+
+    // Observe sections once content is shown
+    function observeSections() {
+      document.querySelectorAll(".section[id]").forEach(function(section) {
+        sectionObserver.observe(section);
+      });
     }
 
     // SCM radio toggle — skip save during initial load
@@ -2086,38 +2268,87 @@ export class SettingsPanel {
       e.preventDefault();
       vscode.postMessage({ type: "open-pricing" });
     });
-    document.getElementById("btn-save-models").addEventListener("click", () => {
-      vscode.postMessage({
-        type: "save-models",
-        workerModel: document.getElementById("model-worker").value,
-        reviewerModel: document.getElementById("model-reviewer").value,
-        plannerModel: document.getElementById("model-planner").value,
-      });
-    });
     document.getElementById("btn-sign-out").addEventListener("click", () => {
       vscode.postMessage({ type: "sign-out" });
+    });
+    // API key save (credential — explicit button)
+    document.getElementById("btn-save-api-key").addEventListener("click", () => {
+      vscode.postMessage({
+        type: "save-api-key",
+        provider: document.getElementById("api-key-provider").value,
+        apiKey: document.getElementById("api-key-input").value.trim(),
+      });
+    });
+    document.getElementById("api-key-provider").addEventListener("change", function() {
+      standaloneProvider = this.value;
+      populateStandaloneModels(standaloneProvider);
+      const hint = document.getElementById("api-key-hint");
+      if (standaloneProvider === "anthropic") {
+        hint.textContent = "For Anthropic, you can skip this if Claude Code OAuth is configured (~/.claude/.credentials.json)";
+      } else if (standaloneProvider === "openai") {
+        hint.textContent = "OpenAI API key starting with sk-...";
+      } else {
+        hint.textContent = "Google AI API key";
+      }
     });
     document.querySelectorAll('input[name="workspace-mode"]').forEach(function(radio) {
       radio.addEventListener("change", function() {
         vscode.postMessage({ type: "switch-mode", mode: this.value });
       });
     });
-    document.getElementById("btn-save-repo").addEventListener("click", () => {
-      vscode.postMessage({ type: "save-repo", defaultRepo: document.getElementById("default-repo").value.trim() });
-    });
 
-    // Worker behavior save
-    document.getElementById("btn-save-worker-behavior").addEventListener("click", () => {
-      vscode.postMessage({
-        type: "save-worker-behavior",
-        maxPerStoryRevisions: parseInt(document.getElementById("wk-per-story-revisions").value) || 0,
-        maxReviewRevisions: parseInt(document.getElementById("wk-pr-revisions").value) || 0,
-        qualityGateMaxRetries: parseInt(document.getElementById("wk-qg-retries").value) || 0,
-        maxCiFixRetries: parseInt(document.getElementById("wk-ci-fix-retries").value) || 0,
-        blockerWaitTimeoutMinutes: parseInt(document.getElementById("wk-blocker-timeout").value) || 20,
-        pushAfterCommit: document.getElementById("wk-push-after-commit").checked,
+    // ── Autosave: debounced save for non-credential fields ──
+    let autosaveTimers = {};
+    function autosave(key, delayMs, saveFn) {
+      clearTimeout(autosaveTimers[key]);
+      autosaveTimers[key] = setTimeout(saveFn, delayMs);
+    }
+
+    // Target repo — autosave on input (debounced 800ms)
+    document.getElementById("default-repo").addEventListener("input", () => {
+      autosave("repo", 800, () => {
+        const repo = document.getElementById("default-repo").value.trim();
+        if (repo) {
+          vscode.postMessage({ type: "save-repo", defaultRepo: repo });
+          // Update RAG label to match
+          if (indexRepoLabel) indexRepoLabel.textContent = repo;
+        }
       });
     });
+
+    // AI Models — autosave on change (instant, select dropdowns)
+    ["model-worker", "model-reviewer", "model-planner"].forEach(function(id) {
+      document.getElementById(id).addEventListener("change", () => {
+        autosave("models", 300, () => {
+          vscode.postMessage({
+            type: "save-models",
+            workerModel: document.getElementById("model-worker").value,
+            reviewerModel: document.getElementById("model-reviewer").value,
+            plannerModel: document.getElementById("model-planner").value,
+          });
+        });
+      });
+    });
+
+    // Worker behavior — autosave on change (debounced 500ms for number inputs)
+    function saveWorkerBehavior() {
+      autosave("worker-behavior", 500, () => {
+        const fixRetries = parseInt(document.getElementById("wk-fix-retries").value) || 0;
+        vscode.postMessage({
+          type: "save-worker-behavior",
+          maxPerStoryRevisions: 0,
+          maxReviewRevisions: parseInt(document.getElementById("wk-pr-revisions").value) || 0,
+          qualityGateMaxRetries: fixRetries,
+          maxCiFixRetries: fixRetries,
+          blockerWaitTimeoutMinutes: parseInt(document.getElementById("wk-blocker-timeout").value) || 20,
+          pushAfterCommit: document.getElementById("wk-push-after-commit").checked,
+        });
+      });
+    }
+    ["wk-pr-revisions", "wk-fix-retries", "wk-blocker-timeout"].forEach(function(id) {
+      document.getElementById(id).addEventListener("input", saveWorkerBehavior);
+    });
+    document.getElementById("wk-push-after-commit").addEventListener("change", saveWorkerBehavior);
 
     // Org switcher
     const orgSelect = document.getElementById("org-select");
@@ -2132,6 +2363,7 @@ export class SettingsPanel {
     // Sandbox toggle
     const sandboxToggle = document.getElementById("sandbox-toggle");
     const sandboxStatus = document.getElementById("sandbox-status");
+    const sandboxWarning = document.getElementById("sandbox-warning");
     sandboxToggle.addEventListener("change", () => {
       vscode.postMessage({ type: "toggle-sandbox", enabled: sandboxToggle.checked });
     });
@@ -2172,9 +2404,9 @@ export class SettingsPanel {
         vscode.postMessage({ type: "set-ollama-port", port: parseInt(ollamaPortInput.value) || 11434 });
       }, 300);
     });
-    const indexRepoSelect = document.getElementById("index-repo-select");
+    const indexRepoLabel = document.getElementById("index-repo-label");
     indexBtn.addEventListener("click", () => {
-      const repo = indexRepoSelect.value;
+      const repo = document.getElementById("default-repo").value.trim();
       if (!repo) return;
       indexBtn.disabled = true;
       indexStatusEl.textContent = "Indexing...";
@@ -2208,6 +2440,8 @@ export class SettingsPanel {
       if (msg.type === "integrations-loaded") {
         loadingEl.classList.add("hidden");
         contentEl.classList.remove("hidden");
+        settingsNav.classList.remove("hidden");
+        observeSections();
         const d = msg.data;
 
         // Show org name so user can verify which org the API key resolves to
@@ -2238,38 +2472,65 @@ export class SettingsPanel {
 
         // Toggle standalone vs cloud sub-sections
         const isStandalone = d.orgName === "Standalone";
-        var standaloneEls = ["linear-standalone-section", "github-standalone-section", "boards-standalone-section"];
-        var cloudEls = ["linear-cloud-section", "github-cloud-section", "boards-cloud-section"];
+        const standaloneEls = ["linear-standalone-section", "github-standalone-section", "boards-standalone-section"];
+        const cloudEls = ["linear-cloud-section", "github-cloud-section", "boards-cloud-section"];
         standaloneEls.forEach(function(id) {
-          var el = document.getElementById(id);
+          const el = document.getElementById(id);
           if (el) el.classList.toggle("hidden", !isStandalone);
         });
         cloudEls.forEach(function(id) {
-          var el = document.getElementById(id);
+          const el = document.getElementById(id);
           if (el) el.classList.toggle("hidden", isStandalone);
         });
 
-        // Set workspace mode radio to match current mode
-        var modeCloud = document.getElementById("mode-cloud");
-        var modeStandalone = document.getElementById("mode-standalone");
+        // Show/hide API key section and nav link for standalone mode
+        const apiKeySection = document.getElementById("section-api-key");
+        const navApiKey = document.getElementById("nav-api-key");
         if (isStandalone) {
-          modeStandalone.checked = true;
+          apiKeySection.classList.remove("hidden");
+          navApiKey.classList.remove("hidden");
+          // Set provider select + status
+          standaloneProvider = d.llmProvider || "anthropic";
+          document.getElementById("api-key-provider").value = standaloneProvider;
+          const statusLabel = document.getElementById("api-key-status-label");
+          statusLabel.textContent = d.hasApiKey ? "API key is configured" : "";
+          statusLabel.style.color = d.hasApiKey ? "var(--success)" : "";
+          // Populate models for the selected provider in standalone
+          populateStandaloneModels(standaloneProvider);
+        } else {
+          apiKeySection.classList.add("hidden");
+          navApiKey.classList.add("hidden");
+        }
+
+        // Set workspace mode radio to match current mode
+        const modeCloud = document.getElementById("mode-cloud");
+        const modeStandaloneRadio = document.getElementById("mode-standalone");
+        if (isStandalone) {
+          modeStandaloneRadio.checked = true;
         } else {
           modeCloud.checked = true;
         }
 
         // Hide cloud-only account buttons in standalone mode
-        var accountBtns = ["btn-dashboard", "btn-web-settings"];
+        const accountBtns = ["btn-dashboard", "btn-web-settings"];
         accountBtns.forEach(function(id) {
-          var el = document.getElementById(id);
+          const el = document.getElementById(id);
           if (el) el.classList.toggle("hidden", isStandalone);
         });
         document.getElementById("plan-info").classList.toggle("hidden", isStandalone);
 
         // Populate model dropdowns
-        populateModelSelect("model-worker", d.defaultWorkerModel || "claude-sonnet-4-6", false);
-        populateModelSelect("model-reviewer", d.managerModelId || "claude-opus-4-6", true);
-        populateModelSelect("model-planner", d.planningAgentModel || "claude-opus-4-6", true);
+        if (isStandalone) {
+          populateStandaloneModels(standaloneProvider, {
+            "model-worker": d.defaultWorkerModel || "claude-sonnet-4-6",
+            "model-reviewer": d.managerModelId || "claude-opus-4-6",
+            "model-planner": d.planningAgentModel || "claude-opus-4-6",
+          });
+        } else {
+          populateModelSelect("model-worker", d.defaultWorkerModel || "claude-sonnet-4-6", false);
+          populateModelSelect("model-reviewer", d.managerModelId || "claude-opus-4-6", true);
+          populateModelSelect("model-planner", d.planningAgentModel || "claude-opus-4-6", true);
+        }
 
         // Select current tracker radio (fall back to "internal" if selected tracker is locked)
         let tracker = d.defaultIssueTracker || "internal";
@@ -2293,14 +2554,14 @@ export class SettingsPanel {
         }
 
         // Badges (issue tracker) — elements may not exist in standalone mode
-        var ghBadge = document.getElementById("github-badge");
+        const ghBadge = document.getElementById("github-badge");
         if (ghBadge) ghBadge.innerHTML = badge(d.github?.configured);
-        var lnBadge = document.getElementById("linear-badge");
+        const lnBadge = document.getElementById("linear-badge");
         if (lnBadge) lnBadge.innerHTML = badge(d.linear?.configured);
 
         // Show Linear configured status in standalone mode
         if (isStandalone && d.linear?.configured) {
-          var linearStatus = document.getElementById("linear-status");
+          const linearStatus = document.getElementById("linear-status");
           if (linearStatus) showStatus(linearStatus, "success", "Linear API key configured");
         }
 
@@ -2337,24 +2598,18 @@ export class SettingsPanel {
         if (repoInput) repoInput.value = defaultRepo;
 
         // Populate worker behavior settings
-        const wkPerStory = document.getElementById("wk-per-story-revisions");
         const wkPr = document.getElementById("wk-pr-revisions");
-        const wkQg = document.getElementById("wk-qg-retries");
-        const wkCiFix = document.getElementById("wk-ci-fix-retries");
+        const wkFixRetries = document.getElementById("wk-fix-retries");
         const wkBlockerTimeout = document.getElementById("wk-blocker-timeout");
         const wkPush = document.getElementById("wk-push-after-commit");
-        if (wkPerStory) wkPerStory.value = String(d.maxPerStoryRevisions ?? 1);
         if (wkPr) wkPr.value = String(d.maxReviewRevisions ?? 3);
-        if (wkQg) wkQg.value = String(d.qualityGateMaxRetries ?? 5);
-        if (wkCiFix) wkCiFix.value = String(d.maxCiFixRetries ?? 3);
+        if (wkFixRetries) wkFixRetries.value = String(d.qualityGateMaxRetries ?? 5);
         if (wkBlockerTimeout) wkBlockerTimeout.value = String(d.blockerWaitTimeoutMinutes ?? 20);
         if (wkPush) wkPush.checked = d.pushAfterCommit !== false;
 
-        // Populate RAG index repo selector
-        if (indexRepoSelect && defaultRepo) {
-          indexRepoSelect.innerHTML = '<option value="' + defaultRepo + '">' + defaultRepo + '</option>';
-        } else if (indexRepoSelect) {
-          indexRepoSelect.innerHTML = '<option value="">No repository configured</option>';
+        // Show target repo in RAG section
+        if (indexRepoLabel) {
+          indexRepoLabel.textContent = defaultRepo ? defaultRepo : "No repository configured";
         }
 
         // Show plan in Account section
@@ -2379,6 +2634,21 @@ export class SettingsPanel {
       if (msg.type === "models-save-error") {
         const ms = document.getElementById("models-status");
         showStatus(ms, "error", msg.message || "Failed to save models");
+      }
+
+      // API key messages (standalone mode)
+      if (msg.type === "api-key-saving") {
+        const ks = document.getElementById("api-key-status");
+        showStatus(ks, "info", "Saving...");
+      }
+      if (msg.type === "api-key-saved") {
+        const ks = document.getElementById("api-key-status");
+        showStatus(ks, "success", "API key saved");
+        setTimeout(() => ks.classList.remove("visible"), 3000);
+      }
+      if (msg.type === "api-key-save-error") {
+        const ks = document.getElementById("api-key-status");
+        showStatus(ks, "error", msg.message || "Failed to save API key");
       }
 
       if (msg.type === "tracker-saved") {
@@ -2459,11 +2729,12 @@ export class SettingsPanel {
       // Sandbox messages
       if (msg.type === "sandbox-loaded") {
         sandboxToggle.checked = msg.sandbox === "docker";
+        sandboxWarning.classList.toggle("hidden", msg.sandbox === "docker");
         if (msg.dockerAvailable) {
           sandboxToggle.disabled = false;
-          showStatus(sandboxStatus, "info", msg.sandbox === "docker"
-            ? "Docker sandbox is active"
-            : "Workers are running as native processes. Enable Docker sandbox above for filesystem and network isolation.");
+          if (msg.sandbox === "docker") {
+            showStatus(sandboxStatus, "success", "Docker sandbox is active");
+          }
         } else if (msg.dockerInstalled) {
           sandboxToggle.disabled = true;
           showStatus(sandboxStatus, "error", "Docker is installed but not running — start Docker Desktop to enable sandbox mode");
@@ -2491,11 +2762,12 @@ export class SettingsPanel {
       if (msg.type === "sandbox-updated") {
         sandboxToggle.disabled = false;
         sandboxToggle.checked = msg.sandbox === "docker";
+        sandboxWarning.classList.toggle("hidden", msg.sandbox === "docker");
         if (msg.error) {
           showStatus(sandboxStatus, "error", msg.error);
         } else {
           showStatus(sandboxStatus, "success", msg.sandbox === "docker" ? "Docker sandbox enabled — agent restarted" : "Docker sandbox disabled — agent restarted");
-          setTimeout(() => { sandboxStatus.className = "status"; }, 5000);
+          setTimeout(() => { sandboxStatus.className = "status"; }, 3000);
         }
       }
       // Org switch messages
@@ -2554,7 +2826,7 @@ export class SettingsPanel {
         }
         ragToggle.checked = !!msg.localRag;
         ollamaPortInput.value = msg.ollamaPort || 11434;
-        indexBtn.disabled = !msg.localRag || !hasModel;
+        indexBtn.disabled = !msg.localRag || !hasModel || !document.getElementById("default-repo").value.trim();
       }
       // RAG setup progress/completion/error
       if (msg.type === "rag-setup-progress") {
@@ -2563,7 +2835,7 @@ export class SettingsPanel {
       if (msg.type === "rag-setup-complete") {
         showStatus(ragSetupStatus, "success", "Ollama setup complete — ready for indexing");
         setupRagBtn.classList.add("hidden");
-        setTimeout(function() { ragSetupStatus.className = "status"; }, 5000);
+        setTimeout(function() { ragSetupStatus.className = "status"; }, 3000);
       }
       if (msg.type === "rag-setup-error") {
         showStatus(ragSetupStatus, "error", msg.error || "Setup failed");
@@ -2581,7 +2853,7 @@ export class SettingsPanel {
           showStatus(ragStatus, "error", msg.error);
         } else {
           showStatus(ragStatus, "success", msg.localRag ? "Local RAG enabled — agent restarted" : "Local RAG disabled — agent restarted");
-          setTimeout(() => { ragStatus.className = "status"; }, 5000);
+          setTimeout(() => { ragStatus.className = "status"; }, 3000);
         }
       }
       if (msg.type === "ollama-port-saved") {
@@ -2600,7 +2872,7 @@ export class SettingsPanel {
         indexStatusEl.textContent = msg.message || "Indexing complete";
         indexStatusEl.style.color = "var(--success)";
         indexBtn.disabled = false;
-        setTimeout(function() { indexStatusEl.textContent = ""; }, 8000);
+        setTimeout(function() { indexStatusEl.textContent = ""; }, 3000);
       }
       if (msg.type === "index-error") {
         indexStatusEl.textContent = msg.error || "Indexing failed";

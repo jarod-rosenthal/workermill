@@ -1272,6 +1272,77 @@ export function convertBackToExecutionPlan(
 }
 
 /**
+ * Build a grounding prompt for decomposer-planned mode.
+ *
+ * When the decomposer has already produced pre-computed stories with
+ * targetFilePatterns (globs), the agent only needs to resolve those patterns
+ * against the real repo and emit a valid ExecutionPlan JSON.
+ *
+ * This is much cheaper than a full planning pass — one short LLM call with
+ * repo tool access to glob/grep.
+ */
+export function buildGroundingPrompt(
+  input: PlanningInput & { preComputedStories: Array<{ id: string; title: string; description: string; persona: string; priority: number; estimatedEffort: "small" | "medium" | "large"; dependencies: string[]; targetFilePatterns: string[] }> },
+): string {
+  const storiesJson = JSON.stringify(input.preComputedStories, null, 2);
+
+  return `You are a grounding agent. The planning phase has already been completed by the decomposer.
+Your ONLY job is to resolve file path patterns against the real repository and emit a valid ExecutionPlan.
+
+## Task
+**Title:** ${input.title}
+**Description:**
+${input.description}
+
+## Pre-Computed Stories
+The decomposer produced these stories with glob-style \`targetFilePatterns\`.
+Resolve each pattern against the actual repository files using your tools (glob, grep, ls).
+
+\`\`\`json
+${storiesJson}
+\`\`\`
+
+## Instructions
+1. For each story, use file search tools to resolve \`targetFilePatterns\` into actual file paths that exist (or will be created).
+2. If a pattern matches nothing (new files to create), keep the pattern as-is — the worker will create it.
+3. If a pattern is too broad (matches 20+ files), narrow it to the most relevant files (max ${input.maxStories ? Math.max(5, Math.ceil(input.maxStories / 2)) : 8} files per story).
+4. Preserve the story structure exactly — do NOT add, remove, or reorder stories.
+5. Map \`dependencies\` as-is (they reference story IDs like "story-0").
+
+## Output Format
+Emit ONLY a JSON block (wrapped in \`\`\`json fences) with this exact structure:
+
+\`\`\`json
+{
+  "summary": "Grounded execution plan for: ${input.title}",
+  "stories": [
+    {
+      "id": "story-1",
+      "title": "...",
+      "description": "...",
+      "persona": "...",
+      "priority": 1,
+      "estimatedEffort": "small|medium|large",
+      "dependencies": ["story-0"],
+      "targetFiles": ["actual/resolved/path.ts", "another/file.go"],
+      "scope": "brief scope description"
+    }
+  ],
+  "risks": [],
+  "assumptions": []
+}
+\`\`\`
+
+IMPORTANT:
+- Story IDs must be "story-1", "story-2", etc. (1-indexed).
+- \`targetFiles\` replaces \`targetFilePatterns\` with resolved paths.
+- \`scope\` should be a brief (1-line) summary of the story's scope.
+- Do NOT change titles, descriptions, personas, priorities, effort estimates, or dependencies.
+- Do NOT add risks or assumptions — leave them as empty arrays.
+- Do NOT include any text outside the JSON block.`;
+}
+
+/**
  * Check if we should use local planning agent.
  * In local mode, we use Claude CLI which handles its own authentication.
  */

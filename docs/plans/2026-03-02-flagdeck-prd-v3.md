@@ -10,7 +10,7 @@ This is a **showcase build** — a polished demo app designed to impress potenti
 - **Live URLs:** API `https://flagdeck.workermill.com`, Web `https://flagdeck-app.workermill.com`
 - **MongoDB:** `mongodb+srv://...@flagdeck.rakqc31.mongodb.net/flagdeck` (configured as `MONGODB_URI` secret)
 - **Redis:** Upstash `rediss://...@us1-merry-cod-40541.upstash.io:40541` (configured as `REDIS_URL` secret)
-- **Deploy:** Railway (project `flagdeck`, services: `api`, `web`)
+- **Deploy:** Railway (project ID `64bd7465-cc4d-410e-8083-10021053680e`, services: `api`, `web`)
 
 ## Tech Stack
 

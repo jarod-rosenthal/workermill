@@ -547,7 +547,7 @@ async function getAllVisibleTasks(): Promise<LocalTaskInfo[]> {
     try {
       const db = getLocalDb();
       const rows = db.prepare(
-        "SELECT id, summary, description, status, github_repo, worker_model, created_at FROM tasks WHERE status IN ('queued','executing','completed','failed','cancelled','escalated') ORDER BY created_at DESC LIMIT 50"
+        "SELECT id, summary, description, status, github_repo, worker_model, created_at FROM tasks WHERE status IN ('queued','executing','completed','failed','cancelled','escalated','pr_approved') ORDER BY created_at DESC LIMIT 50"
       ).all() as Array<Record<string, unknown>>;
       for (const row of rows) {
         const id = String(row.id);

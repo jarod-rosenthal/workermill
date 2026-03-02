@@ -3040,7 +3040,6 @@ export class EpicCoordinator {
       // Create consolidated PR with all story branches
       let prUrl: string | undefined;
       let prNumber: number | undefined;
-      let prCreationAttempted = false;
       let noChangesNeeded = false;
 
       // Check if any stories actually made file changes
@@ -3080,7 +3079,6 @@ export class EpicCoordinator {
 
         console.log("[Epic] Creating consolidated PR...");
         this.postDashboardLog(`Creating consolidated PR from ${storyCompletions.length} story branches...`);
-        prCreationAttempted = true;
         // Build a sensible PR title that fits within GitHub's 256 char limit
         // Format: "Epic implementation (N stories)" - keep it simple, details in body
         const storyCount = storyCompletions.length;
@@ -3223,11 +3221,6 @@ export class EpicCoordinator {
         // This is a valid success case - feature may already be implemented or requirements already met
         taskStatus = "completed";
         jiraComment = `✅ **Analysis completed** — ${completions.length} stories analyzed.\n\n${storyList}\n\n*No code changes were required. The feature may already be implemented or the requirements are already met.*`;
-      } else if (prCreationAttempted) {
-        // PR creation was attempted but failed - this is a failure, not success
-        taskStatus = "failed";
-        errorMessage = "PR creation failed after stories completed";
-        jiraComment = `⚠️ **${completions.length} stories completed**, but PR creation failed.\n\n${storyList}\n\n*Please check the worker logs and retry.*`;
       } else {
         // No Jira key, so no PR was attempted — standalone mode or direct task
         taskStatus = "completed";

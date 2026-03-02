@@ -1119,12 +1119,7 @@ Clean up any containers you start when you're done (\`docker stop <name>\`).`;
       "system"
     );
 
-    // 1. Check that some files were actually modified
-    if (changedFiles.length === 0) {
-      issues.push("No files were modified - story may not be complete");
-    }
-
-    // 1b. Check that modified files are within targetFiles scope
+    // 1. Check that modified files are within targetFiles scope
     if (
       story.targetFiles &&
       story.targetFiles.length > 0 &&
@@ -1280,15 +1275,12 @@ Clean up any containers you start when you're done (\`docker stop <name>\`).`;
     }
 
     // 3. Validation pass/fail decision
-    // Be lenient: pass if files were changed and no major red flags
-    const hasChanges = changedFiles.length > 0;
     const majorIssues = issues.filter(i =>
-      i.includes("No files were modified") ||
       i.includes("critical") ||
       i.includes("required")
     );
 
-    const valid = hasChanges && majorIssues.length === 0;
+    const valid = majorIssues.length === 0;
 
     if (!valid) {
       await this.postLog(

@@ -1314,6 +1314,15 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 \`\`\`
 `;
 
+        // Extract preComputedStories from jiraFields if present
+        let jiraFields: Record<string, unknown> = {};
+        try {
+          jiraFields = task.jira_fields ? JSON.parse(task.jira_fields) : {};
+        } catch { /* ignore malformed JSON */ }
+        const preComputedStories = Array.isArray(jiraFields.preComputedStories) && jiraFields.preComputedStories.length > 0
+          ? jiraFields.preComputedStories
+          : undefined;
+
         return json(res, {
           taskId,
           prompt,
@@ -1323,6 +1332,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
           maxTargetFiles: 8,
           planningMode: "strict",
           validPersonas,
+          ...(preComputedStories ? { preComputedStories } : {}),
         });
       } catch (err) {
         return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);

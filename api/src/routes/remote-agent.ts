@@ -1142,6 +1142,8 @@ router.get(
       return;
     }
 
+    const preComputedStories = (jiraFields.preComputedStories as unknown[] | undefined) || undefined;
+
     res.json({
       taskId: task.id,
       prompt,
@@ -1151,6 +1153,7 @@ router.get(
       maxTargetFiles: org.maxTargetFiles,
       planningMode: org.planningMode || "strict",
       validPersonas: availablePersonas.map((p: { slug: string }) => p.slug),
+      ...(preComputedStories ? { preComputedStories } : {}),
     });
   }),
 );

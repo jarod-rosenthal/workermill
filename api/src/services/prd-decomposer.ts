@@ -19,6 +19,17 @@ import {
 // TYPES
 // ============================================================================
 
+export interface PreComputedStory {
+  id: string; // "story-0", "story-1", ...
+  title: string;
+  description: string; // scope label (2-3 lines)
+  persona: string; // from valid personas
+  priority: number;
+  estimatedEffort: "small" | "medium" | "large";
+  dependencies: string[]; // inter-story within card: ["story-0"]
+  targetFilePatterns: string[]; // glob patterns: ["api/handlers/*.go", "api/models/flag.go"]
+}
+
 export interface DecomposedCard {
   title: string;
   description: string;
@@ -27,6 +38,7 @@ export interface DecomposedCard {
   dependencyIndices: number[];
   labels: string[];
   estimatedSteps: number;
+  stories?: PreComputedStory[];
 }
 
 export interface QualityGateConfig {
@@ -170,6 +182,89 @@ estimatedSteps is the number of deliverables in the card (used for progress trac
 labels should include relevant technology or domain tags (e.g., "react", "api", "terraform", "auth").`;
 
 // ============================================================================
+// SYSTEM PROMPT — WITH STORIES (decomposer_planned mode)
+// ============================================================================
+
+/**
+ * Extended system prompt that produces cards WITH pre-computed story breakdowns.
+ * Used when org.planningMode === "decomposer_planned".
+ *
+ * The base card-level rules are identical to SYSTEM_PROMPT. The addition is:
+ * each card includes a `stories[]` array with story-level breakdown including
+ * `targetFilePatterns` (glob patterns the grounding pass resolves against the repo).
+ */
+export const SYSTEM_PROMPT_WITH_STORIES = `${SYSTEM_PROMPT}
+
+## Story Breakdown Per Card (REQUIRED in decomposer_planned mode)
+
+In addition to the card-level structure above, each card MUST include a \`stories\` array. Stories are the parallel execution units within a card — each story is assigned to one AI expert and runs in its own worktree.
+
+### Story Rules
+
+- Each story has a \`persona\` from the same persona list above. Different personas run in PARALLEL. Same-persona stories run SEQUENTIALLY.
+- **Maximize parallelism via persona diversity.** Assign different personas to independent stories (e.g., \`backend_developer\` for API routes, \`frontend_developer\` for UI).
+- **No overlapping targetFilePatterns within a card.** Two stories MUST NOT target the same files — they execute in parallel worktrees, so concurrent edits cause merge conflicts. If multiple stories need the same file, put ALL changes in ONE foundational story and make others depend on it.
+- **No circular dependencies.** Story dependencies form a DAG within the card. Use story IDs (e.g., "story-0", "story-1") to reference dependencies.
+- **targetFilePatterns are glob patterns**, not exact paths. You don't have repo access, so infer paths from the PRD context. Examples: \`api/handlers/*.go\`, \`web/src/routes/+page.svelte\`, \`api/models/flag.go\`, \`cmd/server/main.go\`. Use the most specific pattern you can infer from the PRD's technology stack and directory structure references.
+- **Story descriptions are scope labels**, not specs. Each expert reads the FULL PRD. Descriptions say which area the expert owns (2-3 lines).
+- Target 2-6 stories per card. Each story should be meaningful work, not trivial tasks.
+
+### Extended Output Format
+
+The output format is the SAME as above, but each card object includes a \`stories\` array:
+
+{
+  "boardName": "Short descriptive board name",
+  "qualityGates": [...],
+  "ciWorkflowPath": ".github/workflows/ci.yml",
+  "cards": [
+    {
+      "title": "Foundation — Backend + CI",
+      "description": "Full description with all required sections...",
+      "persona": "backend_developer",
+      "priority": "urgent",
+      "dependencyIndices": [],
+      "labels": ["go", "fiber", "mongodb"],
+      "estimatedSteps": 20,
+      "stories": [
+        {
+          "id": "story-0",
+          "title": "Project scaffolding and CI",
+          "description": "Initialize Go module, Fiber app skeleton, Docker Compose, and CI workflow.\\nSets up the build system and quality gates for all subsequent stories.",
+          "persona": "backend_developer",
+          "priority": 1,
+          "estimatedEffort": "medium",
+          "dependencies": [],
+          "targetFilePatterns": ["go.mod", "go.sum", "cmd/server/main.go", "Dockerfile", "docker-compose.yml", ".github/workflows/ci.yml"]
+        },
+        {
+          "id": "story-1",
+          "title": "Database models and seed data",
+          "description": "MongoDB models, connection setup, and seed data.\\nDefines all collections referenced by the API handlers.",
+          "persona": "backend_developer",
+          "priority": 2,
+          "estimatedEffort": "medium",
+          "dependencies": ["story-0"],
+          "targetFilePatterns": ["api/models/*.go", "api/database/*.go", "scripts/seed.go"]
+        },
+        {
+          "id": "story-2",
+          "title": "API handlers and middleware",
+          "description": "REST API route handlers, auth middleware, and request validation.\\nImplements all endpoints defined in the PRD.",
+          "persona": "backend_developer",
+          "priority": 2,
+          "estimatedEffort": "large",
+          "dependencies": ["story-1"],
+          "targetFilePatterns": ["api/handlers/*.go", "api/middleware/*.go", "api/routes.go"]
+        }
+      ]
+    }
+  ]
+}
+
+IMPORTANT: The \`stories\` array is REQUIRED for every card. Do NOT omit it.`;
+
+// ============================================================================
 // MAIN FUNCTION
 // ============================================================================
 
@@ -276,6 +371,98 @@ export async function decomposePrd(
   return validateDecomposedPrd(parsed);
 }
 
+/**
+ * Decompose a PRD into cards WITH pre-computed story breakdowns.
+ * Used when org.planningMode === "decomposer_planned".
+ *
+ * Same signature and auth logic as decomposePrd(), but uses
+ * SYSTEM_PROMPT_WITH_STORIES so each card includes stories[].
+ */
+export async function decomposePrdWithStories(
+  prdContent: string,
+  model: string,
+  apiKey?: string,
+): Promise<DecomposedPrd> {
+  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const resolvedApiKey = apiKey || process.env.ANTHROPIC_API_KEY;
+
+  if (!oauthToken && !resolvedApiKey) {
+    throw new Error(
+      "No Anthropic API key provided. Pass apiKey parameter or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN environment variable.",
+    );
+  }
+
+  const resolvedModel = model || DEFAULT_MODEL;
+
+  logger.info("Decomposing PRD with stories via Anthropic SDK", {
+    model: resolvedModel,
+    prdLength: prdContent.length,
+    authMethod: oauthToken ? "oauth" : "api_key",
+  });
+
+  const client = oauthToken
+    ? new Anthropic({ authToken: oauthToken })
+    : new Anthropic({ apiKey: resolvedApiKey });
+
+  let response: Anthropic.Message;
+  try {
+    response = await client.messages.create({
+      model: resolvedModel,
+      max_tokens: 128000,
+      system: SYSTEM_PROMPT_WITH_STORIES,
+      messages: [
+        {
+          role: "user",
+          content: `Decompose this PRD into implementation cards with story breakdowns:\n\n${prdContent}`,
+        },
+      ],
+    });
+  } catch (error) {
+    logger.error("Anthropic SDK error during PRD decomposition (with stories)", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw new Error(
+      `PRD decomposition failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  if (!response.content || response.content.length === 0) {
+    throw new Error("Anthropic API returned empty content");
+  }
+
+  const textBlock = response.content.find((b) => b.type === "text");
+  if (!textBlock || textBlock.type !== "text") {
+    throw new Error("Anthropic API returned no text content");
+  }
+
+  const rawText = textBlock.text;
+
+  logger.info("Received PRD decomposition with stories response", {
+    model: response.model,
+    stopReason: response.stop_reason,
+    inputTokens: response.usage?.input_tokens,
+    outputTokens: response.usage?.output_tokens,
+    responseLength: rawText.length,
+  });
+
+  const jsonText = stripMarkdownFences(rawText);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (error) {
+    logger.error("Failed to parse PRD decomposition (with stories) JSON", {
+      error: error instanceof Error ? error.message : String(error),
+      rawTextSnippet: rawText.slice(0, 500),
+    });
+    throw new Error(
+      `Failed to parse PRD decomposition response as JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  return validateDecomposedPrd(parsed);
+}
+
 // ============================================================================
 // STREAMING VARIANT
 // ============================================================================
@@ -379,6 +566,111 @@ export async function decomposePrdStreaming(
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Failed to parse PRD decomposition JSON (streaming)", {
+      error: errMsg,
+      rawTextSnippet: fullText.slice(0, 500),
+    });
+    emit({ phase: "error", error: `Failed to parse JSON: ${errMsg}` });
+    throw new Error(
+      `Failed to parse PRD decomposition response as JSON: ${errMsg}`,
+    );
+  }
+
+  return validateDecomposedPrd(parsed);
+}
+
+/**
+ * Streaming variant of decomposePrdWithStories().
+ * Uses SYSTEM_PROMPT_WITH_STORIES so each card includes stories[].
+ */
+export async function decomposePrdWithStoriesStreaming(
+  prdContent: string,
+  model: string,
+  apiKey: string | undefined,
+  decompositionId: string,
+): Promise<DecomposedPrd> {
+  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const resolvedApiKey = apiKey || process.env.ANTHROPIC_API_KEY;
+
+  if (!oauthToken && !resolvedApiKey) {
+    throw new Error(
+      "No Anthropic API key provided. Pass apiKey parameter or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN environment variable.",
+    );
+  }
+
+  const resolvedModel = model || DEFAULT_MODEL;
+
+  logger.info("Decomposing PRD with stories via Anthropic SDK (streaming)", {
+    model: resolvedModel,
+    prdLength: prdContent.length,
+    authMethod: oauthToken ? "oauth" : "api_key",
+    decompositionId,
+  });
+
+  const client = oauthToken
+    ? new Anthropic({ authToken: oauthToken })
+    : new Anthropic({ apiKey: resolvedApiKey });
+
+  const emit = (event: DecompositionEvent) =>
+    decompositionEmitter.emitEvent(decompositionId, event);
+
+  emit({ phase: "calling_llm", detail: `Model: ${resolvedModel} (with stories)` });
+
+  let fullText = "";
+  try {
+    const stream = client.messages.stream({
+      model: resolvedModel,
+      max_tokens: 128000,
+      system: SYSTEM_PROMPT_WITH_STORIES,
+      messages: [
+        {
+          role: "user",
+          content: `Decompose this PRD into implementation cards with story breakdowns:\n\n${prdContent}`,
+        },
+      ],
+    });
+
+    stream.on("text", (textDelta) => {
+      fullText += textDelta;
+      emit({
+        phase: "streaming",
+        text: textDelta,
+        charsGenerated: fullText.length,
+      });
+    });
+
+    const finalMessage = await stream.finalMessage();
+
+    logger.info("Received PRD decomposition with stories response (streaming)", {
+      model: finalMessage.model,
+      stopReason: finalMessage.stop_reason,
+      inputTokens: finalMessage.usage?.input_tokens,
+      outputTokens: finalMessage.usage?.output_tokens,
+      responseLength: fullText.length,
+    });
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Anthropic SDK streaming error during PRD decomposition (with stories)", {
+      error: errMsg,
+    });
+    emit({ phase: "error", error: errMsg });
+    throw new Error(`PRD decomposition failed: ${errMsg}`);
+  }
+
+  if (!fullText) {
+    emit({ phase: "error", error: "Anthropic API returned empty content" });
+    throw new Error("Anthropic API returned empty content");
+  }
+
+  emit({ phase: "parsing", detail: "Parsing JSON response (with stories)" });
+
+  const jsonText = stripMarkdownFences(fullText);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Failed to parse PRD decomposition (with stories) JSON (streaming)", {
       error: errMsg,
       rawTextSnippet: fullText.slice(0, 500),
     });
@@ -521,6 +813,77 @@ export function validateDecomposedPrd(data: unknown): DecomposedPrd {
         ? raw.estimatedSteps
         : 8;
 
+    // stories: optional pre-computed story breakdown (decomposer_planned mode)
+    let stories: PreComputedStory[] | undefined;
+    if (Array.isArray(raw.stories) && raw.stories.length > 0) {
+      stories = [];
+      const storyIds = new Set<string>();
+      const allPatterns = new Set<string>();
+
+      for (let s = 0; s < raw.stories.length; s++) {
+        const rs = raw.stories[s] as Record<string, unknown>;
+
+        const storyId =
+          typeof rs.id === "string" && rs.id.trim().length > 0
+            ? rs.id.trim()
+            : `story-${s}`;
+
+        if (storyIds.has(storyId)) {
+          logger.warn(`Card ${i}: duplicate story id "${storyId}", renaming to "story-${s}"`);
+        }
+        storyIds.add(storyId);
+
+        const storyPersona =
+          typeof rs.persona === "string" && validPersonas.has(rs.persona)
+            ? rs.persona
+            : persona; // fall back to card persona
+
+        // Validate dependencies reference valid story IDs within this card
+        const storyDeps: string[] = [];
+        if (Array.isArray(rs.dependencies)) {
+          for (const dep of rs.dependencies) {
+            if (typeof dep === "string") {
+              storyDeps.push(dep);
+            }
+          }
+        }
+
+        // Check for overlapping targetFilePatterns within this card
+        const patterns: string[] = [];
+        if (Array.isArray(rs.targetFilePatterns)) {
+          for (const p of rs.targetFilePatterns) {
+            if (typeof p === "string" && p.trim().length > 0) {
+              const pat = p.trim();
+              if (allPatterns.has(pat)) {
+                logger.warn(
+                  `Card ${i}, story "${storyId}": overlapping targetFilePattern "${pat}" (already used by another story in this card)`,
+                );
+              }
+              allPatterns.add(pat);
+              patterns.push(pat);
+            }
+          }
+        }
+
+        const validEfforts = new Set(["small", "medium", "large"]);
+        const effort =
+          typeof rs.estimatedEffort === "string" && validEfforts.has(rs.estimatedEffort)
+            ? (rs.estimatedEffort as PreComputedStory["estimatedEffort"])
+            : "medium";
+
+        stories.push({
+          id: storyId,
+          title: typeof rs.title === "string" ? rs.title.trim() : `Story ${s}`,
+          description: typeof rs.description === "string" ? rs.description.trim() : "",
+          persona: storyPersona,
+          priority: typeof rs.priority === "number" ? rs.priority : s + 1,
+          estimatedEffort: effort,
+          dependencies: storyDeps,
+          targetFilePatterns: patterns,
+        });
+      }
+    }
+
     cards.push({
       title: raw.title.trim(),
       description: raw.description.trim(),
@@ -529,6 +892,7 @@ export function validateDecomposedPrd(data: unknown): DecomposedPrd {
       dependencyIndices,
       labels,
       estimatedSteps,
+      stories,
     });
   }
 

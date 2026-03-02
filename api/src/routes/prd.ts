@@ -21,7 +21,12 @@ import {
 import { authenticateUser, authenticateApiKey, authenticateSSE } from "../middleware/auth.js";
 import { requireCurrentTos } from "../middleware/tos.js";
 import { body, validateRequest } from "../middleware/validation.js";
-import { decomposePrd, decomposePrdStreaming } from "../services/prd-decomposer.js";
+import {
+  decomposePrd,
+  decomposePrdStreaming,
+  decomposePrdWithStories,
+  decomposePrdWithStoriesStreaming,
+} from "../services/prd-decomposer.js";
 import { decompositionEmitter } from "../services/decomposition-events.js";
 import { getOrgCredentials } from "../services/org-credentials.js";
 import { logger } from "../utils/logger.js";
@@ -510,23 +515,38 @@ router.post(
 
         emitDecomp?.({ phase: "resolving_content", detail: "Content resolved, starting decomposition" });
 
+        const useDecomposerPlanned = org.planningMode === "decomposer_planned";
+
         try {
           if (planProvider === "anthropic") {
             if (decompositionId) {
               // Streaming path — emit events to SSE clients
-              decomposed = await decomposePrdStreaming(
-                prdContent,
-                planModel,
-                orgCreds.anthropicApiKey || undefined,
-                decompositionId,
-              );
+              decomposed = useDecomposerPlanned
+                ? await decomposePrdWithStoriesStreaming(
+                    prdContent,
+                    planModel,
+                    orgCreds.anthropicApiKey || undefined,
+                    decompositionId,
+                  )
+                : await decomposePrdStreaming(
+                    prdContent,
+                    planModel,
+                    orgCreds.anthropicApiKey || undefined,
+                    decompositionId,
+                  );
             } else {
               // Non-streaming path (agents, backward compat)
-              decomposed = await decomposePrd(
-                prdContent,
-                planModel,
-                orgCreds.anthropicApiKey || undefined,
-              );
+              decomposed = useDecomposerPlanned
+                ? await decomposePrdWithStories(
+                    prdContent,
+                    planModel,
+                    orgCreds.anthropicApiKey || undefined,
+                  )
+                : await decomposePrd(
+                    prdContent,
+                    planModel,
+                    orgCreds.anthropicApiKey || undefined,
+                  );
             }
           } else {
             // Non-Anthropic — use Vercel AI SDK via planning agent config
@@ -648,11 +668,20 @@ router.post(
         const createdCards: KbCard[] = [];
         for (let i = 0; i < decomposed.cards.length; i++) {
           const dc = decomposed.cards[i];
+
+          // If decomposer_planned mode produced stories, embed them as a
+          // machine-readable marker at the end of the description.
+          // runCardAsWorkerTask() extracts this into jiraFields.preComputedStories.
+          let description = dc.description;
+          if (dc.stories && dc.stories.length > 0) {
+            description += `\n\n<!-- PRECOMPUTED_STORIES_JSON\n${JSON.stringify(dc.stories)}\nEND_PRECOMPUTED_STORIES -->`;
+          }
+
           const card = cardRepo.create({
             boardId: board.id,
             columnId: todoColumn.id,
             title: dc.title,
-            description: dc.description,
+            description,
             position: i,
             priority: dc.priority,
             cardNumber: startNumber + i,

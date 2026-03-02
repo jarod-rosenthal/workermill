@@ -250,6 +250,73 @@ function phaseLabel(phase: PlanningPhase, elapsed: number): string {
 }
 
 /**
+ * Build a grounding prompt for the agent-side grounding pass.
+ * Tells the LLM to resolve targetFilePatterns against the repo and emit ExecutionPlan JSON.
+ */
+function buildGroundingPromptLocal(
+  task: PlanningTask,
+  preComputedStories: Array<{ id: string; title: string; description: string; persona: string; priority: number; estimatedEffort: string; dependencies: string[]; targetFilePatterns: string[] }>,
+  maxStories: number,
+): string {
+  const storiesJson = JSON.stringify(preComputedStories, null, 2);
+
+  return `You are a grounding agent. The planning phase has already been completed by the decomposer.
+Your ONLY job is to resolve file path patterns against the real repository and emit a valid ExecutionPlan.
+
+***REMOVED******REMOVED*** Task
+**Title:** ${task.summary}
+**Description:**
+${task.description || "No description provided."}
+
+***REMOVED******REMOVED*** Pre-Computed Stories
+The decomposer produced these stories with glob-style \`targetFilePatterns\`.
+Resolve each pattern against the actual repository files using your tools (glob, grep, ls).
+
+\`\`\`json
+${storiesJson}
+\`\`\`
+
+***REMOVED******REMOVED*** Instructions
+1. For each story, use file search tools to resolve \`targetFilePatterns\` into actual file paths that exist (or will be created).
+2. If a pattern matches nothing (new files to create), keep the pattern as-is — the worker will create it.
+3. If a pattern is too broad (matches 20+ files), narrow it to the most relevant files (max ${Math.max(5, Math.ceil(maxStories / 2))} files per story).
+4. Preserve the story structure exactly — do NOT add, remove, or reorder stories.
+5. Map \`dependencies\` as-is (they reference story IDs like "story-0").
+
+***REMOVED******REMOVED*** Output Format
+Emit ONLY a JSON block (wrapped in \`\`\`json fences) with this exact structure:
+
+\`\`\`json
+{
+  "summary": "Grounded execution plan for: ${task.summary}",
+  "stories": [
+    {
+      "id": "story-1",
+      "title": "...",
+      "description": "...",
+      "persona": "...",
+      "priority": 1,
+      "estimatedEffort": "small|medium|large",
+      "dependencies": ["story-0"],
+      "targetFiles": ["actual/resolved/path.ts", "another/file.go"],
+      "scope": "brief scope description"
+    }
+  ],
+  "risks": [],
+  "assumptions": []
+}
+\`\`\`
+
+IMPORTANT:
+- Story IDs must be "story-1", "story-2", etc. (1-indexed).
+- \`targetFiles\` replaces \`targetFilePatterns\` with resolved paths.
+- \`scope\` should be a brief (1-line) summary of the story's scope.
+- Do NOT change titles, descriptions, personas, priorities, effort estimates, or dependencies.
+- Do NOT add risks or assumptions — leave them as empty arrays.
+- Do NOT include any text outside the JSON block.`;
+}
+
+/**
  * Run Claude CLI with stream-json output, posting real-time phase milestones
  * to the cloud dashboard — identical terminal experience to cloud planning.
  */
@@ -850,7 +917,7 @@ export async function planTask(
     }
     throw fetchErr;
   }
-  const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories, maxTargetFiles: apiMaxTargetFiles, planningMode: apiPlanningMode, validPersonas: apiValidPersonas } = promptResponse.data;
+  const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories, maxTargetFiles: apiMaxTargetFiles, planningMode: apiPlanningMode, validPersonas: apiValidPersonas, preComputedStories: apiPreComputedStories } = promptResponse.data;
   const validPersonas: string[] = Array.isArray(apiValidPersonas) ? apiValidPersonas : [];
   const isSimplifiedMode = apiPlanningMode === "simplified";
   if (isSimplifiedMode) {
@@ -928,6 +995,90 @@ export async function planTask(
         );
       }
     }
+  }
+
+  // 1b. Grounding pass — if decomposer provided pre-computed stories, skip the
+  //     full planner-critic loop and just resolve targetFilePatterns against the real repo.
+  const preComputedStories = Array.isArray(apiPreComputedStories) && apiPreComputedStories.length > 0
+    ? apiPreComputedStories
+    : null;
+
+  if (preComputedStories && repoPath) {
+    console.log(`${ts()} ${taskLabel} ${chalk.magenta("⚡")} Decomposer-planned mode: ${preComputedStories.length} pre-computed stories — running grounding pass`);
+    await postLog(task.id, `${PREFIX} Decomposer-planned mode: ${preComputedStories.length} pre-computed stories. Running fast grounding pass instead of full planning.`);
+
+    try {
+      const groundingPrompt = buildGroundingPromptLocal(task, preComputedStories, maxStories);
+      const providerLabel = `${provider}/${cliModel}`;
+      console.log(`${ts()} ${taskLabel} Running grounding pass ${chalk.dim(`(${chalk.yellow(providerLabel)})`)}`);
+      await postLog(task.id, `${PREFIX} Grounding pass: resolving file patterns against repo using ${providerLabel}`);
+
+      let groundingOutput: string;
+      if (isAnthropicPlanning) {
+        groundingOutput = await runClaudeCli(
+          claudePath,
+          cliModel,
+          groundingPrompt,
+          cleanEnv,
+          task.id,
+          startTime,
+          repoPath,
+        );
+      } else {
+        // Non-Anthropic providers: use AI SDK with tools
+        groundingOutput = await generateTextWithTools({
+          provider,
+          model: cliModel,
+          apiKey: providerApiKey || "",
+          prompt: groundingPrompt,
+          workingDir: repoPath,
+        });
+      }
+
+      // Parse the grounding output as ExecutionPlan
+      const groundedPlan = parseExecutionPlan(groundingOutput);
+
+      // Apply guardrails
+      applyFileCap(groundedPlan);
+      applyStoryCap(groundedPlan, maxStories);
+      resolveFileOverlaps(groundedPlan);
+      if (validPersonas.length > 0) {
+        fixInvalidPersonas(groundedPlan, validPersonas);
+      }
+
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} Grounding pass complete in ${elapsed}s — posting plan`);
+      await postLog(task.id, `${PREFIX} Grounding pass complete (${elapsed}s). Posting plan.`);
+
+      const posted = await postValidatedPlan(
+        task.id,
+        groundedPlan,
+        config.agentId,
+        taskLabel,
+        elapsed,
+        undefined,
+        undefined,
+        [],
+        0,
+        (Date.now() - startTime),
+        0,
+      );
+
+      // Clean up cloned repo
+      if (repoPath) {
+        try { rmSync(repoPath, { recursive: true, force: true }); } catch { /* best effort */ }
+      }
+
+      return posted;
+    } catch (groundErr: unknown) {
+      // Grounding failed — fall back to full planner-critic loop
+      const errMsg = groundErr instanceof Error ? groundErr.message : String(groundErr);
+      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Grounding pass failed: ${errMsg.substring(0, 120)}`);
+      await postLog(task.id, `${PREFIX} ⚠️ Grounding pass failed: ${errMsg.substring(0, 120)}. Falling back to full planning.`, "warning");
+    }
+  } else if (preComputedStories && !repoPath) {
+    console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Pre-computed stories present but no repo clone — falling back to full planning`);
+    await postLog(task.id, `${PREFIX} ⚠️ Pre-computed stories available but repo clone failed. Falling back to full planning.`, "warning");
   }
 
   // 2. Planner-Critic iteration loop

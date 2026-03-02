@@ -28,6 +28,7 @@ import type { OrganizationPlan } from "../models/Organization.js";
 import { RemoteAgent } from "../models/RemoteAgent.js";
 import type { WorkerPersona } from "../models/WorkerTask.js";
 import { syncKbCardColumn } from "../services/task-monitor.js";
+import type { PreComputedStory } from "../services/prd-decomposer.js";
 import { resetCancelledTask } from "./tasks/lifecycle.js";
 import { canCreateTask } from "../services/billing.js";
 import { authenticateUser } from "../middleware/auth.js";
@@ -123,6 +124,29 @@ async function logActivity(
   } catch {
     // Activity logging is best-effort
   }
+}
+
+// =============================================================================
+// Helper: Extract pre-computed stories from card description
+// =============================================================================
+
+function extractPreComputedStories(
+  description: string | null,
+): { preComputedStories: PreComputedStory[] } | Record<string, never> {
+  if (!description) return {};
+  const match = description.match(
+    /<!-- PRECOMPUTED_STORIES_JSON\n([\s\S]*?)\nEND_PRECOMPUTED_STORIES -->/,
+  );
+  if (!match) return {};
+  try {
+    const stories = JSON.parse(match[1]) as PreComputedStory[];
+    if (Array.isArray(stories) && stories.length > 0) {
+      return { preComputedStories: stories };
+    }
+  } catch {
+    // Malformed JSON — skip silently
+  }
+  return {};
 }
 
 // =============================================================================
@@ -297,6 +321,7 @@ export async function runCardAsWorkerTask(
     jiraFields: {
       ...(card.board?.qualityGateCommands ? { qualityGates: card.board.qualityGateCommands } : {}),
       ...(card.board?.ciWorkflowPath ? { ciWorkflowPath: card.board.ciWorkflowPath } : {}),
+      ...extractPreComputedStories(card.description),
     },
   });
 

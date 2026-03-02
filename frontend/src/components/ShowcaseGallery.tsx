@@ -120,11 +120,18 @@ const showcaseProjects: ShowcaseProject[] = [
   {
     id: "flagdeck",
     name: "FlagDeck",
-    tagline: "Open-source feature flags and experimentation platform.",
+    tagline: "Open-source feature flag and experimentation platform with targeting rules, percentage rollouts, and A/B testing.",
+    description:
+      "Full-stack feature flag platform with Go Fiber API, SvelteKit 2 dashboard (Svelte 5 runes), MongoDB document models, Redis caching, JWT + API key auth, flag evaluation engine with targeting and rollouts, audit logging, and Playwright E2E tests. 6 epics, all approved. Deployed to Railway.",
     stack: "Go (Fiber) + SvelteKit 2 + MongoDB + Redis",
+    storyCount: 38,
+    cost: "$195",
+    duration: "~10.5 hrs",
+    linesOfCode: "27,000",
+    repoUrl: "https://github.com/workermill-examples/flagdeck",
+    liveUrl: "https://flagdeck-app.workermill.com",
     category: "developer-tools",
     icon: <Zap className="w-4 h-4" />,
-    comingSoon: true,
   },
   {
     id: "docforge",
@@ -171,7 +178,7 @@ export default function ShowcaseGallery() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            282K lines of production code across 5 projects, deployed to AWS,
+            309K lines of production code across 6 projects, deployed to AWS,
             Vercel, and Railway. Every project built from tickets — planned,
             coded, tested, reviewed, and deployed autonomously.
           </p>
@@ -182,7 +189,7 @@ export default function ShowcaseGallery() {
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <TrendingUp className="w-4 h-4 text-emerald-400" />
-              <span className="text-2xl font-bold text-white">96%</span>
+              <span className="text-2xl font-bold text-white">97%</span>
             </div>
             <p className="text-xs text-slate-400">
               Showcase task success rate
@@ -198,7 +205,7 @@ export default function ShowcaseGallery() {
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <GitPullRequest className="w-4 h-4 text-teal-400" />
-              <span className="text-2xl font-bold text-white">54</span>
+              <span className="text-2xl font-bold text-white">60</span>
             </div>
             <p className="text-xs text-slate-400">PRs shipped across builds</p>
           </div>
@@ -360,10 +367,10 @@ export default function ShowcaseGallery() {
                 Real metrics, not cherry-picked
               </h3>
               <p className="text-sm text-slate-400 leading-relaxed">
-                Autonomous coding is hard. Across the 54 showcase tasks above, 2
+                Autonomous coding is hard. Across the 60 showcase tasks above, 2
                 failed — a planning agent that returned malformed JSON and a
                 manager review that caught inaccuracies the worker
-                couldn&apos;t fix in its allowed retries. That&apos;s a 96%
+                couldn&apos;t fix in its allowed retries. That&apos;s a 97%
                 success rate, with zero manual code intervention.
               </p>
             </div>

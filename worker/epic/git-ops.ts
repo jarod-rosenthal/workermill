@@ -962,7 +962,10 @@ export class GitOps {
     // Format commit message with attribution
     const formattedMessage = message + "\n\nStory: S" + storyIndex + "\nCo-Authored-By: " + this.formatPersonaForCommit(persona);
 
-    const result = await worktreeGit.commit(formattedMessage);
+    // --no-verify: skip husky/pre-commit hooks — the executor runs its own quality gates
+    // with full retry + fixer support. Letting husky run a second uncontrolled gate bypasses
+    // the gate retry system and causes spurious failures.
+    const result = await worktreeGit.commit(formattedMessage, { "--no-verify": null });
     console.log("[GitOps] Committed in worktree:", result.commit, "Files:", status.staged.length);
 
     return result.commit;
@@ -1068,7 +1071,7 @@ export class GitOps {
       return "";
     }
 
-    const result = await worktreeGit.commit(message);
+    const result = await worktreeGit.commit(message, { "--no-verify": null });
     console.log(`[GitOps] Committed WIP in worktree: ${result.commit}`);
     return result.commit;
   }
@@ -1226,7 +1229,7 @@ export class GitOps {
     // Format commit message with attribution
     const formattedMessage = message + "\n\nStory: S" + storyIndex + "\nCo-Authored-By: " + this.formatPersonaForCommit(persona);
 
-    const result = await this.git.commit(formattedMessage);
+    const result = await this.git.commit(formattedMessage, { "--no-verify": null });
     console.log("[GitOps] Committed:", result.commit, "Files:", status.staged.length);
 
     return result.commit;
@@ -2362,7 +2365,7 @@ export class GitOps {
                 for (const commit of cherryCommits) {
                   await this.git.raw(["cherry-pick", commit, "--no-commit"]);
                 }
-                await this.git.commit(`Merge story ${storyBranch} (cherry-picked ${cherryCommits.length} commits)`);
+                await this.git.commit(`Merge story ${storyBranch} (cherry-picked ${cherryCommits.length} commits)`, { "--no-verify": null });
                 const headAfterCherry = (await this.git.revparse(["HEAD"])).trim();
                 this.log(`[GitOps] ✓ Merged ${storyBranch} via cherry-pick (${cherryCommits.length} commits, ${headBefore.slice(0, 7)} → ${headAfterCherry.slice(0, 7)})`);
                 mergeResults.push({ branch: storyBranch, status: "merged", reason: "cherry-picked" });
@@ -2392,7 +2395,7 @@ export class GitOps {
                   }
                 }
                 await this.git.add(".");
-                await this.git.commit(`Merge story ${storyBranch} (file-level checkout of ${changedFiles.length} files)`);
+                await this.git.commit(`Merge story ${storyBranch} (file-level checkout of ${changedFiles.length} files)`, { "--no-verify": null });
                 const headAfterCheckout = (await this.git.revparse(["HEAD"])).trim();
                 this.log(`[GitOps] ✓ Merged ${storyBranch} via file checkout (${changedFiles.length} files, ${headBefore.slice(0, 7)} → ${headAfterCheckout.slice(0, 7)})`);
                 mergeResults.push({ branch: storyBranch, status: "merged", reason: "file-level checkout" });

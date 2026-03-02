@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   X,
@@ -12,7 +12,10 @@ import {
   ExternalLink,
 } from "lucide-react";
 import type { CreateBoardData } from "../../lib/boards-api";
-import { decomposePrd, type DecomposeResult } from "../../lib/boards-api";
+import {
+  decomposePrdStreaming,
+  type DecomposeResult,
+} from "../../lib/boards-api";
 
 type DialogMode = "template" | "prd";
 type PrdSource = "text" | "file" | "url" | "repo";
@@ -103,7 +106,19 @@ export default function CreateBoardDialog({
   const [prdRepoPath, setPrdRepoPath] = useState("");
   const [prdBoardName, setPrdBoardName] = useState("");
   const [prdResult, setPrdResult] = useState<DecomposeResult | null>(null);
+  const [streamText, setStreamText] = useState("");
+  const [streamPhase, setStreamPhase] = useState("");
+  const [streamChars, setStreamChars] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const streamContainerRef = useRef<HTMLPreElement>(null);
+
+  // Auto-scroll streaming text to bottom
+  useEffect(() => {
+    if (streamContainerRef.current) {
+      streamContainerRef.current.scrollTop =
+        streamContainerRef.current.scrollHeight;
+    }
+  }, [streamText]);
 
   if (!open) return null;
 
@@ -124,6 +139,9 @@ export default function CreateBoardDialog({
     setPrdRepoPath("");
     setPrdBoardName("");
     setPrdResult(null);
+    setStreamText("");
+    setStreamPhase("");
+    setStreamChars(0);
   };
 
   const handleClose = () => {
@@ -177,6 +195,9 @@ export default function CreateBoardDialog({
   // -- PRD decompose --
   const handleDecompose = async () => {
     setError(null);
+    setStreamText("");
+    setStreamPhase("");
+    setStreamChars(0);
 
     // Validate inputs
     if (prdSource === "text" && !prdContent.trim()) {
@@ -198,7 +219,7 @@ export default function CreateBoardDialog({
 
     setPrdState("loading");
     try {
-      const payload: Parameters<typeof decomposePrd>[0] = {
+      const payload: Parameters<typeof decomposePrdStreaming>[0] = {
         source: prdSource,
         boardName: prdBoardName.trim() || undefined,
       };
@@ -212,7 +233,17 @@ export default function CreateBoardDialog({
         payload.repoPath = prdRepoPath.trim() || undefined;
       }
 
-      const result = await decomposePrd(payload);
+      const result = await decomposePrdStreaming(payload, (event) => {
+        if (event.phase) {
+          setStreamPhase(event.phase);
+        }
+        if (event.text) {
+          setStreamText((prev) => prev + event.text);
+        }
+        if (event.charsGenerated != null) {
+          setStreamChars(event.charsGenerated);
+        }
+      });
       setPrdResult(result);
       setPrdState("success");
     } catch (err) {
@@ -410,16 +441,42 @@ export default function CreateBoardDialog({
         {/* PRD mode */}
         {mode === "prd" && (
           <div>
-            {/* Loading state */}
+            {/* Loading / streaming state */}
             {prdState === "loading" && (
-              <div className="flex flex-col items-center justify-center py-12">
-                <Loader2 className="w-10 h-10 animate-spin text-primary mb-4" />
-                <p className="text-sm text-muted-foreground">
-                  Decomposing spec into cards...
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  This may take a moment
-                </p>
+              <div className="flex flex-col py-4">
+                {/* Phase indicator */}
+                <div className="flex items-center gap-2 mb-3">
+                  <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
+                  <span className="text-sm font-medium text-foreground">
+                    {streamPhase === "resolving_content" && "Resolving content..."}
+                    {streamPhase === "calling_llm" && "Calling LLM..."}
+                    {streamPhase === "streaming" && "Streaming response..."}
+                    {streamPhase === "parsing" && "Parsing JSON..."}
+                    {streamPhase === "creating_board" && "Creating board..."}
+                    {!streamPhase && "Decomposing spec into cards..."}
+                  </span>
+                  {streamChars > 0 && (
+                    <span className="text-xs text-muted-foreground ml-auto tabular-nums">
+                      {streamChars.toLocaleString()} chars
+                    </span>
+                  )}
+                </div>
+
+                {/* Streaming text display */}
+                {streamText ? (
+                  <pre
+                    ref={streamContainerRef}
+                    className="rounded-lg bg-muted/50 border border-border p-3 text-xs text-muted-foreground font-mono whitespace-pre-wrap break-words max-h-60 overflow-y-auto"
+                  >
+                    {streamText}
+                  </pre>
+                ) : (
+                  <div className="flex items-center justify-center py-8">
+                    <p className="text-xs text-muted-foreground">
+                      Waiting for response...
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

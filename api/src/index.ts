@@ -387,11 +387,13 @@ async function start() {
       const { costEvents } = await import("./services/cost-events.js");
       const { planningProgressEmitter } = await import("./services/planning-progress-events.js");
       const { codeEventEmitter } = await import("./services/code-events.js");
+      const { decompositionEmitter } = await import("./services/decomposition-events.js");
       const { initCredentialCacheSubscription } = await import("./services/org-credentials.js");
 
       costEvents.initRedisSubscription();
       planningProgressEmitter.initRedisSubscription();
       codeEventEmitter.initRedisSubscription();
+      decompositionEmitter.initRedisSubscription();
       initCredentialCacheSubscription();
 
       logger.info("Redis event bridging initialized");

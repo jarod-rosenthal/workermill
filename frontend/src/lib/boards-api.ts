@@ -498,6 +498,59 @@ export async function decomposePrd(data: {
   return response.data;
 }
 
+export interface DecompositionStreamEvent {
+  phase: string;
+  text?: string;
+  detail?: string;
+  charsGenerated?: number;
+  boardId?: string;
+  error?: string;
+}
+
+/**
+ * Streaming PRD decomposition — opens SSE before firing the POST,
+ * pipes text deltas to onEvent callback.
+ */
+export async function decomposePrdStreaming(
+  data: {
+    source: "text" | "file" | "url" | "repo";
+    content?: string;
+    fileUrl?: string;
+    repoPath?: string;
+    githubRepo?: string;
+    boardName?: string;
+  },
+  onEvent: (event: DecompositionStreamEvent) => void,
+): Promise<DecomposeResult> {
+  const decompositionId = crypto.randomUUID();
+  const token = localStorage.getItem("accessToken") || "";
+
+  // Open SSE connection first
+  const sseUrl = `/api/prd/decompose/stream?decompositionId=${encodeURIComponent(decompositionId)}&token=${encodeURIComponent(token)}`;
+  const eventSource = new EventSource(sseUrl);
+
+  // Listen for events
+  eventSource.onmessage = (msg) => {
+    try {
+      const event: DecompositionStreamEvent = JSON.parse(msg.data);
+      onEvent(event);
+    } catch {
+      // Ignore parse errors (heartbeats, etc.)
+    }
+  };
+
+  try {
+    // Fire POST with decompositionId
+    const response = await apiClient.post("/prd/decompose", {
+      ...data,
+      decompositionId,
+    });
+    return response.data;
+  } finally {
+    eventSource.close();
+  }
+}
+
 // Card dependencies
 export async function addCardDependency(
   boardId: string,

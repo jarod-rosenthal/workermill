@@ -18,15 +18,81 @@ import {
   KbSpec,
   Organization,
 } from "../models/index.js";
-import { authenticateUser, authenticateApiKey } from "../middleware/auth.js";
+import { authenticateUser, authenticateApiKey, authenticateSSE } from "../middleware/auth.js";
 import { requireCurrentTos } from "../middleware/tos.js";
 import { body, validateRequest } from "../middleware/validation.js";
-import { decomposePrd } from "../services/prd-decomposer.js";
+import { decomposePrd, decomposePrdStreaming } from "../services/prd-decomposer.js";
+import { decompositionEmitter } from "../services/decomposition-events.js";
 import { getOrgCredentials } from "../services/org-credentials.js";
 import { logger } from "../utils/logger.js";
 import { validateExternalUrl } from "../utils/url-validator.js";
 
 const router = Router();
+
+// =============================================================================
+// SSE endpoint — BEFORE auth middleware so it can use authenticateSSE
+// (EventSource can't set headers; auth goes via ?token= query param)
+// =============================================================================
+
+router.get("/decompose/stream", authenticateSSE, (req: Request, res: Response) => {
+  const decompositionId = req.query.decompositionId as string;
+  if (!decompositionId) {
+    res.status(400).json({ error: "decompositionId query parameter is required" });
+    return;
+  }
+
+  // SSE headers
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.flushHeaders();
+
+  // Send initial heartbeat
+  res.write(": heartbeat\n\n");
+
+  let closed = false;
+
+  const unsubscribe = decompositionEmitter.subscribeToEvents(
+    decompositionId,
+    (event) => {
+      if (closed) return;
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+
+      // Close on terminal phases
+      if (event.phase === "complete" || event.phase === "error") {
+        // Small delay to ensure the client receives the final event
+        setTimeout(() => {
+          if (!closed) {
+            closed = true;
+            unsubscribe();
+            res.end();
+          }
+        }, 500);
+      }
+    },
+  );
+
+  // 5-minute timeout
+  const timeout = setTimeout(() => {
+    if (!closed) {
+      closed = true;
+      unsubscribe();
+      res.write(`data: ${JSON.stringify({ phase: "error", error: "Stream timeout" })}\n\n`);
+      res.end();
+    }
+  }, 5 * 60 * 1000);
+
+  req.on("close", () => {
+    if (!closed) {
+      closed = true;
+      unsubscribe();
+      clearTimeout(timeout);
+    }
+  });
+});
 
 // Accept either JWT (dashboard) or API key (agent) authentication
 router.use((req, res, next) => {
@@ -244,12 +310,17 @@ router.post(
     .optional()
     .isBoolean()
     .withMessage("syncToTracker must be a boolean"),
+  body("decompositionId")
+    .optional()
+    .isString()
+    .isLength({ min: 1, max: 100 })
+    .withMessage("decompositionId must be a non-empty string"),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
       const org = req.organization!;
       const user = req.user; // may be undefined when using API key auth (agent)
-      let {
+      const {
         source,
         content,
         fileUrl,
@@ -257,7 +328,13 @@ router.post(
         githubRepo,
         boardName: boardNameOverride,
         syncToTracker,
+        decompositionId,
       } = req.body;
+
+      const emitDecomp = decompositionId
+        ? (event: import("../services/decomposition-events.js").DecompositionEvent) =>
+            decompositionEmitter.emitEvent(decompositionId, event)
+        : undefined;
 
       // ---------------------------------------------------------------
       // 0. If specId provided, load spec and validate quality gate
@@ -430,14 +507,26 @@ router.post(
           orgId: org.id,
         });
 
+        emitDecomp?.({ phase: "resolving_content", detail: "Content resolved, starting decomposition" });
+
         try {
           if (planProvider === "anthropic") {
-            // Anthropic — use existing Anthropic SDK decomposer
-            decomposed = await decomposePrd(
-              prdContent,
-              planModel,
-              orgCreds.anthropicApiKey || undefined,
-            );
+            if (decompositionId) {
+              // Streaming path — emit events to SSE clients
+              decomposed = await decomposePrdStreaming(
+                prdContent,
+                planModel,
+                orgCreds.anthropicApiKey || undefined,
+                decompositionId,
+              );
+            } else {
+              // Non-streaming path (agents, backward compat)
+              decomposed = await decomposePrd(
+                prdContent,
+                planModel,
+                orgCreds.anthropicApiKey || undefined,
+              );
+            }
           } else {
             // Non-Anthropic — use Vercel AI SDK via planning agent config
             const { createModel } = await import("../services/planning-agent/config.js");
@@ -493,6 +582,7 @@ router.post(
       // ---------------------------------------------------------------
       // 3. Create board, columns, cards, dependencies, and labels
       // ---------------------------------------------------------------
+      emitDecomp?.({ phase: "creating_board", detail: "Creating board and cards" });
       const finalBoardName = boardNameOverride || decomposed.boardName;
 
       const result = await AppDataSource.transaction(async (em) => {
@@ -523,6 +613,8 @@ router.post(
           createdById: user?.id || null,
           qualityGateCommands: decomposed.qualityGates?.length ? decomposed.qualityGates : null,
           ciWorkflowPath: decomposed.ciWorkflowPath || null,
+          prdContent: prdContent,
+          prdSource: source || "text",
         });
         await boardRepo.save(board);
 
@@ -671,6 +763,12 @@ router.post(
       // ---------------------------------------------------------------
       // 6. Return response
       // ---------------------------------------------------------------
+      emitDecomp?.({
+        phase: "complete",
+        boardId: result.board.id,
+        detail: `Board "${result.board.name}" created with ${result.createdCards.length} cards`,
+      });
+
       logger.info("PRD decomposed into board", {
         boardId: result.board.id,
         boardName: result.board.name,
@@ -695,6 +793,12 @@ router.post(
       });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
+      if (req.body.decompositionId) {
+        decompositionEmitter.emitEvent(req.body.decompositionId, {
+          phase: "error",
+          error: errorMsg,
+        });
+      }
       logger.error("Error decomposing PRD", {
         error: errorMsg,
         stack: error instanceof Error ? error.stack : undefined,

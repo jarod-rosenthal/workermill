@@ -26,7 +26,7 @@ import { teamBoardEpics } from "../data/teamboard-showcase-data";
 import { taskPulseEpics } from "../data/taskpulse-showcase-data";
 import { calMillEpics } from "../data/calmill-showcase-data";
 import { shipApiEpics } from "../data/shipapi-showcase-data";
-
+import { flagDeckEpics } from "../data/flagdeck-showcase-data";
 
 interface QualityScores {
   lint: string;
@@ -216,6 +216,37 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     stories: [],
     icon: <Terminal className="w-5 h-5" />,
   },
+  flagdeck: {
+    id: "flagdeck",
+    name: "FlagDeck",
+    tagline:
+      "Feature flag platform — built across 6 sequential epics by AI workers.",
+    description:
+      "Open-source feature flag and experimentation platform with Go Fiber API, SvelteKit 2 dashboard, MongoDB document models, Redis caching, JWT + API key authentication, targeting rules, percentage rollouts, A/B experiments, and Playwright E2E tests. 6 epics executed sequentially, each building on the last. Deployed to Railway at flagdeck-app.workermill.com.",
+    stack: "Go (Fiber) + SvelteKit 2 + MongoDB + Redis",
+    storyCount: 38,
+    cost: "$195",
+    duration: "~625 min",
+    linesOfCode: "27,000",
+    repoUrl: "https://github.com/workermill-examples/flagdeck",
+    liveUrl: "https://flagdeck-app.workermill.com",
+    category: "developer-tools",
+    personasUsed: [
+      "backend_developer",
+      "frontend_developer",
+      "security_engineer",
+      "qa_engineer",
+      "devops_engineer",
+    ],
+    qualityScores: {
+      lint: "0 errors",
+      types: "0 errors (go vet + svelte-check)",
+      tests: "Go unit + Playwright E2E",
+      security: "0 critical",
+    },
+    stories: [],
+    icon: <Zap className="w-5 h-5" />,
+  },
 };
 
 const personaLabels: Record<string, { label: string; color: string }> = {
@@ -254,14 +285,18 @@ export default function ShowcaseViewer() {
   const isTaskPulse = projectId === "taskpulse";
   const isCalMill = projectId === "calmill";
   const isShipApi = projectId === "shipapi";
-  const isEpicBoard = isTeamBoard || isTaskPulse || isCalMill || isShipApi;
+  const isFlagDeck = projectId === "flagdeck";
+  const isEpicBoard =
+    isTeamBoard || isTaskPulse || isCalMill || isShipApi || isFlagDeck;
   const epicBoardData = isTeamBoard
     ? teamBoardEpics
     : isCalMill
       ? calMillEpics
       : isShipApi
         ? shipApiEpics
-        : taskPulseEpics;
+        : isFlagDeck
+          ? flagDeckEpics
+          : taskPulseEpics;
   const [expandedEpic, setExpandedEpic] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Record<string, "spec" | "log">>(
     {},

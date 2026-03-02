@@ -10,6 +10,10 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../utils/logger.js";
+import {
+  decompositionEmitter,
+  type DecompositionEvent,
+} from "./decomposition-events.js";
 
 // ============================================================================
 // TYPES
@@ -44,16 +48,17 @@ export interface DecomposedPrd {
 
 export const SYSTEM_PROMPT = `You are a senior technical program manager who decomposes Product Requirements Documents (PRDs) into implementation cards for AI coding agents.
 
-Each card represents ONE cohesive epic — a vertical slice or architectural layer that a single AI worker can execute independently (given its dependencies are met).
+Each card represents ONE cohesive epic — a major functional slice that a single AI worker can execute independently (given its dependencies are met). Workers receive the FULL PRD as their specification, so cards define SCOPE (what to build), not specs (how to build it — the PRD has those).
 
 ***REMOVED******REMOVED*** Sizing Rules (CRITICAL)
 
-- Target 7-12 deliverables per card. This is the sweet spot for AI worker execution.
-- Cards with >15 deliverables MUST be split into smaller cards.
-- Cards with <4 deliverables MUST be merged with related work.
-- Card 1 is ALWAYS "Project Setup & Dev Environment" — repo scaffolding, tooling, environment config.
-- Card 2 is ALWAYS "CI/CD Pipeline & Quality Gates" — the FULL CI pipeline (lint, typecheck, test, build) must be created and verified green BEFORE any feature work begins. This card must include a trivial passing test so CI actually runs. Assigned to devops_engineer. ALL subsequent feature cards MUST depend on this card (directly or transitively).
-- The LAST card is ALWAYS "Production Deploy & Validation" — deployment pipeline, smoke tests, monitoring, go-live checklist.
+- Target **3-4 total cards** for the entire project. Fewer cards = fewer handoffs = fewer integration bugs between workers.
+- Target 15-30 deliverables per card. AI workers perform BETTER with larger, cohesive cards that cover a complete functional layer.
+- Cards with >35 deliverables should be split. Cards with <8 deliverables MUST be merged with related work.
+- Card 1 is ALWAYS "Foundation" — combines project scaffolding, CI/CD pipeline, AND all backend/server code (models, handlers, middleware, services, seed data, tests). CI deliverables are part of this card, NOT a separate card. Assigned to backend_developer.
+- For full-stack projects: Card 1 = Foundation (backend + CI), Card 2 = Frontend (all UI), Last card = Deployment + Validation.
+- For backend-only projects: Card 1 = Foundation (backend + CI), Card 2 = Deployment + Validation.
+- The LAST card ALWAYS includes production deployment + validation — deployment pipeline, smoke tests, seed verification, go-live checklist.
 
 ***REMOVED******REMOVED*** Card Description Format (REQUIRED)
 
@@ -94,14 +99,15 @@ Choose the persona whose primary skillset best matches the card's dominant work.
 
 - dependencyIndices are 0-based array positions referring to other cards
 - No circular dependencies allowed — the dependency graph must be a DAG
-- Card 0 (Project Setup) has no dependencies (empty array)
-- The last card (Production Deploy) typically depends on all or most preceding cards
+- Card 0 (Foundation) has no dependencies (empty array)
+- All subsequent cards depend on Card 0 (directly or transitively)
+- The last card (Deployment) typically depends on all preceding cards
 
-***REMOVED******REMOVED*** CI/CD Is a First-Class Citizen
+***REMOVED******REMOVED*** CI/CD Is a First-Class Citizen (Part of Card 1)
 
-The CI/CD card (Card 2) is NOT a nice-to-have. It is the quality gate that proves code works. Every AI can generate code — the CI pipeline proves it compiles, passes lint, passes tests, and builds.
+CI/CD is NOT a separate card. It is part of Card 1 (Foundation). The CI pipeline proves code compiles, passes lint, passes tests, and builds.
 
-Card 2 deliverables MUST include:
+Card 1 CI deliverables MUST include:
 1. CI workflow file (e.g., .github/workflows/ci.yml) with ALL quality steps (lint, typecheck, test, build)
 2. A trivial passing test file so the test step succeeds on first run
 3. CI workflow triggers MUST include BOTH \`push: [main]\` AND \`pull_request: [main]\` events. Without \`pull_request\` triggers, CI won't run on PRs and code merges without verification.
@@ -112,13 +118,13 @@ CI workflow steps MUST run the EXACT SAME commands as the quality gates — no a
 
 For Go CI: use "go vet ./...", "go test ./... -v -count=1 -race", "go build -o /dev/null ./cmd/server" (NOT golangci-lint, staticcheck, or other third-party linters). For Node.js CI: use "npm run lint", "npm run test", "npm run build". For TypeScript projects (tsconfig.json present): add "npx tsc --noEmit" to quality gates. For SvelteKit projects (svelte.config.js present): use "npx svelte-check" instead of bare tsc. For Python CI: use "python -m pytest", "python -m mypy .". Do NOT add third-party tools to CI that aren't already in the repo.
 
-ALL feature cards (Card 3+) MUST have Card 2 in their transitive dependency chain.
+ALL subsequent cards MUST depend on Card 1 (directly or transitively).
 
 ***REMOVED******REMOVED*** Priority Assignment
 
-- urgent: Blocking all other work (Card 0 — setup, Card 1 — CI/CD pipeline)
-- high: Core business logic, critical path items
-- medium: Important but not blocking — features, integrations
+- urgent: Card 1 — Foundation (setup + CI + backend)
+- high: Feature cards (frontend, integration)
+- medium: Deployment + validation (last card)
 - low: Nice-to-have, polish, documentation
 
 ***REMOVED******REMOVED*** Output Format
@@ -267,6 +273,121 @@ export async function decomposePrd(
   }
 
   // Validate and return
+  return validateDecomposedPrd(parsed);
+}
+
+// ============================================================================
+// STREAMING VARIANT
+// ============================================================================
+
+/**
+ * Decompose a PRD with real-time streaming via decomposition events.
+ * Same auth logic and validation as decomposePrd(), but uses client.messages.stream()
+ * and emits text deltas via the decomposition event emitter.
+ *
+ * @param prdContent - The full text of the PRD document
+ * @param model - Anthropic model ID
+ * @param apiKey - Anthropic API key (falls back to env var)
+ * @param decompositionId - Unique ID for correlating SSE events
+ */
+export async function decomposePrdStreaming(
+  prdContent: string,
+  model: string,
+  apiKey: string | undefined,
+  decompositionId: string,
+): Promise<DecomposedPrd> {
+  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const resolvedApiKey = apiKey || process.env.ANTHROPIC_API_KEY;
+
+  if (!oauthToken && !resolvedApiKey) {
+    throw new Error(
+      "No Anthropic API key provided. Pass apiKey parameter or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN environment variable.",
+    );
+  }
+
+  const resolvedModel = model || DEFAULT_MODEL;
+
+  logger.info("Decomposing PRD via Anthropic SDK (streaming)", {
+    model: resolvedModel,
+    prdLength: prdContent.length,
+    authMethod: oauthToken ? "oauth" : "api_key",
+    decompositionId,
+  });
+
+  const client = oauthToken
+    ? new Anthropic({ authToken: oauthToken })
+    : new Anthropic({ apiKey: resolvedApiKey });
+
+  const emit = (event: DecompositionEvent) =>
+    decompositionEmitter.emitEvent(decompositionId, event);
+
+  emit({ phase: "calling_llm", detail: `Model: ${resolvedModel}` });
+
+  let fullText = "";
+  try {
+    const stream = client.messages.stream({
+      model: resolvedModel,
+      max_tokens: 128000,
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: `Decompose this PRD into implementation cards:\n\n${prdContent}`,
+        },
+      ],
+    });
+
+    stream.on("text", (textDelta) => {
+      fullText += textDelta;
+      emit({
+        phase: "streaming",
+        text: textDelta,
+        charsGenerated: fullText.length,
+      });
+    });
+
+    const finalMessage = await stream.finalMessage();
+
+    logger.info("Received PRD decomposition response (streaming)", {
+      model: finalMessage.model,
+      stopReason: finalMessage.stop_reason,
+      inputTokens: finalMessage.usage?.input_tokens,
+      outputTokens: finalMessage.usage?.output_tokens,
+      responseLength: fullText.length,
+    });
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Anthropic SDK streaming error during PRD decomposition", {
+      error: errMsg,
+    });
+    emit({ phase: "error", error: errMsg });
+    throw new Error(`PRD decomposition failed: ${errMsg}`);
+  }
+
+  if (!fullText) {
+    emit({ phase: "error", error: "Anthropic API returned empty content" });
+    throw new Error("Anthropic API returned empty content");
+  }
+
+  emit({ phase: "parsing", detail: "Parsing JSON response" });
+
+  const jsonText = stripMarkdownFences(fullText);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Failed to parse PRD decomposition JSON (streaming)", {
+      error: errMsg,
+      rawTextSnippet: fullText.slice(0, 500),
+    });
+    emit({ phase: "error", error: `Failed to parse JSON: ${errMsg}` });
+    throw new Error(
+      `Failed to parse PRD decomposition response as JSON: ${errMsg}`,
+    );
+  }
+
   return validateDecomposedPrd(parsed);
 }
 

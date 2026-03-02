@@ -552,8 +552,12 @@ function runClaudeCli(
           ),
         );
       } else {
-        // Prefer the result event's text (authoritative), fall back to accumulated deltas
-        resolve(resultText || fullText);
+        // fullText accumulates text from ALL assistant turns (tool-use conversations
+        // produce multiple turns). resultText is ONLY the last text block of the
+        // last assistant message (from the stream-json "result" event). When the
+        // planner uses tools, the JSON plan is often in an earlier turn — resultText
+        // won't contain it. Always prefer fullText which has everything.
+        resolve(fullText || resultText);
       }
     });
 

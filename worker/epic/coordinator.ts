@@ -103,6 +103,8 @@ export class EpicCoordinator {
   private failedStoryIndices: Set<number> = new Set();
   // Resilience: Track parked stories (quality gate retries exhausted, waiting for deferred retry)
   private parkedStoryIndices: Set<number> = new Set();
+  // Local completion tracking: stories confirmed done by executeStory (defense against postCompletion API failures)
+  private locallyCompletedStoryIndices: Set<number> = new Set();
   // Resilience configuration
   private resilience: ResilienceConfig;
   // Active worktrees for graceful shutdown
@@ -2185,6 +2187,9 @@ export class EpicCoordinator {
         // Mark that we have committed code on a remote branch
         this.hasAnyCommittedCode = true;
 
+        // Track locally so checkMissionComplete works even if postCompletion API failed
+        this.locallyCompletedStoryIndices.add(story.storyIndex);
+
         // Update expert state to completed
         this.expertStates.set(expert, {
           persona: expert,
@@ -2751,10 +2756,10 @@ export class EpicCoordinator {
       const storyIndex = (ready.metadata?.storyIndex as number) || 0;
       const storyPersona = (ready.metadata?.persona as string) || "";
 
-      // Skip if already completed
+      // Skip if already completed (check both coordination feed AND local tracking)
       const isCompleted = completions.some(
         (c) => (c.metadata?.storyIndex as number) === storyIndex
-      );
+      ) || this.locallyCompletedStoryIndices.has(storyIndex);
       if (isCompleted) return false;
 
       // Skip if failed (escalated blocker, awaiting human resolution)

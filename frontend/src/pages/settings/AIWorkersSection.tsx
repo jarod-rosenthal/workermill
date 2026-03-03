@@ -578,12 +578,7 @@ export function AIWorkersSection({
               {/* Max Concurrent Containers */}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-2">Max Concurrent Containers</label>
-                {isProPlan ? (
-                  <div className="px-4 py-3 rounded-lg bg-background/50 border border-border text-muted-foreground text-sm">
-                    1 <span className="text-xs text-amber-400 ml-2">(Pro tier limit)</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4">
                     <input
                       type="range"
                       min="1"
@@ -603,11 +598,10 @@ export function AIWorkersSection({
                       />
                     </div>
                   </div>
-                )}
                 {validationErrors.maxConcurrentWorkers && (
                   <p className="text-xs text-red-500 mt-1">{validationErrors.maxConcurrentWorkers}</p>
                 )}
-                {!isProPlan && <p className="text-xs text-muted-foreground mt-1">Maximum worker containers running simultaneously (1-14)</p>}
+                <p className="text-xs text-muted-foreground mt-1">Maximum worker containers running simultaneously (1-14)</p>
               </div>
 
               {/* Max Parallel Experts */}
@@ -617,7 +611,7 @@ export function AIWorkersSection({
                   <input
                     type="range"
                     min="1"
-                    max={isProPlan ? 3 : 7}
+                    max="14"
                     value={settings.maxParallelExperts}
                     onChange={(e) => updateSetting("maxParallelExperts", parseInt(e.target.value))}
                     className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-accent"
@@ -626,7 +620,7 @@ export function AIWorkersSection({
                     <input
                       type="number"
                       min="1"
-                      max={isProPlan ? 3 : 7}
+                      max="14"
                       value={settings.maxParallelExperts}
                       onChange={(e) => updateSetting("maxParallelExperts", parseInt(e.target.value) || 3)}
                       className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
@@ -637,8 +631,7 @@ export function AIWorkersSection({
                   <p className="text-xs text-red-500 mt-1">{validationErrors.maxParallelExperts}</p>
                 )}
                 <p className="text-xs text-muted-foreground mt-1">
-                  Maximum expert subagents running in parallel per task (1-{isProPlan ? 3 : 7})
-                  {isProPlan && <span className="text-amber-400 ml-1">(max 3 on Pro)</span>}
+                  Maximum expert subagents running in parallel per task (1-14)
                 </p>
               </div>
 

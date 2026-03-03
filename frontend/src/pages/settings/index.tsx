@@ -440,18 +440,12 @@ export default function Settings() {
       });
       if (!response.ok) throw new Error("Failed to load settings");
       const data = await response.json();
-      // Clamp values to plan limits (existing DB values may exceed current plan)
-      const orgPlan = organization?.plan || "pro";
-      const isProPlan = orgPlan === "pro";
-      const logRetMax = isProPlan ? 14 : 90;
-      const taskRetMax = isProPlan ? 14 : 90;
-      const workersMax = isProPlan ? 1 : 3;
-      const expertsMax = isProPlan ? 3 : 7;
+      const isProPlan = (organization?.plan || "pro") === "pro";
       const loadedSettings: Settings = {
-        logRetentionDays: Math.min(data.logRetentionDays ?? 7, logRetMax),
-        taskRetentionDays: Math.min(data.taskRetentionDays ?? 7, taskRetMax),
-        maxConcurrentWorkers: Math.min(data.maxConcurrentWorkers ?? 1, workersMax),
-        maxParallelExperts: Math.min(data.maxParallelExperts, expertsMax),
+        logRetentionDays: data.logRetentionDays ?? 7,
+        taskRetentionDays: data.taskRetentionDays ?? 7,
+        maxConcurrentWorkers: data.maxConcurrentWorkers ?? 1,
+        maxParallelExperts: data.maxParallelExperts ?? 3,
         defaultMaxRetries: Math.min(data.defaultMaxRetries ?? 3, 5),
         taskCooldownSeconds: data.taskCooldownSeconds ?? 0,
         defaultWorkerModel: data.defaultWorkerModel || "claude-sonnet-4-6",
@@ -878,23 +872,17 @@ export default function Settings() {
   // Validation
   const validateSettings = (): boolean => {
     const errors: ValidationErrors = {};
-    const valPlan = organization?.plan || "pro";
-    const valProPlan = valPlan === "pro";
-    const valLogMax = valProPlan ? 14 : 90;
-    const valTaskMax = valProPlan ? 14 : 90;
-    const valWorkersMax = valProPlan ? 1 : 3;
-    const valExpertsMax = valProPlan ? 3 : 7;
-    if (settings.logRetentionDays !== -1 && (settings.logRetentionDays < 1 || settings.logRetentionDays > valLogMax)) {
-      errors.logRetentionDays = `Must be between 1 and ${valLogMax} days`;
+    if (settings.logRetentionDays !== -1 && (settings.logRetentionDays < 1 || settings.logRetentionDays > 365)) {
+      errors.logRetentionDays = "Must be between 1 and 365 days";
     }
-    if (settings.taskRetentionDays !== -1 && (settings.taskRetentionDays < 1 || settings.taskRetentionDays > valTaskMax)) {
-      errors.taskRetentionDays = `Must be between 1 and ${valTaskMax} days`;
+    if (settings.taskRetentionDays !== -1 && (settings.taskRetentionDays < 1 || settings.taskRetentionDays > 365)) {
+      errors.taskRetentionDays = "Must be between 1 and 365 days";
     }
-    if (settings.maxConcurrentWorkers < 1 || settings.maxConcurrentWorkers > valWorkersMax) {
-      errors.maxConcurrentWorkers = `Must be between 1 and ${valWorkersMax}`;
+    if (settings.maxConcurrentWorkers < 1 || settings.maxConcurrentWorkers > 14) {
+      errors.maxConcurrentWorkers = "Must be between 1 and 14";
     }
-    if (settings.maxParallelExperts < 1 || settings.maxParallelExperts > valExpertsMax) {
-      errors.maxParallelExperts = `Must be between 1 and ${valExpertsMax}`;
+    if (settings.maxParallelExperts < 1 || settings.maxParallelExperts > 14) {
+      errors.maxParallelExperts = "Must be between 1 and 14";
     }
     if (settings.defaultMaxRetries < 0 || settings.defaultMaxRetries > 5) {
       errors.defaultMaxRetries = "Must be between 0 and 5 retries";

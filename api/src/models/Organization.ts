@@ -36,17 +36,17 @@ export const PLAN_PRICES: Record<OrganizationPlan, number> = {
   enterprise: 0,  // Custom pricing
 };
 
-// Max concurrent worker containers
+// Max concurrent worker containers — no plan-based limits, users choose their own
 export const PLAN_MAX_WORKERS: Record<OrganizationPlan, number> = {
-  pro: 1,
-  max: 3,
-  enterprise: -1,  // Unlimited
+  pro: -1,
+  max: -1,
+  enterprise: -1,
 };
 
-// Max parallel expert personas per task
+// Max parallel expert personas per task — no plan-based limits, users choose their own
 export const PLAN_MAX_EXPERTS: Record<OrganizationPlan, number> = {
-  pro: 3,
-  max: 7,
+  pro: -1,
+  max: -1,
   enterprise: -1,
 };
 

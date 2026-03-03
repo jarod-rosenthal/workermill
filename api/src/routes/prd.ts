@@ -482,7 +482,10 @@ router.post(
       const { preDecomposed } = req.body;
       let decomposed;
 
-      if (preDecomposed && preDecomposed.boardName && Array.isArray(preDecomposed.cards)) {
+      const hasPreDecomposed = preDecomposed && preDecomposed.boardName && Array.isArray(preDecomposed.cards);
+      const forceServerDecomp = hasPreDecomposed && org.planningMode === "decomposer_planned";
+
+      if (hasPreDecomposed && !forceServerDecomp) {
         // Agent already decomposed locally — validate and sanitize the data
         logger.info("Using pre-decomposed PRD from agent", {
           boardName: preDecomposed.boardName,
@@ -502,6 +505,11 @@ router.post(
           return;
         }
       } else {
+        if (forceServerDecomp) {
+          logger.info("Decomposer-planned mode: ignoring agent pre-decomposed data, re-decomposing server-side with stories", {
+            orgId: org.id,
+          });
+        }
         // Use the planning agent model/provider from org settings
         const planProvider = org.planningAgentProvider || "anthropic";
         const planModel = org.planningAgentModel || org.defaultWorkerModel;

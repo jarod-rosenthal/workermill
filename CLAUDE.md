@@ -26,6 +26,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **If you think something could be "better" (CloudWatch, WebSockets, etc.), ASK FIRST.**
 
+***REMOVED******REMOVED******REMOVED*** DO NOT Hardcode Timeouts, Thresholds, or Limits Without Asking
+
+**NEVER add hardcoded timeouts, rate limits, retry counts, token limits, or any numeric constraint without explicit user approval.** These cause silent failures in production that are extremely hard to debug. A 60-second HTTP timeout killed a multi-minute LLM decomposition flow. A hardcoded retry limit can cause permanent task failures.
+
+- **Timeouts:** If you need a timeout, ASK what value to use. When in doubt, use a very large value or no timeout at all.
+- **Thresholds/limits:** File count caps, token limits, score thresholds — all must be approved before adding.
+- **Fallback defaults:** `?? <value>` and `|| "<value>"` patterns hide bugs. See "DO NOT Add Hardcoded Fallbacks for Org Settings" below.
+- **If you see an existing hardcoded value that seems wrong, flag it** — don't silently change it.
+
 ***REMOVED******REMOVED******REMOVED*** DO NOT Touch the Local Database
 
 **On 2026-02-16, Claude dropped the local PostgreSQL database (`DROP DATABASE workermill`) without permission while debugging a "loading logs" issue. The data only existed locally and was permanently destroyed. This must NEVER happen again.**

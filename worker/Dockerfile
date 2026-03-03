@@ -177,7 +177,9 @@ RUN mkdir -p /workspace
 
 ***REMOVED*** Create worker user with sudo for runtime tool installs
 ***REMOVED*** Claude Code CLI refuses to run as root
-RUN useradd -m -s /bin/bash worker
+***REMOVED*** docker-ce-cli doesn't create a docker group — create it so the worker user
+***REMOVED*** can access the Docker socket when mounted from the host (sibling containers).
+RUN groupadd -f docker && useradd -m -s /bin/bash -G docker worker
 
 ***REMOVED*** Only chown directories the worker actually WRITES to at runtime.
 ***REMOVED*** /app is read-only (root-owned 644/755 is readable by worker) — no chown needed.

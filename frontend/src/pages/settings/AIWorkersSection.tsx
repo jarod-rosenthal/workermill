@@ -384,7 +384,16 @@ export function AIWorkersSection({
               {/* Planning Mode Toggle */}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-3">Planning Mode</label>
-                <div className="grid grid-cols-3 gap-2">
+                {isProPlan ? (
+                  <div className="p-3 rounded-lg border-2 border-purple-500 bg-purple-500/10 text-left">
+                    <div className="text-sm font-medium text-foreground">Simplified</div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Single planning pass — critic feedback is incorporated but never blocks.{" "}
+                      <Link to="/pricing" className="text-primary hover:underline">Upgrade to Max</Link> for more planning modes.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2">
                     <button
                       onClick={() => updateSetting("planningMode", "strict")}
                       className={`p-3 rounded-lg border-2 transition-all text-left ${
@@ -425,6 +434,7 @@ export function AIWorkersSection({
                       </p>
                     </button>
                   </div>
+                )}
               </div>
 
               {isProPlan ? (

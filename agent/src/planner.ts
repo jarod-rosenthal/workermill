@@ -790,7 +790,7 @@ function cloneWithGcm(
         plainUrl,
         tmpDir,
       ],
-      { stdio: ["pipe", "pipe", "pipe"], timeout: 60_000, windowsHide: true },
+      { stdio: ["pipe", "pipe", "pipe"], timeout: 300_000, windowsHide: true },
     );
     console.log(
       `${ts()} ${taskLabel} ${chalk.green("✓")} Repo cloned via Windows credential store`,
@@ -828,7 +828,7 @@ async function cloneTargetRepo(
     );
     execFileSync("git", ["clone", "--depth", "1", "--single-branch", cloneUrl, tmpDir], {
       stdio: ["pipe", "pipe", "pipe"],
-      timeout: 60_000,
+      timeout: 300_000,
       windowsHide: true,
     });
     console.log(

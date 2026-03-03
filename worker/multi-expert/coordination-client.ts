@@ -77,7 +77,7 @@ export class CoordinationClient {
         "Content-Type": "application/json",
         "x-api-key": config.orgApiKey,
       },
-      timeout: 60000,
+      timeout: 300_000,
     });
   }
 
@@ -464,7 +464,7 @@ export class CoordinationClient {
    */
   async pollForAnswers(
     questionIds: string[],
-    timeoutMs: number = 60000,
+    timeoutMs: number = 300_000,
     pollIntervalMs: number = 5000
   ): Promise<Map<string, ContextMessage>> {
     const answers = new Map<string, ContextMessage>();

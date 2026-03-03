@@ -434,7 +434,7 @@ Begin your review now. Start by fetching the PR diff.`;
             "Content-Type": "application/json",
             "x-api-key": this.config.orgApiKey,
           },
-          timeout: 60000,
+          timeout: 300_000,
         });
 
         await this.postLog(`Completion reported successfully: ${JSON.stringify(response.data)}`, "system");

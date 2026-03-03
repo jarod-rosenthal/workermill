@@ -56,7 +56,7 @@ export class CoordinationClient extends EventEmitter {
         "Content-Type": "application/json",
         "x-api-key": config.orgApiKey,
       },
-      timeout: 60000,
+      timeout: 300_000,
     });
   }
 
@@ -401,7 +401,7 @@ export class CoordinationClient extends EventEmitter {
    */
   async waitForAnswer(
     questionId: string,
-    timeoutMs: number = 60000
+    timeoutMs: number = 300_000
   ): Promise<string | undefined> {
     const startTime = Date.now();
     const pollInterval = 2000;

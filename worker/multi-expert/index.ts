@@ -304,7 +304,7 @@ export class MultiExpertCoordinator {
         "Content-Type": "application/json",
         "x-api-key": config.orgApiKey,
       },
-      timeout: 60000,
+      timeout: 300_000,
     });
 
     // Initialize coordination client for real-time communication

@@ -6,7 +6,6 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
-import timeout from "connect-timeout";
 import swaggerUi from "swagger-ui-express";
 
 // Initialize Sentry for error tracking (only if DSN is configured)
@@ -106,9 +105,6 @@ const app = express();
 // Trust one level of proxy (AWS ALB) so req.ip returns the real client IP
 app.set("trust proxy", 1);
 
-// Request timeout middleware - prevents stuck requests (60 second timeout)
-app.use(timeout("60s"));
-
 // Response compression middleware - reduces payload sizes
 app.use(
   compression({
@@ -123,15 +119,6 @@ app.use(
   })
 );
 
-// Timeout check middleware - halt processing if request timed out
-const haltOnTimedout = (
-  req: express.Request,
-  _res: express.Response,
-  next: express.NextFunction
-) => {
-  if (!req.timedout) next();
-};
-
 // Security middleware
 app.use(helmet());
 app.use(
@@ -140,9 +127,6 @@ app.use(
     credentials: true,
   })
 );
-
-// Apply timeout check after security middleware
-app.use(haltOnTimedout);
 
 // Pool health gating — 503 when pool exhausted (before routes)
 app.use(poolHealthMiddleware);
@@ -475,16 +459,6 @@ process.on("unhandledRejection", (reason, promise) => {
 
 // Handle uncaught exceptions - these are more serious and require exit
 process.on("uncaughtException", (error) => {
-  // ERR_HTTP_HEADERS_SENT is benign — connect-timeout already replied, then
-  // a route handler tried to respond again.  The client got their response;
-  // the process state is fine.  Log it and keep running.
-  if ((error as NodeJS.ErrnoException).code === "ERR_HTTP_HEADERS_SENT") {
-    logger.warn("Suppressed ERR_HTTP_HEADERS_SENT (connect-timeout race)", {
-      message: error.message,
-    });
-    return;
-  }
-
   logger.error("Uncaught Exception - shutting down", {
     message: error.message,
     stack: error.stack,

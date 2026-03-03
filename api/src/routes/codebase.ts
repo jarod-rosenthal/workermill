@@ -202,7 +202,6 @@ router.post(
     };
 
     // Fire-and-forget: indexing can take minutes (embedding generation).
-    // Respond immediately so the global connect-timeout doesn't kill us.
     codebaseIndexer.indexRepository(orgId, repository, options).then((result) => {
       logger.info("Codebase index completed", {
         orgId,

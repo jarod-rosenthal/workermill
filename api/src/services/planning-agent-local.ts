@@ -323,7 +323,7 @@ function cloneTargetRepo(
     logger.info("Cloning repo for local planner", { taskId, repo: safeUrl });
     execSync(`git clone --depth 1 --single-branch "${cloneUrl}" "${tmpDir}"`, {
       stdio: ["ignore", "ignore", "pipe"],
-      timeout: 60_000,
+      timeout: 300_000,
     });
     logger.info("Repo cloned for local planner", { taskId, path: tmpDir });
     return tmpDir;

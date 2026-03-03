@@ -1148,7 +1148,7 @@ Clean up any containers you start when you're done (\`docker stop <name>\`).`;
           try {
             execSync("npx tsc --noEmit 2>&1", {
               cwd: worktreePath,
-              timeout: 60_000,
+              timeout: 300_000,
               encoding: "utf-8",
             });
             await this.postLog(

@@ -488,7 +488,7 @@ async function main(): Promise<void> {
     try {
       execSync(
         `git checkout ${mainBranch} && git reset --hard origin/${mainBranch} && git pull --ff-only`,
-        { cwd: existingRepoPath, stdio: "pipe", timeout: 60_000 },
+        { cwd: existingRepoPath, stdio: "pipe", timeout: 300_000 },
       );
       console.log(`[Bootstrap] Reset to ${mainBranch}, pulled latest`);
     } catch (err) {

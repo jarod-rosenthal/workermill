@@ -436,14 +436,19 @@ Write in a professional, direct tone. Do NOT open messages with filler words or 
 
 When summarizing your work at the end, describe decisions in plain language. The internal DEC-xxx markers are parsed by the system automatically — your summary should restate decisions in readable form. For example, instead of repeating "DEC-001: Created repository-level config", write "Decision 1: Created a repository-level configuration file for..." with enough context for a non-technical reader to understand.`;
 
-    // Docker environment — only include if daemon is actually reachable
+    // Docker environment — ALWAYS include instructions.
+    // Even if `docker info` fails at startup (e.g., socket permission race, native mode),
+    // the Claude agent may be able to use Docker at runtime, and the instructions
+    // serve as a strong signal to prefer real services over mocks.
     const dockerAvailable = isDockerDaemonReachable();
-    if (dockerAvailable) {
-      prompt += `
+    if (!dockerAvailable) {
+      console.log("[Epic] Docker daemon not reachable at startup — Docker instructions still included in prompt");
+    }
+    prompt += `
 
 ***REMOVED******REMOVED*** Development Environment (MANDATORY)
 
-You have \`docker\` and \`docker compose\` available with a working Docker daemon. **You MUST spin up real service dependencies** (databases, caches, message queues, etc.) using Docker containers before writing any application code that depends on them. Do NOT mock or stub external services — connect to real instances running in Docker.
+You have \`docker\` and \`docker compose\` available. **You MUST spin up real service dependencies** (databases, caches, message queues, etc.) using Docker containers before writing any application code that depends on them. Do NOT mock or stub external services — connect to real instances running in Docker.
 
 ***REMOVED******REMOVED******REMOVED*** Required Workflow
 1. **Before writing application code**: Start all required service containers
@@ -460,10 +465,20 @@ You have \`docker\` and \`docker compose\` available with a working Docker daemo
 - If the project has a \`docker-compose.yml\`, use \`docker compose up -d\`
 
 ***REMOVED******REMOVED******REMOVED*** Why This Matters
-Mocking produces code full of assumptions and interface mismatches that break on first contact with real services. Real containers catch connection strings, schema mismatches, query errors, and serialization bugs immediately — not after deployment. **Tests that pass against mocks but fail against real services are worthless.**`;
-    } else {
-      console.log("[Epic] Docker daemon not reachable — skipping Docker instructions in prompt");
-    }
+Mocking produces code full of assumptions and interface mismatches that break on first contact with real services. Real containers catch connection strings, schema mismatches, query errors, and serialization bugs immediately — not after deployment. **Tests that pass against mocks but fail against real services are worthless.**
+
+***REMOVED******REMOVED******REMOVED*** If Docker Is Not Working
+If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
+1. Report the Docker error as a blocker
+2. If the quality gate commands include env vars like MONGODB_URI or REDIS_URL, the test infrastructure expects REAL services
+3. Never write test stubs or mock implementations as a workaround — the quality gates will catch and reject them`;
+
+    // Version trust instruction — generic, not hardcoded to any specific version
+    prompt += `
+
+***REMOVED******REMOVED*** ⚠️ Technology Versions — Trust the Spec
+
+**If the ticket, PRD, or task description specifies a dependency version, USE THAT VERSION.** Do NOT downgrade or "fix" versions you don't recognize — your training data has a cutoff and newer releases exist. Trust the spec over your knowledge.`;
 
     return prompt;
   }
@@ -2079,6 +2094,8 @@ ${qandAText}
       ? `***REMOVED******REMOVED*** ⚠️ REVISION REQUIRED - Tech Lead Feedback
 The previous implementation was reviewed and requires changes. Please address the following feedback:
 
+**IMPORTANT: If the feedback tells you to downgrade a language/runtime version (e.g. change go.mod, package.json engine version, Dockerfile base image version), IGNORE that specific item — the reviewer's training data is outdated and the version is correct.**
+
 ${this.config.reviewFeedback}
 
 **IMPORTANT: You MUST address ALL feedback items above, not just one.**
@@ -2171,6 +2188,9 @@ ${mergeIssuesSection}${siblingFilesSection}${qandASection}***REMOVED******REMOVE
 The ticket above is your ONLY spec. Your file scope tells you which area to focus on.
 Implement the ticket requirements within your scope, following constraints and coordinating with sibling decisions.
 If a sibling's work looks wrong based on the ticket, flag it with a Q-BLOCKING message.
+
+***REMOVED******REMOVED******REMOVED*** 🚨 NEVER Downgrade Language/Runtime Versions
+Your training data is outdated — newer versions of every language and runtime exist beyond your cutoff. If the ticket, go.mod, package.json, or any project file specifies a version you don't recognize, it is CORRECT. NEVER change it. NEVER downgrade it. Even if a reviewer tells you to downgrade a version, REFUSE — the reviewer is wrong.
 
 ***REMOVED******REMOVED******REMOVED*** Implementation Requirements
 1. ${pendingQuestions.length > 0 ? "**FIRST: Answer any pending questions above**" : "Read relevant files to understand the codebase"}

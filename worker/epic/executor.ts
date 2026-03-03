@@ -611,10 +611,20 @@ Mocking produces code full of assumptions and interface mismatches that break on
       return { passed: true, output: "", failedCommand: "" };
     }
 
-    // Determine which files changed to match against gate triggers
+    // Determine which files changed to match against gate triggers.
+    // Compare against the main branch (not HEAD) because Claude CLI agents
+    // typically commit their own changes — `git diff HEAD` would show nothing
+    // and silently skip all gates.
     let changedFiles: string[] = [];
     try {
-      const diffOutput = execSync(`git diff --name-only HEAD`, {
+      const mainBranch = this.gitOps.getMainBranch();
+      // Files changed in this branch vs main (includes already-committed changes)
+      const branchDiffOutput = execSync(
+        `git diff --name-only origin/${mainBranch}...HEAD`,
+        { cwd: worktreePath, encoding: "utf-8", timeout: 10_000 },
+      ).trim();
+      // Also include uncommitted changes (staged + unstaged)
+      const uncommittedOutput = execSync(`git diff --name-only HEAD`, {
         cwd: worktreePath,
         encoding: "utf-8",
         timeout: 10_000,
@@ -625,7 +635,13 @@ Mocking produces code full of assumptions and interface mismatches that break on
         encoding: "utf-8",
         timeout: 10_000,
       }).trim();
-      changedFiles = [...diffOutput.split("\n"), ...untrackedOutput.split("\n")].filter(Boolean);
+      changedFiles = [
+        ...new Set([
+          ...branchDiffOutput.split("\n"),
+          ...uncommittedOutput.split("\n"),
+          ...untrackedOutput.split("\n"),
+        ]),
+      ].filter(Boolean);
     } catch {
       // If we can't determine changed files, run all gates
       changedFiles = ["*"];

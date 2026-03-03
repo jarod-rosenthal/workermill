@@ -4187,7 +4187,7 @@ Each card represents ONE cohesive epic — a major functional slice that a singl
 - Target **3-4 total cards** for the entire project. Fewer cards = fewer handoffs = fewer integration bugs between workers.
 - Target 15-30 deliverables per card. AI workers perform BETTER with larger, cohesive cards that cover a complete functional layer.
 - Cards with >35 deliverables should be split. Cards with <8 deliverables MUST be merged with related work.
-- Card 1 is ALWAYS "Foundation" — combines project scaffolding, CI/CD pipeline, AND all backend/server code (models, handlers, middleware, services, seed data, tests). CI deliverables are part of this card, NOT a separate card. Assigned to backend_developer.
+- Card 1 is ALWAYS "Foundation" — combines project scaffolding, CI/CD pipeline, AND all backend/server code (models, handlers, middleware, services, seed data, tests). CI deliverables are part of this card, NOT a separate card. Assigned to backend_developer. If the project uses external services (databases, caches, queues), Card 1 MUST include a docker-compose.yml that starts all required services. Workers spin up real Docker containers — they do NOT use mocks or stubs.
 - For full-stack projects: Card 1 = Foundation (backend + CI), Card 2 = Frontend (all UI), Last card = Deployment + Validation.
 - For backend-only projects: Card 1 = Foundation (backend + CI), Card 2 = Deployment + Validation.
 - The LAST card ALWAYS includes production deployment + validation — deployment pipeline, smoke tests, seed verification, go-live checklist.
@@ -4213,6 +4213,12 @@ A 2-3 sentence summary of what this card accomplishes and why it matters.
 ### Technical Specification
 - Key technical decisions, patterns, libraries, or APIs to use
 - Any constraints or non-functional requirements
+
+### Service Dependencies (if applicable)
+- List all external services the code needs (databases, caches, message queues)
+- Workers have Docker available and MUST spin up real service containers — no mocking
+- Example: "Requires MongoDB 7 on port 27017 and Redis 7 on port 6379"
+- Card 1 (Foundation) MUST include a deliverable for a docker-compose.yml or startup script that launches all required services
 
 ## Persona Assignment
 

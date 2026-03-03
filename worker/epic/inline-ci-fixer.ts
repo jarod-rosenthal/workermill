@@ -9,6 +9,7 @@ import axios from "axios";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
+import { isDockerDaemonReachable } from "./gate-utils.js";
 
 /**
  * CI fix decision from the agent.
@@ -38,7 +39,7 @@ You have the CI failure output below. Diagnose the exact issue and fix it.
 - Only fix what CI is complaining about. Do NOT refactor or improve other code.
 - Common fixes: remove unused imports/variables, fix type errors, fix lint errors, fix build errors.
 - Run the failing command locally to verify your fix before committing.
-- You have \`docker\` and \`docker compose\` available. If CI tests need service dependencies (MongoDB, Redis, Postgres, etc.), spin them up locally as sibling containers to reproduce and fix failures (e.g. \`docker run -d --rm -p 27017:27017 --name mongo-test mongo:7\`). Clean up when done.
+- {{DOCKER_INSTRUCTIONS}}
 - Commit with message "fix: resolve CI failure — <brief description>"
 - Push to the PR branch.
 
@@ -174,12 +175,19 @@ export class InlineCIFixer {
     try {
       const prompt = this.buildPrompt(prNumber, ciFailureLog);
 
-      const systemPrompt = CI_FIX_SYSTEM_PROMPT.replace(
-        "{{ORG_GUIDELINES}}",
-        this.config.orgGuidelines
-          ? this.config.orgGuidelines
-          : "(none set — skip this section)"
-      );
+      const systemPrompt = CI_FIX_SYSTEM_PROMPT
+        .replace(
+          "{{DOCKER_INSTRUCTIONS}}",
+          isDockerDaemonReachable()
+            ? "You have `docker` and `docker compose` available with a working daemon. If CI tests need service dependencies (MongoDB, Redis, Postgres, etc.), you MUST spin them up as sibling containers to reproduce and fix failures (e.g. `docker run -d --rm -p 27017:27017 --name mongo-test mongo:7`). Clean up when done."
+            : "Docker is NOT available in this environment. If tests require service dependencies, use in-memory alternatives or test doubles."
+        )
+        .replace(
+          "{{ORG_GUIDELINES}}",
+          this.config.orgGuidelines
+            ? this.config.orgGuidelines
+            : "(none set — skip this section)"
+        );
 
       const ciFixConfig = {
         persona: "qa_engineer" as const,

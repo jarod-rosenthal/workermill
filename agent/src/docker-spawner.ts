@@ -49,11 +49,11 @@ function isWSL(): boolean {
 }
 
 /**
- * Detect if Docker Desktop is in use (WSL or macOS).
+ * Detect if Docker Desktop is in use (Windows, WSL, or macOS).
  * Docker Desktop doesn't support --network host.
  */
 function isDockerDesktop(): boolean {
-  return isWSL() || process.platform === "darwin";
+  return process.platform === "win32" || isWSL() || process.platform === "darwin";
 }
 
 /**
@@ -532,25 +532,40 @@ export async function spawnDockerWorker(
 
   // Mount Docker socket so workers can spin up sibling containers (DBs, etc.)
   // The sandbox still isolates the filesystem — only Docker API access is shared.
-  // Check multiple paths: standard Linux, Docker Desktop for WSL, user-level
-  const dockerSocketCandidates = [
-    "/var/run/docker.sock",
-    "/mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.sock",
-    path.join(os.homedir(), ".docker/run/docker.sock"),
-  ];
-  const dockerSocket = dockerSocketCandidates.find((s) => fs.existsSync(s));
-  if (dockerSocket) {
-    console.log(chalk.dim(`  Docker socket: ${dockerSocket}`));
-    dockerArgs.push("-v", `${dockerSocket}:/var/run/docker.sock`);
-    // Add the host's docker socket GID so the non-root worker user can access it
-    try {
-      const socketStat = fs.statSync(dockerSocket);
-      dockerArgs.push("--group-add", String(socketStat.gid));
-    } catch {
-      // Socket exists but can't stat — proceed without group-add
-    }
+  //
+  // Docker Desktop (Windows/macOS/WSL) handles socket path translation internally:
+  // passing `-v /var/run/docker.sock:/var/run/docker.sock` works even though
+  // that path doesn't exist on the host filesystem — Docker Desktop maps it to
+  // its internal VM socket or named pipe (//./pipe/docker_engine on Windows).
+  // We must NOT gate on fs.existsSync() for Docker Desktop platforms.
+  if (dockerDesktop) {
+    // Docker Desktop: always mount the standard path — Docker translates it
+    const mountPath = "/var/run/docker.sock";
+    console.log(chalk.dim(`  Docker socket: ${mountPath} (Docker Desktop — no host path check needed)`));
+    dockerArgs.push("-v", `${mountPath}:${mountPath}`);
+    // Docker Desktop socket is owned by root inside the container — add root group
+    // so the non-root worker user can access it
+    dockerArgs.push("--group-add", "0");
   } else {
-    console.log(chalk.yellow("  ⚠ No Docker socket found — workers cannot run docker/docker-compose"));
+    // Native Linux Docker: check actual socket paths on the host filesystem
+    const dockerSocketCandidates = [
+      "/var/run/docker.sock",
+      path.join(os.homedir(), ".docker/run/docker.sock"),
+    ];
+    const dockerSocket = dockerSocketCandidates.find((s) => fs.existsSync(s));
+    if (dockerSocket) {
+      console.log(chalk.dim(`  Docker socket: ${dockerSocket}`));
+      dockerArgs.push("-v", `${dockerSocket}:/var/run/docker.sock`);
+      // Add the host's docker socket GID so the non-root worker user can access it
+      try {
+        const socketStat = fs.statSync(dockerSocket);
+        dockerArgs.push("--group-add", String(socketStat.gid));
+      } catch {
+        // Socket exists but can't stat — proceed without group-add
+      }
+    } else {
+      console.log(chalk.yellow("  ⚠ No Docker socket found — workers cannot run docker/docker-compose"));
+    }
   }
 
   // Mount AWS credentials (read-only)

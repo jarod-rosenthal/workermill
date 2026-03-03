@@ -2771,6 +2771,17 @@ export class EpicCoordinator {
       // Skip if parked (waiting for deferred retry after siblings complete)
       if (this.parkedStoryIndices.has(storyIndex)) return false;
 
+      // Skip if dependencies are not met (dependency story not completed)
+      const deps = (ready.metadata?.dependencies as number[]) || [];
+      if (deps.length > 0) {
+        const unmetDeps = deps.filter(
+          (depIndex) =>
+            !completions.some((c) => (c.metadata?.storyIndex as number) === depIndex) &&
+            !this.locallyCompletedStoryIndices.has(depIndex)
+        );
+        if (unmetDeps.length > 0) return false;
+      }
+
       // Skip if no expert can handle this persona
       const hasMatchingExpert = matchPersonaToExpert(storyPersona) !== null;
       if (!hasMatchingExpert) {

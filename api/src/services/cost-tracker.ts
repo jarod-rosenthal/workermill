@@ -131,7 +131,7 @@ export class CostTracker {
         await txOrgRepo
           .createQueryBuilder()
           .update(Organization)
-          .set({ cumulativeCostUsd: () => `COALESCE("cumulativeCostUsd", 0) + ${taskCost}` })
+          .set({ cumulativeCostUsd: () => `COALESCE("cumulative_cost_usd", 0) + ${taskCost}` })
           .where("id = :id", { id: billingOrgId })
           .execute();
         org.cumulativeCostUsd = previousCost + taskCost;

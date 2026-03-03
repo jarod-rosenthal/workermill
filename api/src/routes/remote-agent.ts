@@ -26,6 +26,7 @@ import { WorkerTask } from "../models/WorkerTask.js";
 import { WorkerTaskLog } from "../models/WorkerTaskLog.js";
 import { RemoteAgent } from "../models/RemoteAgent.js";
 import { In, Not } from "typeorm";
+import { KbCard } from "../models/KbCard.js";
 import { logger } from "../utils/logger.js";
 import { buildPlanningPrompt, type PlanningInput } from "../services/planning-agent-local.js";
 import { getExpertRegistry } from "../services/persona.js";
@@ -308,6 +309,29 @@ router.post(
       relations: ["organization"],
     });
 
+    // Inject quality gate commands from board if task was created from a board card
+    // The PRD decomposition flow stores gates on the board, not on the task's jiraFields
+    let boardQualityGates: Record<string, unknown> = {};
+    if (task) {
+      try {
+        const card = await AppDataSource.getRepository(KbCard).findOne({
+          where: { workerTaskId: task.id },
+          relations: ["board"],
+        });
+        if (card?.board?.qualityGateCommands) {
+          boardQualityGates.qualityGates = card.board.qualityGateCommands;
+        }
+        if (card?.board?.ciWorkflowPath) {
+          boardQualityGates.ciWorkflowPath = card.board.ciWorkflowPath;
+        }
+      } catch (err) {
+        logger.warn("Failed to fetch board quality gates for task", {
+          taskId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     // Fetch org credentials from Secrets Manager for the remote agent
     // These are the org's own credentials configured in Settings > Integrations
     let credentials: Record<string, string | undefined> = {};
@@ -389,7 +413,7 @@ router.post(
             retryCount: task.retryCount,
             pipelineVersion: task.pipelineVersion,
             executionPlanV2: task.executionPlanV2,
-            jiraFields: task.jiraFields,
+            jiraFields: { ...task.jiraFields, ...boardQualityGates },
             taskNotes: task.taskNotes,
             githubPrUrl: task.githubPrUrl,
             githubPrNumber: task.githubPrNumber,

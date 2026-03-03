@@ -396,9 +396,11 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         return;
       }
       const planLimit = PLAN_MAX_EXPERTS[org.plan as OrganizationPlan] ?? 3;
-      // Silently clamp to plan limit (existing DB values may exceed limit)
       if (planLimit !== -1 && max > planLimit) {
-        max = planLimit;
+        res.status(403).json({
+          error: `Max parallel experts is limited to ${planLimit} on your ${org.plan} plan. Upgrade for more.`,
+        });
+        return;
       }
       org.maxParallelExperts = max;
     }

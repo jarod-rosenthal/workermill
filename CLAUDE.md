@@ -181,6 +181,7 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 
 ***REMOVED******REMOVED*** Recent Changes (keep updated — max 10 entries, archive older to `docs/claude/changelog.md`)
 
+- 2026-03-03: Docker-in-Docker fix for Windows Docker Desktop — `isDockerDesktop()` now detects `win32`, Docker socket mount bypasses `fs.existsSync()` on Docker Desktop (Docker translates `/var/run/docker.sock` internally to its named pipe). Workers can now spin up sibling containers (DBs, caches) in sandbox mode on Windows.
 - 2026-02-27: Quality gates — first-class board columns (`quality_gate_commands`, `ci_workflow_path`), SCM-aware CI polling (GitHub Actions + Bitbucket Pipelines), standard toolchain restriction in PRD prompt, gofmt `./...` regex safety net, install-tools.sh re-run before gates.
 - 2026-02-27: CLAUDE.md → AGENTS.md — worker instructions now create provider-agnostic `AGENTS.md` in target repos (legacy `CLAUDE.md` still recognized as fallback).
 - 2026-02-23: Redis pub/sub for real-time coordination — ElastiCache `cache.t4g.micro`, SSE pushes instantly via Redis subscribe, falls back to 5s DB polling if Redis unavailable. Workers use SSE subscriber with event-driven coordinator loop.
@@ -190,7 +191,6 @@ Worker code (`worker/epic/*.ts`) is used in TWO places — the Docker image AND 
 - 2026-02-22: Multi-org support — VS Code extension + web dashboard org switcher (`dc82abc`).
 - 2026-02-21: Billing tiers renamed: Free/Pro/Enterprise → **Pro/Max/Enterprise** (`e8928aa`).
 - 2026-02-21: Docker sandbox mode for remote agent workers (`agent/src/docker-spawner.ts`). Opt-in via VS Code settings. Four spawners now (see Agent Pitfalls).
-- 2026-02-20: Full Build (formerly "PRD") decomposition — `POST /api/prd/decompose` creates boards with dependency-ordered cards. Board execution engine (`api/src/services/board-execution.ts`) cascade-triggers dependent cards on completion.
 
 ---
 
@@ -379,6 +379,7 @@ All org integration credentials (SCM tokens, API keys, Jira, Linear, AWS) are st
 - **Polyglot binary:** Single binary serves CLI/worker/manager via `__WORKERMILL_MODE` env var
 - **Remote agent workers** run as native process self-invocations by default, OR inside Docker sandbox (`agent/src/docker-spawner.ts`) when enabled in VS Code settings
 - **Four spawners:** `agent/src/spawner.ts` (remote agent native), `agent/src/docker-spawner.ts` (remote agent Docker sandbox), `api/src/services/local-epic-spawner.ts` (local Docker), `api/src/services/ecs-task-runner.ts` (cloud ECS) — always ask which environment before changes
+- **Docker Desktop socket mount:** On Windows/macOS/WSL, Docker Desktop translates `/var/run/docker.sock` to its internal named pipe — do NOT gate the mount on `fs.existsSync()`. Always mount unconditionally on Docker Desktop platforms. `isDockerDesktop()` must include `win32`.
 - **VS Code extension REQUIRES the remote agent** — it cannot connect to the local WorkerMill API directly
 - **Planning runs ONLY in the remote agent** — local WorkerMill Docker mode and cloud ECS skip planning
 - **`dotenv/config` type error is intentional** — optional dependency, do not "fix" by removing or adding to deps

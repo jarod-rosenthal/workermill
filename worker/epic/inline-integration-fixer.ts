@@ -167,7 +167,7 @@ export class InlineIntegrationFixer {
     message: string,
     type: "system" | "manager" | "tool" | "output" | "error" = "output"
   ): Promise<void> {
-    const prefix = "[🔗 integration_fixer 🤖]";
+    const prefix = "[🔗 integration_agent 🤖]";
     console.log(`${prefix} ${message}`);
 
     try {

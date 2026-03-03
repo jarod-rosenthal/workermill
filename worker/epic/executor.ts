@@ -649,9 +649,21 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
     for (const gate of gates) {
       const triggerPrefix = gate.trigger.replace(/\*\*/g, "").replace(/\*/g, "").replace(/\/+$/, "");
       const matches = changedFiles.some((f) => f === "*" || f.startsWith(triggerPrefix));
-      if (matches) {
-        triggered.push(...gate.commands);
+      if (!matches) continue;
+
+      // Skip if trigger directory doesn't exist
+      if (triggerPrefix && !existsSync(`${worktreePath}/${triggerPrefix}`)) continue;
+
+      // Skip Go gates if go.mod doesn't exist
+      const hasGoCommand = gate.commands.some((c) => /\bgo\s+(vet|test|build)\b/.test(c));
+      if (hasGoCommand) {
+        const goModPath = triggerPrefix
+          ? `${worktreePath}/${triggerPrefix}/go.mod`
+          : `${worktreePath}/go.mod`;
+        if (!existsSync(goModPath)) continue;
       }
+
+      triggered.push(...gate.commands);
     }
     return triggered;
   }
@@ -764,6 +776,28 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
       const matches = changedFiles.some((f) => f === "*" || f.startsWith(triggerPrefix));
 
       if (!matches) continue;
+
+      // Skip gate if the trigger directory doesn't exist in the worktree.
+      // This prevents failures like `cd web && npm run lint` when the `web/` directory
+      // hasn't been created yet by any story in this run.
+      if (triggerPrefix && !existsSync(`${worktreePath}/${triggerPrefix}`)) {
+        await this.postLog(`[Quality Gate] ⏭️ ${gate.name} gate skipped — directory '${triggerPrefix}/' does not exist yet`, expert, "system");
+        continue;
+      }
+
+      // For Go gates, skip if go.mod doesn't exist in the target directory.
+      // Prevents "directory prefix . does not contain main module" errors when a
+      // story creates files under api/ but hasn't initialized the Go module yet.
+      const hasGoCommand = gate.commands.some((c) => /\bgo\s+(vet|test|build)\b/.test(c));
+      if (hasGoCommand) {
+        const goModPath = triggerPrefix
+          ? `${worktreePath}/${triggerPrefix}/go.mod`
+          : `${worktreePath}/go.mod`;
+        if (!existsSync(goModPath)) {
+          await this.postLog(`[Quality Gate] ⏭️ ${gate.name} gate skipped — no go.mod found (Go module not initialized yet)`, expert, "system");
+          continue;
+        }
+      }
 
       await this.postLog(`[Quality Gate] Running ${gate.name} gate (${gate.commands.length} commands)`, expert, "system");
 

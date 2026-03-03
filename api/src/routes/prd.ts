@@ -483,11 +483,6 @@ router.post(
       let decomposed;
 
       const hasPreDecomposed = preDecomposed && preDecomposed.boardName && Array.isArray(preDecomposed.cards);
-      // Only force server-side re-decomposition if the agent's pre-decomposed data
-      // is missing stories AND the org needs them. If stories are already present, accept as-is.
-      const preDecomposedHasStories = hasPreDecomposed &&
-        preDecomposed.cards.some((c: any) => Array.isArray(c.stories) && c.stories.length > 0);
-      const forceServerDecomp = hasPreDecomposed && org.planningMode === "decomposer_planned" && !preDecomposedHasStories;
 
       // When streaming (decompositionId present), respond 202 immediately
       // so CloudFront doesn't timeout. The heavy LLM + board-creation work
@@ -497,7 +492,7 @@ router.post(
         res.status(202).json({ accepted: true, decompositionId });
       }
 
-      if (hasPreDecomposed && !forceServerDecomp) {
+      if (hasPreDecomposed) {
         // Agent already decomposed locally — validate and sanitize the data
         logger.info("Using pre-decomposed PRD from agent", {
           boardName: preDecomposed.boardName,
@@ -520,11 +515,6 @@ router.post(
           return;
         }
       } else {
-        if (forceServerDecomp) {
-          logger.info("Decomposer-planned mode: ignoring agent pre-decomposed data, re-decomposing server-side with stories", {
-            orgId: org.id,
-          });
-        }
         // Use the planning agent model/provider from org settings
         const planProvider = org.planningAgentProvider || "anthropic";
         const planModel = org.planningAgentModel || org.defaultWorkerModel;

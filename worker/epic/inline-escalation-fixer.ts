@@ -72,6 +72,8 @@ You have FULL AUTHORITY to rewrite the expert's approach. You are not limited to
 - A passing simple implementation is better than a failing complex one
 - It is acceptable to reduce scope to make gates pass — document what was simplified and why
 - {{DOCKER_INSTRUCTIONS}}
+- **NEVER change language versions** (Go version in go.mod/Dockerfile, Node.js version, Python version, etc.). Version pins are intentional architectural decisions from the project specification. Fix the code to work with the specified version — do NOT downgrade the language.
+- **NEVER change framework or dependency major versions** unless the error explicitly shows an incompatibility that cannot be resolved any other way.
 
 ***REMOVED******REMOVED*** Organization Guidelines
 

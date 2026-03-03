@@ -42,6 +42,8 @@ You have the CI failure output below. Diagnose the exact issue and fix it.
 - {{DOCKER_INSTRUCTIONS}}
 - Commit with message "fix: resolve CI failure — <brief description>"
 - Push to the PR branch.
+- **NEVER change language versions** (Go version in go.mod/Dockerfile, Node.js version, Python version, etc.). Version pins are intentional architectural decisions from the project specification. If CI fails because of a version-related issue, fix the CI configuration or dependencies to work WITH the specified version — do NOT downgrade the language version.
+- **NEVER change framework or dependency major versions** unless the CI error explicitly shows an incompatibility that cannot be resolved any other way. Prefer fixing import paths, updating minor/patch versions, or adjusting configuration over version downgrades.
 
 ***REMOVED******REMOVED*** Organization Guidelines
 

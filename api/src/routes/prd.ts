@@ -560,7 +560,7 @@ router.post(
             // Non-Anthropic — use Vercel AI SDK via planning agent config
             const { createModel } = await import("../services/planning-agent/config.js");
             const { generateText } = await import("ai");
-            const { SYSTEM_PROMPT } = await import("../services/prd-decomposer.js");
+            const { SYSTEM_PROMPT, SYSTEM_PROMPT_WITH_STORIES } = await import("../services/prd-decomposer.js");
 
             const providerKey = planProvider === "openai" ? orgCreds.openaiApiKey
               : planProvider === "google" ? orgCreds.googleApiKey
@@ -582,7 +582,7 @@ router.post(
 
             const result = await generateText({
               model,
-              system: SYSTEM_PROMPT,
+              system: useDecomposerPlanned ? SYSTEM_PROMPT_WITH_STORIES : SYSTEM_PROMPT,
               prompt: `Decompose this PRD into implementation cards:\n\n${prdContent}`,
               maxOutputTokens: 128000,
             });

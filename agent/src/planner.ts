@@ -867,18 +867,58 @@ async function cloneTargetRepo(
 }
 
 /**
+ * Apply mechanical post-processing fixes to a plan after critic approval.
+ * These fixes enforce hard limits (file cap, overlaps, personas) that the
+ * planner should have respected but might not have. Running them AFTER the
+ * critic means the critic sees the planner's actual output and gives useful
+ * feedback about structural issues, rather than scoring a mutated plan.
+ */
+function applyMechanicalFixes(
+  plan: ExecutionPlan,
+  validPersonas: string[],
+  taskLabel: string,
+  criticConfig: { maxTargetFiles: number } | null,
+): void {
+  const { truncatedCount, details } = applyFileCap(plan);
+  if (truncatedCount > 0) {
+    const msg = `File cap applied: ${truncatedCount} stories truncated to max ${criticConfig?.maxTargetFiles ?? 5} targetFiles`;
+    console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
+    for (const detail of details) {
+      console.log(`${ts()} ${taskLabel}   ${chalk.dim(detail)}`);
+    }
+  }
+
+  const { resolvedCount: overlapCount, details: overlapDetails } = resolveFileOverlaps(plan);
+  if (overlapCount > 0) {
+    const msg = `File overlap resolved: ${overlapCount} shared file(s) de-duped across stories`;
+    console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
+    for (const detail of overlapDetails) {
+      console.log(`${ts()} ${taskLabel}   ${chalk.dim(detail)}`);
+    }
+  }
+
+  const { fixedCount: personaFixCount, details: personaFixDetails } = fixInvalidPersonas(plan, validPersonas);
+  if (personaFixCount > 0) {
+    const msg = `Persona fix: ${personaFixCount} invalid persona(s) replaced with "backend_developer"`;
+    console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
+    for (const detail of personaFixDetails) {
+      console.log(`${ts()} ${taskLabel}   ${chalk.dim(detail)}`);
+    }
+  }
+}
+
+/**
  * Run planning for a task with Planner-Critic validation loop.
  *
  * Flow:
  *   1. Fetch planning prompt from cloud API
  *   2. Clone target repo (if available) so planner can explore with tools
  *   3. Run Claude CLI to generate plan
- *   4. Parse plan, apply file cap (max 5 files per story)
- *   5. Run critic validation via Claude CLI
- *   6. If critic approves (score >= 80): post validated plan to API
- *   7. If critic rejects: re-run planner with feedback (up to MAX_ITERATIONS)
- *   8. After MAX_ITERATIONS without approval: post best plan if score >= 50 (fallback)
- *   9. If no plan scored >= 50: fail the task
+ *   4. Run critic validation on RAW plan (before mechanical fixes)
+ *   5. If critic approves: apply mechanical fixes (file cap, overlaps, personas), then post
+ *   6. If critic rejects: re-run planner with feedback (up to MAX_ITERATIONS)
+ *   7. After MAX_ITERATIONS without approval: post best plan if score >= 50 (fallback)
+ *   8. If no plan scored >= 50: fail the task
  */
 export async function planTask(
   task: PlanningTask,
@@ -1118,10 +1158,10 @@ export async function planTask(
     }
 
     // 2a. Generate plan via Claude CLI (Anthropic) or HTTP API (other providers)
-    // On re-planning attempts (iteration > 1), don't give repo access — the planner
-    // already explored the repo on the first attempt. Passing cwd would let it waste
-    // time re-reading files instead of just emitting the revised JSON plan.
-    const iterationCwd = iteration === 1 ? (repoPath || undefined) : undefined;
+    // Give repo access on ALL iterations so the planner can verify file paths
+    // when addressing critic feedback. The critic feedback template already tells
+    // the planner to keep tool usage minimal.
+    const iterationCwd = repoPath || undefined;
 
     let rawOutput: string;
     let cliSuccess = false;
@@ -1233,19 +1273,7 @@ export async function planTask(
       return rawPosted;
     }
 
-    // 2c. Apply file cap (max 5 files per story)
-    const { truncatedCount, details } = applyFileCap(plan);
-    if (truncatedCount > 0) {
-      totalFileCapTruncations += truncatedCount;
-      const msg = `${PREFIX} File cap applied: ${truncatedCount} stories truncated to max ${criticConfig?.maxTargetFiles ?? 5} targetFiles`;
-      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
-      await postLog(task.id, msg);
-      for (const detail of details) {
-        console.log(`${ts()} ${taskLabel}   ${chalk.dim(detail)}`);
-      }
-    }
-
-    // 2c2. Apply story cap (max stories from org calibration)
+    // 2c. Apply story cap BEFORE critic (story count is a hard org limit)
     const { droppedCount: storyDropCount, details: storyDropDetails } = applyStoryCap(plan, maxStories);
     if (storyDropCount > 0) {
       const msg = `${PREFIX} Story cap applied: ${storyDropCount} stories dropped (max ${maxStories})`;
@@ -1256,35 +1284,16 @@ export async function planTask(
       }
     }
 
-    // 2c3. Resolve file overlaps (assign each shared file to first story only)
-    const { resolvedCount: overlapCount, details: overlapDetails } = resolveFileOverlaps(plan);
-    if (overlapCount > 0) {
-      const msg = `${PREFIX} File overlap resolved: ${overlapCount} shared file(s) de-duped across stories`;
-      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
-      await postLog(task.id, msg);
-      for (const detail of overlapDetails) {
-        console.log(`${ts()} ${taskLabel}   ${chalk.dim(detail)}`);
-      }
-    }
-
-    // 2c4. Fix invalid personas (replace with backend_developer)
-    const { fixedCount: personaFixCount, details: personaFixDetails } = fixInvalidPersonas(plan, validPersonas);
-    if (personaFixCount > 0) {
-      const msg = `${PREFIX} Persona fix: ${personaFixCount} invalid persona(s) replaced with "backend_developer"`;
-      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
-      await postLog(task.id, msg);
-      for (const detail of personaFixDetails) {
-        console.log(`${ts()} ${taskLabel}   ${chalk.dim(detail)}`);
-      }
-    }
-
     console.log(`${ts()} ${taskLabel} Plan: ${chalk.bold(plan.stories.length)} stories (max ${maxStories})`);
     await postLog(
       task.id,
       `${PREFIX} Plan generated: ${plan.stories.length} stories (${formatElapsed(elapsed)}). Running critic validation...`,
     );
 
-    // 2d. Run critic validation
+    // 2d. Run critic validation on the RAW plan (before mechanical fixes).
+    // This lets the critic see what the planner actually produced and give
+    // useful feedback about file counts and overlaps, rather than scoring a
+    // mutated plan the planner never wrote.
     const criticResult = await runCriticValidation(
       claudePath,
       cliModel,
@@ -1325,13 +1334,13 @@ export async function planTask(
         approved: criticResult.approved || criticResult.score >= AUTO_APPROVAL_THRESHOLD,
         risks: criticResult.risks,
         suggestions: criticResult.suggestions,
-        filesCapApplied: truncatedCount > 0 ? truncatedCount : undefined,
       });
     }
 
     // 2e. Check critic result
     if (!criticResult) {
-      // Critic failed (timeout, parse error, etc.) — post plan without critic gate
+      // Critic failed (timeout, parse error, etc.) — apply mechanical fixes then post
+      applyMechanicalFixes(plan, validPersonas, taskLabel, criticConfig);
       const msg = `${PREFIX} ⚠️ CRITIC BYPASSED — Critic validation failed (timeout/parse error). Posting plan WITHOUT quality gate.`;
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
       await postLog(task.id, msg, "error", "warning");
@@ -1412,13 +1421,6 @@ export async function planTask(
           }
 
           const refinedPlan = parseExecutionPlan(refinedOutput);
-
-          // Apply same guardrails to refined plan
-          applyFileCap(refinedPlan);
-          applyStoryCap(refinedPlan, maxStories);
-          resolveFileOverlaps(refinedPlan);
-          fixInvalidPersonas(refinedPlan, validPersonas);
-
           finalPlan = refinedPlan;
           const refElapsed = Math.round((Date.now() - startTime) / 1000);
           console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} Refinement complete ${chalk.dim(`(${refElapsed}s)`)}`);
@@ -1430,6 +1432,10 @@ export async function planTask(
           // Fall through with original plan
         }
       }
+
+      // Apply mechanical fixes (file cap, overlaps, personas) AFTER critic
+      // approval so the critic sees the planner's actual output.
+      applyMechanicalFixes(finalPlan, validPersonas, taskLabel, criticConfig);
 
       const planningDurationMs = Date.now() - startTime;
       const finalElapsed = Math.round((Date.now() - startTime) / 1000);
@@ -1481,6 +1487,8 @@ export async function planTask(
   // with a warning instead of discarding it entirely.
   const BEST_PLAN_FALLBACK_THRESHOLD = 50;
   if (bestPlan && bestScore >= BEST_PLAN_FALLBACK_THRESHOLD) {
+    // Apply mechanical fixes to fallback plan before posting
+    applyMechanicalFixes(bestPlan, validPersonas, taskLabel, criticConfig);
     const elapsed = Math.round((Date.now() - startTime) / 1000);
     const msg = `${PREFIX} Best-plan fallback: posting plan with score ${bestScore}/100 (below ${AUTO_APPROVAL_THRESHOLD} threshold, above ${BEST_PLAN_FALLBACK_THRESHOLD} minimum)`;
     console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);

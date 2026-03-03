@@ -776,12 +776,14 @@ export const CRITIC_FEEDBACK_TEMPLATE = `
 
 Score: {{SCORE}}/100 (need >= {{THRESHOLD}} to pass)
 
-{{RISKS_SECTION}}{{SUGGESTIONS_SECTION}}{{STORY_FEEDBACK_SECTION}}**You MUST address ALL feedback above.** Each story must target at most {{MAX_TARGET_FILES}} files.
-Stories MUST NOT overlap on targetFiles.
+{{RISKS_SECTION}}{{SUGGESTIONS_SECTION}}{{STORY_FEEDBACK_SECTION}}**You MUST address ALL feedback above.** Key constraints:
+- Each story must target at most {{MAX_TARGET_FILES}} files. If a story needs more, split it into multiple stories.
+- Stories MUST NOT overlap on targetFiles.
+- Story descriptions must be 2-3 line scope labels, NOT detailed specs. Workers read the original ticket.
 
 **CRITICAL — OUTPUT FORMAT:** You MUST output a revised plan as a \`\`\`json code block containing the full JSON object with \`summary\`, \`stories\`, \`risks\`, and \`assumptions\` fields. Do NOT just describe what you would change — output the COMPLETE revised JSON plan. If you do not output a \`\`\`json block, the plan will fail to parse and the task will fail.
 
-**DO NOT re-explore the repository.** You already explored it in the previous attempt. Go directly to outputting the revised \`\`\`json plan. Every tool call wastes output budget — prioritize emitting the JSON plan.
+**You may use tools to check specific file paths if needed**, but keep tool usage minimal — focus on emitting the revised \`\`\`json plan.
 `;
 
 /**

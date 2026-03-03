@@ -25,6 +25,17 @@ This is a **showcase build** — a polished demo app designed to impress potenti
 
 ## Global Constraints
 
+### LLM Knowledge Gaps — DO NOT "FIX" These
+
+Your training data may not include these — they are ALL correct and valid:
+
+- **Go 1.24** was released February 2025. `golang:1.24-alpine` exists on Docker Hub. Do NOT downgrade to 1.23 or 1.22.
+- **Svelte 5** with runes syntax (`$state`, `$derived`, `$effect`) is stable. Do NOT fall back to Svelte 4 `$:` syntax.
+- **Tailwind v4** uses `@tailwindcss/vite` plugin. Do NOT use Tailwind v3 config patterns.
+- **SvelteKit 2** with `adapter-static` is stable. Do NOT downgrade to SvelteKit 1.
+
+If you believe a dependency version "doesn't exist", you are wrong. Trust the PRD.
+
 ### Pre-Commit Quality Gates
 
 ```

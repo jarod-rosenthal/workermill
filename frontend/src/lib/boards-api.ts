@@ -529,23 +529,31 @@ export async function decomposePrdStreaming(
   const sseUrl = `/api/prd/decompose/stream?decompositionId=${encodeURIComponent(decompositionId)}&token=${encodeURIComponent(token)}`;
   const eventSource = new EventSource(sseUrl);
 
-  // Listen for events
-  eventSource.onmessage = (msg) => {
-    try {
-      const event: DecompositionStreamEvent = JSON.parse(msg.data);
-      onEvent(event);
-    } catch {
-      // Ignore parse errors (heartbeats, etc.)
-    }
-  };
+  // Result comes via SSE "complete" event (POST returns 202 immediately)
+  const resultPromise = new Promise<DecomposeResult>((resolve, reject) => {
+    eventSource.onmessage = (msg) => {
+      try {
+        const event: DecompositionStreamEvent = JSON.parse(msg.data);
+        onEvent(event);
+        if (event.phase === "complete" && event.boardId) {
+          resolve({ boardId: event.boardId, boardName: "", prefix: "", cardCount: 0, cards: [] });
+        } else if (event.phase === "error") {
+          reject(new Error(event.error || "Decomposition failed"));
+        }
+      } catch {
+        // Ignore parse errors (heartbeats, etc.)
+      }
+    };
+    eventSource.onerror = () => {
+      reject(new Error("SSE connection lost during decomposition"));
+    };
+  });
 
   try {
-    // Fire POST with decompositionId
-    const response = await apiClient.post("/prd/decompose", {
-      ...data,
-      decompositionId,
-    });
-    return response.data;
+    // Fire POST — returns 202 immediately, work continues server-side
+    await apiClient.post("/prd/decompose", { ...data, decompositionId });
+    // Wait for the SSE complete event with the boardId
+    return await resultPromise;
   } finally {
     eventSource.close();
   }

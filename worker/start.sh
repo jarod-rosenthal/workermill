@@ -2,6 +2,16 @@
 # WorkerMill Worker Start Script
 # Routes to the appropriate entrypoint based on environment variables
 
+# Fix Docker socket permissions if mounted.
+# The socket may be owned by a host-specific GID (e.g. 989, 999, 998) that
+# doesn't match any group inside the container. sudo chmod makes it accessible
+# to the worker user regardless of the host's docker GID.
+if [ -S /var/run/docker.sock ]; then
+    sudo chmod 666 /var/run/docker.sock 2>/dev/null && \
+        echo "[Worker] Docker socket permissions fixed" || \
+        echo "[Worker] Warning: Could not fix Docker socket permissions"
+fi
+
 # Check for Warm Pool mode FIRST (before any other checks)
 # Warm containers wait for task assignment, then re-run start.sh with task env vars
 if [ "${WARM_POOL_MODE}" = "true" ]; then

@@ -24,6 +24,10 @@ need_go() {
   if echo "${TASK_DESCRIPTION:-}" | grep -qiE '\bgo\b|golang|go service|go module'; then
     return 0
   fi
+  # Quality gate commands like "go vet", "go test", "go build" are a clear signal
+  if echo "${QUALITY_GATE_COMMANDS:-}" | grep -qiE '\bgo vet\b|\bgo test\b|\bgo build\b|\bgofmt\b|\bgolang\b'; then
+    return 0
+  fi
   if [ -n "$REPO_DIR" ] && [ -f "$REPO_DIR/go.mod" ]; then
     return 0
   fi

@@ -176,7 +176,7 @@ export class InlineGateFixer {
     message: string,
     type: "system" | "manager" | "tool" | "output" | "error" = "output"
   ): Promise<void> {
-    const prefix = "[🔧 gate_fixer 🤖]";
+    const prefix = "[🔧 gate_agent 🤖]";
     console.log(`${prefix} ${message}`);
 
     try {

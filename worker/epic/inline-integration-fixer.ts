@@ -276,6 +276,27 @@ export class InlineIntegrationFixer {
     gates: NonNullable<EpicConfig["qualityGateCommands"]>
   ): Promise<{ passed: boolean; output: string; failedCommand: string }> {
     for (const gate of gates) {
+      // Skip gate if the trigger directory doesn't exist in the repo.
+      // Prevents failures like `cd web && npm run lint` when the `web/` directory
+      // hasn't been created yet by any story in this run.
+      const triggerPrefix = gate.trigger.replace(/\*\*/g, "").replace(/\*/g, "").replace(/\/+$/, "");
+      if (triggerPrefix && !existsSync(`${this.repoPath}/${triggerPrefix}`)) {
+        await this.postLog(`[Integration Gate] ⏭️ ${gate.name} gate skipped — directory '${triggerPrefix}/' does not exist`, "system");
+        continue;
+      }
+
+      // For Go gates, skip if go.mod doesn't exist in the target directory.
+      const hasGoCommand = gate.commands.some((c) => /\bgo\s+(vet|test|build)\b/.test(c));
+      if (hasGoCommand) {
+        const goModPath = triggerPrefix
+          ? `${this.repoPath}/${triggerPrefix}/go.mod`
+          : `${this.repoPath}/go.mod`;
+        if (!existsSync(goModPath)) {
+          await this.postLog(`[Integration Gate] ⏭️ ${gate.name} gate skipped — no go.mod found`, "system");
+          continue;
+        }
+      }
+
       await this.postLog(`[Integration Gate] Running ${gate.name} (${gate.commands.length} commands)`, "system");
 
       for (let cmd of gate.commands) {

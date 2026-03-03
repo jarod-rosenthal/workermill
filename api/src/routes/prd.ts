@@ -483,7 +483,19 @@ router.post(
       let decomposed;
 
       const hasPreDecomposed = preDecomposed && preDecomposed.boardName && Array.isArray(preDecomposed.cards);
-      const forceServerDecomp = hasPreDecomposed && org.planningMode === "decomposer_planned";
+      // Only force server-side re-decomposition if the agent's pre-decomposed data
+      // is missing stories AND the org needs them. If stories are already present, accept as-is.
+      const preDecomposedHasStories = hasPreDecomposed &&
+        preDecomposed.cards.some((c: any) => Array.isArray(c.stories) && c.stories.length > 0);
+      const forceServerDecomp = hasPreDecomposed && org.planningMode === "decomposer_planned" && !preDecomposedHasStories;
+
+      // When streaming (decompositionId present), respond 202 immediately
+      // so CloudFront doesn't timeout. The heavy LLM + board-creation work
+      // runs after the response; the frontend gets the result via SSE.
+      const isStreaming = !!decompositionId;
+      if (isStreaming) {
+        res.status(202).json({ accepted: true, decompositionId });
+      }
 
       if (hasPreDecomposed && !forceServerDecomp) {
         // Agent already decomposed locally — validate and sanitize the data
@@ -499,9 +511,12 @@ router.post(
           logger.error("Pre-decomposed PRD validation failed", {
             error: valErr instanceof Error ? valErr.message : String(valErr),
           });
-          res.status(400).json({
-            error: `Invalid pre-decomposed PRD: ${valErr instanceof Error ? valErr.message : String(valErr)}`,
-          });
+          if (!isStreaming) {
+            res.status(400).json({
+              error: `Invalid pre-decomposed PRD: ${valErr instanceof Error ? valErr.message : String(valErr)}`,
+            });
+          }
+          emitDecomp?.({ phase: "error", error: `Invalid pre-decomposed PRD: ${valErr instanceof Error ? valErr.message : String(valErr)}` });
           return;
         }
       } else {
@@ -567,9 +582,11 @@ router.post(
               : "";
 
             if (!providerKey && planProvider !== "ollama") {
-              res.status(400).json({
-                error: `No API key configured for ${planProvider}. Add one in Settings > Integrations.`,
-              });
+              const msg = `No API key configured for ${planProvider}. Add one in Settings > Integrations.`;
+              if (!isStreaming) {
+                res.status(400).json({ error: msg });
+              }
+              emitDecomp?.({ phase: "error", error: msg });
               return;
             }
 
@@ -601,9 +618,12 @@ router.post(
             model: planModel,
             error: err instanceof Error ? err.message : String(err),
           });
-          res.status(500).json({
-            error: `PRD decomposition failed: ${err instanceof Error ? err.message : String(err)}`,
-          });
+          if (!isStreaming) {
+            res.status(500).json({
+              error: `PRD decomposition failed: ${err instanceof Error ? err.message : String(err)}`,
+            });
+          }
+          emitDecomp?.({ phase: "error", error: `PRD decomposition failed: ${err instanceof Error ? err.message : String(err)}` });
           return;
         }
       }
@@ -815,20 +835,22 @@ router.post(
         userId: user?.id || "agent",
       });
 
-      res.status(201).json({
-        boardId: result.board.id,
-        boardName: result.board.name,
-        prefix: result.prefix,
-        cardCount: result.createdCards.length,
-        cards: result.createdCards.map((card, i) => ({
-          id: card.id,
-          cardNumber: card.cardNumber,
-          title: card.title,
-          dependencies: result.decomposed.cards[i].dependencyIndices,
-          estimatedSteps: result.decomposed.cards[i].estimatedSteps,
-        })),
-        trackerSync,
-      });
+      if (!isStreaming) {
+        res.status(201).json({
+          boardId: result.board.id,
+          boardName: result.board.name,
+          prefix: result.prefix,
+          cardCount: result.createdCards.length,
+          cards: result.createdCards.map((card, i) => ({
+            id: card.id,
+            cardNumber: card.cardNumber,
+            title: card.title,
+            dependencies: result.decomposed.cards[i].dependencyIndices,
+            estimatedSteps: result.decomposed.cards[i].estimatedSteps,
+          })),
+          trackerSync,
+        });
+      }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       if (req.body.decompositionId) {
@@ -841,7 +863,9 @@ router.post(
         error: errorMsg,
         stack: error instanceof Error ? error.stack : undefined,
       });
-      res.status(500).json({ error: "PRD decomposition failed" });
+      if (!res.headersSent) {
+        res.status(500).json({ error: "PRD decomposition failed" });
+      }
     }
   },
 );

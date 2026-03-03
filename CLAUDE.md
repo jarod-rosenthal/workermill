@@ -411,7 +411,7 @@ Quality gates enforce code quality at two checkpoints during worker execution. B
 **PRD prompt is the single source of truth** for what commands the LLM generates. The canonical prompt lives in `api/src/services/prd-decomposer.ts` and is served to agents via `GET /api/agent/prd-prompt`. The agent fallback prompt in `agent/src/local-api.ts` must stay in sync.
 
 **Standard toolchain restriction:** Quality gate commands run in a minimal container. Only use tools from the standard toolchain:
-- **Go:** `go vet ./...`, `go test ./... -v -count=1 -race`, `go build -o /dev/null ./cmd/server`, `gofmt -w .` (NOT `gofmt ./...` — gofmt doesn't support `...`)
+- **Go:** `go vet ./...`, `go test ./... -v -count=1 -race`, `go build ./...`, `gofmt -w .` (NOT `gofmt ./...` — gofmt doesn't support `...`)
 - **Node.js:** `npm run lint`, `npm run test`, `npm run build`
 - **TypeScript:** `npx tsc --noEmit`
 - **SvelteKit:** `npx svelte-check`

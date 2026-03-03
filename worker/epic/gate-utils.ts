@@ -4,6 +4,8 @@
  */
 
 import { spawn, execSync } from "child_process";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 /**
  * Check if Docker daemon is reachable (socket mounted and responsive).
@@ -20,6 +22,26 @@ export function isDockerDaemonReachable(): boolean {
     dockerReachableCache = false;
   }
   return dockerReachableCache;
+}
+
+/**
+ * Read AGENTS.md or CLAUDE.md from a repo directory if it exists.
+ * Returns the content (truncated to 4KB) or empty string if not found.
+ * This gives fixer agents project context they'd otherwise miss.
+ */
+export function loadRepoContext(repoPath: string): string {
+  for (const filename of ["AGENTS.md", "CLAUDE.md"]) {
+    try {
+      const content = readFileSync(join(repoPath, filename), "utf-8");
+      if (content.length > 4096) {
+        return content.substring(0, 4096) + "\n\n... (truncated)";
+      }
+      return content;
+    } catch {
+      // File doesn't exist, try next
+    }
+  }
+  return "";
 }
 
 /**

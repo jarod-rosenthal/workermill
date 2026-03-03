@@ -9,7 +9,7 @@
 
 import axios from "axios";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
-import { runGateCommand, isDockerDaemonReachable } from "./gate-utils.js";
+import { runGateCommand, isDockerDaemonReachable, loadRepoContext } from "./gate-utils.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
 import {
   createAIClient,
@@ -335,10 +335,15 @@ If the error involves test code:
 `;
     }
 
+    const repoContext = loadRepoContext(this.worktreePath);
+    const repoContextSection = repoContext
+      ? `\n***REMOVED******REMOVED******REMOVED*** Repository Context (from AGENTS.md / CLAUDE.md)\n\n${repoContext}\n`
+      : "";
+
     return `***REMOVED******REMOVED*** Quality Gate Failure
 
 **Repository:** ${this.config.targetRepo}
-
+${repoContextSection}
 ***REMOVED******REMOVED******REMOVED*** Failed Gate Commands
 
 ${commandList}

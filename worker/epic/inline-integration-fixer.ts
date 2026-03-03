@@ -11,7 +11,7 @@ import axios from "axios";
 import { execSync, spawn } from "child_process";
 import { existsSync, readdirSync, statSync } from "fs";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
-import { runGateCommand } from "./gate-utils.js";
+import { runGateCommand, loadRepoContext } from "./gate-utils.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
 import {
   createAIClient,
@@ -527,10 +527,15 @@ export class InlineIntegrationFixer {
       .flatMap((g) => g.commands.map((c) => `  - ${c} (${g.name})`))
       .join("\n");
 
+    const repoContext = loadRepoContext(this.repoPath);
+    const repoContextSection = repoContext
+      ? `\n***REMOVED******REMOVED******REMOVED*** Repository Context (from AGENTS.md / CLAUDE.md)\n\n${repoContext}\n`
+      : "";
+
     return `***REMOVED******REMOVED*** Integration Gate Failure on PR ***REMOVED***${prNumber}
 
 **Repository:** ${this.config.targetRepo}
-
+${repoContextSection}
 ***REMOVED******REMOVED******REMOVED*** Failed Command
 
 \`${failedCommand}\`

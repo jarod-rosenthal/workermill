@@ -9,7 +9,7 @@ import axios from "axios";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
-import { isDockerDaemonReachable } from "./gate-utils.js";
+import { isDockerDaemonReachable, loadRepoContext } from "./gate-utils.js";
 
 /**
  * CI fix decision from the agent.
@@ -254,10 +254,15 @@ export class InlineCIFixer {
       ? ciFailureLog.substring(ciFailureLog.length - maxLogLength)
       : ciFailureLog;
 
+    const repoContext = loadRepoContext(this.repoPath);
+    const repoContextSection = repoContext
+      ? `\n***REMOVED******REMOVED******REMOVED*** Repository Context (from AGENTS.md / CLAUDE.md)\n\n${repoContext}\n`
+      : "";
+
     return `***REMOVED******REMOVED*** CI Failure on PR ***REMOVED***${prNumber}
 
 **Repository:** ${this.config.targetRepo}
-
+${repoContextSection}
 ***REMOVED******REMOVED******REMOVED*** CI Failure Output
 
 \`\`\`

@@ -57,6 +57,7 @@ export interface StandaloneConfig {
   settings?: {
     maxParallelExperts?: number;
     maxStories?: number;
+    maxTargetFiles?: number;
     maxPerStoryRevisions?: number;
     maxReviewRevisions?: number;
     qualityGateMaxRetries?: number;

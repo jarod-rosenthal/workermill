@@ -1237,6 +1237,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
         const config = loadStandaloneConfig();
         const maxStories = config.settings?.maxStories ?? 8;
+        const maxTargetFiles = config.settings?.maxTargetFiles ?? 8;
         const plannerConfig = getRoleConfig(config, "planner");
 
         // Get available personas from worker-config
@@ -1285,7 +1286,7 @@ Do NOT invent personas (e.g., "fullstack_developer" does not exist). For full-st
 - **No circular dependencies.** If A depends on B, B must not depend on A (directly or transitively).
 - **No operational stories.** \`npm install\`, etc. are NOT stories — include them as pre-step instructions in the story that needs the output.
 - **Maximize parallelism via persona diversity.** Each unique persona runs as a separate parallel expert.
-- **targetFiles must be COMPLETE.** List EVERY file the story will create or modify.
+- **targetFiles: max ${maxTargetFiles} per story.** List the most important files each story will create or modify, up to ${maxTargetFiles} files. If a story needs more, split it into multiple stories. Workers can discover additional files from context.
 - **No overlapping targetFiles.** Two stories MUST NOT list the same file in their targetFiles.
 - **Target ${Math.max(1, Math.round(maxStories * 0.7))}-${maxStories} stories.** Prefer fewer, well-scoped stories over many small ones.
 
@@ -1329,7 +1330,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
           model: plannerConfig.model,
           provider: plannerConfig.provider,
           maxStories,
-          maxTargetFiles: 8,
+          maxTargetFiles,
           planningMode: "strict",
           validPersonas,
           ...(preComputedStories ? { preComputedStories } : {}),

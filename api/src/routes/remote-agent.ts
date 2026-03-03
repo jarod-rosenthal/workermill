@@ -1124,6 +1124,7 @@ router.get(
       taskNotes: task.taskNotes || undefined,
       maxParallelExperts: org.maxParallelExperts,
       maxStories,
+      maxTargetFiles: org.maxTargetFiles,
       availablePersonas,
       orgGuidelines: org.aiGuidelines ?? undefined,
     };
@@ -1332,6 +1333,7 @@ Review this execution plan against the PRD:
 **Do NOT penalize:**
 - Single-step plans for genuinely simple tasks
 - Using one persona when only one skill is needed
+- Stories with fewer than ${maxTargetFiles} targetFiles — workers discover additional files from context
 
 **DO check for:**
 1. **Missing Requirements** - Does the plan cover what the PRD asks for?
@@ -1342,8 +1344,7 @@ Review this execution plan against the PRD:
 6. **Overlapping File Scope** - If two or more steps share the same targetFiles, this causes parallel merge conflicts. Steps MUST NOT overlap on targetFiles. Deduct 10 points per shared file across steps.
 7. **Serialization Bottleneck** - If more than half the stories depend on a single story that targets >${maxTargetFiles} files, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
 8. **Requirement Rewriting** - If any story description contains implementation details, acceptance criteria, or rewritten requirements from the PRD, deduct 15 points per offending story. Story descriptions must be 2-3 line scope labels (e.g., "Database layer — migrations and entity definitions.\\nAdds the new table and TypeORM entity."). The original ticket is the spec.
-9. **Incomplete targetFiles** - If a story's description implies files that are NOT listed in its targetFiles, deduct 5 points per story with missing files. targetFiles must be complete.
-10. **Invalid Persona** - Each story's persona MUST be one of: ${validPersonaSlugs.map((s: string) => `\`${s}\``).join(", ")}. Any other persona value is invalid — deduct 20 points per story with an invalid persona.
+9. **Invalid Persona** - Each story's persona MUST be one of: ${validPersonaSlugs.map((s: string) => `\`${s}\``).join(", ")}. Any other persona value is invalid — deduct 20 points per story with an invalid persona.
 
 ***REMOVED******REMOVED*** Scoring Guide
 

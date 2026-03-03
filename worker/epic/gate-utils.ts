@@ -3,7 +3,24 @@
  * Extracted to prevent drift between the two copies.
  */
 
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
+
+/**
+ * Check if Docker daemon is reachable (socket mounted and responsive).
+ * Returns true only if `docker info` succeeds — meaning workers can
+ * actually spin up sibling containers. Cached after first call.
+ */
+let dockerReachableCache: boolean | null = null;
+export function isDockerDaemonReachable(): boolean {
+  if (dockerReachableCache !== null) return dockerReachableCache;
+  try {
+    execSync("docker info", { stdio: "ignore", timeout: 5000 });
+    dockerReachableCache = true;
+  } catch {
+    dockerReachableCache = false;
+  }
+  return dockerReachableCache;
+}
 
 /**
  * Spawn a gate command as a child process with timeout and watch-mode detection.

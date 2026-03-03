@@ -13,7 +13,7 @@
 
 import axios from "axios";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
-import { runGateCommand } from "./gate-utils.js";
+import { runGateCommand, isDockerDaemonReachable } from "./gate-utils.js";
 import type {
   EpicConfig,
   StreamMessage,
@@ -71,7 +71,7 @@ You have FULL AUTHORITY to rewrite the expert's approach. You are not limited to
 - If a library or import keeps causing issues, find an alternative or simplify
 - A passing simple implementation is better than a failing complex one
 - It is acceptable to reduce scope to make gates pass — document what was simplified and why
-- You have \`docker\` and \`docker compose\` available. If tests need service dependencies (MongoDB, Redis, Postgres, etc.), spin them up as sibling containers (e.g. \`docker run -d --rm -p 27017:27017 --name mongo-test mongo:7\`). This is often better than complex mocking. Clean up containers when done.
+- {{DOCKER_INSTRUCTIONS}}
 
 ***REMOVED******REMOVED*** Organization Guidelines
 
@@ -220,12 +220,19 @@ export class InlineEscalationFixer {
     try {
       const prompt = this.buildPrompt();
 
-      const systemPrompt = ESCALATION_SYSTEM_PROMPT.replace(
-        "{{ORG_GUIDELINES}}",
-        this.config.orgGuidelines
-          ? this.config.orgGuidelines
-          : "(none set — skip this section)",
-      );
+      const systemPrompt = ESCALATION_SYSTEM_PROMPT
+        .replace(
+          "{{DOCKER_INSTRUCTIONS}}",
+          isDockerDaemonReachable()
+            ? "You have `docker` and `docker compose` available with a working daemon. If tests need service dependencies (MongoDB, Redis, Postgres, etc.), you MUST spin them up as sibling containers (e.g. `docker run -d --rm -p 27017:27017 --name mongo-test mongo:7`). This is almost always better than complex mocking. Clean up containers when done."
+            : "Docker is NOT available in this environment. If tests require service dependencies, use in-memory alternatives or test doubles."
+        )
+        .replace(
+          "{{ORG_GUIDELINES}}",
+          this.config.orgGuidelines
+            ? this.config.orgGuidelines
+            : "(none set — skip this section)",
+        );
 
       const escalationConfig = {
         persona: "tech_lead" as const,

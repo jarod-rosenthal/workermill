@@ -425,6 +425,31 @@ class LocalEpicSpawner {
       });
     }
 
+    // Mount Docker socket so workers can spin up sibling containers (DBs, caches, etc.)
+    // The sandbox still isolates the filesystem — only Docker API access is shared.
+    const dockerSocketCandidates = [
+      "/var/run/docker.sock",
+      "/mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.sock",
+      path.join(os.homedir(), ".docker/run/docker.sock"),
+    ];
+    const dockerSocket = dockerSocketCandidates.find((s) => fs.existsSync(s));
+    if (dockerSocket) {
+      const dockerSocketPath = this.toDockerPath(dockerSocket);
+      dockerArgs.push("-v", `${dockerSocketPath}:/var/run/docker.sock`);
+      // Add the host's docker socket GID so the non-root worker user can access it
+      try {
+        const socketStat = fs.statSync(dockerSocket);
+        dockerArgs.push("--group-add", String(socketStat.gid));
+      } catch {
+        // Socket exists but can't stat — proceed without group-add
+      }
+      logger.info("Mounting Docker socket for sibling container access", {
+        hostPath: dockerSocket,
+      });
+    } else {
+      logger.warn("No Docker socket found — workers cannot run docker/docker-compose");
+    }
+
     // Add environment variables
     const envArgs = this.buildEnvArgs(task, credentials);
 

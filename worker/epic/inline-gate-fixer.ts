@@ -9,7 +9,7 @@
 
 import axios from "axios";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
-import { runGateCommand } from "./gate-utils.js";
+import { runGateCommand, isDockerDaemonReachable } from "./gate-utils.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
 import {
   createAIClient,
@@ -45,7 +45,7 @@ You have the gate failure output below. Diagnose the exact issue and fix it.
 - Only fix what the quality gate is complaining about. Do NOT refactor or improve other code.
 - Common fixes: remove unused imports/variables, fix type errors, fix lint errors, fix build errors, fix formatting.
 - Run the failing command locally to verify your fix before finishing.
-- You have \`docker\` and \`docker compose\` available. If tests need service dependencies (MongoDB, Redis, Postgres, etc.), spin them up as sibling containers (e.g. \`docker run -d --rm -p 27017:27017 --name mongo-test mongo:7\`). Clean up when done.
+- {{DOCKER_INSTRUCTIONS}}
 - After fixing, stage and commit your changes (e.g. \`git add -A && git commit -m "fix: quality gate"\`). The executor will push after you finish.
 
 ***REMOVED******REMOVED*** Organization Guidelines
@@ -206,12 +206,19 @@ export class InlineGateFixer {
     try {
       const prompt = this.buildPrompt();
 
-      const systemPrompt = GATE_FIX_SYSTEM_PROMPT.replace(
-        "{{ORG_GUIDELINES}}",
-        this.config.orgGuidelines
-          ? this.config.orgGuidelines
-          : "(none set — skip this section)"
-      );
+      const systemPrompt = GATE_FIX_SYSTEM_PROMPT
+        .replace(
+          "{{DOCKER_INSTRUCTIONS}}",
+          isDockerDaemonReachable()
+            ? "You have `docker` and `docker compose` available with a working daemon. If tests need service dependencies (MongoDB, Redis, Postgres, etc.), you MUST spin them up as sibling containers (e.g. `docker run -d --rm -p 27017:27017 --name mongo-test mongo:7`). Clean up when done."
+            : "Docker is NOT available in this environment. If tests require service dependencies, use in-memory alternatives or test doubles."
+        )
+        .replace(
+          "{{ORG_GUIDELINES}}",
+          this.config.orgGuidelines
+            ? this.config.orgGuidelines
+            : "(none set — skip this section)"
+        );
 
       const gateFixConfig = {
         persona: "qa_engineer" as const,

@@ -26,7 +26,7 @@ import type { DecisionClient } from "./decision-client.js";
 import { createRetryableApi } from "./api-retry.js";
 import { InlineGateFixer } from "./inline-gate-fixer.js";
 import { InlineEscalationFixer } from "./inline-escalation-fixer.js";
-import { runGateCommand } from "./gate-utils.js";
+import { runGateCommand, isDockerDaemonReachable } from "./gate-utils.js";
 import axios from "axios";
 import * as fs from "fs/promises";
 import { existsSync, readdirSync, statSync } from "fs";
@@ -436,17 +436,34 @@ Write in a professional, direct tone. Do NOT open messages with filler words or 
 
 When summarizing your work at the end, describe decisions in plain language. The internal DEC-xxx markers are parsed by the system automatically — your summary should restate decisions in readable form. For example, instead of repeating "DEC-001: Created repository-level config", write "Decision 1: Created a repository-level configuration file for..." with enough context for a non-technical reader to understand.`;
 
-    // Docker environment — let experts know they can spin up services
-    prompt += `
+    // Docker environment — only include if daemon is actually reachable
+    const dockerAvailable = isDockerDaemonReachable();
+    if (dockerAvailable) {
+      prompt += `
 
-***REMOVED******REMOVED*** Development Environment
+***REMOVED******REMOVED*** Development Environment (MANDATORY)
 
-You have \`docker\` and \`docker compose\` available. You can spin up service dependencies (databases, caches, message queues, etc.) as sibling containers for integration testing. For example:
-- \`docker run -d --rm -p 27017:27017 --name mongo-test mongo:7\`
-- \`docker run -d --rm -p 6379:6379 --name redis-test redis:7-alpine\`
-- \`docker compose up -d\` (if the project has a docker-compose.yml)
+You have \`docker\` and \`docker compose\` available with a working Docker daemon. **You MUST spin up real service dependencies** (databases, caches, message queues, etc.) using Docker containers before writing any application code that depends on them. Do NOT mock or stub external services — connect to real instances running in Docker.
 
-Clean up any containers you start when you're done (\`docker stop <name>\`).`;
+***REMOVED******REMOVED******REMOVED*** Required Workflow
+1. **Before writing application code**: Start all required service containers
+2. **Configure your code** to connect to localhost on the container ports
+3. **Run tests against real services** — integration tests must hit real databases, not mocks
+4. **Clean up containers** when you're done (\`docker stop <name>\`)
+
+***REMOVED******REMOVED******REMOVED*** Common Services
+- MongoDB: \`docker run -d --rm -p 27017:27017 --name mongo-test mongo:7\`
+- Redis: \`docker run -d --rm -p 6379:6379 --name redis-test redis:7-alpine\`
+- PostgreSQL: \`docker run -d --rm -p 5432:5432 -e POSTGRES_PASSWORD=test --name postgres-test postgres:16-alpine\`
+- MySQL: \`docker run -d --rm -p 3306:3306 -e MYSQL_ROOT_PASSWORD=test --name mysql-test mysql:8\`
+- RabbitMQ: \`docker run -d --rm -p 5672:5672 --name rabbitmq-test rabbitmq:3-alpine\`
+- If the project has a \`docker-compose.yml\`, use \`docker compose up -d\`
+
+***REMOVED******REMOVED******REMOVED*** Why This Matters
+Mocking produces code full of assumptions and interface mismatches that break on first contact with real services. Real containers catch connection strings, schema mismatches, query errors, and serialization bugs immediately — not after deployment. **Tests that pass against mocks but fail against real services are worthless.**`;
+    } else {
+      console.log("[Epic] Docker daemon not reachable — skipping Docker instructions in prompt");
+    }
 
     return prompt;
   }

@@ -304,6 +304,7 @@ router.post(
           id: newOrg?.id,
           name: newOrg?.name,
           slug: newOrg?.slug,
+          plan: newOrg?.plan,
         },
       });
     } catch (error) {

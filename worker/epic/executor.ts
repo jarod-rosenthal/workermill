@@ -613,6 +613,50 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
   }
 
   /**
+   * Get gate commands that match the changed files in a worktree.
+   * Only returns commands from gates whose trigger glob matches at least one changed file.
+   * This prevents backend-only stories from having to pass frontend gates (and vice versa).
+   */
+  private getTriggeredGateCommands(worktreePath: string): string[] {
+    const gates = this.config.qualityGateCommands;
+    if (!gates || gates.length === 0) return [];
+
+    let changedFiles: string[] = [];
+    try {
+      const mainBranch = this.gitOps.getMainBranch();
+      const branchDiffOutput = execSync(
+        `git diff --name-only origin/${mainBranch}...HEAD`,
+        { cwd: worktreePath, encoding: "utf-8", timeout: 10_000 },
+      ).trim();
+      const uncommittedOutput = execSync(`git diff --name-only HEAD`, {
+        cwd: worktreePath, encoding: "utf-8", timeout: 10_000,
+      }).trim();
+      const untrackedOutput = execSync(`git ls-files --others --exclude-standard`, {
+        cwd: worktreePath, encoding: "utf-8", timeout: 10_000,
+      }).trim();
+      changedFiles = [
+        ...new Set([
+          ...branchDiffOutput.split("\n"),
+          ...uncommittedOutput.split("\n"),
+          ...untrackedOutput.split("\n"),
+        ]),
+      ].filter(Boolean);
+    } catch {
+      changedFiles = ["*"];
+    }
+
+    const triggered: string[] = [];
+    for (const gate of gates) {
+      const triggerPrefix = gate.trigger.replace(/\*\*/g, "").replace(/\*/g, "").replace(/\/+$/, "");
+      const matches = changedFiles.some((f) => f === "*" || f.startsWith(triggerPrefix));
+      if (matches) {
+        triggered.push(...gate.commands);
+      }
+    }
+    return triggered;
+  }
+
+  /**
    * [GATE 1] Pre-commit quality gate — runs matching quality gate commands
    * based on which files were changed. Commands come from board metadata
    * (extracted from PRD by the decomposer).
@@ -1784,9 +1828,10 @@ ${parts.join("\n\n")}
               "completion", "decision", "file_created", "file_modified",
             ]);
 
+            const triggeredCommands = this.getTriggeredGateCommands(worktreePath);
             const gateCommands = failedCmd !== "unknown"
-              ? [failedCmd, ...this.config.qualityGateCommands.flatMap((g) => g.commands).filter((c) => c !== failedCmd)]
-              : this.config.qualityGateCommands.flatMap((g) => g.commands);
+              ? [failedCmd, ...triggeredCommands.filter((c) => c !== failedCmd)]
+              : triggeredCommands;
 
             const escalationFixer = new InlineEscalationFixer(
               this.config,
@@ -1825,9 +1870,10 @@ ${parts.join("\n\n")}
             // Extract the specific failed command from the error message for targeted fixing
             // Error format: "Pre-commit quality gate failed (cmd):\n..."
             // Pass all gate commands for verification (fixer re-runs all to confirm fix doesn't break others)
+            const triggeredCommands = this.getTriggeredGateCommands(worktreePath);
             const gateCommands = failedCmd !== "unknown"
-              ? [failedCmd, ...this.config.qualityGateCommands.flatMap((g) => g.commands).filter((c) => c !== failedCmd)]
-              : this.config.qualityGateCommands.flatMap((g) => g.commands);
+              ? [failedCmd, ...triggeredCommands.filter((c) => c !== failedCmd)]
+              : triggeredCommands;
             const fixer = new InlineGateFixer(
               this.config,
               worktreePath,

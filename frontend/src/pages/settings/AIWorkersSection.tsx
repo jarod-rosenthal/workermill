@@ -384,20 +384,11 @@ export function AIWorkersSection({
               {/* Planning Mode Toggle */}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-3">Planning Mode</label>
-                {isProPlan ? (
-                  <div className="p-3 rounded-lg border-2 border-purple-500 bg-purple-500/10 text-left">
-                    <div className="text-sm font-medium text-foreground">Simplified</div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Single planning pass — critic feedback is incorporated but never blocks.{" "}
-                      <Link to="/pricing" className="text-primary hover:underline">Upgrade to Max</Link> for Strict mode.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                     <button
                       onClick={() => updateSetting("planningMode", "strict")}
                       className={`p-3 rounded-lg border-2 transition-all text-left ${
-                        settings.planningMode !== "simplified"
+                        settings.planningMode === "strict"
                           ? "border-purple-500 bg-purple-500/10"
                           : "border-border bg-background/50 hover:border-purple-500/50"
                       }`}
@@ -420,8 +411,20 @@ export function AIWorkersSection({
                         Single planning pass — critic feedback is incorporated but never blocks
                       </p>
                     </button>
+                    <button
+                      onClick={() => updateSetting("planningMode", "decomposer_planned")}
+                      className={`p-3 rounded-lg border-2 transition-all text-left ${
+                        settings.planningMode === "decomposer_planned"
+                          ? "border-purple-500 bg-purple-500/10"
+                          : "border-border bg-background/50 hover:border-purple-500/50"
+                      }`}
+                    >
+                      <div className="text-sm font-medium text-foreground">Decomposer-Planned</div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Stories planned at decomposition — fast grounding pass replaces full planning
+                      </p>
+                    </button>
                   </div>
-                )}
               </div>
 
               {isProPlan ? (

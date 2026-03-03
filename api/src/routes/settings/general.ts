@@ -728,13 +728,13 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     }
 
     if (planningMode !== undefined) {
-      const validModes = ["strict", "simplified"];
+      const validModes = ["strict", "simplified", "decomposer_planned"];
       if (!validModes.includes(planningMode)) {
-        res.status(400).json({ error: "planningMode must be 'strict' or 'simplified'" });
+        res.status(400).json({ error: "planningMode must be 'strict', 'simplified', or 'decomposer_planned'" });
         return;
       }
-      if (org.plan === "pro" && planningMode === "strict") {
-        res.status(403).json({ error: "Pro plan only supports Simplified planning mode. Upgrade to Max for Strict mode." });
+      if (org.plan === "pro" && planningMode !== "simplified") {
+        res.status(403).json({ error: "Pro plan only supports Simplified planning mode. Upgrade to Max for more planning modes." });
         return;
       }
       org.planningMode = planningMode;

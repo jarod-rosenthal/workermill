@@ -57,6 +57,8 @@ Fix ALL quality gate failures. You have access to ALL files in the repository.
 - Do NOT refactor beyond what's needed to pass gates
 - Commit with message "fix: resolve integration issues from story consolidation"
 - Push to current branch
+- **NEVER change language versions** (Go version in go.mod/Dockerfile, Node.js version, Python version, etc.). Version pins are intentional architectural decisions from the project specification. Fix the code to work with the specified version — do NOT downgrade the language.
+- **NEVER change framework or dependency major versions** unless the error explicitly shows an incompatibility that cannot be resolved any other way.
 
 ## Organization Guidelines
 

@@ -47,6 +47,8 @@ You have the gate failure output below. Diagnose the exact issue and fix it.
 - Run the failing command locally to verify your fix before finishing.
 - {{DOCKER_INSTRUCTIONS}}
 - After fixing, stage and commit your changes (e.g. \`git add -A && git commit -m "fix: quality gate"\`). The executor will push after you finish.
+- **NEVER change language versions** (Go version in go.mod/Dockerfile, Node.js version, Python version, etc.). Version pins are intentional architectural decisions from the project specification. Fix the code to work with the specified version — do NOT downgrade the language.
+- **NEVER change framework or dependency major versions** unless the error explicitly shows an incompatibility that cannot be resolved any other way.
 
 ## Organization Guidelines
 

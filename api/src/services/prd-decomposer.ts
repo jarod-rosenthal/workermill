@@ -309,9 +309,11 @@ export async function decomposePrd(
     ? new Anthropic({ authToken: oauthToken })
     : new Anthropic({ apiKey: resolvedApiKey });
 
-  let response: Anthropic.Message;
+  // Use streaming internally to avoid Anthropic SDK 10-minute timeout on
+  // long-running non-streaming requests. We collect the text without emitting events.
+  let rawText = "";
   try {
-    response = await client.messages.create({
+    const stream = client.messages.stream({
       model: resolvedModel,
       max_tokens: 128000,
       system: SYSTEM_PROMPT,
@@ -322,6 +324,20 @@ export async function decomposePrd(
         },
       ],
     });
+
+    stream.on("text", (textDelta) => {
+      rawText += textDelta;
+    });
+
+    const finalMessage = await stream.finalMessage();
+
+    logger.info("Received PRD decomposition response", {
+      model: finalMessage.model,
+      stopReason: finalMessage.stop_reason,
+      inputTokens: finalMessage.usage?.input_tokens,
+      outputTokens: finalMessage.usage?.output_tokens,
+      responseLength: rawText.length,
+    });
   } catch (error) {
     logger.error("Anthropic SDK error during PRD decomposition", {
       error: error instanceof Error ? error.message : String(error),
@@ -331,24 +347,9 @@ export async function decomposePrd(
     );
   }
 
-  if (!response.content || response.content.length === 0) {
+  if (!rawText) {
     throw new Error("Anthropic API returned empty content");
   }
-
-  const textBlock = response.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") {
-    throw new Error("Anthropic API returned no text content");
-  }
-
-  const rawText = textBlock.text;
-
-  logger.info("Received PRD decomposition response", {
-    model: response.model,
-    stopReason: response.stop_reason,
-    inputTokens: response.usage?.input_tokens,
-    outputTokens: response.usage?.output_tokens,
-    responseLength: rawText.length,
-  });
 
   // Strip markdown fences if present (```json ... ``` or ``` ... ```)
   const jsonText = stripMarkdownFences(rawText);
@@ -404,9 +405,11 @@ export async function decomposePrdWithStories(
     ? new Anthropic({ authToken: oauthToken })
     : new Anthropic({ apiKey: resolvedApiKey });
 
-  let response: Anthropic.Message;
+  // Use streaming internally to avoid Anthropic SDK 10-minute timeout on
+  // long-running non-streaming requests. We collect the text without emitting events.
+  let rawText = "";
   try {
-    response = await client.messages.create({
+    const stream = client.messages.stream({
       model: resolvedModel,
       max_tokens: 128000,
       system: SYSTEM_PROMPT_WITH_STORIES,
@@ -417,6 +420,20 @@ export async function decomposePrdWithStories(
         },
       ],
     });
+
+    stream.on("text", (textDelta) => {
+      rawText += textDelta;
+    });
+
+    const finalMessage = await stream.finalMessage();
+
+    logger.info("Received PRD decomposition with stories response", {
+      model: finalMessage.model,
+      stopReason: finalMessage.stop_reason,
+      inputTokens: finalMessage.usage?.input_tokens,
+      outputTokens: finalMessage.usage?.output_tokens,
+      responseLength: rawText.length,
+    });
   } catch (error) {
     logger.error("Anthropic SDK error during PRD decomposition (with stories)", {
       error: error instanceof Error ? error.message : String(error),
@@ -426,24 +443,9 @@ export async function decomposePrdWithStories(
     );
   }
 
-  if (!response.content || response.content.length === 0) {
+  if (!rawText) {
     throw new Error("Anthropic API returned empty content");
   }
-
-  const textBlock = response.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") {
-    throw new Error("Anthropic API returned no text content");
-  }
-
-  const rawText = textBlock.text;
-
-  logger.info("Received PRD decomposition with stories response", {
-    model: response.model,
-    stopReason: response.stop_reason,
-    inputTokens: response.usage?.input_tokens,
-    outputTokens: response.usage?.output_tokens,
-    responseLength: rawText.length,
-  });
 
   const jsonText = stripMarkdownFences(rawText);
 

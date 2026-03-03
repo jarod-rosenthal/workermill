@@ -1054,6 +1054,7 @@ router.get(
       defaultGitlabRepo: org.defaultGitlabRepo ?? null,
       blockerMaxAutoRetries: org.blockerMaxAutoRetries,
       blockerAutoRetryEnabled: org.blockerAutoRetryEnabled !== false,
+      blockerWaitTimeoutMinutes: org.blockerWaitTimeoutMinutes,
       pushAfterCommit: org.pushAfterCommit !== false,
       gracefulShutdownEnabled: org.gracefulShutdownEnabled !== false,
       selfReviewEnabled: org.selfReviewEnabled === true,

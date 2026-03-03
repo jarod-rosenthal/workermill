@@ -1120,34 +1120,46 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
     const changedFiles = await this.gitOps.getFilesChangedVsMainInWorktree(worktreePath);
     const validation = await this.validateStoryCompletion(story, worktreePath, changedFiles, expert);
 
-    // Post completion to coordination feed
-    const currentRevision = await this.coordination.getCurrentRevision();
-    await this.coordination.postCompletion(
-      story.storyIndex,
-      story.title,
-      expert,
-      this.config.parentTaskId,
-      {
-        branchName,
-        filesModified: changedFiles,
-        revisionNumber: currentRevision,
-        validation: {
-          passed: validation.valid,
-          issues: validation.issues,
-          criteriaMetRatio: `${validation.acceptanceCriteriaMet}/${validation.acceptanceCriteriaTotal}`,
-        },
-      }
-    );
+    // Post completion to coordination feed (non-fatal — story already passed all gates and validation)
+    try {
+      const currentRevision = await this.coordination.getCurrentRevision();
+      await this.coordination.postCompletion(
+        story.storyIndex,
+        story.title,
+        expert,
+        this.config.parentTaskId,
+        {
+          branchName,
+          filesModified: changedFiles,
+          revisionNumber: currentRevision,
+          validation: {
+            passed: validation.valid,
+            issues: validation.issues,
+            criteriaMetRatio: `${validation.acceptanceCriteriaMet}/${validation.acceptanceCriteriaTotal}`,
+          },
+        }
+      );
+    } catch (err) {
+      console.error(`[Executor] Failed to post completion for story ${story.storyIndex} (non-fatal):`, err instanceof Error ? err.message : err);
+    }
 
-    await this.ticketOps.postComment(
-      `**${story.title}** — completed by ${expert} (${commentSuffix})\n\n${changedFiles.length} file${changedFiles.length !== 1 ? "s" : ""} changed.`
-    );
+    try {
+      await this.ticketOps.postComment(
+        `**${story.title}** — completed by ${expert} (${commentSuffix})\n\n${changedFiles.length} file${changedFiles.length !== 1 ? "s" : ""} changed.`
+      );
+    } catch (err) {
+      console.error(`[Executor] Failed to post ticket comment for story ${story.storyIndex} (non-fatal):`, err instanceof Error ? err.message : err);
+    }
 
     storyResult.success = true;
     storyResult.filesModified = changedFiles;
     storyResult.branchName = branchName;
     storyResult.worktreePath = worktreePath;
     this.worktreePathByStory.delete(story.storyIndex);
+
+    console.log("[Executor] Story " + story.storyIndex + " completed successfully (" + commentSuffix + ")");
+    await this.postLog(`${story.title} — completed!`, expert, "system");
+
     return storyResult;
   }
 

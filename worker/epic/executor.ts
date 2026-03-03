@@ -1165,6 +1165,11 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
     const validation = await this.validateStoryCompletion(story, worktreePath, changedFiles, expert);
 
     // Post completion to coordination feed (non-fatal — story already passed all gates and validation)
+    // Truncate filesModified to stay under the 10KB coordination metadata limit
+    const maxFixerFiles = 100;
+    const truncatedFixerFiles = changedFiles.length > maxFixerFiles
+      ? [...changedFiles.slice(0, maxFixerFiles), `... and ${changedFiles.length - maxFixerFiles} more files`]
+      : changedFiles;
     try {
       const currentRevision = await this.coordination.getCurrentRevision();
       await this.coordination.postCompletion(
@@ -1174,7 +1179,7 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
         this.config.parentTaskId,
         {
           branchName,
-          filesModified: changedFiles,
+          filesModified: truncatedFixerFiles,
           revisionNumber: currentRevision,
           validation: {
             passed: validation.valid,
@@ -1735,26 +1740,35 @@ ${parts.join("\n\n")}
         );
       }
 
-      // 7. Post completion to coordination feed
+      // 7. Post completion to coordination feed (non-fatal — story already passed all gates and validation)
       // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
       // Include revision number for revision-aware completion tracking
-      const currentRevision = await this.coordination.getCurrentRevision();
-      await this.coordination.postCompletion(
-        story.storyIndex,
-        story.title,
-        expert,
-        this.config.parentTaskId,
-        {
-          branchName,
-          filesModified: changedFiles,
-          revisionNumber: currentRevision,
-          validation: {
-            passed: validation.valid,
-            issues: validation.issues,
-            criteriaMetRatio: `${validation.acceptanceCriteriaMet}/${validation.acceptanceCriteriaTotal}`,
-          },
-        }
-      );
+      // Truncate filesModified to stay under the 10KB coordination metadata limit
+      const maxFiles = 100;
+      const truncatedFiles = changedFiles.length > maxFiles
+        ? [...changedFiles.slice(0, maxFiles), `... and ${changedFiles.length - maxFiles} more files`]
+        : changedFiles;
+      try {
+        const currentRevision = await this.coordination.getCurrentRevision();
+        await this.coordination.postCompletion(
+          story.storyIndex,
+          story.title,
+          expert,
+          this.config.parentTaskId,
+          {
+            branchName,
+            filesModified: truncatedFiles,
+            revisionNumber: currentRevision,
+            validation: {
+              passed: validation.valid,
+              issues: validation.issues,
+              criteriaMetRatio: `${validation.acceptanceCriteriaMet}/${validation.acceptanceCriteriaTotal}`,
+            },
+          }
+        );
+      } catch (err) {
+        console.error(`[Executor] Failed to post completion for story ${story.storyIndex} (non-fatal):`, err instanceof Error ? err.message : err);
+      }
 
       storyResult.success = true;
 

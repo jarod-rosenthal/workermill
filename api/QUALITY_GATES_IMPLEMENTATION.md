@@ -20,12 +20,12 @@ Quality gates are now **validated when tasks complete**, providing visibility in
 
 ***REMOVED******REMOVED******REMOVED*** Key Files
 
-1. **`/mnt/c/Users/jarod/github/workermill/api/src/services/quality-gates.ts`** (NEW)
+1. **`api/src/services/quality-gates.ts`** (NEW)
    - New validation module with comprehensive gate checking logic
    - Supports gates: PR created, PR merged, tests pass, no TypeScript errors, PR review approved, no lint errors, deployment successful, code coverage
    - Returns detailed validation results with per-gate status
 
-2. **`/mnt/c/Users/jarod/github/workermill/api/src/services/orchestrator.ts`** (MODIFIED)
+2. **`api/src/services/orchestrator.ts`** (MODIFIED)
    - Added import: `import { validateQualityGates } from "./quality-gates.js";`
    - Added quality gate validation at task completion (line ~1984-2033)
    - Validation runs for tasks with status: `completed`, `deployed`, `review_requested`

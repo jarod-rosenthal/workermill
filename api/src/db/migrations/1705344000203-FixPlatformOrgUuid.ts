@@ -80,13 +80,14 @@ export class FixPlatformOrgUuid1705344000203 implements MigrationInterface {
           )
         `, [this.NEW_PLATFORM_ORG_ID]);
 
-        // Add jarod as owner
-        const jarodUsers = await queryRunner.query(`
-          SELECT id FROM users WHERE LOWER(email) = 'admin@localhost'
-        `);
+        // Add admin user as owner
+        const adminEmail = process.env.SEED_EMAIL || "admin@localhost";
+        const adminUsers = await queryRunner.query(`
+          SELECT id FROM users WHERE LOWER(email) = LOWER($1)
+        `, [adminEmail]);
 
-        if (jarodUsers.length > 0) {
-          const userId = jarodUsers[0].id;
+        if (adminUsers.length > 0) {
+          const userId = adminUsers[0].id;
           await queryRunner.query(`
             UPDATE users SET support_admin = true WHERE id = $1
           `, [userId]);

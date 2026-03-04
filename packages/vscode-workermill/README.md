@@ -42,4 +42,4 @@ Or if you already have an account: **Sign In** or **Use API Key**.
 
 - [Documentation](https://workermill.com/docs)
 - [Dashboard](https://workermill.com/dashboard)
-- [GitHub](https://github.com/workermill/workermill)
+- [GitHub](https://github.com/jarod-rosenthal/workermill)

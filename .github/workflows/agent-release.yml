@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    if: github.repository == 'workermill/workermill'
+    if: github.repository == 'jarod-rosenthal/workermill'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -56,17 +56,17 @@ jobs:
 
       - name: Upload to S3 CDN
         run: |
-          aws s3 cp agent/dist/bin/workermill-agent-linux-x64 s3://workermill-dev-frontend-AWS_ACCOUNT_ID/agent/latest/workermill-agent-linux-x64 --content-type application/octet-stream
-          aws s3 cp agent/dist/bin/workermill-agent-darwin-x64 s3://workermill-dev-frontend-AWS_ACCOUNT_ID/agent/latest/workermill-agent-darwin-x64 --content-type application/octet-stream
-          aws s3 cp agent/dist/bin/workermill-agent-darwin-arm64 s3://workermill-dev-frontend-AWS_ACCOUNT_ID/agent/latest/workermill-agent-darwin-arm64 --content-type application/octet-stream
-          aws s3 cp agent/dist/bin/workermill-agent-win-x64.exe s3://workermill-dev-frontend-AWS_ACCOUNT_ID/agent/latest/workermill-agent-win-x64.exe --content-type application/octet-stream
-          aws s3 cp agent/dist/bin/latest.json s3://workermill-dev-frontend-AWS_ACCOUNT_ID/agent/latest.json --content-type application/json
-          aws s3 cp agent/install.sh s3://workermill-dev-frontend-AWS_ACCOUNT_ID/install.sh --content-type text/plain
-          aws s3 cp agent/install.ps1 s3://workermill-dev-frontend-AWS_ACCOUNT_ID/install.ps1 --content-type text/plain
+          aws s3 cp agent/dist/bin/workermill-agent-linux-x64 s3://${{ vars.FRONTEND_S3_BUCKET }}/agent/latest/workermill-agent-linux-x64 --content-type application/octet-stream
+          aws s3 cp agent/dist/bin/workermill-agent-darwin-x64 s3://${{ vars.FRONTEND_S3_BUCKET }}/agent/latest/workermill-agent-darwin-x64 --content-type application/octet-stream
+          aws s3 cp agent/dist/bin/workermill-agent-darwin-arm64 s3://${{ vars.FRONTEND_S3_BUCKET }}/agent/latest/workermill-agent-darwin-arm64 --content-type application/octet-stream
+          aws s3 cp agent/dist/bin/workermill-agent-win-x64.exe s3://${{ vars.FRONTEND_S3_BUCKET }}/agent/latest/workermill-agent-win-x64.exe --content-type application/octet-stream
+          aws s3 cp agent/dist/bin/latest.json s3://${{ vars.FRONTEND_S3_BUCKET }}/agent/latest.json --content-type application/json
+          aws s3 cp agent/install.sh s3://${{ vars.FRONTEND_S3_BUCKET }}/install.sh --content-type text/plain
+          aws s3 cp agent/install.ps1 s3://${{ vars.FRONTEND_S3_BUCKET }}/install.ps1 --content-type text/plain
 
       - name: Invalidate CloudFront cache
         run: |
-          aws cloudfront create-invalidation --distribution-id CLOUDFRONT_DIST_ID --paths "/agent/*" "/install.sh" "/install.ps1"
+          aws cloudfront create-invalidation --distribution-id ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/agent/*" "/install.sh" "/install.ps1"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -81,7 +81,7 @@ jobs:
           generate_release_notes: true
 
   docker:
-    if: github.repository == 'workermill/workermill'
+    if: github.repository == 'jarod-rosenthal/workermill'
     runs-on: ubuntu-latest
     needs: build
     permissions:
@@ -108,13 +108,13 @@ jobs:
           file: worker/Dockerfile
           push: true
           tags: |
-            ghcr.io/workermill/worker:${{ steps.version.outputs.version }}
-            ghcr.io/workermill/worker:latest
+            ghcr.io/jarod-rosenthal/worker:${{ steps.version.outputs.version }}
+            ghcr.io/jarod-rosenthal/worker:latest
 
       - name: Make GHCR package public
         run: |
           curl -s -X PATCH \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/orgs/workermill/packages/container/worker" \
+            "https://api.github.com/users/jarod-rosenthal/packages/container/worker" \
             -d '{"visibility":"public"}' || echo "Warning: could not set package visibility (may need org admin to set it manually once)"

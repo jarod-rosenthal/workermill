@@ -37,13 +37,13 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  ECR_REGISTRY: AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
   ECR_API_REPO: workermill-dev/api
   ECR_WORKER_REPO: workermill-dev/worker
   ECS_CLUSTER: workermill-dev
   ECS_SERVICE: workermill-dev-api
-  S3_BUCKET: workermill-dev-frontend-AWS_ACCOUNT_ID
-  CLOUDFRONT_DISTRIBUTION: CLOUDFRONT_DIST_ID
+  S3_BUCKET: ${{ vars.FRONTEND_S3_BUCKET }}
+  CLOUDFRONT_DISTRIBUTION: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
 
 jobs:
   ***REMOVED*** ============================================================================

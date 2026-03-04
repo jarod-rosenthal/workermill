@@ -15,8 +15,7 @@ import type { EpicConfig, StreamMessage } from "./types.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 
 // IAM role for WorkerMill self-improvement operations
-const IMPROVER_ROLE_ARN = process.env.WORKERMILL_IMPROVER_ROLE_ARN ||
-  "arn:aws:iam::AWS_ACCOUNT_ID:role/workermill-improver-role";
+const IMPROVER_ROLE_ARN = process.env.WORKERMILL_IMPROVER_ROLE_ARN || "";
 
 /**
  * Result of an improvement analysis.

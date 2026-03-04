@@ -127,7 +127,7 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
       gitlabToken: "",
       githubReviewerToken: "",
       sandbox: (sc.sandbox === "docker" ? "docker" : "none") as "docker" | "none",
-      dockerImage: "ghcr.io/workermill/worker",
+      dockerImage: "ghcr.io/jarod-rosenthal/worker",
       dockerMemoryGb: 4,
       localRag: false,
       ollamaPort: 11434,

@@ -24,8 +24,6 @@ No automatic triggers on push/PR.
 
 ## GitHub Repository
 
-Single repo: `jarod-rosenthal/workermill`
-
 **Required secrets:** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `VSCE_PAT`
 
 **Required variables:** `AWS_ACCOUNT_ID`, `FRONTEND_S3_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`

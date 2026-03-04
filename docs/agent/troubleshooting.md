@@ -1,6 +1,20 @@
 # Troubleshooting
 
-## Common Commands
+## Standalone Mode
+
+| Problem | Check |
+|---------|-------|
+| Agent won't start | Check `~/.workermill/config.json` exists and has valid `mode`. Run `workermill-agent status` |
+| VS Code can't connect | Check `~/.workermill/agent.port` exists. Try `workermill-agent stop && workermill-agent start` |
+| "API key not found" | Verify `ANTHROPIC_API_KEY` env var, or run `claude auth login` for OAuth, or set key in config |
+| Task stuck "running" | Run `workermill-agent status` to check worker PIDs. Stale worker sweep runs every 60s |
+| Worker process crashes | Check `workermill-agent logs`. Common cause: missing SCM token for private repos |
+| SQLite locked | Only one agent process should run at a time. Check for stale processes: `ps aux | grep workermill-agent` |
+| Docker sandbox fails | Ensure Docker is running. Run `workermill-agent pull` to update the sandbox image |
+
+## Cloud Mode / Local WorkerMill
+
+### Common Commands
 
 ```bash
 # View ECS service status
@@ -11,17 +25,9 @@ MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-
 
 # Tail worker logs
 MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/worker" --follow --region us-east-1
-
-# Database access via bastion (preferred)
-./bin/bastion start && sleep 60 && ./bin/bastion ssh
-# Then in SSH session: psql-workermill
-
-# Alternative: Database access via ECS exec
-MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-1
-# Then: aws ecs execute-command --container api
 ```
 
-## Common Issues
+### Common Issues
 
 | Problem | Check |
 |---------|-------|
@@ -30,9 +36,6 @@ MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-
 | Task not claimed | `GET /api/orchestrator/status`, verify task status is `queued` |
 | PR not created | Branch conflicts, token permissions, rate limits |
 | Epic not progressing | Check coordination commands and worker check-ins, verify planning agent completed |
-| Bastion SSH timeout | Run `./bin/bastion whitelist` to update SG with current IP |
-| Bastion can't reach RDS | Check RDS SG includes bastion SG: `aws ec2 describe-security-groups --group-ids sg-0c7c9a0e3e60d8cab` |
-| psql not found on bastion | User data may have failed; run `sudo dnf install -y postgresql16` |
 
 ## Windows/Git Bash
 
@@ -40,5 +43,4 @@ MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-
 |-------|----------|
 | AWS CLI path conversion | Prefix with `MSYS_NO_PATHCONV=1` |
 | AWS CLI Unicode errors | Set `PYTHONIOENCODING=utf-8` |
-| Shell parsing errors with `$(...)` | Spawn a Task agent instead of debugging |
-| Docker layer caching | deploy.sh uses `--no-cache` - NEVER build with cache |
+| Docker layer caching | deploy.sh uses `--no-cache` — NEVER build with cache |

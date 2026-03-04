@@ -380,12 +380,12 @@ Additional flags: `--skip-build`, `--db-check`, `--check-migrations`, `--snapsho
 ## Documentation
 
 - **[Docs](https://workermill.com/docs)** — User-facing guides: quick start, integrations, task lifecycle, personas, epics
-- **[Architecture](docs/claude/architecture.md)** — Models, routes, task flow, execution modes
-- **[Infrastructure](docs/claude/infrastructure.md)** — Terraform, AWS setup
-- **[Local Dev](docs/claude/local-dev.md)** — Development environment setup
-- **[Agent & VS Code](docs/claude/agent-and-vscode.md)** — Agent internals, extension details
-- **[Testing](docs/claude/testing.md)** — Vitest (API), Playwright (E2E)
-- **[Troubleshooting](docs/claude/troubleshooting.md)** — Common issues and fixes
+- **[Architecture](docs/agent/architecture.md)** — Models, routes, task flow, execution modes
+- **[Infrastructure](docs/agent/infrastructure.md)** — Terraform, AWS setup
+- **[Local Dev](docs/agent/local-dev.md)** — Development environment setup
+- **[Agent & VS Code](docs/agent/agent-and-vscode.md)** — Agent internals, extension details
+- **[Testing](docs/agent/testing.md)** — Vitest (API), Playwright (E2E)
+- **[Troubleshooting](docs/agent/troubleshooting.md)** — Common issues and fixes
 
 ## License
 

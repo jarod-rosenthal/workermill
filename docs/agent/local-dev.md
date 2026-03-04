@@ -1,46 +1,18 @@
 # Local Development
 
-## Bastion Tunnel (Production RDS)
+## Local WorkerMill Mode (Docker — API/Dashboard Development)
 
-Local development uses an SSH bastion to tunnel to the production RDS database. The bastion is a t4g.nano Spot instance (~$0.001/hr) that starts on-demand.
+This mode runs the full WorkerMill API + frontend + PostgreSQL locally, with workers as Docker containers. Used for developing and testing the WorkerMill platform itself. Tasks are managed via the web dashboard at `localhost:5173`.
 
-### Starting Local Dev Environment
+**For most users** who just want to run AI agents on their code, use the standalone agent instead — see `docs/agent/agent-and-vscode.md`.
 
-```bash
-# 1. Start the bastion (auto-detects and whitelists your IP)
-./bin/bastion start
-
-# 2. Wait ~60 seconds for instance to boot, then check status
-./bin/bastion status
-
-# 3. Create SSH tunnel to RDS (keeps running in foreground)
-./bin/bastion ssh
-
-# 4. In another terminal, get the DB password
-aws secretsmanager get-secret-value --secret-id workermill/dev/database-url --query 'SecretString' --output text
-
-# 5. Run the API locally with tunnel
-cd api
-DATABASE_URL=postgresql://workermill:<password>@localhost:5432/workermill npm run dev
-```
-
-**Bastion commands:** `start`, `stop`, `status`, `ssh` (port forwarding 5432→RDS), `whitelist`. SSH key: `~/.ssh/workermill-bastion`.
-
-Once tunnel is running, connect via `psql -h localhost -p 5432 -U workermill -d workermill` or `psql-workermill` from the bastion SSH session.
-
----
-
-## Local WorkerMill Mode (Docker — Dashboard Only, No VS Code Extension)
-
-Run WorkerMill entirely locally with workers as Docker containers. Uses Claude Max subscription OAuth token for authentication. Tasks are managed via the web dashboard at `localhost:5173` — **the VS Code extension does NOT connect to local WorkerMill** (it requires the remote agent).
-
-**To use VS Code with local development**, run the remote agent pointed at `http://localhost:3001` instead — see `docs/claude/agent-and-vscode.md`.
+**To use VS Code with local API development**, run the cloud agent pointed at `http://localhost:3001` — see `docs/agent/agent-and-vscode.md` (Cloud Mode section).
 
 ### Prerequisites
 
-- Docker (for PostgreSQL)
+- Docker (for PostgreSQL and worker containers)
 - Claude CLI: `curl -fsSL https://claude.ai/install.sh | bash` (or `winget install Anthropic.ClaudeCode` on Windows)
-- Claude Max subscription
+- Claude Max subscription (for OAuth token)
 
 ### Setup
 
@@ -52,7 +24,7 @@ claude auth login
 cat >> .env.local << EOF
 DATABASE_URL=postgresql://workermill:localdev@localhost:5433/workermill
 EXECUTION_MODE=local
-TARGET_REPO_PATH=../oncallshift-api
+TARGET_REPO_PATH=../your-target-repo
 EOF
 
 # 3. Build the worker Docker image (first time only)
@@ -74,7 +46,6 @@ EOF
 | `./bin/local-workermill create-task "title"` | Create a test task |
 | `./bin/local-workermill logs` | Tail logs from all services |
 | `./bin/local-workermill reset` | Reset local environment |
-| `./bin/local-workermill sync-data` | Sync data from production (requires bastion) |
 | `./bin/local-workermill build-worker` | Build the worker Docker image |
 | `./bin/local-workermill add-account` | Save current Claude credentials to rotation pool |
 
@@ -91,7 +62,7 @@ EOF
 | `--local-auth` | false | Skip Cognito, auto-login as local user |
 | `--mock-workers` | false | Use fast mock workers instead of Claude CLI (for E2E tests) |
 
-### Local Development Filesystem (CRITICAL — READ THIS)
+### WSL2 Development (Windows)
 
 **Always clone and run WorkerMill from the WSL2 native filesystem (`~/github/workermill`), NOT from `/mnt/c/`.**
 
@@ -103,7 +74,7 @@ cd ~/github/workermill
 ./bin/local-workermill start --skip-db
 
 # Wrong: Windows mount (HMR broken, requires manual restart)
-cd /mnt/c/Users/jarod/github/workermill
+cd /mnt/c/Users/<your-user>/github/workermill
 ```
 
 **After cloning, make scripts executable:** `chmod +x bin/local-workermill bin/bastion`

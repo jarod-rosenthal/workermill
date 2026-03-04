@@ -31,7 +31,7 @@ See the [Quick Start](***REMOVED***quick-start) section in README.md.
 - ESLint for linting (`npm run lint` in api/ and frontend/)
 
 ***REMOVED******REMOVED*** Architecture Overview
-See [docs/claude/architecture.md](docs/claude/architecture.md) for the full architecture guide.
+See [docs/agent/architecture.md](docs/agent/architecture.md) for the full architecture guide.
 
 ***REMOVED******REMOVED*** Code of Conduct
 See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

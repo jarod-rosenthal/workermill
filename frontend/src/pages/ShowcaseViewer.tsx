@@ -70,7 +70,7 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     tagline:
       "Feature flag platform — built across 3 sequential epics by AI workers.",
     description:
-      "Full-stack feature flag and experimentation platform with Go/Fiber API, SvelteKit 2 dashboard (Svelte 5 runes), MongoDB document models, Redis caching, JWT + API key authentication, targeting rules, percentage rollouts, A/B experiments, and Docker deployment. Claude Sonnet 4.6 built the code across 7 expert personas; Claude Opus planned each epic and reviewed all work as tech lead. 3 epics executed sequentially — backend, frontend, deployment — each building on the last. 67 commits, 20.8K lines across 110 files. Deployed to Railway at flagdeck-app.workermill.com.",
+      "Full-stack feature flag and experimentation platform with Go/Fiber API, SvelteKit 2 dashboard (Svelte 5 runes), MongoDB document models, Redis caching, JWT + API key authentication, targeting rules, percentage rollouts, A/B experiments, and Docker deployment. Claude Sonnet built the code across 7 expert personas; Claude Opus planned each epic and reviewed all work as tech lead. 3 epics executed sequentially — backend, frontend, deployment — each building on the last. 67 commits, 20.8K lines across 110 files. Deployed to Railway at flagdeck-app.workermill.com.",
     stack: "Go + SvelteKit 2 + MongoDB + Redis",
     storyCount: 21,
     cost: "$64",
@@ -394,7 +394,7 @@ export default function ShowcaseViewer() {
                   <Zap className="w-4 h-4 text-violet-400" />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-violet-300">Claude Sonnet 4.6</div>
+                  <div className="text-sm font-semibold text-violet-300">Claude Sonnet</div>
                   <div className="text-xs text-muted-foreground">Code generation across 7 expert personas</div>
                 </div>
               </div>

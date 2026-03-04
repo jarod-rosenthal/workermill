@@ -1,5 +1,7 @@
 ***REMOVED*** CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 ***REMOVED******REMOVED*** Project Overview
 
 WorkerMill: the open-source operations layer for AI coding agents. Deployed at https://workermill.com.
@@ -20,12 +22,22 @@ WorkerMill: the open-source operations layer for AI coding agents. Deployed at h
 | Stop local dev | `./bin/local-workermill stop` |
 | Type check API | `cd api && npm run typecheck` |
 | Type check frontend | `cd frontend && npx tsc -b` |
+| Type check agent | `cd agent && npm run typecheck` |
+| Type check worker | `cd worker && npm run typecheck` |
+| Lint API | `cd api && npm run lint` |
+| Lint frontend | `cd frontend && npm run lint` |
 | Run API tests | `cd api && npm run test` |
-| Create migration | `cd api && npm run migrate:create NAME` (register in `connection.ts`) |
+| Run single API test | `cd api && npx vitest run src/routes/some.test.ts` |
+| Run API integration tests | `cd api && npm run test:integration` |
+| Run E2E tests | `cd frontend && npm run test:e2e` |
+| Run single E2E test | `cd frontend && npx playwright test e2e/some-test.spec.ts` |
+| Create migration | `cd api && npm run migrate:create NAME` (register in `api/src/db/connection.ts`) |
 | Build agent | `cd agent && npm run build:binary` |
 | Build worker | `./bin/local-workermill build-worker` |
+| Package VS Code ext | `cd packages/vscode-workermill && npm run package` (bump version first) |
+| Deploy | `./deploy.sh --api`, `--frontend`, `--worker`, or `--all` |
 
-**Git:** Work on `main`.
+**Git:** Work on `main`. No automatic CI on push — workflows are manual (`workflow_dispatch`).
 
 ---
 
@@ -80,3 +92,17 @@ Gate 1: pre-commit shell commands from `quality_gate_commands` board column. Gat
 
 ***REMOVED******REMOVED******REMOVED*** Orchestrator
 Modules in `api/src/services/`: `orchestrator.ts` (hub), `task-claimer.ts`, `worker-spawner.ts`, `task-dispatch.ts`, `task-monitor.ts`, `task-cleanup.ts`, `planning-workflow.ts`, `manager-workflow.ts`. Stateless — all state in DB. Cron jobs use Redis SETNX locks.
+
+***REMOVED******REMOVED******REMOVED*** Three Execution Paths
+1. **Remote Agent** (production + VS Code): Agent polls API → plans → spawns native worker process. VS Code only works with this path.
+2. **Local Docker** (development): API creates task (skips planning) → local orchestrator → Docker container.
+3. **Cloud ECS** (legacy): Agent plans → cloud orchestrator → ECS Fargate task.
+
+See `docs/claude/architecture.md` for full flow diagrams.
+
+***REMOVED******REMOVED******REMOVED*** Release Tags
+- **Agent**: Bump `agent/package.json` → `git tag agent-v<version>` → push tag → CI builds 4 platform binaries + Docker sandbox image.
+- **VS Code**: Bump `packages/vscode-workermill/package.json` → `git tag vscode-v<version>` → push tag → CI publishes to Marketplace.
+
+***REMOVED******REMOVED******REMOVED*** Multi-Provider Support
+AI providers: `anthropic` (default, Claude CLI experts), `openai`, `google`, `ollama` (all via Vercel AI SDK). SCM providers: `github`, `gitlab`, `bitbucket`. Worker decision logic (error classification, quality gates) served by API at `/api/worker-decisions/` — IP lives in `api/src/services/worker-decision-engine.ts`.

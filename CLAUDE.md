@@ -43,13 +43,13 @@ WorkerMill: the open-source operations layer for AI coding agents. Deployed at h
 
 ## Detailed Reference
 
-- **Local dev**: `docs/claude/local-dev.md`
-- **Agent + VS Code**: `docs/claude/agent-and-vscode.md`
-- **Architecture** (models, routes, task flow): `docs/claude/architecture.md`
-- **Integrations**: `docs/claude/integrations.md`
-- **Infrastructure**: `docs/claude/infrastructure.md`
-- **Troubleshooting**: `docs/claude/troubleshooting.md`
-- **Testing**: `docs/claude/testing.md`
+- **Local dev**: `docs/agent/local-dev.md`
+- **Agent + VS Code**: `docs/agent/agent-and-vscode.md`
+- **Architecture** (models, routes, task flow): `docs/agent/architecture.md`
+- **Integrations**: `docs/agent/integrations.md`
+- **Infrastructure**: `docs/agent/infrastructure.md`
+- **Troubleshooting**: `docs/agent/troubleshooting.md`
+- **Testing**: `docs/agent/testing.md`
 
 ---
 
@@ -93,12 +93,13 @@ Gate 1: pre-commit shell commands from `quality_gate_commands` board column. Gat
 ### Orchestrator
 Modules in `api/src/services/`: `orchestrator.ts` (hub), `task-claimer.ts`, `worker-spawner.ts`, `task-dispatch.ts`, `task-monitor.ts`, `task-cleanup.ts`, `planning-workflow.ts`, `manager-workflow.ts`. Stateless — all state in DB. Cron jobs use Redis SETNX locks.
 
-### Three Execution Paths
-1. **Remote Agent** (production + VS Code): Agent polls API → plans → spawns native worker process. VS Code only works with this path.
-2. **Local Docker** (development): API creates task (skips planning) → local orchestrator → Docker container.
-3. **Cloud ECS** (legacy): Agent plans → cloud orchestrator → ECS Fargate task.
+### Four Execution Paths
+1. **Standalone Agent** (default, VS Code): Agent runs locally with SQLite, event-driven orchestration. No cloud dependency.
+2. **Cloud Agent** (production, team workflows): Agent polls cloud API → plans → spawns native worker process.
+3. **Local Docker** (API development): API creates task (skips planning) → local orchestrator → Docker container.
+4. **Cloud ECS** (legacy): Agent plans → cloud orchestrator → ECS Fargate task.
 
-See `docs/claude/architecture.md` for full flow diagrams.
+See `docs/agent/architecture.md` for full flow diagrams.
 
 ### Release Tags
 - **Agent**: Bump `agent/package.json` → `git tag agent-v<version>` → push tag → CI builds 4 platform binaries + Docker sandbox image.

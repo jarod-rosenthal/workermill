@@ -18,7 +18,7 @@ export interface FlagDeckEpic {
   buildLog: string;
 }
 
-// Sanitized PRD — connection strings, project IDs, and secret references removed
+// Sanitized PRD v3 — connection strings, project IDs, and secret references removed
 export const flagDeckPrd = `***REMOVED*** FlagDeck — Full Build Specification
 
 ***REMOVED******REMOVED*** Purpose
@@ -49,6 +49,14 @@ Your training data may not include these — they are ALL correct and valid:
 
 If you believe a dependency version "doesn't exist", you are wrong. Trust the PRD.
 
+***REMOVED******REMOVED******REMOVED*** Dockerfile Version Pinning — CRITICAL
+
+**The Go version in \`api/Dockerfile\` (\`FROM golang:X.XX-alpine\`) MUST match \`go.mod\` (\`go X.XX\`).** If \`go.mod\` says \`go 1.24\`, the Dockerfile MUST use \`golang:1.24-alpine\`. A mismatch causes \`go mod download\` to fail on Railway with: \`go.mod requires go >= 1.24.0 (running go 1.22.12)\`. This is not caught by local CI because \`docker compose\` rebuilds from scratch — it only surfaces on Railway's build servers.
+
+***REMOVED******REMOVED******REMOVED*** Tailwind v4 Scoped CSS — CRITICAL
+
+Do NOT use Tailwind utility classes inside Svelte \`<style>\` blocks. Tailwind v4's Vite plugin only sees utility classes in the \`<template>\` (HTML) portion of \`.svelte\` files. Using \`bg-white\` or any utility class in a \`<style>\` block causes a build failure: \`Cannot apply unknown utility class 'bg-white'\`. Use inline utility classes in the HTML only.
+
 ***REMOVED******REMOVED******REMOVED*** Pre-Commit Quality Gates
 
 \`\`\`
@@ -59,6 +67,7 @@ cd api && go build -o /dev/null ./cmd/server
 cd api && gofmt -w .
 
 ***REMOVED*** Frontend gate (trigger: web/**)
+cd web && npx prettier --write .
 cd web && npm run lint
 cd web && npm run build
 \`\`\`
@@ -69,6 +78,8 @@ Do NOT use \`golangci-lint\`, \`staticcheck\`, or any third-party linters. Do NO
 
 - Go: \`gofmt\`, no naked returns, wrap errors with \`fmt.Errorf("context: %w", err)\`
 - Frontend: Svelte 5 runes (\`$state\`, \`$derived\`, \`$effect\`) — NOT legacy \`$:\` reactive syntax
+- **Svelte rune files:** Any \`.ts\` file that uses Svelte 5 runes (\`$state\`, \`$derived\`, \`$effect\`) MUST use the \`.svelte.ts\` extension. The Svelte compiler only processes rune syntax in \`.svelte\` and \`.svelte.ts\` files. A file named \`auth.ts\` with \`$state()\` will silently fail — it must be \`auth.svelte.ts\`.
+- **\`$derived\` vs \`$derived.by()\`:** Use \`$derived(expr)\` for simple expressions. Use \`$derived.by(() => expr)\` for complex expressions (function calls, multi-line logic, \`.filter()\`, \`.map()\`). Using \`$derived()\` with complex expressions causes runtime errors.
 - All API responses use \`snake_case\` field names — NEVER \`camelCase\`
 - TypeScript strict mode, no \`any\` types
 - Tailwind v4 with \`@tailwindcss/vite\` plugin — do NOT use \`@apply\` in Svelte \`<style>\` blocks (broken in v4). Use inline utility classes only.
@@ -364,25 +375,49 @@ Codes: \`VALIDATION_ERROR\`, \`NOT_FOUND\`, \`UNAUTHORIZED\`, \`FORBIDDEN\`, \`C
 
 ***REMOVED******REMOVED******REMOVED*** Routes
 
-| Path | Page | API Calls |
-|------|------|-----------|
-| \`/login\` | Login form | POST \`/auth/login\` |
-| \`/\` | Dashboard | GET flags, environments, experiments, audit-log (aggregate stats) |
-| \`/flags\` | Flag list | GET \`/api/v1/flags\` |
+| Path | Page | Auth | API Calls |
+|------|------|------|-----------|
+| \`/\` | Landing page (public) | None | None — static marketing page |
+| \`/login\` | Login form | None | POST \`/auth/login\` |
+| \`/dashboard\` | Dashboard | JWT | GET flags, environments, experiments, audit-log (aggregate stats) |
+| \`/flags\` | Flag list | JWT | GET \`/api/v1/flags\` |
 | \`/flags/[id]\` | Flag detail + targeting rules | GET \`/api/v1/flags/:key\`, PUT, toggle |
 | \`/flags/create\` | Create flag form | POST \`/api/v1/flags\` |
 | \`/environments\` | Environment list | GET/POST/PUT/DELETE \`/api/v1/environments\` |
 | \`/segments\` | Segment list + detail | GET/POST/PUT/DELETE \`/api/v1/segments\` |
 | \`/experiments\` | Experiment list + detail | GET/POST/PUT/DELETE \`/api/v1/experiments\` |
 | \`/audit-log\` | Audit timeline | GET \`/api/v1/audit-log\` |
-| \`/settings\` | API keys management | GET/POST/DELETE \`/api/v1/api-keys\` |
+| \`/settings\` | API keys management | JWT | GET/POST/DELETE \`/api/v1/api-keys\` |
+
+***REMOVED******REMOVED******REMOVED*** Landing Page (\`/\`)
+
+The root route is a **public landing page** — visible without authentication. This is the first thing a visitor sees. It must look like a real product marketing page, not a placeholder.
+
+**Required sections:**
+- **Hero** — product name "FlagDeck", tagline, CTA buttons ("Get Started" → \`/login\`, "Learn More" → scroll)
+- **Features** — 3-4 feature cards (feature flags, A/B testing, targeting rules, audit trail)
+- **How It Works** — brief explanation with icons or illustrations
+- **Built by WorkerMill** — prominent section explaining this app was built entirely by AI workers using [WorkerMill](https://workermill.com). Include a "Built with WorkerMill" badge or banner.
+- **Footer** — copyright, "Built with WorkerMill" link, relevant links
+
+**Design requirements:**
+- Professional, modern SaaS aesthetic — gradient hero, clean typography, generous whitespace
+- Fully responsive (mobile + desktop)
+- Do NOT use generic placeholder text ("Lorem ipsum"). Write realistic product copy.
+- "Sign In" link in the top nav → \`/login\`
+
+**Layout behavior:**
+- Landing page (\`/\`) and login (\`/login\`) render WITHOUT the sidebar — full-width pages
+- All authenticated routes (\`/dashboard\`, \`/flags\`, etc.) render WITH the sidebar
+- The layout component must check the current route to decide whether to show the sidebar
 
 ***REMOVED******REMOVED******REMOVED*** Auth Flow
 
 - Store \`access_token\` and \`refresh_token\` in \`localStorage\`
 - Attach \`Authorization: Bearer <access_token>\` to all API requests
 - On 401: attempt refresh with \`refresh_token\`. If refresh fails → redirect to \`/login\`
-- Unauthenticated users see \`/login\` only. All other routes require auth.
+- Successful login redirects to \`/dashboard\` (NOT \`/\` — that's the landing page)
+- Unauthenticated users can access \`/\` (landing) and \`/login\`. All other routes require auth and redirect to \`/login\` if not authenticated.
 
 ***REMOVED******REMOVED******REMOVED*** Key Components
 
@@ -523,16 +558,45 @@ server {
 
 ***REMOVED******REMOVED******REMOVED*** Railway Deployment
 
-Railway deploys from the \`main\` branch automatically on push. The project has **two services**:
+Railway deploys from the \`main\` branch automatically on push. The project has **two services** configured in the Railway dashboard:
 
-| Railway Service | Root Directory | Dockerfile | Port | Domain |
-|----------------|---------------|------------|------|--------|
-| \`api\` | \`/api\` | \`api/Dockerfile\` | 8080 | \`flagdeck.workermill.com\` |
-| \`web\` | \`/web\` | \`web/Dockerfile\` | 80 | \`flagdeck-app.workermill.com\` |
+| Railway Service | Root Directory | Dockerfile | Port | Custom Domain |
+|----------------|---------------|------------|------|---------------|
+| \`flagdeck-api\` | \`/api\` | \`api/Dockerfile\` | 8080 | \`flagdeck.workermill.com\` |
+| \`flagdeck-web\` | \`/web\` | \`web/Dockerfile\` | 80 | \`flagdeck-app.workermill.com\` |
+
+**Environment variables** (pre-configured in Railway dashboard — do NOT hardcode in code):
+
+| Service | Variable | Source |
+|---------|----------|--------|
+| \`flagdeck-api\` | \`MONGODB_URI\` | MongoDB Atlas connection string |
+| \`flagdeck-api\` | \`REDIS_URL\` | Upstash Redis connection string |
+| \`flagdeck-api\` | \`JWT_SECRET\` | Random 64-char secret |
+| \`flagdeck-api\` | \`PORT\` | \`8080\` |
+| \`flagdeck-api\` | \`ENVIRONMENT\` | \`production\` |
+| \`flagdeck-api\` | \`CORS_ORIGINS\` | \`https://flagdeck-app.workermill.com,https://flagdeck.workermill.com\` |
+| \`flagdeck-web\` | \`PUBLIC_API_URL\` | \`https://flagdeck.workermill.com\` |
+| \`flagdeck-web\` | \`PORT\` | \`80\` |
+
+**How Railway builds and deploys:**
+1. Railway connects to the GitHub repo and auto-deploys on every push to \`main\`
+2. Railway's builder (RAILPACK) detects the Dockerfile in each service's root directory and uses it
+3. Railway passes service environment variables into the Docker build — the \`ARG PUBLIC_API_URL\` / \`ENV PUBLIC_API_URL=$PUBLIC_API_URL\` pattern in \`web/Dockerfile\` works because Railway injects env vars during the build step
+4. After build succeeds, Railway deploys the container and routes traffic to the custom domain
 
 **Workers do NOT need to configure Railway.** Railway services and env vars are pre-configured in the dashboard. Workers just push code to \`main\` — Railway detects the Dockerfiles and deploys automatically.
 
-**Do NOT** create \`railway.json\`, \`railway.toml\`, \`Procfile\`, or \`nixpacks.toml\` — Railway uses the Dockerfiles directly.
+**Do NOT** create \`railway.json\`, \`railway.toml\`, \`Procfile\`, or \`nixpacks.toml\` — Railway detects and uses the Dockerfiles directly.
+
+***REMOVED******REMOVED******REMOVED*** Railway Deployment Verification (REQUIRED)
+
+Railway deployments are invisible to CI. The CI workflow validates locally, but Railway builds can fail for reasons CI doesn't catch (version mismatches, build arg issues, RAILPACK detection failures). **Every epic that modifies \`api/Dockerfile\` or \`web/Dockerfile\` MUST include a deployment verification step.**
+
+**Known Railway failure modes (all verified from actual build logs):**
+1. **Go version mismatch:** \`api/Dockerfile\` \`FROM golang:X.XX-alpine\` must exactly match \`api/go.mod\` \`go X.XX\`. Railway's build fails with \`go.mod requires go >= 1.24.0 (running go 1.22.12)\` if they differ.
+2. **RAILPACK Dockerfile detection:** Railway uses RAILPACK as its builder. RAILPACK auto-detects Dockerfiles, but if it fails to detect one, it tries to build as a raw Node.js/Go app and fails. The Dockerfile MUST be at the root of the service's root directory.
+3. **Tailwind v4 scoped CSS:** Using utility classes in Svelte \`<style>\` blocks causes \`Cannot apply unknown utility class\` during production build. Quality gates catch this locally.
+4. **SvelteKit \`$env/static/public\` build arg:** \`PUBLIC_API_URL\` is baked into the web app at build time via SvelteKit's \`$env/static/public\`. If Railway doesn't pass it during Docker build, the web app falls back to \`http://localhost:8080\` and nothing works.
 
 ***REMOVED******REMOVED******REMOVED*** \`docker-compose.yml\` (full local stack)
 
@@ -616,7 +680,11 @@ jobs:
           gofmt -l . | grep . && exit 1 || true
 
       - name: Web quality gates
-        run: cd web && npm ci && npm run lint && npm run build
+        run: |
+          cd web && npm ci
+          npx prettier --check .
+          npm run lint
+          npm run build
 
       - name: E2E tests
         run: |
@@ -627,7 +695,44 @@ jobs:
       - name: Stop stack
         if: always()
         run: docker compose down
+
+      ***REMOVED*** Post-deploy verification (main branch only — after Railway auto-deploys)
+      - name: Wait for Railway deployment
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          echo "Waiting 180s for Railway to build and deploy..."
+          sleep 180
+
+      - name: Smoke test production
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          API_URL="https://flagdeck.workermill.com"
+          WEB_URL="https://flagdeck-app.workermill.com"
+
+          ***REMOVED*** API health
+          curl -sf "$API_URL/health" | grep -q '"status":"ok"' || { echo "FAIL: API health"; exit 1; }
+
+          ***REMOVED*** Login works
+          TOKEN=$(curl -sf -X POST "$API_URL/auth/login" \\
+            -H "Content-Type: application/json" \\
+            -H "Origin: $WEB_URL" \\
+            -d '{"email":"demo@workermill.com","password":"demo1234"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+          [ -n "$TOKEN" ] || { echo "FAIL: Login"; exit 1; }
+
+          ***REMOVED*** Seeded data exists
+          FLAGS=$(curl -sf "$API_URL/api/v1/flags" -H "Authorization: Bearer $TOKEN" -H "Origin: $WEB_URL")
+          COUNT=$(echo "$FLAGS" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('data',[])))")
+          [ "$COUNT" -ge 10 ] || { echo "FAIL: Expected 10+ flags, got $COUNT"; exit 1; }
+
+          ***REMOVED*** Web app loads
+          curl -sf "$WEB_URL/" | grep -q "FlagDeck" || { echo "FAIL: Web app"; exit 1; }
+
+          echo "PASS: All production smoke tests passed"
 \`\`\`
+
+CI uses the SAME docker-compose as local dev. If it works locally, it works in CI.
+
+**The production smoke test step runs ONLY on pushes to \`main\`** (not on PRs). It waits 180 seconds for Railway to build and deploy, then verifies the live site works.
 
 ***REMOVED******REMOVED******REMOVED*** E2E Tests
 
@@ -635,14 +740,42 @@ Playwright tests run against the local docker-compose stack. Test file structure
 
 \`\`\`
 web/e2e/
-  login.spec.ts       — login with demo credentials, verify redirect to dashboard
+  login.spec.ts       — login with demo credentials, verify redirect to /dashboard
   dashboard.spec.ts   — verify stats cards show seeded data, not zeros
   flags.spec.ts       — list flags, create flag, toggle flag, edit targeting rules
   experiments.spec.ts — list experiments, view results chart
   audit-log.spec.ts   — verify timeline shows seeded entries
 \`\`\`
 
+**Important:** E2E tests are created in the SAME epic/PR as the frontend pages they test. Do NOT create E2E test files before the pages they test exist.
+
 Each test authenticates first via the login page, then tests the feature. Tests verify REAL data from seed (not mocked).
+
+***REMOVED******REMOVED******REMOVED*** E2E Test Constraints
+
+These rules are mandatory for all Playwright tests:
+
+**Login helper pattern:**
+\`\`\`typescript
+async function login(page: Page) {
+  await page.goto("/login");
+  await page.click('button[type="submit"]');
+  await page.waitForURL("**/dashboard", { timeout: 30000 });
+}
+\`\`\`
+- Navigate to \`/login\` BEFORE accessing \`localStorage\` (accessing \`localStorage\` on \`about:blank\` throws \`SecurityError\`)
+- Demo credentials are pre-filled — just click submit
+- Wait for redirect to \`/dashboard\` (not \`/\`)
+
+**Selectors — use semantic selectors, NEVER CSS classes:**
+- \`page.locator("h1")\` — element tags
+- \`page.locator('[data-testid="stat-card"]')\` — data-testid attributes
+- \`page.locator("text=Dashboard")\` — text content
+- \`page.getByRole("button", { name: "Create" })\` — ARIA roles
+- **NEVER** use Tailwind classes as selectors (\`.bg-red-50\`, \`.text-red-800\`, \`.animate-spin\`). Tailwind classes are implementation details that break when styling changes.
+
+**Formatting:**
+- Run \`npx prettier --write .\` after editing any test file. CI runs \`prettier --check\` and will fail on unformatted files.
 
 ---
 
@@ -655,18 +788,22 @@ Each test authenticates first via the login page, then tests the feature. Tests 
 - [ ] \`GET /api/v1/flags\` returns 10+ seeded flags in \`{"data":[...],"total":N}\` format
 - [ ] Flag toggle works (per-environment and global)
 - [ ] Evaluation endpoint returns correct values based on targeting rules
-- [ ] Dashboard shows non-zero stats (activeFlags > 0, runningExperiments > 0)
+- [ ] Dashboard at \`/dashboard\` shows non-zero stats (activeFlags > 0, runningExperiments > 0)
+- [ ] Landing page at \`/\` loads without authentication and looks professional
 - [ ] All CRUD operations work for flags, environments, segments, experiments, API keys
 - [ ] Audit log shows 50+ seeded entries spread across 14 days
 - [ ] All E2E tests pass against docker-compose stack
 - [ ] \`go test ./... -race\` passes against local MongoDB
 - [ ] \`npm run lint && npm run build\` passes for web
 
-***REMOVED******REMOVED******REMOVED*** Production (Railway — verified AFTER deploying)
-- [ ] API responds at \`https://flagdeck.workermill.com/health\`
-- [ ] Web loads at \`https://flagdeck-app.workermill.com\`
-- [ ] Login with demo credentials works on production
-- [ ] Seeded data visible in production dashboard
+***REMOVED******REMOVED******REMOVED*** Production (Railway — verified AFTER deploying, automated by CI smoke test)
+- [ ] \`GET https://flagdeck.workermill.com/health\` returns \`{"status":"ok","mongodb":"connected","redis":"connected"}\`
+- [ ] \`POST https://flagdeck.workermill.com/auth/login\` with demo credentials returns JWT (requires \`Origin\` header)
+- [ ] \`GET https://flagdeck.workermill.com/api/v1/flags\` returns 10+ seeded flags (requires JWT + \`Origin\` header)
+- [ ] \`GET https://flagdeck-app.workermill.com/\` returns HTML containing "FlagDeck"
+- [ ] Web app's compiled JS contains \`https://flagdeck.workermill.com\` as the API URL (NOT \`localhost:8080\`)
+- [ ] Login on the actual web app at \`https://flagdeck-app.workermill.com/login\` works and redirects to dashboard with seeded data
+- [ ] CI smoke test step passes on the merge-to-main workflow run
 
 ***REMOVED******REMOVED*** Anti-Patterns (Do NOT)
 
@@ -679,6 +816,10 @@ Each test authenticates first via the login page, then tests the feature. Tests 
 - Do NOT use camelCase in API responses — everything is \`snake_case\`
 - Do NOT hardcode localhost URLs — use \`PUBLIC_API_URL\` env var for frontend
 - Do NOT skip seed upsert — seed must run on every deploy and update existing data
+- Do NOT use a different Go version in \`api/Dockerfile\` than what \`api/go.mod\` specifies — Railway builds will fail
+- Do NOT use Tailwind utility classes inside Svelte \`<style>\` blocks — Tailwind v4 only processes utilities in template HTML
+- Do NOT test API endpoints with \`curl\` without the \`Origin\` header — CORS middleware rejects requests missing it, making auth look broken when it isn't
+- Do NOT assume Railway deployment succeeded just because CI passed — CI only validates locally. Check the production smoke test step.
 `;
 
 export const flagDeckEpics: FlagDeckEpic[] = [

@@ -23,7 +23,7 @@ export const flagDeckPrd = `***REMOVED*** FlagDeck — Full Build Specification
 
 ***REMOVED******REMOVED*** Purpose
 
-This is a **showcase build** — a polished demo app designed to impress potential customers visiting \`flagdeck.workermill.com\`. The app must look and feel like a real product with realistic data, not a skeleton with placeholder content. When a visitor logs in with the demo credentials, they should see a populated dashboard with real-looking flags, active experiments, and a believable audit trail. Every page should have data. Empty states are failure.
+This is a **showcase build** — a polished demo app designed to demonstrate what WorkerMill can build autonomously. The app must look and feel like a real product with realistic data, not a skeleton with placeholder content. When a visitor logs in with the demo credentials, they should see a populated dashboard with real-looking flags, active experiments, and a believable audit trail. Every page should have data. Empty states are failure.
 
 ***REMOVED******REMOVED*** Tech Stack
 

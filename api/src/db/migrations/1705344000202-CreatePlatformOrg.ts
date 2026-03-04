@@ -36,13 +36,14 @@ export class CreatePlatformOrg1705344000202 implements MigrationInterface {
       `, [this.PLATFORM_ORG_ID]);
     }
 
-    // Find jarod's user and configure as platform admin
-    const jarodUsers = await queryRunner.query(`
-      SELECT id FROM users WHERE LOWER(email) = 'admin@localhost'
-    `);
+    // Find the admin user and configure as platform admin
+    const adminEmail = process.env.SEED_EMAIL || "admin@localhost";
+    const adminUsers = await queryRunner.query(`
+      SELECT id FROM users WHERE LOWER(email) = LOWER($1)
+    `, [adminEmail]);
 
-    if (jarodUsers.length > 0) {
-      const userId = jarodUsers[0].id;
+    if (adminUsers.length > 0) {
+      const userId = adminUsers[0].id;
 
       // Ensure support admin flag is set
       await queryRunner.query(`
@@ -57,10 +58,9 @@ export class CreatePlatformOrg1705344000202 implements MigrationInterface {
         ON CONFLICT (user_id, org_id) DO UPDATE SET role = 'owner'
       `, [userId, this.PLATFORM_ORG_ID]);
 
-      // Log the result
-      console.log(`Platform org created and admin@localhost added as owner`);
+      console.log(`Platform org created and ${adminEmail} added as owner`);
     } else {
-      console.log(`Warning: admin@localhost not found - platform org created without admin`);
+      console.log(`Warning: ${adminEmail} not found - platform org created without admin`);
     }
   }
 

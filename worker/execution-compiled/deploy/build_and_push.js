@@ -6,7 +6,7 @@
  * making it perfect for ECS Fargate containers.
  *
  * Environment variables:
- * - DOCKER_REGISTRY: ECR registry URL (e.g., AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/app)
+ * - DOCKER_REGISTRY: ECR registry URL (e.g., <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/app)
  * - DOCKERFILE_PATH: Path to Dockerfile (default: ./Dockerfile)
  * - BUILD_CONTEXT: Build context path (default: .)
  * - IMAGE_TAG: Tag for the image (default: git short SHA)
@@ -35,7 +35,7 @@ if (!tag) {
 }
 if (!registry) {
     console.error("ERROR: DOCKER_REGISTRY environment variable not set");
-    console.error("Example: AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/myapp");
+    console.error("Example: <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/myapp");
     process.exit(1);
 }
 // Resolve dockerfile path

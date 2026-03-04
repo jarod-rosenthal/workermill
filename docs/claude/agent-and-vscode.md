@@ -85,8 +85,7 @@ npm run typecheck   # tsc --noEmit
 npm run package     # → workermill-{version}.vsix
 ```
 - **ALWAYS bump version** in package.json before packaging — VS Code caches extensions by version
-- Marketplace publish: `git tag vscode-v{version}` → push to `origin` (jarod-rosenthal) ONLY → CI publishes to Marketplace
-- **Do NOT push `vscode-v*` tags to `upstream`** — the workflow will fail (no `VSCE_PAT`)
+- Marketplace publish: `git tag vscode-v{version}` → `git push origin vscode-v{version}` → CI publishes to Marketplace
 - Manual install: `code --install-extension workermill-{version}.vsix`
 - **Testing is done on a SEPARATE machine** — not the dev machine. Do not assume `~/.workermill/` exists on the test machine.
 

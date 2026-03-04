@@ -2,13 +2,13 @@
 
 ## Environment Configuration
 
-**Production** (`environments/prod/`) - workermill.com — AWS account AWS_ACCOUNT_ID, us-east-1. ECS cluster is `workermill-dev` (historical naming).
+**Production** (`environments/prod/`) - workermill.com — AWS account <AWS_ACCOUNT_ID>, us-east-1. ECS cluster is `workermill-dev` (historical naming).
 
 ## Terraform Commands
 
 ```bash
 cd infrastructure/terraform/environments/prod
-terraform init -backend-config="bucket=workermill-terraform-state-AWS_ACCOUNT_ID"
+terraform init -backend-config="bucket=workermill-terraform-state-<AWS_ACCOUNT_ID>"
 terraform plan && terraform apply
 ```
 

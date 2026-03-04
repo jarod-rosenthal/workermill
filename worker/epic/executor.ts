@@ -663,6 +663,15 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
         if (!existsSync(goModPath)) continue;
       }
 
+      // Skip Node.js gates if package.json doesn't exist
+      const hasNpmCommand = gate.commands.some((c) => /\bnpm\s+run\b/.test(c));
+      if (hasNpmCommand) {
+        const pkgPath = triggerPrefix
+          ? `${worktreePath}/${triggerPrefix}/package.json`
+          : `${worktreePath}/package.json`;
+        if (!existsSync(pkgPath)) continue;
+      }
+
       triggered.push(...gate.commands);
     }
     return triggered;
@@ -795,6 +804,20 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
           : `${worktreePath}/go.mod`;
         if (!existsSync(goModPath)) {
           await this.postLog(`[Quality Gate] ⏭️ ${gate.name} gate skipped — no go.mod found (Go module not initialized yet)`, expert, "system");
+          continue;
+        }
+      }
+
+      // For Node.js gates, skip if package.json doesn't exist in the target directory.
+      // Prevents failures like `cd web && npm run lint` when the directory exists
+      // but the Node.js project hasn't been initialized yet.
+      const hasNpmCommand = gate.commands.some((c) => /\bnpm\s+run\b/.test(c));
+      if (hasNpmCommand) {
+        const pkgPath = triggerPrefix
+          ? `${worktreePath}/${triggerPrefix}/package.json`
+          : `${worktreePath}/package.json`;
+        if (!existsSync(pkgPath)) {
+          await this.postLog(`[Quality Gate] ⏭️ ${gate.name} gate skipped — no package.json found (Node.js project not initialized yet)`, expert, "system");
           continue;
         }
       }

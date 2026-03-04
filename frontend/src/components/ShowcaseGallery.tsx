@@ -38,19 +38,20 @@ interface ShowcaseProject {
 
 const showcaseProjects: ShowcaseProject[] = [
   {
-    id: "oncallshift",
-    name: "OnCallShift",
+    id: "flagdeck",
+    name: "FlagDeck",
     tagline:
-      "Production incident management across 3 repos — API, web, and mobile — built entirely by WorkerMill.",
+      "Feature flag platform with targeting rules, percentage rollouts, and A/B testing — Go/Fiber API + SvelteKit dashboard.",
     description:
-      "177K lines across 3 repositories. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens, Terraform infrastructure. 24 epics executed sequentially across oncallshift-api, oncallshift-web, and oncallshift-mobile. Deployed to AWS at oncallshift.com.",
-    stack: "Express + TypeScript + React + React Native + Terraform",
-    storyCount: 24,
-    cost: "$1,206",
-    duration: "~18 hrs",
-    linesOfCode: "177,000",
-    liveUrl: "https://oncallshift.com",
-    category: "incident-management",
+      "Full-stack feature flag platform with Go/Fiber API, SvelteKit 2 dashboard (Svelte 5 runes), MongoDB, Redis caching, JWT + API key auth, flag evaluation engine with targeting and rollouts, audit logging, and Docker deployment. Claude Sonnet 4.6 built the code across 7 expert personas; Claude Opus planned each epic and reviewed all work as tech lead. 3 epics, 21 stories, 67 commits. Deployed to Railway.",
+    stack: "Go + SvelteKit 2 + MongoDB + Redis",
+    storyCount: 21,
+    cost: "$64",
+    duration: "~4.5 hrs",
+    linesOfCode: "20,800",
+    repoUrl: "https://github.com/workermill-examples/flagdeck",
+    liveUrl: "https://flagdeck-app.workermill.com",
+    category: "developer-tools",
     icon: <Zap className="w-4 h-4" />,
   },
   {
@@ -118,19 +119,19 @@ const showcaseProjects: ShowcaseProject[] = [
     icon: <Terminal className="w-4 h-4" />,
   },
   {
-    id: "flagdeck",
-    name: "FlagDeck",
-    tagline: "Open-source feature flag and experimentation platform with targeting rules, percentage rollouts, and A/B testing.",
+    id: "oncallshift",
+    name: "OnCallShift",
+    tagline:
+      "Production incident management across 3 repos — API, web, and mobile — built entirely by WorkerMill.",
     description:
-      "Full-stack feature flag platform with Go Fiber API, SvelteKit 2 dashboard (Svelte 5 runes), MongoDB document models, Redis caching, JWT + API key auth, flag evaluation engine with targeting and rollouts, audit logging, and Playwright E2E tests. 6 epics, all approved. Deployed to Railway.",
-    stack: "Go (Fiber) + SvelteKit 2 + MongoDB + Redis",
-    storyCount: 38,
-    cost: "$195",
-    duration: "~10.5 hrs",
-    linesOfCode: "27,000",
-    repoUrl: "https://github.com/workermill-examples/flagdeck",
-    liveUrl: "https://flagdeck-app.workermill.com",
-    category: "developer-tools",
+      "177K lines across 3 repositories. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens, Terraform infrastructure. 24 epics executed sequentially across oncallshift-api, oncallshift-web, and oncallshift-mobile. Deployed to AWS at oncallshift.com.",
+    stack: "Express + TypeScript + React + React Native + Terraform",
+    storyCount: 24,
+    cost: "$1,206",
+    duration: "~18 hrs",
+    linesOfCode: "177,000",
+    liveUrl: "https://oncallshift.com",
+    category: "incident-management",
     icon: <Zap className="w-4 h-4" />,
   },
   {
@@ -178,7 +179,7 @@ export default function ShowcaseGallery() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            309K lines of production code across 6 projects, deployed to AWS,
+            303K lines of production code across 6 projects, deployed to AWS,
             Vercel, and Railway. Every project built from tickets — planned,
             coded, tested, reviewed, and deployed autonomously.
           </p>
@@ -189,7 +190,7 @@ export default function ShowcaseGallery() {
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <TrendingUp className="w-4 h-4 text-emerald-400" />
-              <span className="text-2xl font-bold text-white">97%</span>
+              <span className="text-2xl font-bold text-white">96%</span>
             </div>
             <p className="text-xs text-slate-400">
               Showcase task success rate
@@ -205,7 +206,7 @@ export default function ShowcaseGallery() {
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <GitPullRequest className="w-4 h-4 text-teal-400" />
-              <span className="text-2xl font-bold text-white">60</span>
+              <span className="text-2xl font-bold text-white">57</span>
             </div>
             <p className="text-xs text-slate-400">PRs shipped across builds</p>
           </div>
@@ -367,10 +368,10 @@ export default function ShowcaseGallery() {
                 Real metrics, not cherry-picked
               </h3>
               <p className="text-sm text-slate-400 leading-relaxed">
-                Autonomous coding is hard. Across the 60 showcase tasks above, 2
+                Autonomous coding is hard. Across the 57 showcase tasks above, 2
                 failed — a planning agent that returned malformed JSON and a
                 manager review that caught inaccuracies the worker
-                couldn&apos;t fix in its allowed retries. That&apos;s a 97%
+                couldn&apos;t fix in its allowed retries. That&apos;s a 96%
                 success rate, with zero manual code intervention.
               </p>
             </div>

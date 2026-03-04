@@ -43,7 +43,7 @@ const showcaseProjects: ShowcaseProject[] = [
     tagline:
       "Feature flag platform with targeting rules, percentage rollouts, and A/B testing — Go/Fiber API + SvelteKit dashboard.",
     description:
-      "Full-stack feature flag platform with Go/Fiber API, SvelteKit 2 dashboard (Svelte 5 runes), MongoDB, Redis caching, JWT + API key auth, flag evaluation engine with targeting and rollouts, audit logging, and Docker deployment. Claude Sonnet 4.6 built the code across 7 expert personas; Claude Opus planned each epic and reviewed all work as tech lead. 3 epics, 21 stories, 67 commits. Deployed to Railway.",
+      "Full-stack feature flag platform with Go/Fiber API, SvelteKit 2 dashboard (Svelte 5 runes), MongoDB, Redis caching, JWT + API key auth, flag evaluation engine with targeting and rollouts, audit logging, and Docker deployment. Claude Sonnet built the code across 7 expert personas; Claude Opus planned each epic and reviewed all work as tech lead. 3 epics, 21 stories, 67 commits. Deployed to Railway.",
     stack: "Go + SvelteKit 2 + MongoDB + Redis",
     storyCount: 21,
     cost: "$64",

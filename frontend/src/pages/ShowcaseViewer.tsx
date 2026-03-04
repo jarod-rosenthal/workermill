@@ -21,12 +21,13 @@ import {
   Rocket,
   Calendar,
   Terminal,
+  BookOpen,
 } from "lucide-react";
 import { teamBoardEpics } from "../data/teamboard-showcase-data";
 import { taskPulseEpics } from "../data/taskpulse-showcase-data";
 import { calMillEpics } from "../data/calmill-showcase-data";
 import { shipApiEpics } from "../data/shipapi-showcase-data";
-import { flagDeckEpics } from "../data/flagdeck-showcase-data";
+import { flagDeckEpics, flagDeckPrd } from "../data/flagdeck-showcase-data";
 
 interface QualityScores {
   lint: string;
@@ -220,28 +221,30 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     id: "flagdeck",
     name: "FlagDeck",
     tagline:
-      "Feature flag platform — built across 6 sequential epics by AI workers.",
+      "Feature flag platform — built across 3 sequential epics by AI workers.",
     description:
-      "Open-source feature flag and experimentation platform with Go Fiber API, SvelteKit 2 dashboard, MongoDB document models, Redis caching, JWT + API key authentication, targeting rules, percentage rollouts, A/B experiments, and Playwright E2E tests. 6 epics executed sequentially, each building on the last. Deployed to Railway at flagdeck-app.workermill.com.",
-    stack: "Go (Fiber) + SvelteKit 2 + MongoDB + Redis",
-    storyCount: 38,
-    cost: "$195",
-    duration: "~625 min",
-    linesOfCode: "27,000",
+      "Full-stack feature flag and experimentation platform with Go/Fiber API, SvelteKit 2 dashboard (Svelte 5 runes), MongoDB document models, Redis caching, JWT + API key authentication, targeting rules, percentage rollouts, A/B experiments, and Docker deployment. 3 epics executed sequentially — backend, frontend, deployment — each building on the last. 67 commits, 20.8K lines across 110 files. Deployed to Railway at flagdeck-app.workermill.com.",
+    stack: "Go + SvelteKit 2 + MongoDB + Redis",
+    storyCount: 21,
+    cost: "$64",
+    duration: "~285 min",
+    linesOfCode: "20,800",
     repoUrl: "https://github.com/workermill-examples/flagdeck",
     liveUrl: "https://flagdeck-app.workermill.com",
     category: "developer-tools",
     personasUsed: [
       "backend_developer",
       "frontend_developer",
+      "devops_engineer",
       "security_engineer",
       "qa_engineer",
-      "devops_engineer",
+      "integration_specialist",
+      "tech_writer",
     ],
     qualityScores: {
       lint: "0 errors",
       types: "0 errors (go vet + svelte-check)",
-      tests: "Go unit + Playwright E2E",
+      tests: "Go unit tests (race detector)",
       security: "0 critical",
     },
     stories: [],
@@ -256,6 +259,7 @@ const personaLabels: Record<string, { label: string; color: string }> = {
   security_engineer: { label: "Security", color: "text-red-400" },
   qa_engineer: { label: "QA", color: "text-green-400" },
   tech_writer: { label: "Docs", color: "text-cyan-400" },
+  integration_specialist: { label: "Integration", color: "text-indigo-400" },
   architect: { label: "Architect", color: "text-violet-400" },
   data_ml_engineer: { label: "Data/ML", color: "text-teal-400" },
   mobile_developer: { label: "Mobile", color: "text-green-400" },
@@ -301,6 +305,7 @@ export default function ShowcaseViewer() {
   const [activeTab, setActiveTab] = useState<Record<string, "spec" | "log">>(
     {},
   );
+  const [prdExpanded, setPrdExpanded] = useState(false);
 
   if (!project) {
     return (
@@ -457,6 +462,44 @@ export default function ShowcaseViewer() {
           {/* Epic board view for TeamBoard/TaskPulse, story timeline for others */}
           {isEpicBoard ? (
             <div className="mb-8">
+              {/* Product Specification — FlagDeck only */}
+              {isFlagDeck && (
+                <div className="mb-6">
+                  <div
+                    className="card-elevated border border-border/50 rounded-xl overflow-hidden"
+                  >
+                    <button
+                      onClick={() => setPrdExpanded(!prdExpanded)}
+                      className="w-full text-left p-4 hover:bg-muted/30 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <ChevronDown
+                          className={`w-4 h-4 text-muted-foreground transition-transform flex-shrink-0 ${
+                            prdExpanded ? "rotate-0" : "-rotate-90"
+                          }`}
+                        />
+                        <BookOpen className="w-4 h-4 text-primary" />
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm font-semibold text-foreground">
+                            Product Specification
+                          </span>
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            — the original PRD that defined this build
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                    {prdExpanded && (
+                      <div className="border-t border-border/30 p-4 max-h-[700px] overflow-y-auto">
+                        <div className="prose prose-sm prose-invert max-w-none prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground prose-code:text-primary prose-code:bg-muted/50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-muted/30 prose-pre:border prose-pre:border-border/30 prose-a:text-primary prose-li:text-muted-foreground prose-table:text-muted-foreground prose-th:text-foreground prose-td:text-muted-foreground prose-hr:border-border/30 prose-blockquote:text-muted-foreground prose-blockquote:border-border/50">
+                          <ReactMarkdown>{flagDeckPrd}</ReactMarkdown>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center gap-3 mb-6">
                 <h2 className="text-xl font-semibold text-foreground">
                   Build Log

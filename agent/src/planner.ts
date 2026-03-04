@@ -1163,7 +1163,7 @@ export async function planTask(
     // the planner to keep tool usage minimal.
     const iterationCwd = repoPath || undefined;
 
-    let rawOutput: string;
+    let rawOutput!: string;
     let cliSuccess = false;
     for (let cliAttempt = 1; cliAttempt <= MAX_CLI_RETRIES + 1; cliAttempt++) {
       try {

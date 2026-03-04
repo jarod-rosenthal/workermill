@@ -303,6 +303,7 @@ export default function Settings() {
   // Cloud provider states - IAM Role (recommended)
   const [awsRoleArn, setAwsRoleArn] = useState("");
   const [awsExternalId, setAwsExternalId] = useState("");
+  const [workerTaskRoleArn, setWorkerTaskRoleArn] = useState("");
   const [awsRoleConfigured, setAwsRoleConfigured] = useState(false);
   const [awsTesting, setAwsTesting] = useState(false);
   const [awsTestResult, setAwsTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -1480,6 +1481,9 @@ export default function Settings() {
       const data = await response.json();
       if (response.ok) {
         setAwsExternalId(data.externalId);
+        if (data.trustPolicyExample?.Statement?.[0]?.Principal?.AWS) {
+          setWorkerTaskRoleArn(data.trustPolicyExample.Statement[0].Principal.AWS);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch AWS external ID:", err);
@@ -4092,7 +4096,7 @@ export default function Settings() {
   "Statement": [{
     "Effect": "Allow",
     "Principal": {
-      "AWS": "arn:aws:iam::AWS_ACCOUNT_ID:role/workermill-dev-worker-task"
+      "AWS": "${workerTaskRoleArn || "<WORKERMILL_WORKER_ROLE_ARN>"}"
     },
     "Action": "sts:AssumeRole",
     "Condition": {

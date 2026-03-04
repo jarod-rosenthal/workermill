@@ -37,7 +37,8 @@ async function seed() {
     }
 
     // Check if user already exists
-    const cognitoId = "7408e428-4001-70a2-6ba9-74aa6bf1d1c5";
+    const cognitoId =
+      process.env.SEED_COGNITO_ID || "00000000-0000-0000-0000-000000000001";
     let user = await userRepo.findOne({ where: { cognitoId } });
 
     if (!user) {
@@ -45,8 +46,8 @@ async function seed() {
       user = userRepo.create({
         orgId: org.id, // Keep for backwards compatibility
         cognitoId,
-        email: "admin@localhost",
-        fullName: "Jarod Rosenthal",
+        email: process.env.SEED_EMAIL || "admin@localhost",
+        fullName: process.env.SEED_FULL_NAME || "Admin User",
         role: "admin",
         status: "active",
       });

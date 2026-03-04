@@ -303,6 +303,7 @@ const isDirectRun =
 if (isDirectRun) {
   // Dynamic import dotenv for backward compat (not a dependency in published package)
   try {
+    // @ts-expect-error dotenv is optional, not in package.json
     await import("dotenv/config");
   } catch {
     // dotenv not available in published package — that's fine

@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Default configuration (production)
 AWS_REGION="us-east-1"
-ECR_REGISTRY="AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+ECR_REGISTRY="${AWS_ACCOUNT_ID:?Set AWS_ACCOUNT_ID env var}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
 # Environment-specific configuration
 declare -A ENV_CONFIG
@@ -24,8 +24,8 @@ ENV_CONFIG[prod_ecr_api_repo]="workermill-dev/api"
 ENV_CONFIG[prod_ecr_worker_repo]="workermill-dev/worker"
 ENV_CONFIG[prod_ecs_cluster]="workermill-dev"
 ENV_CONFIG[prod_ecs_service]="workermill-dev-api"
-ENV_CONFIG[prod_s3_bucket]="workermill-dev-frontend-AWS_ACCOUNT_ID"
-ENV_CONFIG[prod_cloudfront]="CLOUDFRONT_DIST_ID"
+ENV_CONFIG[prod_s3_bucket]="workermill-dev-frontend-${AWS_ACCOUNT_ID}"
+ENV_CONFIG[prod_cloudfront]="${PROD_CLOUDFRONT_ID:?Set PROD_CLOUDFRONT_ID env var}"
 ENV_CONFIG[prod_url]="https://workermill.com"
 ENV_CONFIG[prod_tf_dir]="infrastructure/terraform/environments/prod"
 
@@ -34,8 +34,8 @@ ENV_CONFIG[dev_ecr_api_repo]="workermill-sandbox/api"
 ENV_CONFIG[dev_ecr_worker_repo]="workermill-sandbox/worker"
 ENV_CONFIG[dev_ecs_cluster]="workermill-sandbox"
 ENV_CONFIG[dev_ecs_service]="workermill-sandbox-api"
-ENV_CONFIG[dev_s3_bucket]="workermill-sandbox-frontend-AWS_ACCOUNT_ID"
-ENV_CONFIG[dev_cloudfront]="CLOUDFRONT_DIST_ID_2"
+ENV_CONFIG[dev_s3_bucket]="workermill-sandbox-frontend-${AWS_ACCOUNT_ID}"
+ENV_CONFIG[dev_cloudfront]="${DEV_CLOUDFRONT_ID:?Set DEV_CLOUDFRONT_ID env var}"
 ENV_CONFIG[dev_url]="https://dev.workermill.com"
 ENV_CONFIG[dev_tf_dir]="infrastructure/terraform/environments/dev"
 

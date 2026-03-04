@@ -13,12 +13,13 @@ export class AddSupportAdminColumn1705344000097 implements MigrationInterface {
       ADD COLUMN IF NOT EXISTS support_admin BOOLEAN NOT NULL DEFAULT FALSE
     `);
 
-    // Set admin@localhost as support admin
+    // Set the seed/admin user as support admin
+    const adminEmail = process.env.SEED_EMAIL || "admin@localhost";
     await queryRunner.query(`
       UPDATE users
       SET support_admin = TRUE
-      WHERE email = 'admin@localhost'
-    `);
+      WHERE email = $1
+    `, [adminEmail]);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

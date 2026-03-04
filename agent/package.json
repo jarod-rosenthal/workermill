@@ -15,7 +15,7 @@
     "build": "tsc; node build.mjs",
     "build:binary": "tsc; node build.mjs && bun build --compile --target=bun-linux-x64 dist/entry.js --outfile dist/bin/workermill-agent-linux-x64 && bun build --compile --target=bun-darwin-x64 dist/entry.js --outfile dist/bin/workermill-agent-darwin-x64 && bun build --compile --target=bun-darwin-arm64 dist/entry.js --outfile dist/bin/workermill-agent-darwin-arm64 && bun build --compile --target=bun-windows-x64 dist/entry.js --outfile dist/bin/workermill-agent-win-x64.exe",
     "dev": "tsc --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc -p tsconfig.check.json"
   },
   "engines": {
     "node": ">=20.0.0"

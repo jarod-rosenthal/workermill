@@ -142,12 +142,12 @@ After fetching, view images with Claude Code's image reading capability.
 #### `deploy/build_container.js`
 Build and push a container image using Kaniko (daemon-less, works in Fargate).
 ```bash
-IMAGE_NAME="AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend:v1" \
+IMAGE_NAME="<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend:v1" \
 DOCKERFILE_PATH="./Dockerfile" \
 CONTEXT_DIR="." \
 BUILD_ARGS="NODE_ENV=production,VERSION=1.0.0" \
 AWS_REGION="us-east-1" \
-CACHE_REPO="AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/oncallshift-cache" \
+CACHE_REPO="<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/oncallshift-cache" \
   node /app/execution-compiled/deploy/build_container.js
 ```
 | Env Var | Required | Description |
@@ -187,7 +187,7 @@ Deploy a new container image to an ECS service.
 ```bash
 CLUSTER_NAME="oncallshift-dev" \
 SERVICE_NAME="oncallshift-dev-backend" \
-IMAGE_URI="AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend:v1" \
+IMAGE_URI="<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend:v1" \
 AWS_REGION="us-east-1" \
   node /app/execution-compiled/deploy/deploy_ecs.js
 ```
@@ -1048,7 +1048,7 @@ aws cloudfront list-distributions --query "DistributionList.Items[?contains(Alia
 ### Container Build (for backend changes)
 ```bash
 # Note: oncallshift uses Dockerfile.api, not Dockerfile
-IMAGE_NAME="AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/pagerduty-lite-dev-api:$(git rev-parse --short HEAD)" \
+IMAGE_NAME="<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/pagerduty-lite-dev-api:$(git rev-parse --short HEAD)" \
 DOCKERFILE_PATH="./Dockerfile.api" \
 CONTEXT_DIR="." \
 AWS_REGION="us-east-1" \

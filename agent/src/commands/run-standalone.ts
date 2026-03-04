@@ -44,7 +44,7 @@ export async function runStandaloneCommand(opts: {
     gitlabToken: "",
     githubReviewerToken: "",
     sandbox: "none" as const,
-    dockerImage: "ghcr.io/workermill/worker",
+    dockerImage: "ghcr.io/jarod-rosenthal/worker",
     dockerMemoryGb: 4,
     localRag: false,
     ollamaPort: 11434,

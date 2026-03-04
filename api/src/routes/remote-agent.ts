@@ -1065,8 +1065,8 @@ router.get(
       providerRouting: org.providerRouting ?? {},
       ollamaBaseUrl: org.ollamaBaseUrl ?? null,
       // Worker image registry (keeps ECR details server-side)
-      workerImageUrl: `${process.env.ECR_REGISTRY || "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"}/workermill-dev/worker:latest`,
-      ecrRegistry: process.env.ECR_REGISTRY || "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com",
+      workerImageUrl: `${process.env.ECR_REGISTRY || ""}/workermill-dev/worker:latest`,
+      ecrRegistry: process.env.ECR_REGISTRY || "",
       // Intent Engineering
       aiGuidelines: org.aiGuidelines ?? null,
       // Review workflow settings

@@ -138,9 +138,9 @@ export function TransactionHistory({
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
                       <div>{tx.description || "-"}</div>
-                      {tx.type === "usage" && tx.metadata?.durationMinutes && (
+                      {tx.type === "usage" && !!tx.metadata?.durationMinutes && (
                         <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                          {tx.metadata.durationMinutes} min compute
+                          {String(tx.metadata.durationMinutes)} min compute
                         </div>
                       )}
                     </td>
@@ -193,9 +193,9 @@ export function TransactionHistory({
                     {tx.description}
                   </p>
                 )}
-                {tx.type === "usage" && tx.metadata?.durationMinutes && (
+                {tx.type === "usage" && !!tx.metadata?.durationMinutes && (
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    {tx.metadata.durationMinutes} min compute
+                    {String(tx.metadata.durationMinutes)} min compute
                   </p>
                 )}
               </div>

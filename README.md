@@ -209,7 +209,7 @@ cd frontend && npm install && npm run dev    # → http://localhost:5173
 workermill-agent start
 ```
 
-The Terraform configuration in `infrastructure/` can deploy the full stack to AWS (ECS Fargate, RDS, ElastiCache, S3, CloudFront), but you can run it on any infrastructure that supports Node.js, PostgreSQL, and Redis.
+You can deploy the full stack to AWS (ECS Fargate, RDS, ElastiCache, S3, CloudFront) or run it on any infrastructure that supports Node.js, PostgreSQL, and Redis.
 
 ### Hosted Instance
 
@@ -292,7 +292,6 @@ packages/
   vscode-workermill/        VS Code extension
   workermill-mcp/           WorkerMill MCP server
   oncallshift-mcp/          OncallShift MCP server
-infrastructure/             Terraform — AWS (ECS, RDS, ElastiCache, S3, CloudFront)
 bin/                        CLI scripts (local-workermill, bastion)
 docker/                     Docker configs for local development
 ```
@@ -302,7 +301,7 @@ docker/                     Docker configs for local development
 ### Development Setup
 
 ```bash
-git clone https://github.com/workermill/workermill.git
+git clone https://github.com/jarod-rosenthal/workermill.git
 cd workermill
 
 # Start local services (PostgreSQL on :5433, Redis on :6379)
@@ -390,4 +389,4 @@ Additional flags: `--skip-build`, `--db-check`, `--check-migrations`, `--snapsho
 
 ## License
 
-MIT
+Apache License 2.0 — see [LICENSE](LICENSE) for details.

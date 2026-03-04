@@ -299,6 +299,18 @@ export class InlineIntegrationFixer {
         }
       }
 
+      // For Node.js gates, skip if package.json doesn't exist in the target directory.
+      const hasNpmCommand = gate.commands.some((c) => /\bnpm\s+run\b/.test(c));
+      if (hasNpmCommand) {
+        const pkgPath = triggerPrefix
+          ? `${this.repoPath}/${triggerPrefix}/package.json`
+          : `${this.repoPath}/package.json`;
+        if (!existsSync(pkgPath)) {
+          await this.postLog(`[Integration Gate] ⏭️ ${gate.name} gate skipped — no package.json found`, "system");
+          continue;
+        }
+      }
+
       await this.postLog(`[Integration Gate] Running ${gate.name} (${gate.commands.length} commands)`, "system");
 
       for (let cmd of gate.commands) {

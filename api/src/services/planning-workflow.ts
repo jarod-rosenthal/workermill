@@ -480,7 +480,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         progressCallback,
         skipCritic,
         streamProgressCallback,
-        task.organization?.maxTargetFiles ?? 5,
+        task.organization?.maxTargetFiles ?? 15,
       );
     } finally {
       clearPlanningHeartbeat();
@@ -924,33 +924,11 @@ async function processLocalPlanningAgent(
       });
     }
 
-    // Apply file cap — same as remote agent's applyFileCap
-    const maxFiles = task.organization?.maxTargetFiles ?? 5;
-    let truncatedCount = 0;
+    // Normalize targetFiles arrays (ensure they exist) — no truncation
     for (const story of plan.stories) {
-      if (
-        story.targetFiles &&
-        Array.isArray(story.targetFiles) &&
-        story.targetFiles.length > maxFiles
-      ) {
-        const dropped = story.targetFiles.slice(maxFiles);
-        logger.info("File cap applied to story", {
-          taskId: task.id,
-          storyId: story.id,
-          before: story.targetFiles.length,
-          after: maxFiles,
-          dropped,
-        });
-        story.targetFiles = story.targetFiles.slice(0, maxFiles);
-        truncatedCount++;
+      if (!story.targetFiles || !Array.isArray(story.targetFiles)) {
+        story.targetFiles = [];
       }
-    }
-    if (truncatedCount > 0) {
-      await logTaskEvent(
-        task.id,
-        "info",
-        `${prefix} File cap applied: ${truncatedCount} stories truncated to max ${maxFiles} targetFiles`,
-      );
     }
 
     await logTaskEvent(
@@ -982,7 +960,6 @@ async function processLocalPlanningAgent(
         plan,
         originalRequirements: `${task.summary}\n\n${task.description || ""}`,
         iteration: 1,
-        maxTargetFiles: maxFiles,
       });
 
       criticScore = criticResult.score;
@@ -1025,7 +1002,7 @@ async function processLocalPlanningAgent(
         );
 
         try {
-          const refinementFeedback = formatLocalRefinementFeedback(criticResult, maxFiles, plan);
+          const refinementFeedback = formatLocalRefinementFeedback(criticResult, undefined, plan);
           const refinedPlan = await runLocalPlanningAgent(
             {
               ...planningInput,
@@ -1048,13 +1025,6 @@ async function processLocalPlanningAgent(
           }
           if ("mutexGroups" in refinedPlan) {
             (plan as typeof refinedPlan).mutexGroups = refinedPlan.mutexGroups;
-          }
-
-          // Re-apply file cap to refined plan
-          for (const story of plan.stories) {
-            if (story.targetFiles && Array.isArray(story.targetFiles) && story.targetFiles.length > maxFiles) {
-              story.targetFiles = story.targetFiles.slice(0, maxFiles);
-            }
           }
 
           await logTaskEvent(

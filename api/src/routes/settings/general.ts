@@ -759,8 +759,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     if (maxTargetFiles !== undefined) {
       const val = parseInt(maxTargetFiles, 10);
-      if (isNaN(val) || val < 3 || val > 15) {
-        res.status(400).json({ error: "maxTargetFiles must be between 3 and 15" });
+      if (isNaN(val) || val < 3 || val > 50) {
+        res.status(400).json({ error: "maxTargetFiles must be between 3 and 50" });
         return;
       }
       org.maxTargetFiles = val;

@@ -316,9 +316,9 @@ The main issues were [issues]. I'm improving the plan by [changes].
 
 /**
  * Build critic prompt for plan validation.
- * @param maxTargetFiles - Dynamic file cap per step (default 5).
+ * @param maxTargetFiles - Advisory guideline for files per step (not enforced).
  */
-function buildCloudCriticPrompt(maxTargetFiles = 5): string {
+function buildCloudCriticPrompt(maxTargetFiles = 15): string {
   return `You are a Senior Architect reviewing an execution plan. Your job is to ensure the plan is appropriately sized for the task.
 
 Review this execution plan against the PRD:
@@ -345,10 +345,10 @@ Review this execution plan against the PRD:
 1. **Missing Requirements** - Does the plan cover what the PRD asks for?
 2. **Vague Instructions** - Will the worker know what to do?
 3. **Security Issues** - Only for tasks involving auth, user data, or external input
-4. **Unrealistic Scope** - Any step targeting >${maxTargetFiles} files MUST score below 85 (auto-rejection threshold). Each step should modify at most ${maxTargetFiles} files. If a step needs more, split it into multiple steps first.
+4. **Unfocused Scope** - Each step should own a single concern (e.g., "database layer", "auth system", "UI components"). Deduct points only if a step mixes unrelated concerns. Do NOT penalize steps for listing many files — foundation/scaffolding steps legitimately touch 15-25+ files.
 5. **Missing Operational Steps** - If the PRD requires deployment, provisioning, migrations, or running commands, does the plan include operational steps? Writing code is not the same as deploying it.
 6. **Overlapping File Scope** - If two or more steps share the same targetFiles, this causes parallel merge conflicts. Steps MUST NOT overlap on targetFiles. Deduct 10 points per shared file across steps.
-7. **Serialization Bottleneck** - If more than half the stories depend on a single story that targets >${maxTargetFiles} files, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
+7. **Serialization Bottleneck** - If more than half the stories depend on a single story, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
 
 ## Scoring Guide
 
@@ -659,7 +659,7 @@ export async function validatePlanWithCritic(
   prd: string,
   plan: ExecutionPlanV2,
   agentConfig: PlanningAgentConfig = DEFAULT_CONFIG,
-  maxTargetFiles = 5
+  maxTargetFiles = 15
 ): Promise<CriticResult> {
   const prompt = buildCloudCriticPrompt(maxTargetFiles)
     .replace("{{PRD}}", prd)
@@ -733,7 +733,7 @@ export async function generateValidatedPlan(
   onProgress?: PlanProgressCallback,
   skipCritic: boolean = false,
   onStreamProgress?: PlanStreamProgressCallback,
-  maxTargetFiles = 5,
+  maxTargetFiles = 15,
 ): Promise<ExecutionPlanV2> {
   const startTime = Date.now();
   let currentPlan: ExecutionPlanV2 | undefined;

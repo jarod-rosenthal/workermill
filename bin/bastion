@@ -4,7 +4,7 @@
 
 set -e
 
-LAMBDA_NAME="workermill-dev-bastion-control"
+LAMBDA_NAME="${WM_BASTION_LAMBDA:?Set WM_BASTION_LAMBDA in ~/.workermill/env}"
 SSH_KEY="$HOME/.ssh/workermill-bastion"
 TMPFILE=$(mktemp)
 trap "rm -f $TMPFILE" EXIT

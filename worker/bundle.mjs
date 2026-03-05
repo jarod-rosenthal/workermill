@@ -24,7 +24,7 @@ import { join, resolve } from "path";
 // ── Shared config (matches agent/build.mjs exactly) ──────────────────────────
 const shared = {
   platform: "node",
-  target: "node20",
+  target: "node22",
   format: "esm",
   bundle: true,
   minify: true,
@@ -103,7 +103,7 @@ for (const comp of ["epic", "multi-expert", "manager", "standard"]) {
 // No format specified — esbuild preserves original CJS/ESM format with bundle:false
 const standaloneConfig = {
   platform: "node",
-  target: "node20",
+  target: "node22",
   bundle: false,
   minify: true,
   mangleProps: /_$/,

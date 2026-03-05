@@ -19,23 +19,23 @@ ECR_REGISTRY="${AWS_ACCOUNT_ID:?Set AWS_ACCOUNT_ID env var}.dkr.ecr.${AWS_REGION
 ***REMOVED*** Environment-specific configuration
 declare -A ENV_CONFIG
 
-***REMOVED*** Production environment (default) - uses "dev" resource names due to historical naming
-ENV_CONFIG[prod_ecr_api_repo]="workermill-dev/api"
-ENV_CONFIG[prod_ecr_worker_repo]="workermill-dev/worker"
-ENV_CONFIG[prod_ecs_cluster]="workermill-dev"
-ENV_CONFIG[prod_ecs_service]="workermill-dev-api"
-ENV_CONFIG[prod_s3_bucket]="workermill-dev-frontend-${AWS_ACCOUNT_ID}"
-ENV_CONFIG[prod_cloudfront]="${PROD_CLOUDFRONT_ID:?Set PROD_CLOUDFRONT_ID env var}"
+***REMOVED*** Production environment (default) - resource names from ~/.workermill/env
+ENV_CONFIG[prod_ecr_api_repo]="${WM_PROD_ECR_API_REPO:?Set WM_PROD_ECR_API_REPO in ~/.workermill/env}"
+ENV_CONFIG[prod_ecr_worker_repo]="${WM_PROD_ECR_WORKER_REPO:?Set WM_PROD_ECR_WORKER_REPO in ~/.workermill/env}"
+ENV_CONFIG[prod_ecs_cluster]="${WM_PROD_ECS_CLUSTER:?Set WM_PROD_ECS_CLUSTER in ~/.workermill/env}"
+ENV_CONFIG[prod_ecs_service]="${WM_PROD_ECS_SERVICE:?Set WM_PROD_ECS_SERVICE in ~/.workermill/env}"
+ENV_CONFIG[prod_s3_bucket]="${WM_PROD_S3_BUCKET:?Set WM_PROD_S3_BUCKET in ~/.workermill/env}"
+ENV_CONFIG[prod_cloudfront]="${PROD_CLOUDFRONT_ID:?Set PROD_CLOUDFRONT_ID in ~/.workermill/env}"
 ENV_CONFIG[prod_url]="https://workermill.com"
 ENV_CONFIG[prod_tf_dir]="infrastructure/terraform/environments/prod"
 
-***REMOVED*** Development environment - uses "sandbox" resource names
-ENV_CONFIG[dev_ecr_api_repo]="workermill-sandbox/api"
-ENV_CONFIG[dev_ecr_worker_repo]="workermill-sandbox/worker"
-ENV_CONFIG[dev_ecs_cluster]="workermill-sandbox"
-ENV_CONFIG[dev_ecs_service]="workermill-sandbox-api"
-ENV_CONFIG[dev_s3_bucket]="workermill-sandbox-frontend-${AWS_ACCOUNT_ID}"
-ENV_CONFIG[dev_cloudfront]="${DEV_CLOUDFRONT_ID:?Set DEV_CLOUDFRONT_ID env var}"
+***REMOVED*** Development environment - resource names from ~/.workermill/env
+ENV_CONFIG[dev_ecr_api_repo]="${WM_DEV_ECR_API_REPO:?Set WM_DEV_ECR_API_REPO in ~/.workermill/env}"
+ENV_CONFIG[dev_ecr_worker_repo]="${WM_DEV_ECR_WORKER_REPO:?Set WM_DEV_ECR_WORKER_REPO in ~/.workermill/env}"
+ENV_CONFIG[dev_ecs_cluster]="${WM_DEV_ECS_CLUSTER:?Set WM_DEV_ECS_CLUSTER in ~/.workermill/env}"
+ENV_CONFIG[dev_ecs_service]="${WM_DEV_ECS_SERVICE:?Set WM_DEV_ECS_SERVICE in ~/.workermill/env}"
+ENV_CONFIG[dev_s3_bucket]="${WM_DEV_S3_BUCKET:?Set WM_DEV_S3_BUCKET in ~/.workermill/env}"
+ENV_CONFIG[dev_cloudfront]="${DEV_CLOUDFRONT_ID:?Set DEV_CLOUDFRONT_ID in ~/.workermill/env}"
 ENV_CONFIG[dev_url]="https://dev.workermill.com"
 ENV_CONFIG[dev_tf_dir]="infrastructure/terraform/environments/dev"
 
@@ -227,7 +227,7 @@ invoke_bastion() {
     local response_file=$(mktemp)
     local payload="{\"action\":\"$action\"${extra_payload:+,$extra_payload}}"
 
-    MSYS_NO_PATHCONV=1 aws lambda invoke --function-name "workermill-dev-bastion-control" --payload "$payload" --cli-binary-format raw-in-base64-out --region "$AWS_REGION" "$response_file" > /dev/null 2>&1
+    MSYS_NO_PATHCONV=1 aws lambda invoke --function-name "${WM_BASTION_LAMBDA:?Set WM_BASTION_LAMBDA in ~/.workermill/env}" --payload "$payload" --cli-binary-format raw-in-base64-out --region "$AWS_REGION" "$response_file" > /dev/null 2>&1
 
     cat "$response_file"
     rm -f "$response_file"
@@ -303,7 +303,7 @@ start_ssh_tunnel() {
     echo -e "${YELLOW}Starting SSH tunnel to RDS...${NC}"
 
     ***REMOVED*** Extract RDS host from database-url secret (strip port if present)
-    local rds_host=$(aws secretsmanager get-secret-value --secret-id "workermill/dev/database-url" --query 'SecretString' --output text --region "$AWS_REGION" 2>/dev/null | grep -o '@[^:/]*' | tr -d '@')
+    local rds_host=$(aws secretsmanager get-secret-value --secret-id "${WM_SECRETS_PREFIX}/database-url" --query 'SecretString' --output text --region "$AWS_REGION" 2>/dev/null | grep -o '@[^:/]*' | tr -d '@')
 
     if [[ -z "$rds_host" ]]; then
         echo -e "${RED}Failed to get RDS endpoint from secrets${NC}"
@@ -362,7 +362,7 @@ stop_ssh_tunnel() {
 ***REMOVED*** Get database password from Secrets Manager
 get_db_password() {
     aws secretsmanager get-secret-value \
-        --secret-id "workermill/dev/database-url" \
+        --secret-id "${WM_SECRETS_PREFIX}/database-url" \
         --query 'SecretString' --output text \
         --region "$AWS_REGION" \
         | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|'

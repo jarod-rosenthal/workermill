@@ -359,7 +359,7 @@ describe("Local Epic Spawner", () => {
       const wslPathRegex = /^\/mnt\/([a-zA-Z])\/(.*)$/;
 
       // Valid WSL paths
-      expect("/mnt/c/Users/jarod/.claude").toMatch(wslPathRegex);
+      expect("/mnt/c/Users/testuser/.claude").toMatch(wslPathRegex);
       expect("/mnt/d/projects/workermill").toMatch(wslPathRegex);
 
       // Invalid paths (not WSL)
@@ -383,8 +383,8 @@ describe("Local Epic Spawner", () => {
       }
 
       // Test conversions
-      expect(toDockerPath("/mnt/c/Users/jarod/.claude", true)).toBe(
-        "C:/Users/jarod/.claude"
+      expect(toDockerPath("/mnt/c/Users/testuser/.claude", true)).toBe(
+        "C:/Users/testuser/.claude"
       );
       expect(toDockerPath("/mnt/d/projects/repo", true)).toBe("D:/projects/repo");
 
@@ -392,8 +392,8 @@ describe("Local Epic Spawner", () => {
       expect(toDockerPath("/home/user/.claude", true)).toBe("/home/user/.claude");
 
       // When not in WSL, paths should pass through unchanged
-      expect(toDockerPath("/mnt/c/Users/jarod/.claude", false)).toBe(
-        "/mnt/c/Users/jarod/.claude"
+      expect(toDockerPath("/mnt/c/Users/testuser/.claude", false)).toBe(
+        "/mnt/c/Users/testuser/.claude"
       );
     });
   });

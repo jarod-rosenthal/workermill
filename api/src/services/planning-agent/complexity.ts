@@ -378,7 +378,7 @@ ${score.reasoning}
 
 **STORY SIZING RULES:**
 - Each story MUST be ≤3 story points (Haiku-optimized)
-- Each story should target ≤5 files
+- Each story should ideally target ≤5 files (soft guideline — more is acceptable when logically cohesive)
 
 **DO NOT over-decompose.** Each story should be meaningful work, not trivial tasks.
 A gallery feature with 5 pages should NOT become 20+ stories.
@@ -535,7 +535,7 @@ ${dualScore.summary}
 
 **STORY SIZING RULES:**
 - Each story MUST be ≤3 story points (Haiku-optimized)
-- Each story should target ≤5 files
+- Each story should ideally target ≤5 files (soft guideline — more is acceptable when logically cohesive)
 - Create spike stories for blocking unknowns FIRST
 
 **DO NOT over-decompose.** Each story should be meaningful work, not trivial tasks.

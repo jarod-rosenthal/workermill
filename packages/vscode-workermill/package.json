@@ -343,6 +343,69 @@
           "type": "boolean",
           "default": true,
           "description": "Push to remote after each commit."
+        },
+        "workermill.qualityGateEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable quality gates (typecheck, lint, tests) before PR creation."
+        },
+        "workermill.blockOnTypeErrors": {
+          "type": "boolean",
+          "default": true,
+          "description": "Block PR creation on TypeScript type-check errors."
+        },
+        "workermill.blockOnTestFailures": {
+          "type": "boolean",
+          "default": false,
+          "description": "Block PR creation on test failures."
+        },
+        "workermill.autoFixEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically attempt to fix quality gate failures before blocking."
+        },
+        "workermill.autoFixMaxIterations": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Max auto-fix attempts before failing the quality gate (1-10)."
+        },
+        "workermill.maxParallelExperts": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 16,
+          "description": "Maximum parallel worker agents for epic execution (1-16)."
+        },
+        "workermill.maxStories": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Maximum stories the planner can create per task (1-20)."
+        },
+        "workermill.maxTargetFiles": {
+          "type": "number",
+          "default": 15,
+          "minimum": 3,
+          "maximum": 50,
+          "description": "Recommended max files per story. Soft guideline (3-50)."
+        },
+        "workermill.selfReviewEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Workers review their own changes before committing."
+        },
+        "workermill.blockerAutoRetryEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically retry when a worker hits a blocker."
+        },
+        "workermill.gracefulShutdownEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow workers to finish current work before stopping."
         }
       }
     },

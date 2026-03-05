@@ -222,6 +222,8 @@ export class SettingsPanel {
           this.saveTrackerStandalone(msg.tracker);
         } else if (msg.type === "save-worker-behavior") {
           this.saveWorkerBehaviorStandalone(msg);
+        } else if (msg.type === "save-quality-gate") {
+          this.saveQualityGateStandalone(msg);
         } else if (msg.type === "save-api-key") {
           this.saveApiKeyStandalone(msg);
         } else if (msg.type === "save-jira") {
@@ -267,6 +269,8 @@ export class SettingsPanel {
         await this.saveModels(config, msg);
       } else if (msg.type === "save-worker-behavior") {
         await this.saveWorkerBehavior(config, msg);
+      } else if (msg.type === "save-quality-gate") {
+        await this.saveQualityGate(config, msg);
       } else if (msg.type === "save-linear") {
         await this.saveLinear(config, msg);
       } else if (msg.type === "switch-org") {
@@ -418,6 +422,20 @@ export class SettingsPanel {
         maxCiFixRetries: settings.maxCiFixRetries ?? 3,
         blockerWaitTimeoutMinutes: settings.blockerWaitTimeoutMinutes ?? 20,
         pushAfterCommit: settings.pushAfterCommit ?? true,
+        // Quality gate settings
+        qualityGateEnabled: settings.qualityGateEnabled ?? true,
+        blockOnTypeErrors: settings.blockOnTypeErrors ?? true,
+        blockOnTestFailures: settings.blockOnTestFailures ?? false,
+        autoFixEnabled: settings.autoFixEnabled ?? true,
+        autoFixMaxIterations: settings.autoFixMaxIterations ?? 3,
+        // Planning settings
+        maxParallelExperts: settings.maxParallelExperts ?? 8,
+        maxStories: settings.maxStories ?? 8,
+        maxTargetFiles: settings.maxTargetFiles ?? 15,
+        // Resilience settings
+        selfReviewEnabled: settings.selfReviewEnabled ?? true,
+        blockerAutoRetryEnabled: settings.blockerAutoRetryEnabled ?? true,
+        gracefulShutdownEnabled: settings.gracefulShutdownEnabled ?? true,
         // No plan restrictions in standalone — all providers available
         plan: "max",
         orgName: "Standalone",
@@ -588,6 +606,12 @@ export class SettingsPanel {
     maxCiFixRetries: number;
     blockerWaitTimeoutMinutes: number;
     pushAfterCommit: boolean;
+    maxParallelExperts: number;
+    maxStories: number;
+    maxTargetFiles: number;
+    selfReviewEnabled: boolean;
+    blockerAutoRetryEnabled: boolean;
+    gracefulShutdownEnabled: boolean;
   }): void {
     try {
       const sc = readStandaloneConfigFile();
@@ -598,12 +622,44 @@ export class SettingsPanel {
       settings.maxCiFixRetries = msg.maxCiFixRetries;
       settings.blockerWaitTimeoutMinutes = msg.blockerWaitTimeoutMinutes;
       settings.pushAfterCommit = msg.pushAfterCommit;
+      settings.maxParallelExperts = msg.maxParallelExperts;
+      settings.maxStories = msg.maxStories;
+      settings.maxTargetFiles = msg.maxTargetFiles;
+      settings.selfReviewEnabled = msg.selfReviewEnabled;
+      settings.blockerAutoRetryEnabled = msg.blockerAutoRetryEnabled;
+      settings.gracefulShutdownEnabled = msg.gracefulShutdownEnabled;
       sc.settings = settings;
       writeStandaloneConfigFile(sc);
       this.postMessage({ type: "worker-behavior-saved" });
     } catch (err) {
       this.postMessage({
         type: "worker-behavior-save-error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private saveQualityGateStandalone(msg: {
+    qualityGateEnabled: boolean;
+    blockOnTypeErrors: boolean;
+    blockOnTestFailures: boolean;
+    autoFixEnabled: boolean;
+    autoFixMaxIterations: number;
+  }): void {
+    try {
+      const sc = readStandaloneConfigFile();
+      const settings = (sc.settings || {}) as Record<string, unknown>;
+      settings.qualityGateEnabled = msg.qualityGateEnabled;
+      settings.blockOnTypeErrors = msg.blockOnTypeErrors;
+      settings.blockOnTestFailures = msg.blockOnTestFailures;
+      settings.autoFixEnabled = msg.autoFixEnabled;
+      settings.autoFixMaxIterations = msg.autoFixMaxIterations;
+      sc.settings = settings;
+      writeStandaloneConfigFile(sc);
+      this.postMessage({ type: "quality-gate-saved" });
+    } catch (err) {
+      this.postMessage({
+        type: "quality-gate-save-error",
         message: err instanceof Error ? err.message : String(err),
       });
     }
@@ -703,6 +759,12 @@ export class SettingsPanel {
       maxCiFixRetries: number;
       blockerWaitTimeoutMinutes: number;
       pushAfterCommit: boolean;
+      maxParallelExperts: number;
+      maxStories: number;
+      maxTargetFiles: number;
+      selfReviewEnabled: boolean;
+      blockerAutoRetryEnabled: boolean;
+      gracefulShutdownEnabled: boolean;
     },
   ): Promise<void> {
     try {
@@ -718,6 +780,12 @@ export class SettingsPanel {
           maxCiFixRetries: msg.maxCiFixRetries,
           blockerWaitTimeoutMinutes: msg.blockerWaitTimeoutMinutes,
           pushAfterCommit: msg.pushAfterCommit,
+          maxParallelExperts: msg.maxParallelExperts,
+          maxStories: msg.maxStories,
+          maxTargetFiles: msg.maxTargetFiles,
+          selfReviewEnabled: msg.selfReviewEnabled,
+          blockerAutoRetryEnabled: msg.blockerAutoRetryEnabled,
+          gracefulShutdownEnabled: msg.gracefulShutdownEnabled,
         },
       );
       if (status >= 200 && status < 300) {
@@ -727,6 +795,40 @@ export class SettingsPanel {
       }
     } catch (err) {
       this.postMessage({ type: "worker-behavior-save-error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async saveQualityGate(
+    config: { apiUrl: string; apiKey: string },
+    msg: {
+      qualityGateEnabled: boolean;
+      blockOnTypeErrors: boolean;
+      blockOnTestFailures: boolean;
+      autoFixEnabled: boolean;
+      autoFixMaxIterations: number;
+    },
+  ): Promise<void> {
+    try {
+      this.postMessage({ type: "saving" });
+      const { status, data } = await apiRequest<{ success?: boolean; error?: string }>(
+        "PUT",
+        `${config.apiUrl}/api/settings`,
+        config.apiKey,
+        {
+          qualityGateEnabled: msg.qualityGateEnabled,
+          blockOnTypeErrors: msg.blockOnTypeErrors,
+          blockOnTestFailures: msg.blockOnTestFailures,
+          autoFixEnabled: msg.autoFixEnabled,
+          autoFixMaxIterations: msg.autoFixMaxIterations,
+        },
+      );
+      if (status >= 200 && status < 300) {
+        this.postMessage({ type: "quality-gate-saved" });
+      } else {
+        this.postMessage({ type: "quality-gate-save-error", message: data?.error || `HTTP ${status}` });
+      }
+    } catch (err) {
+      this.postMessage({ type: "quality-gate-save-error", message: err instanceof Error ? err.message : String(err) });
     }
   }
 

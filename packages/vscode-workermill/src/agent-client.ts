@@ -228,6 +228,11 @@ export class AgentClient extends EventEmitter {
     await this.del(`/api/boards/${boardId}/cards/${cardId}`);
   }
 
+  /** Delete a completed/pr_approved/failed task */
+  async deleteTask(taskId: string): Promise<void> {
+    await this.del(`/api/tasks/${taskId}`);
+  }
+
   /** Run a Jira issue or board card as a WorkerMill task */
   async runIssue(issueKey: string, cardId?: string, boardId?: string): Promise<unknown> {
     return this.post("/api/tasks/run", { jiraIssueKey: issueKey, _cardId: cardId, _boardId: boardId });

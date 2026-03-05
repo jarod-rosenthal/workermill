@@ -12,7 +12,6 @@ This mode runs the full WorkerMill API + frontend + PostgreSQL locally, with wor
 
 - Docker (for PostgreSQL and worker containers)
 - Claude CLI: `curl -fsSL https://claude.ai/install.sh | bash` (or `winget install Anthropic.ClaudeCode` on Windows)
-- Claude Max subscription (for OAuth token)
 
 ### Setup
 

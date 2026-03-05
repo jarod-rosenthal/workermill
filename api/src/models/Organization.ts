@@ -370,7 +370,13 @@ export class Organization {
   planningAgentModel: string; // Model used for planning/decomposition (Project Manager)
 
   @Column({ name: "planning_mode", type: "varchar", length: 20, default: "strict" })
-  planningMode: string; // "strict" (full critic loop) or "simplified" (single pass + refinement)
+  planningMode: string; // Legacy — use taskPlanningMode / prdPlanningMode instead
+
+  @Column({ name: "task_planning_mode", type: "varchar", length: 20, default: "strict" })
+  taskPlanningMode: string; // "strict" or "simplified" — individual task story planning
+
+  @Column({ name: "prd_planning_mode", type: "varchar", length: 20, default: "strict" })
+  prdPlanningMode: string; // "strict", "simplified", or "decomposer_planned" — full build / PRD planning
 
   @Column({ name: "max_target_files", type: "integer", default: 5 })
   maxTargetFiles: number; // Max files each story can target (3-15)

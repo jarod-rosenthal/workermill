@@ -437,7 +437,12 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     // Simplified planning mode: run planner once, critic once, always approve
     // Achieved by setting maxAttempts=1 — generateValidatedPlan will do one
     // iteration and use best-plan fallback if critic rejects
-    const orgPlanningMode = task.organization?.planningMode || "strict";
+    const jiraFields = (task.jiraFields ?? {}) as Record<string, unknown>;
+    const isBuildPageTask = jiraFields.buildPage === true;
+    const org = task.organization;
+    const orgPlanningMode = isBuildPageTask
+      ? (org?.prdPlanningMode || org?.planningMode || "strict")
+      : (org?.taskPlanningMode || org?.planningMode || "strict");
     const maxAttempts = orgPlanningMode === "simplified" ? 1 : 3;
 
     // Periodic heartbeat log so the terminal doesn't appear dead during planning.

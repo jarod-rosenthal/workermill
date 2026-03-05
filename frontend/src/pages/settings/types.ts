@@ -60,6 +60,8 @@ export interface Settings {
   planningAgentProvider: string;
   planningAgentModel: string;
   planningMode: string;
+  taskPlanningMode: string;
+  prdPlanningMode: string;
   maxTargetFiles: number;
   storyCalibrationMultiplier: number;
   costAlertThresholdUsd: number | null;

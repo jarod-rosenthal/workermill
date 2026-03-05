@@ -286,27 +286,12 @@ router.post(
     // Normalize labels to lowercase for comparison
     const labels = issueLabels.map((l) => l.toLowerCase());
 
-    // Check for repo override label (e.g., "repo:oncallshift/oncallshift-mobile")
-    // Also supports direct repo name labels (e.g., "oncallshift-mobile", "oncallshift-api")
+    // Check for repo override label (e.g., "repo:owner/repo-name")
     // Falls back to org.getDefaultRepo() if not specified
-    // Search original labels (case-sensitive) for repo name preservation
     let repoOverride: string | null = null;
     const repoLabel = issueLabels.find((l: string) => l.toLowerCase().startsWith("repo:"));
     if (repoLabel) {
       repoOverride = repoLabel.substring(5); // Remove "repo:" prefix
-    } else {
-      // Check for direct repo name labels (e.g., "oncallshift-mobile", "oncallshift-api", "oncallshift-web")
-      // Extract owner from default repo to construct full path
-      const defaultRepo = org.getDefaultRepo();
-      const owner = defaultRepo?.split("/")[0];
-      if (owner) {
-        const knownRepoNames = ["oncallshift-mobile", "oncallshift-api", "oncallshift-web"];
-        const repoNameLabel = labels.find((l) => knownRepoNames.includes(l));
-        if (repoNameLabel) {
-          repoOverride = `${owner}/${repoNameLabel}`;
-          logger.info("Detected repo name label, using as override", { repoNameLabel, repoOverride });
-        }
-      }
     }
     const targetRepo = normalizeRepoWithOwner(repoOverride, org.getDefaultRepo());
 

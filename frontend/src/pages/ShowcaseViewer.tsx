@@ -23,7 +23,7 @@ import {
   Terminal,
   BookOpen,
 } from "lucide-react";
-import { teamBoardEpics } from "../data/teamboard-showcase-data";
+import { teamBoardEpics, teamBoardPrd } from "../data/teamboard-showcase-data";
 import { taskPulseEpics } from "../data/taskpulse-showcase-data";
 import { calMillEpics } from "../data/calmill-showcase-data";
 import { shipApiEpics } from "../data/shipapi-showcase-data";
@@ -486,8 +486,8 @@ export default function ShowcaseViewer() {
           {/* Epic board view for TeamBoard/TaskPulse, story timeline for others */}
           {isEpicBoard ? (
             <div className="mb-8">
-              {/* Product Specification — FlagDeck only */}
-              {isFlagDeck && (
+              {/* Product Specification — projects with PRDs */}
+              {(isFlagDeck || isTeamBoard) && (
                 <div className="mb-6">
                   <div
                     className="card-elevated border border-border/50 rounded-xl overflow-hidden"
@@ -516,7 +516,7 @@ export default function ShowcaseViewer() {
                     {prdExpanded && (
                       <div className="border-t border-border/30 p-4 max-h-[700px] overflow-y-auto">
                         <div className="prose prose-sm prose-invert max-w-none prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground prose-code:text-primary prose-code:bg-muted/50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-muted/30 prose-pre:border prose-pre:border-border/30 prose-a:text-primary prose-li:text-muted-foreground prose-table:text-muted-foreground prose-th:text-foreground prose-td:text-muted-foreground prose-hr:border-border/30 prose-blockquote:text-muted-foreground prose-blockquote:border-border/50">
-                          <ReactMarkdown>{flagDeckPrd}</ReactMarkdown>
+                          <ReactMarkdown>{isTeamBoard ? teamBoardPrd : flagDeckPrd}</ReactMarkdown>
                         </div>
                       </div>
                     )}

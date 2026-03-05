@@ -881,7 +881,7 @@ function applyMechanicalFixes(
 ): void {
   const { truncatedCount, details } = applyFileCap(plan);
   if (truncatedCount > 0) {
-    const msg = `File cap applied: ${truncatedCount} stories truncated to max ${criticConfig?.maxTargetFiles ?? 5} targetFiles`;
+    const msg = `File guideline: ${truncatedCount} stories exceed recommended ${criticConfig?.maxTargetFiles ?? 15} targetFiles (not truncated)`;
     console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
     for (const detail of details) {
       console.log(`${ts()} ${taskLabel}   ${chalk.dim(detail)}`);

@@ -19,5 +19,4 @@ export { default as AgentSetup } from "./Agent";
 export { default as VSCodeExtension } from "./VSCodeExtension";
 export { default as Repositories } from "./Repositories";
 export { default as CodebaseIndexing } from "./CodebaseIndexing";
-export { default as CredentialRotation } from "./CredentialRotation";
 export { default as SpecEngineering } from "./SpecEngineering";

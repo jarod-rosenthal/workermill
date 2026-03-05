@@ -22,7 +22,6 @@ import {
   Search,
   FolderGit2,
   Radio,
-  KeyRound,
   FileText,
 } from "lucide-react";
 import { useAuthStore } from "../../store/auth-store";
@@ -34,7 +33,6 @@ const navItems = [
   { to: "/docs/vscode-extension", label: "VS Code Extension", icon: Radio },
   { to: "/docs/repositories", label: "Repositories", icon: FolderGit2 },
   { to: "/docs/codebase-indexing", label: "Codebase Indexing", icon: Search },
-  { to: "/docs/credential-rotation", label: "Credential Rotation", icon: KeyRound },
   { to: "/docs/task-lifecycle", label: "Task Lifecycle", icon: Workflow },
   { to: "/docs/epics", label: "Epics & Stories", icon: Layers },
   { to: "/docs/specifications", label: "Specifications", icon: FileText },

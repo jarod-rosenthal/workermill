@@ -980,6 +980,21 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
           githubRepo: body.githubRepo || body.repo,
           scmProvider: body.scmProvider,
           workerModel: body.workerModel,
+          workerProvider: body.workerProvider,
+          workerPersona: body.workerPersona,
+          parentTaskId: body.parentTaskId,
+          taskNotes: body.taskNotes,
+          jiraIssueKey: body.jiraIssueKey,
+          jiraFields: body.jiraFields,
+          deploymentEnabled: body.deploymentEnabled,
+          improvementEnabled: body.improvementEnabled,
+          qualityGateBypass: body.qualityGateBypass,
+          standardSdkMode: body.standardSdkMode,
+          targetFiles: body.targetFiles,
+          referenceFiles: body.referenceFiles,
+          targetBranch: body.targetBranch,
+          storyBranch: body.storyBranch,
+          skipManagerReview: body.skipManagerReview,
         });
         // If plan=true, run through planner first; otherwise execute directly
         if (body.plan) {
@@ -1021,6 +1036,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
           githubRepo: body.githubRepo || config.defaultRepo,
           scmProvider: config.scm?.provider,
           workerModel: workerConfig.model,
+          workerProvider: workerConfig.provider,
         });
         processQueuedTask(task.id).catch((e) => console.error("[run-file] processQueuedTask failed:", e));
         return json(res, task, 201);

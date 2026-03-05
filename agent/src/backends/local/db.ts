@@ -19,7 +19,7 @@ let dbInstance: any = null;
 const DATA_DIR = join(homedir(), ".workermill");
 const DB_PATH = join(DATA_DIR, "data.db");
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const SCHEMA_SQL = `
 PRAGMA journal_mode=WAL;
@@ -282,6 +282,27 @@ function migrateToV4(db: any): void {
   `);
 }
 
+/** Migration v5: Add missing task columns for cloud-parity env vars. */
+function migrateToV5(db: any): void {
+  const cols = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
+  const colNames = new Set(cols.map((c: { name: string }) => c.name));
+
+  // Task-level flags
+  if (!colNames.has("task_notes")) db.exec("ALTER TABLE tasks ADD COLUMN task_notes TEXT");
+  if (!colNames.has("jira_issue_key")) db.exec("ALTER TABLE tasks ADD COLUMN jira_issue_key TEXT");
+  if (!colNames.has("jira_fields")) db.exec("ALTER TABLE tasks ADD COLUMN jira_fields TEXT");
+  if (!colNames.has("deployment_enabled")) db.exec("ALTER TABLE tasks ADD COLUMN deployment_enabled INTEGER DEFAULT 0");
+  if (!colNames.has("improvement_enabled")) db.exec("ALTER TABLE tasks ADD COLUMN improvement_enabled INTEGER DEFAULT 0");
+  if (!colNames.has("quality_gate_bypass")) db.exec("ALTER TABLE tasks ADD COLUMN quality_gate_bypass INTEGER DEFAULT 0");
+  if (!colNames.has("standard_sdk_mode")) db.exec("ALTER TABLE tasks ADD COLUMN standard_sdk_mode INTEGER DEFAULT 0");
+  if (!colNames.has("retry_count")) db.exec("ALTER TABLE tasks ADD COLUMN retry_count INTEGER DEFAULT 0");
+  if (!colNames.has("target_files")) db.exec("ALTER TABLE tasks ADD COLUMN target_files TEXT");
+  if (!colNames.has("reference_files")) db.exec("ALTER TABLE tasks ADD COLUMN reference_files TEXT");
+  if (!colNames.has("target_branch")) db.exec("ALTER TABLE tasks ADD COLUMN target_branch TEXT");
+  if (!colNames.has("story_branch")) db.exec("ALTER TABLE tasks ADD COLUMN story_branch TEXT");
+  if (!colNames.has("skip_manager_review")) db.exec("ALTER TABLE tasks ADD COLUMN skip_manager_review INTEGER");
+}
+
 /** Generate a random hex ID (same format as PostgreSQL UUIDs but shorter). */
 export function generateId(): string {
   const bytes = new Uint8Array(16);
@@ -357,6 +378,15 @@ export function getDb(): any {
         "INSERT INTO schema_info (key, value) VALUES ('version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       )
       .run(String(4));
+  }
+
+  if (currentVersion < 5) {
+    migrateToV5(dbInstance);
+    dbInstance
+      .prepare(
+        "INSERT INTO schema_info (key, value) VALUES ('version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(String(5));
   }
 
   return dbInstance;

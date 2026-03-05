@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.2.77",
+  "version": "0.2.78",
   "publisher": "workermill",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -131,6 +131,11 @@
         "icon": "$(trash)"
       },
       {
+        "command": "workermill.deleteTask",
+        "title": "WorkerMill: Delete Task",
+        "icon": "$(trash)"
+      },
+      {
         "command": "workermill.signUpWithGitHub",
         "title": "WorkerMill: Sign Up with GitHub"
       },
@@ -231,6 +236,16 @@
         {
           "command": "workermill.deleteCard",
           "when": "viewItem == issue || viewItem == issue-blocked",
+          "group": "destructive"
+        },
+        {
+          "command": "workermill.deleteTask",
+          "when": "viewItem == task-pr_approved || viewItem == task-completed || viewItem == task-failed || viewItem == task-cancelled",
+          "group": "inline@2"
+        },
+        {
+          "command": "workermill.deleteTask",
+          "when": "viewItem == task-pr_approved || viewItem == task-completed || viewItem == task-failed || viewItem == task-cancelled",
           "group": "destructive"
         },
         {
@@ -348,7 +363,7 @@
     "build": "esbuild src/extension.ts --bundle --outdir=dist --external:vscode --format=cjs --platform=node --minify --tree-shaking=true --mangle-props=/_$/ --legal-comments=none",
     "watch": "esbuild src/extension.ts --bundle --outdir=dist --external:vscode --format=cjs --platform=node --sourcemap --watch",
     "typecheck": "tsc --noEmit",
-    "package": "npx @vscode/vsce package --no-dependencies"
+    "package": "npx @vscode/vsce package --no-dependencies --allow-package-secrets github"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

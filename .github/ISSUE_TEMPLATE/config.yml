@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & Discussion
+    url: https://github.com/jarod-rosenthal/workermill/discussions
+    about: Ask questions, share ideas, or discuss WorkerMill in Discussions.
+  - name: Documentation
+    url: https://workermill.com/docs
+    about: Check the docs for setup guides, architecture, and troubleshooting.

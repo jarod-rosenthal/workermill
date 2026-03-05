@@ -93,7 +93,29 @@ const DEFAULT_CONFIG: StandaloneConfig = {
     techLead: { provider: "anthropic", model: "claude-opus-4-6" },
   },
   settings: {
+    // Planning
+    maxParallelExperts: 8,
     maxStories: 8,
+    maxTargetFiles: 15,
+    prdPlanningMode: "decomposer_planned",
+    // Worker behavior
+    maxPerStoryRevisions: 1,
+    maxReviewRevisions: 3,
+    qualityGateMaxRetries: 5,
+    maxCiFixRetries: 3,
+    blockerWaitTimeoutMinutes: 20,
+    pushAfterCommit: true,
+    // Resilience
+    blockerAutoRetryEnabled: true,
+    blockerMaxAutoRetries: 3,
+    gracefulShutdownEnabled: true,
+    selfReviewEnabled: true,
+    // Quality gate
+    qualityGateEnabled: true,
+    blockOnTypeErrors: true,
+    blockOnTestFailures: false,
+    autoFixEnabled: true,
+    autoFixMaxIterations: 3,
   },
 };
 

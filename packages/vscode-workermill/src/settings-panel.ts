@@ -1755,6 +1755,7 @@ export class SettingsPanel {
     </div>
     <div class="nav-group">
       <div class="nav-group-label">Advanced</div>
+      <a href="#section-quality" data-section="section-quality">Quality Gate</a>
       <a href="#section-worker" data-section="section-worker">Worker Behavior</a>
       <a href="#section-docker" data-section="section-docker">Docker Sandbox</a>
       <a href="#section-rag" data-section="section-rag">Local RAG</a>
@@ -1973,6 +1974,47 @@ export class SettingsPanel {
       </div>
     </div>
 
+    <!-- Quality Gate -->
+    <div class="section section-advanced" id="section-quality">
+      <h2>Quality Gate</h2>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="qg-enabled" checked />
+          Enable Quality Gates
+        </label>
+        <div class="hint">Run quality checks (typecheck, lint, tests) before creating PRs.</div>
+      </div>
+      <div id="qg-options">
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="qg-block-type-errors" checked />
+            Block on TypeScript errors
+          </label>
+          <div class="hint">Fail the quality gate if TypeScript type-check errors are found.</div>
+        </div>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="qg-block-test-failures" />
+            Block on test failures
+          </label>
+          <div class="hint">Fail the quality gate if tests fail. Only enable if your repo has a test suite.</div>
+        </div>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="qg-autofix" checked />
+            Auto-Fix Agent
+          </label>
+          <div class="hint">Automatically attempt to fix quality issues before blocking.</div>
+        </div>
+        <div class="field" id="qg-autofix-iterations-field">
+          <label>Auto-Fix Max Iterations</label>
+          <input type="number" id="qg-autofix-iterations" min="1" max="10" value="3" />
+          <div class="hint">Max attempts for the auto-fix agent to resolve quality issues (1-10).</div>
+        </div>
+      </div>
+      <div id="quality-gate-status" class="status"></div>
+    </div>
+
     <!-- Worker Behavior -->
     <div class="section section-advanced" id="section-worker">
       <h2>Worker Behavior</h2>
@@ -1997,6 +2039,42 @@ export class SettingsPanel {
           Push after each commit
         </label>
         <div class="hint">Push to remote immediately after each commit.</div>
+      </div>
+      <div class="field">
+        <label>Max Parallel Experts</label>
+        <input type="number" id="wk-max-parallel" min="1" max="16" value="8" />
+        <div class="hint">Maximum parallel worker agents for epic execution (1-16).</div>
+      </div>
+      <div class="field">
+        <label>Max Stories</label>
+        <input type="number" id="wk-max-stories" min="1" max="20" value="8" />
+        <div class="hint">Maximum stories the planner can create per task (1-20).</div>
+      </div>
+      <div class="field">
+        <label>Max Target Files</label>
+        <input type="number" id="wk-max-target-files" min="3" max="50" value="15" />
+        <div class="hint">Recommended max files per story. Soft guideline, not enforced (3-50).</div>
+      </div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="wk-self-review" checked />
+          Self-Review
+        </label>
+        <div class="hint">Workers review their own changes before committing.</div>
+      </div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="wk-blocker-auto-retry" checked />
+          Auto-Retry on Blockers
+        </label>
+        <div class="hint">Automatically retry when a worker hits a blocker.</div>
+      </div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="wk-graceful-shutdown" checked />
+          Graceful Shutdown
+        </label>
+        <div class="hint">Allow workers to finish current work before stopping.</div>
       </div>
       <div id="worker-behavior-status" class="status"></div>
     </div>
@@ -2437,8 +2515,8 @@ export class SettingsPanel {
 
     // Worker behavior — autosave on change (debounced 500ms for number inputs)
     function saveWorkerBehavior() {
-      autosave("worker-behavior", 500, () => {
-        const fixRetries = parseInt(document.getElementById("wk-fix-retries").value) || 0;
+      autosave("worker-behavior", 500, function() {
+        var fixRetries = parseInt(document.getElementById("wk-fix-retries").value) || 0;
         vscode.postMessage({
           type: "save-worker-behavior",
           maxPerStoryRevisions: 0,
@@ -2447,13 +2525,45 @@ export class SettingsPanel {
           maxCiFixRetries: fixRetries,
           blockerWaitTimeoutMinutes: parseInt(document.getElementById("wk-blocker-timeout").value) || 20,
           pushAfterCommit: document.getElementById("wk-push-after-commit").checked,
+          maxParallelExperts: parseInt(document.getElementById("wk-max-parallel").value) || 8,
+          maxStories: parseInt(document.getElementById("wk-max-stories").value) || 8,
+          maxTargetFiles: parseInt(document.getElementById("wk-max-target-files").value) || 15,
+          selfReviewEnabled: document.getElementById("wk-self-review").checked,
+          blockerAutoRetryEnabled: document.getElementById("wk-blocker-auto-retry").checked,
+          gracefulShutdownEnabled: document.getElementById("wk-graceful-shutdown").checked,
         });
       });
     }
-    ["wk-pr-revisions", "wk-fix-retries", "wk-blocker-timeout"].forEach(function(id) {
+    ["wk-pr-revisions", "wk-fix-retries", "wk-blocker-timeout", "wk-max-parallel", "wk-max-stories", "wk-max-target-files"].forEach(function(id) {
       document.getElementById(id).addEventListener("input", saveWorkerBehavior);
     });
-    document.getElementById("wk-push-after-commit").addEventListener("change", saveWorkerBehavior);
+    ["wk-push-after-commit", "wk-self-review", "wk-blocker-auto-retry", "wk-graceful-shutdown"].forEach(function(id) {
+      document.getElementById(id).addEventListener("change", saveWorkerBehavior);
+    });
+
+    // Quality gate — autosave on change
+    function saveQualityGate() {
+      autosave("quality-gate", 500, function() {
+        vscode.postMessage({
+          type: "save-quality-gate",
+          qualityGateEnabled: document.getElementById("qg-enabled").checked,
+          blockOnTypeErrors: document.getElementById("qg-block-type-errors").checked,
+          blockOnTestFailures: document.getElementById("qg-block-test-failures").checked,
+          autoFixEnabled: document.getElementById("qg-autofix").checked,
+          autoFixMaxIterations: parseInt(document.getElementById("qg-autofix-iterations").value) || 3,
+        });
+      });
+    }
+    ["qg-enabled", "qg-block-type-errors", "qg-block-test-failures", "qg-autofix"].forEach(function(id) {
+      document.getElementById(id).addEventListener("change", saveQualityGate);
+    });
+    document.getElementById("qg-autofix-iterations").addEventListener("input", saveQualityGate);
+    document.getElementById("qg-enabled").addEventListener("change", function() {
+      document.getElementById("qg-options").style.display = this.checked ? "" : "none";
+    });
+    document.getElementById("qg-autofix").addEventListener("change", function() {
+      document.getElementById("qg-autofix-iterations-field").style.display = this.checked ? "" : "none";
+    });
 
     // Org switcher
     const orgSelect = document.getElementById("org-select");
@@ -2712,6 +2822,36 @@ export class SettingsPanel {
         if (wkBlockerTimeout) wkBlockerTimeout.value = String(d.blockerWaitTimeoutMinutes ?? 20);
         if (wkPush) wkPush.checked = d.pushAfterCommit !== false;
 
+        // Populate quality gate settings
+        var qgEnabled = document.getElementById("qg-enabled");
+        var qgTypeErrors = document.getElementById("qg-block-type-errors");
+        var qgTestFailures = document.getElementById("qg-block-test-failures");
+        var qgAutofix = document.getElementById("qg-autofix");
+        var qgAutofixIterations = document.getElementById("qg-autofix-iterations");
+        if (qgEnabled) qgEnabled.checked = d.qualityGateEnabled !== false;
+        if (qgTypeErrors) qgTypeErrors.checked = d.blockOnTypeErrors !== false;
+        if (qgTestFailures) qgTestFailures.checked = !!d.blockOnTestFailures;
+        if (qgAutofix) qgAutofix.checked = d.autoFixEnabled !== false;
+        if (qgAutofixIterations) qgAutofixIterations.value = String(d.autoFixMaxIterations ?? 3);
+        var qgOptions = document.getElementById("qg-options");
+        if (qgOptions) qgOptions.style.display = (d.qualityGateEnabled !== false) ? "" : "none";
+        var qgIterationsField = document.getElementById("qg-autofix-iterations-field");
+        if (qgIterationsField) qgIterationsField.style.display = (d.autoFixEnabled !== false) ? "" : "none";
+
+        // Populate new worker behavior settings
+        var wkMaxParallel = document.getElementById("wk-max-parallel");
+        var wkMaxStories = document.getElementById("wk-max-stories");
+        var wkMaxTargetFiles = document.getElementById("wk-max-target-files");
+        var wkSelfReview = document.getElementById("wk-self-review");
+        var wkBlockerAutoRetry = document.getElementById("wk-blocker-auto-retry");
+        var wkGracefulShutdown = document.getElementById("wk-graceful-shutdown");
+        if (wkMaxParallel) wkMaxParallel.value = String(d.maxParallelExperts ?? 8);
+        if (wkMaxStories) wkMaxStories.value = String(d.maxStories ?? 8);
+        if (wkMaxTargetFiles) wkMaxTargetFiles.value = String(d.maxTargetFiles ?? 15);
+        if (wkSelfReview) wkSelfReview.checked = d.selfReviewEnabled !== false;
+        if (wkBlockerAutoRetry) wkBlockerAutoRetry.checked = d.blockerAutoRetryEnabled !== false;
+        if (wkGracefulShutdown) wkGracefulShutdown.checked = d.gracefulShutdownEnabled !== false;
+
         // Show target repo in RAG section
         if (indexRepoLabel) {
           indexRepoLabel.textContent = defaultRepo ? defaultRepo : "No repository configured";
@@ -2769,6 +2909,16 @@ export class SettingsPanel {
       if (msg.type === "worker-behavior-save-error") {
         const ws = document.getElementById("worker-behavior-status");
         showStatus(ws, "error", msg.message || "Failed to save worker behavior settings");
+      }
+
+      if (msg.type === "quality-gate-saved") {
+        var qgs = document.getElementById("quality-gate-status");
+        showStatus(qgs, "success", "Quality gate settings saved");
+        setTimeout(function() { qgs.classList.remove("visible"); }, 3000);
+      }
+      if (msg.type === "quality-gate-save-error") {
+        var qgs2 = document.getElementById("quality-gate-status");
+        showStatus(qgs2, "error", msg.message || "Failed to save quality gate settings");
       }
 
       if (msg.type === "mode-switched") {

@@ -70,6 +70,10 @@ __pycache__/
 # Playwright MCP
 .playwright-mcp/
 
+# Internal plans and notes
+docs/plans/
+docs/launch/
+
 # Misc artifacts
 *.png
 swebench_predictions.jsonl

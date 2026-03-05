@@ -1178,8 +1178,8 @@ router.get(
       maxStories,
       maxTargetFiles: org.maxTargetFiles,
       planningMode: isBuildPageTask
-        ? (org.prdPlanningMode || org.planningMode || "strict")
-        : (org.taskPlanningMode || org.planningMode || "strict"),
+        ? (org.prdPlanningMode || org.planningMode || "decomposer_planned")
+        : "simplified",
       validPersonas: availablePersonas.map((p: { slug: string }) => p.slug),
       ...(preComputedStories ? { preComputedStories } : {}),
     });

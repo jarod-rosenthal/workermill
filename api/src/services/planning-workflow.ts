@@ -440,9 +440,10 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     const jiraFields = (task.jiraFields ?? {}) as Record<string, unknown>;
     const isBuildPageTask = jiraFields.buildPage === true;
     const org = task.organization;
+    // Task planning is always simplified; only full builds use the configurable mode
     const orgPlanningMode = isBuildPageTask
-      ? (org?.prdPlanningMode || org?.planningMode || "strict")
-      : (org?.taskPlanningMode || org?.planningMode || "strict");
+      ? (org?.prdPlanningMode || org?.planningMode || "decomposer_planned")
+      : "simplified";
     const maxAttempts = orgPlanningMode === "simplified" ? 1 : 3;
 
     // Periodic heartbeat log so the terminal doesn't appear dead during planning.

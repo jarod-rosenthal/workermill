@@ -528,7 +528,7 @@ router.post(
 
         emitDecomp?.({ phase: "resolving_content", detail: "Content resolved, starting decomposition" });
 
-        const effectivePrdMode = org.prdPlanningMode || org.planningMode || "strict";
+        const effectivePrdMode = org.prdPlanningMode || org.planningMode || "decomposer_planned";
         const useDecomposerPlanned = effectivePrdMode === "decomposer_planned";
 
         try {

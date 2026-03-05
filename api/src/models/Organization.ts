@@ -372,10 +372,10 @@ export class Organization {
   @Column({ name: "planning_mode", type: "varchar", length: 20, default: "strict" })
   planningMode: string; // Legacy — use taskPlanningMode / prdPlanningMode instead
 
-  @Column({ name: "task_planning_mode", type: "varchar", length: 20, default: "strict" })
-  taskPlanningMode: string; // "strict" or "simplified" — individual task story planning
+  @Column({ name: "task_planning_mode", type: "varchar", length: 20, default: "simplified" })
+  taskPlanningMode: string; // Always "simplified" — individual tasks use single-pass planning
 
-  @Column({ name: "prd_planning_mode", type: "varchar", length: 20, default: "strict" })
+  @Column({ name: "prd_planning_mode", type: "varchar", length: 20, default: "decomposer_planned" })
   prdPlanningMode: string; // "strict", "simplified", or "decomposer_planned" — full build / PRD planning
 
   @Column({ name: "max_target_files", type: "integer", default: 5 })

@@ -442,7 +442,6 @@ export default function Settings() {
       });
       if (!response.ok) throw new Error("Failed to load settings");
       const data = await response.json();
-      const isProPlan = (organization?.plan || "pro") === "pro";
       const loadedSettings: Settings = {
         logRetentionDays: data.logRetentionDays ?? 7,
         taskRetentionDays: data.taskRetentionDays ?? 7,
@@ -457,14 +456,14 @@ export default function Settings() {
         providerRouting: data.providerRouting ?? {},
         ollamaBaseUrl: data.ollamaBaseUrl ?? null,
         ollamaContextWindow: data.ollamaContextWindow ?? 65536,
-        managerProvider: isProPlan ? "anthropic" : data.managerProvider,
+        managerProvider: data.managerProvider,
         managerModelId: data.managerModelId || "",
         maxReviewRevisions: data.maxReviewRevisions,
         maxPerStoryRevisions: data.maxPerStoryRevisions,
-        planningAgentProvider: isProPlan ? "anthropic" : (data.planningAgentProvider || "anthropic"),
+        planningAgentProvider: data.planningAgentProvider || "anthropic",
         planningAgentModel: data.planningAgentModel || "claude-opus-4-6",
-        planningMode: isProPlan ? "simplified" : (data.planningMode || "simplified"),
-        prdPlanningMode: isProPlan ? "simplified" : (data.prdPlanningMode || data.planningMode || "decomposer_planned"),
+        planningMode: data.planningMode || "simplified",
+        prdPlanningMode: data.prdPlanningMode || data.planningMode || "decomposer_planned",
         maxTargetFiles: data.maxTargetFiles ?? 15,
         storyCalibrationMultiplier: data.storyCalibrationMultiplier ?? 0.4,
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
@@ -490,15 +489,15 @@ export default function Settings() {
         autoReviewEnabled: data.autoReviewEnabled,
         autoDeployEnabled: data.autoDeployEnabled,
         autoImproveEnabled: data.autoImproveEnabled,
-        autoSkillExtraction: isProPlan ? false : data.autoSkillExtraction,
-        prdAutoRun: isProPlan ? true : data.prdAutoRun,
+        autoSkillExtraction: data.autoSkillExtraction,
+        prdAutoRun: data.prdAutoRun,
         remoteAgentOnly: data.remoteAgentOnly,
         warmPoolSize: data.warmPoolSize ?? 0,
         warmPoolHoursStart: data.warmPoolHoursStart ?? 9,
         warmPoolHoursEnd: data.warmPoolHoursEnd ?? 18,
         warmPoolTimezone: data.warmPoolTimezone || "America/New_York",
         // Quality Gate settings
-        qualityGateEnabled: isProPlan ? false : data.qualityGateEnabled,
+        qualityGateEnabled: data.qualityGateEnabled,
         minQualityScore: data.minQualityScore ?? null,
         minTestCoveragePercent: data.minTestCoveragePercent ?? null,
         maxSecurityHighVulns: data.maxSecurityHighVulns ?? null,

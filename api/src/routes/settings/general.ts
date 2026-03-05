@@ -85,7 +85,7 @@ router.get("/", async (req: Request, res: Response) => {
       vllmBaseUrl: org.vllmBaseUrl || null,
 
       // Ralph Execution Settings
-      useRalphExecution: org.useRalphExecution || false,
+      useRalphExecution: org.useRalphExecution,
       ralphMaxStories: org.ralphMaxStories || 10,
 
       // Cost Settings
@@ -131,38 +131,38 @@ router.get("/", async (req: Request, res: Response) => {
       issueTrackerProvider: org.issueTrackerProvider,
 
       // Auto-Workflow Settings
-      autoReviewEnabled: org.autoReviewEnabled ?? false,
-      autoDeployEnabled: org.autoDeployEnabled ?? false,
-      autoImproveEnabled: org.autoImproveEnabled ?? false,
-      autoSkillExtraction: org.autoSkillExtraction ?? true,
-      prdAutoRun: org.prdAutoRun ?? true,
+      autoReviewEnabled: org.autoReviewEnabled,
+      autoDeployEnabled: org.autoDeployEnabled,
+      autoImproveEnabled: org.autoImproveEnabled,
+      autoSkillExtraction: org.autoSkillExtraction,
+      prdAutoRun: org.prdAutoRun,
 
       // Remote Agent Mode
-      remoteAgentOnly: org.remoteAgentOnly ?? false,
+      remoteAgentOnly: org.remoteAgentOnly,
       hasRemoteAgent,
       remoteAgentOnline,
       remoteAgentHostname,
 
       // Quality Gate Settings
-      qualityGateEnabled: org.qualityGateEnabled ?? false,
+      qualityGateEnabled: org.qualityGateEnabled,
       minQualityScore: org.minQualityScore,
       minTestCoveragePercent: org.minTestCoveragePercent,
       maxSecurityHighVulns: org.maxSecurityHighVulns,
-      blockOnTypeErrors: org.blockOnTypeErrors ?? false,
-      blockOnTestFailures: org.blockOnTestFailures ?? false,
+      blockOnTypeErrors: org.blockOnTypeErrors,
+      blockOnTestFailures: org.blockOnTestFailures,
 
       // External Quality Tool Integrations
       sonarqubeUrl: org.sonarqubeUrl || null,
       sonarqubeToken: org.sonarqubeToken ? "***" : null, // Mask token in response
-      coderabbitEnabled: org.coderabbitEnabled ?? false,
+      coderabbitEnabled: org.coderabbitEnabled,
       coderabbitApiKey: org.coderabbitApiKey ? "***" : null, // Mask API key in response
-      deepsourceEnabled: org.deepsourceEnabled ?? false,
+      deepsourceEnabled: org.deepsourceEnabled,
       deepsourceToken: org.deepsourceToken ? "***" : null, // Mask token in response
       qualityWebhookUrl: org.qualityWebhookUrl || null,
       qualityWebhookSecret: org.qualityWebhookSecret ? "***" : null, // Mask secret in response
 
       // Auto-Fix Settings
-      autoFixEnabled: org.autoFixEnabled ?? false,
+      autoFixEnabled: org.autoFixEnabled,
       autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
       autoFixStats: org.autoFixStats || {},
 
@@ -190,12 +190,12 @@ router.get("/", async (req: Request, res: Response) => {
       defaultGitlabRepo: org.defaultGitlabRepo ?? null,
 
       // Codebase RAG Settings
-      codebaseIndexingEnabled: org.codebaseIndexingEnabled ?? false,
+      codebaseIndexingEnabled: org.codebaseIndexingEnabled,
       codebaseMaxFilesPerRepo: org.codebaseMaxFilesPerRepo ?? 500,
       codebaseMaxFileSizeKb: org.codebaseMaxFileSizeKb ?? 100,
       codebaseExcludePatterns: org.codebaseExcludePatterns ?? [],
       codebaseIncludeLanguages: org.codebaseIncludeLanguages ?? [],
-      codebaseAutoIndexOnTask: org.codebaseAutoIndexOnTask ?? true,
+      codebaseAutoIndexOnTask: org.codebaseAutoIndexOnTask,
       codebaseMaxRetrievalChunks: org.codebaseMaxRetrievalChunks ?? 10,
 
       // Spec Engineering Settings
@@ -1341,7 +1341,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         autoDeployEnabled: org.autoDeployEnabled,
         autoImproveEnabled: org.autoImproveEnabled,
         autoSkillExtraction: org.autoSkillExtraction,
-        prdAutoRun: org.prdAutoRun ?? true,
+        prdAutoRun: org.prdAutoRun,
         remoteAgentOnly: org.remoteAgentOnly,
         qualityGateEnabled: org.qualityGateEnabled,
         minQualityScore: org.minQualityScore,
@@ -1357,7 +1357,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         deepsourceToken: org.deepsourceToken ? "***" : null,
         qualityWebhookUrl: org.qualityWebhookUrl || null,
         qualityWebhookSecret: org.qualityWebhookSecret ? "***" : null,
-        autoFixEnabled: org.autoFixEnabled ?? false,
+        autoFixEnabled: org.autoFixEnabled,
         autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
         autoFixStats: org.autoFixStats || {},
         // Resilience Settings
@@ -1372,12 +1372,12 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         // Repository List
         repositories: org.repositories || [],
         // Codebase RAG Settings
-        codebaseIndexingEnabled: org.codebaseIndexingEnabled ?? false,
+        codebaseIndexingEnabled: org.codebaseIndexingEnabled,
         codebaseMaxFilesPerRepo: org.codebaseMaxFilesPerRepo ?? 500,
         codebaseMaxFileSizeKb: org.codebaseMaxFileSizeKb ?? 100,
         codebaseExcludePatterns: org.codebaseExcludePatterns ?? [],
         codebaseIncludeLanguages: org.codebaseIncludeLanguages ?? [],
-        codebaseAutoIndexOnTask: org.codebaseAutoIndexOnTask ?? true,
+        codebaseAutoIndexOnTask: org.codebaseAutoIndexOnTask,
         codebaseMaxRetrievalChunks: org.codebaseMaxRetrievalChunks ?? 10,
         // Spec Engineering Settings
         specMinQualityScore: org.specMinQualityScore ?? 0,

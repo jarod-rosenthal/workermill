@@ -647,8 +647,15 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
 
     const triggered: string[] = [];
     for (const gate of gates) {
-      const triggerPrefix = gate.trigger.replace(/\*\*/g, "").replace(/\*/g, "").replace(/\/+$/, "");
-      const matches = changedFiles.some((f) => f === "*" || f.startsWith(triggerPrefix));
+      // Extract directory prefix from trigger glob: "src/**/*.ts" → "src",
+      // "**/*.{ts,tsx}" → "" (root), "web/*.js" → "web"
+      const triggerPrefix = gate.trigger
+        .replace(/\/?\*\*\/.*/g, "")
+        .replace(/\/?\*\..*/g, "")
+        .replace(/\/?\{[^}]*\}.*/g, "")
+        .replace(/\/?\*$/g, "")
+        .replace(/\/+$/, "");
+      const matches = changedFiles.some((f) => f === "*" || !triggerPrefix || f.startsWith(triggerPrefix));
       if (!matches) continue;
 
       // Skip if trigger directory doesn't exist
@@ -781,8 +788,15 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
 
     for (const gate of gates) {
       // Match files against trigger glob (simple prefix match)
-      const triggerPrefix = gate.trigger.replace(/\*\*/g, "").replace(/\*/g, "").replace(/\/+$/, "");
-      const matches = changedFiles.some((f) => f === "*" || f.startsWith(triggerPrefix));
+      // Extract directory prefix from trigger glob: "src/**/*.ts" → "src",
+      // "**/*.{ts,tsx}" → "" (root), "web/*.js" → "web"
+      const triggerPrefix = gate.trigger
+        .replace(/\/?\*\*\/.*/g, "")   // strip from /**/... onward
+        .replace(/\/?\*\..*/g, "")     // strip from /*.ext onward
+        .replace(/\/?\{[^}]*\}.*/g, "") // strip brace expansions
+        .replace(/\/?\*$/g, "")        // trailing lone *
+        .replace(/\/+$/, "");          // trailing slashes
+      const matches = changedFiles.some((f) => f === "*" || !triggerPrefix || f.startsWith(triggerPrefix));
 
       if (!matches) continue;
 
@@ -918,7 +932,7 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
         return;
       }
       for (const entry of entries) {
-        if (entry === "node_modules" || entry === ".git") continue;
+        if (entry === "node_modules" || entry === ".git" || entry === ".next" || entry === "dist" || entry === "build") continue;
         const full = `${dir}/${entry}`;
         try {
           if (!statSync(full).isDirectory()) continue;

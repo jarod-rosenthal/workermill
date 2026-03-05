@@ -281,7 +281,14 @@ export class InlineIntegrationFixer {
       // Skip gate if the trigger directory doesn't exist in the repo.
       // Prevents failures like `cd web && npm run lint` when the `web/` directory
       // hasn't been created yet by any story in this run.
-      const triggerPrefix = gate.trigger.replace(/\*\*/g, "").replace(/\*/g, "").replace(/\/+$/, "");
+      // Extract directory prefix from trigger glob: "src/**/*.ts" → "src",
+      // "**/*.{ts,tsx}" → "" (root), "web/*.js" → "web"
+      const triggerPrefix = gate.trigger
+        .replace(/\/?\*\*\/.*/g, "")
+        .replace(/\/?\*\..*/g, "")
+        .replace(/\/?\{[^}]*\}.*/g, "")
+        .replace(/\/?\*$/g, "")
+        .replace(/\/+$/, "");
       if (triggerPrefix && !existsSync(`${this.repoPath}/${triggerPrefix}`)) {
         await this.postLog(`[Integration Gate] ⏭️ ${gate.name} gate skipped — directory '${triggerPrefix}/' does not exist`, "system");
         continue;
@@ -447,7 +454,7 @@ export class InlineIntegrationFixer {
         return;
       }
       for (const entry of entries) {
-        if (entry === "node_modules" || entry === ".git") continue;
+        if (entry === "node_modules" || entry === ".git" || entry === ".next" || entry === "dist" || entry === "build") continue;
         const full = `${dir}/${entry}`;
         try {
           if (!statSync(full).isDirectory()) continue;

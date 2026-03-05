@@ -38,10 +38,10 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
-  ECR_API_REPO: workermill-dev/api
-  ECR_WORKER_REPO: workermill-dev/worker
-  ECS_CLUSTER: workermill-dev
-  ECS_SERVICE: workermill-dev-api
+  ECR_API_REPO: ${{ vars.ECR_API_REPO }}
+  ECR_WORKER_REPO: ${{ vars.ECR_WORKER_REPO }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+  ECS_SERVICE: ${{ vars.ECS_SERVICE }}
   S3_BUCKET: ${{ vars.FRONTEND_S3_BUCKET }}
   CLOUDFRONT_DISTRIBUTION: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
 

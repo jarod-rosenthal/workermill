@@ -83,7 +83,7 @@ export const config = {
   // Server
   port: parseInt(process.env.PORT || "3000", 10),
   nodeEnv: process.env.NODE_ENV || "development",
-  environment: process.env.ENVIRONMENT || "dev", // For secrets path (workermill/dev/...)
+  environment: process.env.ENVIRONMENT || "dev",
 
   // S3 (worker state checkpoints)
   s3: {
@@ -104,14 +104,14 @@ export const config = {
   aws: {
     region: process.env.AWS_REGION || "us-east-1",
     sesRegion: process.env.SES_REGION || "us-east-2", // SES approved in Ohio
-    ecsCluster: process.env.ECS_CLUSTER || "workermill-dev",
-    workerTaskDefinition: process.env.WORKER_TASK_DEFINITION || "workermill-dev-worker",
+    ecsCluster: process.env.ECS_CLUSTER || "",
+    workerTaskDefinition: process.env.WORKER_TASK_DEFINITION || "",
     privateSubnets: (process.env.PRIVATE_SUBNETS || "").split(",").filter(Boolean),
     securityGroups: (process.env.SECURITY_GROUPS || "").split(",").filter(Boolean),
-    workerLogGroup: process.env.WORKER_LOG_GROUP || "/ecs/workermill-dev/worker",
+    workerLogGroup: process.env.WORKER_LOG_GROUP || "",
     sqsJobsQueueUrl: process.env.SQS_JOBS_QUEUE_URL || "",
     // GitHub Actions runner (ephemeral ECS tasks)
-    runnerTaskDefinition: process.env.RUNNER_TASK_DEFINITION || "workermill-dev-github-runner",
+    runnerTaskDefinition: process.env.RUNNER_TASK_DEFINITION || "",
     runnerSecurityGroup: process.env.RUNNER_SECURITY_GROUP || "",
   },
 

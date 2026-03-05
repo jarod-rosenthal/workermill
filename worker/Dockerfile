@@ -1,7 +1,7 @@
 # WorkerMill AI Worker Container
 # Runs Claude Code CLI to execute AI agent tasks
 
-FROM node:20.19-bookworm
+FROM node:22-bookworm
 
 # System essentials only — all dev tools (Go, Terraform, AWS CLI, Kaniko, Rust,
 # Deno, etc.) are installed on-demand at runtime by /app/install-tools.sh.
@@ -64,7 +64,7 @@ RUN npm install -g typescript ts-node
 WORKDIR /app/execution
 
 # Create package.json for execution scripts (uses only Node.js built-ins)
-RUN echo '{"name": "workermill-execution", "version": "1.0.0", "private": true, "devDependencies": {"@types/node": "^20.0.0", "typescript": "^5.0.0"}}' > package.json
+RUN echo '{"name": "workermill-execution", "version": "1.0.0", "private": true, "devDependencies": {"@types/node": "^22.0.0", "typescript": "^5.0.0"}}' > package.json
 
 # Create tsconfig.json for compilation
 RUN echo '{"compilerOptions": {"target": "ES2022", "module": "commonjs", "outDir": "../execution-compiled", "rootDir": ".", "strict": true, "esModuleInterop": true, "skipLibCheck": true, "forceConsistentCasingInFileNames": true, "resolveJsonModule": true, "declaration": false, "moduleResolution": "node"}, "include": ["**/*.ts"], "exclude": ["node_modules"]}' > tsconfig.json

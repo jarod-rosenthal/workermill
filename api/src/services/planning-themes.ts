@@ -1182,8 +1182,8 @@ function validateAndFixStories(
       (d) => typeof d === "number" && d >= 0 && d < index
     );
 
-    // Validate target files (max 5, warn if >3)
-    const targetFiles = (story.targetFiles || []).slice(0, 5);
+    // Pass through all target files — no truncation (soft guideline only)
+    const targetFiles = story.targetFiles || [];
 
     return {
       ...story,

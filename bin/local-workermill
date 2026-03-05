@@ -862,7 +862,7 @@ cmd_sync_data() {
   # Get password from AWS Secrets Manager
   local db_pass
   db_pass=$(aws secretsmanager get-secret-value \
-    --secret-id workermill/dev/database-url \
+    --secret-id "${WM_SECRETS_PREFIX:-workermill/${ENVIRONMENT:-dev}}/database-url" \
     --query 'SecretString' --output text 2>/dev/null | \
     sed 's/.*:\([^@]*\)@.*/\1/') || true
 

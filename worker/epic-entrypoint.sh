@@ -226,52 +226,50 @@ trap cleanup EXIT
 start_heartbeat_loop
 
 ***REMOVED*** =============================================================================
-***REMOVED*** Pre-install Dependencies (local mode only)
-***REMOVED*** In local/remote-agent mode, containers have tighter memory limits.
+***REMOVED*** Pre-install Dependencies
 ***REMOVED*** Pre-installing prevents agents from running npm install at runtime, which
 ***REMOVED*** causes OOM when combined with the review phase. npm process memory is freed
 ***REMOVED*** after install completes. Only uses lockfile-based installs (npm ci, etc.)
 ***REMOVED*** to avoid dirtying the git working tree.
+***REMOVED*** Without this, quality gates (tsc, eslint, jest) fail due to missing deps.
 ***REMOVED*** =============================================================================
-if [ "${EXECUTION_MODE}" = "local" ]; then
-    install_node_deps() {
-        local dir="$1"
-        local label="${dir***REMOVED***${REPO_DIR}/}"
-        [ "$dir" = "${REPO_DIR}" ] && label="root"
+install_node_deps() {
+    local dir="$1"
+    local label="${dir***REMOVED***${REPO_DIR}/}"
+    [ "$dir" = "${REPO_DIR}" ] && label="root"
 
-        cd "$dir"
-        if [ -f "pnpm-lock.yaml" ]; then
-            echo "[Epic]   ${label}: pnpm install --frozen-lockfile"
-            corepack enable 2>/dev/null || true
-            pnpm install --frozen-lockfile 2>&1 | tail -3 || true
-        elif [ -f "yarn.lock" ]; then
-            echo "[Epic]   ${label}: yarn install --frozen-lockfile"
-            corepack enable 2>/dev/null || true
-            yarn install --frozen-lockfile 2>&1 | tail -3 || true
-        elif [ -f "package-lock.json" ]; then
-            echo "[Epic]   ${label}: npm ci"
-            npm ci 2>&1 | tail -3 || true
-        fi
-        cd "${REPO_DIR}"
-    }
-
-    echo "[Epic] Pre-installing dependencies (local mode)..."
-
-    ***REMOVED*** Install at repo root
-    if [ -f "${REPO_DIR}/package.json" ]; then
-        install_node_deps "${REPO_DIR}"
+    cd "$dir"
+    if [ -f "pnpm-lock.yaml" ]; then
+        echo "[Epic]   ${label}: pnpm install --frozen-lockfile"
+        corepack enable 2>/dev/null || true
+        pnpm install --frozen-lockfile 2>&1 | tail -3 || true
+    elif [ -f "yarn.lock" ]; then
+        echo "[Epic]   ${label}: yarn install --frozen-lockfile"
+        corepack enable 2>/dev/null || true
+        yarn install --frozen-lockfile 2>&1 | tail -3 || true
+    elif [ -f "package-lock.json" ]; then
+        echo "[Epic]   ${label}: npm ci"
+        npm ci 2>&1 | tail -3 || true
     fi
+    cd "${REPO_DIR}"
+}
 
-    ***REMOVED*** Install in subdirectories with their own lockfiles (monorepo subprojects)
-    find "${REPO_DIR}" -maxdepth 2 \( -name "package-lock.json" -o -name "yarn.lock" -o -name "pnpm-lock.yaml" \) -not -path "*/node_modules/*" 2>/dev/null | while read lockfile; do
-        subdir=$(dirname "$lockfile")
-        if [ "$subdir" != "${REPO_DIR}" ]; then
-            install_node_deps "$subdir"
-        fi
-    done
+echo "[Epic] Pre-installing dependencies..."
 
-    echo "[Epic] Dependency pre-install complete"
+***REMOVED*** Install at repo root
+if [ -f "${REPO_DIR}/package.json" ]; then
+    install_node_deps "${REPO_DIR}"
 fi
+
+***REMOVED*** Install in subdirectories with their own lockfiles (monorepo subprojects)
+find "${REPO_DIR}" -maxdepth 2 \( -name "package-lock.json" -o -name "yarn.lock" -o -name "pnpm-lock.yaml" \) -not -path "*/node_modules/*" 2>/dev/null | while read lockfile; do
+    subdir=$(dirname "$lockfile")
+    if [ "$subdir" != "${REPO_DIR}" ]; then
+        install_node_deps "$subdir"
+    fi
+done
+
+echo "[Epic] Dependency pre-install complete"
 
 ***REMOVED*** =============================================================================
 ***REMOVED*** Start Epic Executor

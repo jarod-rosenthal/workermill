@@ -273,6 +273,7 @@ import { AddSpecEngineering1741800000000 } from "./migrations/1741800000000-AddS
 import { AddMaxCiFixRetries1741900000000 } from "./migrations/1741900000000-AddMaxCiFixRetries.js";
 import { AddBlockerWaitTimeoutMinutes1742000000000 } from "./migrations/1742000000000-AddBlockerWaitTimeoutMinutes.js";
 import { AddIntegrationCheckStatus1742100000000 } from "./migrations/1742100000000-AddIntegrationCheckStatus.js";
+import { SplitPlanningMode1742200000000 } from "./migrations/1742200000000-SplitPlanningMode.js";
 import { logger } from "../utils/logger.js";
 import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
@@ -585,6 +586,7 @@ export const AppDataSource = new DataSource({
     AddMaxCiFixRetries1741900000000,
     AddBlockerWaitTimeoutMinutes1742000000000,
     AddIntegrationCheckStatus1742100000000,
+    SplitPlanningMode1742200000000,
   ],
   subscribers: [
     OrganizationEncryptionSubscriber,

@@ -2,7 +2,9 @@
 
 ## Purpose
 
-This is a polished demo app designed to showcase WorkerMill's capabilities, `teamboard.workermill.com`. A full-stack SaaS Kanban board with RBAC, drag-and-drop, real-time updates, workspace dashboards, and activity feeds. When a visitor clicks "Try the Demo", they should see a populated workspace with realistic boards, cards, and activity. Every page should have data. Empty states are failure.
+This is a polished demo app designed to showcase WorkerMill's capabilities, `teamboard.workermill.com`. A full-stack SaaS Kanban board with RBAC, drag-and-drop, real-time updates, workspace dashboards, activity feeds, and PWA support. When a visitor clicks "Try the Demo", they should see a populated workspace with realistic boards, cards, and activity. Every page should have data. Empty states are failure.
+
+**This app must look like it was designed by expert UI designers and built by a professional engineering team.** It is the first thing prospects see when evaluating WorkerMill. A generic-looking app with default shadcn/ui styling and no visual personality will actively harm credibility. The bar is Linear, Notion, and Vercel's dashboard — not a weekend hackathon project.
 
 ## Source of Truth
 
@@ -24,11 +26,62 @@ This is a polished demo app designed to showcase WorkerMill's capabilities, `tea
 | Drag & Drop | @dnd-kit/core | Latest |
 | Charts | Recharts | Latest |
 | Real-time | Server-Sent Events (SSE) | PostgreSQL polling |
+| PWA | next-pwa or custom Workbox | Latest |
 | Testing | Vitest + Testing Library + Playwright | Latest |
 | Linting | ESLint + Prettier | Latest |
 | CI/CD | GitHub Actions (`ubuntu-latest`) | Free for public repos |
 | Hosting | Vercel | Automatic deploys |
 | Database Hosting | Neon PostgreSQL | Free tier, connection pooling |
+
+## Design Standards
+
+**This is non-negotiable.** Every page, component, and interaction must reflect the quality of a product designed by senior UI designers. Workers must treat visual polish as a first-class requirement, not an afterthought.
+
+### Visual Identity
+
+- **Design references:** Linear (clean density), Notion (warm neutrals + subtle depth), Vercel dashboard (typography + spacing). Study these before writing any UI code.
+- **Color palette:** Define a cohesive palette with primary, secondary, accent, and semantic colors (success/warning/error/info). Do NOT rely on shadcn/ui defaults — customize the theme. Use subtle gradients and tinted backgrounds, not flat gray-on-white.
+- **Typography:** Use a modern sans-serif (Inter or Geist). Establish a clear type scale with distinct heading, body, caption, and label sizes. Pay attention to font weights — use medium (500) and semibold (600) for hierarchy, not just bold.
+- **Spacing:** Consistent spacing system (4px/8px grid). Generous whitespace — never cram elements together. Cards, panels, and sections need breathing room.
+- **Border radius:** Consistent radius tokens (sm/md/lg). Rounded, modern feel — not sharp corners.
+- **Shadows & depth:** Layered shadow system for cards, modals, dropdowns. Subtle, not heavy. Use elevation to create visual hierarchy.
+
+### Interaction Design
+
+- **Animations:** All state transitions must be animated — page transitions, modal open/close, card drag, toast notifications, hover states. Use `framer-motion` or CSS transitions. 150-300ms duration, ease-out curves. No janky jumps.
+- **Hover states:** Every clickable element must have a visible hover state (color shift, subtle scale, background highlight). Interactive elements must feel alive.
+- **Loading states:** Skeleton screens that match the actual layout shape, not generic spinners. Skeletons should shimmer.
+- **Empty states:** Custom illustrations or icons with helpful copy — "No boards yet — create your first one!" with a prominent CTA button. Never show a blank page.
+- **Error states:** Friendly error messages with retry buttons. Not raw error text.
+- **Micro-interactions:** Checkbox animations, button press feedback, card drag shadows, toast slide-in/out, counter animations on dashboard stats.
+
+### Page-Level Polish
+
+- **Landing page:** Hero with gradient background, animated feature showcase, smooth scroll between sections, professional marketing copy. Must rival a real SaaS landing page.
+- **Dashboard:** Stats cards with subtle gradients or colored accents. Charts with custom color schemes matching the palette. Animated number counters on load.
+- **Board view:** Cards with subtle shadows that intensify on hover/drag. Column headers with color accents. Smooth drag animations with ghost preview. Drop zones that highlight on hover.
+- **Card detail:** Well-structured modal with clear sections. Priority badges with color coding. Avatar circles for assignees. Clean label chips.
+- **Sidebar:** Smooth collapse animation. Active state with colored indicator bar. Hover feedback on all nav items. Board list with subtle icons.
+
+### Responsive Design
+
+- All pages work at 320px, 768px, 1024px, 1440px+
+- Sidebar collapses to hamburger menu on mobile
+- Board view: horizontal scroll for columns on mobile
+- Card detail: full-screen sheet on mobile (not centered modal)
+- Touch-friendly: all tap targets ≥ 44px
+- No horizontal overflow anywhere
+
+### Design Anti-Patterns (Do NOT)
+
+- Do NOT ship default shadcn/ui styling without customization — it looks generic
+- Do NOT use raw Tailwind gray palette as the only color — add warmth and brand color
+- Do NOT skip loading/empty/error states — they destroy the polished feel
+- Do NOT use instant state changes without animation — feels cheap
+- Do NOT use tiny click targets on mobile — 44px minimum
+- Do NOT use placeholder text like "Lorem ipsum" — write realistic product copy everywhere
+
+---
 
 ## Global Constraints
 
@@ -63,10 +116,7 @@ npm audit --audit-level=high
 - Never pass user-controlled URLs directly to `router.push()` — validate as relative path first
 - All optimistic UI updates MUST capture previous state and revert on API failure
 - Prisma requires BOTH `DATABASE_URL` (pooled) and `DIRECT_DATABASE_URL` (direct for migrations)
-
-### adapter-static Constraints
-
-SvelteKit is NOT used — this is Next.js. But note: dynamic routes (`[id]`, `[param]`) in App Router require `page.tsx` files. Missing page components return 404 even if child routes exist.
+- Every `[param]/` directory users can navigate to MUST have a `page.tsx` — Next.js App Router returns 404 for dynamic segments without one
 
 ---
 
@@ -93,6 +143,8 @@ model User {
   memberships   WorkspaceMember[]
   assignedCards Card[]    @relation("assignee")
   activities    Activity[]
+  comments      Comment[]
+  starredBoards StarredBoard[]
 }
 
 model Workspace {
@@ -136,6 +188,16 @@ model Board {
   position    Int       @default(0)
   createdAt   DateTime  @default(now())
   columns     Column[]
+  starredBy   StarredBoard[]
+}
+
+model StarredBoard {
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId  String
+  board   Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  boardId String
+
+  @@id([userId, boardId])
 }
 
 model Column {
@@ -145,6 +207,7 @@ model Column {
   name     String
   position Int    @default(0)
   color    String @default("#6B7280")
+  wipLimit Int?
   cards    Card[]
 }
 
@@ -157,11 +220,14 @@ model Card {
   priority    Priority  @default(MEDIUM)
   position    Int       @default(0)
   dueDate     DateTime?
+  coverColor  String?
   assignee    User?     @relation("assignee", fields: [assigneeId], references: [id])
   assigneeId  String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   labels      CardLabel[]
+  comments    Comment[]
+  checklists  ChecklistItem[]
 }
 
 enum Priority {
@@ -169,6 +235,26 @@ enum Priority {
   HIGH
   MEDIUM
   LOW
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  cardId    String
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ChecklistItem {
+  id        String   @id @default(cuid())
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  cardId    String
+  title     String
+  completed Boolean  @default(false)
+  position  Int      @default(0)
 }
 
 model Label {
@@ -266,10 +352,15 @@ GET /api/health → { "status": "ok", "timestamp": "..." }
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
 | POST | `/api/columns/[id]/cards` | Member+ | Create card |
-| GET | `/api/cards/[id]` | Member | Card detail |
-| PUT | `/api/cards/[id]` | Member+ | Update card (title, description, priority, assignee, due date, labels) |
+| GET | `/api/cards/[id]` | Member | Card detail with comments + checklist |
+| PUT | `/api/cards/[id]` | Member+ | Update card (title, description, priority, assignee, due date, labels, coverColor) |
 | DELETE | `/api/cards/[id]` | Member+ | Delete card |
 | POST | `/api/cards/move` | Member+ | Move card (cross-column + reorder) |
+| POST | `/api/cards/[id]/comments` | Member+ | Add comment |
+| DELETE | `/api/cards/[id]/comments/[commentId]` | Author/Admin+ | Delete comment |
+| POST | `/api/cards/[id]/checklist` | Member+ | Add checklist item |
+| PUT | `/api/cards/[id]/checklist/[itemId]` | Member+ | Toggle/update checklist item |
+| DELETE | `/api/cards/[id]/checklist/[itemId]` | Member+ | Delete checklist item |
 
 **Card move** is the most critical API:
 ```typescript
@@ -287,6 +378,7 @@ GET /api/health → { "status": "ok", "timestamp": "..." }
 |--------|------|------|-------|
 | GET | `/api/workspaces/[slug]/activity` | Member | Activity feed (cursor-based, 20 per page) |
 | GET | `/api/workspaces/[slug]/stats` | Member | Dashboard statistics |
+| GET | `/api/workspaces/[slug]/search` | Member | Search cards by title/description across all boards |
 
 **Stats response:**
 ```json
@@ -299,6 +391,13 @@ GET /api/health → { "status": "ok", "timestamp": "..." }
   "completedCards": 12
 }
 ```
+
+### Starred Boards
+
+| Method | Path | Auth | Notes |
+|--------|------|------|-------|
+| POST | `/api/boards/[id]/star` | Member | Star a board |
+| DELETE | `/api/boards/[id]/star` | Member | Unstar a board |
 
 ### SSE Real-Time Stream
 
@@ -346,13 +445,21 @@ Returns 200 on success, 409 if already seeded. Idempotent.
 
 ### Landing Page (`/`)
 
-Public page — visible without auth. Must look like a real product marketing page.
+Public page — visible without auth. This is the first thing a visitor sees. It must look like a real product marketing page, not a placeholder.
 
 **Required sections:**
-- **Hero** — "TeamBoard" name, tagline, "Try the Demo" CTA button
-- **Features** — 3-4 feature cards (Kanban boards, RBAC, real-time, dashboards)
-- **Built by WorkerMill** — prominent section explaining this was built by AI workers using [WorkerMill](https://workermill.com)
-- **Footer** — copyright, "Built with WorkerMill" link
+- **Hero** — Gradient background, "TeamBoard" name, compelling tagline, animated feature preview or illustration, "Try the Demo" CTA button with hover animation
+- **Features** — 3-4 feature cards with icons (Kanban boards, RBAC, real-time collaboration, analytics dashboard)
+- **How It Works** — Brief visual explanation with icons or step illustrations
+- **Built by WorkerMill** — prominent section explaining this was built entirely by AI workers using [WorkerMill](https://workermill.com). Include a "Built with WorkerMill" badge. This is a showcase — visitors need to know the app was autonomously constructed by AI agents.
+- **Footer** — copyright, "Built with WorkerMill" link, relevant links
+
+**Design requirements:**
+- Professional, modern SaaS aesthetic — gradient hero, clean typography, generous whitespace
+- Fully responsive (mobile + desktop)
+- Smooth scroll animations between sections
+- Do NOT use "Lorem ipsum" — write realistic product copy
+- "Sign In" link in top nav → `/login`
 
 **Layout behavior:**
 - Landing page (`/`) and login/signup render WITHOUT sidebar — full-width pages
@@ -370,46 +477,182 @@ Public page — visible without auth. Must look like a real product marketing pa
 
 **Components:**
 - `BoardView` — Container with horizontal scrolling columns
-- `Column` — Vertical list of cards with header (name, card count, color)
-- `Card` — Draggable card showing title, priority badge, assignee avatar, due date, label chips
-- `CardDetail` — Modal for viewing and editing a card
+- `Column` — Vertical list of cards with header (name, card count, color indicator, WIP limit warning)
+- `Card` — Draggable card showing title, priority badge, assignee avatar, due date, label chips, cover color strip, checklist progress bar
+- `CardDetail` — Modal (desktop) or full-screen sheet (mobile) for viewing and editing a card
 
 **Drag & Drop (@dnd-kit/core):**
 - Drag within column (reorder) and between columns (cross-column move)
-- Visual drop indicators
+- Visual drop indicators (highlight target position)
 - Optimistic UI (move immediately, POST to API, rollback on error)
+- Touch: long-press to initiate drag (not immediate touch), larger hit targets (min 44px)
 
 **Card detail modal:**
 - Title (inline editable), rich text description
 - Priority selector (Urgent/High/Medium/Low with color badges)
 - Assignee picker, due date picker, label picker
-- Delete card, activity history
+- Cover color picker
+- Comments section (add/delete)
+- Checklist with progress bar (add/toggle/delete items)
+- Delete card button
+- Activity history for this card
+
+**Board filtering & search:**
+- Filter bar: by assignee, priority, label, due date
+- Search cards by title/description within board
+- Column WIP limits: visual warning (amber/red) when card count exceeds limit
+
+**Keyboard shortcuts:**
+- `N` — New card
+- `E` — Edit card
+- `Delete` — Delete card (with confirmation)
+- `Esc` — Close modal
+- Arrow keys — Navigate between cards
 
 ### Dashboard
 
-4 charts at `/[workspace]/dashboard`:
+4 charts + stats at `/[workspace]/dashboard`:
 1. **Tasks by Status** — Pie/donut chart (one slice per column name)
 2. **Tasks by Assignee** — Horizontal bar chart
 3. **Tasks Created Over Time** — Line chart (last 30 days)
 4. **Overdue Task Count** — Large number card with red highlight
 
-### Key Components
+Stats cards should have animated number counters on load.
 
-- `Sidebar` — Workspace name, nav links (Dashboard, Boards, Activity, Members, Settings), collapsible on mobile
-- `FlagToggle`-style `CardPriorityBadge` — color-coded priority
-- `useSSE(workspaceSlug)` — custom hook for real-time updates, auto-reconnect
+### Activity Feed
+
+`/[workspace]/activity`:
+- Chronological list with user avatar + action description + relative timestamp
+- "Alice moved 'Fix login bug' from To Do → In Progress — 2 hours ago"
+- Pagination (load more button)
+- New activities appear in real-time via SSE (no refresh needed)
+
+### Members Page
+
+`/[workspace]/members`:
+- Member list with name, email, role badge (Owner/Admin/Member/Viewer)
+- Invite form (email input, role selector) — Admin+ only
+- Role change dropdown — Admin+ only
+- Remove member button — Admin+ only
+
+### Settings Page
+
+`/[workspace]/settings`:
+- Workspace name and description edit
+- Labels management (create, edit color/name, delete)
+- Danger zone: Delete workspace (Owner only, requires confirmation dialog)
+
+### Sidebar
+
+- Workspace name + avatar at top
+- Navigation: Dashboard, Boards (expandable list with star toggle), Activity, Members, Settings
+- Starred boards pinned to top of board list
+- Active state with colored indicator bar
+- Collapsible on mobile (hamburger menu)
+- Smooth collapse/expand animation
+- User avatar + settings at bottom
+- Unread activity badge on Activity nav item
+
+### Workspace-Level Search
+
+Search across all boards and cards within the workspace. Available in sidebar or header.
+
+---
+
+## Progressive Web App (PWA)
+
+### Manifest & Install
+
+Create `public/manifest.json`:
+```json
+{
+  "name": "TeamBoard",
+  "short_name": "TeamBoard",
+  "description": "Kanban board for teams — Built by WorkerMill",
+  "start_url": "/workspaces",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "orientation": "any",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
+```
+
+- `<link rel="manifest" href="/manifest.json">` in root layout
+- Apple-specific meta tags (`apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`, `apple-touch-icon`)
+- Generate app icons at 192px and 512px (plus maskable variant)
+- `theme-color` meta tag matching light/dark theme
+
+### Service Worker & Offline Caching
+
+Use `next-pwa` or custom Workbox service worker:
+
+| Resource | Strategy | TTL |
+|----------|----------|-----|
+| App shell (HTML, CSS, JS) | Cache-first, network fallback | Revalidate on new deploy |
+| API responses (`/api/boards`, `/api/workspaces`) | Network-first, cache fallback | 5 minutes |
+| Static assets (icons, fonts, images) | Cache-first | 30 days |
+| Board detail (`/api/boards/[id]`) | Stale-while-revalidate | 1 minute |
+
+**Offline behavior:**
+- Recently viewed boards available offline (read-only)
+- Offline indicator banner: "You're offline — changes will sync when reconnected"
+- Card moves queued locally while offline, synced on reconnect
+- New card creation disabled while offline (show disabled state with tooltip)
+
+### Offline Action Queue
+
+Simple offline action queue using IndexedDB (via `idb` library):
+
+```typescript
+interface QueuedAction {
+  id: string;
+  type: 'card_move' | 'card_update';
+  payload: Record<string, unknown>;
+  timestamp: number;
+  retries: number;
+}
+```
+
+- Card moves and edits stored in IndexedDB when offline
+- On reconnect, actions replayed in order against API
+- Conflict resolution: last-write-wins (server timestamp)
+- Failed replays retry 3 times, then surface error to user
+- Queue badge shows count of pending syncs
+
+### Mobile-Native Interactions
+
+- **Pull-to-refresh** on board view and workspace list
+- **Haptic feedback** on card drag (where supported via `navigator.vibrate`)
+- **Swipe gestures** on cards: swipe right to complete, swipe left to delete (with undo toast)
+- **Bottom sheet** for card detail on mobile (instead of centered modal)
+- **Bottom navigation bar** on mobile viewports (< 768px): Workspaces, Boards, Activity, Profile
+- **Long-press to drag** — not immediate touch
+- **iOS safe area** — respect `env(safe-area-inset-*)` for notch/home indicator
+
+### Performance
+
+- View Transitions API for smooth page transitions (with fallback)
+- Skeleton screens on all data-loading pages
+- Dynamic imports for board view, charts, card detail
+- Lighthouse PWA audit: all checks pass
+- Lighthouse Performance score >90 on mobile
 
 ---
 
 ## Seed Data (CRITICAL — Makes or Breaks the Demo)
 
-**Run on every deploy** via `POST /api/seed`. Idempotent (check-before-insert).
+**Run on every deploy** via `POST /api/seed`. Idempotent (upsert, not insert-if-missing).
 
 ### Demo User
 - `demo@workermill.com` / `demo1234` (role: OWNER)
 
 ### Workspace
-- "Acme Product" (slug: `acme-product`)
+- "Acme Product" (slug: `acme-product`) with demo user as OWNER + 3 additional team members
 
 ### 3 Boards
 1. **Product Roadmap** — 5 columns (Backlog, To Do, In Progress, Review, Done) with 12 cards
@@ -422,7 +665,12 @@ Public page — visible without auth. Must look like a real product marketing pa
 ### 25 Activity Entries
 Spread over 7 days. Include card_created, card_moved, card_assigned, board_created, member_invited. Timestamps spread across business hours — NOT all at the same time.
 
-Cards should use realistic product titles (not "test card 1"). Vary priorities, assignees, due dates, and labels across cards.
+### Card Details
+Cards should use realistic product titles (not "test card 1"). Vary priorities, assignees, due dates, and labels across cards. Some cards should have:
+- Comments (2-3 per card on some cards)
+- Checklists (3-5 items, some completed)
+- Cover colors
+- Overdue due dates (for the dashboard overdue count)
 
 ---
 
@@ -435,6 +683,10 @@ teamboard/
 ├── prisma/
 │   ├── schema.prisma
 │   └── seed.ts
+├── public/
+│   ├── manifest.json
+│   ├── sw.js
+│   └── icons/
 ├── src/
 │   ├── app/
 │   │   ├── layout.tsx
@@ -456,18 +708,20 @@ teamboard/
 │   │       ├── auth/[...nextauth]/route.ts
 │   │       └── ... (all API routes)
 │   ├── components/
-│   │   ├── ui/               # shadcn/ui
-│   │   ├── layout/           # Sidebar, Header
+│   │   ├── ui/               # shadcn/ui (customized theme)
+│   │   ├── layout/           # Sidebar, Header, BottomNav
 │   │   ├── board/            # BoardView, Column, Card, CardDetail
-│   │   ├── dashboard/        # Charts
-│   │   └── shared/           # LoadingSpinner, ErrorBoundary
+│   │   ├── dashboard/        # Charts, StatCards
+│   │   └── shared/           # LoadingSpinner, ErrorBoundary, EmptyState
 │   ├── lib/
 │   │   ├── auth.ts           # NextAuth config
 │   │   ├── prisma.ts         # Prisma client singleton
 │   │   ├── utils.ts
-│   │   └── validations.ts    # Zod schemas
+│   │   ├── validations.ts    # Zod schemas
+│   │   └── offline-queue.ts  # IndexedDB action queue
 │   ├── hooks/
-│   │   └── useSSE.ts
+│   │   ├── useSSE.ts
+│   │   └── useOffline.ts
 │   └── types/
 │       └── index.ts
 ├── tests/
@@ -476,8 +730,10 @@ teamboard/
 ├── .github/workflows/
 │   ├── ci.yml
 │   └── deploy.yml
+├── docker-compose.yml
 ├── playwright.config.ts
 ├── vitest.config.ts
+├── .env.example
 ├── CLAUDE.md
 └── README.md
 ```
@@ -494,6 +750,7 @@ teamboard/
   "test": "vitest run",
   "test:watch": "vitest",
   "test:e2e": "playwright test",
+  "test:e2e:headed": "playwright test --headed",
   "format": "prettier --write .",
   "db:push": "prisma db push",
   "db:migrate": "prisma migrate deploy",
@@ -506,6 +763,67 @@ teamboard/
 - `"test"` MUST be `"vitest run"` (NOT `"vitest"` which hangs CI in watch mode)
 - `"build"` MUST be `"next build"` (NOT `"prisma generate && next build"`)
 - `"postinstall"` MUST be `"prisma generate"` — runs automatically after `npm ci`
+
+### Local Development (docker-compose)
+
+This is the **primary development and testing environment**. It runs a local PostgreSQL so workers can develop without cloud dependencies. Neon is only for production.
+
+**`docker-compose.yml`:**
+```yaml
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_DB: teamboard
+      POSTGRES_USER: teamboard
+      POSTGRES_PASSWORD: teamboard
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teamboard"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+```
+
+**Usage:**
+```bash
+# Start local database
+docker compose up -d --wait
+
+# Run app against local database
+npm run dev
+
+# Run tests against local database
+npm run test
+npm run test:e2e
+
+# Stop
+docker compose down
+```
+
+### Environment Variables
+
+**`.env.example`** (copy to `.env.local` for local dev):
+```bash
+# Database — local PostgreSQL via docker-compose
+DATABASE_URL="postgresql://teamboard:teamboard@localhost:5432/teamboard"
+DIRECT_DATABASE_URL="postgresql://teamboard:teamboard@localhost:5432/teamboard"
+
+# Auth
+NEXTAUTH_SECRET="local-dev-secret-change-in-production"
+NEXTAUTH_URL="http://localhost:3000"
+AUTH_TRUST_HOST="true"
+
+# Seed endpoint protection
+SEED_TOKEN="local-dev-seed-token"
+```
+
+**Workers:** Copy `.env.example` to `.env.local`, run `docker compose up -d --wait`, then `npx prisma db push && npm run db:seed && npm run dev`.
 
 ### CI Pipeline (`.github/workflows/ci.yml`)
 
@@ -668,20 +986,108 @@ jobs:
 - `optimizePackageImports: ['lucide-react', '@radix-ui/*']`
 - `images.formats: ['image/avif', 'image/webp']`
 
-### E2E Test Conventions
+### Vercel Deployment — Known Failure Modes
 
-- Use `globalSetup` that seeds demo data via Prisma before tests run
+**All verified from actual deployments:**
+
+1. **Serverless function timeout:** API routes using Prisma with cold-start connection pooling can exceed the default 10s limit. The `vercel.json` sets `maxDuration: 10` — if seed or heavy queries still timeout, increase to 30. The SSE stream endpoint MUST use edge runtime or a long-running function config.
+
+2. **Build output size:** Next.js standalone output can exceed Vercel's 250MB limit if `node_modules` are not properly tree-shaken. `output: 'standalone'` fixes this — do NOT remove it.
+
+3. **Environment variable availability at build time:** `NEXTAUTH_URL` and `AUTH_TRUST_HOST` must be available at build time for NextAuth.js to generate the correct callback URLs. Verify they are set in Vercel's "Environment Variables" section (not just GitHub Secrets).
+
+4. **Prisma binary targets:** Vercel's serverless runtime uses `rhel-openssl-3.0.x`. The Prisma schema should include `binaryTargets = ["native", "rhel-openssl-3.0.x"]` in the generator block if builds fail with missing Prisma engine errors.
+
+5. **Service worker path:** The service worker (`sw.js`) must be served from the root path (`/sw.js`). Next.js serves files from `public/` at the root. If the SW fails to register, check that `public/sw.js` exists and the scope is `/`.
+
+---
+
+## E2E Tests
+
+Playwright tests run against the local dev server (backed by docker-compose PostgreSQL).
+
+### Test File Structure
+
+```
+tests/e2e/
+  global-setup.ts     — Seeds demo data via Prisma before all tests
+  auth.spec.ts        — Login, bad credentials, demo mode, signup page, redirect to login
+  workspace.spec.ts   — List workspaces, navigate into workspace, role badges
+  dashboard.spec.ts   — Stat cards render, chart data loads, sidebar nav
+  board.spec.ts       — Columns visible, cards visible, priority badges, drag handles, card move
+  card-detail.spec.ts — Open card, edit title, comments, checklist, labels, priority
+  activity.spec.ts    — Activity feed shows entries, pagination
+  members.spec.ts     — Member list, invite flow, role change
+  mobile.spec.ts      — Sidebar hidden, bottom nav, viewport sizing, bottom sheet card detail
+  pwa.spec.ts         — Install prompt, offline banner, service worker registration
+```
+
+### Playwright Config
+
+```typescript
+export default defineConfig({
+  globalSetup: './tests/e2e/global-setup.ts',
+  testDir: './tests/e2e',
+  use: {
+    baseURL: 'http://localhost:3000',
+  },
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'mobile-chrome', use: { ...devices['Pixel 5'] } },
+    { name: 'mobile-safari', use: { ...devices['iPhone 13'] } },
+  ],
+  webServer: {
+    command: 'npm run build && npm run start',
+    port: 3000,
+    reuseExistingServer: !process.env.CI,
+  },
+});
+```
+
+The `global-setup.ts` creates the demo user with `prisma.user.upsert()` (always updating the password hash to ensure it matches test credentials), then seeds workspace, boards, cards.
+
+### Test Conventions
+
 - Use `getByRole` with `{ name }` for interactive elements — NOT `getByText`
-- Use `{ exact: true }` for text queries
-- NEVER use Tailwind classes as selectors
+- Use `{ exact: true }` for text queries to avoid substring matching
+- NEVER use Tailwind classes as selectors (`.bg-red-50`, `.text-red-800`)
+- Use `data-testid` attributes for complex components
 - Run `npx prettier --write .` after editing test files
 - CI browser install: `npx playwright install --with-deps` (installs all configured browsers)
+- Test against actual rendered content — check what components render before writing assertions
+
+---
+
+## Post-Deploy Smoke Test
+
+Run after Vercel deployment completes (~30s after push to main):
+
+```bash
+URL="https://teamboard.workermill.com"
+
+# 1. Health check
+curl -sf "$URL/api/health" | grep -q '"status":"ok"' || { echo "FAIL: Health"; exit 1; }
+
+# 2. Landing page loads
+curl -sf "$URL/" | grep -q "TeamBoard" || { echo "FAIL: Landing page"; exit 1; }
+
+# 3. Login page loads
+curl -sf "$URL/login" | grep -q "Sign" || { echo "FAIL: Login page"; exit 1; }
+
+# 4. Seed endpoint (idempotent)
+SEED_RESP=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$URL/api/seed" \
+  -H "Authorization: Bearer $SEED_TOKEN")
+[ "$SEED_RESP" = "200" ] || [ "$SEED_RESP" = "409" ] || { echo "FAIL: Seed (HTTP $SEED_RESP)"; exit 1; }
+
+echo "PASS: All smoke tests passed"
+```
 
 ---
 
 ## Acceptance Criteria
 
 ### Local
+- [ ] `docker compose up -d --wait` starts PostgreSQL without errors
 - [ ] `npm install` succeeds
 - [ ] `npm run dev` starts on port 3000
 - [ ] `npm run typecheck` passes
@@ -693,10 +1099,20 @@ jobs:
 - [ ] Login with `demo@workermill.com` / `demo1234` works
 - [ ] All 3 boards visible with correct card counts (12, 10, 8)
 - [ ] Drag and drop works within and across columns, persists after reload
+- [ ] Card detail shows comments, checklist, labels
+- [ ] Board filtering works (by assignee, priority, label)
+- [ ] Keyboard shortcuts work (N, E, Delete, Esc, arrows)
 - [ ] Dashboard shows 4 charts with non-zero data
 - [ ] Activity feed shows 25 seeded entries
 - [ ] SSE stream connects and delivers real-time events
+- [ ] Starred boards appear at top of sidebar
+- [ ] Workspace search returns results across boards
+- [ ] PWA: manifest valid, service worker registers
+- [ ] PWA: offline banner appears when disconnected
 - [ ] Responsive at 320px, 768px, 1024px, 1440px — no horizontal overflow
+- [ ] Bottom navigation bar visible on mobile
+- [ ] Lighthouse PWA audit: all checks pass
+- [ ] Lighthouse Performance (mobile): >90
 
 ### Production
 - [ ] `https://teamboard.workermill.com` loads landing page
@@ -706,7 +1122,9 @@ jobs:
 - [ ] Drag and drop works and persists
 - [ ] Dashboard charts render with real data
 - [ ] Activity feed shows entries
+- [ ] Card comments and checklists work
 - [ ] Responsive on mobile
+- [ ] PWA installable (Chrome/Safari "Add to Home Screen")
 - [ ] CI pipeline runs on push (lint, typecheck, test, e2e) on `ubuntu-latest`
 - [ ] Vercel auto-deploys on merge to main
 - [ ] Post-deploy smoke test passes
@@ -726,5 +1144,8 @@ jobs:
 - Do NOT edit existing Prisma migrations — create new ones
 - Do NOT skip CI before merge — even with deploy label
 - Do NOT add `@@map()`, `@@index()`, or extra annotations to the Prisma schema
-- Do NOT create Dockerfile, docker-compose, or vercel.json during initial setup — Vercel auto-detects Next.js
+- Do NOT create Dockerfile or vercel.json during initial setup — Vercel auto-detects Next.js
 - Do NOT create `postcss.config.*` — Next.js 15 includes PostCSS by default
+- Do NOT ship default shadcn/ui styling without customization — it looks generic and hurts credibility
+- Do NOT skip loading/empty/error states — they destroy the polished feel
+- Do NOT use instant state changes without animation — feels cheap and unfinished

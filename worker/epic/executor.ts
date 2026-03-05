@@ -30,7 +30,7 @@ import { runGateCommand, isDockerDaemonReachable } from "./gate-utils.js";
 import axios from "axios";
 import * as fs from "fs/promises";
 import { existsSync, readdirSync, statSync } from "fs";
-import { execSync, spawn } from "child_process";
+import { execSync, execFileSync, spawn } from "child_process";
 
 // Persona and provider icons are loaded from the Decision API at runtime
 // via setIcons() called by the coordinator after getWorkerConfig().
@@ -1035,8 +1035,9 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
 
     while (Date.now() - startTime < maxWaitMs) {
       try {
-        const response = execSync(
-          `gh api repos/${owner}/${repo}/actions/runs?branch=${branchName}&per_page=1 --jq '.workflow_runs[0] | {id, status, conclusion}'`,
+        const response = execFileSync(
+          "gh",
+          ["api", `repos/${owner}/${repo}/actions/runs?branch=${branchName}&per_page=1`, "--jq", ".workflow_runs[0] | {id, status, conclusion}"],
           { encoding: "utf-8", timeout: 15_000 }
         ).trim();
 
@@ -1053,8 +1054,9 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
             // CI failed — get the failure log
             let failureLog = "";
             try {
-              failureLog = execSync(
-                `gh api repos/${owner}/${repo}/actions/runs/${run.id}/jobs --jq '[.jobs[] | select(.conclusion == "failure") | .steps[] | select(.conclusion == "failure") | .name] | join(", ")'`,
+              failureLog = execFileSync(
+                "gh",
+                ["api", `repos/${owner}/${repo}/actions/runs/${run.id}/jobs`, "--jq", `[.jobs[] | select(.conclusion == "failure") | .steps[] | select(.conclusion == "failure") | .name] | join(", ")`],
                 { encoding: "utf-8", timeout: 15_000 }
               ).trim();
             } catch { /* best effort */ }

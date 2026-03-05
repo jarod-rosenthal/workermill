@@ -378,8 +378,8 @@ export class Organization {
   @Column({ name: "prd_planning_mode", type: "varchar", length: 20, default: "decomposer_planned" })
   prdPlanningMode: string; // "strict", "simplified", or "decomposer_planned" — full build / PRD planning
 
-  @Column({ name: "max_target_files", type: "integer", default: 5 })
-  maxTargetFiles: number; // Max files each story can target (3-15)
+  @Column({ name: "max_target_files", type: "integer", default: 15 })
+  maxTargetFiles: number; // Recommended files per story (soft guideline, not truncated)
 
   @Column({ name: "story_calibration_multiplier", type: "decimal", precision: 3, scale: 2, default: 0.4 })
   storyCalibrationMultiplier: number; // Temperature dial: 0.3-1.0, lower = fewer stories

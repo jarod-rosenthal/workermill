@@ -46,7 +46,7 @@ export async function getCriticConfig(apiMaxTargetFiles?: number): Promise<Criti
     cachedCriticConfig = {
       promptTemplate: data.promptTemplate,
       approvalThreshold: data.approvalThreshold ?? 85,
-      maxTargetFiles: data.maxTargetFiles ?? apiMaxTargetFiles ?? 5,
+      maxTargetFiles: data.maxTargetFiles ?? apiMaxTargetFiles ?? 15,
       criticFeedbackTemplate: data.criticFeedbackTemplate,
       refinementFeedbackTemplate: data.refinementFeedbackTemplate,
     };
@@ -101,7 +101,7 @@ export interface CriticResult {
 // ============================================================================
 
 // Defaults — overridden by server config when available
-let MAX_TARGET_FILES = 5;
+let MAX_TARGET_FILES = 15; // Advisory only — not enforced as a hard cap
 let AUTO_APPROVAL_THRESHOLD = 85;
 const SIMPLIFIED_FLOOR = 60;
 
@@ -194,29 +194,21 @@ function extractBalancedJson(text: string, start: number): string | null {
 // ============================================================================
 
 /**
- * Apply file cap to all stories. Truncates targetFiles > MAX_TARGET_FILES.
- * Returns details about truncated stories for logging.
+ * Normalize targetFiles on all stories (ensure array exists).
+ * No truncation — the planner decides how many files each story needs.
+ * Foundation/scaffolding stories legitimately need 15-25+ files.
+ * Feature stories typically need 3-10. Workers discover additional files
+ * from context regardless.
  */
 export function applyFileCap(
   plan: ExecutionPlan,
 ): { truncatedCount: number; details: string[] } {
-  let truncatedCount = 0;
-  const details: string[] = [];
-
   for (const story of plan.stories) {
     if (!story.targetFiles || !Array.isArray(story.targetFiles)) {
       story.targetFiles = [];
-    } else if (story.targetFiles.length > MAX_TARGET_FILES) {
-      const dropped = story.targetFiles.slice(MAX_TARGET_FILES);
-      details.push(
-        `${story.id}: ${story.targetFiles.length} files → ${MAX_TARGET_FILES} (dropped: ${dropped.join(", ")})`,
-      );
-      story.targetFiles = story.targetFiles.slice(0, MAX_TARGET_FILES);
-      truncatedCount++;
     }
   }
-
-  return { truncatedCount, details };
+  return { truncatedCount: 0, details: [] };
 }
 
 // ============================================================================
@@ -604,7 +596,7 @@ export function formatCriticFeedback(critic: CriticResult): string {
   }
 
   lines.push(
-    `**You MUST address ALL feedback above.** Each story must target at most ${MAX_TARGET_FILES} files.`,
+    `**You MUST address ALL feedback above.** List all files each story will create or modify — most stories need 3-10, foundation/scaffolding stories may need 15-25+.`,
     "Stories MUST NOT overlap on targetFiles.",
     "",
     "**CRITICAL — OUTPUT FORMAT:** You MUST output a revised plan as a ```json code block containing the full JSON object with `summary`, `stories`, `risks`, and `assumptions` fields. Do NOT just describe what you would change — output the COMPLETE revised JSON plan. If you do not output a ```json block, the plan will fail to parse and the task will fail.",
@@ -675,7 +667,7 @@ export function formatRefinementFeedback(critic: CriticResult, plan: ExecutionPl
   }
 
   lines.push(
-    `Each story must target at most ${MAX_TARGET_FILES} files. Stories MUST NOT overlap on targetFiles.`,
+    `List all files each story will create or modify — most stories need 3-10, foundation/scaffolding stories may need 15-25+. Stories MUST NOT overlap on targetFiles.`,
     "",
     "**CRITICAL — OUTPUT FORMAT:** Output the refined plan as a ```json code block with the COMPLETE JSON object (`summary`, `stories`, `risks`, `assumptions`). Do NOT describe changes — output the full JSON.",
     "",

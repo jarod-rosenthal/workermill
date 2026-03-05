@@ -74,7 +74,7 @@ This is the ACTUAL codebase you are working with. Use ONLY files that exist here
 **For MULTI-story tasks (score 7+):**
 - Analyze the PRD and create as many stories as needed to fully implement it
 - **CRITICAL: Each story MUST be ≤3 story points** (Haiku-optimized)
-- Each story should modify ≤5 files
+- Each story should ideally modify ≤5 files (soft guideline — more is acceptable when logically cohesive, e.g. test suites or route handlers)
 - Order by dependencies (backend before frontend, etc.)
 - **Deployment/operational stories** (terraform apply, migrations, deploy scripts) MUST use devops_engineer persona and include exact commands to run in acceptance criteria. Writing code and deploying it should be separate stories.
 
@@ -190,7 +190,7 @@ Each acceptance criterion MUST be:
 
 All stories will execute on Haiku (cheapest model). To ensure high accuracy:
 - Each story MUST be ≤3 points
-- Each story should modify ≤5 files
+- Each story should ideally modify ≤5 files (soft guideline — more is acceptable when logically cohesive, e.g. test suites or route handlers)
 - Each story should have clear, unambiguous acceptance criteria (see Acceptance Criteria Guidelines above)
 
 ***REMOVED******REMOVED******REMOVED*** Point Scale (Haiku-Optimized)
@@ -877,18 +877,6 @@ export function validatePlan(plan: ExecutionPlan): void {
           storyIndex: story.index,
           title: story.title,
         });
-      } else if (story.targetFiles.length > 5) {
-        // Hard cap: stories with >5 files are too broad and cause parallel merge conflicts
-        logger.error(
-          "Story targets >5 files — truncating to first 5 to prevent scope explosion",
-          {
-            storyIndex: story.index,
-            fileCount: story.targetFiles.length,
-            title: story.title,
-            dropped: story.targetFiles.slice(5),
-          },
-        );
-        story.targetFiles = story.targetFiles.slice(0, 5);
       }
 
       // Initialize referenceFiles if missing

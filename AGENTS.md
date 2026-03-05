@@ -51,8 +51,6 @@ Correct workflow:
 
 ## Deployment Awareness
 
-**Always run `./deploy.sh --frontend` after UI changes** so they're visible at https://workermill.com.
-
 After any deployment:
 1. Verify the deployment succeeded
 2. Mention the deployment in your summary
@@ -76,11 +74,9 @@ After any deployment:
 When encountering errors:
 
 1. **Git Bash issues** - If commands fail with syntax errors involving `$(...)` or variable expansion, spawn a Task agent instead of debugging
-2. **AWS CLI issues** - Prefix with `MSYS_NO_PATHCONV=1` and set `PYTHONIOENCODING=utf-8`
-3. **Build failures** - Check if the error is in your code or infrastructure; report infrastructure issues rather than attempting fixes
+2. **Build failures** - Check if the error is in your code or infrastructure; report infrastructure issues rather than attempting fixes
 
 ## References
 
 - **Codebase documentation**: `CLAUDE.md`
 - **Worker container instructions**: `worker/AGENTS.md`
-- **Deployment**: `./deploy.sh --help`

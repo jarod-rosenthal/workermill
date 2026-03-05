@@ -1,10 +1,40 @@
-# WorkerMill
+<p align="center">
+  <h1 align="center">WorkerMill</h1>
+</p>
 
-An open-source orchestration platform for autonomous AI coding agents. Give it a task or an entire product spec — it plans the work, assigns persona-matched experts, executes in parallel, enforces quality gates, and delivers pull requests.
+<p align="center">
+  Open-source orchestration for autonomous AI coding agents.<br/>
+  Give it a task or an entire product spec — it plans the work, assigns persona-matched experts, executes in parallel, enforces quality gates, and delivers pull requests.
+</p>
+
+<h3 align="center">
+  <a href="https://workermill.com">Website</a> ·
+  <a href="https://workermill.com/docs">Docs</a> ·
+  <a href="https://github.com/jarod-rosenthal/workermill/discussions">Discussions</a> ·
+  <a href="https://marketplace.visualstudio.com/items?itemName=workermill.workermill">VS Code Extension</a>
+</h3>
+
+<p align="center">
+  <a href="https://github.com/jarod-rosenthal/workermill/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
+  <a href="https://github.com/jarod-rosenthal/workermill/discussions"><img src="https://img.shields.io/github/discussions/jarod-rosenthal/workermill?logo=github&color=blue" alt="GitHub Discussions"></a>
+  <a href="https://github.com/jarod-rosenthal/workermill/stargazers"><img src="https://img.shields.io/github/stars/jarod-rosenthal/workermill?style=social" alt="GitHub stars"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="WorkerMill Demo" width="100%" />
+</p>
+
+## Why WorkerMill?
+
+Most AI coding tools are single-agent, single-file, one-shot. WorkerMill is an **orchestration layer** — it coordinates multiple AI experts working in parallel on your codebase, with real quality enforcement.
+
+- **Full pipeline, not a chatbot** — Planning, decomposition, parallel expert execution, quality gates, and PR delivery. Submit a task or an entire product spec.
+- **12 worker personas** — Backend, frontend, devops, security, QA, and more. Auto-assigned based on task content, or manually selected.
+- **Two-phase quality gates** — Pre-commit (lint, typecheck, test, build) + post-push CI polling. Gate failures trigger automatic fix agents.
+- **Any provider, any SCM** — Anthropic, OpenAI, Google, Ollama. GitHub, GitLab, Bitbucket. Mix and match per role.
+- **Runs on your machine** — Single binary, your API keys, no cloud dependency. Or self-host the full stack with a web dashboard.
 
 ## Quick Start
-
-### Install and Run
 
 ```bash
 # Install the agent binary (Mac/Linux)
@@ -168,6 +198,9 @@ The agent binary runs entirely on your machine. All state is stored locally in S
 
 Run the complete platform yourself — API server, web dashboard, PostgreSQL, Redis. This gives you the web dashboard for monitoring, webhook integrations for Jira/GitHub/Linear, and the ability to run workers on remote infrastructure.
 
+<details>
+<summary>Self-hosted architecture</summary>
+
 ```
 ┌───────────────────────────────────────────────────────────┐
 │                    VS Code Extension                       │
@@ -209,7 +242,9 @@ cd frontend && npm install && npm run dev    # → http://localhost:5173
 workermill-agent start
 ```
 
-You can deploy the full stack to AWS (ECS Fargate, RDS, ElastiCache, S3, CloudFront) or run it on any infrastructure that supports Node.js, PostgreSQL, and Redis.
+You can deploy the full stack on any infrastructure that supports Node.js, PostgreSQL, and Redis.
+
+</details>
 
 ### Hosted Instance
 
@@ -234,10 +269,12 @@ A hosted instance is available at [workermill.com](https://workermill.com) for t
 
 Bring your own API keys. The execution pipeline is identical regardless of provider — the only difference is which SDK drives each expert.
 
-- **Anthropic** (Claude Sonnet 4.6, Opus 4.6, Haiku 4.5) — default, experts via Claude CLI
-- **OpenAI** (GPT-4, GPT-4o) — experts via Vercel AI SDK
-- **Google** (Gemini Pro, Gemini Flash) — experts via Vercel AI SDK
-- **Ollama** (local/self-hosted models) — experts via Vercel AI SDK + codebase RAG embeddings
+| Provider | Models | Integration |
+|----------|--------|-------------|
+| **Anthropic** | Claude Sonnet 4.6, Opus 4.6, Haiku 4.5 | Claude CLI (default) |
+| **OpenAI** | GPT-4, GPT-4o | Vercel AI SDK |
+| **Google** | Gemini Pro, Gemini Flash | Vercel AI SDK |
+| **Ollama** | Local/self-hosted models | Vercel AI SDK + codebase RAG |
 
 ### Worker Personas (12 roles)
 
@@ -359,29 +396,17 @@ If you're diving into the codebase, these are the patterns that hold the system 
 - **Quality gates** are two-phase: pre-commit shell commands + post-push CI pipeline polling
 - **The worker execution engine** (`worker/epic/`) is shared across all deployment options — standalone, self-hosted, and hosted all run the same code
 
-## Deployment
+## Releases
 
-```bash
-# Deploy everything to production (AWS)
-./deploy.sh --all
+**Agent:** Bump `agent/package.json` version → `git tag agent-v<version>` → push tag → CI builds binaries for all platforms.
 
-# Deploy specific components
-./deploy.sh --api        # API service (ECS)
-./deploy.sh --frontend   # Dashboard (S3/CloudFront)
-./deploy.sh --worker     # Worker Docker image (ECR)
-```
-
-Additional flags: `--skip-build`, `--db-check`, `--check-migrations`, `--snapshot`, `--wait`.
-
-**Agent release:** Bump `agent/package.json` version → `git tag agent-v<version>` → push tag → CI builds binaries.
-
-**VS Code release:** Bump `packages/vscode-workermill/package.json` version → `git tag vscode-v<version>` → push tag → CI publishes to Marketplace.
+**VS Code extension:** Bump `packages/vscode-workermill/package.json` version → `git tag vscode-v<version>` → push tag → CI publishes to Marketplace.
 
 ## Documentation
 
 - **[Docs](https://workermill.com/docs)** — User-facing guides: quick start, integrations, task lifecycle, personas, epics
 - **[Architecture](docs/agent/architecture.md)** — Models, routes, task flow, execution modes
-- **[Infrastructure](docs/agent/infrastructure.md)** — Terraform, AWS setup
+- **[Infrastructure](docs/agent/infrastructure.md)** — Deployment requirements and options
 - **[Local Dev](docs/agent/local-dev.md)** — Development environment setup
 - **[Agent & VS Code](docs/agent/agent-and-vscode.md)** — Agent internals, extension details
 - **[Testing](docs/agent/testing.md)** — Vitest (API), Playwright (E2E)

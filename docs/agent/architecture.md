@@ -87,11 +87,11 @@ Dashboard (localhost:5173) → Local API creates task (status: queued, skips pla
                            Worker posts ::result:: → API updates status
 ```
 
-**Path 4 — Cloud ECS (legacy, requires cloud agent for planning):**
+**Path 4 — Cloud Container (legacy, requires cloud agent for planning):**
 ```
 Task created (status: planning) → Cloud agent plans → status: queued
                                   ↓
-                           Cloud orchestrator claims → ECS Fargate task
+                           Cloud orchestrator claims → container task
                                   ↓
                            Container runs Epic Coordinator
 ```
@@ -154,7 +154,7 @@ There are four ways tasks are executed, depending on where the worker runs:
 | **Standalone Agent** (default) | Native process (self-invocation of agent binary) | Yes (agent planner) | **No** |
 | **Cloud Agent** (production) | Native process (self-invocation of agent binary) | Yes (agent planner) | **No** |
 | **Local WorkerMill** (API development) | Docker container (`workermill-worker:local`) | No (skipped) | **Yes** |
-| **Cloud ECS** (legacy) | ECS Fargate task | Yes (agent planner, separate step) | Yes (ECR image) |
+| **Cloud Container** (legacy) | Container task | Yes (agent planner, separate step) | Yes |
 
 ### Epic Mode (Anthropic provider)
 
@@ -162,7 +162,7 @@ Planning Agent decomposes task → Epic Coordinator runs → Claude CLI expert s
 
 **Components:** `worker/epic/coordinator.ts`, `executor.ts`, `experts.ts`, `coordination-client.ts`, `decision-client.ts`, `blocker-manager.ts`, `auto-fix-agent.ts`, `inline-reviewer.ts`, `inline-deployer.ts`, `inline-improver.ts`, `git-ops.ts`, `memory-client.ts`, `ticket-ops.ts`
 - In agent: compiled into the agent binary at build time (esbuild bundles from TS source)
-- In Docker/ECS: compiled by `tsc` during Docker build
+- In Docker: compiled by `tsc` during Docker build
 
 ### Multi-Provider Mode (non-Anthropic)
 

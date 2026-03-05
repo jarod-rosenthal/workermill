@@ -95,7 +95,7 @@ workermill-agent update   # Self-updates from CDN
 
 **Config:** `~/.workermill/config.json` with `"mode": "cloud"`, `apiUrl`, and `apiKey`.
 
-**CDN distribution:** Agent binaries hosted on S3/CloudFront at `https://workermill.com/agent/latest/`:
+**CDN distribution:** Agent binaries hosted at `https://workermill.com/agent/latest/`:
 - `workermill-agent-linux-x64`, `workermill-agent-darwin-arm64`, `workermill-agent-darwin-x64`, `workermill-agent-win-x64.exe`
 - Version manifest: `https://workermill.com/agent/latest.json`
 - CI workflow (`agent-release.yml`) builds binaries on `agent-v*` tags

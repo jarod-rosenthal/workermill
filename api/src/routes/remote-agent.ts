@@ -591,7 +591,9 @@ router.post(
 
       // Server-side story cap safety net: truncate to org's maxStories
       const calibration = org.storyCalibrationMultiplier ?? 0.4;
-      const serverMaxStories = Math.max(3, Math.round(20 * calibration));
+      const baseServerMax = Math.max(3, Math.round(20 * calibration));
+      const isBuildPage = ((task.jiraFields ?? {}) as Record<string, unknown>).buildPage === true;
+      const serverMaxStories = isBuildPage ? Math.max(baseServerMax, 20) : baseServerMax;
       if (rawPlan.stories.length > serverMaxStories) {
         const originalCount = rawPlan.stories.length;
         rawPlan.stories = rawPlan.stories.slice(0, serverMaxStories);
@@ -1126,7 +1128,10 @@ router.get(
     // Calculate maxStories from org calibration multiplier
     // Formula: max(3, round(20 * multiplier)), default multiplier 0.4 → max 8 stories
     const calibrationMultiplier = org.storyCalibrationMultiplier ?? 0.4;
+    // Prompt hint: always use base cap so LLM targets a reasonable number
     const maxStories = Math.max(3, Math.round(20 * calibrationMultiplier));
+    // Truncation ceiling: PRD tasks get higher cap so valid stories aren't chopped
+    const storyCap = isBuildPageTask ? Math.max(maxStories, 20) : maxStories;
 
     // Fetch available personas for dynamic planner prompt
     const experts = await getExpertRegistry(org.id);
@@ -1176,6 +1181,7 @@ router.get(
       model,
       provider,
       maxStories,
+      storyCap,
       maxTargetFiles: org.maxTargetFiles,
       planningMode: isBuildPageTask
         ? (org.prdPlanningMode || org.planningMode || "decomposer_planned")

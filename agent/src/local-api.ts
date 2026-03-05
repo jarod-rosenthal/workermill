@@ -1236,9 +1236,23 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         }
 
         const config = loadStandaloneConfig();
-        const maxStories = config.settings?.maxStories ?? 8;
+        const baseMaxStories = config.settings?.maxStories ?? 8;
         const maxTargetFiles = config.settings?.maxTargetFiles ?? 8;
         const plannerConfig = getRoleConfig(config, "planner");
+
+        // Extract jiraFields early — needed for maxStories calculation before prompt template
+        let jiraFields: Record<string, unknown> = {};
+        try {
+          jiraFields = task.jira_fields ? JSON.parse(task.jira_fields) : {};
+        } catch { /* ignore malformed JSON */ }
+
+        // Detect PRD/full-build task (matches remote-agent.ts)
+        const isBuildPageTask = jiraFields.buildPage === true;
+
+        // Prompt hint: always use base cap so LLM targets a reasonable number
+        const maxStories = baseMaxStories;
+        // Truncation ceiling: PRD tasks get higher cap so valid stories aren't chopped
+        const storyCap = isBuildPageTask ? Math.max(baseMaxStories, 20) : baseMaxStories;
 
         // Get available personas from worker-config
         let validPersonas: string[] = [];
@@ -1315,17 +1329,10 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 \`\`\`
 `;
 
-        // Extract preComputedStories from jiraFields if present
-        let jiraFields: Record<string, unknown> = {};
-        try {
-          jiraFields = task.jira_fields ? JSON.parse(task.jira_fields) : {};
-        } catch { /* ignore malformed JSON */ }
+        // Extract preComputedStories from jiraFields (parsed above)
         const preComputedStories = Array.isArray(jiraFields.preComputedStories) && jiraFields.preComputedStories.length > 0
           ? jiraFields.preComputedStories
           : undefined;
-
-        // Detect PRD/full-build task (matches remote-agent.ts:1124)
-        const isBuildPageTask = jiraFields.buildPage === true;
 
         return json(res, {
           taskId,
@@ -1333,6 +1340,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
           model: plannerConfig.model,
           provider: plannerConfig.provider,
           maxStories,
+          storyCap,
           maxTargetFiles,
           planningMode: isBuildPageTask
             ? (config.settings?.prdPlanningMode || "decomposer_planned")
@@ -1372,9 +1380,13 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
         const { parseExecutionPlan, applyFileCap, applyStoryCap, resolveFileOverlaps, fixInvalidPersonas } = await import("./plan-validator.js");
         const rawPlan = parseExecutionPlan(rawOutput);
 
-        // Apply safety caps
+        // Apply safety caps — use higher cap for PRD/build-page tasks
         const config = loadStandaloneConfig();
-        const maxStories = config.settings?.maxStories ?? 8;
+        const baseMaxStories = config.settings?.maxStories ?? 8;
+        const task = db.prepare("SELECT jira_fields FROM tasks WHERE id = ?").get(taskId) as { jira_fields?: string } | undefined;
+        let isBuildPage = false;
+        try { isBuildPage = task?.jira_fields ? JSON.parse(task.jira_fields).buildPage === true : false; } catch { /* ignore */ }
+        const maxStories = isBuildPage ? Math.max(baseMaxStories, 20) : baseMaxStories;
         applyStoryCap(rawPlan, maxStories);
         applyFileCap(rawPlan);
         resolveFileOverlaps(rawPlan);

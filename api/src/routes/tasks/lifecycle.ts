@@ -236,17 +236,6 @@ router.post(
     const repoLabel = labels.find((l: string) => l.toLowerCase().startsWith("repo:"));
     if (repoLabel) {
       repoOverride = repoLabel.substring(5); // Remove "repo:" prefix
-    } else {
-      // Check for direct repo name labels
-      const defaultRepo = org.getDefaultRepo();
-      const owner = defaultRepo?.split("/")[0];
-      if (owner) {
-        const knownRepoNames = ["oncallshift-mobile", "oncallshift-api", "oncallshift-web"];
-        const repoNameLabel = labels.find((l) => knownRepoNames.includes(l.toLowerCase()));
-        if (repoNameLabel) {
-          repoOverride = `${owner}/${repoNameLabel.toLowerCase()}`;
-        }
-      }
     }
     if (repoOverride) {
       const newRepo = normalizeRepoWithOwner(repoOverride, org.getDefaultRepo());

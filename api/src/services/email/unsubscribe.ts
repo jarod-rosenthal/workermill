@@ -4,7 +4,7 @@
 
 import crypto from "crypto";
 
-const UNSUBSCRIBE_SECRET = process.env.EMAIL_UNSUBSCRIBE_SECRET || "workermill-unsubscribe-secret";
+const UNSUBSCRIBE_SECRET = process.env.EMAIL_UNSUBSCRIBE_SECRET ?? (() => { throw new Error("EMAIL_UNSUBSCRIBE_SECRET environment variable is required"); })();
 
 /**
  * Generate HMAC-signed unsubscribe token

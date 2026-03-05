@@ -1,6 +1,7 @@
 {
   "name": "@workermill/mcp-server",
   "version": "1.2.0",
+  "license": "Apache-2.0",
   "description": "MCP server for WorkerMill AI orchestration platform",
   "type": "module",
   "main": "./build/index.js",

@@ -5,7 +5,7 @@
 
 import { DataSource } from "typeorm";
 
-const PROD_DB_URL = "postgresql://workermill:C6uNpsUwiQD1sQg6fOG7u6ryaCD0uY@localhost:5432/workermill";
+const PROD_DB_URL = process.env.PROD_DATABASE_URL ?? (() => { throw new Error("PROD_DATABASE_URL env var required"); })();
 const LOCAL_DB_URL = "postgresql://workermill:localdev@localhost:5433/workermill";
 
 async function migrate() {
@@ -41,12 +41,14 @@ async function migrate() {
   const localColumnNames = new Set(localCols.map((c: {column_name: string}) => c.column_name));
 
   // Get recent tasks from production (last 7 days) for our org
+  const orgSlug = process.env.MIGRATE_ORG_SLUG;
+  if (!orgSlug) throw new Error("MIGRATE_ORG_SLUG env var required");
   const tasks = await prodDs.query(`
     SELECT * FROM worker_tasks
     WHERE created_at > NOW() - INTERVAL '7 days'
-    AND org_id IN (SELECT id FROM organizations WHERE slug = 'oncallshift')
+    AND org_id IN (SELECT id FROM organizations WHERE slug = $1)
     ORDER BY created_at ASC
-  `);
+  `, [orgSlug]);
   console.log(`Found ${tasks.length} recent tasks to migrate\n`);
 
   // Get existing task IDs in local

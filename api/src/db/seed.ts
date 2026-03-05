@@ -16,18 +16,19 @@ async function seed() {
     const userRepo = AppDataSource.getRepository(User);
 
     // Check if organization already exists
-    let org = await orgRepo.findOne({ where: { name: "OnCallShift" } });
+    const seedOrgName = process.env.SEED_ORG_NAME || "WorkerMill";
+    let org = await orgRepo.findOne({ where: { name: seedOrgName } });
 
     if (!org) {
       // Create organization
       const seedRawKey = `org_${randomUUID().replace(/-/g, "")}`;
       org = orgRepo.create({
-        name: "OnCallShift",
+        name: seedOrgName,
         plan: "enterprise",
         apiKeyHash: await bcrypt.hash(seedRawKey, 10),
         apiKeyPrefix: seedRawKey.substring(0, 12),
-        scmProvider: "bitbucket",
-        defaultBitbucketRepo: "oncallshift/oncallshift-api",
+        scmProvider: process.env.SEED_SCM_PROVIDER as "github" | "bitbucket" | "gitlab" || "github",
+        defaultGithubRepo: process.env.SEED_DEFAULT_REPO || undefined,
       });
       await orgRepo.save(org);
       logger.info("Created organization", { orgId: org.id, name: org.name });

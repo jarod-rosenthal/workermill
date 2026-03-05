@@ -1,6 +1,8 @@
 {
   "name": "workermill-standard",
   "version": "1.0.0",
+  "private": true,
+  "license": "Apache-2.0",
   "description": "Standard SDK-based executor for WorkerMill - single task execution with inline review/deploy/improve",
   "main": "dist/index.js",
   "type": "module",

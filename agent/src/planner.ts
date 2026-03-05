@@ -957,7 +957,7 @@ export async function planTask(
     }
     throw fetchErr;
   }
-  const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories, maxTargetFiles: apiMaxTargetFiles, planningMode: apiPlanningMode, validPersonas: apiValidPersonas, preComputedStories: apiPreComputedStories } = promptResponse.data;
+  const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories, storyCap: apiStoryCap, maxTargetFiles: apiMaxTargetFiles, planningMode: apiPlanningMode, validPersonas: apiValidPersonas, preComputedStories: apiPreComputedStories } = promptResponse.data;
   const validPersonas: string[] = Array.isArray(apiValidPersonas) ? apiValidPersonas : [];
   const isSimplifiedMode = apiPlanningMode === "simplified";
   if (isSimplifiedMode) {
@@ -965,6 +965,8 @@ export async function planTask(
     await postLog(task.id, `${PREFIX} Planning mode: simplified — critic feedback will be incorporated but never blocks`);
   }
   const maxStories: number = typeof apiMaxStories === "number" ? apiMaxStories : 8;
+  // storyCap: higher truncation ceiling for PRD tasks (separate from prompt hint)
+  const storyCap: number = typeof apiStoryCap === "number" ? apiStoryCap : maxStories;
 
   const cliModel = model;
   const provider: AIProvider = (planningProvider || "anthropic") as AIProvider;
@@ -1080,7 +1082,7 @@ export async function planTask(
 
       // Apply guardrails
       applyFileCap(groundedPlan);
-      applyStoryCap(groundedPlan, maxStories);
+      applyStoryCap(groundedPlan, storyCap);
       resolveFileOverlaps(groundedPlan);
       if (validPersonas.length > 0) {
         fixInvalidPersonas(groundedPlan, validPersonas);
@@ -1274,9 +1276,9 @@ export async function planTask(
     }
 
     // 2c. Apply story cap BEFORE critic (story count is a hard org limit)
-    const { droppedCount: storyDropCount, details: storyDropDetails } = applyStoryCap(plan, maxStories);
+    const { droppedCount: storyDropCount, details: storyDropDetails } = applyStoryCap(plan, storyCap);
     if (storyDropCount > 0) {
-      const msg = `${PREFIX} Story cap applied: ${storyDropCount} stories dropped (max ${maxStories})`;
+      const msg = `${PREFIX} Story cap applied: ${storyDropCount} stories dropped (max ${storyCap})`;
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
       await postLog(task.id, msg);
       for (const detail of storyDropDetails) {

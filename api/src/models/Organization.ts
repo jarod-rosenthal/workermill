@@ -84,7 +84,7 @@ export const PLAN_FEATURES: Record<OrganizationPlan, {
     dedicatedWorkerPool: false,
     dataResidency: false,
     multiProvider: false,
-    qualityGates: false,
+    qualityGates: true,
   },
   max: {
     cloudExecution: true,

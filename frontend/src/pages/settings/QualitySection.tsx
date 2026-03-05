@@ -40,7 +40,7 @@ export function QualitySection({
   validationErrors,
   orgPlan,
 }: QualitySectionProps) {
-  const isProPlan = !orgPlan || orgPlan === "pro";
+  const isProPlan = false; // Quality gates available on all plans
   return (
     <div className="space-y-6">
       {/* Workflow Automation */}

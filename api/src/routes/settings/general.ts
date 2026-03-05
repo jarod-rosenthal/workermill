@@ -982,10 +982,6 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     // Validate and update Quality Gate Settings
     if (qualityGateEnabled !== undefined) {
-      if (org.plan === "pro" && Boolean(qualityGateEnabled)) {
-        res.status(403).json({ error: "Quality Gates require Max plan or higher." });
-        return;
-      }
       org.qualityGateEnabled = Boolean(qualityGateEnabled);
     }
 

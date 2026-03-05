@@ -33,8 +33,6 @@ EOF
 ./bin/local-workermill start
 ```
 
-**OAuth Token Handling:** The OAuth token is automatically synced from `~/.claude/.credentials.json` at API startup. No need to manually copy tokens. If authentication expires, just run `claude auth login` again.
-
 ### Local WorkerMill Commands
 
 | Command | Description |

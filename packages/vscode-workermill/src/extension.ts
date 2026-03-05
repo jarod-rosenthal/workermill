@@ -384,6 +384,40 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
 
+    // Delete a completed/pr_approved/failed task
+    vscode.commands.registerCommand(
+      "workermill.deleteTask",
+      async (taskItem?: { task?: { id: string; summary: string } }) => {
+        if (!client.isConnected()) {
+          vscode.window.showErrorMessage("WorkerMill agent is not running.");
+          return;
+        }
+
+        const taskId = taskItem?.task?.id;
+        if (!taskId) {
+          vscode.window.showWarningMessage("Cannot delete — task info missing.");
+          return;
+        }
+
+        const confirm = await vscode.window.showWarningMessage(
+          `Delete "${taskItem?.task?.summary}"? This cannot be undone.`,
+          { modal: true },
+          "Delete",
+        );
+        if (confirm !== "Delete") return;
+
+        try {
+          await client.deleteTask(taskId);
+          vscode.window.showInformationMessage("Task deleted.");
+          treeProvider.refresh();
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed to delete task: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      },
+    ),
+
     // Search and run via quick pick (command palette)
     vscode.commands.registerCommand("workermill.runTask", async () => {
       if (!client.isConnected()) {

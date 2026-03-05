@@ -1730,7 +1730,16 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
         return json(res, { error: String(err) }, 500);
       }
     }
-    return json(res, { error: "Delete not supported in cloud mode" }, 400);
+    // Cloud mode: proxy to cloud API
+    if (cloudProxy) {
+      try {
+        const result = await cloudProxy("DELETE", `/api/tasks/${taskId}`);
+        return json(res, result);
+      } catch (err: any) {
+        return json(res, err.data || { error: String(err) }, err.status || 500);
+      }
+    }
+    return json(res, { error: "Delete not supported — no backend available" }, 400);
   }
 
   // POST /api/tasks/clear — bulk delete completed/failed/cancelled tasks

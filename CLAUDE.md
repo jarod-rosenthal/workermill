@@ -35,7 +35,7 @@ WorkerMill: the open-source operations layer for AI coding agents. Deployed at h
 | Build agent | `cd agent && npm run build:binary` |
 | Build worker | `./bin/local-workermill build-worker` |
 | Package VS Code ext | `cd packages/vscode-workermill && npm run package` (bump version first) |
-| Deploy | `./deploy.sh --api`, `--frontend`, `--worker`, or `--all` |
+| Deploy (cloud) | `./deploy.sh --api`, `--frontend`, `--worker`, or `--all` |
 
 **Git:** Work on `main`. No automatic CI on push — workflows are manual (`workflow_dispatch`).
 
@@ -61,10 +61,10 @@ WorkerMill: the open-source operations layer for AI coding agents. Deployed at h
 | Remote agent native | Bundled in agent binary | Release new agent binary |
 | Remote agent Docker sandbox | Docker image | Agent release CI pushes automatically |
 | Local Docker | Docker image via `tsc` | `./bin/local-workermill build-worker` |
-| Cloud ECS | ECR image | `./deploy.sh --worker` |
+| Cloud ECS | Container image | `./deploy.sh --worker` |
 
 ***REMOVED******REMOVED******REMOVED*** Four Spawners
-`agent/src/spawner.ts` (remote native), `agent/src/docker-spawner.ts` (remote Docker sandbox), `api/src/services/local-epic-spawner.ts` (local), `api/src/services/ecs-task-runner.ts` (cloud ECS). Always ask which environment before changes.
+`agent/src/spawner.ts` (remote native), `agent/src/docker-spawner.ts` (remote Docker sandbox), `api/src/services/local-epic-spawner.ts` (local), `api/src/services/ecs-task-runner.ts` (cloud container). Always ask which environment before changes.
 
 ***REMOVED******REMOVED******REMOVED*** Two Board Systems
 - **Boards** (`/api/boards`, `KbBoard`/`KbCard`) = Kanban. **This is what the user sees.**
@@ -97,7 +97,7 @@ Modules in `api/src/services/`: `orchestrator.ts` (hub), `task-claimer.ts`, `wor
 1. **Standalone Agent** (default, VS Code): Agent runs locally with SQLite, event-driven orchestration. No cloud dependency.
 2. **Cloud Agent** (production, team workflows): Agent polls cloud API → plans → spawns native worker process.
 3. **Local Docker** (API development): API creates task (skips planning) → local orchestrator → Docker container.
-4. **Cloud ECS** (legacy): Agent plans → cloud orchestrator → ECS Fargate task.
+4. **Cloud Container** (legacy): Agent plans → cloud orchestrator → container task.
 
 See `docs/agent/architecture.md` for full flow diagrams.
 

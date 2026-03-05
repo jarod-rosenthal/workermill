@@ -271,9 +271,9 @@ Bring your own API keys. The execution pipeline is identical regardless of provi
 
 | Provider | Models | Integration |
 |----------|--------|-------------|
-| **Anthropic** | Claude Sonnet 4.6, Opus 4.6, Haiku 4.5 | Claude CLI (default) |
-| **OpenAI** | GPT-4, GPT-4o | Vercel AI SDK |
-| **Google** | Gemini Pro, Gemini Flash | Vercel AI SDK |
+| **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | Claude CLI (default) |
+| **OpenAI** | GPT-5.2, GPT-4o | Vercel AI SDK |
+| **Google** | Gemini 3.1 Pro, Gemini Flash | Vercel AI SDK |
 | **Ollama** | Local/self-hosted models | Vercel AI SDK + codebase RAG |
 
 ***REMOVED******REMOVED******REMOVED*** Worker Personas (12 roles)

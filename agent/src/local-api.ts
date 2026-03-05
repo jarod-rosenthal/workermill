@@ -1324,6 +1324,9 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
           ? jiraFields.preComputedStories
           : undefined;
 
+        // Detect PRD/full-build task (matches remote-agent.ts:1124)
+        const isBuildPageTask = jiraFields.buildPage === true;
+
         return json(res, {
           taskId,
           prompt,
@@ -1331,7 +1334,9 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
           provider: plannerConfig.provider,
           maxStories,
           maxTargetFiles,
-          planningMode: "simplified",
+          planningMode: isBuildPageTask
+            ? (config.settings?.prdPlanningMode || "decomposer_planned")
+            : "simplified",
           validPersonas,
           ...(preComputedStories ? { preComputedStories } : {}),
         });

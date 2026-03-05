@@ -1,6 +1,6 @@
 {
   "name": "@workermill/agent",
-  "version": "0.10.169",
+  "version": "0.10.170",
   "license": "Apache-2.0",
   "description": "WorkerMill Remote Agent - Run AI workers locally with your own AI provider credentials",
   "type": "module",
@@ -13,8 +13,8 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc; node build.mjs",
-    "build:binary": "tsc; node build.mjs && bun build --compile --target=bun-linux-x64 dist/entry.js --outfile dist/bin/workermill-agent-linux-x64 && bun build --compile --target=bun-darwin-x64 dist/entry.js --outfile dist/bin/workermill-agent-darwin-x64 && bun build --compile --target=bun-darwin-arm64 dist/entry.js --outfile dist/bin/workermill-agent-darwin-arm64 && bun build --compile --target=bun-windows-x64 dist/entry.js --outfile dist/bin/workermill-agent-win-x64.exe",
+    "build": "tsc -p tsconfig.check.json; node build.mjs",
+    "build:binary": "tsc -p tsconfig.check.json; node build.mjs && bun build --compile --target=bun-linux-x64 dist/entry.js --outfile dist/bin/workermill-agent-linux-x64 && bun build --compile --target=bun-darwin-x64 dist/entry.js --outfile dist/bin/workermill-agent-darwin-x64 && bun build --compile --target=bun-darwin-arm64 dist/entry.js --outfile dist/bin/workermill-agent-darwin-arm64 && bun build --compile --target=bun-windows-x64 dist/entry.js --outfile dist/bin/workermill-agent-win-x64.exe",
     "dev": "tsc --watch",
     "typecheck": "tsc -p tsconfig.check.json"
   },

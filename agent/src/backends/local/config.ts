@@ -64,7 +64,6 @@ export interface StandaloneConfig {
     maxCiFixRetries?: number;
     blockerWaitTimeoutMinutes?: number;
     pushAfterCommit?: boolean;
-    taskPlanningMode?: "strict" | "simplified";
     prdPlanningMode?: "strict" | "simplified" | "decomposer_planned";
   };
 }

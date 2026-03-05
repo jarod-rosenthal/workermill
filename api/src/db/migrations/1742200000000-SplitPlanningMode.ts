@@ -10,13 +10,13 @@ export class SplitPlanningMode1742200000000 implements MigrationInterface {
         ADD COLUMN IF NOT EXISTS prd_planning_mode  VARCHAR(20);
 
       UPDATE organizations
-        SET task_planning_mode = COALESCE(planning_mode, 'strict'),
-            prd_planning_mode  = COALESCE(planning_mode, 'strict')
+        SET task_planning_mode = 'simplified',
+            prd_planning_mode  = COALESCE(planning_mode, 'decomposer_planned')
         WHERE task_planning_mode IS NULL;
 
       ALTER TABLE organizations
-        ALTER COLUMN task_planning_mode SET DEFAULT 'strict',
-        ALTER COLUMN prd_planning_mode  SET DEFAULT 'strict';
+        ALTER COLUMN task_planning_mode SET DEFAULT 'simplified',
+        ALTER COLUMN prd_planning_mode  SET DEFAULT 'decomposer_planned';
 
       ALTER TABLE organizations
         ALTER COLUMN task_planning_mode SET NOT NULL,

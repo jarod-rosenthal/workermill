@@ -513,10 +513,10 @@ export function AIWorkersSection({
                   <input
                     type="number"
                     min="3"
-                    max="15"
+                    max="50"
                     step="1"
                     value={settings.maxTargetFiles}
-                    onChange={(e) => updateSetting("maxTargetFiles", parseInt(e.target.value, 10) || 5)}
+                    onChange={(e) => updateSetting("maxTargetFiles", parseInt(e.target.value, 10) || 15)}
                     className="w-20 px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none text-sm text-center"
                   />
                 </div>

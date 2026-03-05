@@ -1,6 +1,8 @@
-// Auto-generated from WorkerMill internal board data
-// Board: TeamBoard (6e223fc6-3b15-4b69-8a95-cdc8eb99d051)
+// Auto-generated from WorkerMill showcase build data
+// Board: TeamBoard
 // Generated: 2026-02-16
+
+export { teamBoardPrd } from "./teamboard-prd";
 
 export interface TeamBoardEpic {
   id: string;

@@ -19,7 +19,8 @@ const swaggerDefinition = {
       url: "https://workermill.com",
     },
     license: {
-      name: "Proprietary",
+      name: "Apache-2.0",
+      url: "https://www.apache.org/licenses/LICENSE-2.0",
     },
   },
   servers: [

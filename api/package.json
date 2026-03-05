@@ -1,6 +1,8 @@
 {
   "name": "@workermill/api",
   "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
   "description": "WorkerMill API - AI Workers for Jira",
   "main": "dist/index.js",
   "scripts": {

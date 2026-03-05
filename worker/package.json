@@ -2,6 +2,7 @@
   "name": "workermill-worker",
   "version": "1.0.0",
   "private": true,
+  "license": "Apache-2.0",
   "description": "WorkerMill AI Worker execution scripts",
   "scripts": {
     "typecheck": "tsc --noEmit",

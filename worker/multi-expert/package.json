@@ -1,6 +1,8 @@
 {
   "name": "workermill-multi-expert",
   "version": "1.0.0",
+  "private": true,
+  "license": "Apache-2.0",
   "description": "Multi-Expert Coordinator with AI SDK for WorkerMill",
   "main": "dist/index.js",
   "type": "module",

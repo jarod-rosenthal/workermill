@@ -528,7 +528,8 @@ router.post(
 
         emitDecomp?.({ phase: "resolving_content", detail: "Content resolved, starting decomposition" });
 
-        const useDecomposerPlanned = org.planningMode === "decomposer_planned";
+        const effectivePrdMode = org.prdPlanningMode || org.planningMode || "strict";
+        const useDecomposerPlanned = effectivePrdMode === "decomposer_planned";
 
         try {
           if (planProvider === "anthropic") {

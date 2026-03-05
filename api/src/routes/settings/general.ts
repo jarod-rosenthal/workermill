@@ -112,6 +112,8 @@ router.get("/", async (req: Request, res: Response) => {
       planningAgentProvider: org.planningAgentProvider || "anthropic",
       planningAgentModel: org.planningAgentModel || "",
       planningMode: org.planningMode || "strict",
+      taskPlanningMode: org.taskPlanningMode || org.planningMode || "strict",
+      prdPlanningMode: org.prdPlanningMode || org.planningMode || "strict",
       maxTargetFiles: org.maxTargetFiles,
       storyCalibrationMultiplier: org.storyCalibrationMultiplier ?? 0.4,
       hasPlanningApiKey,
@@ -262,6 +264,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       planningAgentProvider,
       planningAgentModel,
       planningMode,
+      taskPlanningMode,
+      prdPlanningMode,
       maxTargetFiles,
       storyCalibrationMultiplier,
 
@@ -740,6 +744,32 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         return;
       }
       org.planningMode = planningMode;
+    }
+
+    if (taskPlanningMode !== undefined) {
+      const validModes = ["strict", "simplified"];
+      if (!validModes.includes(taskPlanningMode)) {
+        res.status(400).json({ error: "taskPlanningMode must be 'strict' or 'simplified'" });
+        return;
+      }
+      if (org.plan === "pro" && taskPlanningMode !== "simplified") {
+        res.status(403).json({ error: "Pro plan only supports Simplified planning mode. Upgrade to Max for more planning modes." });
+        return;
+      }
+      org.taskPlanningMode = taskPlanningMode;
+    }
+
+    if (prdPlanningMode !== undefined) {
+      const validModes = ["strict", "simplified", "decomposer_planned"];
+      if (!validModes.includes(prdPlanningMode)) {
+        res.status(400).json({ error: "prdPlanningMode must be 'strict', 'simplified', or 'decomposer_planned'" });
+        return;
+      }
+      if (org.plan === "pro" && prdPlanningMode !== "simplified") {
+        res.status(403).json({ error: "Pro plan only supports Simplified planning mode. Upgrade to Max for more planning modes." });
+        return;
+      }
+      org.prdPlanningMode = prdPlanningMode;
     }
 
     if (maxTargetFiles !== undefined) {
@@ -1304,6 +1334,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         planningAgentProvider: org.planningAgentProvider,
         planningAgentModel: org.planningAgentModel,
         planningMode: org.planningMode,
+        taskPlanningMode: org.taskPlanningMode,
+        prdPlanningMode: org.prdPlanningMode,
         maxTargetFiles: org.maxTargetFiles,
         storyCalibrationMultiplier: org.storyCalibrationMultiplier,
         costAlertThresholdUsd: org.costAlertThresholdUsd,

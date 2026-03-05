@@ -381,23 +381,23 @@ export function AIWorkersSection({
             summary={`${PROVIDER_OPTIONS.find((p) => p.value === settings.planningAgentProvider)?.label.split(" ")[0] || "Anthropic"} ${MODEL_OPTIONS[settings.planningAgentProvider]?.find((m) => m.value === settings.planningAgentModel)?.label || settings.planningAgentModel}`}
           >
             <div className="space-y-6">
-              {/* Planning Mode Toggle */}
+              {/* Task Planning Mode Toggle */}
               <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-3">Planning Mode</label>
+                <label className="block text-sm font-medium text-muted-foreground mb-3">Task Planning Mode</label>
                 {isProPlan ? (
                   <div className="p-3 rounded-lg border-2 border-purple-500 bg-purple-500/10 text-left">
                     <div className="text-sm font-medium text-foreground">Simplified</div>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Single planning pass — critic feedback is incorporated but never blocks.{" "}
+                      Single planning pass for individual tasks.{" "}
                       <Link to="/pricing" className="text-primary hover:underline">Upgrade to Max</Link> for more planning modes.
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <button
-                      onClick={() => updateSetting("planningMode", "strict")}
+                      onClick={() => updateSetting("taskPlanningMode", "strict")}
                       className={`p-3 rounded-lg border-2 transition-all text-left ${
-                        settings.planningMode === "strict"
+                        settings.taskPlanningMode === "strict"
                           ? "border-purple-500 bg-purple-500/10"
                           : "border-border bg-background/50 hover:border-purple-500/50"
                       }`}
@@ -408,9 +408,52 @@ export function AIWorkersSection({
                       </p>
                     </button>
                     <button
-                      onClick={() => updateSetting("planningMode", "simplified")}
+                      onClick={() => updateSetting("taskPlanningMode", "simplified")}
                       className={`p-3 rounded-lg border-2 transition-all text-left ${
-                        settings.planningMode === "simplified"
+                        settings.taskPlanningMode === "simplified"
+                          ? "border-purple-500 bg-purple-500/10"
+                          : "border-border bg-background/50 hover:border-purple-500/50"
+                      }`}
+                    >
+                      <div className="text-sm font-medium text-foreground">Simplified</div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Single planning pass — critic feedback is incorporated but never blocks
+                      </p>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Full Build (PRD) Planning Mode Toggle */}
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-3">Full Build Planning Mode</label>
+                {isProPlan ? (
+                  <div className="p-3 rounded-lg border-2 border-purple-500 bg-purple-500/10 text-left">
+                    <div className="text-sm font-medium text-foreground">Simplified</div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Single planning pass for full builds.{" "}
+                      <Link to="/pricing" className="text-primary hover:underline">Upgrade to Max</Link> for more planning modes.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => updateSetting("prdPlanningMode", "strict")}
+                      className={`p-3 rounded-lg border-2 transition-all text-left ${
+                        settings.prdPlanningMode === "strict"
+                          ? "border-purple-500 bg-purple-500/10"
+                          : "border-border bg-background/50 hover:border-purple-500/50"
+                      }`}
+                    >
+                      <div className="text-sm font-medium text-foreground">Strict</div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Full planner-critic loop — plan must score 85+ to proceed (up to 3 attempts)
+                      </p>
+                    </button>
+                    <button
+                      onClick={() => updateSetting("prdPlanningMode", "simplified")}
+                      className={`p-3 rounded-lg border-2 transition-all text-left ${
+                        settings.prdPlanningMode === "simplified"
                           ? "border-purple-500 bg-purple-500/10"
                           : "border-border bg-background/50 hover:border-purple-500/50"
                       }`}
@@ -421,9 +464,9 @@ export function AIWorkersSection({
                       </p>
                     </button>
                     <button
-                      onClick={() => updateSetting("planningMode", "decomposer_planned")}
+                      onClick={() => updateSetting("prdPlanningMode", "decomposer_planned")}
                       className={`p-3 rounded-lg border-2 transition-all text-left ${
-                        settings.planningMode === "decomposer_planned"
+                        settings.prdPlanningMode === "decomposer_planned"
                           ? "border-purple-500 bg-purple-500/10"
                           : "border-border bg-background/50 hover:border-purple-500/50"
                       }`}

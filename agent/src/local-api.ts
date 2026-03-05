@@ -1331,7 +1331,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
           provider: plannerConfig.provider,
           maxStories,
           maxTargetFiles,
-          planningMode: "strict",
+          planningMode: config.settings?.taskPlanningMode || "strict",
           validPersonas,
           ...(preComputedStories ? { preComputedStories } : {}),
         });

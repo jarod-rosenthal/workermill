@@ -1177,7 +1177,9 @@ router.get(
       provider,
       maxStories,
       maxTargetFiles: org.maxTargetFiles,
-      planningMode: org.planningMode || "strict",
+      planningMode: isBuildPageTask
+        ? (org.prdPlanningMode || org.planningMode || "strict")
+        : (org.taskPlanningMode || org.planningMode || "strict"),
       validPersonas: availablePersonas.map((p: { slug: string }) => p.slug),
       ...(preComputedStories ? { preComputedStories } : {}),
     });

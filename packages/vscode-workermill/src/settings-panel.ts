@@ -1637,6 +1637,10 @@ export class SettingsPanel {
   <div class="settings-layout">
   <nav class="settings-nav hidden" id="settings-nav">
     <div class="nav-group">
+      <div class="nav-group-label">General</div>
+      <a href="***REMOVED***section-mode" data-section="section-mode">Workspace Mode</a>
+    </div>
+    <div class="nav-group">
       <div class="nav-group-label">Setup</div>
       <a href="***REMOVED***section-repo" data-section="section-repo">Target Repository</a>
       <a href="***REMOVED***section-scm" data-section="section-scm">Source Control</a>
@@ -1655,13 +1659,23 @@ export class SettingsPanel {
     </div>
     <div class="nav-group">
       <div class="nav-group-label">Account</div>
-      <a href="***REMOVED***section-mode" data-section="section-mode">Workspace Mode</a>
       <a href="***REMOVED***section-account" data-section="section-account">Account</a>
     </div>
   </nav>
 
   <div class="settings-content">
   <div id="content" class="hidden">
+    <!-- Workspace Mode -->
+    <div class="section" id="section-mode">
+      <h2>Workspace Mode</h2>
+      <div class="radio-group">
+        <label><input type="radio" name="workspace-mode" value="cloud" id="mode-cloud" /> Cloud</label>
+        <label><input type="radio" name="workspace-mode" value="standalone" id="mode-standalone" /> Standalone</label>
+      </div>
+      <div id="mode-hint" class="hint">Cloud: managed by WorkerMill. Standalone: runs locally with your own API keys.</div>
+      <div id="mode-status" class="status"></div>
+    </div>
+
     <!-- Target Repository -->
     <div class="section section-setup" id="section-repo">
       <h2>Target Repository</h2>
@@ -1950,17 +1964,6 @@ export class SettingsPanel {
         <span id="index-status" class="hint" style="margin-top:4px;display:block;"></span>
       </div>
       <div id="rag-status" class="status"></div>
-    </div>
-
-    <!-- Workspace Mode -->
-    <div class="section section-account" id="section-mode">
-      <h2>Workspace Mode</h2>
-      <div class="radio-group">
-        <label><input type="radio" name="workspace-mode" value="cloud" id="mode-cloud" /> Cloud</label>
-        <label><input type="radio" name="workspace-mode" value="standalone" id="mode-standalone" /> Standalone</label>
-      </div>
-      <div id="mode-hint" class="hint">Cloud: managed by WorkerMill. Standalone: runs locally with your own API keys.</div>
-      <div id="mode-status" class="status"></div>
     </div>
 
     <!-- Organization (only visible for multi-org users) -->

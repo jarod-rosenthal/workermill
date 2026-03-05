@@ -109,6 +109,8 @@ npm run test
 npm audit --audit-level=high
 ```
 
+E2E tests (`npm run test:e2e`) run post-push in CI. Workers should also run them locally before pushing — see "Worker Testing Environment" section below for setup.
+
 ### Code Style Rules
 
 - TypeScript strict mode, no `any` types
@@ -764,9 +766,87 @@ teamboard/
 - `"build"` MUST be `"next build"` (NOT `"prisma generate && next build"`)
 - `"postinstall"` MUST be `"prisma generate"` — runs automatically after `npm ci`
 
-### Local Development (docker-compose)
+### CLAUDE.md (repo root)
 
-This is the **primary development and testing environment**. It runs a local PostgreSQL so workers can develop without cloud dependencies. Neon is only for production.
+This file guides AI workers. Create it with:
+
+```markdown
+# TeamBoard
+
+Full-stack Kanban board — Next.js 15, Prisma, Neon PostgreSQL, NextAuth.js v5.
+
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Install | `npm install` |
+| Dev server | `npm run dev` |
+| Build | `npm run build` |
+| Lint | `npm run lint` |
+| Type check | `npm run typecheck` |
+| Unit tests | `npm run test` |
+| E2E tests | `npx playwright install --with-deps chromium && npm run test:e2e` |
+| Push schema | `npx prisma db push` |
+| Seed data | `npm run db:seed` |
+| Format | `npm run format` |
+
+## Testing Setup
+
+Database credentials (`DATABASE_URL`, `DIRECT_DATABASE_URL`) are pre-configured as environment variables. Do NOT create or modify `.env.local` — the env vars are already set.
+
+Before running tests:
+1. `npx prisma db push` — push schema to database
+2. `npm run db:seed` — seed demo data
+3. `npm run test` — run unit tests
+4. `npx playwright install --with-deps chromium` — install browser (required once)
+5. `npm run test:e2e` — run E2E tests
+
+## Key Constraints
+
+- Next.js 15 + React 19 (NOT 14)
+- `bcrypt ^6.0.0` (NOT 5.x)
+- All `useSearchParams()` calls MUST be wrapped in `<Suspense>`
+- Prisma needs BOTH `DATABASE_URL` (pooled) and `DIRECT_DATABASE_URL` (direct)
+- Do NOT use `docker compose` — database is cloud-hosted
+- `npm run test` uses `vitest run` (NOT watch mode)
+```
+
+### Worker Testing Environment (IMPORTANT)
+
+Workers run in containers without Docker daemon access. **Workers MUST test against Neon directly** — the `DATABASE_URL` and `DIRECT_DATABASE_URL` environment variables are pre-configured and point to Neon PostgreSQL.
+
+**Worker setup (no docker-compose needed):**
+```bash
+# Install dependencies
+npm install
+
+# Push schema to Neon and seed demo data
+npx prisma db push
+npm run db:seed
+
+# Run quality gates
+npm run lint
+npm run typecheck
+npm run test
+
+# Install Playwright browsers for E2E tests
+npx playwright install --with-deps chromium
+
+# Build and run E2E tests
+npm run build
+npm run test:e2e
+```
+
+**Worker quality gate commands (pre-commit):**
+```
+npm run lint && npm run typecheck && npm run test && npm audit --audit-level=high
+```
+
+**Worker E2E testing:** Playwright tests run against Neon directly. The E2E config starts the Next.js server via `npm run build && npm run start`, which connects to Neon using the pre-configured environment variables. Workers MUST run `npx playwright install --with-deps chromium` before running E2E tests — browsers are not pre-installed in the worker container.
+
+### Local Development for Human Developers (docker-compose)
+
+This is for developers cloning the repo who want to run a local PostgreSQL instead of connecting to Neon.
 
 **`docker-compose.yml`:**
 ```yaml
@@ -790,25 +870,16 @@ volumes:
   pgdata:
 ```
 
-**Usage:**
+**Usage (human developers only):**
 ```bash
-# Start local database
 docker compose up -d --wait
-
-# Run app against local database
-npm run dev
-
-# Run tests against local database
-npm run test
-npm run test:e2e
-
-# Stop
-docker compose down
+cp .env.example .env.local
+npx prisma db push && npm run db:seed && npm run dev
 ```
 
 ### Environment Variables
 
-**`.env.example`** (copy to `.env.local` for local dev):
+**`.env.example`** (copy to `.env.local` for local dev with docker-compose):
 ```bash
 # Database — local PostgreSQL via docker-compose
 DATABASE_URL="postgresql://teamboard:teamboard@localhost:5432/teamboard"
@@ -823,7 +894,7 @@ AUTH_TRUST_HOST="true"
 SEED_TOKEN="local-dev-seed-token"
 ```
 
-**Workers:** Copy `.env.example` to `.env.local`, run `docker compose up -d --wait`, then `npx prisma db push && npm run db:seed && npm run dev`.
+**Note:** Workers do NOT use `.env.example` — their environment variables are pre-configured.
 
 ### CI Pipeline (`.github/workflows/ci.yml`)
 
@@ -1004,7 +1075,7 @@ jobs:
 
 ## E2E Tests
 
-Playwright tests run against the local dev server (backed by docker-compose PostgreSQL).
+Playwright tests run against the dev server backed by a real PostgreSQL database (Neon for workers/CI, docker-compose for human developers).
 
 ### Test File Structure
 
@@ -1086,9 +1157,10 @@ echo "PASS: All smoke tests passed"
 
 ## Acceptance Criteria
 
-### Local
-- [ ] `docker compose up -d --wait` starts PostgreSQL without errors
+### Local (Workers test against Neon; docker-compose checks are for CI/human devs)
 - [ ] `npm install` succeeds
+- [ ] `npx prisma db push` creates tables in Neon
+- [ ] `npm run db:seed` populates demo data
 - [ ] `npm run dev` starts on port 3000
 - [ ] `npm run typecheck` passes
 - [ ] `npm run lint` passes
@@ -1146,6 +1218,7 @@ echo "PASS: All smoke tests passed"
 - Do NOT add `@@map()`, `@@index()`, or extra annotations to the Prisma schema
 - Do NOT create Dockerfile or vercel.json during initial setup — Vercel auto-detects Next.js
 - Do NOT create `postcss.config.*` — Next.js 15 includes PostCSS by default
+- Do NOT use `docker compose` in the worker environment — there is no Docker daemon. Test against Neon directly.
 - Do NOT ship default shadcn/ui styling without customization — it looks generic and hurts credibility
 - Do NOT skip loading/empty/error states — they destroy the polished feel
 - Do NOT use instant state changes without animation — feels cheap and unfinished

@@ -4,7 +4,11 @@
 
 import crypto from "crypto";
 
-const UNSUBSCRIBE_SECRET = process.env.EMAIL_UNSUBSCRIBE_SECRET ?? (() => { throw new Error("EMAIL_UNSUBSCRIBE_SECRET environment variable is required"); })();
+function getUnsubscribeSecret(): string {
+  const secret = process.env.EMAIL_UNSUBSCRIBE_SECRET;
+  if (!secret) throw new Error("EMAIL_UNSUBSCRIBE_SECRET environment variable is required");
+  return secret;
+}
 
 /**
  * Generate HMAC-signed unsubscribe token
@@ -17,7 +21,7 @@ export function generateUnsubscribeToken(
   const timestamp = Date.now();
   const payload = `${userId}:${notificationType}:${timestamp}`;
   const signature = crypto
-    .createHmac("sha256", UNSUBSCRIBE_SECRET)
+    .createHmac("sha256", getUnsubscribeSecret())
     .update(payload)
     .digest("hex")
     .substring(0, 16);
@@ -50,7 +54,7 @@ export function verifyUnsubscribeToken(
     // Verify signature
     const payload = `${userId}:${notificationType}:${timestamp}`;
     const expectedSignature = crypto
-      .createHmac("sha256", UNSUBSCRIBE_SECRET)
+      .createHmac("sha256", getUnsubscribeSecret())
       .update(payload)
       .digest("hex")
       .substring(0, 16);

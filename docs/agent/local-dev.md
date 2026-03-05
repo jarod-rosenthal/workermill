@@ -47,7 +47,6 @@ EOF
 | `./bin/local-workermill logs` | Tail logs from all services |
 | `./bin/local-workermill reset` | Reset local environment |
 | `./bin/local-workermill build-worker` | Build the worker Docker image |
-| `./bin/local-workermill add-account` | Save current Claude credentials to rotation pool |
 
 ### Start Options
 

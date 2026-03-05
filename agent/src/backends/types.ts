@@ -30,7 +30,7 @@ export interface TaskInfo {
   cardId?: string;
   summary: string;
   description?: string;
-  status: "queued" | "planning" | "executing" | "completed" | "failed" | "cancelled";
+  status: "queued" | "planning" | "executing" | "reviewing" | "completed" | "failed" | "cancelled";
   executionPlan?: unknown;
   githubRepo?: string;
   scmProvider?: string;
@@ -40,6 +40,19 @@ export interface TaskInfo {
   expertIndex?: number;
   totalExperts?: number;
   workerPid?: number;
+  taskNotes?: string;
+  jiraIssueKey?: string;
+  jiraFields?: Record<string, unknown>;
+  deploymentEnabled?: boolean;
+  improvementEnabled?: boolean;
+  qualityGateBypass?: boolean;
+  standardSdkMode?: boolean;
+  retryCount?: number;
+  targetFiles?: string[];
+  referenceFiles?: string[];
+  targetBranch?: string;
+  storyBranch?: string;
+  skipManagerReview?: boolean;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
@@ -52,8 +65,23 @@ export interface CreateTaskInput {
   githubRepo?: string;
   scmProvider?: string;
   workerModel?: string;
+  workerProvider?: string;
+  workerPersona?: string;
   boardId?: string;
   cardId?: string;
+  parentTaskId?: string;
+  taskNotes?: string;
+  jiraIssueKey?: string;
+  jiraFields?: Record<string, unknown>;
+  deploymentEnabled?: boolean;
+  improvementEnabled?: boolean;
+  qualityGateBypass?: boolean;
+  standardSdkMode?: boolean;
+  targetFiles?: string[];
+  referenceFiles?: string[];
+  targetBranch?: string;
+  storyBranch?: string;
+  skipManagerReview?: boolean;
 }
 
 export interface TaskResult {

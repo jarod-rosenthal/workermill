@@ -141,32 +141,135 @@ async function spawnLocalWorker(task: any): Promise<void> {
     cleanEnv[k] = v;
   }
 
+  // Parse task-level JSON fields
+  const jiraFields = task.jira_fields ? JSON.parse(task.jira_fields) : {};
+  const targetFiles = task.target_files ? JSON.parse(task.target_files) : [];
+  const referenceFiles = task.reference_files ? JSON.parse(task.reference_files) : [];
+
+  // Resolve worker provider and model
+  const workerProvider = task.worker_provider || getRoleConfig(config, "worker").provider;
+  const workerModel = task.worker_model || getRoleConfig(config, "worker").model;
+
+  // Resolve LLM API key for the worker's provider
+  const workerKey = resolveApiKey(config, "worker");
+
+  // Issue tracker config
+  const issueTracker = config.issueTracker;
+
+  // Manager config
+  const techLeadConfig = getRoleConfig(config, "techLead");
+
+  // Build env vars — full cloud-parity (matches agent/src/spawner.ts)
   const env: Record<string, string> = {
     ...cleanEnv,
     __WORKERMILL_MODE: "worker",
+
+    // Core identifiers
     WORKERMILL_API_URL: apiUrl,
     API_BASE_URL: apiUrl,
     ORG_API_KEY: agentToken,
     TASK_ID: taskId,
     PARENT_TASK_ID: task.parent_task_id || taskId,
+    EPIC_MODE: "true",
+    EXECUTION_MODE: "remote",
+
+    // Task context
     TASK_SUMMARY: task.summary || "",
     TASK_DESCRIPTION: task.description || "",
+    JIRA_SUMMARY: task.summary || "",
+    JIRA_DESCRIPTION: task.description || "",
+    JIRA_ISSUE_KEY: task.jira_issue_key || "",
+    TICKET_KEY: task.jira_issue_key || "",
+    TASK_NOTES: task.task_notes || "",
+    WORKER_PERSONA: task.worker_persona || "",
+    RETRY_NUMBER: String(task.retry_count ?? 0),
+
+    // Target repository
+    TARGET_REPO: repoSlug,
     GITHUB_REPO: repoSlug,
+
+    // SCM configuration
     SCM_PROVIDER: task.scm_provider || config.scm?.provider || "github",
-    WORKER_MODEL: task.worker_model || getRoleConfig(config, "worker").model,
     SCM_TOKEN: config.scm?.token || "",
     GITHUB_TOKEN: config.scm?.token || "",
+    GH_TOKEN: config.scm?.token || "",
+
+    // Worker model/provider
+    WORKER_MODEL: workerModel,
+    CLAUDE_MODEL: workerModel,
+    WORKER_PROVIDER: workerProvider,
+
+    // Issue tracker
+    TICKET_SYSTEM: issueTracker?.provider || "internal",
+    JIRA_BASE_URL: issueTracker?.jira?.baseUrl || "",
+    JIRA_EMAIL: issueTracker?.jira?.email || "",
+    JIRA_API_TOKEN: issueTracker?.jira?.apiToken || "",
+    LINEAR_API_KEY: issueTracker?.linear?.apiKey || "",
+
+    // Manager settings
+    MANAGER_PROVIDER: techLeadConfig.provider,
+    MANAGER_MODEL: techLeadConfig.model,
+
+    // Workflow control flags
+    DEPLOYMENT_ENABLED: task.deployment_enabled || task.parent_task_id ? "true" : "false",
+    PRD_CHILD_TASK: task.parent_task_id ? "true" : "false",
+    IMPROVEMENT_ENABLED: task.improvement_enabled ? "true" : "false",
+    QUALITY_GATE_BYPASS: task.quality_gate_bypass ? "true" : "false",
+    STANDARD_SDK_MODE: task.standard_sdk_mode ? "true" : "false",
+    REVIEW_ENABLED: task.skip_manager_review === 0 ? "true" : (config.settings?.maxReviewRevisions !== 0 ? "true" : "false"),
+    SELF_REVIEW_ENABLED: config.settings?.selfReviewEnabled ? "true" : "false",
+    EXECUTION_MODE_SETTING: (jiraFields.executionMode as string) || "autonomous",
+
+    // File targeting
+    TARGET_FILES: JSON.stringify(targetFiles),
+    REFERENCE_FILES: JSON.stringify(referenceFiles),
+
+    // PRD branching
+    TARGET_BRANCH: task.target_branch || (jiraFields.targetBranch as string) || "",
+    STORY_BRANCH: task.story_branch || (jiraFields.storyBranch as string) || "",
+    PARENT_JIRA_KEY: task.jira_issue_key && /-S\d+$/.test(task.jira_issue_key)
+      ? (jiraFields.parentJiraKey as string) || ""
+      : "",
+
+    // Existing PR info
+    EXISTING_PR_URL: task.github_pr_url || "",
+    EXISTING_PR_NUMBER: task.github_pr_url ? (task.github_pr_url.match(/\/pull\/(\d+)/)?.[1] || "") : "",
+
+    // Resilience settings
     MAX_PER_STORY_REVISIONS: String(config.settings?.maxPerStoryRevisions ?? 1),
     MAX_REVIEW_REVISIONS: String(config.settings?.maxReviewRevisions ?? 3),
     QUALITY_GATE_MAX_RETRIES: String(config.settings?.qualityGateMaxRetries ?? 5),
     MAX_CI_FIX_RETRIES: String(config.settings?.maxCiFixRetries ?? 3),
     BLOCKER_WAIT_TIMEOUT_MINUTES: String(config.settings?.blockerWaitTimeoutMinutes ?? 20),
     PUSH_AFTER_COMMIT: config.settings?.pushAfterCommit !== false ? "true" : "false",
+    BLOCKER_AUTO_RETRY_ENABLED: config.settings?.blockerAutoRetryEnabled !== false ? "true" : "false",
+    BLOCKER_MAX_AUTO_RETRIES: String(config.settings?.blockerMaxAutoRetries ?? 3),
+    GRACEFUL_SHUTDOWN_ENABLED: config.settings?.gracefulShutdownEnabled !== false ? "true" : "false",
+    MAX_PARALLEL_EXPERTS: String(config.settings?.maxParallelExperts ?? 8),
+
+    // Org guidelines
+    ORG_GUIDELINES: config.settings?.aiGuidelines || "",
+
+    // Quality gate thresholds
+    QUALITY_THRESHOLDS: JSON.stringify({
+      qualityGateEnabled: config.settings?.qualityGateEnabled ?? false,
+      minQualityScore: config.settings?.minQualityScore ?? null,
+      minTestCoveragePercent: config.settings?.minTestCoveragePercent ?? null,
+      maxSecurityHighVulns: config.settings?.maxSecurityHighVulns ?? null,
+      blockOnTypeErrors: config.settings?.blockOnTypeErrors ?? false,
+      blockOnTestFailures: config.settings?.blockOnTestFailures ?? false,
+      autoFixEnabled: config.settings?.autoFixEnabled ?? false,
+      autoFixMaxIterations: config.settings?.autoFixMaxIterations ?? 3,
+    }),
+
+    // Codebase indexing
+    CODEBASE_INDEXING_ENABLED: config.settings?.codebaseIndexingEnabled ? "true" : "false",
+
+    // Board execution workspace
+    ...(task.board_id ? { PERSISTENT_WORKSPACE: workDir } : {}),
   };
 
   // LLM API keys — set all providers that have keys so workers can use any
-  const workerKey = resolveApiKey(config, "worker");
-  const workerProvider = getRoleConfig(config, "worker").provider;
   if (workerProvider === "anthropic") {
     // Only set ANTHROPIC_API_KEY if user explicitly configured a real API key in config.json.
     // Otherwise Claude CLI reads ~/.claude/.credentials.json directly.
@@ -179,6 +282,14 @@ async function spawnLocalWorker(task: any): Promise<void> {
     env.GOOGLE_API_KEY = workerKey;
     env.GOOGLE_GENERATIVE_AI_API_KEY = workerKey;
   }
+
+  // Also pass non-primary provider keys if they're available in the environment
+  // (so multi-provider workers can access all configured providers)
+  if (!env.OPENAI_API_KEY && process.env.OPENAI_API_KEY) env.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  if (!env.GOOGLE_API_KEY && process.env.GOOGLE_API_KEY) env.GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+  if (!env.GOOGLE_GENERATIVE_AI_API_KEY && process.env.GOOGLE_GENERATIVE_AI_API_KEY) env.GOOGLE_GENERATIVE_AI_API_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  if (process.env.OLLAMA_HOST) env.OLLAMA_HOST = process.env.OLLAMA_HOST;
+  if (process.env.VLLM_BASE_URL) env.VLLM_BASE_URL = process.env.VLLM_BASE_URL;
 
   // Execution plan (if this is a sub-task of a planned epic)
   if (task.execution_plan) {
@@ -198,6 +309,14 @@ async function spawnLocalWorker(task: any): Promise<void> {
         env.CI_WORKFLOW_PATH = board.ci_workflow_path;
       }
     } catch { /* board lookup failed — proceed without gates */ }
+  }
+
+  // Quality gates from task jiraFields (set via PRD decomposer or API)
+  if (jiraFields.qualityGates) {
+    env.QUALITY_GATE_COMMANDS = JSON.stringify(jiraFields.qualityGates);
+  }
+  if (jiraFields.ciWorkflowPath) {
+    env.CI_WORKFLOW_PATH = jiraFields.ciWorkflowPath as string;
   }
 
   console.log(`[orchestrator] Spawning worker: ${command} ${args.join(" ")} (cwd: ${workDir}, task: ${taskId})`);
@@ -355,13 +474,14 @@ function triggerDependentCards(completedTaskId: string): void {
         const taskId = generateId();
         const now = new Date().toISOString();
 
+        const workerRole = getRoleConfig(config, "worker");
         db.prepare(`
-          INSERT INTO tasks (id, summary, description, github_repo, scm_provider, worker_model, board_id, card_id, status, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+          INSERT INTO tasks (id, summary, description, github_repo, scm_provider, worker_model, worker_provider, board_id, card_id, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
         `).run(
           taskId, depCard.title, depCard.description,
           config.defaultRepo || null, config.scm?.provider || null,
-          getRoleConfig(config, "worker").model, depCard.board_id, depCard.id,
+          workerRole.model, workerRole.provider, depCard.board_id, depCard.id,
           now, now,
         );
 
@@ -426,6 +546,8 @@ async function spawnManagerReview(task: any, prUrl: string): Promise<void> {
     cleanEnv[k] = v;
   }
 
+  const issueTracker = config.issueTracker;
+
   const env: Record<string, string> = {
     ...cleanEnv,
     __WORKERMILL_MODE: "manager",
@@ -444,6 +566,12 @@ async function spawnManagerReview(task: any, prUrl: string): Promise<void> {
     MANAGER_MODEL: techLeadConfig.model,
     JIRA_SUMMARY: task.summary || "",
     JIRA_DESCRIPTION: task.description || "",
+    JIRA_ISSUE_KEY: task.jira_issue_key || "",
+    TICKET_SYSTEM: issueTracker?.provider || "internal",
+    JIRA_BASE_URL: issueTracker?.jira?.baseUrl || "",
+    JIRA_EMAIL: issueTracker?.jira?.email || "",
+    JIRA_API_TOKEN: issueTracker?.jira?.apiToken || "",
+    LINEAR_API_KEY: issueTracker?.linear?.apiKey || "",
   };
 
   // Set LLM API key for the tech lead role

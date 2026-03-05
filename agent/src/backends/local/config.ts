@@ -65,6 +65,23 @@ export interface StandaloneConfig {
     blockerWaitTimeoutMinutes?: number;
     pushAfterCommit?: boolean;
     prdPlanningMode?: "strict" | "simplified" | "decomposer_planned";
+    // Resilience & workflow flags (parity with cloud org settings)
+    blockerAutoRetryEnabled?: boolean;
+    blockerMaxAutoRetries?: number;
+    gracefulShutdownEnabled?: boolean;
+    selfReviewEnabled?: boolean;
+    codebaseIndexingEnabled?: boolean;
+    // Quality gate thresholds
+    qualityGateEnabled?: boolean;
+    minQualityScore?: number | null;
+    minTestCoveragePercent?: number | null;
+    maxSecurityHighVulns?: number | null;
+    blockOnTypeErrors?: boolean;
+    blockOnTestFailures?: boolean;
+    autoFixEnabled?: boolean;
+    autoFixMaxIterations?: number;
+    // Org-level guidelines
+    aiGuidelines?: string;
   };
 }
 

@@ -84,8 +84,14 @@ export class LocalBackend implements AgentBackend {
     getDb()
       .prepare(
         `
-      INSERT INTO tasks (id, summary, description, github_repo, scm_provider, worker_model, board_id, card_id, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+      INSERT INTO tasks (
+        id, summary, description, github_repo, scm_provider, worker_model, worker_provider, worker_persona,
+        board_id, card_id, parent_task_id, task_notes, jira_issue_key, jira_fields,
+        deployment_enabled, improvement_enabled, quality_gate_bypass, standard_sdk_mode,
+        target_files, reference_files, target_branch, story_branch, skip_manager_review,
+        status, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
     `,
       )
       .run(
@@ -95,8 +101,23 @@ export class LocalBackend implements AgentBackend {
         input.githubRepo || null,
         input.scmProvider || null,
         input.workerModel || null,
+        input.workerProvider || null,
+        input.workerPersona || null,
         input.boardId || null,
         input.cardId || null,
+        input.parentTaskId || null,
+        input.taskNotes || null,
+        input.jiraIssueKey || null,
+        input.jiraFields ? JSON.stringify(input.jiraFields) : null,
+        input.deploymentEnabled ? 1 : 0,
+        input.improvementEnabled ? 1 : 0,
+        input.qualityGateBypass ? 1 : 0,
+        input.standardSdkMode ? 1 : 0,
+        input.targetFiles ? JSON.stringify(input.targetFiles) : null,
+        input.referenceFiles ? JSON.stringify(input.referenceFiles) : null,
+        input.targetBranch || null,
+        input.storyBranch || null,
+        input.skipManagerReview === undefined ? null : (input.skipManagerReview ? 1 : 0),
         now,
         now,
       );
@@ -604,12 +625,14 @@ export class LocalBackend implements AgentBackend {
     if (!card) throw new Error("Card not found");
 
     const config = loadStandaloneConfig();
+    const workerRole = getRoleConfig(config, "worker");
     return this.createTask({
       summary: card.title,
       description: card.description,
       githubRepo: config.defaultRepo,
       scmProvider: config.scm?.provider,
-      workerModel: getRoleConfig(config, "worker").model,
+      workerModel: workerRole.model,
+      workerProvider: workerRole.provider,
       boardId,
       cardId,
     });
@@ -878,6 +901,19 @@ function rowToTask(row: any): TaskInfo {
     expertIndex: row.expert_index ?? undefined,
     totalExperts: row.total_experts ?? undefined,
     workerPid: row.worker_pid ?? undefined,
+    taskNotes: row.task_notes || undefined,
+    jiraIssueKey: row.jira_issue_key || undefined,
+    jiraFields: row.jira_fields ? JSON.parse(row.jira_fields) : undefined,
+    deploymentEnabled: row.deployment_enabled === 1 ? true : undefined,
+    improvementEnabled: row.improvement_enabled === 1 ? true : undefined,
+    qualityGateBypass: row.quality_gate_bypass === 1 ? true : undefined,
+    standardSdkMode: row.standard_sdk_mode === 1 ? true : undefined,
+    retryCount: row.retry_count ?? undefined,
+    targetFiles: row.target_files ? JSON.parse(row.target_files) : undefined,
+    referenceFiles: row.reference_files ? JSON.parse(row.reference_files) : undefined,
+    targetBranch: row.target_branch || undefined,
+    storyBranch: row.story_branch || undefined,
+    skipManagerReview: row.skip_manager_review === null ? undefined : row.skip_manager_review === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     startedAt: row.started_at || undefined,

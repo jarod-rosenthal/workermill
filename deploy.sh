@@ -3,6 +3,11 @@ set -e
 
 # WorkerMill Deployment Script
 # This script handles deploying both the API (ECS) and Frontend (S3/CloudFront)
+
+# Source private env vars (AWS creds, resource names) if not already set.
+# .bashrc sources this for interactive shells, but non-interactive shells
+# (CI, IDE tool calls, cron) need it loaded explicitly.
+[ -f "$HOME/.workermill/env" ] && . "$HOME/.workermill/env"
 # Supports multiple environments via --env flag
 
 # Colors for output

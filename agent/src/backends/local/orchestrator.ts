@@ -298,11 +298,18 @@ async function spawnLocalWorker(task: any): Promise<void> {
       : JSON.stringify(JSON.parse(task.execution_plan));
   }
 
-  // Quality gates — read from the board if this task is linked to a card
+  // Quality gates — read from the board if this task is linked to a card.
+  // Foundation card (position 0) creates the project from scratch — its stories
+  // build incrementally and can't pass full-project quality gates. Skip for position 0.
   if (task.board_id) {
     try {
       const board = getDb().prepare("SELECT quality_gate_commands, ci_workflow_path FROM boards WHERE id = ?").get(task.board_id) as any;
-      if (board?.quality_gate_commands) {
+      let isFoundationCard = false;
+      if (task.card_id) {
+        const card = getDb().prepare("SELECT position FROM cards WHERE id = ?").get(task.card_id) as any;
+        isFoundationCard = card?.position === 0;
+      }
+      if (board?.quality_gate_commands && !isFoundationCard) {
         env.QUALITY_GATE_COMMANDS = board.quality_gate_commands;
       }
       if (board?.ci_workflow_path) {

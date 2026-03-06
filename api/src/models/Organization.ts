@@ -378,6 +378,9 @@ export class Organization {
   @Column({ name: "prd_planning_mode", type: "varchar", length: 20, default: "simplified" })
   prdPlanningMode: string; // "strict" or "simplified" — per-card planner critic loop for PRD builds
 
+  @Column({ name: "critic_approval_threshold", type: "integer", default: 85 })
+  criticApprovalThreshold: number; // Minimum critic score for plan approval in strict mode (50-100)
+
   @Column({ name: "max_target_files", type: "integer", default: 15 })
   maxTargetFiles: number; // Recommended files per story (soft guideline, not truncated)
 

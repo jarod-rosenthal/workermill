@@ -105,6 +105,11 @@ let MAX_TARGET_FILES = 15; // Advisory only — not enforced as a hard cap
 let AUTO_APPROVAL_THRESHOLD = 85;
 const SIMPLIFIED_FLOOR = 60;
 
+/** Override the critic approval threshold (e.g. from org/standalone config). */
+export function setCriticApprovalThreshold(threshold: number): void {
+  AUTO_APPROVAL_THRESHOLD = threshold;
+}
+
 // ============================================================================
 // PLAN PARSING
 // ============================================================================

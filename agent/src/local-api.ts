@@ -1360,7 +1360,8 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
           maxTargetFiles,
           planningMode: isBuildPageTask
             ? (config.settings?.prdPlanningMode || "simplified")
-            : "simplified",
+            : (config.settings?.planningMode || "simplified"),
+          criticApprovalThreshold: config.settings?.criticApprovalThreshold ?? 85,
           validPersonas,
           ...(preComputedStories ? { preComputedStories } : {}),
         });

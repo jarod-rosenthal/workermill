@@ -1393,14 +1393,17 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 {"approved": boolean, "score": number, "risks": ["risk1", "risk2"], "suggestions": ["suggestion1", "suggestion2"], "storyFeedback": [{"storyId": "step-0", "feedback": "specific feedback", "suggestedChanges": ["change1"]}]}
 
 Rules:
-- approved = true if score >= 85 AND plan is right-sized for task
+- approved = true if score >= {{THRESHOLD}} AND plan is right-sized for task
 - risks = specific issues (empty array if none)
 - suggestions = actionable improvements (empty array if none)
 - storyFeedback = per-step feedback (optional, only for steps that need changes)`;
 
+    const threshold = org.criticApprovalThreshold ?? 85;
+    const finalPrompt = CRITIC_PROMPT.replace(/\{\{THRESHOLD\}\}/g, String(threshold));
+
     res.json({
-      promptTemplate: CRITIC_PROMPT,
-      approvalThreshold: 85,
+      promptTemplate: finalPrompt,
+      approvalThreshold: threshold,
       maxTargetFiles,
       criticFeedbackTemplate: CRITIC_FEEDBACK_TEMPLATE,
       refinementFeedbackTemplate: REFINEMENT_FEEDBACK_TEMPLATE,

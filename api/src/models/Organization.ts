@@ -375,8 +375,8 @@ export class Organization {
   @Column({ name: "task_planning_mode", type: "varchar", length: 20, default: "simplified" })
   taskPlanningMode: string; // Always "simplified" — individual tasks use single-pass planning
 
-  @Column({ name: "prd_planning_mode", type: "varchar", length: 20, default: "decomposer_planned" })
-  prdPlanningMode: string; // "strict", "simplified", or "decomposer_planned" — full build / PRD planning
+  @Column({ name: "prd_planning_mode", type: "varchar", length: 20, default: "simplified" })
+  prdPlanningMode: string; // "strict" or "simplified" — per-card planner critic loop for PRD builds
 
   @Column({ name: "max_target_files", type: "integer", default: 15 })
   maxTargetFiles: number; // Recommended files per story (soft guideline, not truncated)

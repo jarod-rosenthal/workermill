@@ -188,12 +188,12 @@ estimatedSteps is the number of deliverables in the card (used for progress trac
 labels should include relevant technology or domain tags (e.g., "react", "api", "terraform", "auth").`;
 
 // ============================================================================
-// SYSTEM PROMPT — WITH STORIES (decomposer_planned mode)
+// SYSTEM PROMPT — WITH STORIES (always used for PRD builds)
 // ============================================================================
 
 /**
  * Extended system prompt that produces cards WITH pre-computed story breakdowns.
- * Used when org.planningMode === "decomposer_planned".
+ * Always used for PRD builds — stories are pre-computed at decomposition time.
  *
  * The base card-level rules are identical to SYSTEM_PROMPT. The addition is:
  * each card includes a `stories[]` array with story-level breakdown including
@@ -201,7 +201,7 @@ labels should include relevant technology or domain tags (e.g., "react", "api", 
  */
 export const SYSTEM_PROMPT_WITH_STORIES = `${SYSTEM_PROMPT}
 
-***REMOVED******REMOVED*** Story Breakdown Per Card (REQUIRED in decomposer_planned mode)
+***REMOVED******REMOVED*** Story Breakdown Per Card (REQUIRED)
 
 In addition to the card-level structure above, each card MUST include a \`stories\` array. Stories are the parallel execution units within a card — each story is assigned to one AI expert and runs in its own worktree.
 
@@ -380,7 +380,7 @@ export async function decomposePrd(
 
 /**
  * Decompose a PRD into cards WITH pre-computed story breakdowns.
- * Used when org.planningMode === "decomposer_planned".
+ * Always used for PRD builds.
  *
  * Same signature and auth logic as decomposePrd(), but uses
  * SYSTEM_PROMPT_WITH_STORIES so each card includes stories[].
@@ -821,7 +821,7 @@ export function validateDecomposedPrd(data: unknown): DecomposedPrd {
         ? raw.estimatedSteps
         : 8;
 
-    // stories: optional pre-computed story breakdown (decomposer_planned mode)
+    // stories: pre-computed story breakdown from decomposition
     let stories: PreComputedStory[] | undefined;
     if (Array.isArray(raw.stories) && raw.stories.length > 0) {
       stories = [];

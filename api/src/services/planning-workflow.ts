@@ -442,7 +442,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     const org = task.organization;
     // Task planning is always simplified; only full builds use the configurable mode
     const orgPlanningMode = isBuildPageTask
-      ? (org?.prdPlanningMode || org?.planningMode || "decomposer_planned")
+      ? (org?.prdPlanningMode || org?.planningMode || "simplified")
       : "simplified";
     const maxAttempts = orgPlanningMode === "simplified" ? 1 : 3;
 

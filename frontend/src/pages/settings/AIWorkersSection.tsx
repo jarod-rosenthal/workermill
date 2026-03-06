@@ -393,7 +393,7 @@ export function AIWorkersSection({
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => updateSetting("prdPlanningMode", "strict")}
                       className={`p-3 rounded-lg border-2 transition-all text-left ${
@@ -410,7 +410,7 @@ export function AIWorkersSection({
                     <button
                       onClick={() => updateSetting("prdPlanningMode", "simplified")}
                       className={`p-3 rounded-lg border-2 transition-all text-left ${
-                        settings.prdPlanningMode === "simplified"
+                        settings.prdPlanningMode === "simplified" || settings.prdPlanningMode === "decomposer_planned"
                           ? "border-purple-500 bg-purple-500/10"
                           : "border-border bg-background/50 hover:border-purple-500/50"
                       }`}
@@ -418,19 +418,6 @@ export function AIWorkersSection({
                       <div className="text-sm font-medium text-foreground">Simplified</div>
                       <p className="text-xs text-muted-foreground mt-1">
                         Single planning pass — critic feedback is incorporated but never blocks
-                      </p>
-                    </button>
-                    <button
-                      onClick={() => updateSetting("prdPlanningMode", "decomposer_planned")}
-                      className={`p-3 rounded-lg border-2 transition-all text-left ${
-                        settings.prdPlanningMode === "decomposer_planned"
-                          ? "border-purple-500 bg-purple-500/10"
-                          : "border-border bg-background/50 hover:border-purple-500/50"
-                      }`}
-                    >
-                      <div className="text-sm font-medium text-foreground">Decomposer-Planned</div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Stories planned at decomposition — fast grounding pass replaces full planning
                       </p>
                     </button>
                   </div>

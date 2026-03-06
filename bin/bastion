@@ -1,106 +1,261 @@
 #!/bin/bash
 # Bastion control script for WorkerMill
-# Usage: bastion [start|stop|status|ssh]
+# Usage: bastion [start|stop|status]
+#
+# start  - Start bastion, whitelist IP, open SSH tunnel, print connection info
+# stop   - Close tunnel and stop bastion
+# status - Show current bastion and tunnel state
 
 set -e
 
+# Load environment (persists between sessions via ~/.bashrc sourcing)
+[ -f "$HOME/.workermill/env" ] && . "$HOME/.workermill/env"
+
 LAMBDA_NAME="${WM_BASTION_LAMBDA:?Set WM_BASTION_LAMBDA in ~/.workermill/env}"
+SECRETS_PREFIX="${WM_SECRETS_PREFIX:?Set WM_SECRETS_PREFIX in ~/.workermill/env}"
+AWS_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 SSH_KEY="$HOME/.ssh/workermill-bastion"
-TMPFILE=$(mktemp)
-trap "rm -f $TMPFILE" EXIT
+TUNNEL_PORT=5432
+
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# ============================================================================
+# Helpers
+# ============================================================================
 
 invoke_lambda() {
     local action="$1"
-    aws lambda invoke \
+    local extra="${2:-}"
+    local payload="{\"action\":\"$action\"${extra:+,$extra}}"
+    local tmpfile=$(mktemp)
+    trap "rm -f $tmpfile" RETURN
+
+    MSYS_NO_PATHCONV=1 aws lambda invoke \
         --function-name "$LAMBDA_NAME" \
-        --payload "{\"action\":\"$action\"}" \
+        --payload "$payload" \
         --cli-binary-format raw-in-base64-out \
-        "$TMPFILE" > /dev/null 2>&1
-    jq . "$TMPFILE"
+        --region "$AWS_REGION" \
+        "$tmpfile" > /dev/null 2>&1
+
+    cat "$tmpfile"
 }
 
-get_lambda_json() {
-    local action="$1"
-    aws lambda invoke \
-        --function-name "$LAMBDA_NAME" \
-        --payload "{\"action\":\"$action\"}" \
-        --cli-binary-format raw-in-base64-out \
-        "$TMPFILE" > /dev/null 2>&1
-    cat "$TMPFILE"
+get_rds_host() {
+    aws secretsmanager get-secret-value \
+        --secret-id "${SECRETS_PREFIX}/database-url" \
+        --query 'SecretString' --output text \
+        --region "$AWS_REGION" 2>/dev/null \
+        | grep -o '@[^:/]*' | tr -d '@'
 }
+
+get_db_password() {
+    aws secretsmanager get-secret-value \
+        --secret-id "${SECRETS_PREFIX}/database-url" \
+        --query 'SecretString' --output text \
+        --region "$AWS_REGION" 2>/dev/null \
+        | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|'
+}
+
+get_tunnel_pid() {
+    pgrep -f "ssh.*workermill-bastion.*-L.*${TUNNEL_PORT}" 2>/dev/null | head -1
+}
+
+kill_tunnel() {
+    local pid=$(get_tunnel_pid)
+    if [[ -n "$pid" ]]; then
+        kill "$pid" 2>/dev/null || true
+    fi
+}
+
+print_connection_info() {
+    local db_pass=$(get_db_password)
+    echo ""
+    echo -e "${GREEN}=== Prod DB tunnel active on localhost:${TUNNEL_PORT} ===${NC}"
+    echo ""
+    echo "Connection string:"
+    echo "  PROD_DATABASE_URL=postgresql://workermill:${db_pass}@localhost:${TUNNEL_PORT}/workermill?sslmode=disable"
+    echo ""
+    echo "psql:"
+    echo "  PGPASSWORD='${db_pass}' psql -h localhost -p ${TUNNEL_PORT} -U workermill -d workermill"
+    echo ""
+    echo -e "Stop with: ${YELLOW}bastion stop${NC}"
+}
+
+# ============================================================================
+# Commands
+# ============================================================================
+
+do_start() {
+    # Check SSH key
+    if [[ ! -f "$SSH_KEY" ]]; then
+        echo -e "${RED}SSH key not found: $SSH_KEY${NC}"
+        exit 1
+    fi
+
+    # If tunnel already running and working, just print info
+    local existing_pid=$(get_tunnel_pid)
+    if [[ -n "$existing_pid" ]] && nc -z localhost "$TUNNEL_PORT" 2>/dev/null; then
+        echo -e "${GREEN}Tunnel already active (PID: $existing_pid)${NC}"
+        print_connection_info
+        return 0
+    fi
+
+    # Kill stale tunnel if any
+    kill_tunnel
+
+    # Detect IP for whitelisting
+    echo -e "${YELLOW}Detecting public IP...${NC}"
+    local my_ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null)
+    local ip_payload=""
+    if [[ -n "$my_ip" ]]; then
+        echo -e "Your IP: ${my_ip}"
+        ip_payload="\"ip\":\"$my_ip\""
+    else
+        echo -e "${YELLOW}Warning: Could not detect IP, skipping whitelist${NC}"
+    fi
+
+    # Check bastion status
+    echo -e "${YELLOW}Checking bastion...${NC}"
+    local status_json=$(invoke_lambda "status")
+    local state=$(echo "$status_json" | jq -r '.status // "unknown"')
+    local bastion_ip=""
+
+    if [[ "$state" == "running" ]]; then
+        bastion_ip=$(echo "$status_json" | jq -r '.instances[0].public_ip // empty')
+        if [[ -n "$bastion_ip" ]]; then
+            echo -e "${GREEN}Bastion already running at ${bastion_ip}${NC}"
+            # Still whitelist our IP
+            if [[ -n "$ip_payload" ]]; then
+                invoke_lambda "whitelist" "$ip_payload" > /dev/null
+            fi
+        fi
+    fi
+
+    # Start bastion if not running
+    if [[ -z "$bastion_ip" ]]; then
+        echo -e "${YELLOW}Starting bastion (takes ~60-90s)...${NC}"
+        invoke_lambda "start" "$ip_payload" > /dev/null
+
+        local attempt=0
+        local max_attempts=24  # 120 seconds
+        while [[ $attempt -lt $max_attempts ]]; do
+            sleep 5
+            ((++attempt))
+            status_json=$(invoke_lambda "status")
+            state=$(echo "$status_json" | jq -r '.status // "unknown"')
+            if [[ "$state" == "running" ]]; then
+                bastion_ip=$(echo "$status_json" | jq -r '.instances[0].public_ip // empty')
+                if [[ -n "$bastion_ip" ]]; then
+                    echo -e "${GREEN}Bastion ready at ${bastion_ip}${NC}"
+                    break
+                fi
+            fi
+            echo -e "  Waiting... ($((attempt * 5))s)"
+        done
+
+        if [[ -z "$bastion_ip" ]]; then
+            echo -e "${RED}Bastion failed to start within 120 seconds${NC}"
+            exit 1
+        fi
+    fi
+
+    # Get RDS host
+    echo -e "${YELLOW}Resolving RDS endpoint...${NC}"
+    local rds_host=$(get_rds_host)
+    if [[ -z "$rds_host" ]]; then
+        echo -e "${RED}Failed to get RDS endpoint from Secrets Manager${NC}"
+        exit 1
+    fi
+
+    # Open background SSH tunnel with retries (sshd may not be ready on fresh spot instance)
+    echo -e "${YELLOW}Opening SSH tunnel...${NC}"
+    local retry=0
+    local max_retries=4
+
+    while [[ $retry -lt $max_retries ]]; do
+        ((++retry))
+
+        ssh -f -N -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            -i "$SSH_KEY" \
+            -L "${TUNNEL_PORT}:${rds_host}:5432" \
+            -o "ExitOnForwardFailure=yes" \
+            "ec2-user@${bastion_ip}" 2>/dev/null || true
+
+        sleep 2
+
+        if nc -z localhost "$TUNNEL_PORT" 2>/dev/null; then
+            print_connection_info
+            return 0
+        fi
+
+        if [[ $retry -lt $max_retries ]]; then
+            echo -e "  Tunnel attempt ${retry}/${max_retries} failed, retrying in 5s..."
+            kill_tunnel
+            sleep 5
+        fi
+    done
+
+    echo -e "${RED}Failed to establish SSH tunnel after ${max_retries} attempts${NC}"
+    exit 1
+}
+
+do_stop() {
+    local stopped_something=false
+
+    # Kill tunnel
+    local pid=$(get_tunnel_pid)
+    if [[ -n "$pid" ]]; then
+        kill "$pid" 2>/dev/null || true
+        echo -e "${GREEN}SSH tunnel closed (PID: $pid)${NC}"
+        stopped_something=true
+    fi
+
+    # Stop bastion
+    echo -e "${YELLOW}Stopping bastion...${NC}"
+    local result=$(invoke_lambda "stop")
+    local state=$(echo "$result" | jq -r '.status // .message // "unknown"')
+    echo -e "${GREEN}Bastion: ${state}${NC}"
+}
+
+do_status() {
+    # Bastion status
+    local result=$(invoke_lambda "status")
+    local state=$(echo "$result" | jq -r '.status // "unknown"')
+    local bastion_ip=$(echo "$result" | jq -r '.instances[0].public_ip // "none"' 2>/dev/null)
+
+    echo -e "Bastion: ${state}"
+    if [[ "$state" == "running" ]]; then
+        echo -e "  IP: ${bastion_ip}"
+    fi
+
+    # Tunnel status
+    local pid=$(get_tunnel_pid)
+    if [[ -n "$pid" ]] && nc -z localhost "$TUNNEL_PORT" 2>/dev/null; then
+        echo -e "Tunnel:  ${GREEN}active${NC} (PID: $pid, localhost:${TUNNEL_PORT})"
+    elif [[ -n "$pid" ]]; then
+        echo -e "Tunnel:  ${YELLOW}process exists but port not responding${NC} (PID: $pid)"
+    else
+        echo -e "Tunnel:  not running"
+    fi
+}
+
+# ============================================================================
+# Main
+# ============================================================================
 
 case "${1:-status}" in
-    start)
-        echo "Detecting your public IP..."
-        MY_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null)
-        if [ -z "$MY_IP" ]; then
-            echo "Warning: Could not detect IP. You may need to run: bastion whitelist"
-            aws lambda invoke \
-                --function-name "$LAMBDA_NAME" \
-                --payload '{"action":"start"}' \
-                --cli-binary-format raw-in-base64-out \
-                "$TMPFILE" > /dev/null 2>&1
-        else
-            echo "Your IP: $MY_IP"
-            aws lambda invoke \
-                --function-name "$LAMBDA_NAME" \
-                --payload "{\"action\":\"start\",\"ip\":\"$MY_IP\"}" \
-                --cli-binary-format raw-in-base64-out \
-                "$TMPFILE" > /dev/null 2>&1
-        fi
-        jq . "$TMPFILE"
-        echo ""
-        echo "Wait ~60 seconds, then run: bastion status"
-        ;;
-    stop)
-        echo "Stopping bastion..."
-        invoke_lambda "stop"
-        ;;
-    status)
-        invoke_lambda "status"
-        ;;
-    ssh)
-        result=$(get_lambda_json "status")
-
-        status=$(echo "$result" | jq -r '.status')
-        if [ "$status" != "running" ]; then
-            echo "Bastion is not running (status: $status)"
-            echo "Run: bastion start"
-            exit 1
-        fi
-
-        ip=$(echo "$result" | jq -r '.instances[0].public_ip')
-        rds=$(echo "$result" | jq -r '.ssh_command' | sed 's/.*5432:\([^:]*\):5432.*/\1/')
-
-        echo "Connecting to bastion at $ip..."
-        echo "SSH tunnel: localhost:5432 -> $rds:5432"
-        echo ""
-        exec ssh -i "$SSH_KEY" -L "5432:${rds}:5432" "ec2-user@${ip}"
-        ;;
-    whitelist)
-        echo "Detecting your public IP..."
-        MY_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null)
-        if [ -z "$MY_IP" ]; then
-            echo "Error: Could not detect IP"
-            exit 1
-        fi
-        echo "Whitelisting: $MY_IP"
-        aws lambda invoke \
-            --function-name "$LAMBDA_NAME" \
-            --payload "{\"action\":\"whitelist\",\"ip\":\"$MY_IP\"}" \
-            --cli-binary-format raw-in-base64-out \
-            "$TMPFILE" > /dev/null 2>&1
-        jq . "$TMPFILE"
-        ;;
+    start)   do_start ;;
+    stop)    do_stop ;;
+    status)  do_status ;;
     help|--help|-h)
-        echo "Usage: bastion [start|stop|status|ssh|whitelist]"
+        echo "Usage: bastion [start|stop|status]"
         echo ""
-        echo "Commands:"
-        echo "  start      Start bastion and whitelist your IP"
-        echo "  stop       Stop bastion"
-        echo "  status     Show bastion status and SSH command"
-        echo "  ssh        Connect to bastion with port forwarding"
-        echo "  whitelist  Update security group with your current IP"
+        echo "  start   Start bastion + whitelist IP + open tunnel + print connection info"
+        echo "  stop    Close tunnel + stop bastion"
+        echo "  status  Show bastion and tunnel state"
         ;;
     *)
         echo "Unknown command: $1"

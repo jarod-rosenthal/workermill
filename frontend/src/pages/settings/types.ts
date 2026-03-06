@@ -61,6 +61,7 @@ export interface Settings {
   planningAgentModel: string;
   planningMode: string;
   prdPlanningMode: string;
+  criticApprovalThreshold: number;
   maxTargetFiles: number;
   storyCalibrationMultiplier: number;
   costAlertThresholdUsd: number | null;

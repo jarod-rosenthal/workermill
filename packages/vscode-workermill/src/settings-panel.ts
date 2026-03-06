@@ -429,6 +429,8 @@ export class SettingsPanel {
         autoFixEnabled: settings.autoFixEnabled ?? true,
         autoFixMaxIterations: settings.autoFixMaxIterations ?? 3,
         // Planning settings
+        planningMode: settings.planningMode ?? "simplified",
+        criticApprovalThreshold: settings.criticApprovalThreshold ?? 85,
         maxParallelExperts: settings.maxParallelExperts ?? 8,
         maxStories: settings.maxStories ?? 8,
         maxTargetFiles: settings.maxTargetFiles ?? 15,
@@ -606,6 +608,8 @@ export class SettingsPanel {
     maxCiFixRetries: number;
     blockerWaitTimeoutMinutes: number;
     pushAfterCommit: boolean;
+    planningMode: string;
+    criticApprovalThreshold: number;
     maxParallelExperts: number;
     maxStories: number;
     maxTargetFiles: number;
@@ -622,6 +626,8 @@ export class SettingsPanel {
       settings.maxCiFixRetries = msg.maxCiFixRetries;
       settings.blockerWaitTimeoutMinutes = msg.blockerWaitTimeoutMinutes;
       settings.pushAfterCommit = msg.pushAfterCommit;
+      settings.planningMode = msg.planningMode;
+      settings.criticApprovalThreshold = msg.criticApprovalThreshold;
       settings.maxParallelExperts = msg.maxParallelExperts;
       settings.maxStories = msg.maxStories;
       settings.maxTargetFiles = msg.maxTargetFiles;
@@ -2056,6 +2062,19 @@ export class SettingsPanel {
         <div class="hint">Recommended max files per story. Soft guideline, not enforced (3-50).</div>
       </div>
       <div class="field">
+        <label>Planning Mode</label>
+        <select id="wk-planning-mode">
+          <option value="simplified">Simplified</option>
+          <option value="strict">Strict</option>
+        </select>
+        <div class="hint">Simplified: single pass, critic feedback never blocks. Strict: full critic loop, plan must meet approval threshold.</div>
+      </div>
+      <div class="field" id="wk-threshold-field">
+        <label>Critic Approval Threshold</label>
+        <input type="number" id="wk-critic-threshold" min="50" max="100" value="85" />
+        <div class="hint">Minimum critic score (50-100) for plan approval in strict mode.</div>
+      </div>
+      <div class="field">
         <label style="display:flex;align-items:center;gap:8px;">
           <input type="checkbox" id="wk-self-review" checked />
           Self-Review
@@ -2525,6 +2544,8 @@ export class SettingsPanel {
           maxCiFixRetries: fixRetries,
           blockerWaitTimeoutMinutes: parseInt(document.getElementById("wk-blocker-timeout").value) || 20,
           pushAfterCommit: document.getElementById("wk-push-after-commit").checked,
+          planningMode: document.getElementById("wk-planning-mode").value,
+          criticApprovalThreshold: parseInt(document.getElementById("wk-critic-threshold").value) || 85,
           maxParallelExperts: parseInt(document.getElementById("wk-max-parallel").value) || 8,
           maxStories: parseInt(document.getElementById("wk-max-stories").value) || 8,
           maxTargetFiles: parseInt(document.getElementById("wk-max-target-files").value) || 15,
@@ -2534,11 +2555,16 @@ export class SettingsPanel {
         });
       });
     }
-    ["wk-pr-revisions", "wk-fix-retries", "wk-blocker-timeout", "wk-max-parallel", "wk-max-stories", "wk-max-target-files"].forEach(function(id) {
+    ["wk-pr-revisions", "wk-fix-retries", "wk-blocker-timeout", "wk-critic-threshold", "wk-max-parallel", "wk-max-stories", "wk-max-target-files"].forEach(function(id) {
       document.getElementById(id).addEventListener("input", saveWorkerBehavior);
     });
-    ["wk-push-after-commit", "wk-self-review", "wk-blocker-auto-retry", "wk-graceful-shutdown"].forEach(function(id) {
+    ["wk-push-after-commit", "wk-planning-mode", "wk-self-review", "wk-blocker-auto-retry", "wk-graceful-shutdown"].forEach(function(id) {
       document.getElementById(id).addEventListener("change", saveWorkerBehavior);
+    });
+    // Show/hide threshold field based on planning mode
+    document.getElementById("wk-planning-mode").addEventListener("change", function() {
+      var tf = document.getElementById("wk-threshold-field");
+      if (tf) tf.style.display = this.value === "strict" ? "" : "none";
     });
 
     // Quality gate — autosave on change
@@ -2839,12 +2865,18 @@ export class SettingsPanel {
         if (qgIterationsField) qgIterationsField.style.display = (d.autoFixEnabled !== false) ? "" : "none";
 
         // Populate new worker behavior settings
+        var wkPlanningMode = document.getElementById("wk-planning-mode");
+        var wkCriticThreshold = document.getElementById("wk-critic-threshold");
+        var wkThresholdField = document.getElementById("wk-threshold-field");
         var wkMaxParallel = document.getElementById("wk-max-parallel");
         var wkMaxStories = document.getElementById("wk-max-stories");
         var wkMaxTargetFiles = document.getElementById("wk-max-target-files");
         var wkSelfReview = document.getElementById("wk-self-review");
         var wkBlockerAutoRetry = document.getElementById("wk-blocker-auto-retry");
         var wkGracefulShutdown = document.getElementById("wk-graceful-shutdown");
+        if (wkPlanningMode) wkPlanningMode.value = d.planningMode || "simplified";
+        if (wkCriticThreshold) wkCriticThreshold.value = String(d.criticApprovalThreshold ?? 85);
+        if (wkThresholdField) wkThresholdField.style.display = (d.planningMode || "simplified") === "strict" ? "" : "none";
         if (wkMaxParallel) wkMaxParallel.value = String(d.maxParallelExperts ?? 8);
         if (wkMaxStories) wkMaxStories.value = String(d.maxStories ?? 8);
         if (wkMaxTargetFiles) wkMaxTargetFiles.value = String(d.maxTargetFiles ?? 15);

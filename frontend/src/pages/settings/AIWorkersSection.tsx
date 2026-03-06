@@ -404,7 +404,7 @@ export function AIWorkersSection({
                     >
                       <div className="text-sm font-medium text-foreground">Strict</div>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Full planner-critic loop — plan must score 85+ to proceed (up to 3 attempts)
+                        Full planner-critic loop — plan must meet approval threshold to proceed (up to 3 attempts)
                       </p>
                     </button>
                     <button
@@ -423,6 +423,29 @@ export function AIWorkersSection({
                   </div>
                 )}
               </div>
+
+              {/* Critic Approval Threshold */}
+              {!isProPlan && (settings.prdPlanningMode === "strict" || settings.planningMode === "strict") && (
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">Critic Approval Threshold</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="number"
+                      min={50}
+                      max={100}
+                      value={settings.criticApprovalThreshold ?? 85}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        if (!isNaN(val) && val >= 50 && val <= 100) {
+                          updateSetting("criticApprovalThreshold", val);
+                        }
+                      }}
+                      className="w-20 px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none transition-all text-sm"
+                    />
+                    <span className="text-xs text-muted-foreground">Minimum critic score (50-100) for plan approval in strict mode</span>
+                  </div>
+                </div>
+              )}
 
               {isProPlan ? (
                 <>

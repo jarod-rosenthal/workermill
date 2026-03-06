@@ -113,6 +113,7 @@ router.get("/", async (req: Request, res: Response) => {
       planningAgentModel: org.planningAgentModel || "",
       planningMode: org.planningMode || "strict",
       prdPlanningMode: org.prdPlanningMode || org.planningMode || "simplified",
+      criticApprovalThreshold: org.criticApprovalThreshold ?? 85,
       maxTargetFiles: org.maxTargetFiles,
       storyCalibrationMultiplier: org.storyCalibrationMultiplier ?? 0.4,
       hasPlanningApiKey,
@@ -264,6 +265,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       planningAgentModel,
       planningMode,
       prdPlanningMode,
+      criticApprovalThreshold,
       maxTargetFiles,
       storyCalibrationMultiplier,
 
@@ -757,6 +759,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         return;
       }
       org.prdPlanningMode = normalized;
+    }
+
+    if (criticApprovalThreshold !== undefined) {
+      const val = parseInt(criticApprovalThreshold, 10);
+      if (isNaN(val) || val < 50 || val > 100) {
+        res.status(400).json({ error: "criticApprovalThreshold must be between 50 and 100" });
+        return;
+      }
+      org.criticApprovalThreshold = val;
     }
 
     if (maxTargetFiles !== undefined) {
@@ -1318,6 +1329,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         planningAgentModel: org.planningAgentModel,
         planningMode: org.planningMode,
         prdPlanningMode: org.prdPlanningMode,
+        criticApprovalThreshold: org.criticApprovalThreshold ?? 85,
         maxTargetFiles: org.maxTargetFiles,
         storyCalibrationMultiplier: org.storyCalibrationMultiplier,
         costAlertThresholdUsd: org.costAlertThresholdUsd,

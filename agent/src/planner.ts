@@ -34,6 +34,7 @@ import {
   formatRefinementFeedback,
   stripFalsePersonaRisks,
   getCriticConfig,
+  setCriticApprovalThreshold,
   AUTO_APPROVAL_THRESHOLD,
   SIMPLIFIED_FLOOR,
   type ExecutionPlan,
@@ -957,7 +958,7 @@ export async function planTask(
     }
     throw fetchErr;
   }
-  const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories, storyCap: apiStoryCap, maxTargetFiles: apiMaxTargetFiles, planningMode: apiPlanningMode, validPersonas: apiValidPersonas, preComputedStories: apiPreComputedStories } = promptResponse.data;
+  const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories, storyCap: apiStoryCap, maxTargetFiles: apiMaxTargetFiles, planningMode: apiPlanningMode, validPersonas: apiValidPersonas, preComputedStories: apiPreComputedStories, criticApprovalThreshold: apiCriticThreshold } = promptResponse.data;
   const validPersonas: string[] = Array.isArray(apiValidPersonas) ? apiValidPersonas : [];
   const isSimplifiedMode = apiPlanningMode === "simplified";
   if (isSimplifiedMode) {
@@ -1144,6 +1145,11 @@ export async function planTask(
   if (!criticConfig) {
     console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Could not fetch critic config — critic validation will be skipped`);
     await postLog(task.id, `${PREFIX} ⚠️ Could not fetch critic config from API — critic validation will be skipped`);
+  }
+
+  // Apply local/org threshold override if provided
+  if (typeof apiCriticThreshold === "number" && apiCriticThreshold >= 50 && apiCriticThreshold <= 100) {
+    setCriticApprovalThreshold(apiCriticThreshold);
   }
 
   try {

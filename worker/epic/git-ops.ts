@@ -1239,7 +1239,7 @@ export class GitOps {
    * Format persona for commit co-author line.
    */
   /**
-   * Ensure node_modules and .workermill-message.md are listed in .gitignore
+   * Ensure node_modules, build outputs, and workermill temp files are in .gitignore
    * so `git add .` never stages them.
    * Greenfield projects may not have a .gitignore yet when the first commit runs.
    */
@@ -1264,6 +1264,13 @@ export class GitOps {
       if (!lines.some(line => line === ".workermill-answer.md")) {
         additions += "\n.workermill-answer.md";
         console.log("[GitOps] Added .workermill-answer.md to .gitignore");
+      }
+      // Common build output directories that should never be committed
+      for (const buildDir of [".next", "dist", "build", "out", ".nuxt", ".output", ".svelte-kit"]) {
+        if (!lines.some(line => line === buildDir || line === `${buildDir}/`)) {
+          additions += `\n${buildDir}`;
+          console.log(`[GitOps] Added ${buildDir} to .gitignore`);
+        }
       }
       if (additions) {
         appendFileSync(gitignorePath, additions + "\n");

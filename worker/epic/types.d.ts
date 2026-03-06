@@ -127,6 +127,8 @@ export interface EpicConfig {
     improvementEnabled?: boolean;
     /** Feedback from previous manager review (for revision runs) */
     reviewFeedback?: string;
+    /** Per-story revision reasons from Tech Lead (keyed by story index) */
+    revisionReasons?: Record<number, string>;
 }
 /**
  * Result of claiming a story.

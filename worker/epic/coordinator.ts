@@ -2817,7 +2817,7 @@ export class EpicCoordinator {
     // Deadlock detection: all experts idle, no claimable stories, but failed/blocked stories remain
     // Don't trigger deadlock if parked stories are waiting for deferred retry
     // Instead of failing the entire task, proceed with partial completion (create PR with completed stories)
-    if (allIdle && readyToClaim.length === 0 && this.parkedStoryIndices.size === 0 && (this.failedStoryIndices.size > 0 || this.blockedStoryIndices.size > 0) && completions.length > 0) {
+    if (allIdle && readyToClaim.length === 0 && this.revisionStoriesQueued.length === 0 && this.parkedStoryIndices.size === 0 && (this.failedStoryIndices.size > 0 || this.blockedStoryIndices.size > 0) && completions.length > 0) {
       const failedList = Array.from(this.failedStoryIndices).sort((a, b) => a - b);
       const blockedList = Array.from(this.blockedStoryIndices).sort((a, b) => a - b);
       console.log(`[Epic] Partial completion — ${completions.length} stories done, ${failedList.length} failed, ${blockedList.length} blocked`);
@@ -2829,7 +2829,7 @@ export class EpicCoordinator {
       // Fall through to the completion path below instead of failing
     }
 
-    if (allIdle && readyToClaim.length === 0 && completions.length > 0) {
+    if (allIdle && readyToClaim.length === 0 && this.revisionStoriesQueued.length === 0 && completions.length > 0) {
       // Determine if this is a partial completion (some stories failed/blocked)
       const isPartialCompletion = this.failedStoryIndices.size > 0 || this.blockedStoryIndices.size > 0;
       if (isPartialCompletion) {
@@ -4378,6 +4378,12 @@ Begin your review now. Start by fetching the code changes.`;
 
     // Update config with review feedback for story executors to see
     this.config.reviewFeedback = feedback;
+    // Store per-story reasons so each executor only sees its own feedback
+    this.config.revisionReasons = affectedReasons
+      ? Object.fromEntries(
+          Object.entries(affectedReasons).map(([k, v]) => [Number(k), v])
+        )
+      : undefined;
 
     // Reset all expert states to idle
     for (const expert of getAvailableExperts()) {

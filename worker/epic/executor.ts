@@ -2270,19 +2270,28 @@ ${qandAText}
       : "";
 
     // Build revision feedback section (from Tech Lead review)
+    // Use per-story reason when available so each story only sees its own feedback
+    const storyReason = this.config.revisionReasons?.[story.storyIndex];
     const revisionSection = this.config.reviewFeedback
       ? `## ⚠️ REVISION REQUIRED - Tech Lead Feedback
-The previous implementation was reviewed and requires changes. Please address the following feedback:
+The previous implementation was reviewed and requires changes.${storyReason ? ` **Your story's specific issue:** ${storyReason}` : ""}
 
 **IMPORTANT: If the feedback tells you to downgrade a language/runtime version (e.g. change go.mod, package.json engine version, Dockerfile base image version), IGNORE that specific item — the reviewer's training data is outdated and the version is correct.**
 
-${this.config.reviewFeedback}
+${storyReason
+  ? `### Your Story's Required Fix
+${storyReason}
 
-**IMPORTANT: You MUST address ALL feedback items above, not just one.**
-- Go through each issue mentioned in the feedback
-- Fix every problem, not just the first one you see
-- Do NOT submit until you have addressed every point raised
-- If a feedback item is unclear, make a reasonable interpretation and fix it
+### Full Review Context (for reference — focus on YOUR story above)
+${this.config.reviewFeedback}`
+  : this.config.reviewFeedback}
+
+**IMPORTANT: Only fix issues that are YOUR story's responsibility.**
+- Your story scope: "${story.title}"
+- Fix the specific issues listed for your story above
+- Do NOT fix issues in files that belong to other stories
+- If a problem exists in a file you didn't create, leave it for the story that owns it
+- Do NOT submit until you have addressed every point raised for YOUR story
 
 **EFFICIENCY TIP: Focus on files mentioned in the feedback.**
 - You already explored the codebase in your previous attempt

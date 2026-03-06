@@ -29,7 +29,7 @@ import { InlineEscalationFixer } from "./inline-escalation-fixer.js";
 import { runGateCommand, isDockerDaemonReachable } from "./gate-utils.js";
 import axios from "axios";
 import * as fs from "fs/promises";
-import { existsSync, readdirSync, statSync } from "fs";
+import { existsSync, readdirSync, statSync, readFileSync, appendFileSync } from "fs";
 import { execSync, execFileSync, spawn } from "child_process";
 
 // Persona and provider icons are loaded from the Decision API at runtime
@@ -955,6 +955,25 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
     };
     scan(root, 1);
     return results;
+  }
+
+  /**
+   * Ensure .gitignore contains node_modules before fixer agents run.
+   * Fixer agents execute raw `git add -A` which bypasses GitOps.commitChangesInWorktree
+   * and its ensureNodeModulesIgnored safeguard. Without this, npm install creates
+   * 100MB+ SWC binaries that get committed and rejected by GitHub's pre-receive hook.
+   */
+  private ensureGitignoreBeforeFixer(worktreePath: string): void {
+    const gitignorePath = `${worktreePath}/.gitignore`;
+    try {
+      const content = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
+      const lines = content.split("\n").map(l => l.trim());
+      if (!lines.some(line => line === "node_modules" || line === "node_modules/")) {
+        appendFileSync(gitignorePath, "\nnode_modules\n");
+      }
+    } catch {
+      // Best effort
+    }
   }
 
   /**
@@ -1909,6 +1928,12 @@ ${parts.join("\n\n")}
 
           const isPreCommitGate = errorMessage.startsWith("Pre-commit quality gate failed");
           const worktreePath = this.worktreePathByStory.get(story.storyIndex);
+
+          // Ensure .gitignore has node_modules before fixer agents run `git add -A`
+          // (prevents 100MB+ SWC binaries from being committed and rejected by GitHub)
+          if (isPreCommitGate && worktreePath) {
+            this.ensureGitignoreBeforeFixer(worktreePath);
+          }
 
           // After 2+ identical failures, escalate to full-context escalation agent
           // This agent sees: story requirements, full error history, coordination context,

@@ -318,7 +318,8 @@ router.post(
           where: { workerTaskId: task.id },
           relations: ["board"],
         });
-        if (card?.board?.qualityGateCommands) {
+        const isFoundationCard = card?.position === 0;
+        if (card?.board?.qualityGateCommands && !isFoundationCard) {
           boardQualityGates.qualityGates = card.board.qualityGateCommands;
         }
         if (card?.board?.ciWorkflowPath) {

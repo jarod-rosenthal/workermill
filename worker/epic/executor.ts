@@ -648,13 +648,13 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
     const triggered: string[] = [];
     for (const gate of gates) {
       // Extract directory prefix from trigger glob: "src/**/*.ts" → "src",
-      // "**/*.{ts,tsx}" → "" (root), "web/*.js" → "web"
+      // "**/*.{ts,tsx}" → "" (root), "api/**" → "api", "**" → ""
       const triggerPrefix = gate.trigger
-        .replace(/\/?\*\*\/.*/g, "")
-        .replace(/\/?\*\..*/g, "")
-        .replace(/\/?\{[^}]*\}.*/g, "")
-        .replace(/\/?\*$/g, "")
-        .replace(/\/+$/, "");
+        .replace(/\/?\*\*\/?.*$/g, "")  // strip from /**... or ** onward (handles "**", "api/**", "src/**/*.ts")
+        .replace(/\/?\*\..*/g, "")      // strip from /*.ext onward
+        .replace(/\/?\{[^}]*\}.*/g, "") // strip brace expansions
+        .replace(/\/?\*$/g, "")         // trailing lone *
+        .replace(/\/+$/, "");           // trailing slashes
       const matches = changedFiles.some((f) => f === "*" || !triggerPrefix || f.startsWith(triggerPrefix));
       if (!matches) continue;
 
@@ -789,13 +789,13 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
     for (const gate of gates) {
       // Match files against trigger glob (simple prefix match)
       // Extract directory prefix from trigger glob: "src/**/*.ts" → "src",
-      // "**/*.{ts,tsx}" → "" (root), "web/*.js" → "web"
+      // "**/*.{ts,tsx}" → "" (root), "api/**" → "api", "**" → ""
       const triggerPrefix = gate.trigger
-        .replace(/\/?\*\*\/.*/g, "")   // strip from /**/... onward
-        .replace(/\/?\*\..*/g, "")     // strip from /*.ext onward
+        .replace(/\/?\*\*\/?.*$/g, "")  // strip from /**... or ** onward (handles "**", "api/**", "src/**/*.ts")
+        .replace(/\/?\*\..*/g, "")      // strip from /*.ext onward
         .replace(/\/?\{[^}]*\}.*/g, "") // strip brace expansions
-        .replace(/\/?\*$/g, "")        // trailing lone *
-        .replace(/\/+$/, "");          // trailing slashes
+        .replace(/\/?\*$/g, "")         // trailing lone *
+        .replace(/\/+$/, "");           // trailing slashes
       const matches = changedFiles.some((f) => f === "*" || !triggerPrefix || f.startsWith(triggerPrefix));
 
       if (!matches) continue;

@@ -791,8 +791,15 @@ export async function dispatchMultiStoryPlan(
     childTask.parentTaskId = task.id;
     childTask.githubRepo = task.githubRepo; // Inherit repo from parent
     childTask.jiraIssueId = jiraStoryId || task.jiraIssueId; // Use story ID if created
+    // Foundation story (index 0, storyIndex 1) should skip quality gates —
+    // it creates the project from scratch and can't pass full-project gates.
+    const isFoundationStory = i === 0;
+    const parentFields = { ...(task.jiraFields || {}) } as Record<string, unknown>;
+    if (isFoundationStory) {
+      delete parentFields.qualityGates;
+    }
     childTask.jiraFields = {
-      ...(task.jiraFields || {}),
+      ...parentFields,
       storyIndex: i + 1,
       storyDependencies: story.dependencies
         ?.map((depId: string | number) => {

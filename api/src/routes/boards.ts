@@ -319,6 +319,7 @@ export async function runCardAsWorkerTask(
     ticketSystem: "internal",
     boardExecutionId: boardExecutionId || null,
     jiraFields: {
+      ...(card.board?.prdContent ? { buildPage: true } : {}),
       ...(card.board?.qualityGateCommands ? { qualityGates: card.board.qualityGateCommands } : {}),
       ...(card.board?.ciWorkflowPath ? { ciWorkflowPath: card.board.ciWorkflowPath } : {}),
       ...extractPreComputedStories(card.description),

@@ -289,6 +289,12 @@ export async function runCardAsWorkerTask(
       : "",
   ].filter(Boolean).join("\n\n");
 
+  // Foundation card (position 0) creates the project from scratch — its stories
+  // build incrementally and can't pass full-project quality gates (e.g. npm run build
+  // fails on intermediate TypeScript errors). Quality gates only apply to subsequent
+  // cards that modify an already-working codebase.
+  const isFoundationCard = card.position === 0;
+
   // Create WorkerTask
   const workerTask = workerTaskRepo.create({
     orgId: org.id,
@@ -320,7 +326,7 @@ export async function runCardAsWorkerTask(
     boardExecutionId: boardExecutionId || null,
     jiraFields: {
       ...(card.board?.prdContent ? { buildPage: true } : {}),
-      ...(card.board?.qualityGateCommands ? { qualityGates: card.board.qualityGateCommands } : {}),
+      ...(card.board?.qualityGateCommands && !isFoundationCard ? { qualityGates: card.board.qualityGateCommands } : {}),
       ...(card.board?.ciWorkflowPath ? { ciWorkflowPath: card.board.ciWorkflowPath } : {}),
       ...extractPreComputedStories(card.description),
     },

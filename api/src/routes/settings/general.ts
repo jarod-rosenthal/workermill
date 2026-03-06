@@ -112,7 +112,7 @@ router.get("/", async (req: Request, res: Response) => {
       planningAgentProvider: org.planningAgentProvider || "anthropic",
       planningAgentModel: org.planningAgentModel || "",
       planningMode: org.planningMode || "strict",
-      prdPlanningMode: org.prdPlanningMode || org.planningMode || "decomposer_planned",
+      prdPlanningMode: org.prdPlanningMode || org.planningMode || "simplified",
       maxTargetFiles: org.maxTargetFiles,
       storyCalibrationMultiplier: org.storyCalibrationMultiplier ?? 0.4,
       hasPlanningApiKey,
@@ -732,9 +732,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     }
 
     if (planningMode !== undefined) {
-      const validModes = ["strict", "simplified", "decomposer_planned"];
+      const validModes = ["strict", "simplified"];
       if (!validModes.includes(planningMode)) {
-        res.status(400).json({ error: "planningMode must be 'strict', 'simplified', or 'decomposer_planned'" });
+        res.status(400).json({ error: "planningMode must be 'strict' or 'simplified'" });
         return;
       }
       if (org.plan === "pro" && planningMode !== "simplified") {
@@ -745,16 +745,18 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     }
 
     if (prdPlanningMode !== undefined) {
-      const validModes = ["strict", "simplified", "decomposer_planned"];
-      if (!validModes.includes(prdPlanningMode)) {
-        res.status(400).json({ error: "prdPlanningMode must be 'strict', 'simplified', or 'decomposer_planned'" });
+      // Accept decomposer_planned for backwards compat but treat as simplified
+      const normalized = prdPlanningMode === "decomposer_planned" ? "simplified" : prdPlanningMode;
+      const validModes = ["strict", "simplified"];
+      if (!validModes.includes(normalized)) {
+        res.status(400).json({ error: "prdPlanningMode must be 'strict' or 'simplified'" });
         return;
       }
-      if (org.plan === "pro" && prdPlanningMode !== "simplified") {
+      if (org.plan === "pro" && normalized !== "simplified") {
         res.status(403).json({ error: "Pro plan only supports Simplified planning mode. Upgrade to Max for more planning modes." });
         return;
       }
-      org.prdPlanningMode = prdPlanningMode;
+      org.prdPlanningMode = normalized;
     }
 
     if (maxTargetFiles !== undefined) {

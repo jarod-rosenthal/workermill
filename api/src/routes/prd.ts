@@ -528,45 +528,34 @@ router.post(
 
         emitDecomp?.({ phase: "resolving_content", detail: "Content resolved, starting decomposition" });
 
-        const effectivePrdMode = org.prdPlanningMode || org.planningMode || "decomposer_planned";
-        const useDecomposerPlanned = effectivePrdMode === "decomposer_planned";
+        // Always use story-level decomposition for PRD builds — the decomposer
+        // produces pre-computed stories per card for parallel expert execution.
+        // The org's prdPlanningMode (strict/simplified) only controls the
+        // per-card planner critic loop, not the decomposition step.
 
         try {
           if (planProvider === "anthropic") {
             if (decompositionId) {
               // Streaming path — emit events to SSE clients
-              decomposed = useDecomposerPlanned
-                ? await decomposePrdWithStoriesStreaming(
-                    prdContent,
-                    planModel,
-                    orgCreds.anthropicApiKey || undefined,
-                    decompositionId,
-                  )
-                : await decomposePrdStreaming(
-                    prdContent,
-                    planModel,
-                    orgCreds.anthropicApiKey || undefined,
-                    decompositionId,
-                  );
+              decomposed = await decomposePrdWithStoriesStreaming(
+                prdContent,
+                planModel,
+                orgCreds.anthropicApiKey || undefined,
+                decompositionId,
+              );
             } else {
               // Non-streaming path (agents, backward compat)
-              decomposed = useDecomposerPlanned
-                ? await decomposePrdWithStories(
-                    prdContent,
-                    planModel,
-                    orgCreds.anthropicApiKey || undefined,
-                  )
-                : await decomposePrd(
-                    prdContent,
-                    planModel,
-                    orgCreds.anthropicApiKey || undefined,
-                  );
+              decomposed = await decomposePrdWithStories(
+                prdContent,
+                planModel,
+                orgCreds.anthropicApiKey || undefined,
+              );
             }
           } else {
             // Non-Anthropic — use Vercel AI SDK via planning agent config
             const { createModel } = await import("../services/planning-agent/config.js");
             const { generateText } = await import("ai");
-            const { SYSTEM_PROMPT, SYSTEM_PROMPT_WITH_STORIES } = await import("../services/prd-decomposer.js");
+            const { SYSTEM_PROMPT_WITH_STORIES } = await import("../services/prd-decomposer.js");
 
             const providerKey = planProvider === "openai" ? orgCreds.openaiApiKey
               : planProvider === "google" ? orgCreds.googleApiKey
@@ -590,7 +579,7 @@ router.post(
 
             const result = await generateText({
               model,
-              system: useDecomposerPlanned ? SYSTEM_PROMPT_WITH_STORIES : SYSTEM_PROMPT,
+              system: SYSTEM_PROMPT_WITH_STORIES,
               prompt: `Decompose this PRD into implementation cards:\n\n${prdContent}`,
               maxOutputTokens: 128000,
             });
@@ -688,7 +677,7 @@ router.post(
         for (let i = 0; i < decomposed.cards.length; i++) {
           const dc = decomposed.cards[i];
 
-          // If decomposer_planned mode produced stories, embed them as a
+          // If decomposition produced stories, embed them as a
           // machine-readable marker at the end of the description.
           // runCardAsWorkerTask() extracts this into jiraFields.preComputedStories.
           let description = dc.description;

@@ -64,7 +64,7 @@ export interface StandaloneConfig {
     maxCiFixRetries?: number;
     blockerWaitTimeoutMinutes?: number;
     pushAfterCommit?: boolean;
-    prdPlanningMode?: "strict" | "simplified" | "decomposer_planned";
+    prdPlanningMode?: "strict" | "simplified";
     // Resilience & workflow flags (parity with cloud org settings)
     blockerAutoRetryEnabled?: boolean;
     blockerMaxAutoRetries?: number;
@@ -97,7 +97,7 @@ const DEFAULT_CONFIG: StandaloneConfig = {
     maxParallelExperts: 8,
     maxStories: 8,
     maxTargetFiles: 15,
-    prdPlanningMode: "decomposer_planned",
+    prdPlanningMode: "simplified",
     // Worker behavior
     maxPerStoryRevisions: 1,
     maxReviewRevisions: 3,

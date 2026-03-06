@@ -65,6 +65,8 @@ export interface StandaloneConfig {
     blockerWaitTimeoutMinutes?: number;
     pushAfterCommit?: boolean;
     prdPlanningMode?: "strict" | "simplified";
+    planningMode?: "strict" | "simplified";
+    criticApprovalThreshold?: number;
     // Resilience & workflow flags (parity with cloud org settings)
     blockerAutoRetryEnabled?: boolean;
     blockerMaxAutoRetries?: number;
@@ -98,6 +100,8 @@ const DEFAULT_CONFIG: StandaloneConfig = {
     maxStories: 8,
     maxTargetFiles: 15,
     prdPlanningMode: "simplified",
+    planningMode: "simplified",
+    criticApprovalThreshold: 85,
     // Worker behavior
     maxPerStoryRevisions: 1,
     maxReviewRevisions: 3,

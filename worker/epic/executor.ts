@@ -1713,7 +1713,9 @@ ${parts.join("\n\n")}
       }
 
       // 4c. [GATE 1] Pre-commit quality gate — run matching quality gate commands
-      if (this.config.qualityGateCommands && !this.config.qualityGateBypass) {
+      // Skip if quality gates are disabled at the org level (qualityGateEnabled)
+      const gatesEnabled = this.config.qualityThresholds?.qualityGateEnabled !== false;
+      if (this.config.qualityGateCommands && !this.config.qualityGateBypass && gatesEnabled) {
         const gateResult = await this.runPreCommitGate(worktreePath, expert);
         if (!gateResult.passed) {
           throw new Error(`Pre-commit quality gate failed (${gateResult.failedCommand}):\n${gateResult.output}`);

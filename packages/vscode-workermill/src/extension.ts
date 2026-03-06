@@ -756,14 +756,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
         async function cancelWithConfirm(t: TaskInfo): Promise<void> {
           const confirm = await vscode.window.showWarningMessage(
-            `Cancel "${t.summary}"?`,
+            `Stop task "${t.summary}"? This will terminate the running worker.`,
             { modal: true },
-            "Cancel Task",
+            "Stop Task",
           );
-          if (confirm !== "Cancel Task") return;
+          if (confirm !== "Stop Task") return;
           try {
             await client.cancelTask(t.id);
-            vscode.window.showInformationMessage(`Task cancelled.`);
+            vscode.window.showInformationMessage(`Task stopped.`);
           } catch (err) {
             vscode.window.showErrorMessage(
               `Failed to cancel: ${err instanceof Error ? err.message : String(err)}`,

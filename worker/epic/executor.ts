@@ -903,6 +903,14 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
             continue;
           }
 
+          // npm audit failures on transitive dependencies are not fixable by the agent.
+          // Treat as a warning rather than a blocking failure — the agent can't patch
+          // upstream packages. Log the output so it's visible but don't fail the gate.
+          if (/\bnpm\s+audit\b/.test(cmd)) {
+            await this.postLog(`[Quality Gate] ⚠️ ${cmd} — vulnerabilities found (informational, not blocking)\n${output.slice(0, 500)}`, expert, "system");
+            continue;
+          }
+
           await this.postLog(`[Quality Gate] ❌ ${cmd}\n${output}`, expert, "error");
           return { passed: false, output, failedCommand: cmd };
         }

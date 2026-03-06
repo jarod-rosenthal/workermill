@@ -29,7 +29,16 @@ const router = Router();
 async function fetchBoardCard(
   orgId: string,
   issueKey: string,
-): Promise<{ summary: string; description: string; labels: string[]; cardId: string } | null> {
+): Promise<{
+  summary: string;
+  description: string;
+  labels: string[];
+  cardId: string;
+  boardHasPrd: boolean;
+  qualityGateCommands: Array<{ name: string; trigger: string; commands: string[] }> | null;
+  ciWorkflowPath: string | null;
+  cardPosition: number;
+} | null> {
   // Match prefix-number where prefix may contain non-ASCII chars (e.g., em dashes from board names)
   const match = issueKey.match(/^(.+)-(\d+)$/);
   if (!match) return null;
@@ -55,6 +64,10 @@ async function fetchBoardCard(
       .map((cl) => cl.label?.name)
       .filter(Boolean) as string[],
     cardId: card.id,
+    boardHasPrd: !!(card.board?.prdContent),
+    qualityGateCommands: card.board?.qualityGateCommands || null,
+    ciWorkflowPath: card.board?.ciWorkflowPath || null,
+    cardPosition: card.position ?? 0,
   };
 }
 
@@ -198,6 +211,8 @@ router.post(
     const issueTrackerProvider = org.issueTrackerProvider;
 
     let issueData: { summary: string; description: string; labels: string[] } | null = null;
+    // Board metadata from fetchBoardCard — used to populate jiraFields with buildPage, qualityGates, etc.
+    let boardMeta: { boardHasPrd: boolean; qualityGateCommands: Array<{ name: string; trigger: string; commands: string[] }> | null; ciWorkflowPath: string | null; cardPosition: number } | null = null;
 
     if (issueTrackerProvider === "internal") {
       // Fetch from internal KbBoard/KbCard — card MUST exist for internal boards
@@ -205,6 +220,7 @@ router.post(
       if (boardCard) {
         issueData = boardCard;
         boardCardId = boardCard.cardId;
+        boardMeta = boardCard;
         logger.info("Fetched internal board card details for task", {
           issueKey: jiraIssueKey,
           cardId: boardCardId,
@@ -240,6 +256,7 @@ router.post(
         if (boardCard) {
           issueData = boardCard;
           boardCardId = boardCard.cardId;
+          boardMeta = boardCard;
         }
       }
       if (issueData) {
@@ -258,8 +275,14 @@ router.post(
       issueSummary = summary || issueData.summary;
       issueDescription = issueData.description || null;
       issueLabels = issueData.labels;
-      // Store labels in jiraFields for downstream use (e.g., retry logic, label detection)
-      jiraFields = { labels: issueLabels };
+      // Store labels + board metadata in jiraFields (parity with boards.ts runCardAsWorkerTask)
+      const isFoundationCard = boardMeta ? boardMeta.cardPosition === 0 : false;
+      jiraFields = {
+        labels: issueLabels,
+        ...(boardMeta?.boardHasPrd ? { buildPage: true } : {}),
+        ...(boardMeta?.qualityGateCommands && !isFoundationCard ? { qualityGates: boardMeta.qualityGateCommands } : {}),
+        ...(boardMeta?.ciWorkflowPath ? { ciWorkflowPath: boardMeta.ciWorkflowPath } : {}),
+      };
 
       // Infer persona from ticket if not explicitly provided
       if (!workerPersona) {

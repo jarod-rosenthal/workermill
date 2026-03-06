@@ -1359,7 +1359,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
           storyCap,
           maxTargetFiles,
           planningMode: isBuildPageTask
-            ? (config.settings?.prdPlanningMode || "decomposer_planned")
+            ? (config.settings?.prdPlanningMode || "simplified")
             : "simplified",
           validPersonas,
           ...(preComputedStories ? { preComputedStories } : {}),

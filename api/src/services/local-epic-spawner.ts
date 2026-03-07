@@ -820,8 +820,7 @@ class LocalEpicSpawner {
       // Resilience Settings (from org settings)
       BLOCKER_MAX_AUTO_RETRIES: String(task.organization?.blockerMaxAutoRetries),
       BLOCKER_AUTO_RETRY_ENABLED: task.organization?.blockerAutoRetryEnabled !== false ? "true" : "false",
-      QUALITY_GATE_MAX_RETRIES: String(task.organization?.qualityGateMaxRetries ?? 5),
-      MAX_CI_FIX_RETRIES: String(task.organization?.maxCiFixRetries ?? 3),
+      MAX_FIX_RETRIES: String(task.organization?.maxFixRetries ?? 3),
       BLOCKER_WAIT_TIMEOUT_MINUTES: String(task.organization?.blockerWaitTimeoutMinutes),
       QUALITY_GATE_COMMANDS: task.jiraFields?.qualityGates
         ? JSON.stringify(task.jiraFields.qualityGates)

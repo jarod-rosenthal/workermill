@@ -75,7 +75,6 @@ export class EpicCoordinator {
 
   // CI Fix Agent tracking
   private ciFixRetryCount: number = 0;
-  private maxCiFixRetries: number = parseInt(process.env.MAX_CI_FIX_RETRIES || "3", 10);
   private totalStories: number = 0;  // Total stories in the Epic (for lazy coordination loading)
 
   // Memory system (REQ-19) with Codebase RAG
@@ -101,8 +100,6 @@ export class EpicCoordinator {
   private blockedStoryIndices: Set<number> = new Set();
   // Resilience: Track failed stories (for auto-retry)
   private failedStoryIndices: Set<number> = new Set();
-  // Resilience: Track parked stories (quality gate retries exhausted, waiting for deferred retry)
-  private parkedStoryIndices: Set<number> = new Set();
   // Local completion tracking: stories confirmed done by executeStory (defense against postCompletion API failures)
   private locallyCompletedStoryIndices: Set<number> = new Set();
   // Resilience configuration
@@ -186,7 +183,7 @@ export class EpicCoordinator {
     this.resilience = resilience || {
       blockerMaxAutoRetries: 3,
       blockerAutoRetryEnabled: true,
-      qualityGateMaxRetries: 5,
+
       pushAfterCommit: true,
       gracefulShutdownEnabled: true,
     };
@@ -1896,10 +1893,6 @@ export class EpicCoordinator {
         continue;
       }
 
-      // Skip parked stories (quality gate retries exhausted, waiting for deferred retry)
-      if (this.parkedStoryIndices.has(story.storyIndex)) {
-        continue;
-      }
 
       console.log(`[Epic] Checking story ${story.storyIndex}: persona=${story.persona}, id=${story.id}`);
 
@@ -2163,17 +2156,6 @@ export class EpicCoordinator {
           this.expertStates.set(expert, { persona: expert, status: "idle" });
         }, 2000);
 
-        return;
-      }
-
-      // Handle parked story — quality gate retries exhausted, waiting for deferred retry
-      if (result.parked) {
-        console.log(`[Epic] Story ${story.storyIndex} parked — quality gate retries exhausted, waiting for siblings`);
-        this.parkedStoryIndices.add(story.storyIndex);
-        this.unregisterRunningStory(story.storyIndex);
-        await this.coordination.archiveStoryClaims([story.storyIndex]).catch(() => {});
-        // Reset expert to idle so it can work on other stories
-        this.expertStates.set(expert, { persona: expert, status: "idle" });
         return;
       }
 
@@ -2768,9 +2750,6 @@ export class EpicCoordinator {
       // Skip if blocked (dependency on a failed story)
       if (this.blockedStoryIndices.has(storyIndex)) return false;
 
-      // Skip if parked (waiting for deferred retry after siblings complete)
-      if (this.parkedStoryIndices.has(storyIndex)) return false;
-
       // Skip if dependencies are not met (dependency story not completed)
       const deps = (ready.metadata?.dependencies as number[]) || [];
       if (deps.length > 0) {
@@ -2793,31 +2772,9 @@ export class EpicCoordinator {
       return true;
     });
 
-    // Deferred retry: if parked stories exist and nothing else can make progress, retry them.
-    // This covers: all siblings done, all stories parked, or all remaining stories blocked
-    // by dependencies on parked stories (prevents deadlock when story-0 parks and everything depends on it).
-    const shouldUnpark = allIdle && readyToClaim.length === 0 && this.parkedStoryIndices.size > 0;
-    if (shouldUnpark) {
-      const parkedList = Array.from(this.parkedStoryIndices).sort((a, b) => a - b);
-      this.postLog(
-        `All other stories complete — retrying ${parkedList.length} parked story(ies): [${parkedList.join(", ")}]`
-      );
-
-      for (const storyIndex of parkedList) {
-        // Move from parked back to claimable
-        this.parkedStoryIndices.delete(storyIndex);
-        this.executor.markDeferredRetryUsed(storyIndex);
-        // Reset quality gate retry counter so the deferred attempt gets fresh retries
-        this.executor.resetQualityGateRetries(storyIndex);
-      }
-      // Stories are now claimable again — the main loop will pick them up
-      return;
-    }
-
     // Deadlock detection: all experts idle, no claimable stories, but failed/blocked stories remain
-    // Don't trigger deadlock if parked stories are waiting for deferred retry
     // Instead of failing the entire task, proceed with partial completion (create PR with completed stories)
-    if (allIdle && readyToClaim.length === 0 && this.revisionStoriesQueued.length === 0 && this.parkedStoryIndices.size === 0 && (this.failedStoryIndices.size > 0 || this.blockedStoryIndices.size > 0) && completions.length > 0) {
+    if (allIdle && readyToClaim.length === 0 && this.revisionStoriesQueued.length === 0 && (this.failedStoryIndices.size > 0 || this.blockedStoryIndices.size > 0) && completions.length > 0) {
       const failedList = Array.from(this.failedStoryIndices).sort((a, b) => a - b);
       const blockedList = Array.from(this.blockedStoryIndices).sort((a, b) => a - b);
       console.log(`[Epic] Partial completion — ${completions.length} stories done, ${failedList.length} failed, ${blockedList.length} blocked`);
@@ -3164,7 +3121,8 @@ export class EpicCoordinator {
 
         const gateResult = await integrationFixer.fix(
           prNumber,
-          this.config.qualityGateCommands!
+          this.config.qualityGateCommands!,
+          this.config.maxFixRetries ?? 3
         );
 
         if (gateResult.decision === "passed") {
@@ -4070,7 +4028,7 @@ Begin your review now. Start by fetching the code changes.`;
 
   /**
    * Merge a PR with CI verification and automatic fix attempts.
-   * Polls PR CI, launches CI Fix Agent on failures, retries up to maxCiFixRetries.
+   * Polls PR CI, launches CI Fix Agent on failures, retries up to config.maxFixRetries.
    * Always merges eventually (never blocks the run).
    */
   private async mergeWithCIVerification(
@@ -4079,7 +4037,7 @@ Begin your review now. Start by fetching the code changes.`;
     mergeLabel: string
   ): Promise<{ merged: boolean }> {
     // If CI fix retries disabled, merge directly
-    if (this.maxCiFixRetries <= 0) {
+    if ((this.config.maxFixRetries ?? 3) <= 0) {
       await this.postLog(`Merging PR #${prNumber} (${mergeLabel}, CI check disabled)...`);
       const merged = await this.gitOps.mergePR(prUrl, prNumber);
       return { merged };
@@ -4098,10 +4056,11 @@ Begin your review now. Start by fetching the code changes.`;
     }
 
     // CI failed — enter fix loop
-    while (this.ciFixRetryCount < this.maxCiFixRetries) {
+    const maxRetries = this.config.maxFixRetries ?? 3;
+    while (this.ciFixRetryCount < maxRetries) {
       this.ciFixRetryCount++;
       await this.postLog(
-        `[CI Gate] CI failed on PR #${prNumber} — launching CI Fix Agent (attempt ${this.ciFixRetryCount}/${this.maxCiFixRetries})`
+        `[CI Gate] CI failed on PR #${prNumber} — launching CI Fix Agent (attempt ${this.ciFixRetryCount}/${maxRetries})`
       );
 
       const fixer = new InlineCIFixer(this.config, this.gitOps.getRepoPath());

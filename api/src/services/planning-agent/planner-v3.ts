@@ -106,8 +106,8 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
   // -------------------------------------------------------------------------
   await addPlanningLog(task.id, `📦 Phase 0: Extracting structured inventory from PRD...`);
 
-  // Get org settings for calibration (use default 0.4 if not available)
-  const calibrationMultiplier = (task.organization as { storyCalibrationMultiplier?: number })?.storyCalibrationMultiplier ?? 0.4;
+  // Get org settings for calibration
+  const calibrationMultiplier = (task.organization as { storyCalibrationMultiplier?: number })?.storyCalibrationMultiplier;
   await addPlanningLog(task.id, `🎚️ Story calibration multiplier: ${calibrationMultiplier}`);
 
   const { inventory, dualScore, legacyScore } = await calculateComplexityV3(

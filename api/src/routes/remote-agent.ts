@@ -591,7 +591,7 @@ router.post(
       const rawPlan = parseExecutionPlan(rawOutput);
 
       // Server-side story cap safety net: truncate to org's maxStories
-      const calibration = org.storyCalibrationMultiplier ?? 0.4;
+      const calibration = org.storyCalibrationMultiplier;
       const baseServerMax = Math.max(3, Math.round(20 * calibration));
       const isBuildPage = ((task.jiraFields ?? {}) as Record<string, unknown>).buildPage === true;
       const serverMaxStories = isBuildPage ? Math.max(baseServerMax, 20) : baseServerMax;
@@ -1087,7 +1087,7 @@ router.get(
         blockOnTypeErrors: org.blockOnTypeErrors ?? false,
         blockOnTestFailures: org.blockOnTestFailures ?? false,
         autoFixEnabled: org.autoFixEnabled ?? false,
-        autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
+        autoFixMaxIterations: org.autoFixMaxIterations,
       },
     });
   }),
@@ -1128,7 +1128,7 @@ router.get(
 
     // Calculate maxStories from org calibration multiplier
     // Formula: max(3, round(20 * multiplier)), default multiplier 0.4 → max 8 stories
-    const calibrationMultiplier = org.storyCalibrationMultiplier ?? 0.4;
+    const calibrationMultiplier = org.storyCalibrationMultiplier;
     // Prompt hint: always use base cap so LLM targets a reasonable number
     const maxStories = Math.max(3, Math.round(20 * calibrationMultiplier));
     // Truncation ceiling: PRD tasks get higher cap so valid stories aren't chopped
@@ -1398,7 +1398,7 @@ Rules:
 - suggestions = actionable improvements (empty array if none)
 - storyFeedback = per-step feedback (optional, only for steps that need changes)`;
 
-    const threshold = org.criticApprovalThreshold ?? 85;
+    const threshold = org.criticApprovalThreshold;
     const finalPrompt = CRITIC_PROMPT.replace(/\{\{THRESHOLD\}\}/g, String(threshold));
 
     res.json({

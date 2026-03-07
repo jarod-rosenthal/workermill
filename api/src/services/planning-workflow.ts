@@ -480,7 +480,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         progressCallback,
         skipCritic,
         streamProgressCallback,
-        task.organization?.maxTargetFiles ?? 15,
+        task.organization?.maxTargetFiles,
       );
     } finally {
       clearPlanningHeartbeat();

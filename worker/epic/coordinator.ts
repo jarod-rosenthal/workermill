@@ -4443,6 +4443,12 @@ Begin your review now. Start by fetching the code changes.`;
     // Clear completion state for affected stories only
     for (const idx of storiesToRevise) {
       this.completedStoryIndices.delete(idx);
+      this.locallyCompletedStoryIndices.delete(idx);
+    }
+
+    // Clear blocked-story log suppression so revision progress is visible
+    for (const idx of storiesToRevise) {
+      this.loggedBlockedStories.delete(idx);
     }
 
     // Queue only affected stories for re-execution, sorted by index (respects dependencies)

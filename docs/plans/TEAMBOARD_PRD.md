@@ -86,6 +86,69 @@ Tailwind v4 does NOT use `tailwind.config.ts` or `tailwind.config.js`. Configura
 }
 ```
 
+### NextAuth.js v5 Beta Export Pattern (WILL BREAK AUTH IF WRONG)
+
+NextAuth v5 uses a completely different initialization pattern than v4. You MUST use the `NextAuth()` function and destructure the exports:
+
+```typescript
+// lib/auth.ts — CORRECT (NextAuth v5 beta.25):
+import NextAuth from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+import { PrismaAdapter } from "@auth/prisma-adapter";
+import bcrypt from "bcrypt";
+import { prisma } from "./prisma";
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  adapter: PrismaAdapter(prisma),
+  session: { strategy: "jwt" },
+  providers: [
+    Credentials({
+      credentials: { email: {}, password: {} },
+      async authorize(credentials) {
+        const user = await prisma.user.findUnique({
+          where: { email: credentials.email as string },
+        });
+        if (!user) return null;
+        const valid = await bcrypt.compare(
+          credentials.password as string,
+          user.passwordHash
+        );
+        return valid ? { id: user.id, email: user.email, name: user.name } : null;
+      },
+    }),
+  ],
+  // ... callbacks for JWT/session
+});
+```
+
+```typescript
+// app/api/auth/[...nextauth]/route.ts — CORRECT:
+import { handlers } from "@/lib/auth";
+export const { GET, POST } = handlers;
+```
+
+```typescript
+// Any protected API route — CORRECT:
+import { auth } from "@/lib/auth";
+
+export async function GET() {
+  const session = await auth();
+  if (!session?.user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  // ...
+}
+```
+
+**WRONG patterns (v4 — DO NOT USE):**
+- `import { getServerSession } from "next-auth/next"` — does not exist in v5
+- `import { authOptions } from "@/lib/auth"` — v5 does not use `authOptions`
+- `import NextAuth from "next-auth/next"` — wrong import path for v5
+
+All API routes that check authentication MUST use `import { auth } from "@/lib/auth"` and call `const session = await auth()`. There is no other pattern.
+
+### Prisma `JsonValue` and TypeScript `any`
+
+The "no `any` types" rule has one exception: Prisma's `JsonValue` type requires `any` for JSON metadata fields. Use `// eslint-disable-next-line @typescript-eslint/no-explicit-any` on those specific lines. Do NOT replace with `Record<string, unknown>` — it causes Prisma type conflicts.
+
 ### Pinned Dependencies (DO NOT change)
 
 - `"next": "^15.1.0"` — NOT 14.x (14 has critical CVEs)
@@ -460,6 +523,38 @@ legacy-peer-deps=true
 ```
 React 19 peer dependency conflicts with `@testing-library/react` and other packages will cause `npm ci` and `npm install` to fail without this. Create this file in the scaffolding story BEFORE any `npm install`.
 
+### Required App Shell Files (WILL BREAK BUILD IF MISSING)
+
+Next.js requires `app/layout.tsx` and `app/page.tsx` to exist for `next build` to succeed. These MUST be created during project scaffolding — before any API routes or other code.
+
+```typescript
+// app/layout.tsx — minimal shell (scaffolding story):
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "TeamBoard",
+  description: "Kanban board for teams",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+```typescript
+// app/page.tsx — minimal placeholder (scaffolding story):
+export default function Home() {
+  return <main><h1>TeamBoard</h1></main>;
+}
+```
+
+These are replaced with full implementations in the frontend cards, but they MUST exist from story 0 so that `npm run build` passes for all backend stories.
+
 ### Quality Gates (pre-commit)
 ```
 npm run lint && npm run typecheck && npm run build && npm run test && npm audit --audit-level=high
@@ -539,3 +634,6 @@ Playwright tests against dev server + real PostgreSQL. `global-setup.ts` seeds d
 - Do NOT skip loading/empty/error states
 - Do NOT use instant state changes without animation
 - Do NOT claim completion without running `npm run typecheck && npm run build`
+- Do NOT use `getServerSession` or `authOptions` — NextAuth v5 uses `auth()` exported from `lib/auth.ts`
+- Do NOT omit `app/layout.tsx` or `app/page.tsx` from the scaffolding story — `next build` requires them
+- Do NOT replace Prisma `JsonValue` compatible `any` types with `Record<string, unknown>` — causes type conflicts

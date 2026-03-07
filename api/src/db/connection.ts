@@ -275,6 +275,7 @@ import { AddBlockerWaitTimeoutMinutes1742000000000 } from "./migrations/17420000
 import { AddIntegrationCheckStatus1742100000000 } from "./migrations/1742100000000-AddIntegrationCheckStatus.js";
 import { SplitPlanningMode1742200000000 } from "./migrations/1742200000000-SplitPlanningMode.js";
 import { AddCriticApprovalThreshold1742300000000 } from "./migrations/1742300000000-AddCriticApprovalThreshold.js";
+import { ConsolidateFixRetries1742400000000 } from "./migrations/1742400000000-ConsolidateFixRetries.js";
 import { logger } from "../utils/logger.js";
 import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
@@ -589,6 +590,7 @@ export const AppDataSource = new DataSource({
     AddIntegrationCheckStatus1742100000000,
     SplitPlanningMode1742200000000,
     AddCriticApprovalThreshold1742300000000,
+    ConsolidateFixRetries1742400000000,
   ],
   subscribers: [
     OrganizationEncryptionSubscriber,

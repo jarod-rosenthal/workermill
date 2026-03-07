@@ -672,11 +672,8 @@ export class Organization {
   @Column({ name: "blocker_auto_retry_enabled", type: "boolean", default: true })
   blockerAutoRetryEnabled: boolean;
 
-  @Column({ name: "quality_gate_max_retries", type: "int", default: 5 })
-  qualityGateMaxRetries: number;
-
-  @Column({ name: "max_ci_fix_retries", type: "int", default: 3 })
-  maxCiFixRetries: number;
+  @Column({ name: "max_fix_retries", type: "int", default: 3 })
+  maxFixRetries: number;
 
   @Column({ name: "blocker_wait_timeout_minutes", type: "int", default: 20 })
   blockerWaitTimeoutMinutes: number;

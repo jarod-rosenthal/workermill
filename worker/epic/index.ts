@@ -83,6 +83,7 @@ function loadConfig(): EpicConfig {
     ciWorkflowPath: process.env.CI_WORKFLOW_PATH || undefined,
     // Max parallel experts cap
     maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10),
+    maxFixRetries: process.env.MAX_FIX_RETRIES ? parseInt(process.env.MAX_FIX_RETRIES, 10) : undefined,
     // Intent Engineering — org guidelines from settings
     orgGuidelines: process.env.ORG_GUIDELINES || undefined,
     // Quality gate thresholds from organization settings
@@ -99,7 +100,6 @@ function loadResilienceConfig(): ResilienceConfig {
   return {
     blockerMaxAutoRetries: parseInt(process.env.BLOCKER_MAX_AUTO_RETRIES || "3", 10),
     blockerAutoRetryEnabled: process.env.BLOCKER_AUTO_RETRY_ENABLED !== "false",
-    qualityGateMaxRetries: parseInt(process.env.QUALITY_GATE_MAX_RETRIES || "5", 10),
     pushAfterCommit: process.env.PUSH_AFTER_COMMIT !== "false",
     gracefulShutdownEnabled: process.env.GRACEFUL_SHUTDOWN_ENABLED !== "false",
     selfReviewEnabled: process.env.SELF_REVIEW_ENABLED === "true",
@@ -136,7 +136,6 @@ async function main(): Promise<void> {
     console.log("  - File overlap gating: " + (resilience.fileOverlapGatingEnabled ?? true));
     console.log("  - Incremental rebase: " + (resilience.incrementalRebaseEnabled ?? true));
     console.log("  - Merge agent: " + (resilience.mergeAgentEnabled ?? false));
-    console.log("  - Quality gate max retries: " + resilience.qualityGateMaxRetries);
     console.log("Quality Gate Config:");
     console.log("  - Pre-commit gates: " + (config.qualityGateCommands ? config.qualityGateCommands.length + " configured" : "NONE"));
     console.log("  - CI workflow path: " + (config.ciWorkflowPath || "NONE"));

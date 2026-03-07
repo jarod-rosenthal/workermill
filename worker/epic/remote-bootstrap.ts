@@ -397,6 +397,7 @@ function loadConfig(repoDir: string, mainBranch: string): EpicConfig {
       : undefined,
     ciWorkflowPath: process.env.CI_WORKFLOW_PATH || undefined,
     maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10),
+    maxFixRetries: process.env.MAX_FIX_RETRIES ? parseInt(process.env.MAX_FIX_RETRIES, 10) : undefined,
     qualityThresholds: process.env.QUALITY_THRESHOLDS
       ? JSON.parse(process.env.QUALITY_THRESHOLDS)
       : undefined,
@@ -407,7 +408,6 @@ function loadResilienceConfig(): ResilienceConfig {
   return {
     blockerMaxAutoRetries: parseInt(process.env.BLOCKER_MAX_AUTO_RETRIES || "3", 10),
     blockerAutoRetryEnabled: process.env.BLOCKER_AUTO_RETRY_ENABLED !== "false",
-    qualityGateMaxRetries: parseInt(process.env.QUALITY_GATE_MAX_RETRIES || "5", 10),
     pushAfterCommit: process.env.PUSH_AFTER_COMMIT !== "false",
     gracefulShutdownEnabled: process.env.GRACEFUL_SHUTDOWN_ENABLED !== "false",
     selfReviewEnabled: process.env.SELF_REVIEW_ENABLED === "true",

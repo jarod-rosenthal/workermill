@@ -145,8 +145,6 @@ export interface StoryResult {
   postRebaseBaseSha?: string;
   /** Dependency branches that had merge conflicts (missing from worktree) */
   depConflicts?: string[];
-  /** Story parked for deferred retry — quality gate retries exhausted, waiting for siblings to finish */
-  parked?: boolean;
 }
 
 /**
@@ -215,6 +213,8 @@ export interface EpicConfig {
   useUnifiedClient?: boolean;
   /** Maximum number of expert subagents that can run in parallel */
   maxParallelExperts?: number;
+  /** Max retries for fix agents (integration fixer + CI fixer). From org settings. */
+  maxFixRetries?: number;
   /** Org-level AI guidelines for intent engineering */
   orgGuidelines?: string;
 }
@@ -344,8 +344,6 @@ export interface ResilienceConfig {
   blockerMaxAutoRetries: number;
   /** Whether auto-retry is enabled for fixable errors */
   blockerAutoRetryEnabled: boolean;
-  /** Maximum retries for quality gate failures (separate from general blocker retries) */
-  qualityGateMaxRetries: number;
   /** Push to remote after each agent commit */
   pushAfterCommit: boolean;
   /** Enable graceful shutdown on SIGTERM */

@@ -948,7 +948,7 @@ jobs:
 | Framework | Next.js, Node 22 |
 | Custom domain | \`teamboard.workermill.com\` (verified) |
 | Env vars | DATABASE_URL, DIRECT_DATABASE_URL, NEXTAUTH_SECRET, NEXTAUTH_URL, SEED_TOKEN |
-| Auto-deploy on push | Enabled via Vercel GitHub App |
+| Auto-deploy on push | **DISABLED during build** (see "Final Deployment" below) |
 
 ***REMOVED******REMOVED******REMOVED*** Neon PostgreSQL (pre-configured)
 
@@ -1085,6 +1085,23 @@ SEED_RESP=\$(curl -s -o /dev/null -w "%{http_code}" -X POST "\$URL/api/seed" \
 
 echo "PASS: All smoke tests passed"
 \`\`\`
+
+---
+
+***REMOVED******REMOVED*** Final Deployment
+
+Vercel auto-deploy is disabled during the build phase to prevent unnecessary deployments while workers push changes. The Vercel project has \\\`commandForIgnoringBuildStep\\\` set to \\\`exit 0\\\`, which skips all builds on push.
+
+After all tickets are merged to \\\`main\\\` and CI passes, the final deployment must be performed:
+
+1. **Remove the build skip** — clear \\\`commandForIgnoringBuildStep\\\` (set to \\\`null\\\`) via the Vercel dashboard (Project Settings > Git > Ignored Build Step) or the Vercel API
+2. **Trigger a production deploy** — push an empty commit (\\\`git commit --allow-empty -m "trigger deploy"\\\`) or click "Redeploy" in the Vercel dashboard
+3. **Run database migrations** — \\\`npx prisma migrate deploy\\\` against production (uses \\\`DIRECT_DATABASE_URL\\\`)
+4. **Seed production data** — \\\`POST https://teamboard.workermill.com/api/seed\\\` with \\\`Authorization: Bearer $SEED_TOKEN\\\`
+5. **Run the post-deploy smoke test** (see section above)
+6. **Verify acceptance criteria** — all production checks in the checklist below must pass
+
+Do NOT re-enable auto-deploy until all PRs are merged and the codebase is in a deployable state.
 
 ---
 

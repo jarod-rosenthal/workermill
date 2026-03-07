@@ -175,8 +175,7 @@ router.get("/", async (req: Request, res: Response) => {
       // Resilience Settings
       blockerMaxAutoRetries: org.blockerMaxAutoRetries,
       blockerAutoRetryEnabled: org.blockerAutoRetryEnabled,
-      qualityGateMaxRetries: org.qualityGateMaxRetries,
-      maxCiFixRetries: org.maxCiFixRetries,
+      maxFixRetries: org.maxFixRetries,
       blockerWaitTimeoutMinutes: org.blockerWaitTimeoutMinutes,
       pushAfterCommit: org.pushAfterCommit,
       gracefulShutdownEnabled: org.gracefulShutdownEnabled,
@@ -327,8 +326,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       // Resilience Settings
       blockerMaxAutoRetries,
       blockerAutoRetryEnabled,
-      qualityGateMaxRetries,
-      maxCiFixRetries,
+      maxFixRetries,
       blockerWaitTimeoutMinutes,
       pushAfterCommit,
       gracefulShutdownEnabled,
@@ -1152,22 +1150,13 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.blockerAutoRetryEnabled = blockerAutoRetryEnabled === true;
     }
 
-    if (qualityGateMaxRetries !== undefined) {
-      const maxRetries = parseInt(qualityGateMaxRetries, 10);
-      if (isNaN(maxRetries) || maxRetries < 1 || maxRetries > 20) {
-        res.status(400).json({ error: "qualityGateMaxRetries must be between 1 and 20" });
+    if (maxFixRetries !== undefined) {
+      const retries = parseInt(maxFixRetries, 10);
+      if (isNaN(retries) || retries < 1 || retries > 10) {
+        res.status(400).json({ error: "maxFixRetries must be between 1 and 10" });
         return;
       }
-      org.qualityGateMaxRetries = maxRetries;
-    }
-
-    if (maxCiFixRetries !== undefined) {
-      const retries = parseInt(maxCiFixRetries, 10);
-      if (isNaN(retries) || retries < 0 || retries > 10) {
-        res.status(400).json({ error: "maxCiFixRetries must be between 0 and 10" });
-        return;
-      }
-      org.maxCiFixRetries = retries;
+      org.maxFixRetries = retries;
     }
 
     if (blockerWaitTimeoutMinutes !== undefined) {
@@ -1373,8 +1362,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         // Resilience Settings
         blockerMaxAutoRetries: org.blockerMaxAutoRetries,
         blockerAutoRetryEnabled: org.blockerAutoRetryEnabled,
-        qualityGateMaxRetries: org.qualityGateMaxRetries,
-        maxCiFixRetries: org.maxCiFixRetries,
+        maxFixRetries: org.maxFixRetries,
         blockerWaitTimeoutMinutes: org.blockerWaitTimeoutMinutes,
         pushAfterCommit: org.pushAfterCommit,
         gracefulShutdownEnabled: org.gracefulShutdownEnabled,

@@ -189,7 +189,8 @@ export class InlineIntegrationFixer {
    */
   async fix(
     prNumber: number,
-    qualityGateCommands: NonNullable<EpicConfig["qualityGateCommands"]>
+    qualityGateCommands: NonNullable<EpicConfig["qualityGateCommands"]>,
+    maxRetries: number
   ): Promise<IntegrationFixResult> {
     this.allOutput = "";
 
@@ -201,13 +202,9 @@ export class InlineIntegrationFixer {
     await this.postLog(`PR #${prNumber} — checking ${qualityGateCommands.length} gate(s)`, "system");
 
     try {
-      // Install subdirectory deps first (same pattern as executor.ts)
       await this.installSubdirectoryDeps();
-
-      // Re-run tool installer if available (Docker containers only)
       this.runToolInstaller();
 
-      // Run all quality gate commands
       const gateResult = await this.runAllGates(qualityGateCommands);
 
       if (gateResult.passed) {
@@ -215,53 +212,68 @@ export class InlineIntegrationFixer {
         return { success: true, decision: "passed", summary: "All quality gates passed on consolidated branch" };
       }
 
-      // Gates failed — spawn fix agent
-      await this.postLog(`Integration gate failed: ${gateResult.failedCommand}`, "error");
-      await this.postLog("Spawning Integration Fix Agent...", "system");
+      // Gates failed — enter fix-retry loop
+      let lastOutput = gateResult.output;
+      let lastFailedCommand = gateResult.failedCommand;
+      const failureHistory: string[] = [lastOutput];
 
-      const fixResult = await this.runFixAgent(prNumber, qualityGateCommands, gateResult.output, gateResult.failedCommand);
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        await this.postLog(
+          `Integration gate failed: ${lastFailedCommand} — spawning fix agent (attempt ${attempt}/${maxRetries})`,
+          "error"
+        );
 
-      if (!fixResult.success) {
-        await this.postLog(`Fix agent failed: ${fixResult.error}`, "error");
-        return {
-          success: false,
-          decision: "unfixable",
-          summary: `Fix agent execution failed: ${fixResult.error}`,
-          error: fixResult.error,
-        };
-      }
+        const fixResult = await this.runFixAgent(
+          prNumber,
+          qualityGateCommands,
+          failureHistory.join("\n\n---\n\n"),
+          lastFailedCommand
+        );
 
-      const decision = this.parseDecision();
-      const summary = this.parseSummary();
+        if (!fixResult.success) {
+          await this.postLog(`Fix agent failed: ${fixResult.error}`, "error");
+          if (fixResult.error?.includes("unfixable")) {
+            return {
+              success: false,
+              decision: "unfixable",
+              summary: `Fix agent reports unfixable: ${fixResult.error}`,
+              error: fixResult.error,
+            };
+          }
+          continue;
+        }
 
-      // Verify gates pass after fix
-      if (decision === "fixed") {
-        await this.postLog("Verifying gates pass after fix...", "system");
+        // Verify gates pass after fix
+        await this.postLog(`Verifying gates after fix attempt ${attempt}...`, "system");
         const verifyResult = await this.runAllGates(qualityGateCommands);
-        if (!verifyResult.passed) {
-          await this.postLog("Gates still failing after fix attempt", "error");
+
+        if (verifyResult.passed) {
+          await this.postLog(`All gates passing after fix attempt ${attempt}`, "system");
           return {
-            success: false,
-            decision: "unfixable",
-            summary: `Fix agent reported fixed but gates still fail: ${verifyResult.failedCommand}`,
+            success: true,
+            decision: "fixed",
+            summary: this.parseSummary() || `Fixed on attempt ${attempt}/${maxRetries}`,
           };
         }
-        await this.postLog("Verified — all gates passing after fix", "system");
+
+        lastOutput = verifyResult.output;
+        lastFailedCommand = verifyResult.failedCommand;
+        failureHistory.push(lastOutput);
+        await this.postLog(
+          `Gates still failing after attempt ${attempt} — ${lastFailedCommand}`,
+          "error"
+        );
       }
 
-      await this.postLog(`Decision: ${decision}`, "system");
-      await this.postLog(`Summary: ${summary}`, "system");
-
+      // All retries exhausted
       return {
-        success: decision === "fixed",
-        decision,
-        summary,
+        success: false,
+        decision: "unfixable",
+        summary: `Integration gates still failing after ${maxRetries} fix attempts: ${lastFailedCommand}`,
       };
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       await this.postLog(`Integration fix failed: ${errorMessage}`, "error");
-
       return {
         success: false,
         decision: "unfixable",

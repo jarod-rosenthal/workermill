@@ -305,7 +305,7 @@ export async function authenticateApiKey(
     res.status(401).json({ error: "Invalid API key" });
   } catch (error) {
     logger.error("API key authentication error", { error });
-    res.status(401).json({ error: "Authentication failed" });
+    res.status(503).json({ error: "Authentication service temporarily unavailable" });
   }
 }
 

@@ -178,8 +178,7 @@ export default function Settings() {
     // Resilience defaults
     blockerMaxAutoRetries: 3,
     blockerAutoRetryEnabled: true,
-    qualityGateMaxRetries: 5,
-    maxCiFixRetries: 3,
+    maxFixRetries: 3,
     blockerWaitTimeoutMinutes: 20,
     pushAfterCommit: true,
     gracefulShutdownEnabled: true,
@@ -518,8 +517,7 @@ export default function Settings() {
         // Resilience settings
         blockerMaxAutoRetries: data.blockerMaxAutoRetries,
         blockerAutoRetryEnabled: data.blockerAutoRetryEnabled,
-        qualityGateMaxRetries: data.qualityGateMaxRetries ?? 5,
-        maxCiFixRetries: data.maxCiFixRetries ?? 3,
+        maxFixRetries: data.maxFixRetries ?? 3,
         blockerWaitTimeoutMinutes: data.blockerWaitTimeoutMinutes ?? 20,
         pushAfterCommit: data.pushAfterCommit,
         gracefulShutdownEnabled: data.gracefulShutdownEnabled,

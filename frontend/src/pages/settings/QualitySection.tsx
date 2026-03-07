@@ -375,39 +375,22 @@ export function QualitySection({
               </div>
             )}
 
-            {/* Quality Gate Max Retries */}
+            {/* Fix Agent Max Retries */}
             <div className="flex items-center justify-between mb-4 pt-4 border-t border-border">
               <div>
-                <span className="text-sm text-foreground">Quality Gate Max Retries</span>
-                <p className="text-xs text-muted-foreground">Max retries when pre-commit quality gates (lint, test, build) fail</p>
-              </div>
-              <input
-                type="number"
-                min="1"
-                max="20"
-                value={settings.qualityGateMaxRetries}
-                onChange={(e) => updateSetting("qualityGateMaxRetries", parseInt(e.target.value, 10) || 5)}
-                className="w-20 px-3 py-2 bg-background border border-border rounded-md text-foreground text-center"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground -mt-3 mb-4 ml-0">1-20 attempts before escalating as blocker (default: 5). Separate from general auto-retry — quality gate failures give experts more chances since each retry re-runs the full code generation.</p>
-
-            {/* CI Fix Max Retries */}
-            <div className="flex items-center justify-between mb-4 pt-4 border-t border-border">
-              <div>
-                <span className="text-sm text-foreground">CI Fix Max Retries</span>
-                <p className="text-xs text-muted-foreground">Max attempts for the CI Fix Agent to resolve PR CI failures before merging</p>
+                <span className="text-sm text-foreground">Fix Agent Max Retries</span>
+                <p className="text-xs text-muted-foreground">Max attempts for fix agents to resolve quality gate and CI failures</p>
               </div>
               <input
                 type="number"
                 min="0"
                 max="10"
-                value={settings.maxCiFixRetries}
-                onChange={(e) => updateSetting("maxCiFixRetries", parseInt(e.target.value, 10) || 3)}
+                value={settings.maxFixRetries}
+                onChange={(e) => updateSetting("maxFixRetries", parseInt(e.target.value, 10) || 3)}
                 className="w-20 px-3 py-2 bg-background border border-border rounded-md text-foreground text-center"
               />
             </div>
-            <p className="text-xs text-muted-foreground -mt-3 mb-4 ml-0">0-10 attempts (default: 3). After CI fails on a PR, the CI Fix Agent makes surgical fixes (unused imports, type errors, lint). Set to 0 to skip CI verification and merge immediately.</p>
+            <p className="text-xs text-muted-foreground -mt-3 mb-4 ml-0">0-10 attempts (default: 3). Used by both the integration fixer (pre-review, on merged branch) and the CI fixer (post-review). Set to 0 to skip fix attempts.</p>
 
             {/* Blocker Wait Timeout */}
             <div className="flex items-center justify-between mb-4 pt-4 border-t border-border">

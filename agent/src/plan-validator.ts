@@ -45,8 +45,8 @@ export async function getCriticConfig(apiMaxTargetFiles?: number): Promise<Criti
     const { data } = await api.get("/api/agent/critic-prompt", { params });
     cachedCriticConfig = {
       promptTemplate: data.promptTemplate,
-      approvalThreshold: data.approvalThreshold ?? 85,
-      maxTargetFiles: data.maxTargetFiles ?? apiMaxTargetFiles ?? 15,
+      approvalThreshold: data.approvalThreshold,
+      maxTargetFiles: data.maxTargetFiles ?? apiMaxTargetFiles,
       criticFeedbackTemplate: data.criticFeedbackTemplate,
       refinementFeedbackTemplate: data.refinementFeedbackTemplate,
     };

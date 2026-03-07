@@ -113,9 +113,9 @@ router.get("/", async (req: Request, res: Response) => {
       planningAgentModel: org.planningAgentModel || "",
       planningMode: org.planningMode || "strict",
       prdPlanningMode: org.prdPlanningMode || org.planningMode || "simplified",
-      criticApprovalThreshold: org.criticApprovalThreshold ?? 85,
+      criticApprovalThreshold: org.criticApprovalThreshold,
       maxTargetFiles: org.maxTargetFiles,
-      storyCalibrationMultiplier: org.storyCalibrationMultiplier ?? 0.4,
+      storyCalibrationMultiplier: org.storyCalibrationMultiplier,
       hasPlanningApiKey,
 
       // Email Settings
@@ -164,7 +164,7 @@ router.get("/", async (req: Request, res: Response) => {
 
       // Auto-Fix Settings
       autoFixEnabled: org.autoFixEnabled,
-      autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
+      autoFixMaxIterations: org.autoFixMaxIterations,
       autoFixStats: org.autoFixStats || {},
 
       // System Settings (read-only for reference)
@@ -191,16 +191,16 @@ router.get("/", async (req: Request, res: Response) => {
 
       // Codebase RAG Settings
       codebaseIndexingEnabled: org.codebaseIndexingEnabled,
-      codebaseMaxFilesPerRepo: org.codebaseMaxFilesPerRepo ?? 500,
-      codebaseMaxFileSizeKb: org.codebaseMaxFileSizeKb ?? 100,
-      codebaseExcludePatterns: org.codebaseExcludePatterns ?? [],
-      codebaseIncludeLanguages: org.codebaseIncludeLanguages ?? [],
+      codebaseMaxFilesPerRepo: org.codebaseMaxFilesPerRepo,
+      codebaseMaxFileSizeKb: org.codebaseMaxFileSizeKb,
+      codebaseExcludePatterns: org.codebaseExcludePatterns,
+      codebaseIncludeLanguages: org.codebaseIncludeLanguages,
       codebaseAutoIndexOnTask: org.codebaseAutoIndexOnTask,
-      codebaseMaxRetrievalChunks: org.codebaseMaxRetrievalChunks ?? 10,
+      codebaseMaxRetrievalChunks: org.codebaseMaxRetrievalChunks,
 
       // Spec Engineering Settings
-      specMinQualityScore: org.specMinQualityScore ?? 0,
-      specRequiredSections: org.specRequiredSections ?? null,
+      specMinQualityScore: org.specMinQualityScore,
+      specRequiredSections: org.specRequiredSections,
     });
   } catch (error) {
     logger.error("Error getting settings", { error });
@@ -1318,7 +1318,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         planningAgentModel: org.planningAgentModel,
         planningMode: org.planningMode,
         prdPlanningMode: org.prdPlanningMode,
-        criticApprovalThreshold: org.criticApprovalThreshold ?? 85,
+        criticApprovalThreshold: org.criticApprovalThreshold,
         maxTargetFiles: org.maxTargetFiles,
         storyCalibrationMultiplier: org.storyCalibrationMultiplier,
         costAlertThresholdUsd: org.costAlertThresholdUsd,
@@ -1357,7 +1357,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         qualityWebhookUrl: org.qualityWebhookUrl || null,
         qualityWebhookSecret: org.qualityWebhookSecret ? "***" : null,
         autoFixEnabled: org.autoFixEnabled,
-        autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
+        autoFixMaxIterations: org.autoFixMaxIterations,
         autoFixStats: org.autoFixStats || {},
         // Resilience Settings
         blockerMaxAutoRetries: org.blockerMaxAutoRetries,
@@ -1371,15 +1371,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         repositories: org.repositories || [],
         // Codebase RAG Settings
         codebaseIndexingEnabled: org.codebaseIndexingEnabled,
-        codebaseMaxFilesPerRepo: org.codebaseMaxFilesPerRepo ?? 500,
-        codebaseMaxFileSizeKb: org.codebaseMaxFileSizeKb ?? 100,
-        codebaseExcludePatterns: org.codebaseExcludePatterns ?? [],
-        codebaseIncludeLanguages: org.codebaseIncludeLanguages ?? [],
+        codebaseMaxFilesPerRepo: org.codebaseMaxFilesPerRepo,
+        codebaseMaxFileSizeKb: org.codebaseMaxFileSizeKb,
+        codebaseExcludePatterns: org.codebaseExcludePatterns,
+        codebaseIncludeLanguages: org.codebaseIncludeLanguages,
         codebaseAutoIndexOnTask: org.codebaseAutoIndexOnTask,
-        codebaseMaxRetrievalChunks: org.codebaseMaxRetrievalChunks ?? 10,
+        codebaseMaxRetrievalChunks: org.codebaseMaxRetrievalChunks,
         // Spec Engineering Settings
-        specMinQualityScore: org.specMinQualityScore ?? 0,
-        specRequiredSections: org.specRequiredSections ?? null,
+        specMinQualityScore: org.specMinQualityScore,
+        specRequiredSections: org.specRequiredSections,
       },
     });
   } catch (error) {

@@ -782,8 +782,8 @@ class LocalEpicSpawner {
       AWS_REGION: credentials?.customerAwsRegion || process.env.AWS_REGION || "",
 
       // Review and deployment settings (match ECS spawner logic)
-      MAX_REVIEW_REVISIONS: String(task.organization?.maxReviewRevisions ?? process.env.MAX_REVIEW_REVISIONS ?? 3),
-      MAX_PER_STORY_REVISIONS: String(task.organization?.maxPerStoryRevisions ?? process.env.MAX_PER_STORY_REVISIONS ?? 2),
+      MAX_REVIEW_REVISIONS: String(task.organization?.maxReviewRevisions),
+      MAX_PER_STORY_REVISIONS: String(task.organization?.maxPerStoryRevisions),
       REVIEW_ENABLED: task.organization?.autoReviewEnabled !== false ? "true" : "false",
       DEPLOYMENT_ENABLED: task.deploymentEnabled || task.parentTaskId ? "true" : "false",
       PRD_CHILD_TASK: task.parentTaskId ? "true" : "false",
@@ -820,7 +820,7 @@ class LocalEpicSpawner {
       // Resilience Settings (from org settings)
       BLOCKER_MAX_AUTO_RETRIES: String(task.organization?.blockerMaxAutoRetries),
       BLOCKER_AUTO_RETRY_ENABLED: task.organization?.blockerAutoRetryEnabled !== false ? "true" : "false",
-      MAX_FIX_RETRIES: String(task.organization?.maxFixRetries ?? 3),
+      MAX_FIX_RETRIES: String(task.organization?.maxFixRetries),
       BLOCKER_WAIT_TIMEOUT_MINUTES: String(task.organization?.blockerWaitTimeoutMinutes),
       QUALITY_GATE_COMMANDS: task.jiraFields?.qualityGates
         ? JSON.stringify(task.jiraFields.qualityGates)
@@ -842,7 +842,7 @@ class LocalEpicSpawner {
         blockOnTypeErrors: task.organization?.blockOnTypeErrors ?? false,
         blockOnTestFailures: task.organization?.blockOnTestFailures ?? false,
         autoFixEnabled: task.organization?.autoFixEnabled ?? false,
-        autoFixMaxIterations: task.organization?.autoFixMaxIterations ?? 3,
+        autoFixMaxIterations: task.organization?.autoFixMaxIterations,
       }),
     };
 

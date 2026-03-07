@@ -3146,7 +3146,7 @@ export class EpicCoordinator {
         const gateResult = await integrationFixer.fix(
           prNumber,
           this.config.qualityGateCommands!,
-          this.config.maxFixRetries ?? 3
+          this.config.maxFixRetries
         );
 
         if (gateResult.decision === "passed") {
@@ -3966,8 +3966,8 @@ Begin your review now. Start by fetching the code changes.`;
       ).trim();
       const headSha = prRes;
       if (!headSha) {
-        await this.postLog("[CI Gate] Could not determine PR head SHA — skipping CI check");
-        return { passed: true, pending: false };
+        await this.postLog("[CI Gate] Could not determine PR head SHA — treating as failed");
+        return { passed: false, pending: false, log: "Could not determine PR head SHA" };
       }
 
       // Poll check-runs every 15 seconds, up to 8 minutes
@@ -4040,20 +4040,20 @@ Begin your review now. Start by fetching the code changes.`;
         return { passed: false, pending: false, log: detailedLog };
       }
 
-      // Timeout with still-pending checks — don't block
-      await this.postLog("[CI Gate] CI checks still pending after 8 minutes — proceeding without waiting");
-      return { passed: true, pending: true };
+      // Timeout with still-pending checks — treat as failure
+      await this.postLog("[CI Gate] CI checks still pending after 8 minutes — treating as failed");
+      return { passed: false, pending: true, log: "CI checks did not complete within 8 minutes" };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      await this.postLog(`[CI Gate] Error polling CI: ${msg} — skipping CI check`);
-      return { passed: true, pending: false };
+      await this.postLog(`[CI Gate] Error polling CI: ${msg} — treating as failed`);
+      return { passed: false, pending: false, log: `CI polling error: ${msg}` };
     }
   }
 
   /**
    * Merge a PR with CI verification and automatic fix attempts.
    * Polls PR CI, launches CI Fix Agent on failures, retries up to config.maxFixRetries.
-   * Always merges eventually (never blocks the run).
+   * Blocks merge if CI fails and cannot be fixed.
    */
   private async mergeWithCIVerification(
     prUrl: string,
@@ -4061,7 +4061,7 @@ Begin your review now. Start by fetching the code changes.`;
     mergeLabel: string
   ): Promise<{ merged: boolean }> {
     // If CI fix retries disabled, merge directly
-    if ((this.config.maxFixRetries ?? 3) <= 0) {
+    if ((this.config.maxFixRetries) <= 0) {
       await this.postLog(`Merging PR ***REMOVED***${prNumber} (${mergeLabel}, CI check disabled)...`);
       const merged = await this.gitOps.mergePR(prUrl, prNumber);
       return { merged };
@@ -4080,7 +4080,7 @@ Begin your review now. Start by fetching the code changes.`;
     }
 
     // CI failed — enter fix loop
-    const maxRetries = this.config.maxFixRetries ?? 3;
+    const maxRetries = this.config.maxFixRetries;
     while (this.ciFixRetryCount < maxRetries) {
       this.ciFixRetryCount++;
       await this.postLog(
@@ -4116,12 +4116,11 @@ Begin your review now. Start by fetching the code changes.`;
       }
     }
 
-    // All retries exhausted or unfixable — merge anyway with warning
+    // All retries exhausted or unfixable — do NOT merge broken code
     await this.postLog(
-      `⚠️ CI still failing after ${this.ciFixRetryCount} fix attempt(s) — merging PR ***REMOVED***${prNumber} with warning`
+      `❌ CI still failing after ${this.ciFixRetryCount} fix attempt(s) — blocking merge of PR ***REMOVED***${prNumber}`
     );
-    const merged = await this.gitOps.mergePR(prUrl, prNumber);
-    return { merged };
+    return { merged: false };
   }
 
   /**

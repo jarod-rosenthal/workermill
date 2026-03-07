@@ -665,6 +665,7 @@ export async function spawnDockerWorker(
     STANDARD_SDK_MODE: task.standardSdkMode ? "true" : "false",
     MAX_REVIEW_REVISIONS: String(orgConfig.maxReviewRevisions),
     MAX_PER_STORY_REVISIONS: String(orgConfig.maxPerStoryRevisions),
+    MAX_FIX_RETRIES: String(orgConfig.maxFixRetries),
     CODEBASE_INDEXING_ENABLED:
       orgConfig.codebaseIndexingEnabled === true ? "true" : "false",
 
@@ -719,9 +720,9 @@ export async function spawnDockerWorker(
     BLOCKER_MAX_AUTO_RETRIES: String(orgConfig.blockerMaxAutoRetries),
     BLOCKER_AUTO_RETRY_ENABLED:
       orgConfig.blockerAutoRetryEnabled !== false ? "true" : "false",
-    QUALITY_GATE_MAX_RETRIES: String(orgConfig.qualityGateMaxRetries ?? 5),
-    MAX_CI_FIX_RETRIES: String(orgConfig.maxCiFixRetries ?? 3),
-    BLOCKER_WAIT_TIMEOUT_MINUTES: String(orgConfig.blockerWaitTimeoutMinutes ?? 20),
+    QUALITY_GATE_MAX_RETRIES: String(orgConfig.qualityGateMaxRetries),
+    MAX_CI_FIX_RETRIES: String(orgConfig.maxCiFixRetries),
+    BLOCKER_WAIT_TIMEOUT_MINUTES: String(orgConfig.blockerWaitTimeoutMinutes),
     PUSH_AFTER_COMMIT:
       orgConfig.pushAfterCommit !== false ? "true" : "false",
     GRACEFUL_SHUTDOWN_ENABLED:

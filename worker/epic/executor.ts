@@ -24,12 +24,10 @@ import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 import type { DecisionClient } from "./decision-client.js";
 import { createRetryableApi } from "./api-retry.js";
-import { InlineGateFixer } from "./inline-gate-fixer.js";
-import { InlineEscalationFixer } from "./inline-escalation-fixer.js";
-import { runGateCommand, isDockerDaemonReachable } from "./gate-utils.js";
+import { isDockerDaemonReachable } from "./gate-utils.js";
 import axios from "axios";
 import * as fs from "fs/promises";
-import { existsSync, readdirSync, statSync, readFileSync, appendFileSync } from "fs";
+import { existsSync } from "fs";
 import { execSync, execFileSync, spawn } from "child_process";
 
 // Persona and provider icons are loaded from the Decision API at runtime
@@ -85,17 +83,6 @@ export class StoryExecutor {
   private hasActiveUserFeedback = false;
   // Track auto-retry attempts per story (for blocker handling)
   private retryCountByStory: Map<number, number> = new Map();
-  // Track quality gate retry attempts per story (separate limit from general retries)
-  private qualityGateRetryCountByStory: Map<number, number> = new Map();
-  // Track quality gate error history per story (for detecting repeated identical failures)
-  private gateErrorHistoryByStory: Map<
-    number,
-    Array<{ attempt: number; errorSnippet: string; failedCommand: string; timestamp: number }>
-  > = new Map();
-  // Track worktree paths per story (for sibling rebase on retry)
-  private worktreePathByStory: Map<number, string> = new Map();
-  // Track stories that have already been through deferred retry (prevent infinite park-retry loops)
-  private deferredRetryUsedByStory: Set<number> = new Set();
   // Persona/provider icons loaded from Decision API
   private personaIcons: Record<string, string> = {};
   private providerIcons: Record<string, string> = {};
@@ -118,7 +105,6 @@ export class StoryExecutor {
     this.resilience = resilience || {
       blockerMaxAutoRetries: 3,
       blockerAutoRetryEnabled: true,
-      qualityGateMaxRetries: 5,
       pushAfterCommit: true,
       gracefulShutdownEnabled: true,
     };
@@ -158,22 +144,6 @@ export class StoryExecutor {
   setIcons(personaIcons: Record<string, string>, providerIcons: Record<string, string>): void {
     this.personaIcons = personaIcons;
     this.providerIcons = providerIcons;
-  }
-
-  /**
-   * Reset quality gate retry counter for a story (used by coordinator for deferred retry).
-   */
-  resetQualityGateRetries(storyIndex: number): void {
-    this.qualityGateRetryCountByStory.delete(storyIndex);
-    this.gateErrorHistoryByStory.delete(storyIndex);
-  }
-
-  /**
-   * Mark a story as having used its deferred retry (prevents infinite park-retry loops).
-   * Called by coordinator when unparking a story for deferred retry.
-   */
-  markDeferredRetryUsed(storyIndex: number): void {
-    this.deferredRetryUsedByStory.add(storyIndex);
   }
 
   /**
@@ -540,19 +510,6 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
   // ─── Quality Gate Methods ─────────────────────────────────────────────────
 
   /**
-   * Run a shell command with watch-mode detection. Uses `spawn` to monitor
-   * stdout in real-time. If the output matches watch-mode patterns (vitest/jest
-   * "Waiting for file changes"), kills the process after a 2s flush window
-   * instead of blocking for the full timeout.
-   */
-  private runGateCommand(
-    cmd: string,
-    cwd: string,
-    timeoutMs: number = 300_000
-  ): Promise<{ stdout: string; stderr: string }> {
-    return runGateCommand(cmd, cwd, timeoutMs);
-  }
-
   /**
    * Merge all completed sibling branches into the story worktree.
    * Reuses the incremental rebase pattern — non-blocking on conflicts.
@@ -564,9 +521,8 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
     worktreePath?: string
   ): Promise<void> {
     if (!(this.resilience.incrementalRebaseEnabled ?? true)) return;
-    // Resolve worktree path from parameter or stored map
-    const wtPath = worktreePath || this.worktreePathByStory.get(story.storyIndex);
-    if (!wtPath) return;
+    if (!worktreePath) return;
+    const wtPath = worktreePath;
 
     try {
       const allCompleted = await this.coordination.getAllCompletedBranchNames();
@@ -610,396 +566,6 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
         "system"
       );
     }
-  }
-
-  /**
-   * Get gate commands that match the changed files in a worktree.
-   * Only returns commands from gates whose trigger glob matches at least one changed file.
-   * This prevents backend-only stories from having to pass frontend gates (and vice versa).
-   */
-  private getTriggeredGateCommands(worktreePath: string): string[] {
-    const gates = this.config.qualityGateCommands;
-    if (!gates || gates.length === 0) return [];
-
-    let changedFiles: string[] = [];
-    try {
-      const mainBranch = this.gitOps.getMainBranch();
-      const branchDiffOutput = execSync(
-        `git diff --name-only origin/${mainBranch}...HEAD`,
-        { cwd: worktreePath, encoding: "utf-8", timeout: 10_000 },
-      ).trim();
-      const uncommittedOutput = execSync(`git diff --name-only HEAD`, {
-        cwd: worktreePath, encoding: "utf-8", timeout: 10_000,
-      }).trim();
-      const untrackedOutput = execSync(`git ls-files --others --exclude-standard`, {
-        cwd: worktreePath, encoding: "utf-8", timeout: 10_000,
-      }).trim();
-      changedFiles = [
-        ...new Set([
-          ...branchDiffOutput.split("\n"),
-          ...uncommittedOutput.split("\n"),
-          ...untrackedOutput.split("\n"),
-        ]),
-      ].filter(Boolean);
-    } catch {
-      changedFiles = ["*"];
-    }
-
-    const triggered: string[] = [];
-    for (const gate of gates) {
-      // Extract directory prefix from trigger glob: "src/**/*.ts" → "src",
-      // "**/*.{ts,tsx}" → "" (root), "api/**" → "api", "**" → ""
-      const triggerPrefix = gate.trigger
-        .replace(/\/?\*\*\/?.*$/g, "")  // strip from /**... or ** onward (handles "**", "api/**", "src/**/*.ts")
-        .replace(/\/?\*\..*/g, "")      // strip from /*.ext onward
-        .replace(/\/?\{[^}]*\}.*/g, "") // strip brace expansions
-        .replace(/\/?\*$/g, "")         // trailing lone *
-        .replace(/\/+$/, "");           // trailing slashes
-      const matches = changedFiles.some((f) => f === "*" || !triggerPrefix || f.startsWith(triggerPrefix));
-      if (!matches) continue;
-
-      // Skip if trigger directory doesn't exist
-      if (triggerPrefix && !existsSync(`${worktreePath}/${triggerPrefix}`)) continue;
-
-      // Skip Go gates if go.mod doesn't exist
-      const hasGoCommand = gate.commands.some((c) => /\bgo\s+(vet|test|build)\b/.test(c));
-      if (hasGoCommand) {
-        const goModPath = triggerPrefix
-          ? `${worktreePath}/${triggerPrefix}/go.mod`
-          : `${worktreePath}/go.mod`;
-        if (!existsSync(goModPath)) continue;
-      }
-
-      // Skip Node.js gates if package.json doesn't exist
-      const hasNpmCommand = gate.commands.some((c) => /\bnpm\s+run\b/.test(c));
-      if (hasNpmCommand) {
-        const pkgPath = triggerPrefix
-          ? `${worktreePath}/${triggerPrefix}/package.json`
-          : `${worktreePath}/package.json`;
-        if (!existsSync(pkgPath)) continue;
-      }
-
-      triggered.push(...gate.commands);
-    }
-    return triggered;
-  }
-
-  /**
-   * [GATE 1] Pre-commit quality gate — runs matching quality gate commands
-   * based on which files were changed. Commands come from board metadata
-   * (extracted from PRD by the decomposer).
-   */
-  private async runPreCommitGate(
-    worktreePath: string,
-    expert: ExpertPersona
-  ): Promise<{ passed: boolean; output: string; failedCommand: string }> {
-    const gates = this.config.qualityGateCommands;
-    if (!gates || gates.length === 0) {
-      return { passed: true, output: "", failedCommand: "" };
-    }
-
-    // Determine which files changed to match against gate triggers.
-    // Compare against the main branch (not HEAD) because Claude CLI agents
-    // typically commit their own changes — `git diff HEAD` would show nothing
-    // and silently skip all gates.
-    let changedFiles: string[] = [];
-    try {
-      const mainBranch = this.gitOps.getMainBranch();
-      // Files changed in this branch vs main (includes already-committed changes)
-      const branchDiffOutput = execSync(
-        `git diff --name-only origin/${mainBranch}...HEAD`,
-        { cwd: worktreePath, encoding: "utf-8", timeout: 10_000 },
-      ).trim();
-      // Also include uncommitted changes (staged + unstaged)
-      const uncommittedOutput = execSync(`git diff --name-only HEAD`, {
-        cwd: worktreePath,
-        encoding: "utf-8",
-        timeout: 10_000,
-      }).trim();
-      // Also include untracked files
-      const untrackedOutput = execSync(`git ls-files --others --exclude-standard`, {
-        cwd: worktreePath,
-        encoding: "utf-8",
-        timeout: 10_000,
-      }).trim();
-      changedFiles = [
-        ...new Set([
-          ...branchDiffOutput.split("\n"),
-          ...uncommittedOutput.split("\n"),
-          ...untrackedOutput.split("\n"),
-        ]),
-      ].filter(Boolean);
-    } catch {
-      // If we can't determine changed files, run all gates
-      changedFiles = ["*"];
-    }
-
-    await this.postLog(`[Quality Gate] Checking ${changedFiles.length} changed files against ${gates.length} gate(s)`, expert, "system");
-
-    // Re-run tool installer against the worktree so tools created by the expert
-    // (e.g., go.mod) trigger installation of Go, golangci-lint, etc.
-    // install-tools.sh is idempotent — skips already-installed tools.
-    // Only exists in Docker containers (/app/install-tools.sh), not native agent.
-    try {
-      await fs.access("/app/install-tools.sh");
-      execSync(`/app/install-tools.sh "${worktreePath}"`, {
-        cwd: worktreePath,
-        encoding: "utf-8",
-        timeout: 120_000, // 2 min max for tool installs
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-    } catch {
-      // Best effort — script missing (native agent) or install failed
-    }
-
-    // Install npm/yarn/pnpm dependencies in subdirectories that have package.json but no node_modules.
-    // Quality gate commands (eslint, tsc, jest) fail if deps aren't installed in newly-created subdirs.
-    try {
-      const dirsToInstall = this.findSubdirsNeedingInstall(worktreePath, 3);
-      for (const dir of dirsToInstall) {
-        const lockType = existsSync(`${dir}/pnpm-lock.yaml`)
-          ? "pnpm"
-          : existsSync(`${dir}/yarn.lock`)
-            ? "yarn"
-            : "npm";
-        const installCmd =
-          lockType === "pnpm"
-            ? "pnpm install --frozen-lockfile"
-            : lockType === "yarn"
-              ? "yarn install --frozen-lockfile"
-              : "npm ci";
-        const relDir = dir.replace(worktreePath + "/", "");
-        await this.postLog(`[Quality Gate] Installing deps in ${relDir} (${lockType})`, expert, "system");
-        try {
-          execSync(installCmd, {
-            cwd: dir,
-            encoding: "utf-8",
-            timeout: 120_000,
-            stdio: ["pipe", "pipe", "pipe"],
-          });
-        } catch {
-          // Non-fatal — the gate itself will surface the real error
-          await this.postLog(`[Quality Gate] Warning: dep install failed in ${relDir} — gate will report actual error`, expert, "system");
-        }
-      }
-    } catch {
-      // Scan itself failed — proceed without installing
-    }
-
-    for (const gate of gates) {
-      // Match files against trigger glob (simple prefix match)
-      // Extract directory prefix from trigger glob: "src/**/*.ts" → "src",
-      // "**/*.{ts,tsx}" → "" (root), "api/**" → "api", "**" → ""
-      const triggerPrefix = gate.trigger
-        .replace(/\/?\*\*\/?.*$/g, "")  // strip from /**... or ** onward (handles "**", "api/**", "src/**/*.ts")
-        .replace(/\/?\*\..*/g, "")      // strip from /*.ext onward
-        .replace(/\/?\{[^}]*\}.*/g, "") // strip brace expansions
-        .replace(/\/?\*$/g, "")         // trailing lone *
-        .replace(/\/+$/, "");           // trailing slashes
-      const matches = changedFiles.some((f) => f === "*" || !triggerPrefix || f.startsWith(triggerPrefix));
-
-      if (!matches) continue;
-
-      // Skip gate if the trigger directory doesn't exist in the worktree.
-      // This prevents failures like `cd web && npm run lint` when the `web/` directory
-      // hasn't been created yet by any story in this run.
-      if (triggerPrefix && !existsSync(`${worktreePath}/${triggerPrefix}`)) {
-        await this.postLog(`[Quality Gate] ⏭️ ${gate.name} gate skipped — directory '${triggerPrefix}/' does not exist yet`, expert, "system");
-        continue;
-      }
-
-      // For Go gates, skip if go.mod doesn't exist in the target directory.
-      // Prevents "directory prefix . does not contain main module" errors when a
-      // story creates files under api/ but hasn't initialized the Go module yet.
-      const hasGoCommand = gate.commands.some((c) => /\bgo\s+(vet|test|build)\b/.test(c));
-      if (hasGoCommand) {
-        const goModPath = triggerPrefix
-          ? `${worktreePath}/${triggerPrefix}/go.mod`
-          : `${worktreePath}/go.mod`;
-        if (!existsSync(goModPath)) {
-          await this.postLog(`[Quality Gate] ⏭️ ${gate.name} gate skipped — no go.mod found (Go module not initialized yet)`, expert, "system");
-          continue;
-        }
-      }
-
-      // For Node.js gates, skip if package.json doesn't exist in the target directory.
-      // Prevents failures like `cd web && npm run lint` when the directory exists
-      // but the Node.js project hasn't been initialized yet.
-      const hasNpmCommand = gate.commands.some((c) => /\bnpm\s+run\b/.test(c));
-      if (hasNpmCommand) {
-        const pkgPath = triggerPrefix
-          ? `${worktreePath}/${triggerPrefix}/package.json`
-          : `${worktreePath}/package.json`;
-        if (!existsSync(pkgPath)) {
-          await this.postLog(`[Quality Gate] ⏭️ ${gate.name} gate skipped — no package.json found (Node.js project not initialized yet)`, expert, "system");
-          continue;
-        }
-      }
-
-      await this.postLog(`[Quality Gate] Running ${gate.name} gate (${gate.commands.length} commands)`, expert, "system");
-
-      for (let cmd of gate.commands) {
-        // Fix common LLM mistake: gofmt doesn't support Go's "..." wildcard.
-        // Rewrite "gofmt -w ./api/..." → "gofmt -w ./api/" etc.
-        cmd = cmd.replace(/\bgofmt\b(.+?)\.\/([^\s]*)\.\.\./g, "gofmt$1./$2");
-
-        // Auto-fix step: attempt to fix trivially fixable issues before checking.
-        // This handles eslint --fix, gofmt, prettier, etc. Best-effort — failures are ignored.
-        const autoFixCmd = this.getAutoFixCommand(cmd);
-        if (autoFixCmd) {
-          try {
-            await this.runGateCommand(autoFixCmd, worktreePath, 120_000);
-            await this.postLog(`[Quality Gate] 🔧 Auto-fix: ${autoFixCmd}`, expert, "system");
-          } catch {
-            // Auto-fix failure is non-blocking — we'll catch real errors in the gate check
-          }
-        }
-
-        try {
-          const result = await this.runGateCommand(cmd, worktreePath, 300_000);
-          // runGateCommand resolves for both clean exits AND watch-mode kills.
-          // Check if this was a watch-mode kill where tests actually passed.
-          const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
-          const wasWatchMode = /waiting for file changes|press [hq] to/i.test(output);
-          if (wasWatchMode) {
-            // Verify tests actually passed before treating as success
-            const testsPassedPatterns = [
-              /Tests?\s+\d+\s+passed/i,
-              /Test Files?\s+\d+\s+passed/i,
-              /Test Suites?:\s+\d+\s+passed/i,
-            ];
-            if (testsPassedPatterns.some((p) => p.test(output)) && !/\d+\s+failed/i.test(output)) {
-              await this.postLog(`[Quality Gate] ✅ ${cmd} (tests passed — killed watch-mode process)`, expert, "system");
-            } else {
-              await this.postLog(`[Quality Gate] ❌ ${cmd}\n${output}`, expert, "error");
-              return { passed: false, output, failedCommand: cmd };
-            }
-          } else {
-            await this.postLog(`[Quality Gate] ✅ ${cmd}`, expert, "system");
-          }
-        } catch (error: unknown) {
-          const stderr =
-            error instanceof Error && "stderr" in error
-              ? String((error as { stderr: unknown }).stderr).slice(0, 2000)
-              : String(error).slice(0, 2000);
-          const stdout =
-            error instanceof Error && "stdout" in error
-              ? String((error as { stdout: unknown }).stdout).slice(0, 2000)
-              : "";
-          const output = [stdout, stderr].filter(Boolean).join("\n");
-
-          // "No test files found" is NOT a real failure — it means the test runner
-          // (Vitest, Jest, pytest) found zero test files. This is expected when a
-          // feature card runs before the CI card creates the first test file.
-          const noTestsPatterns = [
-            /no test files found/i,
-            /no tests found/i,
-            /no test suites found/i,
-            /no tests to run/i,
-            /collected 0 items/i, // pytest
-          ];
-          if (noTestsPatterns.some((p) => p.test(output))) {
-            await this.postLog(`[Quality Gate] ⏭️ ${cmd} — no test files yet, skipping`, expert, "system");
-            continue;
-          }
-
-          // npm audit failures on transitive dependencies are not fixable by the agent.
-          // Treat as a warning rather than a blocking failure — the agent can't patch
-          // upstream packages. Log the output so it's visible but don't fail the gate.
-          if (/\bnpm\s+audit\b/.test(cmd)) {
-            await this.postLog(`[Quality Gate] ⚠️ ${cmd} — vulnerabilities found (informational, not blocking)\n${output.slice(0, 500)}`, expert, "system");
-            continue;
-          }
-
-          await this.postLog(`[Quality Gate] ❌ ${cmd}\n${output}`, expert, "error");
-          return { passed: false, output, failedCommand: cmd };
-        }
-      }
-
-      await this.postLog(`[Quality Gate] ✅ ${gate.name} gate passed`, expert, "system");
-    }
-
-    return { passed: true, output: "", failedCommand: "" };
-  }
-
-  /**
-   * Recursively find subdirectories with package.json that need dep installation.
-   * Always includes directories with package.json — even if node_modules/ exists —
-   * because a partial node_modules (e.g. expert ran `npm install <pkg>` without
-   * devDependencies) causes gate tools like eslint to be missing.
-   * Skips node_modules and .git directories. Limits depth to avoid deep traversal.
-   */
-  private findSubdirsNeedingInstall(root: string, maxDepth: number): string[] {
-    const results: string[] = [];
-    const scan = (dir: string, depth: number) => {
-      if (depth > maxDepth) return;
-      let entries: string[];
-      try {
-        entries = readdirSync(dir);
-      } catch {
-        return;
-      }
-      for (const entry of entries) {
-        if (entry === "node_modules" || entry === ".git" || entry === ".next" || entry === "dist" || entry === "build") continue;
-        const full = `${dir}/${entry}`;
-        try {
-          if (!statSync(full).isDirectory()) continue;
-        } catch {
-          continue;
-        }
-        if (existsSync(`${full}/package.json`)) {
-          results.push(full);
-        }
-        scan(full, depth + 1);
-      }
-    };
-    scan(root, 1);
-    return results;
-  }
-
-  /**
-   * Ensure .gitignore contains node_modules before fixer agents run.
-   * Fixer agents execute raw `git add -A` which bypasses GitOps.commitChangesInWorktree
-   * and its ensureNodeModulesIgnored safeguard. Without this, npm install creates
-   * 100MB+ SWC binaries that get committed and rejected by GitHub's pre-receive hook.
-   */
-  private ensureGitignoreBeforeFixer(worktreePath: string): void {
-    const gitignorePath = `${worktreePath}/.gitignore`;
-    try {
-      const content = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
-      const lines = content.split("\n").map(l => l.trim());
-      if (!lines.some(line => line === "node_modules" || line === "node_modules/")) {
-        appendFileSync(gitignorePath, "\nnode_modules\n");
-      }
-    } catch {
-      // Best effort
-    }
-  }
-
-  /**
-   * Derive an auto-fix command from a gate check command.
-   * Returns null if no auto-fix is available for the given command.
-   */
-  private getAutoFixCommand(cmd: string): string | null {
-    // ESLint: "npm run lint" or "npx eslint" → add --fix
-    // Match "cd <dir> && npm run lint" or bare "npm run lint"
-    if (/\bnpm run lint\b/.test(cmd) && !cmd.includes("--fix")) {
-      return cmd.replace(/\bnpm run lint\b/, "npm run lint -- --fix");
-    }
-    if (/\bnpx eslint\b/.test(cmd) && !cmd.includes("--fix")) {
-      return cmd + " --fix";
-    }
-    // Prettier: "npx prettier --check" → "--write"
-    if (/\bprettier\b.*--check\b/.test(cmd)) {
-      return cmd.replace("--check", "--write");
-    }
-    // gofmt: already writes in-place with -w, but "gofmt -l" (list) → "gofmt -w"
-    if (/\bgofmt\s+-l\b/.test(cmd)) {
-      return cmd.replace("-l", "-w");
-    }
-    // Python: autopep8/black/ruff format — these are already fixers, skip
-    // Go vet, go test, go build — no auto-fix available
-    return null;
   }
 
   /**
@@ -1227,89 +793,6 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
     // Timeout with no pipelines at all — graceful skip
     await this.postLog(`[CI Gate] ⏭️ No Bitbucket Pipeline triggered on this branch — CI will be verified on the PR`, expert, "system");
     return { passed: true, summary: "No pipeline triggered on branch — skipped" };
-  }
-
-  /**
-   * Shared finalization path for inline fixers (gate fixer, escalation agent).
-   * Commits remaining changes, pushes, runs CI gate, validates, posts completion.
-   */
-  private async finalizeFixerResult(
-    story: ReadyStory,
-    expert: ExpertPersona,
-    worktreePath: string,
-    branchName: string,
-    storyResult: StoryResult,
-    commentSuffix: string,
-  ): Promise<StoryResult> {
-    // Commit any remaining uncommitted changes (safety net)
-    const uncommitted = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
-    if (uncommitted.length > 0) {
-      const commitMsg = `fix: ${commentSuffix} — Story ${story.storyIndex} - ${story.title}`;
-      await this.gitOps.commitChangesInWorktree(worktreePath, commitMsg, expert, story.storyIndex);
-    }
-
-    // Push branch
-    await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
-    await this.postLog(`Pushed branch to remote after ${commentSuffix}`, expert, "system");
-
-    // Post-push CI gate (if configured)
-    if (this.config.ciWorkflowPath && !this.config.qualityGateBypass) {
-      const ciResult = await this.runPostPushCIGate(worktreePath, branchName, expert);
-      if (!ciResult.passed && !ciResult.infrastructureFailure) {
-        throw new Error(`Post-push CI failed:\n${ciResult.log || ciResult.summary}`);
-      }
-    }
-
-    // Get changed files and validate
-    const changedFiles = await this.gitOps.getFilesChangedVsMainInWorktree(worktreePath);
-    const validation = await this.validateStoryCompletion(story, worktreePath, changedFiles, expert);
-
-    // Post completion to coordination feed (non-fatal — story already passed all gates and validation)
-    // Truncate filesModified to stay under the 10KB coordination metadata limit
-    const maxFixerFiles = 100;
-    const truncatedFixerFiles = changedFiles.length > maxFixerFiles
-      ? [...changedFiles.slice(0, maxFixerFiles), `... and ${changedFiles.length - maxFixerFiles} more files`]
-      : changedFiles;
-    try {
-      const currentRevision = await this.coordination.getCurrentRevision();
-      await this.coordination.postCompletion(
-        story.storyIndex,
-        story.title,
-        expert,
-        this.config.parentTaskId,
-        {
-          branchName,
-          filesModified: truncatedFixerFiles,
-          revisionNumber: currentRevision,
-          validation: {
-            passed: validation.valid,
-            issues: validation.issues,
-            criteriaMetRatio: `${validation.acceptanceCriteriaMet}/${validation.acceptanceCriteriaTotal}`,
-          },
-        }
-      );
-    } catch (err) {
-      console.error(`[Executor] Failed to post completion for story ${story.storyIndex} (non-fatal):`, err instanceof Error ? err.message : err);
-    }
-
-    try {
-      await this.ticketOps.postComment(
-        `**${story.title}** — completed by ${expert} (${commentSuffix})\n\n${changedFiles.length} file${changedFiles.length !== 1 ? "s" : ""} changed.`
-      );
-    } catch (err) {
-      console.error(`[Executor] Failed to post ticket comment for story ${story.storyIndex} (non-fatal):`, err instanceof Error ? err.message : err);
-    }
-
-    storyResult.success = true;
-    storyResult.filesModified = changedFiles;
-    storyResult.branchName = branchName;
-    storyResult.worktreePath = worktreePath;
-    this.worktreePathByStory.delete(story.storyIndex);
-
-    console.log("[Executor] Story " + story.storyIndex + " completed successfully (" + commentSuffix + ")");
-    await this.postLog(`${story.title} — completed!`, expert, "system");
-
-    return storyResult;
   }
 
   private async validateStoryCompletion(
@@ -1571,8 +1054,6 @@ If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
       storyResult.worktreePath = worktreePath;
       // Notify coordinator immediately so graceful shutdown can save work
       this.onWorktreeCreated?.(story.storyIndex, worktreePath, branchName);
-      // Track worktree path for sibling rebase on quality gate retry
-      this.worktreePathByStory.set(story.storyIndex, worktreePath);
       await this.postLog(`Created branch: ${branchName}`, expert, "system");
       await this.postLog(`Worktree: ${worktreePath}`, expert, "system");
 
@@ -1739,16 +1220,6 @@ ${parts.join("\n\n")}
         await this.runSelfReview(story, expert, worktreePath, currentChanges, acceptanceCriteria);
       }
 
-      // 4c. [GATE 1] Pre-commit quality gate — run matching quality gate commands
-      // Skip if quality gates are disabled at the org level (qualityGateEnabled)
-      const gatesEnabled = this.config.qualityThresholds?.qualityGateEnabled !== false;
-      if (this.config.qualityGateCommands && !this.config.qualityGateBypass && gatesEnabled) {
-        const gateResult = await this.runPreCommitGate(worktreePath, expert);
-        if (!gateResult.passed) {
-          throw new Error(`Pre-commit quality gate failed (${gateResult.failedCommand}):\n${gateResult.output}`);
-        }
-      }
-
       // 5. Commit any uncommitted changes in worktree (if agent left changes unstaged/uncommitted)
       const uncommittedFiles = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
       if (uncommittedFiles.length > 0) {
@@ -1799,28 +1270,6 @@ ${parts.join("\n\n")}
         await this.postLog(`Pushed branch to remote anyway`, expert, "system");
       } else {
         await this.postLog(`No changes to push (branch is up-to-date with main)`, expert, "system");
-      }
-
-      // 6b. [GATE 2] Post-push CI verification — wait for CI green if workflow exists
-      if (this.config.ciWorkflowPath && !this.config.qualityGateBypass && hasCommits) {
-        const ciResult = await this.runPostPushCIGate(worktreePath, branchName!, expert);
-        if (!ciResult.passed) {
-          if (ciResult.infrastructureFailure) {
-            await this.postLog(`CI infrastructure failure: ${ciResult.summary} — escalating as blocker`, expert, "system");
-            // Don't throw — infra failures are not the expert's fault, escalate but continue
-            const sessionId = `${expert}-story-${story.storyIndex}`;
-            await this.coordination.postContext(
-              "blocker",
-              `CI infrastructure failure on ${story.title}: ${ciResult.summary}`,
-              expert,
-              this.config.parentTaskId,
-              { storyIndex: story.storyIndex, ciInfraFailure: true },
-              sessionId
-            );
-          } else {
-            throw new Error(`Post-push CI failed:\n${ciResult.log || ciResult.summary}`);
-          }
-        }
       }
 
       // 6a. VALIDATION: Verify story completion before marking done
@@ -1883,204 +1332,10 @@ ${parts.join("\n\n")}
 
       console.log("[Executor] Story " + story.storyIndex + " completed successfully");
       await this.postLog(`${story.title} — completed!`, expert, "system");
-      // Clean up worktree path tracking (no longer needed for retry rebase)
-      this.worktreePathByStory.delete(story.storyIndex);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[Executor] Story " + story.storyIndex + " failed:", errorMessage);
       await this.postLog(`${story.title} — FAILED: ${errorMessage}`, expert, "error");
-
-      // Quality gate failures use their own separate retry counter and limit
-      const isQualityGateError = errorMessage.startsWith("Pre-commit quality gate failed") || errorMessage.startsWith("Post-push CI failed");
-      if (isQualityGateError) {
-        const gateRetryCount = this.qualityGateRetryCountByStory.get(story.storyIndex) ?? 0;
-        const gateMaxRetries = this.resilience.qualityGateMaxRetries;
-        console.log(`[Executor] Quality gate failure — retry ${gateRetryCount + 1}/${gateMaxRetries}`);
-
-        if (gateRetryCount < gateMaxRetries) {
-          this.qualityGateRetryCountByStory.set(story.storyIndex, gateRetryCount + 1);
-
-          // Record error in gate history for repeated-failure detection
-          const history = this.gateErrorHistoryByStory.get(story.storyIndex) ?? [];
-          const failedCmdMatch = errorMessage.match(/\(([^)]+)\):/);
-          const failedCmd = failedCmdMatch?.[1] ?? "unknown";
-          history.push({
-            attempt: gateRetryCount + 1,
-            errorSnippet: errorMessage.slice(0, 1500),
-            failedCommand: failedCmd,
-            timestamp: Date.now(),
-          });
-          this.gateErrorHistoryByStory.set(story.storyIndex, history);
-
-          // Detect repeated identical failures (same command + same error pattern 2+ times in a row)
-          const isRepeatedFailure =
-            history.length >= 2 &&
-            history
-              .slice(-2)
-              .every(
-                (h) =>
-                  h.failedCommand === failedCmd &&
-                  h.errorSnippet.slice(0, 200) === errorMessage.slice(0, 200)
-              );
-
-          // Re-merge sibling branches BEFORE any retry so agent has latest code from other experts
-          await this.rebaseSiblingBranches(story, expert);
-
-          const isPreCommitGate = errorMessage.startsWith("Pre-commit quality gate failed");
-          const worktreePath = this.worktreePathByStory.get(story.storyIndex);
-
-          // Ensure .gitignore has node_modules before fixer agents run `git add -A`
-          // (prevents 100MB+ SWC binaries from being committed and rejected by GitHub)
-          if (isPreCommitGate && worktreePath) {
-            this.ensureGitignoreBeforeFixer(worktreePath);
-          }
-
-          // After 2+ identical failures, escalate to full-context escalation agent
-          // This agent sees: story requirements, full error history, coordination context,
-          // and works in the existing worktree with authority to rewrite the approach entirely.
-          if (isRepeatedFailure && history.length >= 2 && isPreCommitGate && worktreePath && this.config.qualityGateCommands) {
-            await this.postLog(
-              `[Quality Gate] Same error ${history.length} times — spawning escalation agent with full context`,
-              expert,
-              "system"
-            );
-
-            // Gather coordination context so escalation agent sees what siblings built
-            const coordinationContext = await this.coordination.getContextsByTypes([
-              "completion", "decision", "file_created", "file_modified",
-            ]);
-
-            const triggeredCommands = this.getTriggeredGateCommands(worktreePath);
-            const gateCommands = failedCmd !== "unknown"
-              ? [failedCmd, ...triggeredCommands.filter((c) => c !== failedCmd)]
-              : triggeredCommands;
-
-            const escalationFixer = new InlineEscalationFixer(
-              this.config,
-              worktreePath,
-              story,
-              gateCommands,
-              expert,
-              history,
-              coordinationContext,
-            );
-            const escalationResult = await escalationFixer.run();
-
-            if (escalationResult.success) {
-              await this.postLog(
-                `[Quality Gate] Escalation agent succeeded — finalizing story`,
-                expert,
-                "system"
-              );
-              return this.finalizeFixerResult(story, expert, worktreePath, branchName!, storyResult, "escalation rewrite");
-            }
-
-            await this.postLog(
-              `[Quality Gate] Escalation agent could not fix: ${escalationResult.summary}`,
-              expert,
-              "system"
-            );
-            // Fall through to park/escalate logic below
-          } else if (isPreCommitGate && worktreePath && this.config.qualityGateCommands) {
-            // Use InlineGateFixer for surgical fix instead of re-executing entire story
-            await this.postLog(
-              `[Quality Gate] Retry ${gateRetryCount + 1}/${gateMaxRetries} — spawning inline gate fixer`,
-              expert,
-              "system"
-            );
-
-            // Extract the specific failed command from the error message for targeted fixing
-            // Error format: "Pre-commit quality gate failed (cmd):\n..."
-            // Pass all gate commands for verification (fixer re-runs all to confirm fix doesn't break others)
-            const triggeredCommands = this.getTriggeredGateCommands(worktreePath);
-            const gateCommands = failedCmd !== "unknown"
-              ? [failedCmd, ...triggeredCommands.filter((c) => c !== failedCmd)]
-              : triggeredCommands;
-            const fixer = new InlineGateFixer(
-              this.config,
-              worktreePath,
-              errorMessage,
-              gateCommands,
-              expert,
-              history.length > 0 ? history : undefined
-            );
-            const fixResult = await fixer.run();
-
-            if (fixResult.success) {
-              await this.postLog(
-                `[Quality Gate] Inline gate fixer succeeded — finalizing story`,
-                expert,
-                "system"
-              );
-              return this.finalizeFixerResult(story, expert, worktreePath!, branchName!, storyResult, "quality gate fix");
-            }
-
-            await this.postLog(
-              `[Quality Gate] Inline gate fixer could not fix: ${fixResult.summary}`,
-              expert,
-              "system"
-            );
-            // Fall through to park/escalate logic below
-          } else {
-            // Post-push CI failures or missing worktree — fall back to full re-execution
-            await this.postLog(
-              `[Quality Gate] Retry ${gateRetryCount + 1}/${gateMaxRetries} — feeding error back to expert`,
-              expert,
-              "system"
-            );
-            const fixFeedback = `## QUALITY GATE FAILED — FIX REQUIRED\n\nYour code did not pass the quality gate. Fix the errors below and try again.\n\n${errorMessage}`;
-            return this.executeStory(story, expert, totalStories, fixFeedback);
-          }
-        }
-
-        // Gate retries exhausted — park for deferred retry or escalate
-        if (!this.deferredRetryUsedByStory.has(story.storyIndex)) {
-          // First exhaustion: park the story for deferred retry after siblings complete
-          await this.postLog(
-            `[Quality Gate] All ${gateMaxRetries} retries exhausted — parking story for deferred retry after siblings complete`,
-            expert,
-            "system"
-          );
-          await this.coordination.postContext(
-            "warning",
-            `Story ${story.storyIndex} parked — quality gate failed after ${gateMaxRetries} retries. Will retry after all siblings complete.`,
-            expert,
-            this.config.parentTaskId,
-            { storyIndex: story.storyIndex, messageType: "story_parked", errorMessage: errorMessage.slice(0, 500) },
-            `${expert}-story-${story.storyIndex}`
-          );
-
-          storyResult.error = errorMessage;
-          storyResult.parked = true;
-          return storyResult;
-        }
-
-        // Deferred retry also failed — escalate as blocker
-        await this.postLog(
-          `[Quality Gate] All ${gateMaxRetries} retries exhausted (deferred retry also failed) — escalating as blocker`,
-          expert,
-          "system"
-        );
-        await this.coordination.postBlocker(
-          "Quality gate failed after " + gateMaxRetries + " retries (including deferred retry): " + errorMessage.slice(0, 500),
-          expert,
-          this.config.parentTaskId,
-          undefined,
-          story.storyIndex,
-          {
-            storyTitle: story.title,
-            errorCategory: "quality_gate",
-            isFixable: false,
-            affectedFiles: [],
-            autoRetryAttempts: gateMaxRetries,
-            maxAutoRetries: gateMaxRetries,
-            escalationReason: `Quality gate failed after ${gateMaxRetries} retries (including deferred retry)`,
-          }
-        );
-
-        storyResult.error = errorMessage;
-        return storyResult;
-      }
 
       // Classify the error via Decision API to determine if it's auto-fixable
       const result = await this.decisionClient.classifyError({ errorOutput: errorMessage });

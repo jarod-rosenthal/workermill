@@ -2002,10 +2002,13 @@ export class EpicCoordinator {
       }
     }
 
-    const storiesToProcess = [...this.revisionStoriesQueued];
-    this.revisionStoriesQueued = [];  // Clear queue
+    // Safe dequeue: filter in-place instead of clear-then-re-add.
+    // The old pattern (copy → clear → re-add) could silently drop stories
+    // if any code path failed to re-add them, causing checkMissionComplete
+    // to fire prematurely with missing stories.
+    const dispatched: number[] = [];
 
-    for (const story of storiesToProcess) {
+    for (const story of this.revisionStoriesQueued) {
       // Check if story's dependencies are all completed
       if (story.dependencies && story.dependencies.length > 0) {
         const unmetDeps = story.dependencies.filter(
@@ -2018,40 +2021,34 @@ export class EpicCoordinator {
             );
             this.loggedBlockedStories.add(story.storyIndex);
           }
-          // Re-queue if dependencies not met
-          this.revisionStoriesQueued.push(story);
-          continue;
+          continue; // stays in queue
         }
       }
 
       // Check for mutex conflicts with running stories
       if (this.hasMutexConflict(story)) {
-        // Re-queue if mutex conflict
-        this.revisionStoriesQueued.push(story);
-        continue;
+        continue; // stays in queue
       }
 
       // Check for file-overlap conflicts with running stories
       if (this.hasFileOverlap(story)) {
-        // Re-queue if file overlap
-        this.revisionStoriesQueued.push(story);
-        continue;
+        continue; // stays in queue
       }
 
       // Find matching expert
       const expertPersona = matchPersonaToExpert(story.persona);
       if (!expertPersona) {
-        console.log("[Epic] No expert match for revision story persona: " + story.persona);
-        continue;
+        continue; // stays in queue
       }
 
       // Check if expert is available
       const expertState = this.expertStates.get(expertPersona);
       if (!expertState || expertState.status !== "idle") {
-        // Re-queue if expert is busy
-        this.revisionStoriesQueued.push(story);
-        continue;
+        continue; // stays in queue
       }
+
+      // All checks passed — dispatch this story
+      dispatched.push(story.storyIndex);
 
       console.log(`[Epic] ${expertPersona} executing revision for story ${story.storyIndex}`);
 
@@ -2078,6 +2075,13 @@ export class EpicCoordinator {
 
       // Fire-and-forget: expert executes revision story in parallel
       this.executeStoryAsync(story, expertPersona, this.totalStories, revisionFeedback || undefined);
+    }
+
+    // Remove only dispatched stories from the queue
+    if (dispatched.length > 0) {
+      this.revisionStoriesQueued = this.revisionStoriesQueued.filter(
+        (s) => !dispatched.includes(s.storyIndex)
+      );
     }
   }
 

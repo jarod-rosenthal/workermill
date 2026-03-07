@@ -37,6 +37,8 @@ import { writeFileSync, unlinkSync, existsSync, readFileSync } from "fs";
 import { runQualityVerification, postQualityMetrics, type QualityMetrics } from "./quality-runner.js";
 import type { EvaluateQualityResponse } from "./decision-client.js";
 import { runAutoFixWithTracking, formatAutoFixResult, type QualityGateResult as AutoFixQualityGateResult } from "./auto-fix-agent.js";
+import { runAgent, type AgentResult } from "./agent-sdk.js";
+import { loadRepoContext } from "./gate-utils.js";
 
 /**
  * Personas excluded from question routing (Tier 2/3 fallback).
@@ -2939,9 +2941,23 @@ export class EpicCoordinator {
               capturedQualityMetrics = updatedMetrics;
               await postQualityMetrics(this.config.apiBaseUrl, this.config.orgApiKey, this.config.parentTaskId, updatedMetrics);
             } else {
-              // Auto-fix failed — fall through to existing failure path
-              console.log("[Epic] Auto-fix could not resolve all quality issues");
-              this.postDashboardLog(`Auto-fix incomplete — ${autoFixResult.issuesRemaining.length} issue(s) remain`);
+              // Shell auto-fix couldn't resolve — escalate to Claude agent
+              console.log("[Epic] Shell auto-fix incomplete — escalating to Claude agent...");
+              this.postDashboardLog("Shell auto-fix incomplete — spawning Claude fix agent...");
+
+              const agentFixed = await this.runQualityFixAgent(repoPath, autoFixResult.issuesRemaining);
+              if (agentFixed) {
+                autoFixSucceeded = true;
+
+                execSync(`git -C "${repoPath}" add -A && git -C "${repoPath}" commit -m "fix: auto-fix quality gate issues" --no-verify || true`);
+
+                const updatedMetrics = await runQualityVerification(repoPath);
+                capturedQualityMetrics = updatedMetrics;
+                await postQualityMetrics(this.config.apiBaseUrl, this.config.orgApiKey, this.config.parentTaskId, updatedMetrics);
+              } else {
+                console.log("[Epic] Claude fix agent could not resolve all quality issues");
+                this.postDashboardLog(`Auto-fix incomplete — ${autoFixResult.issuesRemaining.length} issue(s) remain`);
+              }
             }
           }
 
@@ -4420,6 +4436,135 @@ Begin your review now. Start by fetching the code changes.`;
       .sort((a, b) => a.storyIndex - b.storyIndex);
 
     console.log(`[Epic] Revision triggered. ${this.revisionStoriesQueued.length} stories queued for re-execution.`);
+  }
+
+  /**
+   * Spawn a Claude agent to fix quality gate failures that shell commands couldn't resolve.
+   * Uses the same agent SDK as InlineIntegrationFixer / InlineCIFixer.
+   */
+  private async runQualityFixAgent(repoPath: string, issuesRemaining: string[]): Promise<boolean> {
+    // Capture fresh tsc/lint/test output so the agent sees real errors
+    let errorOutput = "";
+    try {
+      execSync("npx tsc --noEmit 2>&1", { cwd: repoPath, encoding: "utf-8", timeout: 120_000 });
+    } catch (e: unknown) {
+      const err = e as { stdout?: string; stderr?: string };
+      errorOutput += (err.stdout || "") + "\n" + (err.stderr || "");
+    }
+    try {
+      execSync("npx eslint . --ext .ts,.tsx,.js,.jsx 2>&1", { cwd: repoPath, encoding: "utf-8", timeout: 120_000 });
+    } catch (e: unknown) {
+      const err = e as { stdout?: string; stderr?: string };
+      errorOutput += "\n" + (err.stdout || "") + "\n" + (err.stderr || "");
+    }
+
+    if (!errorOutput.trim()) {
+      errorOutput = issuesRemaining.join("\n");
+    }
+
+    const maxLen = 8 * 1024;
+    const truncated = errorOutput.length > maxLen
+      ? errorOutput.substring(errorOutput.length - maxLen)
+      : errorOutput;
+
+    const repoContext = loadRepoContext(repoPath);
+    const repoContextSection = repoContext
+      ? `\n***REMOVED******REMOVED******REMOVED*** Repository Context\n\n${repoContext}\n`
+      : "";
+
+    const prompt = `***REMOVED******REMOVED*** Quality Gate Failures
+
+**Repository:** ${this.config.targetRepo}
+${repoContextSection}
+***REMOVED******REMOVED******REMOVED*** Error Output
+
+\`\`\`
+${truncated}
+\`\`\`
+
+***REMOVED******REMOVED******REMOVED*** Instructions
+
+The code has quality gate failures (TypeScript errors, lint errors, or test failures) that need fixing.
+
+1. Read the errors carefully and fix ALL of them
+2. Run \`npx tsc --noEmit\` to verify type errors are resolved
+3. Run \`npx eslint . --ext .ts,.tsx,.js,.jsx\` to verify lint errors are resolved
+4. Do NOT refactor beyond what's needed to pass quality gates
+5. Do NOT change language versions, framework versions, or dependency versions
+6. Commit with message "fix: resolve quality gate issues"`;
+
+    const systemPrompt = `You are a Quality Fix Agent. Fix ALL quality gate failures in the codebase. You have full access to read and edit files.
+
+***REMOVED******REMOVED*** Rules
+- Fix EVERY error, not just the first
+- Run verification commands after fixing to confirm
+- Do NOT refactor beyond what's needed
+- Do NOT change language or dependency versions
+- **NEVER change framework or dependency major versions**
+
+***REMOVED******REMOVED*** Communication Style
+Write in a professional, direct tone. Do NOT open with filler words or pleasantries.`;
+
+    const model = process.env.MANAGER_MODEL || this.config.model || "";
+
+    try {
+      const result: AgentResult = await runAgent(this.config, {
+        prompt,
+        expertConfig: {
+          persona: "qa_engineer" as const,
+          description: "Quality fix specialist",
+          systemPrompt,
+          tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
+          model,
+          specialties: ["testing", "quality"],
+          maxTurns: 20,
+        },
+        repoPath,
+        storyId: `quality-fix-${this.config.parentTaskId}`,
+        onMessage: (msg) => {
+          if (msg.type === "text" && msg.content && msg.content.length > 20) {
+            this.postLog(msg.content);
+          } else if (msg.type === "tool_use" && msg.toolName) {
+            const input = msg.toolInput;
+            let toolMsg = `Tool: ${msg.toolName}`;
+            if (input?.command) toolMsg += ` -> ${String(input.command).substring(0, 500)}`;
+            else if (input?.file_path) toolMsg += ` -> ${input.file_path}`;
+            this.postLog(toolMsg);
+          }
+        },
+      });
+
+      if (!result.success) {
+        console.log(`[Epic] Quality fix agent failed: ${result.error}`);
+        return false;
+      }
+
+      // Verify quality actually passes now
+      const metrics = await runQualityVerification(repoPath);
+      const evalResult = await this.decisionClient.evaluateQuality({
+        metrics: {
+          qualityScore: metrics.qualityScore,
+          typeErrors: metrics.typeErrors > 0,
+          testFailures: metrics.testsFailed > 0,
+          testCoveragePercent: metrics.coverageLines || undefined,
+          securityVulnsHigh: metrics.securityHigh,
+        },
+        qualityGateEnabled: true,
+        storyDescription: this.config.jiraRequirements || undefined,
+      });
+
+      if (evalResult.pass) {
+        console.log("[Epic] Quality fix agent resolved all issues");
+        this.postDashboardLog("Claude fix agent resolved all quality issues");
+        return true;
+      }
+
+      console.log(`[Epic] Quality fix agent ran but gate still fails: ${evalResult.blockers.join(", ")}`);
+      return false;
+    } catch (error) {
+      console.error("[Epic] Quality fix agent error:", error instanceof Error ? error.message : error);
+      return false;
+    }
   }
 
   /**

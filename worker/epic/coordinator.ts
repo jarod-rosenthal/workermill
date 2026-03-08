@@ -66,8 +66,8 @@ export class EpicCoordinator {
 
   // Inline review and deployment tracking
   private revisionCount: number = 0;
-  private maxRevisions: number = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
-  private maxPerStoryRevisions: number = parseInt(process.env.MAX_PER_STORY_REVISIONS || "1", 10);
+  private maxRevisions: number;
+  private maxPerStoryRevisions: number;
   private currentPrUrl: string | undefined;
   private currentPrNumber: number | undefined;
   private lastReviewFeedback: string | undefined;
@@ -134,6 +134,8 @@ export class EpicCoordinator {
 
   constructor(config: EpicConfig, resilience?: ResilienceConfig, decisionClient?: DecisionClient) {
     this.config = config;
+    this.maxRevisions = config.maxReviewRevisions;
+    this.maxPerStoryRevisions = config.maxPerStoryRevisions;
     this.coordination = new CoordinationClient(config);
 
     // Initialize decision client (uses safe fallbacks if API unavailable)

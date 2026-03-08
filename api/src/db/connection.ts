@@ -180,29 +180,29 @@ import { AddCodebaseSettings1705344000102 } from "./migrations/1705344000102-Add
 import { AddDirectiveUsageTracking1705344000110 } from "./migrations/1705344000110-AddDirectiveUsageTracking.js";
 import { CreateDirectiveExperiments1705344000111 } from "./migrations/1705344000111-CreateDirectiveExperiments.js";
 import { BackfillUserOrganizations1705344000120 } from "./migrations/1705344000120-BackfillUserOrganizations.js";
-import { SetSupportAdminForJarod1705344000121 } from "./migrations/1705344000121-SetSupportAdminForJarod.js";
-import { DiagnoseBradUser1705344000122 } from "./migrations/1705344000122-DiagnoseBradUser.js";
-import { DiagnoseBradOrg1705344000123 } from "./migrations/1705344000123-DiagnoseBradOrg.js";
-import { AddJarodToBradOrg1705344000124 } from "./migrations/1705344000124-AddJarodToBradOrg.js";
+import { SetSupportAdminForUser1705344000121 } from "./migrations/1705344000121-SetSupportAdminForUser.js";
+import { DiagnoseUser1705344000122 } from "./migrations/1705344000122-DiagnoseUser.js";
+import { DiagnoseOrg1705344000123 } from "./migrations/1705344000123-DiagnoseOrg.js";
+import { AddUserToOrg1705344000124 } from "./migrations/1705344000124-AddUserToOrg.js";
 import { DiagnoseOtherInvites1705344000125 } from "./migrations/1705344000125-DiagnoseOtherInvites.js";
 import { MigrateMevionUsers1705344000126 } from "./migrations/1705344000126-MigrateMevionUsers.js";
-import { MoveUsersToBradOrg1705344000127 } from "./migrations/1705344000127-MoveUsersToBradOrg.js";
+import { MoveUsersToOrg1705344000127 } from "./migrations/1705344000127-MoveUsersToOrg.js";
 import { CleanupStaleInvites1705344000128 } from "./migrations/1705344000128-CleanupStaleInvites.js";
-import { RenameBradOrgToMevion1705344000129 } from "./migrations/1705344000129-RenameBradOrgToMevion.js";
+import { RenameOrgToMevion1705344000129 } from "./migrations/1705344000129-RenameOrgToMevion.js";
 import { AddPlatformOrgFlag1705344000200 } from "./migrations/1705344000200-AddPlatformOrgFlag.js";
 import { AddBillingOrgId1705344000201 } from "./migrations/1705344000201-AddBillingOrgId.js";
 import { CreatePlatformOrg1705344000202 } from "./migrations/1705344000202-CreatePlatformOrg.js";
 import { FixPlatformOrgUuid1705344000203 } from "./migrations/1705344000203-FixPlatformOrgUuid.js";
 import { FixAuditLogsColumns1706688000000 } from "./migrations/1706688000000-FixAuditLogsColumns.js";
 import { AddIssueTrackerProvider1706688000001 } from "./migrations/1706688000001-AddIssueTrackerProvider.js";
-import { DeleteJarod120Invite1706688000002 } from "./migrations/1706688000002-DeleteJarod120Invite.js";
+import { DeleteTestInvite1706688000002 } from "./migrations/1706688000002-DeleteTestInvite.js";
 import { SyncUserOrgIdWithDefault1706688000003 } from "./migrations/1706688000003-SyncUserOrgIdWithDefault.js";
 import { ConfigurePlatformOrgSettings1706688000004 } from "./migrations/1706688000004-ConfigurePlatformOrgSettings.js";
 import { FixMevionUsersAndCleanupOrgs1706688000005 } from "./migrations/1706688000005-FixMevionUsersAndCleanupOrgs.js";
-import { CleanupJarod120User1706688000006 } from "./migrations/1706688000006-CleanupJarod120User.js";
-import { DeleteJarodTestUsers1706688000007 } from "./migrations/1706688000007-DeleteJarodTestUsers.js";
-import { DeleteJarodTestUsersAgain1706688000008 } from "./migrations/1706688000008-DeleteJarodTestUsersAgain.js";
-import { DeleteJarod120ForInviteTest1706688000009 } from "./migrations/1706688000009-DeleteJarod120ForInviteTest.js";
+import { CleanupTestUser1706688000006 } from "./migrations/1706688000006-CleanupTestUser.js";
+import { DeleteTestUsers1706688000007 } from "./migrations/1706688000007-DeleteTestUsers.js";
+import { DeleteTestUsersAgain1706688000008 } from "./migrations/1706688000008-DeleteTestUsersAgain.js";
+import { DeleteUserForInviteTest1706688000009 } from "./migrations/1706688000009-DeleteUserForInviteTest.js";
 import { AddDefaultBitbucketRepo1706688000010 } from "./migrations/1706688000010-AddDefaultBitbucketRepo.js";
 import { AddPersonaKeywordPattern1706688000011 } from "./migrations/1706688000011-AddPersonaKeywordPattern.js";
 import { UpdateDirectivesWithFullContent1706688000012 } from "./migrations/1706688000012-UpdateDirectivesWithFullContent.js";
@@ -495,29 +495,29 @@ export const AppDataSource = new DataSource({
     AddDirectiveUsageTracking1705344000110,
     CreateDirectiveExperiments1705344000111,
     BackfillUserOrganizations1705344000120,
-    SetSupportAdminForJarod1705344000121,
-    DiagnoseBradUser1705344000122,
-    DiagnoseBradOrg1705344000123,
-    AddJarodToBradOrg1705344000124,
+    SetSupportAdminForUser1705344000121,
+    DiagnoseUser1705344000122,
+    DiagnoseOrg1705344000123,
+    AddUserToOrg1705344000124,
     DiagnoseOtherInvites1705344000125,
     MigrateMevionUsers1705344000126,
-    MoveUsersToBradOrg1705344000127,
+    MoveUsersToOrg1705344000127,
     CleanupStaleInvites1705344000128,
-    RenameBradOrgToMevion1705344000129,
+    RenameOrgToMevion1705344000129,
     AddPlatformOrgFlag1705344000200,
     AddBillingOrgId1705344000201,
     CreatePlatformOrg1705344000202,
     FixPlatformOrgUuid1705344000203,
     FixAuditLogsColumns1706688000000,
     AddIssueTrackerProvider1706688000001,
-    DeleteJarod120Invite1706688000002,
+    DeleteTestInvite1706688000002,
     SyncUserOrgIdWithDefault1706688000003,
     ConfigurePlatformOrgSettings1706688000004,
     FixMevionUsersAndCleanupOrgs1706688000005,
-    CleanupJarod120User1706688000006,
-    DeleteJarodTestUsers1706688000007,
-    DeleteJarodTestUsersAgain1706688000008,
-    DeleteJarod120ForInviteTest1706688000009,
+    CleanupTestUser1706688000006,
+    DeleteTestUsers1706688000007,
+    DeleteTestUsersAgain1706688000008,
+    DeleteUserForInviteTest1706688000009,
     AddDefaultBitbucketRepo1706688000010,
     AddPersonaKeywordPattern1706688000011,
     UpdateDirectivesWithFullContent1706688000012,

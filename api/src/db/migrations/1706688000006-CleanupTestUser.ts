@@ -1,8 +1,7 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
-export class RenameBradOrgToMevion1705344000129 implements MigrationInterface {
-  name = "RenameBradOrgToMevion1705344000129";
-
+export class CleanupTestUser1706688000006 implements MigrationInterface {
+  name = "CleanupTestUser1706688000006";
   public async up(queryRunner: QueryRunner): Promise<void> {
     // No-op: customer-specific data migration removed for open-source release
   }

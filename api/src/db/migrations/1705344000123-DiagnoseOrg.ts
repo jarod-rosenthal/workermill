@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
-export class CleanupJarod120User1706688000006 implements MigrationInterface {
+export class DiagnoseOrg1705344000123 implements MigrationInterface {
+  name = "DiagnoseOrg1705344000123";
+
   public async up(queryRunner: QueryRunner): Promise<void> {
     // No-op: customer-specific data migration removed for open-source release
   }

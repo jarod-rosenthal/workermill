@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
-export class DeleteJarod120ForInviteTest1706688000009 implements MigrationInterface {
-  name = "DeleteJarod120ForInviteTest1706688000009";
+export class DeleteTestUsers1706688000007 implements MigrationInterface {
+  name = "DeleteTestUsers1706688000007";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     // No-op: customer-specific data migration removed for open-source release

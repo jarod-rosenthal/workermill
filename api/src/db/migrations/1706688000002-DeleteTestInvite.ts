@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
-export class DiagnoseBradOrg1705344000123 implements MigrationInterface {
-  name = "DiagnoseBradOrg1705344000123";
+export class DeleteTestInvite1706688000002 implements MigrationInterface {
+  name = "DeleteTestInvite1706688000002";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     // No-op: customer-specific data migration removed for open-source release

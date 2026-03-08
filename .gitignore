@@ -84,6 +84,10 @@ __pycache__/
 docs/plans/
 docs/launch/
 
+# Operations scripts (local only)
+bin/bastion
+scripts/diagnose-tenant.ts
+
 # Misc artifacts
 *.png
 swebench_predictions.jsonl

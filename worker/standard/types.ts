@@ -40,6 +40,10 @@ export interface StandardConfig {
   deploymentEnabled?: boolean;
   improvementEnabled?: boolean;
 
+  // Revision limits (from org settings, required)
+  maxReviewRevisions: number;
+  maxPerStoryRevisions: number;
+
   // Optional review feedback (for revision runs)
   reviewFeedback?: string;
 

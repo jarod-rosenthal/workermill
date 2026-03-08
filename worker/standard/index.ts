@@ -35,6 +35,8 @@ function loadConfig(): StandardConfig {
     "GITHUB_TOKEN",
     "TARGET_REPO",
     "WORKER_PERSONA",
+    "MAX_REVIEW_REVISIONS",
+    "MAX_PER_STORY_REVISIONS",
   ];
 
   const missing = required.filter((key) => !process.env[key]);
@@ -80,6 +82,8 @@ function loadConfig(): StandardConfig {
     reviewEnabled: process.env.REVIEW_ENABLED === "true",
     deploymentEnabled: process.env.DEPLOYMENT_ENABLED === "true",
     improvementEnabled: process.env.IMPROVEMENT_ENABLED === "true",
+    maxReviewRevisions: parseInt(process.env.MAX_REVIEW_REVISIONS, 10),
+    maxPerStoryRevisions: parseInt(process.env.MAX_PER_STORY_REVISIONS, 10),
     reviewFeedback: process.env.REVIEW_FEEDBACK || process.env.REVISION_FEEDBACK,
     targetFiles,
     referenceFiles,

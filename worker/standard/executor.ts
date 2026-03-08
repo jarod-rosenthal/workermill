@@ -48,6 +48,8 @@ export class StandardExecutor {
       deploymentEnabled: config.deploymentEnabled,
       improvementEnabled: config.improvementEnabled,
       reviewFeedback: config.reviewFeedback,
+      maxReviewRevisions: config.maxReviewRevisions,
+      maxPerStoryRevisions: config.maxPerStoryRevisions,
     };
 
     // Create axios instance for posting logs

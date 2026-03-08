@@ -1,4 +1,0 @@
-[DRY RUN] Simulated work for frontend_developer
-
-::context::decision::[DRY RUN] Simulated decision
-::context::completion::[DRY RUN] Simulated completion for frontend_developer

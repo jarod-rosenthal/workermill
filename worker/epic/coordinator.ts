@@ -1381,7 +1381,7 @@ export class EpicCoordinator {
     );
 
     // Wait for human resolution (timeout configurable, default 20 min)
-    const blockerTimeout = this.resilience.blockerWaitTimeoutMs ?? 20 * 60_000;
+    const blockerTimeout = this.resilience.blockerWaitTimeoutMs;
     console.log(`[Epic] Waiting for human resolution (timeout: ${Math.round(blockerTimeout / 60_000)}min)...`);
     const response = await this.blockerManager.waitForBlockerResponse(blocker, blockerTimeout);
 
@@ -3159,17 +3159,8 @@ export class EpicCoordinator {
         } else {
           this.postDashboardLog(`Integration gates failed (unfixable): ${gateResult.summary}`);
           await this.ticketOps.postComment(
-            `❌ Integration quality gates failed — PR not mergeable:\n\n${gateResult.summary}\n\n*Fix the issues and re-run.*`
+            `⚠️ Integration issues could not be auto-fixed:\n\n${gateResult.summary}\n\nTech Lead will assess.`
           );
-          await this.finishMission(
-            summaryParts,
-            prUrl,
-            prNumber,
-            "quality_gate_failed",
-            `Integration quality gates failed: ${gateResult.summary}`
-          );
-          this.missionActive = false;
-          return;
         }
       }
 
@@ -3979,9 +3970,9 @@ Begin your review now. Start by fetching the code changes.`;
         return { passed: false, pending: false, log: "Could not determine PR head SHA" };
       }
 
-      // Poll check-runs every 15 seconds, up to 8 minutes
-      const maxWaitMs = 8 * 60 * 1000;
-      const pollIntervalMs = 15 * 1000;
+      // Poll check-runs using org's blockerWaitTimeout setting
+      const maxWaitMs = this.resilience.blockerWaitTimeoutMs;
+      const pollIntervalMs = 30 * 1000;
       const noChecksGraceMs = 3 * 60 * 1000;
       const startTime = Date.now();
 
@@ -3996,8 +3987,8 @@ Begin your review now. Start by fetching the code changes.`;
 
         if (checks.total === 0) {
           if (Date.now() - startTime > noChecksGraceMs) {
-            await this.postLog("[CI Gate] No CI checks found after 3 minutes — proceeding without CI verification");
-            return { passed: true, pending: false };
+            await this.postLog("[CI Gate] No CI checks found after 3 minutes — treating as failed");
+            return { passed: false, pending: false, log: "No CI checks found after 3 minute grace period" };
           }
           // Wait for checks to appear
           await new Promise(r => setTimeout(r, pollIntervalMs));
@@ -4050,8 +4041,9 @@ Begin your review now. Start by fetching the code changes.`;
       }
 
       // Timeout with still-pending checks — treat as failure
-      await this.postLog("[CI Gate] CI checks still pending after 8 minutes — treating as failed");
-      return { passed: false, pending: true, log: "CI checks did not complete within 8 minutes" };
+      const waitMinutes = Math.round(maxWaitMs / 60_000);
+      await this.postLog(`[CI Gate] CI checks still pending after ${waitMinutes} minutes — treating as failed`);
+      return { passed: false, pending: true, log: `CI checks did not complete within ${waitMinutes} minutes` };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       await this.postLog(`[CI Gate] Error polling CI: ${msg} — treating as failed`);

@@ -215,6 +215,10 @@ export interface EpicConfig {
   maxParallelExperts?: number;
   /** Max retries for fix agents (integration fixer + CI fixer). From org settings. */
   maxFixRetries?: number;
+  /** Max review revisions for the full Epic PR. From org settings. */
+  maxReviewRevisions: number;
+  /** Max per-story review revisions before auto-approving. From org settings. */
+  maxPerStoryRevisions: number;
   /** Org-level AI guidelines for intent engineering */
   orgGuidelines?: string;
 }

@@ -48,6 +48,7 @@ export interface InlineReviewerConfig {
   googleApiKey?: string;
   openaiApiKey?: string;
   ollamaHost?: string;
+  maxReviewRevisions: number;
 }
 
 /**
@@ -191,7 +192,7 @@ export class InlineReviewerAiSdk {
     await this.postLog(`PR: ${prUrl}`, "system");
     await this.postLog(`Jira: ${this.config.jiraIssueKey}`, "system");
     await this.postLog(`Provider: ${this.config.provider} | Model: ${this.config.model}`, "system");
-    const maxRevisions = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
+    const maxRevisions = this.config.maxReviewRevisions;
     if (revisionCount > 0) {
       await this.postLog(`Revision attempt: ${revisionCount}/${maxRevisions}`, "system");
     }
@@ -386,7 +387,7 @@ export class InlineReviewerAiSdk {
     revisionCount: number,
     previousFeedback?: string
   ): string {
-    const maxRevisions = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
+    const maxRevisions = this.config.maxReviewRevisions;
     const revisionSection = previousFeedback
       ? `## Previous Review Feedback (Revision ${revisionCount}/${maxRevisions})
 This is a revision attempt. The previous code was reviewed and these issues were identified:

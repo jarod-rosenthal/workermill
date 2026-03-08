@@ -302,9 +302,8 @@ export class InlineReviewer {
     await this.postLog("Starting inline Tech Lead review", "system");
     await this.postLog(`PR: ${prUrl}`, "system");
     await this.postLog(`Jira: ${this.config.jiraIssueKey}`, "system");
-    const maxRevisions = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
     if (revisionCount > 0) {
-      await this.postLog(`Revision attempt: ${revisionCount}/${maxRevisions}`, "system");
+      await this.postLog(`Revision attempt: ${revisionCount}/${this.config.maxReviewRevisions}`, "system");
     }
 
     try {
@@ -420,7 +419,7 @@ export class InlineReviewer {
     storyCompletions?: Array<{ storyIndex: number; title: string; filesModified?: string[] }>,
     storyContext?: { storyIndex: number; title: string; description: string; totalStories: number; targetFiles?: string[] }
   ): string {
-    const maxRevisions = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
+    const maxRevisions = this.config.maxReviewRevisions;
     const revisionSection = previousFeedback
       ? `## Previous Review Feedback (Revision ${revisionCount}/${maxRevisions})
 This is a revision attempt. The previous code was reviewed and these issues were identified:
@@ -924,10 +923,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       `Starting per-story review for story ${storyIndex} (branch: ${branchName})`,
       "system"
     );
-    const maxPerStoryRevisions = parseInt(
-      process.env.MAX_PER_STORY_REVISIONS || "1",
-      10
-    );
+    const maxPerStoryRevisions = this.config.maxPerStoryRevisions;
     if (revisionCount > 0) {
       await this.postLog(
         `Revision attempt: ${revisionCount}/${maxPerStoryRevisions}`,
@@ -1067,10 +1063,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     baselineSha?: string,
     expertContext?: string
   ): string {
-    const maxPerStoryRevisions = parseInt(
-      process.env.MAX_PER_STORY_REVISIONS || "1",
-      10
-    );
+    const maxPerStoryRevisions = this.config.maxPerStoryRevisions;
     const revisionSection = previousFeedback
       ? `## Previous Review Feedback (Revision ${revisionCount}/${maxPerStoryRevisions})
 This is a revision attempt. The previous code was reviewed and these issues were identified:

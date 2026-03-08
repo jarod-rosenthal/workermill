@@ -6,7 +6,7 @@
  * Inputs (environment variables):
  * - DOCKERFILE_PATH: Optional. Path to Dockerfile (defaults to "./Dockerfile")
  * - CONTEXT_DIR: Optional. Build context directory (defaults to ".")
- * - IMAGE_NAME: Required. Full image name including registry (e.g., "<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend:latest")
+ * - IMAGE_NAME: Required. Full image name including registry (e.g., "<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/my-app/backend:latest")
  * - BUILD_ARGS: Optional. Comma-separated build args (e.g., "NODE_ENV=production,VERSION=1.0.0")
  * - AWS_REGION: Optional. AWS region for ECR auth (defaults to us-east-1)
  * - CACHE_REPO: Optional. ECR repo for layer caching

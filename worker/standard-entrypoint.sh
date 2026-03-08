@@ -27,7 +27,7 @@ fi
 echo "Task ID: ${TASK_ID}"
 echo "Persona: ${WORKER_PERSONA:-backend_developer}"
 echo "Model: ${WORKER_MODEL:-sonnet}"
-echo "Target Repo: ${TARGET_REPO:-bitbucket.org/oncallshift/oncallshift-api}"
+echo "Target Repo: ${TARGET_REPO:-not set}"
 
 ***REMOVED*** Set defaults
 export WORKER_PERSONA="${WORKER_PERSONA:-backend_developer}"

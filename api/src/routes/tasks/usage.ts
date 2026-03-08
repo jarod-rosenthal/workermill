@@ -19,7 +19,7 @@ router.use(requireCurrentTos);
  * Report token usage from worker (called by log-parser.cjs during execution)
  * Uses API key authentication (x-api-key header)
  *
- * IMPORTANT: This endpoint matches oncallshift's /api/v1/ai-worker-tasks/:id/usage
+ * IMPORTANT: This endpoint matches the usage reporting contract
  * - Uses idempotency check via usageReportedAt
  * - Sets tokens directly (not additive) - log-parser already uses Math.max()
  * - Calculates cost immediately

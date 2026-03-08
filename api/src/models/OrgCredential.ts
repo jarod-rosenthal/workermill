@@ -18,7 +18,7 @@ import {
  *   providers/anthropic, providers/openai, providers/google,
  *   github-token, github-reviewer-token, gitlab-token, bitbucket-token,
  *   jira-credentials, linear-credentials, teams-webhook, slack-webhook,
- *   oncallshift-credentials, aws-credentials, aws-role-config,
+ *   aws-credentials, aws-role-config,
  *   gcp-credentials, azure-credentials
  */
 @Entity("org_credentials")

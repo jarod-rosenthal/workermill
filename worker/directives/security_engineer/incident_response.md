@@ -72,14 +72,14 @@ aws logs describe-log-groups > incident_log_groups_$(date +%Y%m%d_%H%M%S).json
 
 ***REMOVED*** 2. Export relevant logs (don't delete anything)
 aws logs filter-log-events \
-  --log-group-name /ecs/workermill/api \
+  --log-group-name /ecs/my-app/api \
   --start-time $(date -d '24 hours ago' +%s000) \
   --end-time $(date +%s000) \
   > api_logs_$(date +%Y%m%d_%H%M%S).json
 
 ***REMOVED*** 3. Snapshot affected databases
 aws rds create-db-snapshot \
-  --db-instance-identifier workermill-db \
+  --db-instance-identifier my-app-db \
   --db-snapshot-identifier incident-$(date +%Y%m%d-%H%M%S)
 
 ***REMOVED*** 4. Capture network flow logs
@@ -132,8 +132,8 @@ aws wafv2 update-ip-set \
 
 ***REMOVED*** 3. Enable enhanced logging
 aws ecs update-service \
-  --cluster workermill-dev \
-  --service api \
+  --cluster my-cluster \
+  --service my-service \
   --enable-execute-command
 
 ***REMOVED*** 4. Scale up logging/monitoring resources if needed
@@ -237,7 +237,7 @@ git commit -m "security: patch CVE-2024-XXXXX"
 git push
 
 ***REMOVED*** 2. Rotate all potentially compromised credentials
-aws secretsmanager rotate-secret --secret-id workermill/dev/db-password
+aws secretsmanager rotate-secret --secret-id my-app/production/db-password
 
 ***REMOVED*** 3. Update security groups/IAM policies
 terraform apply -target=aws_security_group.api

@@ -15,7 +15,7 @@ import { encrypt } from "../../utils/encryption.js";
  *   providers/anthropic, providers/openai, providers/google,
  *   github-token, github-reviewer-token, gitlab-token, bitbucket-token,
  *   jira-credentials, linear-credentials, teams-webhook, slack-webhook,
- *   oncallshift-credentials, aws-credentials, aws-role-config,
+ *   aws-credentials, aws-role-config,
  *   gcp-credentials, azure-credentials
  */
 export class MigrateSecretsManagerToDb1740500000001
@@ -35,7 +35,6 @@ export class MigrateSecretsManagerToDb1740500000001
     "linear-credentials",
     "teams-webhook",
     "slack-webhook",
-    "oncallshift-credentials",
     "aws-credentials",
     "aws-role-config",
     "gcp-credentials",

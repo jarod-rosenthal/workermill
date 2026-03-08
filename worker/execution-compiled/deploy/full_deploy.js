@@ -3,8 +3,7 @@
 /**
  * Full-Stack Deployment Script for AI Agents
  *
- * A unified deployment script that handles backend and frontend deployments
- * for oncallshift (pagerduty-lite).
+ * A unified deployment script that handles backend and frontend deployments.
  *
  * Usage:
  *   node /app/execution-compiled/deploy/full_deploy.js [options]
@@ -18,14 +17,14 @@
  *   --skip-wait       Don't wait for ECS stabilization
  *   --dry-run         Show what would be deployed without actually deploying
  *
- * Environment variables (optional overrides):
+ * Environment variables (or set via .workermill/deploy.json):
  *   REPO_PATH                    Path to repository (default: /workspace/repo)
  *   AWS_REGION                   AWS region (default: us-east-1)
- *   ECS_CLUSTER                  ECS cluster name (default: pagerduty-lite-dev)
- *   ECS_SERVICE                  ECS service name (default: pagerduty-lite-dev-api)
- *   ECR_REPO                     ECR repository URL
- *   S3_BUCKET                    S3 bucket for frontend (default: oncallshift-dev-web)
- *   CLOUDFRONT_DISTRIBUTION_ID   CloudFront distribution (default: E7BQGD7BWAB8B)
+ *   ECS_CLUSTER                  ECS cluster name (required for backend)
+ *   ECS_SERVICE                  ECS service name (required for backend)
+ *   ECR_REPO                     ECR repository URL (required for backend)
+ *   S3_BUCKET                    S3 bucket for frontend (required for frontend)
+ *   CLOUDFRONT_DISTRIBUTION_ID   CloudFront distribution ID (required for frontend)
  *   FRONTEND_BUILD_DIR           Frontend build output (default: ./frontend/dist)
  *   IMAGE_TAG                    Override image tag (default: git commit hash)
  *
@@ -161,7 +160,7 @@ function parseArgs() {
 }
 function printHelp() {
     console.log(`
-Full-Stack Deployment Script for Oncallshift
+Full-Stack Deployment Script
 
 Usage: node /app/execution-compiled/deploy/full_deploy.js [options]
 
@@ -175,13 +174,14 @@ Options:
   --dry-run, -n     Show what would be deployed without deploying
   --help, -h        Show this help message
 
-Environment Variables:
+Environment Variables (or set via .workermill/deploy.json):
   REPO_PATH                    Repository path (default: /workspace/repo)
   AWS_REGION                   AWS region (default: us-east-1)
-  ECS_CLUSTER                  ECS cluster (default: pagerduty-lite-dev)
-  ECS_SERVICE                  ECS service (default: pagerduty-lite-dev-api)
-  S3_BUCKET                    S3 bucket (default: oncallshift-dev-web)
-  CLOUDFRONT_DISTRIBUTION_ID   CloudFront ID (default: E7BQGD7BWAB8B)
+  ECS_CLUSTER                  ECS cluster name (required for backend)
+  ECS_SERVICE                  ECS service name (required for backend)
+  ECR_REPO                     ECR repository URL (required for backend)
+  S3_BUCKET                    S3 bucket (required for frontend)
+  CLOUDFRONT_DISTRIBUTION_ID   CloudFront distribution ID (required for frontend)
   IMAGE_TAG                    Override image tag (default: git commit hash)
 
 Examples:
@@ -404,7 +404,7 @@ async function deployBackend(repoPath, awsCli, config) {
     // Build container
     if (!config.skipBuild) {
         console.error("\n[deploy] Building container with Kaniko...");
-        // Auto-detect Dockerfile (oncallshift uses Dockerfile.api, others use Dockerfile)
+        // Auto-detect Dockerfile (some projects use Dockerfile.api, others use Dockerfile)
         let dockerfilePath = "./Dockerfile";
         const possibleDockerfiles = ["Dockerfile.api", "Dockerfile", "dockerfile", "Dockerfile.backend"];
         for (const df of possibleDockerfiles) {

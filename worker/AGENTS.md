@@ -142,12 +142,12 @@ After fetching, view images with Claude Code's image reading capability.
 ***REMOVED******REMOVED******REMOVED******REMOVED*** `deploy/build_container.js`
 Build and push a container image using Kaniko (daemon-less, works in Fargate).
 ```bash
-IMAGE_NAME="<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend:v1" \
+IMAGE_NAME="<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/my-app/backend:v1" \
 DOCKERFILE_PATH="./Dockerfile" \
 CONTEXT_DIR="." \
 BUILD_ARGS="NODE_ENV=production,VERSION=1.0.0" \
 AWS_REGION="us-east-1" \
-CACHE_REPO="<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/oncallshift-cache" \
+CACHE_REPO="<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/my-app-cache" \
   node /app/execution-compiled/deploy/build_container.js
 ```
 | Env Var | Required | Description |
@@ -168,8 +168,8 @@ Deploy frontend to S3 and invalidate CloudFront cache.
 
 ```bash
 BUILD_DIR="./dist" \
-S3_BUCKET="oncallshift-dev-web" \
-CLOUDFRONT_DISTRIBUTION_ID="E7BQGD7BWAB8B" \
+S3_BUCKET="my-app-frontend" \
+CLOUDFRONT_DISTRIBUTION_ID="EXXXXXXXXXX" \
 AWS_REGION="us-east-1" \
   node /app/execution-compiled/deploy/deploy_frontend.js
 ```
@@ -185,9 +185,9 @@ AWS_REGION="us-east-1" \
 ***REMOVED******REMOVED******REMOVED******REMOVED*** `deploy/deploy_ecs.js`
 Deploy a new container image to an ECS service.
 ```bash
-CLUSTER_NAME="oncallshift-dev" \
-SERVICE_NAME="oncallshift-dev-backend" \
-IMAGE_URI="<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend:v1" \
+CLUSTER_NAME="my-cluster" \
+SERVICE_NAME="my-app-backend" \
+IMAGE_URI="<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/my-app/backend:v1" \
 AWS_REGION="us-east-1" \
   node /app/execution-compiled/deploy/deploy_ecs.js
 ```
@@ -201,7 +201,7 @@ AWS_REGION="us-east-1" \
 ***REMOVED******REMOVED******REMOVED******REMOVED*** `deploy/check_health.js`
 Check health endpoint after deployment.
 ```bash
-HEALTH_URL="https://api.oncallshift.com/health" \
+HEALTH_URL="https://api.example.com/health" \
 TIMEOUT_SECONDS="60" \
   node /app/execution-compiled/deploy/check_health.js
 ```
@@ -213,14 +213,14 @@ TIMEOUT_SECONDS="60" \
 ***REMOVED******REMOVED******REMOVED******REMOVED*** `deploy/rollback.js`
 Roll back an ECS service to its previous task definition.
 ```bash
-CLUSTER_NAME="oncallshift-dev" \
-SERVICE_NAME="oncallshift-dev-backend" \
+CLUSTER_NAME="my-cluster" \
+SERVICE_NAME="my-app-backend" \
 AWS_REGION="us-east-1" \
   node /app/execution-compiled/deploy/rollback.js
 ```
 
 ***REMOVED******REMOVED******REMOVED******REMOVED*** `deploy/full_deploy.js` (RECOMMENDED)
-**Unified deployment script for full-stack changes.** This is the preferred way to deploy oncallshift.
+**Unified deployment script for full-stack changes.** This is the preferred way to deploy.
 
 ```bash
 ***REMOVED*** Deploy everything (auto-detects what changed)
@@ -1008,7 +1008,7 @@ When you find yourself writing the same command multiple times, that's a sign it
 
 ---
 
-***REMOVED******REMOVED*** Oncallshift Deployment Configuration
+***REMOVED******REMOVED*** Deployment Configuration
 
 **RECOMMENDED: Use the unified deployment script for simplicity:**
 ```bash
@@ -1025,8 +1025,8 @@ node /app/execution-compiled/deploy/full_deploy.js --frontend  ***REMOVED*** S3+
 
 ***REMOVED******REMOVED******REMOVED*** Backend (ECS)
 ```bash
-CLUSTER_NAME="pagerduty-lite-dev" \
-SERVICE_NAME="pagerduty-lite-dev-api" \
+CLUSTER_NAME="my-cluster" \
+SERVICE_NAME="my-app-api" \
 AWS_REGION="us-east-1" \
   node /app/execution-compiled/deploy/deploy_ecs.js
 ```
@@ -1034,21 +1034,21 @@ AWS_REGION="us-east-1" \
 ***REMOVED******REMOVED******REMOVED*** Frontend (S3 + CloudFront)
 ```bash
 BUILD_DIR="./frontend/dist" \
-S3_BUCKET="oncallshift-dev-web" \
-CLOUDFRONT_DISTRIBUTION_ID="E7BQGD7BWAB8B" \
+S3_BUCKET="my-app-frontend" \
+CLOUDFRONT_DISTRIBUTION_ID="EXXXXXXXXXX" \
 AWS_REGION="us-east-1" \
   node /app/execution-compiled/deploy/deploy_frontend.js
 ```
 
 **To find the CloudFront distribution ID:**
 ```bash
-aws cloudfront list-distributions --query "DistributionList.Items[?contains(Aliases.Items, 'oncallshift') || contains(Origins.Items[].DomainName, 'pagerduty-lite')].{Id:Id,Domain:DomainName}" --output table
+aws cloudfront list-distributions --query "DistributionList.Items[].{Id:Id,Domain:DomainName,Aliases:Aliases.Items[0]}" --output table
 ```
 
 ***REMOVED******REMOVED******REMOVED*** Container Build (for backend changes)
 ```bash
-***REMOVED*** Note: oncallshift uses Dockerfile.api, not Dockerfile
-IMAGE_NAME="<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/pagerduty-lite-dev-api:$(git rev-parse --short HEAD)" \
+***REMOVED*** Note: some projects use Dockerfile.api instead of Dockerfile
+IMAGE_NAME="<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/my-app-api:$(git rev-parse --short HEAD)" \
 DOCKERFILE_PATH="./Dockerfile.api" \
 CONTEXT_DIR="." \
 AWS_REGION="us-east-1" \

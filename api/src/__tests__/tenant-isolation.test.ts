@@ -30,7 +30,7 @@ describe("Tenant Isolation", () => {
 
       // New format should match
       expect("/api/webhooks/acme-corp/jira").toMatch(newFormatRegex);
-      expect("/api/webhooks/oncallshift/linear").toMatch(newFormatRegex);
+      expect("/api/webhooks/acme-tools/linear").toMatch(newFormatRegex);
 
       // Legacy format should NOT match
       expect("/api/webhooks/jira").not.toMatch(newFormatRegex);
@@ -56,7 +56,7 @@ describe("Tenant Isolation", () => {
 
       // Valid slugs
       expect("acme-corp").toMatch(validSlugRegex);
-      expect("oncallshift").toMatch(validSlugRegex);
+      expect("acme-tools").toMatch(validSlugRegex);
       expect("my-org-123").toMatch(validSlugRegex);
 
       // Invalid slugs

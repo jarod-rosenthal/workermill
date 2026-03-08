@@ -313,7 +313,7 @@ function InstallSection() {
 
         {/* Platform note */}
         <p className="mt-6 text-center text-sm text-slate-500">
-          Runs on macOS, Linux, and Windows &mdash; Pro trial requires an{" "}
+          Runs on macOS, Linux, and Windows &mdash; requires an{" "}
           <a
             href="https://www.anthropic.com"
             target="_blank"
@@ -322,7 +322,7 @@ function InstallSection() {
           >
             Anthropic
           </a>{" "}
-          account
+          API key or Claude subscription
         </p>
       </div>
     </section>

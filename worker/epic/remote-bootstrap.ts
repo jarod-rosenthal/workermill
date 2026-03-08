@@ -29,7 +29,7 @@ import type { MultiExpertCoordinator as MultiExpertCoordinatorType } from "../mu
 // ---------------------------------------------------------------------------
 
 function validateEnv(): void {
-  const required = ["PARENT_TASK_ID", "API_BASE_URL", "ORG_API_KEY"];
+  const required = ["PARENT_TASK_ID", "API_BASE_URL", "ORG_API_KEY", "MAX_REVIEW_REVISIONS", "MAX_PER_STORY_REVISIONS"];
   const missing: string[] = [];
 
   for (const key of required) {
@@ -398,6 +398,8 @@ function loadConfig(repoDir: string, mainBranch: string): EpicConfig {
     ciWorkflowPath: process.env.CI_WORKFLOW_PATH || undefined,
     maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10),
     maxFixRetries: process.env.MAX_FIX_RETRIES ? parseInt(process.env.MAX_FIX_RETRIES, 10) : undefined,
+    maxReviewRevisions: parseInt(process.env.MAX_REVIEW_REVISIONS, 10),
+    maxPerStoryRevisions: parseInt(process.env.MAX_PER_STORY_REVISIONS, 10),
     qualityThresholds: process.env.QUALITY_THRESHOLDS
       ? JSON.parse(process.env.QUALITY_THRESHOLDS)
       : undefined,

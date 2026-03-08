@@ -27,6 +27,8 @@ function loadConfig(): EpicConfig {
     "API_BASE_URL",
     "ORG_API_KEY",
     "TARGET_REPO",
+    "MAX_REVIEW_REVISIONS",
+    "MAX_PER_STORY_REVISIONS",
   ];
 
   // Require ANTHROPIC_API_KEY unless we have OAuth credentials (local mode or Docker sandbox)
@@ -84,6 +86,8 @@ function loadConfig(): EpicConfig {
     // Max parallel experts cap
     maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10),
     maxFixRetries: process.env.MAX_FIX_RETRIES ? parseInt(process.env.MAX_FIX_RETRIES, 10) : undefined,
+    maxReviewRevisions: parseInt(process.env.MAX_REVIEW_REVISIONS, 10),
+    maxPerStoryRevisions: parseInt(process.env.MAX_PER_STORY_REVISIONS, 10),
     // Intent Engineering — org guidelines from settings
     orgGuidelines: process.env.ORG_GUIDELINES || undefined,
     // Quality gate thresholds from organization settings

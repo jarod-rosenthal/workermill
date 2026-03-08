@@ -63,6 +63,7 @@ interface MultiExpertConfig {
   useUnifiedClient?: boolean;
   /** Override repo path (set by remote-bootstrap when repo is already cloned) */
   repoPath?: string;
+  maxReviewRevisions: number;
 }
 
 /**
@@ -114,6 +115,7 @@ function loadConfig(): MultiExpertConfig {
     "ORG_API_KEY",
     "GITHUB_TOKEN",
     "TARGET_REPO",
+    "MAX_REVIEW_REVISIONS",
   ];
 
   const missing = required.filter((key) => !process.env[key]);
@@ -147,6 +149,7 @@ function loadConfig(): MultiExpertConfig {
     openaiApiKey: process.env.OPENAI_API_KEY,
     ollamaHost: process.env.OLLAMA_HOST,
     skipManagerReview: process.env.SKIP_MANAGER_REVIEW === "true",
+    maxReviewRevisions: parseInt(process.env.MAX_REVIEW_REVISIONS, 10),
   };
 }
 
@@ -253,7 +256,7 @@ export class MultiExpertCoordinator {
   private currentPrUrl: string | undefined;
   private currentPrNumber: number | undefined;
   private revisionCount: number = 0;
-  private maxRevisions: number = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
+  private maxRevisions: number;
   private lastReviewFeedback: string | undefined;
   // Jira requirements for tech_lead review (populated from task data)
   private jiraRequirements: string | undefined;
@@ -297,6 +300,7 @@ export class MultiExpertCoordinator {
 
   constructor(config: MultiExpertConfig) {
     this.config = config;
+    this.maxRevisions = config.maxReviewRevisions;
     this.repoPath = config.repoPath || process.env.REPO_PATH || "/workspace/repo";
     this.api = axios.create({
       baseURL: config.apiBaseUrl,
@@ -3185,6 +3189,7 @@ The repository is cloned at: **${promptRepoPath}**
       googleApiKey: this.config.googleApiKey,
       openaiApiKey: this.config.openaiApiKey,
       ollamaHost: this.config.ollamaHost,
+      maxReviewRevisions: this.config.maxReviewRevisions,
     };
 
     const reviewer = new InlineReviewerAiSdk(reviewerConfig, this.repoPath, this.serverPromptTemplates?.techLeadReviewPrompt);

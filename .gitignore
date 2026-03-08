@@ -1,3 +1,8 @@
+# Compiled TypeScript output in source directories
+api/src/**/*.js
+api/src/**/*.d.ts
+!api/src/types/**/*.d.ts
+
 # Dependencies
 node_modules/
 .pnp

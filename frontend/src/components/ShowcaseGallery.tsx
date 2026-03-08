@@ -75,7 +75,7 @@ const showcaseProjects: ShowcaseProject[] = [
     name: "TeamBoard",
     tagline: "Multi-tenant SaaS project management with Kanban boards.",
     description:
-      "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time updates, workspace dashboards, activity feeds, and PWA support. 33 stories across 3 epics, 3 revision rounds on frontend integration, seed pipeline gap caught post-deploy. The real story of an AI build — warts and all.",
+      "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time updates, workspace dashboards, activity feeds, and PWA support. Claude Sonnet built the code across 8 expert personas; Claude Opus planned each epic and reviewed all work as tech lead. 3 epics, 33 stories, 3 revision rounds on frontend integration, seed pipeline gap caught post-deploy. The real story of an AI build — warts and all.",
     stack: "Next.js 15 + Prisma 6 + TailwindCSS 4 + Neon PostgreSQL",
     storyCount: 33,
     cost: "$485",

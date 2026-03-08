@@ -130,12 +130,9 @@ import { AddMultiTenantWebhooks1705344000050 } from "./migrations/1705344000050-
 import { AddOrgIdToPersonaTables1705344000051 } from "./migrations/1705344000051-AddOrgIdToPersonaTables.js";
 import { AddOrgIdToRemainingTables1705344000052 } from "./migrations/1705344000052-AddOrgIdToRemainingTables.js";
 import { AddPersonaInferenceRules1705344000053 } from "./migrations/1705344000053-AddPersonaInferenceRules.js";
-import { RenameOrgSlugToOncallshift1705344000054 } from "./migrations/1705344000054-RenameOrgSlugToOncallshift.js";
 import { AddMultiOrgSupport1705344000055 } from "./migrations/1705344000055-AddMultiOrgSupport.js";
 import { SeedSystemPersonas1705344000056 } from "./migrations/1705344000056-SeedSystemPersonas.js";
 import { AddEpicExecutionFields1705344000057 } from "./migrations/1705344000057-AddEpicExecutionFields.js";
-import { RenameToOncallshift1705344000058 } from "./migrations/1705344000058-RenameToOncallshift.js";
-import { FixOncallshiftRename1705344000059 } from "./migrations/1705344000059-FixOncallshiftRename.js";
 import { AddCreditBillingTables1705344000060 } from "./migrations/1705344000060-AddCreditBillingTables.js";
 import { CleanupTestUsers1705344000061 } from "./migrations/1705344000061-CleanupTestUsers.js";
 import { AddWarmContainerPool1705344000062 } from "./migrations/1705344000062-AddWarmContainerPool.js";
@@ -147,7 +144,6 @@ import { AddPlanningTokensColumns1705344000067 } from "./migrations/170534400006
 import { AddSupportAgentColumns1705344000068 } from "./migrations/1705344000068-AddSupportAgentColumns.js";
 import { AddTosAcceptanceFields1705344000069 } from "./migrations/1705344000069-AddTosAcceptanceFields.js";
 import { AddCodeQualityMetrics1705344000070 } from "./migrations/1705344000070-AddCodeQualityMetrics.js";
-import { BackfillOncallshiftQualityMetrics1705344000071 } from "./migrations/1705344000071-BackfillOncallshiftQualityMetrics.js";
 import { AddAzureTenantIdToOrganization1705344000072 } from "./migrations/1705344000072-AddAzureTenantIdToOrganization.js";
 import { ClearBackfilledQualityMetrics1705344000073 } from "./migrations/1705344000073-ClearBackfilledQualityMetrics.js";
 import { CreateWorkerTaskTokenUsage1705344000074 } from "./migrations/1705344000074-CreateWorkerTaskTokenUsage.js";
@@ -445,12 +441,9 @@ export const AppDataSource = new DataSource({
     AddOrgIdToPersonaTables1705344000051,
     AddOrgIdToRemainingTables1705344000052,
     AddPersonaInferenceRules1705344000053,
-    RenameOrgSlugToOncallshift1705344000054,
     AddMultiOrgSupport1705344000055,
     SeedSystemPersonas1705344000056,
     AddEpicExecutionFields1705344000057,
-    RenameToOncallshift1705344000058,
-    FixOncallshiftRename1705344000059,
     AddCreditBillingTables1705344000060,
     CleanupTestUsers1705344000061,
     AddWarmContainerPool1705344000062,
@@ -462,7 +455,6 @@ export const AppDataSource = new DataSource({
     AddSupportAgentColumns1705344000068,
     AddTosAcceptanceFields1705344000069,
     AddCodeQualityMetrics1705344000070,
-    BackfillOncallshiftQualityMetrics1705344000071,
     AddAzureTenantIdToOrganization1705344000072,
     ClearBackfilledQualityMetrics1705344000073,
     CreateWorkerTaskTokenUsage1705344000074,

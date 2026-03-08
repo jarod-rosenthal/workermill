@@ -5,7 +5,7 @@
  *
  * Inputs (environment variables):
  * - BUILD_DIR: Required. Path to the built frontend (e.g., "./dist" or "./frontend/dist")
- * - S3_BUCKET: Required. Target S3 bucket name (e.g., "oncallshift-dev-web")
+ * - S3_BUCKET: Required. Target S3 bucket name (e.g., "my-app-frontend")
  * - CLOUDFRONT_DISTRIBUTION_ID: Optional. CloudFront distribution ID to invalidate
  * - AWS_REGION: Optional. AWS region (defaults to us-east-1)
  *

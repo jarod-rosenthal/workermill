@@ -1302,7 +1302,7 @@ router.post(
         const basePersona = (task.persona || project.defaultPersona || org.defaultWorkerPersona || "backend_developer") as WorkerPersona;
         const workerPersona = needsPlanning ? "project_manager" : basePersona;
 
-        // Repo override label (e.g., "repo:oncallshift-web")
+        // Repo override label (e.g., "repo:my-app-web")
         const repoLabel = (task.labels || []).find((l: string) => l.toLowerCase().startsWith("repo:"));
         const repoOverride = repoLabel ? repoLabel.substring(5) : null;
         const defaultRepo = task.githubRepo || project.githubRepo || org.getDefaultRepo();

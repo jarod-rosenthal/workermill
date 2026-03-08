@@ -116,7 +116,7 @@ export async function triggerSupportAgentTask(
     description: description || null,
     workerPersona: "support_agent" as WorkerPersona,
     workerModel: config.supportAgent.defaultModel,
-    githubRepo: "jarod-rosenthal/workermill", // Support agent searches WorkerMill codebase
+    githubRepo: "workermill/workermill", // Support agent searches WorkerMill codebase
     status: "queued",
     orgId: platformOrg.id, // Platform org - task runs here, visible only to platform admins
     isPlatformTask: true, // Mark as platform-initiated

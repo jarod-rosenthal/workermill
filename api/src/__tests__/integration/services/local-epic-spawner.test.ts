@@ -181,7 +181,7 @@ describe("Local Epic Spawner", () => {
       const manager = getTestManager();
       const org = await createTestOrg({
         scmProvider: "bitbucket",
-        defaultBitbucketRepo: "oncallshift/oncallshift-api",
+        defaultBitbucketRepo: "acme-org/acme-api",
       });
       const task = await createTestTask(org, { githubRepo: "" });
 
@@ -193,7 +193,7 @@ describe("Local Epic Spawner", () => {
 
       expect(loadedTask?.organization?.scmProvider).toBe("bitbucket");
       expect(loadedTask?.organization?.defaultBitbucketRepo).toBe(
-        "oncallshift/oncallshift-api"
+        "acme-org/acme-api"
       );
     });
 

@@ -230,7 +230,7 @@ router.post(
     const needsPlanning = isPrdTask || isEpicTask || isMultiProvider || isV2Pipeline;
 
     // Re-check for repo override label during retry (fixes label changes between runs)
-    // Also supports direct repo name labels (e.g., "oncallshift-mobile")
+    // Also supports direct repo name labels (e.g., "my-app-mobile")
     const org = req.organization!;
     let repoOverride: string | null = null;
     const repoLabel = labels.find((l: string) => l.toLowerCase().startsWith("repo:"));

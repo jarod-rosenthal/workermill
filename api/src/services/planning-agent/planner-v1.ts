@@ -160,7 +160,7 @@ Each acceptance criterion MUST be:
 
 **Infrastructure/Deployment:**
 - BAD: "Infrastructure is set up"
-- GOOD: "Run \`terraform apply\` in infrastructure/ directory, verify VPC created with \`aws ec2 describe-vpcs --filters Name=tag:Name,Values=oncallshift-prod-vpc\`, verify exit code 0"
+- GOOD: "Run \`terraform apply\` in infrastructure/ directory, verify VPC created with \`aws ec2 describe-vpcs --filters Name=tag:Name,Values=my-app-prod-vpc\`, verify exit code 0"
 - BAD: "Database migrated"
 - GOOD: "Run \`npm run migrate\` against production database, verify all migrations applied with \`npm run migrate:status\`, zero pending migrations"
 

@@ -14,11 +14,11 @@ export type ScmProviderId = "github" | "gitlab" | "bitbucket";
  * Parsed repository identifier with owner/namespace and repo name
  */
 export interface ScmRepoIdentifier {
-  /** Repository owner or namespace (e.g., "jarod-rosenthal" or "mygroup/subgroup") */
+  /** Repository owner or namespace (e.g., "acme-org" or "mygroup/subgroup") */
   owner: string;
-  /** Repository name (e.g., "pagerduty-lite") */
+  /** Repository name (e.g., "my-app") */
   name: string;
-  /** Full repository path (e.g., "jarod-rosenthal/pagerduty-lite") */
+  /** Full repository path (e.g., "acme-org/my-app") */
   fullPath: string;
 }
 

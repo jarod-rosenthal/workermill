@@ -2850,7 +2850,7 @@ fi
 # DO NOT MODIFY THIS SECTION WITHOUT EXPLICIT USER APPROVAL!
 #
 # This log streaming system took a week to get working. It follows the exact
-# pattern from the oncallshift reference implementation. Key components:
+# pattern from the original reference implementation. Key components:
 #
 # 1. Claude CLI outputs structured JSON via --output-format stream-json
 # 2. Output is piped through log-parser.cjs which:
@@ -2866,7 +2866,7 @@ fi
 # - ORG_API_KEY is set for authentication
 # - API endpoint /api/control-center/logs is accessible
 #
-# Reference: oncallshift backend/scripts/ai-worker-entrypoint.sh lines 604-630
+# Reference: original entrypoint implementation
 # =============================================================================
 
 # Set environment variables for execution scripts

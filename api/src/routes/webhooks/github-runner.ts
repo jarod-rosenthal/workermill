@@ -95,8 +95,12 @@ router.post("/github-runner", async (req: Request, res: Response) => {
     }
 
     const repo = payload.repository;
-    const owner = repo?.owner?.login || "jarodtowner";
-    const repoName = repo?.name || "workermill";
+    if (!repo?.owner?.login || !repo?.name) {
+      logger.error("GitHub runner webhook missing repository info");
+      return res.status(400).json({ error: "Missing repository info in payload" });
+    }
+    const owner = repo.owner.login;
+    const repoName = repo.name;
 
     const tokenResponse = await fetch(
       `https://api.github.com/repos/${owner}/${repoName}/actions/runners/registration-token`,

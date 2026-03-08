@@ -22,7 +22,7 @@
  * - API endpoint /api/control-center/logs is accessible
  * - TASK_ID and ORG_ID are set
  *
- * Reference: oncallshift backend/ai-worker/scripts/log-parser.cjs
+ * Reference: original log-parser implementation
  * =============================================================================
  *
  * Usage:

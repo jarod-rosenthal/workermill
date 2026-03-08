@@ -381,7 +381,7 @@ If you identify improvements to make:
 
 \`\`\`bash
 rm -rf /tmp/workermill
-git clone https://github.com/jarod-rosenthal/workermill.git /tmp/workermill
+git clone https://github.com/workermill/workermill.git /tmp/workermill
 cd /tmp/workermill
 \`\`\`
 

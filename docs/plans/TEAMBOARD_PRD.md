@@ -1,4 +1,4 @@
-# TeamBoard — Full Build Specification
+# TeamBoard — Build Specification
 
 ## Purpose
 
@@ -13,55 +13,57 @@ Polished demo app showcasing WorkerMill at `teamboard.workermill.com`. Full-stac
 - **Deployment:** Vercel (app) + Neon PostgreSQL (database)
 - **CI/CD:** GitHub Actions with `ubuntu-latest` runners (free for public repos)
 
-## Tech Stack
+---
 
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| Framework | Next.js (App Router) | 15 |
-| ORM | Prisma | Latest |
-| Database | PostgreSQL (Neon) | Free tier with connection pooling |
-| Auth | NextAuth.js v5 | `5.0.0-beta.25` exact, JWT strategy, bcrypt |
-| Styling | TailwindCSS + shadcn/ui | Tailwind v4 (CSS-based config) |
-| Drag & Drop | @dnd-kit/core | Latest |
-| Charts | Recharts | Latest |
-| Real-time | Server-Sent Events (SSE) | PostgreSQL polling |
-| PWA | next-pwa or custom Workbox | Latest |
-| Testing | Vitest + Testing Library + Playwright | Latest |
-| CI/CD | GitHub Actions (`ubuntu-latest`) | Free for public repos |
-| Hosting | Vercel | Automatic deploys |
-| Database Hosting | Neon PostgreSQL | Free tier, connection pooling |
+## 1. Tech Stack & Dependencies
+
+| Layer | Package | Version | Notes |
+|-------|---------|---------|-------|
+| Framework | `next` | `^15.1.0` | App Router. NOT 14.x. |
+| ORM | `prisma` + `@prisma/client` | `^6.1.0` | NOT v7 (breaking datasource changes). |
+| Database | PostgreSQL (Neon) | Free tier | Connection pooling enabled. |
+| Auth | `next-auth` | `5.0.0-beta.25` exact | NOT `^5.0.0` (doesn't exist on npm). JWT strategy. |
+| Auth adapter | `@auth/prisma-adapter` | `^2.11.1` | NOT `^3.x` (3.7.0 doesn't exist on npm). |
+| Password hashing | `bcrypt` | `^6.0.0` | NOT v5.x (fails `npm audit`). |
+| Styling | `tailwindcss` | `^4.0.0` | CSS-based config only. See Tailwind section. |
+| Styling PostCSS | `@tailwindcss/postcss` | latest (devDep) | Required for Tailwind v4 compilation. |
+| UI components | shadcn/ui | latest | Must be customized beyond defaults. |
+| Drag & Drop | `@dnd-kit/core` | latest | |
+| Charts | `recharts` | latest | |
+| Animation | `framer-motion` | latest | |
+| React | `react` + `react-dom` | `^19.0.0` | |
+| React types | `@types/react` + `@types/react-dom` | `^19.0.0` | |
+| Testing | `vitest` | latest (devDep) | |
+| Testing React | `@testing-library/react` | `^16.0.0` (devDep) | React 19 compatible. |
+| E2E | `@playwright/test` | latest (devDep) | |
+| ESLint | `eslint-config-next` | `^15.1.0` | Must match Next.js major. |
+| Node.js | | `22` | In all CI workflows. Matches Vercel runtime. |
+
+### `.npmrc` (create in repo root during scaffolding, BEFORE `npm install`)
+```
+legacy-peer-deps=true
+```
+React 19 peer dependency conflicts cause `npm ci` and `npm install` to fail without this.
 
 ---
 
-## CRITICAL: LLM Knowledge Gaps
+## 2. Tailwind v4 Setup
 
-Your training data may not include these — they are ALL correct and valid. Do NOT "fix" them.
+Tailwind v4 does NOT use `tailwind.config.ts` or `tailwind.config.js`. Delete these files if they exist.
 
-### Next.js 15 Route Params (WILL BREAK BUILD IF WRONG)
+**Three files are required:**
 
-Next.js 15 changed route handler signatures. `params` is now a `Promise` and MUST be awaited:
-
-```typescript
-// WRONG (Next.js 14 — WILL NOT BUILD):
-export async function GET(req: Request, { params }: { params: { id: string } }) {
-  const board = await prisma.board.findUnique({ where: { id: params.id } });
-}
-
-// CORRECT (Next.js 15 — params is a Promise):
-export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const board = await prisma.board.findUnique({ where: { id } });
-}
+**`postcss.config.mjs`** — without this file, zero CSS renders:
+```javascript
+export default {
+  plugins: {
+    '@tailwindcss/postcss': {},
+  },
+};
 ```
 
-This applies to EVERY `route.ts` under `app/api/` with dynamic segments (`[id]`, `[slug]`, `[boardId]`, `[...nextauth]`), and to `page.tsx`/`layout.tsx` with dynamic params. Build fails with: `Type '{ params: { id: string; }; }' is not a valid type`.
-
-### Tailwind v4 Configuration (NO JavaScript config)
-
-Tailwind v4 does NOT use `tailwind.config.ts` or `tailwind.config.js`. Configuration is CSS-based with `@theme` directives. **Do NOT create a `tailwind.config.ts` file — delete it if it exists.**
-
+**`app/globals.css`** — CSS-based theme configuration:
 ```css
-/* app/globals.css */
 @import "tailwindcss";
 
 @theme {
@@ -86,21 +88,55 @@ Tailwind v4 does NOT use `tailwind.config.ts` or `tailwind.config.js`. Configura
 }
 ```
 
-### NextAuth.js v5 Beta Export Pattern (WILL BREAK AUTH IF WRONG)
+**`app/layout.tsx`** must import `./globals.css`.
 
-NextAuth v5 uses a completely different initialization pattern than v4. You MUST use the `NextAuth()` function and destructure the exports:
+---
 
+## 3. Authentication (NextAuth v5)
+
+Auth is split into TWO files because `middleware.ts` runs in Edge runtime, which cannot execute Node.js native modules (bcrypt, prisma).
+
+### `lib/auth.config.ts` — Edge-safe config
+No prisma, no bcrypt, no PrismaAdapter. Middleware imports from this file.
 ```typescript
-// lib/auth.ts — CORRECT (NextAuth v5 beta.25):
+import type { NextAuthConfig } from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+
+export const authConfig: NextAuthConfig = {
+  session: { strategy: "jwt" },
+  providers: [
+    Credentials({
+      credentials: { email: {}, password: {} },
+      // authorize is NOT here — it needs prisma+bcrypt (Node.js only)
+    }),
+  ],
+  callbacks: {
+    jwt({ token, user }) {
+      if (user) { token.id = user.id; }
+      return token;
+    },
+    session({ session, token }) {
+      if (token?.id) { session.user.id = token.id as string; }
+      return session;
+    },
+  },
+  pages: { signIn: "/login" },
+};
+```
+
+### `lib/auth.ts` — Full config (server-side only)
+Extends the Edge-safe config with PrismaAdapter and the authorize function.
+```typescript
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import bcrypt from "bcrypt";
 import { prisma } from "./prisma";
+import { authConfig } from "./auth.config";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  ...authConfig,
   adapter: PrismaAdapter(prisma),
-  session: { strategy: "jwt" },
   providers: [
     Credentials({
       credentials: { email: {}, password: {} },
@@ -111,24 +147,35 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!user) return null;
         const valid = await bcrypt.compare(
           credentials.password as string,
-          user.passwordHash
+          user.password  // Field name is "password", NOT "passwordHash"
         );
         return valid ? { id: user.id, email: user.email, name: user.name } : null;
       },
     }),
   ],
-  // ... callbacks for JWT/session
 });
 ```
 
+### `middleware.ts` — Edge-safe auth redirects
 ```typescript
-// app/api/auth/[...nextauth]/route.ts — CORRECT:
+import NextAuth from "next-auth";
+import { authConfig } from "@/lib/auth.config";
+
+export default NextAuth(authConfig).auth;
+
+export const config = {
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|manifest.json|browserconfig.xml|og-image.png|icons).*)'],
+};
+```
+
+### `app/api/auth/[...nextauth]/route.ts`
+```typescript
 import { handlers } from "@/lib/auth";
 export const { GET, POST } = handlers;
 ```
 
+### Protected API routes
 ```typescript
-// Any protected API route — CORRECT:
 import { auth } from "@/lib/auth";
 
 export async function GET() {
@@ -138,73 +185,33 @@ export async function GET() {
 }
 ```
 
-**WRONG patterns (v4 — DO NOT USE):**
-- `import { getServerSession } from "next-auth/next"` — does not exist in v5
-- `import { authOptions } from "@/lib/auth"` — v5 does not use `authOptions`
-- `import NextAuth from "next-auth/next"` — wrong import path for v5
+---
 
-All API routes that check authentication MUST use `import { auth } from "@/lib/auth"` and call `const session = await auth()`. There is no other pattern.
+## 4. Next.js 15 Route Params
 
-### Prisma `JsonValue` and TypeScript `any`
+Every `route.ts`, `page.tsx`, and `layout.tsx` with dynamic segments MUST use Promise-based params:
 
-The "no `any` types" rule has one exception: Prisma's `JsonValue` type requires `any` for JSON metadata fields. Use `// eslint-disable-next-line @typescript-eslint/no-explicit-any` on those specific lines. Do NOT replace with `Record<string, unknown>` — it causes Prisma type conflicts.
+```typescript
+// CORRECT:
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+}
 
-### Pinned Dependencies (DO NOT change)
-
-- `"next": "^15.1.0"` — NOT 14.x (14 has critical CVEs)
-- `"next-auth": "5.0.0-beta.25"` — exact beta version, NOT `"^5.0.0"` (doesn't exist on npm)
-- `"eslint-config-next": "^15.1.0"` — must match Next.js major
-- `"bcrypt": "^6.0.0"` — NOT v5.x (v5 has vulnerable `tar` dependency, fails `npm audit`)
-- `"react": "^19.0.0"`, `"react-dom": "^19.0.0"`, `"@types/react": "^19.0.0"` — React 19
-- `"@testing-library/react": "^16.0.0"` — React 19 compatible
-- `node-version` in all CI workflows: `22` (matches Vercel runtime)
-
-### React 19 Peer Dependency Resolution
-
-If `npm ci` fails due to peer deps, add `.npmrc` with `legacy-peer-deps=true`. Do NOT use `--force`.
+// WRONG (will not build):
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+```
 
 ---
 
-## Design Standards
+## 5. Data Model
 
-Every page, component, and interaction must reflect the quality of a product designed by senior UI designers.
+Use this EXACT schema. Every file that references these fields MUST use the exact names shown here.
 
-### Visual Identity
-- **References:** Linear (clean density), Notion (warm neutrals + subtle depth), Vercel dashboard (typography + spacing)
-- **Palette:** Primary, secondary, accent, semantic colors. Do NOT rely on shadcn/ui defaults. Use subtle gradients and tinted backgrounds.
-- **Typography:** Inter or Geist. Clear type scale with medium (500) and semibold (600) for hierarchy.
-- **Spacing:** 4px/8px grid. Generous whitespace. Cards and panels need breathing room.
-- **Shadows:** Layered shadow system for cards, modals, dropdowns. Subtle elevation hierarchy.
-
-### Interactions
-- All state transitions animated (150-300ms, ease-out). Use `framer-motion` or CSS transitions.
-- Every clickable element has visible hover state. Skeleton loading screens (shimmer). Friendly error states with retry.
-- Card drag shadows, toast slide-in/out, checkbox animations, button press feedback.
-
-### Responsive: 320px, 768px, 1024px, 1440px+
-- Sidebar collapses to hamburger on mobile. Board view: horizontal scroll for columns. Card detail: full-screen sheet on mobile.
-- Touch targets >= 44px. No horizontal overflow.
-
-### Design Anti-Patterns
-- Do NOT ship default shadcn/ui without customization. Do NOT use raw Tailwind gray as only color.
-- Do NOT skip loading/empty/error states. Do NOT use instant state changes without animation.
-- Do NOT use placeholder "Lorem ipsum" — write realistic product copy.
-
----
-
-## Code Style Rules
-
-- TypeScript strict mode, no `any` types
-- All `useSearchParams()` / `usePathname()` MUST be wrapped in `<Suspense>` (Next.js 15 build crashes without it)
-- Never pass user-controlled URLs to `router.push()` — validate as relative path first
-- All optimistic UI updates MUST capture previous state and revert on API failure
-- Prisma requires BOTH `DATABASE_URL` (pooled) and `DIRECT_DATABASE_URL` (direct for migrations)
-- Every `[param]/` directory users can navigate to MUST have a `page.tsx`
-- Do NOT create `postcss.config.*` — Next.js 15 includes PostCSS by default
-
----
-
-## Data Model
+**Field name reference:**
+- User password field: `password` (NOT `passwordHash`)
+- User avatar field: `avatar` (NOT `avatarUrl`)
+- ChecklistItem text field: `text` (NOT `title`)
+- Label color field: `color` as `String` (hex like `#EF4444`, NOT an enum)
 
 ```prisma
 generator client {
@@ -221,8 +228,8 @@ model User {
   id            String    @id @default(cuid())
   email         String    @unique
   name          String
-  passwordHash  String
-  avatarUrl     String?
+  password      String
+  avatar        String?
   createdAt     DateTime  @default(now())
   memberships   WorkspaceMember[]
   assignedCards Card[]    @relation("assignee")
@@ -324,7 +331,7 @@ model ChecklistItem {
   id        String   @id @default(cuid())
   card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
   cardId    String
-  title     String
+  text      String
   completed Boolean  @default(false)
   position  Int      @default(0)
 }
@@ -360,23 +367,27 @@ model Activity {
 }
 ```
 
-**Use this EXACT schema.** Do NOT add `@@map()`, `@@index()`, or annotations not shown.
+Prisma's `JsonValue` type requires `any` for JSON metadata fields. Use `// eslint-disable-next-line @typescript-eslint/no-explicit-any` on those specific lines.
 
 ---
 
-## API Endpoints
+## 6. API Endpoints
+
+All route handlers with dynamic segments use `params: Promise<{...}>` and `await params`.
+
+RBAC hierarchy: OWNER > ADMIN > MEMBER > VIEWER. ADMINs cannot invite as OWNER (enforce hierarchy check in POST /members).
 
 ### Auth
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
-| POST | `/api/auth/signup` | None | `{email, password, name}` → creates user, returns session |
-| GET/POST | `/api/auth/[...nextauth]` | None | NextAuth.js handler. JWT strategy, bcrypt 12+ rounds |
+| POST | `/api/auth/signup` | None | `{email, password, name}` → creates user with bcrypt 12+ rounds, returns session |
+| GET/POST | `/api/auth/[...nextauth]` | None | NextAuth.js handler |
 
 ### Health & Seed
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
 | GET | `/api/health` | None | `{ "status": "ok", "timestamp": "..." }` |
-| POST | `/api/seed` | Bearer `$SEED_TOKEN` | 200 success, 409 already seeded. Idempotent |
+| POST | `/api/seed` | Bearer `$SEED_TOKEN` | 200 success, 409 already seeded. Idempotent. |
 
 ### Workspaces
 | Method | Path | Auth | Notes |
@@ -390,14 +401,14 @@ model Activity {
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
 | GET | `/api/workspaces/[slug]/members` | Member | List members |
-| POST | `/api/workspaces/[slug]/members` | Admin+ | Invite by email |
+| POST | `/api/workspaces/[slug]/members` | Admin+ | Invite by email. Enforce role hierarchy. |
 | PUT/DELETE | `/api/workspaces/[slug]/members/[id]` | Admin+ | Change role / remove |
 
 ### Boards & Columns
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
 | GET/POST | `/api/workspaces/[slug]/boards` | Member/Member+ | List / create |
-| GET/PUT/DELETE | `/api/workspaces/[slug]/boards/[id]` | Member/Member+/Admin+ | Detail / update / delete |
+| GET/PUT/DELETE | `/api/workspaces/[slug]/boards/[id]` | Member/Admin+/Admin+ | Detail / update / delete |
 | POST | `/api/boards/[id]/columns` | Member+ | Create column |
 | PUT | `/api/boards/[id]/columns/reorder` | Member+ | Reorder columns |
 | PUT/DELETE | `/api/columns/[id]` | Member+/Admin+ | Update / delete column |
@@ -415,16 +426,16 @@ model Activity {
 ### Activity, Stats, Search, SSE
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
-| GET | `/api/workspaces/[slug]/activity` | Member | Cursor-based, 20/page |
+| GET | `/api/workspaces/[slug]/activity` | Member | Cursor-based, 20/page. Use timestamp-based tracking (createdAt > lastTimestamp), NOT CUID comparison. |
 | GET | `/api/workspaces/[slug]/stats` | Member | `tasksByStatus`, `tasksByAssignee`, `tasksOverTime`, `overdueCount`, `totalCards`, `completedCards` |
 | GET | `/api/workspaces/[slug]/search` | Member | Search cards by title/description across boards |
-| GET | `/api/workspaces/[slug]/stream` | Member (query param JWT) | SSE events: `card_created/moved/updated/deleted`, `board_updated`. Keep-alive 20s, polling 1-2s |
-
-### RBAC: OWNER (full control) > ADMIN (manage members/boards) > MEMBER (create/edit) > VIEWER (read-only)
+| GET | `/api/workspaces/[slug]/stream` | Member (query param JWT) | SSE events: `card_created/moved/updated/deleted`, `board_updated`. Keep-alive 20s, polling 1-2s. Add AbortSignal listener for interval cleanup. |
 
 ---
 
-## Frontend Routes
+## 7. Frontend
+
+### Routes
 
 | Path | Page | Auth |
 |------|------|------|
@@ -437,7 +448,15 @@ model Activity {
 | `/[workspace]/members` | Member management | Member |
 | `/[workspace]/settings` | Workspace settings | Admin+ |
 
-**Layout:** Landing + auth pages render WITHOUT sidebar (full-width). All authenticated routes render WITH sidebar.
+Landing + auth pages render WITHOUT sidebar (full-width). All authenticated routes render WITH sidebar.
+
+### Code Requirements
+- TypeScript strict mode, no `any` types (except Prisma `JsonValue` — see above)
+- All `useSearchParams()` / `usePathname()` wrapped in `<Suspense>` (build crashes without it)
+- All optimistic UI updates capture previous state and revert on API failure
+- Every `[param]/` directory users can navigate to has a `page.tsx`
+- Customize shadcn/ui components beyond defaults — match Linear/Notion aesthetic
+- Every page has skeleton loading, error states with retry, and animations (150-300ms, ease-out)
 
 ### Landing Page (`/`)
 Hero with gradient, "Try the Demo" CTA, feature cards, "How It Works", "Built by WorkerMill" section with badge. Professional SaaS aesthetic. "Sign In" in top nav.
@@ -449,19 +468,29 @@ Hero with gradient, "Try the Demo" CTA, feature cards, "How It Works", "Built by
 - Filter bar: assignee, priority, label, due date. Search within board. WIP limits with amber/red warnings.
 - Keyboard: N=new, E=edit, Del=delete, Esc=close, arrows=navigate.
 
-### Dashboard: 4 charts (tasks by status pie, tasks by assignee bar, tasks over time line, overdue count card). Animated counters.
+### Dashboard
+4 charts (tasks by status pie, tasks by assignee bar, tasks over time line, overdue count card). Animated counters.
 
-### Activity Feed: Chronological list with avatars + relative timestamps. Pagination. Real-time via SSE.
+### Activity Feed
+Chronological list with avatars + relative timestamps. Cursor-based pagination. Real-time via SSE.
 
-### Members: List with role badges. Invite form (Admin+). Role change dropdown. Remove button.
+### Members
+List with role badges. Invite form (Admin+). Role change dropdown. Remove button.
 
-### Settings: Workspace name/description edit. Labels CRUD. Danger zone: delete workspace (Owner, confirm dialog).
+### Settings
+Workspace name/description edit. Labels CRUD with color picker (hex values). Danger zone: delete workspace (Owner, confirmation dialog).
 
-### Sidebar: Workspace name, nav (Dashboard, Boards with expandable list + star toggle, Activity, Members, Settings), starred boards pinned, active indicator bar, collapsible on mobile, user avatar at bottom.
+### Sidebar
+Workspace name, nav links (Dashboard, Boards with expandable list + star toggle, Activity, Members, Settings), starred boards pinned, active indicator bar, collapsible on mobile, user avatar at bottom.
+
+**The sidebar renders desktop and mobile variants.** Every `data-testid` inside the sidebar MUST be unique across both variants. Use `-desktop` / `-mobile` suffixes (e.g., `data-testid="user-menu-desktop"`, `data-testid="user-menu-mobile"`). The E2E auth fixture targets `[data-testid="user-menu-desktop"]` to verify login. Duplicate testids cause Playwright strict mode violations and 100% E2E failure.
+
+### Responsive Design
+320px, 768px, 1024px, 1440px+. Sidebar collapses to hamburger on mobile. Board horizontal scroll. Card detail full-screen sheet on mobile. Touch targets >= 44px.
 
 ---
 
-## PWA
+## 8. PWA
 
 - `public/manifest.json` with icons (192px, 512px, maskable). Apple meta tags. `theme-color`.
 - Service worker: cache-first for static assets, network-first for API, stale-while-revalidate for board detail.
@@ -471,43 +500,56 @@ Hero with gradient, "Try the Demo" CTA, feature cards, "How It Works", "Built by
 
 ---
 
-## Seed Data
+## 9. Seed Data
 
-`POST /api/seed` — run on every deploy, idempotent (upsert).
+`POST /api/seed` — run on every deploy, idempotent (upsert with `findFirst` + conditional `create`).
 
-- **Demo user:** `demo@workermill.com` / `demo1234` (OWNER)
-- **Workspace:** "Acme Product" (slug: `acme-product`) + 3 team members
-- **3 Boards:** Product Roadmap (5 cols, 12 cards), Sprint 14 (4 cols, 10 cards, some overdue), Bug Tracker (3 cols, 8 cards)
-- **5 Labels:** Bug (red), Feature (blue), Enhancement (green), Documentation (purple), Urgent (orange)
-- **25 Activities:** Spread over 7 days, varied types and timestamps
-- Cards have realistic titles, varied priorities/assignees/due dates/labels. Some with comments (2-3), checklists (3-5 items), cover colors, overdue dates.
+| Item | Spec |
+|------|------|
+| **Demo user** | `demo@workermill.com` / `demo1234` (OWNER). Same credentials in `prisma/seed.ts`, `e2e/global-setup.ts`, `e2e/fixtures/auth.fixture.ts`, all E2E specs, and `README.md`. |
+| **Workspace** | "Acme Product" (slug: `acme-product`) + 3 team members |
+| **Boards** | 3 total: Product Roadmap (5 cols, 12 cards), Sprint 14 (4 cols, 10 cards), Bug Tracker (3 cols, 8 cards) |
+| **Cards** | 30 total. Varied priority (LOW/MEDIUM/HIGH/URGENT), varied assignee (some null, some demoUser), varied dueDate (some overdue, some future, some null). Realistic titles. |
+| **Labels** | 5: Bug (`#EF4444`), Feature (`#3B82F6`), Enhancement (`#22C55E`), Documentation (`#8B5CF6`), Urgent (`#F97316`). Hex color values. |
+| **Activities** | 25, spread over 7 days, varied types and timestamps |
+| **Extras** | Comments (2-3) and checklists (3-5 items) on select cards. Some cards with cover colors. |
+| **Verification** | `scripts/verify-seed.sh` uses `EXPECTED_CARDS=30`. Must match what `prisma/seed.ts` creates. |
 
 ---
 
-## Configuration
+## 10. Configuration
 
-### package.json scripts
+### `next.config.ts`
+```typescript
+const nextConfig: NextConfig = {
+  output: 'standalone',
+  poweredByHeader: false,
+  compress: true,
+};
+```
+Because `output: 'standalone'` is set, `next start` does NOT work. Start the app with `node .next/standalone/server.js` everywhere (local dev after build, Playwright webServer, CI).
+
+### `package.json` scripts
 ```json
 {
-  "dev": "next dev", "build": "next build", "start": "next start",
-  "lint": "next lint", "typecheck": "tsc --noEmit",
-  "test": "vitest run", "test:e2e": "playwright test",
+  "dev": "next dev",
+  "build": "next build",
+  "start": "node .next/standalone/server.js",
+  "lint": "next lint",
+  "typecheck": "tsc --noEmit",
+  "test": "vitest run",
+  "test:e2e": "playwright test",
   "format": "prettier --write .",
-  "db:push": "prisma db push", "db:migrate": "prisma migrate deploy",
-  "db:seed": "tsx prisma/seed.ts", "db:studio": "prisma studio",
+  "db:push": "prisma db push",
+  "db:migrate": "prisma migrate deploy",
+  "db:seed": "tsx prisma/seed.ts",
+  "db:studio": "prisma studio",
   "postinstall": "prisma generate"
 }
 ```
-- `"test"` MUST be `"vitest run"` (NOT `"vitest"` — hangs CI). `"postinstall"` MUST be `"prisma generate"`.
+`"test"` MUST be `"vitest run"` (NOT `"vitest"` — hangs in CI).
 
-### Local Development
-```bash
-cp .env.example .env.local
-docker compose up -d --wait    # PostgreSQL 16-alpine on port 5432
-npm install && npx prisma db push && npm run db:seed && npm run dev
-```
-
-### .env.example
+### `.env.example`
 ```bash
 DATABASE_URL="postgresql://teamboard:teamboard@localhost:5432/teamboard"
 DIRECT_DATABASE_URL="postgresql://teamboard:teamboard@localhost:5432/teamboard"
@@ -517,51 +559,59 @@ AUTH_TRUST_HOST="true"
 SEED_TOKEN="local-dev-seed-token"
 ```
 
-### .npmrc (repo root — MUST create during scaffolding)
-```
-legacy-peer-deps=true
-```
-React 19 peer dependency conflicts with `@testing-library/react` and other packages will cause `npm ci` and `npm install` to fail without this. Create this file in the scaffolding story BEFORE any `npm install`.
-
-### Required App Shell Files (WILL BREAK BUILD IF MISSING)
-
-Next.js requires `app/layout.tsx` and `app/page.tsx` to exist for `next build` to succeed. These MUST be created during project scaffolding — before any API routes or other code.
-
-```typescript
-// app/layout.tsx — minimal shell (scaffolding story):
-import type { Metadata } from "next";
-import "./globals.css";
-
-export const metadata: Metadata = {
-  title: "TeamBoard",
-  description: "Kanban board for teams",
-};
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en">
-      <body>{children}</body>
-    </html>
-  );
-}
+### Local Development
+```bash
+cp .env.example .env.local
+docker compose up -d --wait    # PostgreSQL 16-alpine on port 5432
+npm install && npx prisma db push && npm run db:seed && npm run dev
 ```
 
-```typescript
-// app/page.tsx — minimal placeholder (scaffolding story):
-export default function Home() {
-  return <main><h1>TeamBoard</h1></main>;
-}
-```
-
-These are replaced with full implementations in the frontend cards, but they MUST exist from story 0 so that `npm run build` passes for all backend stories.
+### Scaffolding Checklist (create these BEFORE any other code)
+1. `app/layout.tsx` — minimal root layout importing `./globals.css`. Build fails without it.
+2. `app/page.tsx` — minimal placeholder. Build fails without it.
+3. `postcss.config.mjs` — with `@tailwindcss/postcss`. No styles render without it.
+4. `app/globals.css` — with `@import "tailwindcss"` and `@theme` block.
+5. `.npmrc` — with `legacy-peer-deps=true`. Install fails without it.
 
 ### Quality Gates (pre-commit)
 ```
 npm run lint && npm run typecheck && npm run build && npm run test && npm audit --audit-level=high
 ```
-E2E tests run post-push in CI. Workers should also run locally: `npx playwright install --with-deps chromium && npm run test:e2e`.
 
-### CLAUDE.md (repo root)
+### Vercel Config
+- `vercel.json`: `maxDuration: 10` for API routes, security headers (nosniff, DENY, XSS protection)
+- Prisma binary targets: include `"rhel-openssl-3.0.x"` for Vercel serverless
+- `NEXTAUTH_URL` and `AUTH_TRUST_HOST` must be set at build time
+
+### GitHub Secrets (pre-configured)
+DATABASE_URL, DIRECT_DATABASE_URL, NEON_API_TOKEN, VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID, NEXTAUTH_SECRET, SEED_TOKEN — all set.
+
+### CI Pipeline
+Quality job: checkout → setup-node 22 → `npm ci` → lint → typecheck → build → test → `npm audit --audit-level=high`.
+E2E job (needs quality): `npm ci` → `prisma migrate deploy` → build → `npx playwright install --with-deps` → test:e2e.
+
+---
+
+## 11. E2E Tests
+
+Playwright tests against built app + real PostgreSQL. `global-setup.ts` seeds demo data via Prisma.
+
+**Test files:** auth, workspace, dashboard, board, card-detail, activity, members, mobile, pwa.
+
+### Playwright config
+- **Projects:** Desktop Chrome (always), Pixel 5 and iPhone 13 (local only, excluded in CI via `...(!process.env.CI ? [mobile projects] : [])`).
+- **webServer command:** `npm run build && node .next/standalone/server.js` on port 3000. NOT `npm run start`.
+- **Retries:** 2. **Workers:** 1 in CI.
+
+### Test conventions
+- Use `getByRole` with `{ name }`, `{ exact: true }`. Use `data-testid` for complex components.
+- Never use Tailwind classes as selectors.
+- Never call `test.use(devices[...])` inside `describe` blocks — Playwright errors with `Cannot use({ defaultBrowserType }) in a describe group`. Configure browser settings in `playwright.config.ts` projects only.
+- The auth fixture (`e2e/fixtures/auth.fixture.ts`) logs in via `/login` form and verifies by checking `[data-testid="user-menu-desktop"]`. This testid MUST exist and resolve to exactly ONE element at 1280x720.
+
+---
+
+## 12. `CLAUDE.md` (repo root)
 
 Create this file to guide AI workers:
 ```markdown
@@ -574,66 +624,35 @@ Next.js 15, Prisma, PostgreSQL, NextAuth.js v5.
 | Install | `npm install` |
 | Dev | `npm run dev` |
 | Build | `npm run build` |
+| Start (after build) | `node .next/standalone/server.js` |
 | Lint | `npm run lint` |
 | Type check | `npm run typecheck` |
 | Unit tests | `npm run test` |
 | E2E tests | `npx playwright install --with-deps chromium && npm run test:e2e` |
 | Validate | `npm run lint && npm run typecheck && npm run build && npm run test && npm audit --audit-level=high` |
 
-## CRITICAL Constraints
+## CRITICAL — Read Before Writing Any Code
 - Next.js 15 route params are Promises: `{ params: Promise<{ id: string }> }` then `await params`
-- Tailwind v4: NO `tailwind.config.ts` — use CSS `@theme` in globals.css
-- `bcrypt ^6.0.0` (NOT 5.x), `next-auth` exact `5.0.0-beta.25`
+- Tailwind v4: NO `tailwind.config.ts`. MUST have `postcss.config.mjs` with `@tailwindcss/postcss`.
+- Schema field names: `password` (NOT passwordHash), `avatar` (NOT avatarUrl), ChecklistItem `text` (NOT title), Label `color` is String (NOT enum)
+- Auth: `lib/auth.config.ts` (Edge-safe) and `lib/auth.ts` (full). Middleware imports from auth.config.ts ONLY.
+- Dependencies: `next-auth` exact `5.0.0-beta.25`, `@auth/prisma-adapter ^2.11.1`, `bcrypt ^6.0.0`, `prisma ^6.1.0`
+- `output: 'standalone'` means use `node .next/standalone/server.js` NOT `next start`
 - All `useSearchParams()` wrapped in `<Suspense>`
-- Do NOT create `postcss.config.*`
+- All `data-testid` attributes must be unique at the tested viewport (no duplicates between desktop/mobile sidebar)
 - `npm run build` MUST succeed before pushing
 ```
 
-### CI Pipeline
-Quality job: checkout → setup-node 22 → `npm ci` → lint → typecheck → build → test → `npm audit --audit-level=high`.
-E2E job (needs quality): `npm ci` → `prisma migrate deploy` → build → `npx playwright install --with-deps` → test:e2e.
-
-### Vercel Config
-- `output: 'standalone'`, `poweredByHeader: false`, `compress: true`
-- `vercel.json`: `maxDuration: 10` for API routes, security headers (nosniff, DENY, XSS protection)
-- Prisma binary targets: include `"rhel-openssl-3.0.x"` for Vercel serverless
-- `NEXTAUTH_URL` and `AUTH_TRUST_HOST` must be set at build time
-
-### GitHub Secrets (pre-configured)
-DATABASE_URL, DIRECT_DATABASE_URL, NEON_API_TOKEN, VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID, NEXTAUTH_SECRET, SEED_TOKEN — all set.
-
-### Neon PostgreSQL + Vercel Project — pre-configured and linked.
-
 ---
 
-## E2E Tests
+## 13. Design Standards
 
-Playwright tests against dev server + real PostgreSQL. `global-setup.ts` seeds demo data via Prisma.
+Every page, component, and interaction must reflect Linear/Notion/Vercel quality.
 
-**Test files:** auth, workspace, dashboard, board, card-detail, activity, members, mobile, pwa.
-
-**Projects:** Desktop Chrome, Pixel 5, iPhone 13. `webServer`: `npm run build && npm run start` on port 3000.
-
-**Conventions:** Use `getByRole` with `{ name }`, `{ exact: true }`. NEVER use Tailwind classes as selectors. Use `data-testid` for complex components.
-
----
-
-## Anti-Patterns (Do NOT)
-
-- Do NOT use synchronous `params` in route handlers — Next.js 15 requires `params: Promise<{...}>` and `await params` (build WILL fail)
-- Do NOT create `tailwind.config.ts` — Tailwind v4 uses CSS `@theme` only (delete if exists)
-- Do NOT use `bcrypt` v5.x — use `^6.0.0` (v5 fails `npm audit`)
-- Do NOT use `next-auth` `^5.0.0` — use exact `5.0.0-beta.25`
-- Do NOT use Next.js 14 — use 15
-- Do NOT use `useSearchParams()` without `<Suspense>` boundary
-- Do NOT create `postcss.config.*` — Next.js 15 includes PostCSS
-- Do NOT create dynamic route directories without `page.tsx`
-- Do NOT use `"vitest"` as test script — hangs CI
-- Do NOT add `@@map()`, `@@index()` to Prisma schema
-- Do NOT ship default shadcn/ui without customization
-- Do NOT skip loading/empty/error states
-- Do NOT use instant state changes without animation
-- Do NOT claim completion without running `npm run typecheck && npm run build`
-- Do NOT use `getServerSession` or `authOptions` — NextAuth v5 uses `auth()` exported from `lib/auth.ts`
-- Do NOT omit `app/layout.tsx` or `app/page.tsx` from the scaffolding story — `next build` requires them
-- Do NOT replace Prisma `JsonValue` compatible `any` types with `Record<string, unknown>` — causes type conflicts
+- **Palette:** Primary, secondary, accent, semantic colors. Subtle gradients and tinted backgrounds.
+- **Typography:** Inter or Geist. Clear type scale with medium (500) and semibold (600) for hierarchy.
+- **Spacing:** 4px/8px grid. Generous whitespace.
+- **Shadows:** Layered shadow system for cards, modals, dropdowns.
+- **Animations:** All state transitions animated (150-300ms, ease-out). Skeleton loading screens with shimmer. Card drag shadows, toast slide-in/out, checkbox animations, button press feedback.
+- **Every page:** skeleton loading state, error state with retry button, empty state with action prompt.
+- **Responsive:** Touch targets >= 44px. No horizontal overflow.

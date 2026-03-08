@@ -386,29 +386,27 @@ export default function ShowcaseViewer() {
             {project.stack}
           </div>
 
-          {/* AI Model Attribution — FlagDeck */}
-          {isFlagDeck && (
-            <div className="mt-6 flex flex-wrap gap-4">
-              <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-violet-500/10 border border-violet-500/20">
-                <div className="w-8 h-8 rounded-lg bg-violet-500/20 flex items-center justify-center">
-                  <Zap className="w-4 h-4 text-violet-400" />
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-violet-300">Claude Sonnet</div>
-                  <div className="text-xs text-muted-foreground">Code generation across 7 expert personas</div>
-                </div>
+          {/* AI Model Attribution */}
+          <div className="mt-6 flex flex-wrap gap-4">
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-violet-500/10 border border-violet-500/20">
+              <div className="w-8 h-8 rounded-lg bg-violet-500/20 flex items-center justify-center">
+                <Zap className="w-4 h-4 text-violet-400" />
               </div>
-              <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
-                  <BookOpen className="w-4 h-4 text-amber-400" />
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-amber-300">Claude Opus</div>
-                  <div className="text-xs text-muted-foreground">Epic planning & tech lead review</div>
-                </div>
+              <div>
+                <div className="text-sm font-semibold text-violet-300">Claude Sonnet</div>
+                <div className="text-xs text-muted-foreground">Code generation across {project.personasUsed.length} expert personas</div>
               </div>
             </div>
-          )}
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
+                <BookOpen className="w-4 h-4 text-amber-400" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-amber-300">Claude Opus</div>
+                <div className="text-xs text-muted-foreground">Epic planning & tech lead review</div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Stats row */}

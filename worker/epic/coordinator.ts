@@ -3159,8 +3159,17 @@ export class EpicCoordinator {
         } else {
           this.postDashboardLog(`Integration gates failed (unfixable): ${gateResult.summary}`);
           await this.ticketOps.postComment(
-            `⚠️ Integration issues could not be auto-fixed:\n\n${gateResult.summary}\n\nTech Lead will assess.`
+            `❌ Integration quality gates failed — PR not mergeable:\n\n${gateResult.summary}\n\n*Fix the issues and re-run.*`
           );
+          await this.finishMission(
+            summaryParts,
+            prUrl,
+            prNumber,
+            "quality_gate_failed",
+            `Integration quality gates failed: ${gateResult.summary}`
+          );
+          this.missionActive = false;
+          return;
         }
       }
 

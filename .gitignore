@@ -1,5 +1,6 @@
 # Working docs (local only)
 docs/plans/
+.plan
 
 # Compiled TypeScript output in source directories
 api/src/**/*.js

@@ -123,9 +123,9 @@ Define MCP tools with Zod schemas:
 ## Reference Files
 | File | Purpose |
 |------|---------|
-| `packages/oncallshift-mcp/src/server.ts` | Server template |
-| `packages/oncallshift-mcp/src/client.ts` | Client pattern |
-| `packages/oncallshift-mcp/src/tools/index.ts` | Tool definition pattern |
+| `packages/workermill-mcp/src/server.ts` | Server template |
+| `packages/workermill-mcp/src/client.ts` | Client pattern |
+| `packages/workermill-mcp/src/tools/index.ts` | Tool definition pattern |
 | `api/src/routes/tasks.ts` | WorkerMill task endpoints |
 | `api/src/routes/orchestrator.ts` | Orchestrator endpoints |
 | `api/src/routes/control-center.ts` | Dashboard endpoints |

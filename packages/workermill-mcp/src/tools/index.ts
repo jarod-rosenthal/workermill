@@ -353,7 +353,7 @@ export const codebaseSearchTool: ToolDefinition = {
   inputSchema: z.object({
     repository: z
       .string()
-      .describe("Repository to search (e.g., oncallshift/oncallshift-api)"),
+      .describe("Repository to search (e.g., owner/repo-name)"),
     query: z
       .string()
       .describe(
@@ -425,7 +425,7 @@ export const codebaseSymbolTool: ToolDefinition = {
   inputSchema: z.object({
     repository: z
       .string()
-      .describe("Repository to search (e.g., oncallshift/oncallshift-api)"),
+      .describe("Repository to search (e.g., owner/repo-name)"),
     name: z
       .string()
       .describe(
@@ -459,7 +459,7 @@ export const codebaseFileTool: ToolDefinition = {
   inputSchema: z.object({
     repository: z
       .string()
-      .describe("Repository (e.g., oncallshift/oncallshift-api)"),
+      .describe("Repository (e.g., owner/repo-name)"),
     path: z
       .string()
       .describe("File path within the repository (e.g., backend/src/auth/middleware.ts)"),
@@ -486,7 +486,7 @@ export const codebaseIndexTool: ToolDefinition = {
   inputSchema: z.object({
     repository: z
       .string()
-      .describe("Repository to index (e.g., oncallshift/oncallshift-api)"),
+      .describe("Repository to index (e.g., owner/repo-name)"),
     branch: z
       .string()
       .optional()
@@ -519,7 +519,7 @@ export const codebaseStatusTool: ToolDefinition = {
   inputSchema: z.object({
     repository: z
       .string()
-      .describe("Repository to check (e.g., oncallshift/oncallshift-api)"),
+      .describe("Repository to check (e.g., owner/repo-name)"),
     branch: z
       .string()
       .optional()

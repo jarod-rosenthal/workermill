@@ -328,7 +328,6 @@ worker/                     Worker execution engine — planning, coordination, 
 packages/
   vscode-workermill/        VS Code extension
   workermill-mcp/           WorkerMill MCP server
-  oncallshift-mcp/          OncallShift MCP server
 bin/                        CLI scripts (local-workermill, bastion)
 docker/                     Docker configs for local development
 ```

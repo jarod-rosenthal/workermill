@@ -185,10 +185,10 @@ import { DiagnoseUser1705344000122 } from "./migrations/1705344000122-DiagnoseUs
 import { DiagnoseOrg1705344000123 } from "./migrations/1705344000123-DiagnoseOrg.js";
 import { AddUserToOrg1705344000124 } from "./migrations/1705344000124-AddUserToOrg.js";
 import { DiagnoseOtherInvites1705344000125 } from "./migrations/1705344000125-DiagnoseOtherInvites.js";
-import { MigrateMevionUsers1705344000126 } from "./migrations/1705344000126-MigrateMevionUsers.js";
+import { MigrateEnterpriseUsers1705344000126 } from "./migrations/1705344000126-MigrateEnterpriseUsers.js";
 import { MoveUsersToOrg1705344000127 } from "./migrations/1705344000127-MoveUsersToOrg.js";
 import { CleanupStaleInvites1705344000128 } from "./migrations/1705344000128-CleanupStaleInvites.js";
-import { RenameOrgToMevion1705344000129 } from "./migrations/1705344000129-RenameOrgToMevion.js";
+import { RenameOrgToEnterprise1705344000129 } from "./migrations/1705344000129-RenameOrgToEnterprise.js";
 import { AddPlatformOrgFlag1705344000200 } from "./migrations/1705344000200-AddPlatformOrgFlag.js";
 import { AddBillingOrgId1705344000201 } from "./migrations/1705344000201-AddBillingOrgId.js";
 import { CreatePlatformOrg1705344000202 } from "./migrations/1705344000202-CreatePlatformOrg.js";
@@ -198,7 +198,7 @@ import { AddIssueTrackerProvider1706688000001 } from "./migrations/1706688000001
 import { DeleteTestInvite1706688000002 } from "./migrations/1706688000002-DeleteTestInvite.js";
 import { SyncUserOrgIdWithDefault1706688000003 } from "./migrations/1706688000003-SyncUserOrgIdWithDefault.js";
 import { ConfigurePlatformOrgSettings1706688000004 } from "./migrations/1706688000004-ConfigurePlatformOrgSettings.js";
-import { FixMevionUsersAndCleanupOrgs1706688000005 } from "./migrations/1706688000005-FixMevionUsersAndCleanupOrgs.js";
+import { FixEnterpriseUsersAndCleanupOrgs1706688000005 } from "./migrations/1706688000005-FixEnterpriseUsersAndCleanupOrgs.js";
 import { CleanupTestUser1706688000006 } from "./migrations/1706688000006-CleanupTestUser.js";
 import { DeleteTestUsers1706688000007 } from "./migrations/1706688000007-DeleteTestUsers.js";
 import { DeleteTestUsersAgain1706688000008 } from "./migrations/1706688000008-DeleteTestUsersAgain.js";
@@ -258,7 +258,7 @@ import { CreateOrgCredentials1740500000000 } from "./migrations/1740500000000-Cr
 import { MigrateSecretsManagerToDb1740500000001 } from "./migrations/1740500000001-MigrateSecretsManagerToDb.js";
 import { AddPollPerformanceIndexes1740600000000 } from "./migrations/1740600000000-AddPollPerformanceIndexes.js";
 import { AddCoordinationAndStreamIndexes1740700000000 } from "./migrations/1740700000000-AddCoordinationAndStreamIndexes.js";
-import { EnsureEnterpriseMevionAndPlatform1740800000000 } from "./migrations/1740800000000-EnsureEnterpriseMevionAndPlatform.js";
+import { EnsureEnterpriseOrgAndPlatform1740800000000 } from "./migrations/1740800000000-EnsureEnterpriseOrgAndPlatform.js";
 import { EncryptExistingApiKeys1740900000000 } from "./migrations/1740900000000-EncryptExistingApiKeys.js";
 import { AddOrgAiGuidelines1741000000000 } from "./migrations/1741000000000-AddOrgAiGuidelines.js";
 import { AddCloudComputeBilling1741100000000 } from "./migrations/1741100000000-AddCloudComputeBilling.js";
@@ -500,10 +500,10 @@ export const AppDataSource = new DataSource({
     DiagnoseOrg1705344000123,
     AddUserToOrg1705344000124,
     DiagnoseOtherInvites1705344000125,
-    MigrateMevionUsers1705344000126,
+    MigrateEnterpriseUsers1705344000126,
     MoveUsersToOrg1705344000127,
     CleanupStaleInvites1705344000128,
-    RenameOrgToMevion1705344000129,
+    RenameOrgToEnterprise1705344000129,
     AddPlatformOrgFlag1705344000200,
     AddBillingOrgId1705344000201,
     CreatePlatformOrg1705344000202,
@@ -513,7 +513,7 @@ export const AppDataSource = new DataSource({
     DeleteTestInvite1706688000002,
     SyncUserOrgIdWithDefault1706688000003,
     ConfigurePlatformOrgSettings1706688000004,
-    FixMevionUsersAndCleanupOrgs1706688000005,
+    FixEnterpriseUsersAndCleanupOrgs1706688000005,
     CleanupTestUser1706688000006,
     DeleteTestUsers1706688000007,
     DeleteTestUsersAgain1706688000008,
@@ -573,7 +573,7 @@ export const AppDataSource = new DataSource({
     MigrateSecretsManagerToDb1740500000001,
     AddPollPerformanceIndexes1740600000000,
     AddCoordinationAndStreamIndexes1740700000000,
-    EnsureEnterpriseMevionAndPlatform1740800000000,
+    EnsureEnterpriseOrgAndPlatform1740800000000,
     EncryptExistingApiKeys1740900000000,
     AddOrgAiGuidelines1741000000000,
     AddCloudComputeBilling1741100000000,

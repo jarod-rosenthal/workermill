@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { Lock, Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock } from "lucide-react";
+import { Lock, Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock, Github, Star, ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
@@ -80,6 +80,70 @@ function FeaturedArticle() {
             </div>
           </div>
         </Link>
+      </div>
+    </section>
+  );
+}
+
+// ─── Open Source Banner ─────────────────────────────────────────────────────
+
+function OpenSourceBanner() {
+  return (
+    <section className="relative py-20 px-6">
+      <div className="relative max-w-3xl mx-auto text-center">
+        {/* GitHub icon */}
+        <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-white/[0.06] border border-white/10 mb-6">
+          <Github className="w-7 h-7 text-white" />
+        </div>
+
+        <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">
+          Open source.{" "}
+          <span className="bg-gradient-to-r from-teal-400 to-cyan-400 bg-clip-text text-transparent">
+            Always.
+          </span>
+        </h2>
+        <p className="text-slate-400 max-w-xl mx-auto leading-relaxed mb-8">
+          WorkerMill is fully open source under the Apache 2.0 license.
+          Read the code, run it yourself, or contribute — no black boxes.
+        </p>
+
+        {/* CTA row */}
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+          <a
+            href="https://github.com/jarod-rosenthal/workermill"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl bg-white text-black font-semibold text-sm hover:bg-slate-200 transition-colors"
+          >
+            <Github className="w-4 h-4" />
+            View on GitHub
+            <ExternalLink className="w-3.5 h-3.5 opacity-50" />
+          </a>
+          <a
+            href="https://github.com/jarod-rosenthal/workermill/stargazers"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl border border-white/10 bg-white/[0.03] text-slate-300 text-sm font-medium hover:bg-white/[0.06] hover:text-white transition-colors"
+          >
+            <Star className="w-4 h-4 text-amber-400" />
+            Star the repo
+          </a>
+        </div>
+
+        {/* License badge */}
+        <p className="mt-6 text-xs text-slate-500">
+          Licensed under{" "}
+          <a
+            href="https://github.com/jarod-rosenthal/workermill/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-slate-400 hover:text-white transition-colors underline underline-offset-2"
+          >
+            Apache 2.0
+          </a>
+          {" · "}
+          Contributions welcome
+        </p>
       </div>
     </section>
   );
@@ -328,6 +392,9 @@ export default function LandingV0() {
 
           {/* Trust & Security */}
           <TrustCallout />
+
+          {/* Open Source */}
+          <OpenSourceBanner />
 
           {/* Now they're convinced — show how to get started */}
           <InstallSection />

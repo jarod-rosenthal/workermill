@@ -18,6 +18,8 @@ import {
   Play,
   Zap,
   GitBranch,
+  Paperclip,
+  FileText,
 } from "lucide-react";
 import type {
   Card,
@@ -25,6 +27,7 @@ import type {
   Comment,
   ChecklistItem,
   OrgMember,
+  Attachment,
 } from "../../lib/boards-api";
 import * as boardsApi from "../../lib/boards-api";
 
@@ -181,6 +184,15 @@ export default function CardDetail({
   const [runLoading, setRunLoading] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [workerTaskId, setWorkerTaskId] = useState(card.workerTaskId);
+
+  // Attachments
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    boardsApi.listAttachments(card.id).then(setAttachments).catch(() => {});
+  }, [card.id]);
 
   // Fetch comments on mount
   const fetchComments = useCallback(async () => {
@@ -425,6 +437,34 @@ export default function CardDetail({
       setRunError(msg);
     } finally {
       setRunLoading(false);
+    }
+  };
+
+  const handleAttachmentUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploadingAttachment(true);
+    try {
+      for (const file of Array.from(files)) {
+        if (file.size > 10 * 1024 * 1024) {
+          alert(`File "${file.name}" exceeds 10MB limit`);
+          continue;
+        }
+        const att = await boardsApi.uploadAttachment(card.id, file);
+        setAttachments((prev) => [...prev, att]);
+      }
+    } catch (err) {
+      console.error("Upload failed:", err);
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  const handleAttachmentDelete = async (attachmentId: string) => {
+    try {
+      await boardsApi.deleteAttachment(attachmentId);
+      setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
+    } catch (err) {
+      console.error("Delete failed:", err);
     }
   };
 
@@ -691,6 +731,71 @@ export default function CardDetail({
                     >
                       Add
                     </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Attachments */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <Paperclip className="w-4 h-4" />
+                  Attachments ({attachments.length})
+                </div>
+
+                {/* Upload zone */}
+                <div
+                  className="border-2 border-dashed border-zinc-700 rounded-lg p-4 text-center cursor-pointer hover:border-zinc-500 transition-colors"
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleAttachmentUpload(e.dataTransfer.files); }}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => handleAttachmentUpload(e.target.files)}
+                  />
+                  {uploadingAttachment ? (
+                    <p className="text-sm text-zinc-400">Uploading...</p>
+                  ) : (
+                    <p className="text-sm text-zinc-500">Drop files here or click to upload (max 10MB)</p>
+                  )}
+                </div>
+
+                {/* Attachment list */}
+                {attachments.length > 0 && (
+                  <div className="space-y-1">
+                    {attachments.map((att) => (
+                      <div key={att.id} className="flex items-center gap-2 p-2 rounded hover:bg-zinc-800 group">
+                        {att.contentType.startsWith("image/") ? (
+                          <img
+                            src={boardsApi.getAttachmentUrl(att.id)}
+                            alt={att.filename}
+                            className="w-10 h-10 rounded object-cover"
+                          />
+                        ) : (
+                          <FileText className="w-5 h-5 text-zinc-400" />
+                        )}
+                        <a
+                          href={boardsApi.getAttachmentUrl(att.id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 text-sm text-zinc-300 hover:text-white truncate"
+                        >
+                          {att.filename}
+                        </a>
+                        <span className="text-xs text-zinc-500">
+                          {(att.sizeBytes / 1024).toFixed(0)} KB
+                        </span>
+                        <button
+                          onClick={() => handleAttachmentDelete(att.id)}
+                          className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 transition-opacity"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

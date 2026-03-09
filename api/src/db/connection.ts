@@ -60,6 +60,7 @@ import {
   KbSpec,
   KbSpecTemplate,
   KbSpecVersion,
+  KbCardAttachment,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -272,6 +273,7 @@ import { AddIntegrationCheckStatus1742100000000 } from "./migrations/17421000000
 import { SplitPlanningMode1742200000000 } from "./migrations/1742200000000-SplitPlanningMode.js";
 import { AddCriticApprovalThreshold1742300000000 } from "./migrations/1742300000000-AddCriticApprovalThreshold.js";
 import { ConsolidateFixRetries1742400000000 } from "./migrations/1742400000000-ConsolidateFixRetries.js";
+import { AddKbCardAttachments1742500000000 } from "./migrations/1742500000000-AddKbCardAttachments.js";
 import { logger } from "../utils/logger.js";
 import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
@@ -370,6 +372,7 @@ export const AppDataSource = new DataSource({
     KbSpec,
     KbSpecTemplate,
     KbSpecVersion,
+    KbCardAttachment,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -583,6 +586,7 @@ export const AppDataSource = new DataSource({
     SplitPlanningMode1742200000000,
     AddCriticApprovalThreshold1742300000000,
     ConsolidateFixRetries1742400000000,
+    AddKbCardAttachments1742500000000,
   ],
   subscribers: [
     OrganizationEncryptionSubscriber,

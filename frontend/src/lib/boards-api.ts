@@ -93,6 +93,15 @@ export interface ChecklistItem {
   updatedAt: string;
 }
 
+export interface Attachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadedById: string | null;
+  createdAt: string;
+}
+
 export interface Activity {
   id: string;
   boardId: string;
@@ -435,6 +444,39 @@ export async function deleteChecklistItem(
   await apiClient.delete(
     `/boards/${boardId}/cards/${cardId}/checklist/${itemId}`,
   );
+}
+
+// Attachments
+export async function listAttachments(cardId: string): Promise<Attachment[]> {
+  const response = await apiClient.get(`/boards/cards/${cardId}/attachments`);
+  return response.data.attachments ?? response.data;
+}
+
+export async function uploadAttachment(
+  cardId: string,
+  file: File,
+): Promise<Attachment> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const token = localStorage.getItem("accessToken") || "";
+  const res = await fetch(`/api/boards/cards/${cardId}/attachments`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to upload attachment");
+  }
+  return res.json();
+}
+
+export async function deleteAttachment(attachmentId: string): Promise<void> {
+  await apiClient.delete(`/attachments/${attachmentId}`);
+}
+
+export function getAttachmentUrl(attachmentId: string): string {
+  return `/api/attachments/${attachmentId}`;
 }
 
 // Run card with AI worker

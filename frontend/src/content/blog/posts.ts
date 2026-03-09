@@ -13,6 +13,27 @@ const authors: Record<string, Author> = {
 
 export const blogPosts: BlogPost[] = [
   {
+    slug: "why-open-source-ai-coding-infrastructure",
+    title:
+      "Why Open Source Is the Only Sane Bet in AI Coding Infrastructure",
+    excerpt:
+      "The AI coding landscape is moving so fast that closed, locked-in infrastructure is a liability. Open source isn't an ideological choice — it's a survival strategy. Here's what we've seen, why we open-sourced WorkerMill, and what it means.",
+    date: "2026-03-08",
+    category: "ai-automation",
+    author: authors.jarod,
+    thumbnail:
+      "https://images.unsplash.com/photo-1618401471353-b98afee0b2eb?w=1200&h=600&fit=crop&q=80",
+    featured: true,
+    readingTime: 12,
+    tags: [
+      "open-source",
+      "ai-agents",
+      "infrastructure",
+      "vendor-lock-in",
+      "agentic-coding",
+    ],
+  },
+  {
     slug: "anatomy-of-a-one-shot-spec",
     title:
       "Anatomy of a One-Shot Spec: Designing Software That AI Agents Build Right the First Time",
@@ -23,7 +44,6 @@ export const blogPosts: BlogPost[] = [
     author: authors.jarod,
     thumbnail:
       "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=1200&h=600&fit=crop&q=80",
-    featured: true,
     readingTime: 14,
     tags: [
       "spec-driven-development",

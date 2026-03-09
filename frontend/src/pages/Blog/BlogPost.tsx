@@ -14,6 +14,299 @@ import "./article.css";
 
 // Content for each blog post
 const postContent: Record<string, React.ReactNode> = {
+  "why-open-source-ai-coding-infrastructure": (
+    <>
+      <p className="article-lead">
+        Six months ago, the best AI coding model couldn't reliably handle a
+        multi-file refactor. Today, autonomous agents are shipping production
+        features across full-stack codebases — planning the work, writing the
+        code, fixing their own test failures, and opening pull requests. If
+        you're building infrastructure for AI coding agents,{" "}
+        <strong>
+          the ground is shifting under you faster than at any point in the
+          history of software tooling.
+        </strong>
+      </p>
+
+      <p>
+        This pace of change has a direct consequence for how you build the
+        orchestration layer — the system that plans, coordinates, and quality-checks
+        autonomous agent work. If that layer is closed-source, locked to a single
+        provider, or controlled by a vendor whose incentives diverge from yours,
+        you're building on sand. Open source isn't an ideological position here.
+        It's an engineering decision driven by the same pragmatism that makes you
+        choose PostgreSQL over a proprietary database: when the landscape is
+        this volatile, you need infrastructure you can see, modify, and control.
+      </p>
+
+      <p>
+        That's why WorkerMill is open source. I want to explain what led to that
+        decision, what it means in practice, and why I think it's the only sane
+        approach for this category of tooling right now.
+      </p>
+
+      <h2>What Changed in 90 Days</h2>
+      <p>
+        To appreciate why openness matters, you need to feel the velocity.
+        Consider what shifted in the AI coding landscape in just the last
+        quarter:
+      </p>
+
+      <ul>
+        <li>
+          <strong>Model capability jumps:</strong> Frontier models went from
+          struggling with cross-file dependency reasoning to handling it
+          routinely. Tasks that required human intervention six months ago now
+          run autonomously with quality gate pass rates above 90%.
+        </li>
+        <li>
+          <strong>New providers entering the market:</strong> Google, OpenAI,
+          and Anthropic are all shipping coding-optimized models on different
+          release cadences. Ollama brought local inference to the point where
+          a laptop can run a capable coding model. The provider you bet on
+          in January may not be the best choice in April.
+        </li>
+        <li>
+          <strong>Tooling ecosystem explosion:</strong> New agent frameworks,
+          new IDE integrations, new approaches to context management and
+          tool use — the ecosystem is expanding in every direction
+          simultaneously.
+        </li>
+        <li>
+          <strong>Enterprise adoption inflection:</strong> Organizations that
+          were "evaluating" agentic coding three months ago are now running
+          it in production. The conversation shifted from "should we?" to
+          "how do we scale this?"
+        </li>
+      </ul>
+
+      <p>
+        WorkerMill absorbed every one of these shifts without a rewrite. When
+        a new model family drops, we add a provider adapter — the orchestration
+        logic, quality gates, and coordination layer don't change. When a new
+        SCM platform needs support, we add a provider. The architecture was
+        designed for this: provider-agnostic execution with pluggable adapters
+        at every integration boundary.
+      </p>
+
+      <div className="article-callout">
+        <strong>This is the key insight:</strong> In a landscape that changes
+        quarterly, your infrastructure needs to absorb change, not predict it.
+        Every hardcoded assumption about which model, which provider, or which
+        toolchain is "the one" becomes technical debt the moment the landscape
+        shifts again.
+      </div>
+
+      <h2>The Lock-In Tax</h2>
+      <p>
+        Vendor lock-in is always a risk. But in AI coding infrastructure right
+        now, it's an acute risk — because the cost of being locked to the wrong
+        provider compounds with every shift in the landscape.
+      </p>
+
+      <p>
+        Consider what lock-in looks like in practice:
+      </p>
+
+      <ul>
+        <li>
+          <strong>Model lock-in:</strong> Your orchestration layer is tightly
+          coupled to one provider's API. A competitor releases a model that's
+          40% cheaper at equivalent quality. You can't switch without rewriting
+          your execution pipeline.
+        </li>
+        <li>
+          <strong>Platform lock-in:</strong> Your agent infrastructure runs on
+          a managed platform. The vendor changes pricing, deprecates a feature
+          you depend on, or makes an architectural decision that conflicts with
+          your requirements. You have no recourse.
+        </li>
+        <li>
+          <strong>Data lock-in:</strong> Your task history, execution logs, and
+          quality metrics live in a vendor's system. You want to analyze
+          patterns, optimize workflows, or audit agent decisions. You're
+          limited to whatever the vendor's dashboard exposes.
+        </li>
+      </ul>
+
+      <p>
+        Each of these scenarios is manageable in a stable market. In a market
+        that reinvents itself every quarter, they're existential. The team that
+        can swap providers in an afternoon has a structural advantage over the
+        team that needs a quarter-long migration project.
+      </p>
+
+      <p>
+        WorkerMill supports Anthropic, OpenAI, Google, and Ollama today.
+        Switching between them is a configuration change, not a code change.
+        The same quality gates, the same log streaming, the same coordination
+        layer — all of it works regardless of which model is driving the
+        worker. This isn't a feature we added for marketing. It's a survival
+        trait in a market where the right provider choice changes monthly.
+      </p>
+
+      <h2>Why We Open-Sourced WorkerMill</h2>
+      <p>
+        The decision to open source WorkerMill wasn't altruism. It was the
+        logical conclusion of three observations:
+      </p>
+
+      <h3>1. The Community Adapts Faster Than Any Single Team</h3>
+      <p>
+        I've been building WorkerMill for two years — 1,400+ commits, solo.
+        That's fine for proving the architecture. But the landscape is moving
+        too fast for any individual or small team to cover every integration,
+        every edge case, every deployment environment. Open source means the
+        team working with Bitbucket Pipelines can contribute that integration.
+        The team running Ollama on-premise can optimize that path. The team
+        with strict compliance requirements can add the audit hooks they need.
+        The codebase evolves at the speed of the community, not the speed of
+        one person.
+      </p>
+
+      <h3>2. Transparency Builds Trust for Enterprise Adoption</h3>
+      <p>
+        Autonomous AI agents that write code, commit to repositories, and
+        open pull requests represent a significant trust boundary. Enterprises
+        considering this technology want to know exactly what the agent is
+        doing, how decisions are made, and what guardrails exist. "Trust us,
+        it's safe" is not a satisfying answer. "Read the source code" is.
+      </p>
+      <p>
+        Every quality gate, every decision point, every security boundary in
+        WorkerMill is inspectable. Security teams can audit the execution
+        pipeline. Compliance teams can verify that agent behavior meets their
+        requirements. This level of transparency is only possible with open
+        source.
+      </p>
+
+      <h3>3. Open Source Is the Moat When the Technology Layer Commoditizes</h3>
+      <p>
+        The AI models themselves are commoditizing. Multiple providers offer
+        comparable coding capability, and the gap narrows with every release.
+        The value isn't in the model — it's in the orchestration layer that
+        makes models useful in production: planning, parallel execution,
+        quality enforcement, coordination, and integration with existing
+        development workflows.
+      </p>
+      <p>
+        Building that layer as closed-source proprietary software is a bet
+        that you can outrun the market. Building it as open source is a bet
+        that the best orchestration layer wins — and the best one will be the
+        one shaped by the broadest set of real-world usage. That's the bet
+        I'm making.
+      </p>
+
+      <h2>What "Open Source" Means Here</h2>
+      <p>
+        "Open source" has been diluted to the point where it needs
+        qualification. Here's what it means for WorkerMill:
+      </p>
+
+      <ul>
+        <li>
+          <strong>Fully self-hostable:</strong> Run the entire stack — API,
+          frontend, orchestrator, workers — on your own infrastructure.
+          PostgreSQL, Redis, and Docker are the only dependencies. No phone-home,
+          no license server, no usage-based metering that you don't control.
+        </li>
+        <li>
+          <strong>Pluggable providers:</strong> Anthropic, OpenAI, Google,
+          Ollama for AI. GitHub, GitLab, Bitbucket for source control. Jira,
+          Linear, GitHub Issues for task management. Each is an adapter, not
+          a hardcoded dependency.
+        </li>
+        <li>
+          <strong>Extensible worker personas:</strong> WorkerMill ships with
+          12 expert personas — frontend, backend, DevOps, database, security,
+          and more. These are configurable, not locked. Teams can modify
+          existing personas or create new ones matched to their stack and
+          conventions.
+        </li>
+        <li>
+          <strong>Board-configured quality gates:</strong> The shell commands
+          that define "correct" for your codebase are per-board configuration,
+          not platform policy. A TypeScript project runs{" "}
+          <code>tsc && eslint && vitest</code>. A Python project runs{" "}
+          <code>pytest && mypy && ruff</code>. You decide what quality means.
+        </li>
+        <li>
+          <strong>Full execution transparency:</strong> Every log line, every
+          decision, every quality gate result is persisted and streamable in
+          real time. No black boxes.
+        </li>
+      </ul>
+
+      <p>
+        We've shipped five production showcase platforms through WorkerMill —
+        OnCallShift, CalMill, TeamBoard, FlagDeck, and ShipAPI — totaling over
+        280,000 lines of code. Each was built by AI agents orchestrated through
+        the same open-source pipeline: Claude Sonnet writing code across
+        specialized expert personas, Claude Opus planning each epic and
+        reviewing all work as tech lead. The showcases aren't demos. They're
+        deployed, functional applications that anyone can inspect.
+      </p>
+
+      <div className="article-callout article-callout-success">
+        <strong>See it in action:</strong> Every showcase on{" "}
+        <a href="https://workermill.com/#showcase" className="text-teal-400 hover:text-teal-300">
+          workermill.com
+        </a>{" "}
+        includes a live demo, full source code on GitHub, and a detailed
+        timeline showing how AI agents built the entire application from a
+        spec.
+      </div>
+
+      <h2>The Landscape Will Keep Changing</h2>
+      <p>
+        I have no idea which model will be the best coding model six months
+        from now. I don't know which new capability will reshape how agents
+        approach multi-file reasoning, or which new tool-use paradigm will
+        emerge, or which provider will offer the best cost-to-quality ratio
+        for different task types.
+      </p>
+      <p>
+        Nobody does. That's the point.
+      </p>
+      <p>
+        The bet isn't on predicting which direction the landscape moves. The
+        bet is on building infrastructure that absorbs change regardless of
+        direction. Provider-agnostic execution. Pluggable integrations.
+        Configurable quality standards. Transparent decision-making. And a
+        codebase that anyone can inspect, modify, and extend.
+      </p>
+      <p>
+        That's what open source gives you. Not just access to the code, but
+        resilience against a future you can't predict.
+      </p>
+
+      <h2>Get Involved</h2>
+      <p>
+        WorkerMill is on{" "}
+        <a href="https://github.com/jarod-rosenthal/workermill" className="text-teal-400 hover:text-teal-300">
+          GitHub
+        </a>
+        . The production deployment runs at{" "}
+        <a href="https://workermill.com" className="text-teal-400 hover:text-teal-300">
+          workermill.com
+        </a>
+        .
+      </p>
+      <p>
+        If you're running AI coding agents in production, I want to hear what
+        you're building and what problems you're hitting. The architectural
+        decisions in WorkerMill came from two years of iterating on what
+        breaks in practice — and the landscape is producing new breakage
+        patterns faster than any single team can discover. The best
+        infrastructure will be built by the people using it.
+      </p>
+      <p>
+        The AI coding landscape will look different in six months. The
+        question isn't whether your infrastructure can handle it. It's
+        whether you can see what it's doing when it does.
+      </p>
+    </>
+  ),
   "anatomy-of-a-one-shot-spec": (
     <>
       <p className="article-lead">

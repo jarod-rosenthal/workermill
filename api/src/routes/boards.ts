@@ -287,14 +287,37 @@ export async function runCardAsWorkerTask(
     }
   }
 
+  // Fetch attachments for the card
+  const attachmentRepo = AppDataSource.getRepository(KbCardAttachment);
+  const attachments = await attachmentRepo.find({
+    where: { cardId: card.id },
+    order: { createdAt: "ASC" },
+  });
+
   // Build card description for worker — include full PRD if available
-  const description = [
+  let description = [
     card.title,
     card.description || "",
     card.board?.prdContent
       ? `\n---\n\n## Full Build Specification\n\nThe following is the complete specification document. Your card description above defines your SCOPE — use this specification for exact technical details (API response shapes, field names, data structures, route parameters, UI component specs).\n\n${card.board.prdContent}`
       : "",
   ].filter(Boolean).join("\n\n");
+
+  // Append attachments to description
+  if (attachments.length > 0) {
+    const attachmentLines: string[] = ["\n---\n\n## Attachments\n"];
+    for (const att of attachments) {
+      if (att.contentType.startsWith("image/")) {
+        // Inline base64 for images — Claude CLI reads these natively
+        const b64 = att.data.toString("base64");
+        attachmentLines.push(`### ${att.filename}\n\n![${att.filename}](data:${att.contentType};base64,${b64})\n`);
+      } else {
+        // Non-images: include filename and size for context
+        attachmentLines.push(`### ${att.filename}\n\nAttached file: ${att.filename} (${(att.sizeBytes / 1024).toFixed(1)} KB, ${att.contentType})\n`);
+      }
+    }
+    description += attachmentLines.join("\n");
+  }
 
   // Foundation card (position 0) creates the project from scratch — its stories
   // build incrementally and can't pass full-project quality gates (e.g. npm run build

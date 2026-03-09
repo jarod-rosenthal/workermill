@@ -153,7 +153,7 @@ const postContent: Record<string, React.ReactNode> = {
 
       <h3>1. The Community Adapts Faster Than Any Single Team</h3>
       <p>
-        I've been building WorkerMill for two years — 1,400+ commits, solo.
+        I've been building WorkerMill since December 2025 — 1,400+ commits, solo.
         That's fine for proving the architecture. But the landscape is moving
         too fast for any individual or small team to cover every integration,
         every edge case, every deployment environment. Open source means the
@@ -295,7 +295,7 @@ const postContent: Record<string, React.ReactNode> = {
       <p>
         If you're running AI coding agents in production, I want to hear what
         you're building and what problems you're hitting. The architectural
-        decisions in WorkerMill came from two years of iterating on what
+        decisions in WorkerMill came from months of iterating on what
         breaks in practice — and the landscape is producing new breakage
         patterns faster than any single team can discover. The best
         infrastructure will be built by the people using it.

@@ -2,6 +2,8 @@
 // Board: CalMill (2272c945-84ea-493c-b304-b744496998f6)
 // Generated: 2026-02-17
 
+export { calMillPrd } from "./calmill-prd";
+
 export interface CalMillEpic {
   id: string;
   title: string;

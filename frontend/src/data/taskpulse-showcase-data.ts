@@ -2,6 +2,8 @@
 // Board: TaskPulse (f5514519-30ca-436c-bebf-5cce99051951)
 // Generated: 2026-02-16
 
+export { taskPulsePrd } from "./taskpulse-prd";
+
 export interface TaskPulseEpic {
   id: string;
   title: string;

@@ -2,6 +2,8 @@
 // Repo: workermill-examples/shipapi
 // Generated: 2026-02-19
 
+export { shipApiPrd } from "./shipapi-prd";
+
 export interface ShipApiEpic {
   id: string;
   title: string;

@@ -17,6 +17,7 @@ import type { KbCardLabel } from "./KbCardLabel.js";
 import type { KbCardDependency } from "./KbCardDependency.js";
 import type { KbComment } from "./KbComment.js";
 import type { KbChecklist } from "./KbChecklist.js";
+import type { KbCardAttachment } from "./KbCardAttachment.js";
 
 export type KbCardPriority = "urgent" | "high" | "medium" | "low";
 
@@ -107,4 +108,7 @@ export class KbCard {
 
   @OneToMany("KbChecklist", "card")
   checklistItems: KbChecklist[];
+
+  @OneToMany("KbCardAttachment", "card")
+  attachments: KbCardAttachment[];
 }

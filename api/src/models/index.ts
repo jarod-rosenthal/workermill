@@ -108,6 +108,7 @@ export { KbCardLabel } from "./KbCardLabel.js";
 export { KbCardDependency } from "./KbCardDependency.js";
 export { KbComment } from "./KbComment.js";
 export { KbChecklist } from "./KbChecklist.js";
+export { KbCardAttachment } from "./KbCardAttachment.js";
 export { KbActivity } from "./KbActivity.js";
 export { KbStarredBoard } from "./KbStarredBoard.js";
 export { KbSpec, type SpecStatus, type QualityFeedback, type QualityDimensionScore } from "./KbSpec.js";

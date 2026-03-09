@@ -4449,26 +4449,50 @@ Begin your review now. Start by fetching the code changes.`;
    * Uses the same agent SDK as InlineIntegrationFixer / InlineCIFixer.
    */
   private async runQualityFixAgent(repoPath: string, issuesRemaining: string[]): Promise<boolean> {
-    // Capture fresh tsc/lint/test output so the agent sees real errors
+    // Capture fresh tsc/lint/test output so the agent sees ALL quality gate errors.
+    // Previously this only captured typecheck + lint, causing the agent to miss test failures.
     let errorOutput = "";
+
+    // 1. TypeScript errors
     try {
       execSync("npx tsc --noEmit 2>&1", { cwd: repoPath, encoding: "utf-8", timeout: 120_000 });
     } catch (e: unknown) {
       const err = e as { stdout?: string; stderr?: string };
-      errorOutput += (err.stdout || "") + "\n" + (err.stderr || "");
+      errorOutput += "=== TYPECHECK ERRORS ===\n" + (err.stdout || "") + "\n" + (err.stderr || "");
     }
+
+    // 2. Lint errors
     try {
       execSync("npx eslint . --ext .ts,.tsx,.js,.jsx 2>&1", { cwd: repoPath, encoding: "utf-8", timeout: 120_000 });
     } catch (e: unknown) {
       const err = e as { stdout?: string; stderr?: string };
-      errorOutput += "\n" + (err.stdout || "") + "\n" + (err.stderr || "");
+      errorOutput += "\n=== LINT ERRORS ===\n" + (err.stdout || "") + "\n" + (err.stderr || "");
+    }
+
+    // 3. Test failures — detect test runner from package.json and capture output
+    try {
+      const pkgJsonPath = path.join(repoPath, "package.json");
+      if (existsSync(pkgJsonPath)) {
+        const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
+        const testScript = pkgJson.scripts?.test;
+        if (testScript) {
+          try {
+            execSync("npm test 2>&1", { cwd: repoPath, encoding: "utf-8", timeout: 300_000, env: { ...process.env, CI: "true" } });
+          } catch (testErr: unknown) {
+            const te = testErr as { stdout?: string; stderr?: string };
+            errorOutput += "\n=== TEST FAILURES ===\n" + (te.stdout || "") + "\n" + (te.stderr || "");
+          }
+        }
+      }
+    } catch {
+      // package.json parse failure — non-fatal
     }
 
     if (!errorOutput.trim()) {
       errorOutput = issuesRemaining.join("\n");
     }
 
-    const maxLen = 8 * 1024;
+    const maxLen = 12 * 1024;
     const truncated = errorOutput.length > maxLen
       ? errorOutput.substring(errorOutput.length - maxLen)
       : errorOutput;
@@ -4490,14 +4514,15 @@ ${truncated}
 
 ### Instructions
 
-The code has quality gate failures (TypeScript errors, lint errors, or test failures) that need fixing.
+The code has quality gate failures (TypeScript errors, lint errors, and/or test failures) that need fixing.
 
-1. Read the errors carefully and fix ALL of them
+1. Read ALL the errors carefully and fix ALL of them — typecheck, lint, AND tests
 2. Run \`npx tsc --noEmit\` to verify type errors are resolved
 3. Run \`npx eslint . --ext .ts,.tsx,.js,.jsx\` to verify lint errors are resolved
-4. Do NOT refactor beyond what's needed to pass quality gates
-5. Do NOT change language versions, framework versions, or dependency versions
-6. Commit with message "fix: resolve quality gate issues"`;
+4. Run \`npm test\` to verify test failures are resolved
+5. Do NOT refactor beyond what's needed to pass quality gates
+6. Do NOT change language versions, framework versions, or dependency versions
+7. Commit with message "fix: resolve quality gate issues"`;
 
     const systemPrompt = `You are a Quality Fix Agent. Fix ALL quality gate failures in the codebase. You have full access to read and edit files.
 

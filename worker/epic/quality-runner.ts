@@ -241,6 +241,49 @@ export function getChangedFileCoverage(
 }
 
 /**
+ * Ensure dependencies are installed before running quality checks.
+ * Detects package manager from lockfile (same logic as remote-bootstrap.ts).
+ * Without this, stale node_modules produces thousands of phantom type errors.
+ */
+function ensureDependenciesInstalled(cwd: string, languageId: string): void {
+  if (languageId === "go") {
+    // Go modules: download dependencies if go.mod exists
+    if (fs.existsSync(path.join(cwd, "go.mod"))) {
+      console.log("[quality-runner] Installing Go dependencies...");
+      try {
+        execSync("go mod download", { cwd, stdio: "pipe", timeout: 120_000 });
+        console.log("[quality-runner] Go dependencies installed");
+      } catch {
+        console.log("[quality-runner] go mod download failed (non-fatal)");
+      }
+    }
+    return;
+  }
+
+  // JS/TS: detect package manager from lockfile and install
+  let installCmd: string | null = null;
+  if (fs.existsSync(path.join(cwd, "pnpm-lock.yaml"))) {
+    installCmd = "pnpm install --frozen-lockfile";
+  } else if (fs.existsSync(path.join(cwd, "yarn.lock"))) {
+    installCmd = "yarn install --frozen-lockfile";
+  } else if (fs.existsSync(path.join(cwd, "package-lock.json"))) {
+    installCmd = "npm ci";
+  } else if (fs.existsSync(path.join(cwd, "package.json"))) {
+    installCmd = "npm install";
+  }
+
+  if (installCmd) {
+    console.log(`[quality-runner] Installing dependencies: ${installCmd}`);
+    try {
+      execSync(installCmd, { cwd, stdio: "pipe", timeout: 300_000 });
+      console.log("[quality-runner] Dependencies installed");
+    } catch {
+      console.log("[quality-runner] Dependency install failed (non-fatal) — proceeding with existing node_modules");
+    }
+  }
+}
+
+/**
  * Run quality verification on a repository and return metrics.
  */
 export async function runQualityVerification(repoPath: string): Promise<QualityMetrics> {
@@ -272,6 +315,10 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
   // For Go, find all module directories (including subdirectories)
   const goModDirs = profile.id === "go" ? findGoModDirs(repoPath) : [];
   const effectiveCwd = goModDirs[0] || repoPath;
+
+  // Ensure dependencies are installed before running checks.
+  // Stale or incomplete node_modules causes phantom type errors (e.g. 5000+ false TS errors).
+  ensureDependenciesInstalled(effectiveCwd, profile.id);
 
   // Run TypeCheck
   console.log("[quality-runner] Running typecheck...");

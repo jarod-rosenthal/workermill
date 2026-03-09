@@ -6,6 +6,7 @@
  */
 
 import crypto from "crypto";
+import multer from "multer";
 import { Router, Request, Response } from "express";
 import { AppDataSource } from "../db/connection.js";
 import {
@@ -19,6 +20,7 @@ import {
   KbActivity,
   KbStarredBoard,
   KbCardDependency,
+  KbCardAttachment,
   Organization,
   User,
   WorkerTask,
@@ -35,6 +37,11 @@ import { authenticateUser } from "../middleware/auth.js";
 import { requireCurrentTos } from "../middleware/tos.js";
 import { logger } from "../utils/logger.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB — matches Jira default
+});
 
 const router = Router();
 
@@ -2419,6 +2426,103 @@ router.get(
     } catch (error) {
       logger.error("Error listing activity", { error });
       res.status(500).json({ error: "Failed to list activity" });
+    }
+  }
+);
+
+// =============================================================================
+// Attachment Routes
+// =============================================================================
+
+/**
+ * POST /api/boards/cards/:cardId/attachments
+ * Upload a file attachment to a card
+ */
+router.post(
+  "/cards/:cardId/attachments",
+  param("cardId").isUUID(),
+  upload.single("file"),
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const cardId = req.params.cardId as string;
+      const file = req.file;
+
+      if (!file) {
+        res.status(400).json({ error: "No file provided" });
+        return;
+      }
+
+      const cardRepo = AppDataSource.getRepository(KbCard);
+      const card = await cardRepo.findOne({
+        where: { id: cardId },
+        relations: ["board"],
+      });
+      if (!card || card.board.orgId !== org.id) {
+        res.status(404).json({ error: "Card not found" });
+        return;
+      }
+
+      const attachmentRepo = AppDataSource.getRepository(KbCardAttachment);
+      const attachment = attachmentRepo.create({
+        cardId,
+        filename: file.originalname,
+        contentType: file.mimetype,
+        sizeBytes: file.size,
+        data: file.buffer,
+        uploadedById: req.user!.id,
+      });
+      await attachmentRepo.save(attachment);
+
+      res.status(201).json({
+        id: attachment.id,
+        filename: attachment.filename,
+        contentType: attachment.contentType,
+        sizeBytes: attachment.sizeBytes,
+        uploadedById: attachment.uploadedById,
+        createdAt: attachment.createdAt,
+      });
+    } catch (error) {
+      logger.error("Error uploading attachment", { error });
+      res.status(500).json({ error: "Failed to upload attachment" });
+    }
+  }
+);
+
+/**
+ * GET /api/boards/cards/:cardId/attachments
+ * List all attachments for a card (metadata only, no binary)
+ */
+router.get(
+  "/cards/:cardId/attachments",
+  param("cardId").isUUID(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const cardId = req.params.cardId as string;
+
+      const cardRepo = AppDataSource.getRepository(KbCard);
+      const card = await cardRepo.findOne({
+        where: { id: cardId },
+        relations: ["board"],
+      });
+      if (!card || card.board.orgId !== org.id) {
+        res.status(404).json({ error: "Card not found" });
+        return;
+      }
+
+      const attachmentRepo = AppDataSource.getRepository(KbCardAttachment);
+      const attachments = await attachmentRepo.find({
+        where: { cardId },
+        select: ["id", "filename", "contentType", "sizeBytes", "uploadedById", "createdAt"],
+        order: { createdAt: "ASC" },
+      });
+
+      res.json(attachments);
+    } catch (error) {
+      logger.error("Error listing attachments", { error });
+      res.status(500).json({ error: "Failed to list attachments" });
     }
   }
 );

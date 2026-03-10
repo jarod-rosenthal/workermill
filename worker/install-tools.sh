@@ -14,7 +14,7 @@ INSTALLED=""
 # Pre-extend PATH for cached tool installations.
 # Docker volume mounts may already contain tools from previous runs —
 # this ensures `command -v` finds them without re-installation.
-export PATH="/usr/local/go/bin:$HOME/.cargo/bin:$HOME/.deno/bin:$HOME/.bun/bin:${PATH}"
+export PATH="/usr/local/go/bin:$HOME/.cargo/bin:$HOME/.deno/bin:$HOME/.bun/bin:$HOME/.local/bin:${PATH}"
 
 log() { echo "[install-tools] $*"; }
 
@@ -81,6 +81,51 @@ detect_node_upgrade() {
   if [ -n "$target" ] && [ "$target" -gt "$current_major" ] 2>/dev/null; then
     echo "$target"
   fi
+}
+
+# Returns target Python version (e.g. "3.13") if upgrade needed, empty otherwise.
+# Checks .python-version and pyproject.toml for a required version higher than installed.
+detect_python_upgrade() {
+  local current_version
+  current_version=$(python3 --version 2>/dev/null | sed 's/Python //' | cut -d. -f1,2)
+  [ -z "$current_version" ] && return
+
+  local target=""
+
+  if [ -n "$REPO_DIR" ] && [ -f "$REPO_DIR/.python-version" ]; then
+    target=$(head -1 "$REPO_DIR/.python-version" 2>/dev/null | tr -d ' \n\r' | cut -d. -f1,2)
+  fi
+
+  # Check pyproject.toml requires-python
+  if [ -z "$target" ] && [ -n "$REPO_DIR" ] && [ -f "$REPO_DIR/pyproject.toml" ]; then
+    target=$(grep -oP 'requires-python\s*=\s*"[^"]*\K[0-9]+\.[0-9]+' "$REPO_DIR/pyproject.toml" 2>/dev/null | head -1)
+  fi
+
+  if [ -n "$target" ] && [ "$target" != "$current_version" ]; then
+    # Compare: is target newer than current?
+    local cur_major cur_minor tgt_major tgt_minor
+    cur_major=$(echo "$current_version" | cut -d. -f1)
+    cur_minor=$(echo "$current_version" | cut -d. -f2)
+    tgt_major=$(echo "$target" | cut -d. -f1)
+    tgt_minor=$(echo "$target" | cut -d. -f2)
+    if [ "$tgt_major" -gt "$cur_major" ] 2>/dev/null || \
+       { [ "$tgt_major" -eq "$cur_major" ] && [ "$tgt_minor" -gt "$cur_minor" ]; } 2>/dev/null; then
+      echo "$target"
+    fi
+  fi
+}
+
+need_uv() {
+  if echo "${QUALITY_GATE_COMMANDS:-}" | grep -qiE '\buv run\b|\buv sync\b|\buv pip\b'; then
+    return 0
+  fi
+  if [ -n "$REPO_DIR" ] && [ -f "$REPO_DIR/uv.lock" ]; then
+    return 0
+  fi
+  if [ -n "$REPO_DIR" ] && [ -f "$REPO_DIR/pyproject.toml" ] && grep -q '\[tool\.uv\]' "$REPO_DIR/pyproject.toml" 2>/dev/null; then
+    return 0
+  fi
+  return 1
 }
 
 # ── Install Functions (all pull from official sources) ───────────────────────
@@ -179,6 +224,40 @@ install_railway() {
   INSTALLED="${INSTALLED} railway"
 }
 
+install_python() {
+  local target_version="${1:-}"
+  [ -z "$target_version" ] && return 0
+
+  local current_version
+  current_version=$(python3 --version 2>/dev/null | sed 's/Python //' | cut -d. -f1,2)
+
+  if [ "$current_version" = "$target_version" ]; then
+    log "Python $target_version already installed"
+    return 0
+  fi
+
+  # Use uv to manage Python versions — no root required, works on any Linux.
+  # deadsnakes PPA is Ubuntu-only and won't work on the Debian base image.
+  install_uv
+  log "Installing Python ${target_version} via uv..."
+  uv python install "$target_version" 2>/dev/null
+
+  log "Python installed: $(uv python find "$target_version" 2>/dev/null || echo "$target_version")"
+  INSTALLED="${INSTALLED} python${target_version}"
+}
+
+install_uv() {
+  if command -v uv &>/dev/null; then
+    log "uv already installed ($(uv --version))"
+    return 0
+  fi
+  log "Installing uv from astral.sh..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null
+  export PATH="$HOME/.local/bin:${PATH}"
+  log "uv installed: $(uv --version)"
+  INSTALLED="${INSTALLED} uv"
+}
+
 install_node_version() {
   local target_version="$1"
   local current_major
@@ -255,6 +334,13 @@ fallback_scan() {
     fi
   fi
 
+  if ! command -v uv &>/dev/null; then
+    if echo "$scan_text" | grep -qiE 'uv sync|uv run|uv pip|astral-sh/setup-uv|uv\.lock'; then
+      log "Fallback: detected uv references in config files"
+      install_uv
+    fi
+  fi
+
   # Check CI configs for Node.js version requirements higher than current
   local ci_node_version
   ci_node_version=$(echo "$scan_text" | grep -oP 'node-version:\s*"?\K[0-9]+' | sort -rn | head -1)
@@ -282,7 +368,8 @@ resolve_tool() {
     deno)            install_deno "$version" ;;
     bun)             install_bun ;;
     railway)         install_railway ;;
-    python)          ;; # Python 3 already in base image
+    python)          [ -n "$version" ] && install_python "$version" ;;
+    uv)              install_uv ;;
     nodejs|node)     [ -n "$version" ] && install_node_version "$version" ;;
     *)
       # Unknown tool — try apt as generic fallback
@@ -377,6 +464,16 @@ need_awscli && install_awscli
 NODE_TARGET=$(detect_node_upgrade)
 if [ -n "$NODE_TARGET" ]; then
   install_node_version "$NODE_TARGET"
+fi
+
+# Pass 2c: uv package manager (if repo uses it — install before Python since
+# install_python uses uv to manage Python versions)
+need_uv && install_uv
+
+# Pass 2d: Python version upgrade (if repo declares a higher version than installed)
+PYTHON_TARGET=$(detect_python_upgrade)
+if [ -n "$PYTHON_TARGET" ]; then
+  install_python "$PYTHON_TARGET"
 fi
 
 # Pass 3: scan config files for references we missed

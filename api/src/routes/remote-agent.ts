@@ -319,8 +319,11 @@ router.post(
           relations: ["board"],
         });
         const isFoundationCard = card?.position === 0;
-        if (card?.board?.qualityGateCommands && !isFoundationCard) {
+        if (card?.board?.qualityGateCommands) {
           boardQualityGates.qualityGates = card.board.qualityGateCommands;
+        }
+        if (isFoundationCard) {
+          boardQualityGates.isFoundationCard = true;
         }
         if (card?.board?.ciWorkflowPath) {
           boardQualityGates.ciWorkflowPath = card.board.ciWorkflowPath;

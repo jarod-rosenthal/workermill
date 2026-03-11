@@ -77,6 +77,8 @@ function loadConfig(): EpicConfig {
     reviewFeedback: process.env.REVIEW_FEEDBACK || undefined,
     // Quality gate bypass (from bypass-quality-gate label)
     qualityGateBypass: process.env.QUALITY_GATE_BYPASS === "true",
+    // Foundation card — skip integration fixer but pass gates to reviewer
+    isFoundationCard: process.env.IS_FOUNDATION_CARD === "true",
     // Pre-commit quality gate commands (from board metadata, extracted from PRD)
     qualityGateCommands: process.env.QUALITY_GATE_COMMANDS
       ? JSON.parse(process.env.QUALITY_GATE_COMMANDS)
@@ -144,6 +146,7 @@ async function main(): Promise<void> {
     console.log("  - Pre-commit gates: " + (config.qualityGateCommands ? config.qualityGateCommands.length + " configured" : "NONE"));
     console.log("  - CI workflow path: " + (config.ciWorkflowPath || "NONE"));
     console.log("  - Quality gate bypass: " + (config.qualityGateBypass ? "YES" : "NO"));
+    console.log("  - Foundation card: " + (config.isFoundationCard ? "YES (skip integration fixer)" : "NO"));
 
     const decisionClient = new DecisionClient({
       apiBaseUrl: config.apiBaseUrl,

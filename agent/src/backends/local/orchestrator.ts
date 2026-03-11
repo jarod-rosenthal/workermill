@@ -309,8 +309,11 @@ async function spawnLocalWorker(task: any): Promise<void> {
         const card = getDb().prepare("SELECT position FROM cards WHERE id = ?").get(task.card_id) as any;
         isFoundationCard = card?.position === 0;
       }
-      if (board?.quality_gate_commands && !isFoundationCard) {
+      if (board?.quality_gate_commands) {
         env.QUALITY_GATE_COMMANDS = board.quality_gate_commands;
+      }
+      if (isFoundationCard) {
+        env.IS_FOUNDATION_CARD = "true";
       }
       if (board?.ci_workflow_path) {
         env.CI_WORKFLOW_PATH = board.ci_workflow_path;
@@ -321,6 +324,9 @@ async function spawnLocalWorker(task: any): Promise<void> {
   // Quality gates from task jiraFields (set via PRD decomposer or API)
   if (jiraFields.qualityGates) {
     env.QUALITY_GATE_COMMANDS = JSON.stringify(jiraFields.qualityGates);
+  }
+  if (jiraFields.isFoundationCard) {
+    env.IS_FOUNDATION_CARD = "true";
   }
   if (jiraFields.ciWorkflowPath) {
     env.CI_WORKFLOW_PATH = jiraFields.ciWorkflowPath as string;

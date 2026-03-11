@@ -184,6 +184,8 @@ export interface EpicConfig {
   revisionPriorWork?: Record<number, string>;
   /** If true, bypass quality gate checks (bypass-quality-gate label) */
   qualityGateBypass?: boolean;
+  /** If true, this is a foundation card (position 0) — skip integration fixer but pass gates to reviewer */
+  isFoundationCard?: boolean;
   /** Pre-commit quality gate commands from board metadata (extracted from PRD) */
   qualityGateCommands?: {
     name: string;

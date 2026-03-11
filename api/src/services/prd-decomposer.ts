@@ -70,7 +70,7 @@ Each card represents ONE cohesive epic — a major functional slice that a singl
 - Card 1 is ALWAYS "Foundation" — combines project scaffolding, CI/CD pipeline, AND all backend/server code (models, handlers, middleware, services, seed data, tests). CI deliverables are part of this card, NOT a separate card. Assigned to backend_developer. If the project uses external services (databases, caches, queues), Card 1 MUST include a docker-compose.yml that starts all required services. Workers spin up real Docker containers — they do NOT use mocks or stubs.
 - For full-stack projects: Card 1 = Foundation (backend + CI), Card 2 = Frontend (all UI), Last card = Deployment + Validation.
 - For backend-only projects: Card 1 = Foundation (backend + CI), Card 2 = Deployment + Validation.
-- The LAST card ALWAYS includes production deployment + validation — deployment pipeline, smoke tests, seed verification, go-live checklist.
+- The LAST card ALWAYS includes production deployment + validation — deployment pipeline, smoke tests, seed verification, go-live checklist. See "End-to-End Validation" section below.
 
 ## Card Description Format (REQUIRED)
 
@@ -134,9 +134,34 @@ IMPORTANT: Do NOT create a separate "CI verification" story that pushes to main 
 
 CI workflow steps MUST run the EXACT SAME commands as the quality gates — no additions, no differences. This is critical: if the quality gate runs "go vet ./..." and "go test ./... -v -count=1 -race", the CI workflow MUST run those same commands, NOT golangci-lint or any other tool. The quality gates are the single source of truth for what "passing" means. Any divergence between the quality gates and CI creates a gap where code passes one but fails the other.
 
-For Go CI: use "go vet ./...", "go test ./... -v -count=1 -race", "go build ./..." (NOT golangci-lint, staticcheck, or other third-party linters). For Node.js CI: use "npm run lint", "npm run test", "npm run build". For TypeScript projects (tsconfig.json present): add "npx tsc --noEmit" to quality gates. For SvelteKit projects (svelte.config.js present): use "npx svelte-check" instead of bare tsc. For Python CI: use "python -m pytest", "python -m mypy .". Do NOT add third-party tools to CI that aren't already in the repo.
+For Go CI: use "go vet ./...", "go test ./... -v -count=1 -race", "go build ./..." (NOT golangci-lint, staticcheck, or other third-party linters). For Node.js CI: use "npm run lint", "npm run test", "npm run build". For TypeScript projects (tsconfig.json present): add "npx tsc --noEmit" to quality gates. For SvelteKit projects (svelte.config.js present): use "npx svelte-check" instead of bare tsc. For Python CI with uv: use "uv run ruff check", "uv run ruff format --check", "uv run mypy src", "uv run pytest". For Python CI without uv: use "python -m pytest", "python -m mypy .". Do NOT add third-party tools to CI that aren't already in the repo. If the PRD specifies exact CI steps, use those verbatim.
 
 ALL subsequent cards MUST depend on Card 1 (directly or transitively).
+
+## End-to-End Validation (Last Card)
+
+The last card is NOT just "deploy and hope." It MUST include concrete, verifiable smoke test deliverables that prove the deployed application actually works. At minimum:
+
+1. **Health check** — hit the health endpoint, verify 200 + expected JSON shape
+2. **Auth flow** — register/login with demo credentials, obtain a valid token
+3. **Core data** — verify seeded/demo data exists (e.g., product count >= expected)
+4. **Key feature** — exercise the primary feature end-to-end (e.g., search, create resource, API call)
+5. **Documentation** — verify API docs (Swagger/ReDoc/etc.) load if applicable
+6. **Response headers** — verify any required headers (e.g., X-Request-Id, CORS)
+
+These smoke tests should be scripted (e.g., in the deploy workflow or a standalone script) so they run automatically after deployment. Do NOT rely on manual verification.
+
+## Quality Gates Are the Source of Truth
+
+Quality gates define what "passing" means for the entire project. They are the SINGLE authoritative set of commands that must pass before code is acceptable.
+
+**If the PRD specifies exact quality gate commands** (e.g., in a "Pre-Commit Quality Gates" or "Quality Gates" section), use those EXACT commands as the \`qualityGates\` output. Copy them verbatim — do NOT generalize, simplify, or substitute with generic defaults. The PRD author chose those specific commands for a reason.
+
+**If the PRD does NOT specify quality gate commands**, infer them from the tech stack using the standard toolchain defaults below.
+
+**Worker environment requirements:** Quality gate commands run inside worker containers with the working directory already set to the repository root. Do NOT prefix commands with \`cd\` — they already run from the correct directory.
+- For Python projects using \`uv\`: prefix commands with \`source $HOME/.local/bin/env &&\` to ensure uv is on PATH
+- For Node.js projects: no prefix needed — commands run from the repo root automatically
 
 ## Priority Assignment
 
@@ -153,19 +178,19 @@ Respond with ONLY a JSON object (no markdown fences, no explanation):
   "boardName": "Short descriptive board name derived from the PRD title",
   "qualityGates": [
     {
-      "name": "backend",
-      "trigger": "api/**",
-      "commands": ["cd api && go vet ./...", "cd api && go test ./... -v -count=1 -race", "cd api && go build ./..."]
-    },
-    {
-      "name": "frontend",
-      "trigger": "web/**",
-      "commands": ["cd web && npm run lint", "cd web && npm run test", "cd web && npm run build"]
+      "name": "lint",
+      "trigger": "src/**,tests/**",
+      "commands": ["source $HOME/.local/bin/env && uv run ruff check src/ tests/", "source $HOME/.local/bin/env && uv run ruff format --check src/ tests/"]
     },
     {
       "name": "typecheck",
-      "trigger": "src/**/*.ts",
-      "commands": ["npx tsc --noEmit"]
+      "trigger": "src/**",
+      "commands": ["source $HOME/.local/bin/env && uv run mypy src"]
+    },
+    {
+      "name": "test",
+      "trigger": "src/**,tests/**",
+      "commands": ["docker compose up -d --wait", "source $HOME/.local/bin/env && uv run pytest tests/ -v --tb=short", "docker compose down"]
     }
   ],
   "ciWorkflowPath": ".github/workflows/ci.yml",
@@ -182,7 +207,7 @@ Respond with ONLY a JSON object (no markdown fences, no explanation):
   ]
 }
 
-qualityGates: Extract pre-commit quality gate commands from the PRD. Each gate has a name (e.g., "backend", "frontend"), a file trigger glob (e.g., "api/**"), and the exact shell commands to run. These commands run in a minimal container — ONLY use tools from the standard toolchain. For Go: use ONLY "go vet ./...", "go test ./... -v -count=1 -race", "go build ./...", "gofmt -w ." (NOT "gofmt ./..." — gofmt doesn't support "..."). Do NOT use golangci-lint, staticcheck, or other third-party tools — they are not installed. For Node.js: use "npm run lint", "npm run test", "npm run build". For TypeScript projects (tsconfig.json present): add "npx tsc --noEmit" to quality gates. For SvelteKit projects (svelte.config.js present): use "npx svelte-check" instead of bare tsc. For Python: use "python -m pytest", "python -m mypy .". IMPORTANT: The CI workflow MUST use the exact same commands as the quality gates — no divergence allowed.
+qualityGates: Extract pre-commit quality gate commands from the PRD. If the PRD has an explicit "Quality Gates" or "Pre-Commit Quality Gates" section with exact commands, use those commands VERBATIM — do not simplify or generalize. Otherwise, infer from the tech stack using the standard toolchain only. Each gate has a name (e.g., "lint", "typecheck", "test"), a file trigger glob (e.g., "src/**,tests/**"), and the exact shell commands to run. Commands run in worker containers with the working directory already set to the repository root — do NOT prefix commands with "cd" to change directories. For Python/uv commands, prefix with "source $HOME/.local/bin/env &&" to ensure uv is on PATH. Standard toolchain defaults (use ONLY when PRD does not specify exact commands): For Go: "go vet ./...", "go test ./... -v -count=1 -race", "go build ./...", "gofmt -w ." (NOT golangci-lint or staticcheck). For Node.js: "npm run lint", "npm run test", "npm run build". For TypeScript: add "npx tsc --noEmit". For SvelteKit: use "npx svelte-check" instead of bare tsc. For Python with uv: "source $HOME/.local/bin/env && uv run ruff check src/ tests/", "source $HOME/.local/bin/env && uv run ruff format --check src/ tests/", "source $HOME/.local/bin/env && uv run mypy src", and for tests: "docker compose down --remove-orphans && docker compose up -d --wait" then "source $HOME/.local/bin/env && DATABASE_URL=postgresql://user:pass@localhost:5432/dbname uv run pytest tests/ -v --tb=short" (substitute the actual DATABASE_URL from the PRD) then "docker compose down". For Python without uv: "python -m pytest", "python -m mypy .". IMPORTANT: The CI workflow MUST use the exact same commands as the quality gates — no divergence allowed.
 ciWorkflowPath: The path to the CI workflow file in the repo. GitHub repos use ".github/workflows/ci.yml", Bitbucket repos use "bitbucket-pipelines.yml". Used to detect when CI becomes available and to verify CI passes after push.
 estimatedSteps is the number of deliverables in the card (used for progress tracking).
 labels should include relevant technology or domain tags (e.g., "react", "api", "terraform", "auth").`;

@@ -392,6 +392,7 @@ function loadConfig(repoDir: string, mainBranch: string): EpicConfig {
     improvementEnabled: process.env.IMPROVEMENT_ENABLED === "true",
     reviewFeedback: process.env.REVIEW_FEEDBACK || undefined,
     qualityGateBypass: process.env.QUALITY_GATE_BYPASS === "true",
+    isFoundationCard: process.env.IS_FOUNDATION_CARD === "true",
     qualityGateCommands: process.env.QUALITY_GATE_COMMANDS
       ? JSON.parse(process.env.QUALITY_GATE_COMMANDS)
       : undefined,

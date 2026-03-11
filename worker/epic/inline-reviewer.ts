@@ -82,11 +82,11 @@ If the following org-level guidelines were provided, flag any code that violates
 
 ## Pre-Review Guidelines
 
-**Do NOT install dependencies or run test suites.** The expert workers already built, tested, and committed the code in this same workspace — dependencies are already installed and test results are provided in the quality metrics below.
+**Do NOT install dependencies.** The expert workers already built, tested, and committed the code in this same workspace — dependencies are already installed.
 
-Your job is to **read the code** using \`gh pr diff\`, \`Read\`, \`Glob\`, and \`Grep\`. Use Bash only for \`gh\` CLI commands and lightweight checks (e.g., \`go build ./...\`, \`go vet ./...\`, \`gofmt -d ./...\`).
+Your job is to **read the code** using \`gh pr diff\`, \`Read\`, \`Glob\`, and \`Grep\`. Use Bash only for \`gh\` CLI commands, lightweight checks (e.g., \`go build ./...\`, \`go vet ./...\`, \`gofmt -d ./...\`), and **running quality gate commands when provided in the review prompt**.
 
-**Do NOT run:** \`npm install\`, \`go mod download\`, \`npm run test:e2e\`, \`go test\`, \`golangci-lint\`, or any other expensive build/test/infrastructure commands. Check the quality metrics provided in the review prompt for test and lint results.
+**Do NOT run:** \`npm install\`, \`go mod download\`, \`golangci-lint\`, or other dependency installation commands. For test and lint results, check the quality metrics provided in the review prompt — UNLESS quality gate commands are explicitly provided, in which case you MUST run them and report the results.
 
 ## Architecture Review Checklist
 
@@ -466,6 +466,30 @@ ${hasSecurityIssues ? '**🔴 HIGH SEVERITY SECURITY ISSUES - These MUST be fixe
 `;
     }
 
+    // Build quality gate commands section — tells the reviewer what commands to run
+    // For foundation cards, quality gates don't run automatically (the project was just created),
+    // so the reviewer is the quality gate executor.
+    let qualityGateCommandsSection = "";
+    if (this.config.qualityGateCommands && this.config.qualityGateCommands.length > 0) {
+      const gateList = this.config.qualityGateCommands
+        .map((g) => `**${g.name}** (trigger: \`${g.trigger}\`):\n${g.commands.map((c) => `\`\`\`bash\n${c}\n\`\`\``).join("\n")}`)
+        .join("\n\n");
+
+      qualityGateCommandsSection = `## Quality Gate Commands
+
+${this.config.isFoundationCard
+  ? `**This is a foundation card — quality gates did not run automatically.** You MUST run these commands yourself to verify code quality. These are the project's authoritative quality standards:`
+  : `These quality gate commands define the project's standards. Integration gates ran before this review — check results above. You may re-run them to verify:`}
+
+${gateList}
+
+**Run each gate command and include the results in your review.** If any gate fails, request REVISION_NEEDED and include the specific errors in your feedback so workers know exactly what to fix.
+
+---
+
+`;
+    }
+
     // Build story summary section for selective revision
     let storySummarySection = "";
     if (storyCompletions && storyCompletions.length > 0) {
@@ -623,7 +647,7 @@ Use \`git diff\` commands or Bitbucket API via curl as shown below.`
 
     return `# PR Code Review Task
 
-${revisionSection}${storySummarySection}${jiraSection}${qualitySection}## Task Details
+${revisionSection}${storySummarySection}${jiraSection}${qualitySection}${qualityGateCommandsSection}## Task Details
 - **Jira Issue**: ${this.config.jiraIssueKey}
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}

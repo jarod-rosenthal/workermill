@@ -280,7 +280,8 @@ router.post(
       jiraFields = {
         labels: issueLabels,
         ...(boardMeta?.boardHasPrd ? { buildPage: true } : {}),
-        ...(boardMeta?.qualityGateCommands && !isFoundationCard ? { qualityGates: boardMeta.qualityGateCommands } : {}),
+        ...(boardMeta?.qualityGateCommands ? { qualityGates: boardMeta.qualityGateCommands } : {}),
+        ...(isFoundationCard ? { isFoundationCard: true } : {}),
         ...(boardMeta?.ciWorkflowPath ? { ciWorkflowPath: boardMeta.ciWorkflowPath } : {}),
       };
 

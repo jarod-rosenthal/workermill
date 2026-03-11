@@ -3132,8 +3132,10 @@ export class EpicCoordinator {
         }
       }
 
-      // Run integration quality gates on consolidated branch before Tech Lead review
-      if (prUrl && prNumber && (this.config.qualityGateCommands?.length ?? 0) > 0) {
+      // Run integration quality gates on consolidated branch before Tech Lead review.
+      // Foundation cards (position 0) skip this — the codebase is brand new and gates
+      // fail on intermediate state. The Tech Lead reviewer runs gates instead.
+      if (prUrl && prNumber && (this.config.qualityGateCommands?.length ?? 0) > 0 && !this.config.isFoundationCard) {
         await this.postProgressUpdate("integration_check", prUrl, prNumber);
         this.postDashboardLog("Running integration quality gates on consolidated branch...");
 

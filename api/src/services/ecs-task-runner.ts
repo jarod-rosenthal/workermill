@@ -188,6 +188,10 @@ export class ECSTaskRunner {
           : "",
       },
       {
+        name: "IS_FOUNDATION_CARD",
+        value: task.jiraFields?.isFoundationCard ? "true" : "false",
+      },
+      {
         name: "CI_WORKFLOW_PATH",
         value: (task.jiraFields?.ciWorkflowPath as string) || "",
       },

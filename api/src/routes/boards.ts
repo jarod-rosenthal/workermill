@@ -321,8 +321,8 @@ export async function runCardAsWorkerTask(
 
   // Foundation card (position 0) creates the project from scratch — its stories
   // build incrementally and can't pass full-project quality gates (e.g. npm run build
-  // fails on intermediate TypeScript errors). Quality gates only apply to subsequent
-  // cards that modify an already-working codebase.
+  // fails on intermediate TypeScript errors). We still pass quality gate commands so
+  // the Tech Lead reviewer can run them, but the integration fixer skips execution.
   const isFoundationCard = card.position === 0;
 
   // Create WorkerTask
@@ -356,7 +356,8 @@ export async function runCardAsWorkerTask(
     boardExecutionId: boardExecutionId || null,
     jiraFields: {
       ...(card.board?.prdContent ? { buildPage: true } : {}),
-      ...(card.board?.qualityGateCommands && !isFoundationCard ? { qualityGates: card.board.qualityGateCommands } : {}),
+      ...(card.board?.qualityGateCommands ? { qualityGates: card.board.qualityGateCommands } : {}),
+      ...(isFoundationCard ? { isFoundationCard: true } : {}),
       ...(card.board?.ciWorkflowPath ? { ciWorkflowPath: card.board.ciWorkflowPath } : {}),
       ...extractPreComputedStories(card.description),
     },

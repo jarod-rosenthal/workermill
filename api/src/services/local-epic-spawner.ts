@@ -825,6 +825,7 @@ class LocalEpicSpawner {
       QUALITY_GATE_COMMANDS: task.jiraFields?.qualityGates
         ? JSON.stringify(task.jiraFields.qualityGates)
         : "",
+      IS_FOUNDATION_CARD: task.jiraFields?.isFoundationCard ? "true" : "false",
       CI_WORKFLOW_PATH: (task.jiraFields?.ciWorkflowPath as string) || "",
       PUSH_AFTER_COMMIT: task.organization?.pushAfterCommit !== false ? "true" : "false",
       GRACEFUL_SHUTDOWN_ENABLED: task.organization?.gracefulShutdownEnabled !== false ? "true" : "false",

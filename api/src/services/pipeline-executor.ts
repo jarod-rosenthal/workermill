@@ -588,6 +588,9 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     if (taskQualityGates) {
       additionalEnv.QUALITY_GATE_COMMANDS = JSON.stringify(taskQualityGates);
     }
+    if (task.jiraFields?.isFoundationCard) {
+      additionalEnv.IS_FOUNDATION_CARD = "true";
+    }
     const ciPath = task.jiraFields?.ciWorkflowPath as string;
     if (ciPath) {
       additionalEnv.CI_WORKFLOW_PATH = ciPath;

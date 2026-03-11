@@ -305,6 +305,7 @@ export async function spawnWorker(
     PRD_CHILD_TASK: task.parentTaskId ? "true" : "false",
     IMPROVEMENT_ENABLED: task.improvementEnabled ? "true" : "false",
     QUALITY_GATE_BYPASS: task.qualityGateBypass ? "true" : "false",
+    IS_FOUNDATION_CARD: task.jiraFields?.isFoundationCard ? "true" : "false",
     QUALITY_GATE_COMMANDS: task.jiraFields?.qualityGates
       ? JSON.stringify(task.jiraFields.qualityGates)
       : "",

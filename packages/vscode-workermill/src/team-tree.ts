@@ -212,7 +212,8 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
 
 class TaskTreeItem extends vscode.TreeItem {
   constructor(public readonly task: TaskInfo) {
-    const label = task.summary.length > 50 ? task.summary.substring(0, 50) + "..." : task.summary;
+    const fullLabel = task.jiraIssueKey ? `${task.jiraIssueKey}: ${task.summary}` : task.summary;
+    const label = fullLabel.length > 55 ? fullLabel.substring(0, 55) + "..." : fullLabel;
     super(label, vscode.TreeItemCollapsibleState.Collapsed);
 
     this.id = task.id;

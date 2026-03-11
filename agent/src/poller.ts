@@ -200,6 +200,7 @@ async function handlePlanningTask(
     id: string;
     summary: string;
     description: string | null;
+    jiraIssueKey?: string | null;
     githubRepo?: string;
     scmProvider?: string;
   },
@@ -255,7 +256,7 @@ async function handlePlanningTask(
     console.log(`${ts()} ${taskLabel} Retry #${claimedTask!.retryCount} with existing plan — skipping planning`);
 
     // Notify VS Code so the task is brought into focus immediately
-    agentEvents.emit("task:planning", { id: task.id, summary: task.summary, description: task.description });
+    agentEvents.emit("task:planning", { id: task.id, summary: task.summary, description: task.description, jiraIssueKey: task.jiraIssueKey });
 
     // Tell the API to resume with the existing plan (planning → queued)
     try {
@@ -275,7 +276,7 @@ async function handlePlanningTask(
 
   console.log();
   console.log(`${ts()} ${chalk.magenta("◆ PLANNING")} ${taskLabel} ${task.summary.substring(0, 60)}`);
-  agentEvents.emit("task:planning", { id: task.id, summary: task.summary, description: task.description });
+  agentEvents.emit("task:planning", { id: task.id, summary: task.summary, description: task.description, jiraIssueKey: task.jiraIssueKey });
 
   // Run planning asynchronously (don't block the poll loop)
   planTask(task, config, credentials)

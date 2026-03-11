@@ -59,6 +59,7 @@ export interface TaskInfo {
   startedAt: string;
   cost?: number;
   errorMessage?: string;
+  jiraIssueKey?: string;
 }
 
 export interface LogLine {

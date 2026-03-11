@@ -834,6 +834,7 @@ export async function spawnDockerWorker(
     persona: task.workerPersona,
     model: task.workerModel,
     repo: task.githubRepo,
+    jiraIssueKey: task.jiraIssueKey,
   });
 
   // Stream stdout/stderr

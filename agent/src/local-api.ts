@@ -50,6 +50,7 @@ export interface LocalTaskInfo {
   repo?: string;
   startedAt: string;
   cost?: number;
+  jiraIssueKey?: string;
 }
 
 export interface AgentState {
@@ -373,7 +374,7 @@ async function getWorkerConfigFallback(): Promise<Record<string, unknown>> {
   };
 }
 
-agentEvents.on("task:started", (info: { id: string; parentTaskId?: string; summary: string; description?: string; persona?: string; model?: string; repo?: string }) => {
+agentEvents.on("task:started", (info: { id: string; parentTaskId?: string; summary: string; description?: string; persona?: string; model?: string; repo?: string; jiraIssueKey?: string }) => {
   localTasks.set(info.id, {
     id: info.id,
     parentTaskId: info.parentTaskId,
@@ -384,16 +385,18 @@ agentEvents.on("task:started", (info: { id: string; parentTaskId?: string; summa
     model: info.model,
     repo: info.repo,
     startedAt: new Date().toISOString(),
+    jiraIssueKey: info.jiraIssueKey,
   });
 });
 
-agentEvents.on("task:planning", (info: { id: string; summary: string; description?: string }) => {
+agentEvents.on("task:planning", (info: { id: string; summary: string; description?: string; jiraIssueKey?: string }) => {
   localTasks.set(info.id, {
     id: info.id,
     summary: info.summary,
     description: info.description,
     status: "planning",
     startedAt: new Date().toISOString(),
+    jiraIssueKey: info.jiraIssueKey,
   });
 });
 
@@ -547,7 +550,7 @@ async function getAllVisibleTasks(): Promise<LocalTaskInfo[]> {
     try {
       const db = getLocalDb();
       const rows = db.prepare(
-        "SELECT id, summary, description, status, github_repo, worker_model, created_at FROM tasks WHERE status IN ('queued','executing','completed','failed','cancelled','escalated','pr_approved') ORDER BY created_at DESC LIMIT 50"
+        "SELECT id, summary, description, status, github_repo, worker_model, jira_issue_key, created_at FROM tasks WHERE status IN ('queued','executing','completed','failed','cancelled','escalated','pr_approved') ORDER BY created_at DESC LIMIT 50"
       ).all() as Array<Record<string, unknown>>;
       for (const row of rows) {
         const id = String(row.id);
@@ -560,6 +563,7 @@ async function getAllVisibleTasks(): Promise<LocalTaskInfo[]> {
           status: mapLocalStatus(String(row.status || "queued")),
           model: row.worker_model ? String(row.worker_model) : undefined,
           repo: row.github_repo ? String(row.github_repo) : undefined,
+          jiraIssueKey: row.jira_issue_key ? String(row.jira_issue_key) : undefined,
           startedAt: row.created_at ? String(row.created_at) : new Date().toISOString(),
         });
       }
@@ -610,6 +614,7 @@ async function getMergedTasks(): Promise<LocalTaskInfo[]> {
         workerPersona?: string;
         workerModel?: string;
         githubRepo?: string;
+        jiraIssueKey?: string;
         startedAt?: string;
         createdAt?: string;
       };
@@ -635,6 +640,7 @@ async function getMergedTasks(): Promise<LocalTaskInfo[]> {
           persona: ct.workerPersona || undefined,
           model: ct.workerModel || undefined,
           repo: ct.githubRepo || undefined,
+          jiraIssueKey: ct.jiraIssueKey || undefined,
           startedAt: ct.startedAt || ct.createdAt || new Date().toISOString(),
         });
       }

@@ -157,11 +157,10 @@ Quality gates define what "passing" means for the entire project. They are the S
 
 **If the PRD specifies exact quality gate commands** (e.g., in a "Pre-Commit Quality Gates" or "Quality Gates" section), use those EXACT commands as the \`qualityGates\` output. Copy them verbatim — do NOT generalize, simplify, or substitute with generic defaults. The PRD author chose those specific commands for a reason.
 
-**If the PRD does NOT specify quality gate commands**, infer them from the tech stack using the standard toolchain defaults below.
-
-**Worker environment requirements:** Quality gate commands run inside worker containers with the working directory already set to the repository root. Do NOT prefix commands with \`cd\` — they already run from the correct directory.
-- For Python projects using \`uv\`: prefix commands with \`source $HOME/.local/bin/env &&\` to ensure uv is on PATH
-- For Node.js projects: no prefix needed — commands run from the repo root automatically
+**If the PRD does NOT specify quality gate commands**, infer them from the tech stack using the standard toolchain defaults below. When inferring, apply worker environment prefixes:
+- Commands run inside worker containers with the working directory already set to the repository root — do NOT prefix with \`cd\`
+- For Python projects using \`uv\`: prefix inferred commands with \`source $HOME/.local/bin/env &&\` to ensure uv is on PATH
+- For Node.js projects: no prefix needed
 
 ## Priority Assignment
 

@@ -180,6 +180,8 @@ export interface EpicConfig {
   reviewFeedback?: string;
   /** Per-story revision reasons from Tech Lead (keyed by story index) */
   revisionReasons?: Record<number, string>;
+  /** Per-story prior work summaries captured before branch deletion (keyed by story index) */
+  revisionPriorWork?: Record<number, string>;
   /** If true, bypass quality gate checks (bypass-quality-gate label) */
   qualityGateBypass?: boolean;
   /** Pre-commit quality gate commands from board metadata (extracted from PRD) */

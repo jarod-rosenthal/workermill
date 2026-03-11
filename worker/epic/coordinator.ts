@@ -4408,6 +4408,27 @@ Begin your review now. Start by fetching the code changes.`;
       console.log(`[Epic] Full revision: all ${storiesToRevise.size} stories will be re-executed`);
     }
 
+    // Capture prior work context from story branches BEFORE deleting them.
+    // This gives revision workers knowledge of what was attempted previously —
+    // commits, files changed, and diff summary — so they can avoid repeating mistakes.
+    const priorWorkMap: Record<number, string> = {};
+    try {
+      const branchSummaries = await this.gitOps.captureStoryBranchSummaries(
+        this.config.jiraIssueKey,
+        storiesToRevise
+      );
+      for (const [idx, summary] of Object.entries(branchSummaries)) {
+        priorWorkMap[Number(idx)] = summary;
+      }
+      if (Object.keys(priorWorkMap).length > 0) {
+        console.log(`[Epic] Captured prior work context for ${Object.keys(priorWorkMap).length} stories`);
+      }
+    } catch (e) {
+      console.warn(`[Epic] Could not capture prior work context: ${e}`);
+      // Non-fatal — workers will just lack prior context
+    }
+    this.config.revisionPriorWork = priorWorkMap;
+
     // Delete story branches ONLY for stories being revised, so revision stories
     // start fresh from main. Branches for approved stories are preserved so that
     // revised stories can still merge them as dependencies.

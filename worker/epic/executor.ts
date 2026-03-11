@@ -1527,6 +1527,7 @@ ${qandAText}
     // Build revision feedback section (from Tech Lead review)
     // Use per-story reason when available so each story only sees its own feedback
     const storyReason = this.config.revisionReasons?.[story.storyIndex];
+    const storyPriorWork = this.config.revisionPriorWork?.[story.storyIndex];
     const revisionSection = this.config.reviewFeedback
       ? `## ⚠️ REVISION REQUIRED - Tech Lead Feedback
 The previous implementation was reviewed and requires changes.${storyReason ? ` **Your story's specific issue:** ${storyReason}` : ""}
@@ -1540,7 +1541,14 @@ ${storyReason}
 ### Full Review Context (for reference — focus on YOUR story above)
 ${this.config.reviewFeedback}`
   : this.config.reviewFeedback}
+${storyPriorWork
+  ? `
+### What You Did Last Time
+Your previous attempt created the following work. The branch has been reset so you must recreate these files, but use this context to understand what was already tried and avoid repeating the same mistakes.
 
+${storyPriorWork}
+`
+  : ""}
 **IMPORTANT: Only fix issues that are YOUR story's responsibility.**
 - Your story scope: "${story.title}"
 - Fix the specific issues listed for your story above
@@ -1552,7 +1560,6 @@ ${this.config.reviewFeedback}`
 - You already explored the codebase in your previous attempt
 - Skip re-reading files unless they're directly relevant to the feedback
 - Go straight to the files that need changes
-- Use \`git diff\` to see what you changed previously
 
 `
       : "";

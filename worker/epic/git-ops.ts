@@ -1775,6 +1775,75 @@ fi
   }
 
   /**
+   * Capture git log and diff summary from story branches before they are deleted.
+   * Returns a map of story index → human-readable summary of prior work.
+   */
+  async captureStoryBranchSummaries(
+    jiraKey: string | undefined,
+    storyIndices: Set<number>
+  ): Promise<Record<number, string>> {
+    const result: Record<number, string> = {};
+    if (!jiraKey) return result;
+
+    await this.git.fetch(["--all", "--prune"]);
+    const branches = await this.git.branch(["-r"]);
+    const prefix = `origin/story/${jiraKey.toLowerCase()}/`;
+
+    for (const idx of storyIndices) {
+      const storyBranch = branches.all.find((b) => {
+        if (!b.startsWith(prefix)) return false;
+        const afterPrefix = b.substring(prefix.length);
+        const storyIdx = parseInt(afterPrefix.split("-")[0], 10);
+        return storyIdx === idx;
+      });
+      if (!storyBranch) continue;
+
+      try {
+        // Get commit log (story commits only, not merge base ancestors)
+        const logOutput = await this.git.log([
+          `origin/${this.mainBranch}..${storyBranch}`,
+          "--oneline",
+          "--no-merges",
+          "-20",
+        ]);
+        const commits = logOutput.all.map(
+          (c) => `- \`${c.hash.substring(0, 7)}\` ${c.message}`
+        );
+
+        // Get files changed vs main
+        let filesChanged: string[] = [];
+        try {
+          const diffOutput = await this.git.raw([
+            "diff", "--name-only",
+            `origin/${this.mainBranch}...${storyBranch}`,
+          ]);
+          filesChanged = diffOutput.trim().split("\n").filter(Boolean);
+        } catch {
+          // diff may fail if branches have diverged significantly
+        }
+
+        if (commits.length === 0 && filesChanged.length === 0) continue;
+
+        const lines: string[] = [];
+        lines.push(`### Prior Attempt (Revision ${idx})`);
+        lines.push(`Branch: \`${storyBranch.replace("origin/", "")}\``);
+        if (commits.length > 0) {
+          lines.push(`\n**Commits from previous attempt:**`);
+          lines.push(...commits);
+        }
+        if (filesChanged.length > 0) {
+          lines.push(`\n**Files changed (${filesChanged.length}):** ${filesChanged.join(", ")}`);
+        }
+        result[idx] = lines.join("\n");
+      } catch (e) {
+        console.warn(`[GitOps] Could not capture prior work for story ${idx}: ${e}`);
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Delete story branches for this epic from remote and local.
    * Used during revision to force fresh branches from main so that
    * stale branch history doesn't contaminate re-execution.

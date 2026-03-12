@@ -57,8 +57,7 @@ class LocalEpicSpawner {
     // Detect WSL environment
     this.isWSL = this.detectWSL();
 
-    // Docker Desktop on Windows/macOS doesn't support --network host
-    // Use host.docker.internal instead
+    // Docker Desktop detection — used for API URL translation and --add-host
     this.isDockerDesktop = this.isWSL || process.platform === "darwin";
 
     // Set API URL based on Docker networking mode
@@ -320,8 +319,6 @@ class LocalEpicSpawner {
     }
 
     // Build Docker run arguments
-    // Note: --network host only works on Linux. On Docker Desktop (Windows/macOS),
-    // we use bridge network and host.docker.internal to reach the host API.
     // Note: We don't use --rm so we can inspect logs after container exits
     const dockerArgs = [
       "run",
@@ -345,24 +342,23 @@ class LocalEpicSpawner {
       dockerArgs.push("--user", `${currentUid}:${currentGid}`);
     }
 
-    // Network mode: host on Linux, bridge on Docker Desktop (Windows/macOS/WSL)
+    // Network mode — always use host networking so docker compose services
+    // (e.g. Postgres) are reachable at localhost from the worker process.
+    // Docker Desktop 4.29+ (Windows/WSL2) and 4.34+ (macOS) support --network host.
+    dockerArgs.push("--network", "host");
     if (this.isDockerDesktop) {
-      // Docker Desktop: use default bridge network, container reaches host via host.docker.internal
-      // WSL2: host-gateway resolves to Docker VM, not WSL2 — use actual WSL2 IP instead
+      // Add host.docker.internal for backward compat (API URL translation uses it)
       const wslIP = this.getWSLHostIP();
       if (wslIP) {
         dockerArgs.push(`--add-host=host.docker.internal:${wslIP}`);
       } else {
         dockerArgs.push("--add-host=host.docker.internal:host-gateway");
       }
-      logger.info("Using Docker Desktop mode (bridge network, host.docker.internal)", {
+      logger.info("Using Docker Desktop with host networking", {
         isWSL: this.isWSL,
         wslIP: wslIP || "host-gateway",
         apiBaseUrl: this.apiBaseUrl,
       });
-    } else {
-      // Linux: use host network for direct localhost access
-      dockerArgs.push("--network", "host");
     }
 
     // Mount worktree (convert path for Docker on WSL)

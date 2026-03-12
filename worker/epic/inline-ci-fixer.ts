@@ -38,12 +38,28 @@ You have the CI failure output below. Diagnose the exact issue and fix it.
 
 - Only fix what CI is complaining about. Do NOT refactor or improve other code.
 - Common fixes: remove unused imports/variables, fix type errors, fix lint errors, fix build errors.
-- Run the failing command locally to verify your fix before committing.
 - {{DOCKER_INSTRUCTIONS}}
-- Commit with message "fix: resolve CI failure — <brief description>"
-- Push to the PR branch.
 - **NEVER change language versions** (Go version in go.mod/Dockerfile, Node.js version, Python version, etc.). Version pins are intentional architectural decisions from the project specification. If CI fails because of a version-related issue, fix the CI configuration or dependencies to work WITH the specified version — do NOT downgrade the language version.
 - **NEVER change framework or dependency major versions** unless the CI error explicitly shows an incompatibility that cannot be resolved any other way. Prefer fixing import paths, updating minor/patch versions, or adjusting configuration over version downgrades.
+
+## CRITICAL — Validate Before Pushing
+
+After making your fix, you MUST run ALL quality gate commands locally before committing. Do NOT commit and push a fix without verifying it passes. Each failed push wastes a CI round-trip (3-5 minutes) and counts against the retry limit.
+
+{{QUALITY_GATE_COMMANDS}}
+
+**Validation workflow:**
+1. Make your code fix
+2. Run every quality gate command listed above
+3. If ANY command fails, fix the issue and re-run ALL commands — do NOT push partial fixes
+4. Only after ALL commands pass: commit and push
+
+If you cannot get all checks to pass after reasonable effort, output CI_FIX_DECISION: unfixable rather than pushing broken code.
+
+## Commit and Push
+
+- Commit with message "fix: resolve CI failure — <brief description>"
+- Push to the PR branch.
 
 ## Organization Guidelines
 
@@ -177,12 +193,25 @@ export class InlineCIFixer {
     try {
       const prompt = this.buildPrompt(prNumber, ciFailureLog);
 
+      // Build quality gate commands section for local validation
+      let qualityGateSection = "";
+      if (this.config.qualityGateCommands && this.config.qualityGateCommands.length > 0) {
+        const gateList = this.config.qualityGateCommands
+          .map((g) => g.commands.map((c) => `\`\`\`bash\n${c}\n\`\`\``).join("\n"))
+          .join("\n\n");
+        qualityGateSection = `\n**Quality gate commands for this project (run ALL of these before pushing):**\n\n${gateList}\n\nRun each command. If any fails, fix the issue and re-run ALL commands until they all pass. Only then commit and push.`;
+      }
+
       const systemPrompt = CI_FIX_SYSTEM_PROMPT
         .replace(
           "{{DOCKER_INSTRUCTIONS}}",
           isDockerDaemonReachable()
-            ? "You have `docker` and `docker compose` available with a working daemon. If CI tests need service dependencies (MongoDB, Redis, Postgres, etc.), you MUST spin them up as sibling containers to reproduce and fix failures (e.g. `docker run -d --rm -p 27017:27017 --name mongo-test mongo:7`). Connect to services at `${DOCKER_HOST_HOSTNAME:-localhost}`, NOT `localhost` — the env var is set for you. Clean up when done."
+            ? "You have `docker` and `docker compose` available with a working daemon. If CI tests need service dependencies (MongoDB, Redis, Postgres, etc.), you MUST spin them up as sibling containers to reproduce and fix failures (e.g. `docker run -d --rm -p 27017:27017 --name mongo-test mongo:7`). Connect to services at `localhost` on the mapped ports. Clean up when done."
             : "Docker is NOT available in this environment. If tests require service dependencies, use in-memory alternatives or test doubles."
+        )
+        .replace(
+          "{{QUALITY_GATE_COMMANDS}}",
+          qualityGateSection
         )
         .replace(
           "{{ORG_GUIDELINES}}",
@@ -198,7 +227,7 @@ export class InlineCIFixer {
         tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
         model: this.model,
         specialties: ["testing", "ci", "quality"],
-        maxTurns: 15,
+        maxTurns: this.config.maxAgentTurns,
       };
 
       const result = await this.executeAgent(

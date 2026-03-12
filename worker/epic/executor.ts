@@ -422,7 +422,7 @@ You have \`docker\` and \`docker compose\` available. **You MUST spin up real se
 
 ### Required Workflow
 1. **Before writing application code**: Start all required service containers
-2. **Configure your code** to connect to \`\${DOCKER_HOST_HOSTNAME:-localhost}\` on the container ports. The \`DOCKER_HOST_HOSTNAME\` env var is set for you — use it instead of hardcoding \`localhost\` (which doesn't work on all platforms).
+2. **Configure your code** to connect to \`localhost\` on the container ports. The worker uses host networking, so Docker services are reachable at localhost.
 3. **Run tests against real services** — integration tests must hit real databases, not mocks
 4. **Clean up containers** when you're done (\`docker stop <name>\`)
 
@@ -433,7 +433,7 @@ You have \`docker\` and \`docker compose\` available. **You MUST spin up real se
 - MySQL: \`docker run -d --rm -p 3306:3306 -e MYSQL_ROOT_PASSWORD=test --name mysql-test mysql:8\`
 - RabbitMQ: \`docker run -d --rm -p 5672:5672 --name rabbitmq-test rabbitmq:3-alpine\`
 - If the project has a \`docker-compose.yml\`, use \`docker compose up -d\`
-- **IMPORTANT**: Connect to services at \`\${DOCKER_HOST_HOSTNAME:-localhost}\`, NOT \`localhost\`. For example: \`postgresql://user:pass@\${DOCKER_HOST_HOSTNAME}:5432/db\`
+- Connect to services at \`localhost\` on the mapped ports. For example: \`postgresql://user:pass@localhost:5432/db\`
 
 ### Why This Matters
 Mocking produces code full of assumptions and interface mismatches that break on first contact with real services. Real containers catch connection strings, schema mismatches, query errors, and serialization bugs immediately — not after deployment. **Tests that pass against mocks but fail against real services are worthless.**

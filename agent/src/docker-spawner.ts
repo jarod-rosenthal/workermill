@@ -50,7 +50,7 @@ function isWSL(): boolean {
 
 /**
  * Detect if Docker Desktop is in use (Windows, WSL, or macOS).
- * Docker Desktop doesn't support --network host.
+ * Used for API URL translation (localhost → host.docker.internal).
  */
 function isDockerDesktop(): boolean {
   return process.platform === "win32" || isWSL() || process.platform === "darwin";
@@ -455,17 +455,19 @@ export async function spawnDockerWorker(
     dockerArgs.push("--gpus=all");
   }
 
-  // Network mode
+  // Network mode — always use host networking so docker compose services
+  // (e.g. Postgres) are reachable at localhost from the worker process.
+  // Docker Desktop 4.29+ (Windows/WSL2) and 4.34+ (macOS) support --network host.
   const dockerDesktop = isDockerDesktop();
+  dockerArgs.push("--network", "host");
   if (dockerDesktop) {
+    // Add host.docker.internal for backward compat (API URL translation uses it)
     const wslIP = getWSLHostIP();
     if (wslIP) {
       dockerArgs.push(`--add-host=host.docker.internal:${wslIP}`);
     } else {
       dockerArgs.push("--add-host=host.docker.internal:host-gateway");
     }
-  } else {
-    dockerArgs.push("--network", "host");
   }
 
   // Mount Claude credentials — read-write so Claude CLI can refresh expired OAuth tokens.
@@ -719,9 +721,8 @@ export async function spawnDockerWorker(
     VLLM_BASE_URL: credentials?.vllmBaseUrl || "",
 
     // When the worker starts services via docker compose (e.g. Postgres),
-    // those services are reachable at localhost on --network host (Linux) but
-    // at host.docker.internal on Docker Desktop (Windows/macOS/WSL bridge mode).
-    DOCKER_HOST_HOSTNAME: dockerDesktop ? "host.docker.internal" : "localhost",
+    // those services are reachable at localhost since we always use --network host.
+    DOCKER_HOST_HOSTNAME: "localhost",
 
     BLOCKER_MAX_AUTO_RETRIES: String(orgConfig.blockerMaxAutoRetries),
     BLOCKER_AUTO_RETRY_ENABLED:

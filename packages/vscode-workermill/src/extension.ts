@@ -136,6 +136,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // ── Task lifecycle auto-sync ──
 
+  // Sticky live diff: when user enables live code view, auto-enable it on the next cascaded task
+  let liveDiffSticky = false;
+
   // Show feed and terminal as soon as planning begins (immediate feedback)
   client.on(
     "task:planning",
@@ -179,6 +182,11 @@ export function activate(context: vscode.ExtensionContext): void {
       // Focus feed first, then open terminal last so terminal gets final focus
       vscode.commands.executeCommand("workermill.feedPanel.focus");
       logManager.openLogs(info.id, info.summary);
+
+      // Auto-start live diff if it was active on the previous task (sticky mode)
+      if (liveDiffSticky) {
+        LiveDiffManager.createOrShow(client, { id: info.id, summary: info.summary });
+      }
     },
   );
 
@@ -189,6 +197,8 @@ export function activate(context: vscode.ExtensionContext): void {
       feedView.onTaskFinished(info.id, "completed");
     }
     logManager.onTaskFinished(info.id, "completed");
+    // Close live diff for the completed task (next task will auto-start if sticky)
+    LiveDiffManager.closeTask(info.id);
   });
 
   client.on("task:failed", (info: { id: string }) => {
@@ -701,6 +711,8 @@ export function activate(context: vscode.ExtensionContext): void {
         const task = treeItem?.task;
         if (!task?.id || !client.isConnected()) return;
         LiveDiffManager.createOrShow(client, task);
+        // Track sticky state: ON if we just created a session, OFF if we just toggled it off
+        liveDiffSticky = LiveDiffManager.hasActiveSessions();
       },
     ),
 

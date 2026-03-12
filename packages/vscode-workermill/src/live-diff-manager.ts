@@ -140,6 +140,11 @@ export class LiveDiffManager {
     if (mgr) mgr.dispose();
   }
 
+  /** Check if any live diff session is currently active. */
+  static hasActiveSessions(): boolean {
+    return managers.size > 0;
+  }
+
   /** Dispose all active managers. */
   static disposeAll(): void {
     for (const m of managers.values()) m.dispose();

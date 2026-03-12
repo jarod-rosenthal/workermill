@@ -173,7 +173,7 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
       | { provider?: string; model?: string }
       | undefined;
     const reviewerProvider = reviewerRouting?.provider ?? workerProvider;
-    const reviewerModel = reviewerRouting?.model ?? workerModel;
+    const reviewerModel = reviewerRouting?.model ?? cloud.managerModelId ?? workerModel;
 
     console.log(`  ${chalk.dim("Models")}`);
     console.log(`  ${chalk.dim("  Worker:")}   ${workerProvider} / ${chalk.yellow(workerModel)}`);

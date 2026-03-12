@@ -1069,6 +1069,7 @@ router.get(
       planningAgentProvider: org.planningAgentProvider ?? "anthropic",
       planningAgentModel: org.planningAgentModel ?? null,
       providerRouting: org.providerRouting ?? {},
+      managerModelId: org.managerModelId ?? null,
       ollamaBaseUrl: org.ollamaBaseUrl ?? null,
       // Worker image registry (keeps ECR details server-side)
       workerImageUrl: `${process.env.ECR_REGISTRY || ""}/${process.env.ECR_WORKER_REPO || ""}:latest`,

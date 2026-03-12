@@ -57,9 +57,18 @@ async function fetchBoardCard(
 
   if (!card) return null;
 
+  // Build description with PRD appended — same as boards.ts runCardAsWorkerTask
+  const description = [
+    card.title,
+    card.description || "",
+    card.board?.prdContent
+      ? `\n---\n\n## Full Build Specification\n\nThe following is the complete specification document. Your card description above defines your SCOPE — use this specification for exact technical details (API response shapes, field names, data structures, route parameters, UI component specs).\n\n${card.board.prdContent}`
+      : "",
+  ].filter(Boolean).join("\n\n");
+
   return {
     summary: card.title,
-    description: card.description || "",
+    description,
     labels: (card.cardLabels || [])
       .map((cl) => cl.label?.name)
       .filter(Boolean) as string[],

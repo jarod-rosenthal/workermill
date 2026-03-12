@@ -755,6 +755,37 @@ export async function spawnDockerWorker(
   // Long task descriptions + JSON fields easily exceed this, causing ENAMETOOLONG.
   const envFileDir = path.join(os.tmpdir(), "workermill-docker");
   fs.mkdirSync(envFileDir, { recursive: true });
+
+  // Large env var values (task descriptions, JSON blobs) can exceed Docker's
+  // --env-file line limit (bufio.Scanner max token = 64KB). Write these to
+  // individual files, mount the directory, and set *_FILE env vars so the
+  // worker entrypoints read from file instead of env.
+  const largeVarDir = path.join(envFileDir, containerName);
+  fs.mkdirSync(largeVarDir, { recursive: true });
+  const containerLargeVarDir = "/tmp/workermill-env";
+  const largeVarKeys = new Set([
+    "JIRA_DESCRIPTION",
+    "TASK_DESCRIPTION",
+    "QUALITY_GATE_COMMANDS",
+    "TASK_NOTES",
+    "V2_STEP_INPUT",
+  ]);
+
+  for (const key of largeVarKeys) {
+    const value = envVars[key];
+    if (value && value.length > 0) {
+      const filePath = path.join(largeVarDir, key);
+      fs.writeFileSync(filePath, value, { mode: 0o600 });
+      // Replace the env var with a _FILE pointer and remove the original
+      envVars[`${key}_FILE`] = `${containerLargeVarDir}/${key}`;
+      delete envVars[key];
+    }
+  }
+
+  // Mount the large var directory into the container
+  const dockerLargeVarDir = toDockerPath(largeVarDir);
+  dockerArgs.push("-v", `${dockerLargeVarDir}:${containerLargeVarDir}:ro`);
+
   const envFilePath = path.join(envFileDir, `${containerName}.env`);
   const envFileLines: string[] = [];
   for (const [k, v] of Object.entries(envVars)) {
@@ -966,9 +997,14 @@ export async function spawnDockerWorker(
       } catch { /* best effort */ }
     }
 
-    // Clean up env file immediately (no longer needed after container starts)
+    // Clean up env file and large var directory (no longer needed after container starts)
     try {
       fs.unlinkSync(envFilePath);
+    } catch {
+      /* best effort */
+    }
+    try {
+      fs.rmSync(largeVarDir, { recursive: true, force: true });
     } catch {
       /* best effort */
     }

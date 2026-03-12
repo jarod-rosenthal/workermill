@@ -4,6 +4,18 @@ set -e
 # WorkerMill AI Worker Entrypoint
 # This script runs Claude Code CLI to execute AI agent tasks
 
+# Hydrate env vars from mounted files (Docker sandbox writes large values to files
+# to avoid --env-file line length limits). For each VAR_FILE=/path, read the file
+# contents into VAR and unset VAR_FILE.
+for file_var in $(env | grep '_FILE=' | cut -d= -f1); do
+    base_var="${file_var%_FILE}"
+    file_path="${!file_var}"
+    if [ -f "$file_path" ]; then
+        export "$base_var"="$(cat "$file_path")"
+        unset "$file_var"
+    fi
+done
+
 # API base URL for posting logs (exported for subshells)
 export API_BASE="${API_BASE_URL:-https://workermill.com}"
 

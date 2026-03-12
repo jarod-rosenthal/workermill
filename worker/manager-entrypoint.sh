@@ -1,6 +1,18 @@
 #!/bin/bash
 set -e
 
+# Hydrate env vars from mounted files (Docker sandbox writes large values to files
+# to avoid --env-file line length limits). For each VAR_FILE=/path, read the file
+# contents into VAR and unset VAR_FILE.
+for file_var in $(env | grep '_FILE=' | cut -d= -f1); do
+    base_var="${file_var%_FILE}"
+    file_path="${!file_var}"
+    if [ -f "$file_path" ]; then
+        export "$base_var"="$(cat "$file_path")"
+        unset "$file_var"
+    fi
+done
+
 # WorkerMill Virtual Manager Entrypoint
 # Handles: PR review, log analysis for environment issues
 #

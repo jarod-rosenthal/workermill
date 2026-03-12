@@ -181,7 +181,7 @@ export class InlineCIFixer {
         .replace(
           "{{DOCKER_INSTRUCTIONS}}",
           isDockerDaemonReachable()
-            ? "You have `docker` and `docker compose` available with a working daemon. If CI tests need service dependencies (MongoDB, Redis, Postgres, etc.), you MUST spin them up as sibling containers to reproduce and fix failures (e.g. `docker run -d --rm -p 27017:27017 --name mongo-test mongo:7`). Clean up when done."
+            ? "You have `docker` and `docker compose` available with a working daemon. If CI tests need service dependencies (MongoDB, Redis, Postgres, etc.), you MUST spin them up as sibling containers to reproduce and fix failures (e.g. `docker run -d --rm -p 27017:27017 --name mongo-test mongo:7`). Connect to services at `${DOCKER_HOST_HOSTNAME:-localhost}`, NOT `localhost` — the env var is set for you. Clean up when done."
             : "Docker is NOT available in this environment. If tests require service dependencies, use in-memory alternatives or test doubles."
         )
         .replace(

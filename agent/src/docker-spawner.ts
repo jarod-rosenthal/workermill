@@ -718,6 +718,11 @@ export async function spawnDockerWorker(
       : "",
     VLLM_BASE_URL: credentials?.vllmBaseUrl || "",
 
+    // When the worker starts services via docker compose (e.g. Postgres),
+    // those services are reachable at localhost on --network host (Linux) but
+    // at host.docker.internal on Docker Desktop (Windows/macOS/WSL bridge mode).
+    DOCKER_HOST_HOSTNAME: dockerDesktop ? "host.docker.internal" : "localhost",
+
     BLOCKER_MAX_AUTO_RETRIES: String(orgConfig.blockerMaxAutoRetries),
     BLOCKER_AUTO_RETRY_ENABLED:
       orgConfig.blockerAutoRetryEnabled !== false ? "true" : "false",

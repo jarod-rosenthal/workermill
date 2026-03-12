@@ -6,7 +6,7 @@
  */
 
 import { simpleGit, SimpleGit, SimpleGitOptions } from "simple-git";
-import { existsSync, mkdirSync, readdirSync, readFileSync, appendFileSync, unlinkSync, lstatSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync, unlinkSync, lstatSync, rmSync, chmodSync } from "fs";
 import { execFile, execSync } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -1253,29 +1253,33 @@ export class GitOps {
       const content = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
       const lines = content.split("\n").map(l => l.trim());
       let additions = "";
-      if (!lines.some(line => line === "node_modules" || line === "node_modules/")) {
-        additions += "\nnode_modules";
-        console.log("[GitOps] Added node_modules to .gitignore");
-      }
-      if (!lines.some(line => line === ".workermill-message.md")) {
-        additions += "\n.workermill-message.md";
-        console.log("[GitOps] Added .workermill-message.md to .gitignore");
-      }
-      if (!lines.some(line => line === ".workermill-response.md")) {
-        additions += "\n.workermill-response.md";
-        console.log("[GitOps] Added .workermill-response.md to .gitignore");
-      }
-      if (!lines.some(line => line === ".workermill-answer.md")) {
-        additions += "\n.workermill-answer.md";
-        console.log("[GitOps] Added .workermill-answer.md to .gitignore");
-      }
-      // Common build output directories that should never be committed
-      for (const buildDir of [".next", "dist", "build", "out", ".nuxt", ".output", ".svelte-kit"]) {
-        if (!lines.some(line => line === buildDir || line === `${buildDir}/`)) {
-          additions += `\n${buildDir}`;
-          console.log(`[GitOps] Added ${buildDir} to .gitignore`);
+
+      // Always ignore WorkerMill internal files
+      for (const wmFile of [".workermill-message.md", ".workermill-response.md", ".workermill-answer.md"]) {
+        if (!lines.some(line => line === wmFile)) {
+          additions += `\n${wmFile}`;
+          console.log(`[GitOps] Added ${wmFile} to .gitignore`);
         }
       }
+
+      // Only add build artifact dirs that are relevant to the detected project type.
+      // If the repo already has a .gitignore with specific entries, respect it —
+      // the PRD may specify exact .gitignore content and reviewers flag deviations.
+      const hasPackageJson = existsSync(path.join(repoPath, "package.json"));
+      if (hasPackageJson) {
+        if (!lines.some(line => line === "node_modules" || line === "node_modules/")) {
+          additions += "\nnode_modules";
+          console.log("[GitOps] Added node_modules to .gitignore");
+        }
+        // Only add JS/TS build dirs for Node projects
+        for (const buildDir of [".next", "out", ".nuxt", ".output", ".svelte-kit"]) {
+          if (!lines.some(line => line === buildDir || line === `${buildDir}/`)) {
+            additions += `\n${buildDir}`;
+            console.log(`[GitOps] Added ${buildDir} to .gitignore`);
+          }
+        }
+      }
+
       if (additions) {
         appendFileSync(gitignorePath, additions + "\n");
       }
@@ -1311,33 +1315,20 @@ export class GitOps {
         actualHooksDir = hooksDir;
       }
 
-      const { mkdirSync, writeFileSync, chmodSync } = require("fs");
       mkdirSync(actualHooksDir, { recursive: true });
 
-      const FORBIDDEN_DIRS = [".next", "dist", "build", "out", ".nuxt", ".output", ".svelte-kit", "node_modules"];
+      // Only unstage dangerous dirs — do NOT modify .gitignore (PRD may specify exact content)
+      const UNSTAGE_DIRS = [".next", "dist", "build", "out", ".nuxt", ".output", ".svelte-kit", "node_modules", "__pycache__", ".venv", "venv"];
       const hookScript = `#!/bin/sh
-# WorkerMill pre-commit hook — enforce .gitignore for build artifacts
-# Ensures build output directories are never committed, even if a worker
-# runs 'git add .' directly via the Bash tool.
+# WorkerMill pre-commit hook — safety net for build artifacts and secrets
+# Unstages dangerous directories if a worker runs 'git add .' directly.
+# Does NOT modify .gitignore — that's the worker's responsibility per the PRD.
 
-GITIGNORE="\$(git rev-parse --show-toplevel)/.gitignore"
-ADDITIONS=""
-
-${FORBIDDEN_DIRS.map(d => `# Ensure ${d} is in .gitignore
-if ! grep -qxF '${d}' "$GITIGNORE" 2>/dev/null && ! grep -qxF '${d}/' "$GITIGNORE" 2>/dev/null; then
-  ADDITIONS="$ADDITIONS
-${d}"
-fi
-git rm -r --cached --quiet "${d}/" 2>/dev/null || true`).join("\n\n")}
+${UNSTAGE_DIRS.map(d => `git rm -r --cached --quiet "${d}/" 2>/dev/null || true`).join("\n")}
 
 # Also unstage .env* files (security)
 git rm --cached --quiet .env.local 2>/dev/null || true
 git rm --cached --quiet .env 2>/dev/null || true
-
-if [ -n "$ADDITIONS" ]; then
-  echo "$ADDITIONS" >> "$GITIGNORE"
-  git add "$GITIGNORE"
-fi
 `;
       writeFileSync(path.join(actualHooksDir, "pre-commit"), hookScript);
       chmodSync(path.join(actualHooksDir, "pre-commit"), 0o755);

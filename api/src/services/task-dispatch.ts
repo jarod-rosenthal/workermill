@@ -708,10 +708,26 @@ export async function dispatchMultiStoryPlan(
       }
     }
 
-    // Reference to parent PRD for full context
-    descriptionParts.push(
-      `## Parent PRD\nSee ${task.jiraIssueKey} for full PRD context.`,
-    );
+    // Append full PRD from parent task so workers have the complete spec.
+    // The parent task description (assembled by boards.ts) contains the full PRD
+    // after the "## Full Build Specification" header. Extract and pass it through
+    // so child workers have the same context as single-card workers.
+    if (task.description) {
+      const prdMarker = "## Full Build Specification";
+      const prdIndex = task.description.indexOf(prdMarker);
+      if (prdIndex >= 0) {
+        // Found the full PRD section — include it with scope framing
+        descriptionParts.push(
+          `---\n\n${task.description.substring(prdIndex)}`,
+        );
+      } else {
+        // No marker found — parent description may BE the PRD (e.g. Jira ticket).
+        // Include it as reference context so the worker isn't flying blind.
+        descriptionParts.push(
+          `---\n\n## Full Build Specification\n\nThe following is the complete specification document. Your story scope above defines your SCOPE — use this specification for exact technical details (API response shapes, field names, data structures, route parameters, UI component specs).\n\n${task.description}`,
+        );
+      }
+    }
 
     const fullDescription =
       descriptionParts.length > 0

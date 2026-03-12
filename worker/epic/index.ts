@@ -88,6 +88,7 @@ function loadConfig(): EpicConfig {
     // Max parallel experts cap
     maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10),
     maxFixRetries: process.env.MAX_FIX_RETRIES ? parseInt(process.env.MAX_FIX_RETRIES, 10) : undefined,
+    maxAgentTurns: process.env.MAX_AGENT_TURNS ? parseInt(process.env.MAX_AGENT_TURNS, 10) : undefined,
     maxReviewRevisions: parseInt(process.env.MAX_REVIEW_REVISIONS, 10),
     maxPerStoryRevisions: parseInt(process.env.MAX_PER_STORY_REVISIONS, 10),
     // Intent Engineering — org guidelines from settings

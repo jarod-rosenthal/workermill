@@ -526,7 +526,7 @@ export class InlineIntegrationFixer {
       tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
       model: this.model,
       specialties: ["testing", "integration", "quality"],
-      maxTurns: 20,
+      maxTurns: this.config.maxAgentTurns,
     };
 
     return this.executeAgent(

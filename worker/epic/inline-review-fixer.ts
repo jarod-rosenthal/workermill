@@ -215,7 +215,7 @@ export class InlineReviewFixer {
         tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
         model: this.model,
         specialties: ["code-review", "refactoring", "quality"],
-        maxTurns: 20,
+        maxTurns: this.config.maxAgentTurns,
       };
 
       const result = await this.executeAgent(

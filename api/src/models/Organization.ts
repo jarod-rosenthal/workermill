@@ -675,6 +675,9 @@ export class Organization {
   @Column({ name: "max_fix_retries", type: "int", default: 3 })
   maxFixRetries: number;
 
+  @Column({ name: "max_agent_turns", type: "int", nullable: true })
+  maxAgentTurns: number | null;
+
   @Column({ name: "blocker_wait_timeout_minutes", type: "int", default: 20 })
   blockerWaitTimeoutMinutes: number;
 

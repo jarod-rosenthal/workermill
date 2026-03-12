@@ -817,6 +817,7 @@ class LocalEpicSpawner {
       BLOCKER_MAX_AUTO_RETRIES: String(task.organization?.blockerMaxAutoRetries),
       BLOCKER_AUTO_RETRY_ENABLED: task.organization?.blockerAutoRetryEnabled !== false ? "true" : "false",
       MAX_FIX_RETRIES: String(task.organization?.maxFixRetries),
+      ...(task.organization?.maxAgentTurns != null ? { MAX_AGENT_TURNS: String(task.organization.maxAgentTurns) } : {}),
       BLOCKER_WAIT_TIMEOUT_MINUTES: String(task.organization?.blockerWaitTimeoutMinutes),
       QUALITY_GATE_COMMANDS: task.jiraFields?.qualityGates
         ? JSON.stringify(task.jiraFields.qualityGates)

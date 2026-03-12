@@ -503,6 +503,7 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
       additionalEnv.BLOCKER_MAX_AUTO_RETRIES = String(org.blockerMaxAutoRetries);
       additionalEnv.BLOCKER_AUTO_RETRY_ENABLED = org.blockerAutoRetryEnabled !== false ? "true" : "false";
       additionalEnv.MAX_FIX_RETRIES = String(org.maxFixRetries);
+      if (org.maxAgentTurns != null) additionalEnv.MAX_AGENT_TURNS = String(org.maxAgentTurns);
       additionalEnv.BLOCKER_WAIT_TIMEOUT_MINUTES = String(org.blockerWaitTimeoutMinutes);
       additionalEnv.PUSH_AFTER_COMMIT = org.pushAfterCommit !== false ? "true" : "false";
       additionalEnv.GRACEFUL_SHUTDOWN_ENABLED = org.gracefulShutdownEnabled !== false ? "true" : "false";

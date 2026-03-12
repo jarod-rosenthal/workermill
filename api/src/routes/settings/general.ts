@@ -176,6 +176,7 @@ router.get("/", async (req: Request, res: Response) => {
       blockerMaxAutoRetries: org.blockerMaxAutoRetries,
       blockerAutoRetryEnabled: org.blockerAutoRetryEnabled,
       maxFixRetries: org.maxFixRetries,
+      maxAgentTurns: org.maxAgentTurns,
       blockerWaitTimeoutMinutes: org.blockerWaitTimeoutMinutes,
       pushAfterCommit: org.pushAfterCommit,
       gracefulShutdownEnabled: org.gracefulShutdownEnabled,
@@ -327,6 +328,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       blockerMaxAutoRetries,
       blockerAutoRetryEnabled,
       maxFixRetries,
+      maxAgentTurns,
       blockerWaitTimeoutMinutes,
       pushAfterCommit,
       gracefulShutdownEnabled,
@@ -1159,6 +1161,19 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.maxFixRetries = retries;
     }
 
+    if (maxAgentTurns !== undefined) {
+      if (maxAgentTurns === null) {
+        org.maxAgentTurns = null;
+      } else {
+        const turns = parseInt(maxAgentTurns, 10);
+        if (isNaN(turns) || turns < 1) {
+          res.status(400).json({ error: "maxAgentTurns must be a positive integer" });
+          return;
+        }
+        org.maxAgentTurns = turns;
+      }
+    }
+
     if (blockerWaitTimeoutMinutes !== undefined) {
       const timeout = parseInt(blockerWaitTimeoutMinutes, 10);
       if (isNaN(timeout) || timeout < 1 || timeout > 120) {
@@ -1363,6 +1378,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         blockerMaxAutoRetries: org.blockerMaxAutoRetries,
         blockerAutoRetryEnabled: org.blockerAutoRetryEnabled,
         maxFixRetries: org.maxFixRetries,
+        maxAgentTurns: org.maxAgentTurns,
         blockerWaitTimeoutMinutes: org.blockerWaitTimeoutMinutes,
         pushAfterCommit: org.pushAfterCommit,
         gracefulShutdownEnabled: org.gracefulShutdownEnabled,

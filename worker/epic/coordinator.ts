@@ -4577,7 +4577,7 @@ Write in a professional, direct tone. Do NOT open with filler words or pleasantr
           tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
           model,
           specialties: ["testing", "quality"],
-          maxTurns: 20,
+          maxTurns: this.config.maxAgentTurns,
         },
         repoPath,
         storyId: `quality-fix-${this.config.parentTaskId}`,

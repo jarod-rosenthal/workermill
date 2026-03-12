@@ -442,7 +442,30 @@ Mocking produces code full of assumptions and interface mismatches that break on
 If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
 1. Report the Docker error as a blocker
 2. If the quality gate commands include env vars like MONGODB_URI or REDIS_URL, the test infrastructure expects REAL services
-3. Never write test stubs or mock implementations as a workaround — the quality gates will catch and reject them`;
+3. Never write test stubs or mock implementations as a workaround — the quality gates will catch and reject them
+
+### CI/CD Workflows Must Include Service Containers
+When creating GitHub Actions CI workflows that run tests requiring databases or other services, you **MUST** add \`services:\` blocks so the CI runner has real service instances. Example for PostgreSQL:
+\`\`\`yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+\`\`\`
+The same pattern applies to Redis, MongoDB, MySQL, etc. **Tests that pass locally with Docker but fail in CI because there's no database are a waste of CI fix cycles.** Always match your local Docker setup with CI service containers.`;
 
     // Version trust instruction — generic, not hardcoded to any specific version
     prompt += `

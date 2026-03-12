@@ -74,6 +74,7 @@ export class EpicCoordinator {
   private revisionStoriesQueued: ReadyStory[] = [];  // Stories queued for revision re-execution
   private deploymentSucceeded: boolean = false;  // Track if deployment completed successfully
   private reviewSkipped: boolean = false;  // Track if review was skipped due to failure (OAuth, crash, etc.)
+  private mergeFailed: boolean = false;  // Track if CI-verified merge failed after all retries
 
   // CI Fix Agent tracking
   private ciFixRetryCount: number = 0;
@@ -3208,6 +3209,12 @@ export class EpicCoordinator {
           // Review was enabled but crashed (OAuth, CLI failure, etc.) — escalate for human review
           taskStatus = "escalated";
           jiraComment = `⚠️ **${completionLabel}**, but Tech Lead review could not complete.\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Please review the PR manually.*`;
+        } else if (this.mergeFailed) {
+          // Review approved but CI-verified merge failed after all retries — task must fail
+          // so the cascade doesn't continue on a broken foundation
+          taskStatus = "failed";
+          errorMessage = "CI checks did not pass after all retry attempts — PR could not be merged";
+          jiraComment = `❌ **${completionLabel}**, approved by Tech Lead, but **PR merge failed** — CI checks did not pass after all retry attempts.\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Manual intervention required.*`;
         } else if (this.config.reviewEnabled) {
           // Review was approved by inline Tech Lead
           taskStatus = isPartialCompletion ? "escalated" : "pr_approved";
@@ -3419,8 +3426,12 @@ export class EpicCoordinator {
               await this.gitOps.postMergeCleanup(this.config.jiraIssueKey);
             }
           } else {
-            console.warn(`[Epic] PR #${prNumber} merge failed — manual merge required`);
-            await this.postLog(`⚠️ PR #${prNumber} auto-merge failed — manual merge required`);
+            console.warn(`[Epic] PR #${prNumber} merge failed after CI retries`);
+            await this.postLog(`❌ PR #${prNumber} merge failed — CI checks did not pass after all retry attempts`);
+            await this.ticketOps.postComment(
+              `❌ PR #${prNumber} could not be merged — CI checks failed after all retry attempts.\n\nPR: ${prUrl}\n\n*Manual intervention required.*`
+            );
+            this.mergeFailed = true;
           }
         }
         return "done";
@@ -4268,7 +4279,13 @@ Begin your review now. Start by fetching the code changes.`;
               await this.gitOps.postMergeCleanup(this.config.jiraIssueKey);
             }
           } else {
-            await this.postLog(`⚠️ PR #${prNumber} auto-merge failed — manual merge required`);
+            await this.postLog(`❌ PR #${prNumber} merge failed — CI checks did not pass after all retry attempts`);
+            await this.ticketOps.postComment(
+              `❌ PR #${prNumber} could not be merged — CI checks failed after all retry attempts.\n\nPR: ${prUrl}\n\n*Manual intervention required.*`
+            );
+            await this.updateTaskStatus("failed", `PR #${prNumber} CI failed — merge blocked`, `CI checks did not pass after all retry attempts`, prUrl);
+            this.missionActive = false;
+            return false;
           }
         }
         await this.updateTaskStatus("pr_approved", `PR #${prNumber} approved by Tech Lead`, undefined, prUrl);

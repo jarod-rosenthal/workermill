@@ -3133,9 +3133,9 @@ export class EpicCoordinator {
       }
 
       // Run integration quality gates on consolidated branch before Tech Lead review.
-      // Foundation cards (position 0) skip this — the codebase is brand new and gates
-      // fail on intermediate state. The Tech Lead reviewer runs gates instead.
-      if (prUrl && prNumber && (this.config.qualityGateCommands?.length ?? 0) > 0 && !this.config.isFoundationCard) {
+      // This runs for ALL cards including foundation — by this point all stories are
+      // complete and the consolidated branch has the full codebase.
+      if (prUrl && prNumber && (this.config.qualityGateCommands?.length ?? 0) > 0) {
         await this.postProgressUpdate("integration_check", prUrl, prNumber);
         this.postDashboardLog("Running integration quality gates on consolidated branch...");
 
@@ -3789,35 +3789,41 @@ ${this.lastReviewFeedback}
 `
       : "";
 
-    // Build quality metrics section if available
+    // Build quality metrics section if available — use org thresholds, not hardcoded values
     let qualitySection = "";
     if (qualityMetrics) {
+      const thresholds = this.config.qualityThresholds;
+      const blockOnTypeErrors = thresholds?.blockOnTypeErrors ?? false;
+      const blockOnTestFailures = thresholds?.blockOnTestFailures ?? true;
+      const minQualityScore = thresholds?.minQualityScore ?? null;
+      const maxSecurityHigh = thresholds?.maxSecurityHighVulns ?? null;
+
       const hasLintIssues = qualityMetrics.lintErrors > 0;
       const hasTypeErrors = qualityMetrics.typeErrors > 0;
       const hasTestFailures = qualityMetrics.testsFailed > 0;
-      const hasSecurityIssues = qualityMetrics.securityHigh > 0;
-      const qualityBelowThreshold = qualityMetrics.qualityScore < 70;
+      const hasSecurityIssues = maxSecurityHigh !== null ? qualityMetrics.securityHigh > maxSecurityHigh : qualityMetrics.securityHigh > 0;
+      const qualityBelowThreshold = minQualityScore !== null && qualityMetrics.qualityScore < minQualityScore;
 
       qualitySection = `## Automated Quality Metrics
 
 | Metric | Result | Status |
 |--------|--------|--------|
-| **Overall Score** | ${qualityMetrics.qualityScore}% | ${qualityMetrics.qualityScore >= 70 ? '✅' : '⚠️ Below 70% threshold'} |
-| TypeCheck | ${qualityMetrics.typeErrors} errors | ${hasTypeErrors ? '❌ MUST FIX' : '✅'} |
-| Lint | ${qualityMetrics.lintErrors} errors, ${qualityMetrics.lintWarnings} warnings | ${hasLintIssues ? '⚠️' : '✅'} |
-| Tests | ${qualityMetrics.testsPassed} passed, ${qualityMetrics.testsFailed} failed | ${hasTestFailures ? '❌ MUST FIX' : '✅'} |
-| Security | ${qualityMetrics.securityHigh} high, ${qualityMetrics.securityMedium} medium | ${hasSecurityIssues ? '🔴 CRITICAL' : '✅'} |
+| **Overall Score** | ${qualityMetrics.qualityScore}% | ${qualityBelowThreshold ? `⚠️ Below ${minQualityScore}% threshold` : '✅'} |
+| TypeCheck | ${qualityMetrics.typeErrors} errors | ${hasTypeErrors ? (blockOnTypeErrors ? '❌ Blocking' : '⚠️ Non-blocking') : '✅'} |
+| Lint | ${qualityMetrics.lintErrors} errors, ${qualityMetrics.lintWarnings} warnings | ${hasLintIssues ? '⚠️ Informational' : '✅'} |
+| Tests | ${qualityMetrics.testsPassed} passed, ${qualityMetrics.testsFailed} failed | ${hasTestFailures ? (blockOnTestFailures ? '❌ Blocking' : '⚠️ Non-blocking') : '✅'} |
+| Security | ${qualityMetrics.securityHigh} high, ${qualityMetrics.securityMedium} medium | ${hasSecurityIssues ? '🔴 Blocking' : '✅'} |
 
-### Quality Gate Rules
-${qualityBelowThreshold ? '**⚠️ QUALITY SCORE BELOW 70% - Revision required unless there is a very good reason.**\n' : ''}${hasTypeErrors ? '**❌ TYPE ERRORS DETECTED - These MUST be fixed. Request revision.**\n' : ''}${hasTestFailures ? '**❌ TEST FAILURES DETECTED - These MUST be fixed. Request revision.**\n' : ''}${hasSecurityIssues ? '**🔴 HIGH SEVERITY SECURITY ISSUES - These MUST be fixed. Request revision.**\n' : ''}
+### Quality Gate Rules (from Organization Settings)
+${qualityBelowThreshold ? `**⚠️ QUALITY SCORE BELOW ${minQualityScore}% - Consider requesting revision.**\n` : ''}${hasTypeErrors && blockOnTypeErrors ? '**❌ TYPE ERRORS DETECTED - Organization requires these to be fixed.**\n' : ''}${hasTypeErrors && !blockOnTypeErrors ? '**ℹ️ Type errors detected but blocking is DISABLED in org settings — do NOT request revision for type errors alone.**\n' : ''}${hasTestFailures && blockOnTestFailures ? '**❌ TEST FAILURES DETECTED - Organization requires these to be fixed.**\n' : ''}${hasTestFailures && !blockOnTestFailures ? '**ℹ️ Test failures detected but blocking is DISABLED in org settings — do NOT request revision for test failures alone.**\n' : ''}${hasSecurityIssues ? '**🔴 HIGH SEVERITY SECURITY ISSUES - These must be fixed.**\n' : ''}${!qualityBelowThreshold && !hasSecurityIssues && !(hasTypeErrors && blockOnTypeErrors) && !(hasTestFailures && blockOnTestFailures) ? '**✅ All quality gates pass per organization settings — bias toward approval.**\n' : ''}
 ---
 
 `;
     }
 
     const qualityNote = qualityMetrics ? "- **Do the automated quality metrics pass? (See above)**" : "";
-    const qualityGateNote = qualityMetrics && (qualityMetrics.typeErrors > 0 || qualityMetrics.testsFailed > 0 || qualityMetrics.securityHigh > 0)
-      ? "\n   **NOTE: Due to quality gate failures above, you should request REVISION_NEEDED unless already addressed.**"
+    const qualityGateNote = qualityMetrics
+      ? "\n   **NOTE: Review the quality metrics above. Only request REVISION_NEEDED for metrics marked as ❌ Blocking per organization settings. Metrics marked ⚠️ Non-blocking or ℹ️ Informational should be noted in feedback but are NOT grounds for revision.**"
       : "";
 
     // Build SCM-aware instructions

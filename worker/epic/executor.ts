@@ -1458,12 +1458,16 @@ ${parts.join("\n\n")}
         ...story.targetFiles.map((f) => `  - ${f}`),
         "",
         "Focus your work on these files. These are the files assigned to your scope by the planner.",
-        "If the ticket requirements clearly need additional files not listed here, you may create them,",
-        "but ask first with Q-BLOCKING-SCOPE if unsure.",
+        "If the ticket requirements clearly need additional files not listed here, you may create them.",
         "",
-        "If you need to modify files NOT mentioned in either the description or targetFiles list,",
-        "ask first:",
-        "  Q-BLOCKING-SCOPE: I need to modify [file] which isn't in the story scope — should I? (explain why)",
+        "**Fixing issues outside your target files:**",
+        "If you encounter lint errors, type errors, test failures, or broken imports in files outside your",
+        "target list that are blocking YOUR quality gates or YOUR work from succeeding — FIX THEM.",
+        "Do not ask permission. Do not post Q-BLOCKING-SCOPE. Just fix the issue and move on.",
+        "The integration fixer will resolve any merge conflicts later.",
+        "",
+        "Only ask Q-BLOCKING-SCOPE if you're unsure whether a LARGE architectural change outside your",
+        "scope is the right approach (e.g., restructuring a shared module, changing a database schema).",
       ].join("\n");
     }
 
@@ -1612,7 +1616,9 @@ ${this.config.jiraRequirements}
       ? `## ⛔ DO NOT DELETE — Files From Sibling Stories
 The following files were created by OTHER stories and merged into your worktree for compatibility.
 They are NOT part of your story. You MUST NOT delete, rename, or overwrite them.
-If you need to modify one of these files, ask first with Q-BLOCKING-SCOPE.
+If you need to make small fixes to these files (e.g., fixing imports, lint errors, type errors)
+to unblock your own work, go ahead — the integration fixer handles merge conflicts.
+Only ask Q-BLOCKING-SCOPE for large structural changes to sibling files.
 
 ${mergedSiblingFiles.map((f) => `- ${f}`).join("\n")}
 
@@ -1651,21 +1657,24 @@ Your training data is outdated — newer versions of every language and runtime 
 
 ### 🤝 Team Collaboration (IMPORTANT)
 You are part of a team of experts working in parallel on the SAME ticket. Each expert owns a piece.
-**Ask questions when you hit ambiguity** — don't guess or make silent decisions. Your teammates are here to help, and the team works better when experts communicate openly.
+**Bias toward action over questions.** If you see a problem — even outside your target files — and you know how to fix it, just fix it. Small fixes (lint errors, type errors, broken imports, missing dependencies) should never be questions. The integration fixer handles merge conflicts.
+
 **If a sibling's work contradicts the ticket spec, flag it** — you all share responsibility for the ticket's success.
 
-**When to ask a question (use these markers in your output):**
-- **Scope conflict**: Story mentions files not in your targetFiles list
-- **Design ambiguity**: Multiple valid approaches and you're unsure which fits the team's direction
-- **Missing context**: You need information about what a sibling expert is building
-- **Dependency concern**: Your work might conflict with another story's changes
-- **Integration questions**: You need to know an API shape, component interface, or data format another expert is creating
+**Only ask questions for genuinely blocking ambiguity:**
+- **Design ambiguity**: Multiple valid approaches with significant architectural implications
+- **Missing context**: You need an API shape, component interface, or data format another expert hasn't created yet
+- **Large structural changes**: Restructuring shared modules, changing database schemas, altering public APIs
 
-**Question formats:**
-- Q-BACKEND-001: What's the API endpoint format? (targets backend_developer)
-- Q-SECURITY-001: Is this auth approach secure? (targets security_engineer)
-- Q-BLOCKING-001: Critical question? (blocks your story until answered)
+**DO NOT ask questions about:**
+- Whether you should fix a lint/type/test error (just fix it)
+- Whether you should touch a file outside your target list to fix a small issue (just fix it)
+- Scope boundaries when the fix is obvious (just fix it)
+
+**Question formats (use sparingly):**
+- Q-BLOCKING-001: Critical question that blocks your story until answered
 - Q-001: General question for any teammate
+- DEC-001: Architectural decision you made (informational, not a question)
 
 **To answer a sibling's question:** ANSWER-{PERSONA}: Your answer
 

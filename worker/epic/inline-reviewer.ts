@@ -63,17 +63,26 @@ If the following org-level guidelines were provided, flag any code that violates
 ## Code Review Standards
 
 ### APPROVE when:
-- Code correctly implements the Jira requirements
+- Code correctly implements the requirements
 - No obvious bugs or security issues
 - Code follows existing patterns in the codebase
 - Appropriate error handling is in place
-- Changes are maintainable and readable
+- Quality gates pass (lint, typecheck, tests)
+- Minor cosmetic issues (formatting, empty lines, comment style, variable naming preferences) are NOT grounds for revision — mention them in feedback but still approve
 
 ### REVISION_NEEDED when:
-- Code has fixable issues (style, missing tests, minor bugs)
-- Security concerns that can be addressed with changes
-- Missing error handling or edge cases
-- Could benefit from refactoring for clarity
+- Code has functional bugs that affect correctness
+- Security vulnerabilities that must be fixed
+- Quality gates fail (lint errors, type errors, test failures) AND the worker did not attempt to fix them
+- Missing required functionality from the task requirements
+- Broken imports, missing dependencies, or code that won't run
+
+### Do NOT request revision for:
+- Style preferences (extra/missing blank lines, comment formatting, string quote style)
+- Minor naming differences that don't affect functionality
+- "Could be cleaner" refactoring suggestions
+- Missing tests for edge cases when core functionality is tested
+- Code that works correctly but isn't how you would have written it
 
 ### REJECT when:
 - Fundamental approach is wrong and cannot be fixed with revisions
@@ -173,8 +182,9 @@ AFFECTED_REASONS: {"2": "Missing CI workflow configuration", "3": "Husky hooks n
 - For GitHub: Submit your review using \`gh pr review\`
 - For Bitbucket/GitLab: Your review decision will be captured from the output markers
 - Be constructive in feedback - help the worker improve
-- Consider the full context of the Jira requirements
-- Balance perfectionism with pragmatism - ship good code, not perfect code
+- Consider the full context of the requirements
+- **Bias toward approval**: If the code works, passes quality gates, and implements the requirements, approve it. Cosmetic feedback belongs in comments, not in revision requests. Every revision cycle costs significant time and tokens — only block when there's a real functional or security issue.
+- A score of 7+ should almost always be an approval
 
 ## Communication Style
 
@@ -439,27 +449,36 @@ ${previousFeedback}
     // Build quality metrics section if available
     let qualitySection = "";
     if (qualityMetrics) {
+      const thresholds = this.config.qualityThresholds;
+      const blockOnTypeErrors = thresholds?.blockOnTypeErrors ?? false;
+      const blockOnTestFailures = thresholds?.blockOnTestFailures ?? true;
+      const minQualityScore = thresholds?.minQualityScore ?? null;
+      const maxSecurityHigh = thresholds?.maxSecurityHighVulns ?? null;
+
       const hasLintIssues = qualityMetrics.lintErrors > 0;
       const hasTypeErrors = qualityMetrics.typeErrors > 0;
       const hasTestFailures = qualityMetrics.testsFailed > 0;
-      const hasSecurityIssues = qualityMetrics.securityHigh > 0;
-      const qualityBelowThreshold = qualityMetrics.qualityScore < 70;
+      const hasSecurityIssues = maxSecurityHigh !== null ? qualityMetrics.securityHigh > maxSecurityHigh : qualityMetrics.securityHigh > 0;
+      const qualityBelowThreshold = minQualityScore !== null && qualityMetrics.qualityScore < minQualityScore;
 
       qualitySection = `## Automated Quality Metrics
 
 | Metric | Result | Status |
 |--------|--------|--------|
-| **Overall Score** | ${qualityMetrics.qualityScore}% | ${qualityMetrics.qualityScore >= 70 ? '✅' : '⚠️ Below 70% threshold'} |
-| TypeCheck | ${qualityMetrics.typeErrors} errors | ${hasTypeErrors ? '❌ MUST FIX' : '✅'} |
-| Lint | ${qualityMetrics.lintErrors} errors, ${qualityMetrics.lintWarnings} warnings | ${hasLintIssues ? '⚠️' : '✅'} |
-| Tests | ${qualityMetrics.testsPassed} passed, ${qualityMetrics.testsFailed} failed | ${hasTestFailures ? '❌ MUST FIX' : '✅'} |
-| Security | ${qualityMetrics.securityHigh} high, ${qualityMetrics.securityMedium} medium | ${hasSecurityIssues ? '🔴 CRITICAL' : '✅'} |
+| **Overall Score** | ${qualityMetrics.qualityScore}% | ${qualityBelowThreshold ? `⚠️ Below ${minQualityScore}% threshold` : '✅'} |
+| TypeCheck | ${qualityMetrics.typeErrors} errors | ${hasTypeErrors ? (blockOnTypeErrors ? '❌ Blocking' : '⚠️ Non-blocking') : '✅'} |
+| Lint | ${qualityMetrics.lintErrors} errors, ${qualityMetrics.lintWarnings} warnings | ${hasLintIssues ? '⚠️ Informational' : '✅'} |
+| Tests | ${qualityMetrics.testsPassed} passed, ${qualityMetrics.testsFailed} failed | ${hasTestFailures ? (blockOnTestFailures ? '❌ Blocking' : '⚠️ Non-blocking') : '✅'} |
+| Security | ${qualityMetrics.securityHigh} high, ${qualityMetrics.securityMedium} medium | ${hasSecurityIssues ? '🔴 Blocking' : '✅'} |
 
-### Quality Gate Rules
-${qualityBelowThreshold ? '**⚠️ QUALITY SCORE BELOW 70% - Revision required unless there is a very good reason.**\n' : ''}
-${hasTypeErrors ? '**❌ TYPE ERRORS DETECTED - These MUST be fixed. Request revision.**\n' : ''}
-${hasTestFailures ? '**❌ TEST FAILURES DETECTED - These MUST be fixed. Request revision.**\n' : ''}
-${hasSecurityIssues ? '**🔴 HIGH SEVERITY SECURITY ISSUES - These MUST be fixed. Request revision.**\n' : ''}
+### Quality Gate Rules (from Organization Settings)
+${qualityBelowThreshold ? `**⚠️ QUALITY SCORE BELOW ${minQualityScore}% - Consider requesting revision.**\n` : ''}
+${hasTypeErrors && blockOnTypeErrors ? '**❌ TYPE ERRORS DETECTED - Organization requires these to be fixed.**\n' : ''}
+${hasTypeErrors && !blockOnTypeErrors ? '**ℹ️ Type errors detected but blocking is DISABLED in org settings — do NOT request revision for type errors alone.**\n' : ''}
+${hasTestFailures && blockOnTestFailures ? '**❌ TEST FAILURES DETECTED - Organization requires these to be fixed.**\n' : ''}
+${hasTestFailures && !blockOnTestFailures ? '**ℹ️ Test failures detected but blocking is DISABLED in org settings — do NOT request revision for test failures alone.**\n' : ''}
+${hasSecurityIssues ? '**🔴 HIGH SEVERITY SECURITY ISSUES - These must be fixed.**\n' : ''}
+${!qualityBelowThreshold && !hasSecurityIssues && !(hasTypeErrors && blockOnTypeErrors) && !(hasTestFailures && blockOnTestFailures) ? '**✅ All quality gates pass per organization settings — bias toward approval.**\n' : ''}
 
 ---
 
@@ -475,11 +494,18 @@ ${hasSecurityIssues ? '**🔴 HIGH SEVERITY SECURITY ISSUES - These MUST be fixe
         .map((g) => `**${g.name}** (trigger: \`${g.trigger}\`):\n${g.commands.map((c) => `\`\`\`bash\n${c}\n\`\`\``).join("\n")}`)
         .join("\n\n");
 
+      const thresholds = this.config.qualityThresholds;
+      const blockingRules: string[] = [];
+      if (thresholds?.blockOnTypeErrors) blockingRules.push("Type errors are **blocking**");
+      else blockingRules.push("Type errors are **non-blocking** (note in feedback, do not request revision)");
+      if (thresholds?.blockOnTestFailures) blockingRules.push("Test failures are **blocking**");
+      else blockingRules.push("Test failures are **non-blocking** (note in feedback, do not request revision)");
+      if (thresholds?.minQualityScore) blockingRules.push(`Quality score below ${thresholds.minQualityScore}% is **blocking**`);
+      const blockingContext = blockingRules.length > 0 ? `\n\n**Organization blocking rules:**\n${blockingRules.map(r => `- ${r}`).join("\n")}\n` : "";
+
       qualityGateCommandsSection = `## Quality Gate Commands
 
-${this.config.isFoundationCard
-  ? `**This is a foundation card — quality gates did not run automatically.** You MUST run these commands yourself to verify code quality. These are the project's authoritative quality standards:`
-  : `These quality gate commands define the project's standards. Integration gates ran before this review — check results above. You may re-run them to verify:`}
+These quality gate commands define the project's standards. Integration gates ran before this review — check results above. You may re-run them to verify:${blockingContext}
 
 ${gateList}
 
@@ -670,7 +696,7 @@ ${diffInstructions}
    ${previousFeedback ? "- **Have the previous review issues been addressed?**" : ""}
 
 3. **Make your decision**: APPROVE, REVISION_NEEDED, or REJECT
-   ${qualityMetrics && (qualityMetrics.typeErrors > 0 || qualityMetrics.testsFailed > 0 || qualityMetrics.securityHigh > 0) ? "\n   **NOTE: Due to quality gate failures above, you should request REVISION_NEEDED unless already addressed.**" : ""}
+   ${qualityMetrics ? "\n   **NOTE: Review the quality metrics above. Only request REVISION_NEEDED for metrics marked as ❌ Blocking per organization settings. Metrics marked ⚠️ Non-blocking or ℹ️ Informational should be noted in feedback but are NOT grounds for revision.**" : ""}
 
 ${reviewSubmitInstructions} **Output your decision** using these exact markers:
    \`\`\`

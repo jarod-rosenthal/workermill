@@ -101,17 +101,26 @@ If the following org-level guidelines were provided, flag any code that violates
 ## Code Review Standards
 
 ### APPROVE when:
-- Code correctly implements the Jira requirements
+- Code correctly implements the requirements
 - No obvious bugs or security issues
 - Code follows existing patterns in the codebase
 - Appropriate error handling is in place
-- Changes are maintainable and readable
+- Quality gates pass (lint, typecheck, tests)
+- Minor cosmetic issues (formatting, empty lines, comment style, variable naming preferences) are NOT grounds for revision — mention them in feedback but still approve
 
 ### REVISION_NEEDED when:
-- Code has fixable issues (style, missing tests, minor bugs)
-- Security concerns that can be addressed with changes
-- Missing error handling or edge cases
-- Could benefit from refactoring for clarity
+- Code has functional bugs that affect correctness
+- Security vulnerabilities that must be fixed
+- Quality gates fail (lint errors, type errors, test failures) AND the worker did not attempt to fix them
+- Missing required functionality from the task requirements
+- Broken imports, missing dependencies, or code that won't run
+
+### Do NOT request revision for:
+- Style preferences (extra/missing blank lines, comment formatting, string quote style)
+- Minor naming differences that don't affect functionality
+- "Could be cleaner" refactoring suggestions
+- Missing tests for edge cases when core functionality is tested
+- Code that works correctly but isn't how you would have written it
 
 ### REJECT when:
 - Fundamental approach is wrong and cannot be fixed with revisions
@@ -208,8 +217,9 @@ AFFECTED_REASONS: {"2": "Missing CI workflow configuration", "3": "Husky hooks n
 - For GitHub: Submit your review using \`gh pr review\`
 - For Bitbucket/GitLab: Your review decision will be captured from the output markers
 - Be constructive in feedback - help the worker improve
-- Consider the full context of the Jira requirements
-- Balance perfectionism with pragmatism - ship good code, not perfect code
+- Consider the full context of the requirements
+- **Bias toward approval**: If the code works, passes quality gates, and implements the requirements, approve it. Cosmetic feedback belongs in comments, not in revision requests. Every revision cycle costs significant time and tokens — only block when there's a real functional or security issue.
+- A score of 7+ should almost always be an approval
 `;
 
 /**

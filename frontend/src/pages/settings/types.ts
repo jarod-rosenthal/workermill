@@ -131,6 +131,8 @@ export interface Settings {
   codebaseIncludeLanguages: string[];
   codebaseAutoIndexOnTask: boolean;
   codebaseMaxRetrievalChunks: number;
+  // Agent execution limits
+  maxAgentTurns: number | null;
   // Spec Engineering settings
   specMinQualityScore: number;
   specRequiredSections: string[] | null;

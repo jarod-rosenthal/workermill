@@ -207,6 +207,7 @@ export default function Settings() {
     codebaseAutoIndexOnTask: true,
     codebaseMaxRetrievalChunks: 10,
     // Spec Engineering defaults
+    maxAgentTurns: null,
     specMinQualityScore: 0,
     specRequiredSections: null,
   });
@@ -546,6 +547,7 @@ export default function Settings() {
         codebaseAutoIndexOnTask: data.codebaseAutoIndexOnTask,
         codebaseMaxRetrievalChunks: data.codebaseMaxRetrievalChunks ?? 10,
         // Spec Engineering settings
+        maxAgentTurns: data.maxAgentTurns ?? null,
         specMinQualityScore: data.specMinQualityScore ?? 0,
         specRequiredSections: data.specRequiredSections ?? null,
       };

@@ -313,7 +313,7 @@ export class InlineReviewer {
     await this.postLog(`PR: ${prUrl}`, "system");
     await this.postLog(`Jira: ${this.config.jiraIssueKey}`, "system");
     if (revisionCount > 0) {
-      await this.postLog(`Revision attempt: ${revisionCount}/${this.config.maxReviewRevisions}`, "system");
+      await this.postLog(`Review ${revisionCount + 1}/${this.config.maxReviewRevisions} (revision ${revisionCount})`, "system");
     }
 
     try {
@@ -431,7 +431,7 @@ export class InlineReviewer {
   ): string {
     const maxRevisions = this.config.maxReviewRevisions;
     const revisionSection = previousFeedback
-      ? `## Previous Review Feedback (Revision ${revisionCount}/${maxRevisions})
+      ? `## Previous Review Feedback (Review ${revisionCount + 1}/${maxRevisions})
 This is a revision attempt. The previous code was reviewed and these issues were identified:
 
 ${previousFeedback}
@@ -976,7 +976,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     const maxPerStoryRevisions = this.config.maxPerStoryRevisions;
     if (revisionCount > 0) {
       await this.postLog(
-        `Revision attempt: ${revisionCount}/${maxPerStoryRevisions}`,
+        `Review ${revisionCount + 1}/${maxPerStoryRevisions} (revision ${revisionCount})`,
         "system"
       );
     }
@@ -1115,7 +1115,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
   ): string {
     const maxPerStoryRevisions = this.config.maxPerStoryRevisions;
     const revisionSection = previousFeedback
-      ? `## Previous Review Feedback (Revision ${revisionCount}/${maxPerStoryRevisions})
+      ? `## Previous Review Feedback (Review ${revisionCount + 1}/${maxPerStoryRevisions})
 This is a revision attempt. The previous code was reviewed and these issues were identified:
 
 ${previousFeedback}

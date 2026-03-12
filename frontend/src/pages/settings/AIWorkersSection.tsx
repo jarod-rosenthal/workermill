@@ -674,43 +674,6 @@ export function AIWorkersSection({
                 <p className="text-xs text-muted-foreground mt-1">Automatic retries for failed tasks (0-5)</p>
               </div>
 
-              {/* Max Agent Turns */}
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">Max Agent Turns</label>
-                <div className="flex items-center gap-4">
-                  <div className="w-32">
-                    <input
-                      type="number"
-                      min="1"
-                      max="200"
-                      value={settings.maxAgentTurns ?? ""}
-                      placeholder="No limit"
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val === "") {
-                          updateSetting("maxAgentTurns", null);
-                        } else {
-                          const num = parseInt(val, 10);
-                          if (num > 0) updateSetting("maxAgentTurns", num);
-                        }
-                      }}
-                      className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
-                    />
-                  </div>
-                  {settings.maxAgentTurns != null && (
-                    <button
-                      onClick={() => updateSetting("maxAgentTurns", null)}
-                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Maximum CLI turns per agent invocation. Leave empty for no limit.
-                </p>
-              </div>
-
               {/* PRD Auto-Run */}
               <div className="flex items-center justify-between p-4 bg-accent/5 border border-accent/20 rounded-xl">
                 <div>

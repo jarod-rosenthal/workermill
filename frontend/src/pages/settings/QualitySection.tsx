@@ -334,139 +334,139 @@ export function QualitySection({
             )}
           </div>
 
-          {/* Resilience Settings */}
+          {/* Execution Limits */}
           <div className="bg-card rounded-lg border border-border p-6">
-            <h3 className="text-lg font-medium text-foreground mb-4">Resilience Settings</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Configure checkpoint recovery, blocker handling, and self-review for worker executions
+            <h3 className="text-lg font-medium text-foreground mb-2">Execution Limits</h3>
+            <p className="text-sm text-muted-foreground mb-6">
+              Control how many attempts agents get before stopping
             </p>
 
-            {/* Auto-Retry for Blockers */}
-            <div className="flex items-center justify-between mb-4">
+            {/* Numeric limits in a clean grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              {/* Max Agent Turns */}
               <div>
-                <span className="text-sm text-foreground">Enable Blocker Auto-Retry</span>
-                <p className="text-xs text-muted-foreground">Automatically retry fixable errors (TypeScript, lint, test failures)</p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={settings.blockerAutoRetryEnabled}
-                  onChange={(e) => updateSetting("blockerAutoRetryEnabled", e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-              </label>
-            </div>
-
-            {settings.blockerAutoRetryEnabled && (
-              <div className="mt-4 mb-6">
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  Max Auto-Retry Attempts
-                </label>
+                <label className="block text-sm font-medium text-foreground mb-2">Max Agent Turns</label>
                 <input
                   type="number"
                   min="1"
+                  max="200"
+                  placeholder="No limit"
+                  value={settings.maxAgentTurns ?? ""}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateSetting("maxAgentTurns", val === "" ? null : Math.max(1, parseInt(val, 10) || 1));
+                  }}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground placeholder-muted-foreground"
+                />
+                <p className="text-xs text-muted-foreground mt-1">CLI turns per agent invocation. Empty = no limit.</p>
+              </div>
+
+              {/* Fix Agent Retries */}
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">Fix Agent Retries</label>
+                <input
+                  type="number"
+                  min="0"
                   max="10"
-                  value={settings.blockerMaxAutoRetries}
-                  onChange={(e) => updateSetting("blockerMaxAutoRetries", parseInt(e.target.value, 10) || 3)}
-                  className="w-32 px-3 py-2 bg-background border border-border rounded-md text-foreground"
+                  value={settings.maxFixRetries}
+                  onChange={(e) => updateSetting("maxFixRetries", parseInt(e.target.value, 10) || 0)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground"
                 />
-                <p className="text-xs text-muted-foreground mt-1">1-10 attempts before escalating to human (default: 3)</p>
+                <p className="text-xs text-muted-foreground mt-1">Attempts to fix quality gate / CI failures. 0 = skip.</p>
               </div>
-            )}
 
-            {/* Fix Agent Max Retries */}
-            <div className="flex items-center justify-between mb-4 pt-4 border-t border-border">
+              {/* Blocker Wait Timeout */}
               <div>
-                <span className="text-sm text-foreground">Fix Agent Max Retries</span>
-                <p className="text-xs text-muted-foreground">Max attempts for fix agents to resolve quality gate and CI failures</p>
-              </div>
-              <input
-                type="number"
-                min="0"
-                max="10"
-                value={settings.maxFixRetries}
-                onChange={(e) => updateSetting("maxFixRetries", parseInt(e.target.value, 10) || 3)}
-                className="w-20 px-3 py-2 bg-background border border-border rounded-md text-foreground text-center"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground -mt-3 mb-4 ml-0">0-10 attempts (default: 3). Used by both the integration fixer (pre-review, on merged branch) and the CI fixer (post-review). Set to 0 to skip fix attempts.</p>
-
-            {/* Blocker Wait Timeout */}
-            <div className="flex items-center justify-between mb-4 pt-4 border-t border-border">
-              <div>
-                <span className="text-sm text-foreground">Blocker Wait Timeout (minutes)</span>
-                <p className="text-xs text-muted-foreground">How long to wait for human blocker resolution before aborting</p>
-              </div>
-              <input
-                type="number"
-                min="1"
-                max="120"
-                value={settings.blockerWaitTimeoutMinutes}
-                onChange={(e) => updateSetting("blockerWaitTimeoutMinutes", parseInt(e.target.value, 10) || 20)}
-                className="w-20 px-3 py-2 bg-background border border-border rounded-md text-foreground text-center"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground -mt-3 mb-4 ml-0">1-120 minutes (default: 20). After escalating a blocker, workers wait this long for human response before aborting the run.</p>
-
-            {/* Push After Commit */}
-            <div className="flex items-center justify-between mb-4 pt-4 border-t border-border">
-              <div>
-                <span className="text-sm text-foreground">Push After Each Commit</span>
-                <p className="text-xs text-muted-foreground">Push to remote immediately after each agent commit (checkpoint safety)</p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
+                <label className="block text-sm font-medium text-foreground mb-2">Blocker Wait Timeout</label>
                 <input
-                  type="checkbox"
-                  checked={settings.pushAfterCommit}
-                  onChange={(e) => updateSetting("pushAfterCommit", e.target.checked)}
-                  className="sr-only peer"
+                  type="number"
+                  min="1"
+                  max="120"
+                  value={settings.blockerWaitTimeoutMinutes}
+                  onChange={(e) => updateSetting("blockerWaitTimeoutMinutes", parseInt(e.target.value, 10) || 1)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground"
                 />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-              </label>
+                <p className="text-xs text-muted-foreground mt-1">Minutes to wait for human blocker response before aborting.</p>
+              </div>
+
+              {/* Blocker Auto-Retry Attempts */}
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">Blocker Auto-Retry Attempts</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="10"
+                  value={settings.blockerAutoRetryEnabled ? settings.blockerMaxAutoRetries : 0}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10) || 0;
+                    if (val === 0) {
+                      updateSetting("blockerAutoRetryEnabled", false);
+                    } else {
+                      updateSetting("blockerAutoRetryEnabled", true);
+                      updateSetting("blockerMaxAutoRetries", val);
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground"
+                />
+                <p className="text-xs text-muted-foreground mt-1">Auto-retry fixable errors (lint, type, test). 0 = disabled.</p>
+              </div>
             </div>
 
-            {/* Graceful Shutdown */}
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-sm text-foreground">Graceful Shutdown</span>
-                <p className="text-xs text-muted-foreground">Save uncommitted work when container receives SIGTERM</p>
+            {/* Toggle switches */}
+            <div className="pt-4 border-t border-border space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm text-foreground">Push After Each Commit</span>
+                  <p className="text-xs text-muted-foreground">Checkpoint safety — push to remote after each commit</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.pushAfterCommit}
+                    onChange={(e) => updateSetting("pushAfterCommit", e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                </label>
               </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={settings.gracefulShutdownEnabled}
-                  onChange={(e) => updateSetting("gracefulShutdownEnabled", e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-              </label>
-            </div>
 
-            {/* Self-Review */}
-            <div className="flex items-center justify-between pt-4 border-t border-border">
-              <div>
-                <span className="text-sm text-foreground">
-                  Self-Review
-                  {isProPlan && (
-                    <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 rounded-full border border-amber-500/30">
-                      <Crown className="w-3 h-3" />
-                      Max
-                    </span>
-                  )}
-                </span>
-                <p className="text-xs text-muted-foreground">Run an extra Claude CLI pass to review each story before merging (adds latency and cost)</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm text-foreground">Graceful Shutdown</span>
+                  <p className="text-xs text-muted-foreground">Save uncommitted work on container SIGTERM</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.gracefulShutdownEnabled}
+                    onChange={(e) => updateSetting("gracefulShutdownEnabled", e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                </label>
               </div>
-              <label className={`relative inline-flex items-center ${isProPlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
-                <input
-                  type="checkbox"
-                  checked={settings.selfReviewEnabled}
-                  onChange={(e) => { if (!isProPlan) updateSetting("selfReviewEnabled", e.target.checked); }}
-                  disabled={isProPlan}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-              </label>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm text-foreground">
+                    Self-Review
+                    {isProPlan && (
+                      <span className="ml-2"><MaxBadge /></span>
+                    )}
+                  </span>
+                  <p className="text-xs text-muted-foreground">Extra review pass per story before merging (adds latency + cost)</p>
+                </div>
+                <label className={`relative inline-flex items-center ${isProPlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
+                  <input
+                    type="checkbox"
+                    checked={settings.selfReviewEnabled}
+                    onChange={(e) => { if (!isProPlan) updateSetting("selfReviewEnabled", e.target.checked); }}
+                    disabled={isProPlan}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                </label>
+              </div>
             </div>
           </div>
 

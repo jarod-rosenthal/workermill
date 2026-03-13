@@ -61,6 +61,11 @@ export function runGateCommand(
     // these to locate the build cache. Also ensure ~/bin is in PATH so user wrapper
     // scripts (e.g. go wrapper with gcc PATH for -race flag) are discoverable.
     const env: Record<string, string | undefined> = { ...process.env, CI: "true" };
+    // Ensure ~/.local/bin is in PATH for tools installed by uv/pipx/cargo etc.
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    if (home && env.PATH && !env.PATH.includes(`${home}/.local/bin`)) {
+      env.PATH = `${home}/.local/bin:${env.PATH}`;
+    }
     if (process.platform === "win32" || process.env.MSYSTEM) {
       const home = process.env.HOME || process.env.USERPROFILE || "";
       if (!env.APPDATA && home) env.APPDATA = `${home}/AppData/Roaming`;

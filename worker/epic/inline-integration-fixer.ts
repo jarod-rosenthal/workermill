@@ -11,7 +11,7 @@ import axios from "axios";
 import { execSync, spawn } from "child_process";
 import { existsSync, readdirSync, statSync } from "fs";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
-import { runGateCommand, loadRepoContext } from "./gate-utils.js";
+import { runGateCommand, loadRepoContext, isDockerDaemonReachable } from "./gate-utils.js";
 import type { ContextMessage, EpicConfig, StreamMessage } from "./types.js";
 import {
   createAIClient,
@@ -339,6 +339,13 @@ export class InlineIntegrationFixer {
           await this.postLog(`[Integration Gate] ⏭️ ${gate.name} gate skipped — no go.mod found`, "system");
           continue;
         }
+      }
+
+      // Skip gates requiring docker compose if docker daemon isn't reachable (sandbox containers)
+      const hasDockerCompose = gate.commands.some((c) => /docker\s+compose/i.test(c));
+      if (hasDockerCompose && !isDockerDaemonReachable()) {
+        await this.postLog(`[Integration Gate] ⏭️ ${gate.name} gate skipped — Docker daemon not reachable`, "system");
+        continue;
       }
 
       // For Node.js gates, skip if package.json doesn't exist in the target directory.

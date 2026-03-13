@@ -220,9 +220,12 @@ const pythonProfile: LanguageProfile = {
       }
     } catch { /* not JSON, try text */ }
 
-    // Text output: count lines matching file:line:col pattern
+    // Text output: count lines matching file:line:col pattern (ruff check)
     const issueLines = stdout.match(/^.+:\d+:\d+:/gm) || [];
     errors = issueLines.length;
+    // ruff format --check: "Would reformat: file.py" or "X files would be reformatted"
+    const formatIssues = stdout.match(/^Would reformat:/gm) || [];
+    errors += formatIssues.length;
     return { errors, warnings };
   },
 

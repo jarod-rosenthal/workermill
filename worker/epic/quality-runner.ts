@@ -11,6 +11,7 @@ import * as path from "path";
 import * as https from "https";
 import * as http from "http";
 import { detectLanguageWithTestRunner, findGoModDirs } from "../lib/dist/language-profile.js";
+import { isDockerDaemonReachable } from "./gate-utils.js";
 
 // Score weights (must sum to 1.0)
 const WEIGHTS = {
@@ -282,7 +283,7 @@ function ensureDependenciesInstalled(cwd: string, languageId: string): void {
         execSync("source $HOME/.local/bin/env 2>/dev/null; uv sync", {
           cwd, stdio: "pipe", timeout: 120_000,
           env: uvEnv,
-          shell: "/bin/sh",
+          shell: "/bin/bash",
         });
         console.log("[quality-runner] Python dependencies installed");
       } catch {
@@ -473,14 +474,20 @@ export async function runQualityVerification(
       g.commands.some((c) => /docker\s+compose\s+up/i.test(c))
     );
     if (serviceGate) {
-      const setupCmd = serviceGate.commands.join(" && ");
-      console.log(`[quality-runner] Starting services: ${setupCmd}`);
-      const serviceResult = runCommand(setupCmd, repoPath, 120000);
-      if (serviceResult.exitCode === 0) {
-        servicesStarted = true;
-        console.log("[quality-runner] Services started successfully");
+      if (!isDockerDaemonReachable()) {
+        console.log("[quality-runner] Docker daemon not reachable — skipping service startup, tests requiring services will be unavailable");
       } else {
-        console.log(`[quality-runner] Service startup failed (exit ${serviceResult.exitCode}) — tests requiring services will be unavailable`);
+        // Only run docker compose commands — not the full gate (which includes test commands)
+        const composeCmds = serviceGate.commands.filter((c) => /docker\s+compose/i.test(c));
+        const setupCmd = composeCmds.join(" && ");
+        console.log(`[quality-runner] Starting services: ${setupCmd}`);
+        const serviceResult = runCommand(setupCmd, repoPath, 120000);
+        if (serviceResult.exitCode === 0) {
+          servicesStarted = true;
+          console.log("[quality-runner] Services started successfully");
+        } else {
+          console.log(`[quality-runner] Service startup failed (exit ${serviceResult.exitCode}) — tests requiring services will be unavailable`);
+        }
       }
     }
   }

@@ -169,6 +169,20 @@ export function activate(context: vscode.ExtensionContext): void {
   client.on(
     "task:started",
     (info: { id: string; summary: string; description?: string; persona?: string; model?: string; repo?: string }) => {
+      log(`[sticky] task:started id=${info.id} liveDiffSticky=${liveDiffSticky} activeSessions=${LiveDiffManager.hasActiveSessions()}`);
+
+      // Auto-start live diff FIRST — before any other work that might throw
+      if (liveDiffSticky) {
+        try {
+          LiveDiffManager.createOrShow(client, { id: info.id, summary: info.summary });
+          log(`[sticky] auto-opened live diff for ${info.id}, sessions now=${LiveDiffManager.hasActiveSessions()}`);
+          const label = info.summary.length > 50 ? `${info.summary.substring(0, 50)}...` : info.summary;
+          vscode.window.setStatusBarMessage(`$(eye) Live code view: watching ${label}`, 5000);
+        } catch (err) {
+          log(`[sticky] ERROR auto-opening live diff: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
       // Always switch to the new task — the previous one is done or this is more important
       const taskInfo: TaskInfo = {
         ...info,
@@ -182,11 +196,6 @@ export function activate(context: vscode.ExtensionContext): void {
       // Focus feed first, then open terminal last so terminal gets final focus
       vscode.commands.executeCommand("workermill.feedPanel.focus");
       logManager.openLogs(info.id, info.summary);
-
-      // Auto-start live diff if it was active on the previous task (sticky mode)
-      if (liveDiffSticky) {
-        LiveDiffManager.createOrShow(client, { id: info.id, summary: info.summary });
-      }
     },
   );
 
@@ -198,15 +207,20 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     logManager.onTaskFinished(info.id, "completed");
     // Close live diff for the completed task (next task will auto-start if sticky)
+    log(`[sticky] task:completed id=${info.id} liveDiffSticky=${liveDiffSticky} sessions=${LiveDiffManager.hasActiveSessions()}`);
     LiveDiffManager.closeTask(info.id);
+    log(`[sticky] after closeTask sessions=${LiveDiffManager.hasActiveSessions()}`);
   });
 
   client.on("task:failed", (info: { id: string }) => {
+    log(`[sticky] task:failed id=${info.id} liveDiffSticky=${liveDiffSticky} sessions=${LiveDiffManager.hasActiveSessions()}`);
     if (currentFeedTaskId === info.id) {
       currentFeedTaskStatus = "failed";
       feedView.onTaskFinished(info.id, "failed");
     }
     logManager.onTaskFinished(info.id, "failed");
+    // Close live diff for failed task too (matches completed behavior)
+    LiveDiffManager.closeTask(info.id);
   });
 
   // Reconcile state when agent sends updated task list (e.g., after cleanup)
@@ -713,6 +727,7 @@ export function activate(context: vscode.ExtensionContext): void {
         LiveDiffManager.createOrShow(client, task);
         // Track sticky state: ON if we just created a session, OFF if we just toggled it off
         liveDiffSticky = LiveDiffManager.hasActiveSessions();
+        log(`[sticky] eye icon clicked task=${task.id} liveDiffSticky=${liveDiffSticky} sessions=${LiveDiffManager.hasActiveSessions()}`);
       },
     ),
 

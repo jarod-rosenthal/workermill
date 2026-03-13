@@ -480,8 +480,26 @@ agentEvents.on("state:changed", () => broadcastSSE("tasks", "state:changed", {})
 // Forward local event bus (orchestrator/worker) to SSE clients
 onStreamEvent((event) => {
   broadcastSSE(event.ch, event.t, event.p);
-  // Also broadcast task state changes as agentEvents-style events
+  // Bridge local orchestrator task_state events → agentEvents-style lifecycle events
+  // so VS Code extension features (sticky live diff, feed auto-switch, notifications) work
   if (event.ch === "org:local:tasks" && event.t === "task_state") {
+    const p = event.p as { taskId: string; status: string; exitCode?: number; error?: string };
+    // Look up task details from SQLite for the event payload
+    const db = getLocalDb();
+    const task = db.prepare("SELECT id, summary, description, github_repo FROM tasks WHERE id = ?").get(p.taskId) as
+      { id: string; summary: string; description?: string; github_repo?: string } | undefined;
+    if (task) {
+      const info = { id: task.id, summary: task.summary, description: task.description, repo: task.github_repo };
+      if (p.status === "executing") {
+        broadcastSSE("tasks", "task:started", info);
+      } else if (p.status === "completed") {
+        broadcastSSE("tasks", "task:completed", { id: task.id });
+      } else if (p.status === "failed") {
+        broadcastSSE("tasks", "task:failed", { id: task.id, error: p.error });
+      } else if (p.status === "planning") {
+        broadcastSSE("tasks", "task:planning", info);
+      }
+    }
     broadcastSSE("tasks", "state:changed", {});
   }
 });

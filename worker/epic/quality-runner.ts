@@ -260,6 +260,37 @@ function ensureDependenciesInstalled(cwd: string, languageId: string): void {
     return;
   }
 
+  if (languageId === "python") {
+    // Python: install uv if missing, then sync dependencies
+    const uvEnv = { ...process.env, PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}` };
+    try {
+      execSync("uv --version", { cwd, stdio: "pipe", timeout: 10_000, env: uvEnv });
+    } catch {
+      console.log("[quality-runner] Installing uv...");
+      try {
+        execSync("curl -LsSf https://astral.sh/uv/install.sh | sh", { cwd, stdio: "pipe", timeout: 60_000 });
+        console.log("[quality-runner] uv installed");
+      } catch {
+        console.log("[quality-runner] uv install failed (non-fatal)");
+        return;
+      }
+    }
+    if (fs.existsSync(path.join(cwd, "pyproject.toml")) || fs.existsSync(path.join(cwd, "requirements.txt"))) {
+      console.log("[quality-runner] Installing Python dependencies: uv sync");
+      try {
+        execSync("source $HOME/.local/bin/env 2>/dev/null; uv sync", {
+          cwd, stdio: "pipe", timeout: 120_000,
+          env: uvEnv,
+          shell: "/bin/sh",
+        });
+        console.log("[quality-runner] Python dependencies installed");
+      } catch {
+        console.log("[quality-runner] uv sync failed (non-fatal) — proceeding with existing environment");
+      }
+    }
+    return;
+  }
+
   // JS/TS: detect package manager from lockfile and install
   let installCmd: string | null = null;
   if (fs.existsSync(path.join(cwd, "pnpm-lock.yaml"))) {

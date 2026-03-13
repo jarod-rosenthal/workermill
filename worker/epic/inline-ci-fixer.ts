@@ -290,10 +290,14 @@ export class InlineCIFixer {
       ? `\n### Repository Context (from AGENTS.md / CLAUDE.md)\n\n${repoContext}\n`
       : "";
 
+    const requirementsSection = this.config.jiraRequirements
+      ? `\n### Project Requirements (PRD)\n\n${this.config.jiraRequirements}\n`
+      : "";
+
     return `## CI Failure on PR #${prNumber}
 
 **Repository:** ${this.config.targetRepo}
-${repoContextSection}
+${repoContextSection}${requirementsSection}
 ### CI Failure Output
 
 \`\`\`

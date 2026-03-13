@@ -599,10 +599,14 @@ export class InlineIntegrationFixer {
 
     const ownershipSection = ownershipContext ? `\n${ownershipContext}\n` : "";
 
+    const requirementsSection = this.config.jiraRequirements
+      ? `\n### Project Requirements (PRD)\n\n${this.config.jiraRequirements}\n`
+      : "";
+
     return `## Integration Gate Failure on PR #${prNumber}
 
 **Repository:** ${this.config.targetRepo}
-${repoContextSection}${ownershipSection}
+${repoContextSection}${requirementsSection}${ownershipSection}
 ### Failed Command
 
 \`${failedCommand}\`

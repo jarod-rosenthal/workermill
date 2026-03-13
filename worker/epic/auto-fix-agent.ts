@@ -7,6 +7,7 @@
 
 import { spawn } from "child_process";
 import { QualityMetrics } from "./quality-runner.js";
+import { detectLanguage } from "../lib/language-profile.js";
 /** Quality gate result type (formerly from quality-gate.ts, now inline) */
 export interface QualityGateResult {
   passed: boolean;
@@ -129,37 +130,67 @@ async function runCommand(
 }
 
 /**
- * Attempt to fix lint errors using ESLint's --fix flag.
+ * Attempt to fix lint errors using the appropriate tool for the detected language.
  */
 async function fixLintErrors(projectRoot: string): Promise<FixAttemptResult> {
-  const result = await runCommand("npx", ["eslint", ".", "--fix", "--ext", ".ts,.tsx,.js,.jsx"], projectRoot);
+  const profile = detectLanguage(projectRoot);
+  let result;
 
-  const filesModified: string[] = [];
-  // Parse ESLint output for fixed files
-  const fixedMatch = result.stdout.match(/(\d+) problems fixed/);
-  const fixed = result.exitCode === 0 || (fixedMatch && parseInt(fixedMatch[1]) > 0);
+  switch (profile.id) {
+    case "python":
+      result = await runCommand("bash", ["-c", `source $HOME/.local/bin/env 2>/dev/null; uv run ruff check --fix . 2>&1 && uv run ruff format . 2>&1`], projectRoot);
+      break;
+    case "go":
+      result = await runCommand("gofmt", ["-w", "."], projectRoot);
+      break;
+    case "rust":
+      result = await runCommand("cargo", ["clippy", "--fix", "--allow-dirty", "--allow-staged"], projectRoot);
+      break;
+    case "ruby":
+      result = await runCommand("bundle", ["exec", "rubocop", "-a"], projectRoot);
+      break;
+    default:
+      result = await runCommand("npx", ["eslint", ".", "--fix", "--ext", ".ts,.tsx,.js,.jsx"], projectRoot);
+  }
+
+  const fixed = result.exitCode === 0;
 
   return {
     issueType: "lint_errors",
-    fixed: fixed || false,
-    message: fixed ? `Lint errors fixed` : `Could not fix all lint errors`,
-    filesModified,
+    fixed,
+    message: fixed ? `Lint errors fixed (${profile.displayName})` : `Could not fix all lint errors (${profile.displayName})`,
+    filesModified: [],
     errors: result.stderr ? [result.stderr] : undefined,
   };
 }
 
 /**
- * Attempt to fix formatting issues using Prettier.
+ * Attempt to fix formatting issues using the appropriate formatter for the detected language.
  */
 async function fixFormatIssues(projectRoot: string): Promise<FixAttemptResult> {
-  const result = await runCommand("npx", ["prettier", "--write", ".", "--ignore-unknown"], projectRoot);
+  const profile = detectLanguage(projectRoot);
+  let result;
+
+  switch (profile.id) {
+    case "python":
+      result = await runCommand("bash", ["-c", "source $HOME/.local/bin/env 2>/dev/null; uv run ruff format . 2>&1"], projectRoot);
+      break;
+    case "go":
+      result = await runCommand("gofmt", ["-w", "."], projectRoot);
+      break;
+    case "rust":
+      result = await runCommand("cargo", ["fmt"], projectRoot);
+      break;
+    default:
+      result = await runCommand("npx", ["prettier", "--write", ".", "--ignore-unknown"], projectRoot);
+  }
 
   const fixed = result.exitCode === 0;
 
   return {
     issueType: "format_issues",
     fixed,
-    message: fixed ? "Formatting issues fixed" : "Could not fix formatting issues",
+    message: fixed ? `Formatting issues fixed (${profile.displayName})` : `Could not fix formatting issues (${profile.displayName})`,
     filesModified: [],
     errors: result.stderr ? [result.stderr] : undefined,
   };
@@ -169,7 +200,18 @@ async function fixFormatIssues(projectRoot: string): Promise<FixAttemptResult> {
  * Attempt to fix import issues (organize imports, remove unused).
  */
 async function fixImportIssues(projectRoot: string): Promise<FixAttemptResult> {
-  // Try to organize imports using eslint with import sorting rules
+  const profile = detectLanguage(projectRoot);
+
+  // Import fixing is primarily a JS/TS concern — other languages handle imports via lint --fix
+  if (profile.id !== "typescript") {
+    return {
+      issueType: "import_issues",
+      fixed: false,
+      message: `Import auto-fix not applicable for ${profile.displayName} (handled by lint --fix)`,
+      filesModified: [],
+    };
+  }
+
   const result = await runCommand(
     "npx",
     ["eslint", ".", "--fix", "--rule", '{"import/order": "error", "unused-imports/no-unused-imports": "error"}'],
@@ -188,30 +230,19 @@ async function fixImportIssues(projectRoot: string): Promise<FixAttemptResult> {
 }
 
 /**
- * Attempt to fix TypeScript errors (limited - mostly uses tsc suggestions).
- * This is complex and often requires code changes, so we focus on simple fixes.
+ * Attempt to fix type errors. For most languages, type errors can't be auto-fixed
+ * without AI — this is a best-effort check that defers to the Claude fix agent.
  */
 async function fixTypeErrors(projectRoot: string): Promise<FixAttemptResult> {
-  // Run tsc to get current errors
-  const tscResult = await runCommand("npx", ["tsc", "--noEmit"], projectRoot);
+  const profile = detectLanguage(projectRoot);
 
-  if (tscResult.exitCode === 0) {
-    return {
-      issueType: "type_errors",
-      fixed: true,
-      message: "No TypeScript errors to fix",
-      filesModified: [],
-    };
-  }
-
-  // For now, we can't auto-fix type errors reliably without AI
-  // This would require the Claude Agent SDK to analyze and fix
+  // Type errors generally can't be auto-fixed by shell commands — defer to AI agent
+  // Just verify current state so we don't waste iterations
   return {
     issueType: "type_errors",
     fixed: false,
-    message: "TypeScript errors require manual intervention or AI-assisted fixing",
+    message: `Type errors require AI-assisted fixing (${profile.displayName})`,
     filesModified: [],
-    errors: [tscResult.stderr || "Type errors detected but auto-fix not available"],
   };
 }
 

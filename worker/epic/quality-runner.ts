@@ -544,6 +544,13 @@ export async function runQualityVerification(
   {
     // Use board test command (includes DATABASE_URL, docker compose, etc.) or fall back to generic
     const testCmd = boardTestCmd || profile.test;
+    // Skip test commands that require docker compose when docker isn't available
+    const testNeedsDocker = /docker\s+compose/i.test(testCmd);
+    if (testNeedsDocker && !isDockerDaemonReachable()) {
+      testsAvailable = false;
+      metrics.testScore = 0;
+      console.log("[quality-runner] Tests require Docker (not available) — excluding from score");
+    } else {
     const testResult = runCommand(testCmd, effectiveCwd, 300000);
     if (testResult.exitCode !== 0) {
       console.log(`[quality-runner] Test command failed (exit ${testResult.exitCode}):\n  STDOUT: ${testResult.stdout.substring(0, 500) || "(empty)"}\n  STDERR: ${testResult.stderr.substring(0, 500) || "(empty)"}`);
@@ -572,6 +579,7 @@ export async function runQualityVerification(
         metrics.coverageBranches = parseFloat(coverageMatch[2]) || 0;
         metrics.coverageScore = Math.round(metrics.coverageLines);
       }
+    }
     }
   }
 
@@ -606,6 +614,12 @@ export async function runQualityVerification(
   console.log("[quality-runner] Checking for E2E tests...");
   try {
     if (boardTestE2eCmd) {
+      // Skip E2E if it requires docker compose and docker isn't available
+      const e2eNeedsDocker = /docker\s+compose/i.test(boardTestE2eCmd);
+      if (e2eNeedsDocker && !isDockerDaemonReachable()) {
+        console.log("[quality-runner] E2E tests require Docker (not available) — skipping");
+        metrics.e2eAvailable = false;
+      } else {
       // Board gate E2E command available — use it directly (includes env vars, service setup, etc.)
       metrics.e2eAvailable = true;
       console.log(`[quality-runner] Running E2E tests (board gate): ${boardTestE2eCmd}`);
@@ -633,6 +647,7 @@ export async function runQualityVerification(
 
       if (metrics.e2eFailed > 0) {
         console.log(`[quality-runner] E2E TESTS FAILING — ${metrics.e2eFailed} failures must be fixed before PR creation`);
+      }
       }
     } else {
       // Fallback: check for test:e2e script in package.json (Playwright-style)

@@ -1,5 +1,5 @@
 # Working docs (local only)
-docs/plans/
+docs/
 .plan
 
 # Compiled TypeScript output in source directories
@@ -80,9 +80,7 @@ __pycache__/
 # Playwright MCP
 .playwright-mcp/
 
-# Internal plans and notes
-docs/plans/
-docs/launch/
+# Internal plans and notes (covered by docs/ above)
 
 # Operations scripts (local only)
 bin/bastion

@@ -34,7 +34,8 @@ import { createMemoryClient, type MemoryClient, type MemoryContext, type Enhance
 import { CredentialRotator } from "./credential-rotator.js";
 import { spawn, execSync } from "child_process";
 import { writeFileSync, unlinkSync, existsSync, readFileSync } from "fs";
-import { runQualityVerification, postQualityMetrics, type QualityMetrics } from "./quality-runner.js";
+import { runQualityVerification, postQualityMetrics, type QualityMetrics, findBoardGateCommand } from "./quality-runner.js";
+import { detectLanguage } from "../lib/language-profile.js";
 import type { EvaluateQualityResponse } from "./decision-client.js";
 import { runAutoFixWithTracking, formatAutoFixResult, type QualityGateResult as AutoFixQualityGateResult } from "./auto-fix-agent.js";
 import { runAgent, type AgentResult } from "./agent-sdk.js";
@@ -4486,43 +4487,48 @@ Begin your review now. Start by fetching the code changes.`;
    * Uses the same agent SDK as InlineIntegrationFixer / InlineCIFixer.
    */
   private async runQualityFixAgent(repoPath: string, issuesRemaining: string[]): Promise<boolean> {
-    // Capture fresh tsc/lint/test output so the agent sees ALL quality gate errors.
-    // Previously this only captured typecheck + lint, causing the agent to miss test failures.
+    // Capture fresh quality gate output so the agent sees ALL errors.
+    // Uses board gate commands (if configured) or language profile commands,
+    // matching the same tools the quality runner uses for scoring.
     let errorOutput = "";
 
-    // 1. TypeScript errors
-    try {
-      execSync("npx tsc --noEmit 2>&1", { cwd: repoPath, encoding: "utf-8", timeout: 120_000 });
-    } catch (e: unknown) {
-      const err = e as { stdout?: string; stderr?: string };
-      errorOutput += "=== TYPECHECK ERRORS ===\n" + (err.stdout || "") + "\n" + (err.stderr || "");
+    const profile = detectLanguage(repoPath);
+    const boardGates = this.config.qualityGateCommands;
+    const execEnv = { ...process.env, CI: "true", PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}` };
+
+    // Resolve commands: board gate commands take priority, then language profile defaults
+    const typecheckCmd = (boardGates?.length ? findBoardGateCommand(boardGates, "typecheck") : undefined) || profile.typecheck;
+    const lintCmd = (boardGates?.length ? findBoardGateCommand(boardGates, "lint") : undefined) || profile.lint;
+    const testCmd = (boardGates?.length ? findBoardGateCommand(boardGates, "test") : undefined) || profile.test;
+
+    // 1. Typecheck errors
+    if (typecheckCmd) {
+      try {
+        execSync(typecheckCmd, { cwd: repoPath, encoding: "utf-8", timeout: 120_000, env: execEnv });
+      } catch (e: unknown) {
+        const err = e as { stdout?: string; stderr?: string };
+        errorOutput += "=== TYPECHECK ERRORS ===\n" + (err.stdout || "") + "\n" + (err.stderr || "");
+      }
     }
 
     // 2. Lint errors
-    try {
-      execSync("npx eslint . --ext .ts,.tsx,.js,.jsx 2>&1", { cwd: repoPath, encoding: "utf-8", timeout: 120_000 });
-    } catch (e: unknown) {
-      const err = e as { stdout?: string; stderr?: string };
-      errorOutput += "\n=== LINT ERRORS ===\n" + (err.stdout || "") + "\n" + (err.stderr || "");
+    if (lintCmd) {
+      try {
+        execSync(lintCmd, { cwd: repoPath, encoding: "utf-8", timeout: 120_000, env: execEnv });
+      } catch (e: unknown) {
+        const err = e as { stdout?: string; stderr?: string };
+        errorOutput += "\n=== LINT ERRORS ===\n" + (err.stdout || "") + "\n" + (err.stderr || "");
+      }
     }
 
-    // 3. Test failures — detect test runner from package.json and capture output
-    try {
-      const pkgJsonPath = path.join(repoPath, "package.json");
-      if (existsSync(pkgJsonPath)) {
-        const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
-        const testScript = pkgJson.scripts?.test;
-        if (testScript) {
-          try {
-            execSync("npm test 2>&1", { cwd: repoPath, encoding: "utf-8", timeout: 300_000, env: { ...process.env, CI: "true" } });
-          } catch (testErr: unknown) {
-            const te = testErr as { stdout?: string; stderr?: string };
-            errorOutput += "\n=== TEST FAILURES ===\n" + (te.stdout || "") + "\n" + (te.stderr || "");
-          }
-        }
+    // 3. Test failures
+    if (testCmd) {
+      try {
+        execSync(testCmd, { cwd: repoPath, encoding: "utf-8", timeout: 300_000, env: execEnv });
+      } catch (e: unknown) {
+        const err = e as { stdout?: string; stderr?: string };
+        errorOutput += "\n=== TEST FAILURES ===\n" + (err.stdout || "") + "\n" + (err.stderr || "");
       }
-    } catch {
-      // package.json parse failure — non-fatal
     }
 
     if (!errorOutput.trim()) {
@@ -4539,9 +4545,17 @@ Begin your review now. Start by fetching the code changes.`;
       ? `\n### Repository Context\n\n${repoContext}\n`
       : "";
 
+    // Build verification instructions using the same commands the quality runner will use
+    const verifySteps = [
+      typecheckCmd ? `Run \`${typecheckCmd}\` to verify type errors are resolved` : null,
+      lintCmd ? `Run \`${lintCmd}\` to verify lint errors are resolved` : null,
+      testCmd ? `Run \`${testCmd}\` to verify test failures are resolved` : null,
+    ].filter(Boolean);
+
     const prompt = `## Quality Gate Failures
 
 **Repository:** ${this.config.targetRepo}
+**Language:** ${profile.displayName}
 ${repoContextSection}
 ### Error Output
 
@@ -4551,15 +4565,13 @@ ${truncated}
 
 ### Instructions
 
-The code has quality gate failures (TypeScript errors, lint errors, and/or test failures) that need fixing.
+The code has quality gate failures that need fixing.
 
 1. Read ALL the errors carefully and fix ALL of them — typecheck, lint, AND tests
-2. Run \`npx tsc --noEmit\` to verify type errors are resolved
-3. Run \`npx eslint . --ext .ts,.tsx,.js,.jsx\` to verify lint errors are resolved
-4. Run \`npm test\` to verify test failures are resolved
-5. Do NOT refactor beyond what's needed to pass quality gates
-6. Do NOT change language versions, framework versions, or dependency versions
-7. Commit with message "fix: resolve quality gate issues"`;
+${verifySteps.map((s, i) => `${i + 2}. ${s}`).join("\n")}
+${verifySteps.length + 2}. Do NOT refactor beyond what's needed to pass quality gates
+${verifySteps.length + 3}. Do NOT change language versions, framework versions, or dependency versions
+${verifySteps.length + 4}. Commit with message "fix: resolve quality gate issues"`;
 
     const systemPrompt = `You are a Quality Fix Agent. Fix ALL quality gate failures in the codebase. You have full access to read and edit files.
 

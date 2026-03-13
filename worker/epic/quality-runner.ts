@@ -84,7 +84,7 @@ function runCommand(cmd: string, cwd: string, timeoutMs: number = 120000): Comma
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
       timeout: timeoutMs,
-      env: { ...process.env, CI: "true" }, // Prevent vitest/jest watch mode
+      env: { ...process.env, CI: "true", PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}` },
     });
     return { stdout, stderr: "", exitCode: 0 };
   } catch (error: unknown) {
@@ -288,7 +288,7 @@ function ensureDependenciesInstalled(cwd: string, languageId: string): void {
  * Returns the full command chain (joined with &&) or undefined if no match.
  * Matches by gate name first, then by command content as fallback.
  */
-function findBoardGateCommand(
+export function findBoardGateCommand(
   gates: { name: string; trigger: string; commands: string[] }[],
   category: "test" | "test-e2e" | "lint" | "typecheck"
 ): string | undefined {

@@ -389,7 +389,7 @@ export class InlineReviewerAiSdk {
   ): string {
     const maxRevisions = this.config.maxReviewRevisions;
     const revisionSection = previousFeedback
-      ? `## Previous Review Feedback (Revision ${revisionCount}/${maxRevisions})
+      ? `## Previous Review Feedback (Revision ${revisionCount + 1}/${maxRevisions})
 This is a revision attempt. The previous code was reviewed and these issues were identified:
 
 ${previousFeedback}

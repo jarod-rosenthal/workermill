@@ -313,7 +313,7 @@ export class InlineReviewer {
     await this.postLog(`PR: ${prUrl}`, "system");
     await this.postLog(`Jira: ${this.config.jiraIssueKey}`, "system");
     if (revisionCount > 0) {
-      await this.postLog(`Review ${revisionCount + 1}/${this.config.maxReviewRevisions} (revision ${revisionCount})`, "system");
+      await this.postLog(`Review ${revisionCount + 1}/${this.config.maxReviewRevisions} (revision ${revisionCount + 1})`, "system");
     }
 
     try {
@@ -976,7 +976,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     const maxPerStoryRevisions = this.config.maxPerStoryRevisions;
     if (revisionCount > 0) {
       await this.postLog(
-        `Review ${revisionCount + 1}/${maxPerStoryRevisions} (revision ${revisionCount})`,
+        `Review ${revisionCount + 1}/${maxPerStoryRevisions} (revision ${revisionCount + 1})`,
         "system"
       );
     }

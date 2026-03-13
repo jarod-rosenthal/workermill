@@ -54,7 +54,7 @@ export function runGateCommand(
   timeoutMs: number = 300_000
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const shell = process.platform === "win32" ? "cmd" : "/bin/sh";
+    const shell = process.platform === "win32" ? "cmd" : "/bin/bash";
     const shellArgs = process.platform === "win32" ? ["/c", cmd] : ["-c", cmd];
     // On Windows (Git Bash / MSYS2), the Bun-compiled agent binary may not inherit
     // Windows user env vars like APPDATA, LOCALAPPDATA, GOCACHE. Go toolchain needs

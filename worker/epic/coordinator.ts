@@ -4504,7 +4504,7 @@ Begin your review now. Start by fetching the code changes.`;
     // 1. Typecheck errors
     if (typecheckCmd) {
       try {
-        execSync(typecheckCmd, { cwd: repoPath, encoding: "utf-8", timeout: 120_000, env: execEnv });
+        execSync(typecheckCmd, { cwd: repoPath, encoding: "utf-8", timeout: 120_000, env: execEnv, shell: "/bin/bash" });
       } catch (e: unknown) {
         const err = e as { stdout?: string; stderr?: string };
         errorOutput += "=== TYPECHECK ERRORS ===\n" + (err.stdout || "") + "\n" + (err.stderr || "");
@@ -4514,7 +4514,7 @@ Begin your review now. Start by fetching the code changes.`;
     // 2. Lint errors
     if (lintCmd) {
       try {
-        execSync(lintCmd, { cwd: repoPath, encoding: "utf-8", timeout: 120_000, env: execEnv });
+        execSync(lintCmd, { cwd: repoPath, encoding: "utf-8", timeout: 120_000, env: execEnv, shell: "/bin/bash" });
       } catch (e: unknown) {
         const err = e as { stdout?: string; stderr?: string };
         errorOutput += "\n=== LINT ERRORS ===\n" + (err.stdout || "") + "\n" + (err.stderr || "");
@@ -4524,7 +4524,7 @@ Begin your review now. Start by fetching the code changes.`;
     // 3. Test failures
     if (testCmd) {
       try {
-        execSync(testCmd, { cwd: repoPath, encoding: "utf-8", timeout: 300_000, env: execEnv });
+        execSync(testCmd, { cwd: repoPath, encoding: "utf-8", timeout: 300_000, env: execEnv, shell: "/bin/bash" });
       } catch (e: unknown) {
         const err = e as { stdout?: string; stderr?: string };
         errorOutput += "\n=== TEST FAILURES ===\n" + (err.stdout || "") + "\n" + (err.stderr || "");

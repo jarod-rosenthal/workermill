@@ -84,6 +84,7 @@ function runCommand(cmd: string, cwd: string, timeoutMs: number = 120000): Comma
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
       timeout: timeoutMs,
+      shell: "/bin/bash",
       env: { ...process.env, CI: "true", PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}` },
     });
     return { stdout, stderr: "", exitCode: 0 };

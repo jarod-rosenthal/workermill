@@ -62,6 +62,7 @@ export interface EvaluateQualityRequest {
     securityVulnsHigh?: number;
     typeErrors?: boolean;
     testFailures?: boolean;
+    lintErrors?: boolean;
   };
   taskId?: string;
   bypassRequested: boolean;
@@ -72,6 +73,7 @@ export interface EvaluateQualityRequest {
     maxSecurityHighVulns?: number | null;
     blockOnTypeErrors?: boolean;
     blockOnTestFailures?: boolean;
+    blockOnLintErrors?: boolean;
   };
 }
 
@@ -785,6 +787,11 @@ export function evaluateQuality(
   // Check: test failures
   if (thresholds.blockOnTestFailures && req.metrics.testFailures) {
     blockers.push("Test failures detected and blocking is enabled");
+  }
+
+  // Check: lint errors
+  if (thresholds.blockOnLintErrors && req.metrics.lintErrors) {
+    blockers.push("Lint errors detected and blocking is enabled");
   }
 
   const pass = blockers.length === 0;

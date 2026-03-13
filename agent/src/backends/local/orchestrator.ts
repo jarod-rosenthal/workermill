@@ -258,6 +258,7 @@ async function spawnLocalWorker(task: any): Promise<void> {
       maxSecurityHighVulns: config.settings?.maxSecurityHighVulns ?? null,
       blockOnTypeErrors: config.settings?.blockOnTypeErrors ?? false,
       blockOnTestFailures: config.settings?.blockOnTestFailures ?? false,
+      blockOnLintErrors: config.settings?.blockOnLintErrors ?? false,
       autoFixEnabled: config.settings?.autoFixEnabled ?? false,
       autoFixMaxIterations: config.settings?.autoFixMaxIterations ?? 3,
     }),

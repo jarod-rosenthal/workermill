@@ -1323,6 +1323,13 @@ ${parts.join("\n\n")}
       const truncatedFiles = changedFiles.length > maxFiles
         ? [...changedFiles.slice(0, maxFiles), `... and ${changedFiles.length - maxFiles} more files`]
         : changedFiles;
+      // Truncate description and targetFiles to stay under coordination metadata size limit
+      const truncatedDescription = story.description?.length > 1024
+        ? story.description.substring(0, 1024) + "..."
+        : story.description;
+      const truncatedTargetFiles = story.targetFiles && story.targetFiles.length > maxFiles
+        ? [...story.targetFiles.slice(0, maxFiles), `... and ${story.targetFiles.length - maxFiles} more`]
+        : story.targetFiles;
       try {
         const currentRevision = await this.coordination.getCurrentRevision();
         await this.coordination.postCompletion(
@@ -1334,6 +1341,8 @@ ${parts.join("\n\n")}
             branchName,
             filesModified: truncatedFiles,
             revisionNumber: currentRevision,
+            description: truncatedDescription,
+            targetFiles: truncatedTargetFiles,
             validation: {
               passed: validation.valid,
               issues: validation.issues,

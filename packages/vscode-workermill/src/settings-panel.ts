@@ -426,6 +426,7 @@ export class SettingsPanel {
         qualityGateEnabled: settings.qualityGateEnabled ?? true,
         blockOnTypeErrors: settings.blockOnTypeErrors ?? true,
         blockOnTestFailures: settings.blockOnTestFailures ?? false,
+        blockOnLintErrors: settings.blockOnLintErrors ?? true,
         autoFixEnabled: settings.autoFixEnabled ?? true,
         autoFixMaxIterations: settings.autoFixMaxIterations ?? 3,
         // Planning settings
@@ -649,6 +650,7 @@ export class SettingsPanel {
     qualityGateEnabled: boolean;
     blockOnTypeErrors: boolean;
     blockOnTestFailures: boolean;
+    blockOnLintErrors: boolean;
     autoFixEnabled: boolean;
     autoFixMaxIterations: number;
   }): void {
@@ -658,6 +660,7 @@ export class SettingsPanel {
       settings.qualityGateEnabled = msg.qualityGateEnabled;
       settings.blockOnTypeErrors = msg.blockOnTypeErrors;
       settings.blockOnTestFailures = msg.blockOnTestFailures;
+      settings.blockOnLintErrors = msg.blockOnLintErrors;
       settings.autoFixEnabled = msg.autoFixEnabled;
       settings.autoFixMaxIterations = msg.autoFixMaxIterations;
       sc.settings = settings;
@@ -810,6 +813,7 @@ export class SettingsPanel {
       qualityGateEnabled: boolean;
       blockOnTypeErrors: boolean;
       blockOnTestFailures: boolean;
+      blockOnLintErrors: boolean;
       autoFixEnabled: boolean;
       autoFixMaxIterations: number;
     },
@@ -824,6 +828,7 @@ export class SettingsPanel {
           qualityGateEnabled: msg.qualityGateEnabled,
           blockOnTypeErrors: msg.blockOnTypeErrors,
           blockOnTestFailures: msg.blockOnTestFailures,
+          blockOnLintErrors: msg.blockOnLintErrors,
           autoFixEnabled: msg.autoFixEnabled,
           autoFixMaxIterations: msg.autoFixMaxIterations,
         },
@@ -2007,6 +2012,13 @@ export class SettingsPanel {
         </div>
         <div class="field">
           <label style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="qg-block-lint-errors" checked />
+            Block on lint errors
+          </label>
+          <div class="hint">Fail the quality gate if lint errors are found (ruff, eslint, etc.).</div>
+        </div>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:8px;">
             <input type="checkbox" id="qg-autofix" checked />
             Auto-Fix Agent
           </label>
@@ -2575,12 +2587,13 @@ export class SettingsPanel {
           qualityGateEnabled: document.getElementById("qg-enabled").checked,
           blockOnTypeErrors: document.getElementById("qg-block-type-errors").checked,
           blockOnTestFailures: document.getElementById("qg-block-test-failures").checked,
+          blockOnLintErrors: document.getElementById("qg-block-lint-errors").checked,
           autoFixEnabled: document.getElementById("qg-autofix").checked,
           autoFixMaxIterations: parseInt(document.getElementById("qg-autofix-iterations").value) || 3,
         });
       });
     }
-    ["qg-enabled", "qg-block-type-errors", "qg-block-test-failures", "qg-autofix"].forEach(function(id) {
+    ["qg-enabled", "qg-block-type-errors", "qg-block-test-failures", "qg-block-lint-errors", "qg-autofix"].forEach(function(id) {
       document.getElementById(id).addEventListener("change", saveQualityGate);
     });
     document.getElementById("qg-autofix-iterations").addEventListener("input", saveQualityGate);
@@ -2852,11 +2865,13 @@ export class SettingsPanel {
         var qgEnabled = document.getElementById("qg-enabled");
         var qgTypeErrors = document.getElementById("qg-block-type-errors");
         var qgTestFailures = document.getElementById("qg-block-test-failures");
+        var qgLintErrors = document.getElementById("qg-block-lint-errors");
         var qgAutofix = document.getElementById("qg-autofix");
         var qgAutofixIterations = document.getElementById("qg-autofix-iterations");
         if (qgEnabled) qgEnabled.checked = d.qualityGateEnabled !== false;
         if (qgTypeErrors) qgTypeErrors.checked = d.blockOnTypeErrors !== false;
         if (qgTestFailures) qgTestFailures.checked = !!d.blockOnTestFailures;
+        if (qgLintErrors) qgLintErrors.checked = !!d.blockOnLintErrors;
         if (qgAutofix) qgAutofix.checked = d.autoFixEnabled !== false;
         if (qgAutofixIterations) qgAutofixIterations.value = String(d.autoFixMaxIterations ?? 3);
         var qgOptions = document.getElementById("qg-options");

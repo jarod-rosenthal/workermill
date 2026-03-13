@@ -19,6 +19,7 @@ export interface TechStack {
 export interface QualityThresholds {
   minQualityScore: number;
   blockOnTypeErrors: boolean;
+  blockOnLintErrors: boolean;
 }
 
 export interface StackTemplate {
@@ -45,7 +46,7 @@ export const STACK_TEMPLATES: StackTemplate[] = [
       rationale: "Modern full-stack TypeScript with excellent DX and type safety",
     },
     defaultPersonas: ["backend_developer", "frontend_developer", "devops_engineer", "qa_engineer"],
-    qualityThresholds: { minQualityScore: 70, blockOnTypeErrors: true },
+    qualityThresholds: { minQualityScore: 70, blockOnTypeErrors: true, blockOnLintErrors: true },
   },
   {
     id: "django-react",
@@ -61,7 +62,7 @@ export const STACK_TEMPLATES: StackTemplate[] = [
       rationale: "Battle-tested Python backend with rich ecosystem and React frontend",
     },
     defaultPersonas: ["backend_developer", "frontend_developer", "devops_engineer", "qa_engineer"],
-    qualityThresholds: { minQualityScore: 70, blockOnTypeErrors: false },
+    qualityThresholds: { minQualityScore: 70, blockOnTypeErrors: false, blockOnLintErrors: true },
   },
   {
     id: "fastapi-react",
@@ -77,7 +78,7 @@ export const STACK_TEMPLATES: StackTemplate[] = [
       rationale: "Modern async Python with automatic OpenAPI docs and type hints",
     },
     defaultPersonas: ["backend_developer", "frontend_developer", "devops_engineer", "qa_engineer"],
-    qualityThresholds: { minQualityScore: 70, blockOnTypeErrors: false },
+    qualityThresholds: { minQualityScore: 70, blockOnTypeErrors: false, blockOnLintErrors: true },
   },
   {
     id: "express-react",
@@ -93,7 +94,7 @@ export const STACK_TEMPLATES: StackTemplate[] = [
       rationale: "Familiar Node.js stack with TypeScript end-to-end",
     },
     defaultPersonas: ["backend_developer", "frontend_developer", "devops_engineer", "qa_engineer"],
-    qualityThresholds: { minQualityScore: 70, blockOnTypeErrors: true },
+    qualityThresholds: { minQualityScore: 70, blockOnTypeErrors: true, blockOnLintErrors: true },
   },
   {
     id: "rails-react",
@@ -109,7 +110,7 @@ export const STACK_TEMPLATES: StackTemplate[] = [
       rationale: "Convention-over-configuration with rapid prototyping and mature ecosystem",
     },
     defaultPersonas: ["backend_developer", "frontend_developer", "devops_engineer", "qa_engineer"],
-    qualityThresholds: { minQualityScore: 65, blockOnTypeErrors: false },
+    qualityThresholds: { minQualityScore: 65, blockOnTypeErrors: false, blockOnLintErrors: true },
   },
   {
     id: "flask-htmx",
@@ -125,7 +126,7 @@ export const STACK_TEMPLATES: StackTemplate[] = [
       rationale: "Simple server-rendered approach with progressive enhancement",
     },
     defaultPersonas: ["backend_developer", "devops_engineer", "qa_engineer"],
-    qualityThresholds: { minQualityScore: 65, blockOnTypeErrors: false },
+    qualityThresholds: { minQualityScore: 65, blockOnTypeErrors: false, blockOnLintErrors: true },
   },
   {
     id: "go-htmx",
@@ -141,7 +142,7 @@ export const STACK_TEMPLATES: StackTemplate[] = [
       rationale: "Fast compiled backend with type-safe SQL and server-rendered UI",
     },
     defaultPersonas: ["backend_developer", "devops_engineer", "qa_engineer"],
-    qualityThresholds: { minQualityScore: 70, blockOnTypeErrors: true },
+    qualityThresholds: { minQualityScore: 70, blockOnTypeErrors: true, blockOnLintErrors: true },
   },
   {
     id: "spring-boot-react",
@@ -157,7 +158,7 @@ export const STACK_TEMPLATES: StackTemplate[] = [
       rationale: "Enterprise-grade Java backend with rich Spring ecosystem",
     },
     defaultPersonas: ["backend_developer", "frontend_developer", "devops_engineer", "qa_engineer"],
-    qualityThresholds: { minQualityScore: 70, blockOnTypeErrors: true },
+    qualityThresholds: { minQualityScore: 70, blockOnTypeErrors: true, blockOnLintErrors: true },
   },
 ];
 

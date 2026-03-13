@@ -839,6 +839,7 @@ class LocalEpicSpawner {
         maxSecurityHighVulns: task.organization?.maxSecurityHighVulns ?? null,
         blockOnTypeErrors: task.organization?.blockOnTypeErrors ?? false,
         blockOnTestFailures: task.organization?.blockOnTestFailures ?? false,
+        blockOnLintErrors: task.organization?.blockOnLintErrors ?? false,
         autoFixEnabled: task.organization?.autoFixEnabled ?? false,
         autoFixMaxIterations: task.organization?.autoFixMaxIterations,
       }),

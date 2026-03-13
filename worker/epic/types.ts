@@ -202,6 +202,7 @@ export interface EpicConfig {
     maxSecurityHighVulns: number | null;
     blockOnTypeErrors: boolean;
     blockOnTestFailures: boolean;
+    blockOnLintErrors: boolean;
     autoFixEnabled: boolean;
     autoFixMaxIterations: number;
   };

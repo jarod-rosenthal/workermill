@@ -112,11 +112,11 @@ export function runGateCommand(
       if (watchModeTimer) clearTimeout(watchModeTimer);
 
       if (watchModeKilled || code === 0) {
-        resolve({ stdout: stdout.slice(0, 4000), stderr: stderr.slice(0, 2000) });
+        resolve({ stdout, stderr });
       } else {
         const err = new Error(`Command failed with exit code ${code}`);
-        (err as any).stdout = stdout.slice(0, 4000);
-        (err as any).stderr = stderr.slice(0, 2000);
+        (err as any).stdout = stdout;
+        (err as any).stderr = stderr;
         (err as any).code = code;
         reject(err);
       }

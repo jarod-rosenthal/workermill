@@ -452,6 +452,7 @@ ${previousFeedback}
       const thresholds = this.config.qualityThresholds;
       const blockOnTypeErrors = thresholds?.blockOnTypeErrors ?? false;
       const blockOnTestFailures = thresholds?.blockOnTestFailures ?? true;
+      const blockOnLintErrors = thresholds?.blockOnLintErrors ?? false;
       const minQualityScore = thresholds?.minQualityScore ?? null;
       const maxSecurityHigh = thresholds?.maxSecurityHighVulns ?? null;
 
@@ -467,7 +468,7 @@ ${previousFeedback}
 |--------|--------|--------|
 | **Overall Score** | ${qualityMetrics.qualityScore}% | ${qualityBelowThreshold ? `⚠️ Below ${minQualityScore}% threshold` : '✅'} |
 | TypeCheck | ${qualityMetrics.typeErrors} errors | ${hasTypeErrors ? (blockOnTypeErrors ? '❌ Blocking' : '⚠️ Non-blocking') : '✅'} |
-| Lint | ${qualityMetrics.lintErrors} errors, ${qualityMetrics.lintWarnings} warnings | ${hasLintIssues ? '⚠️ Informational' : '✅'} |
+| Lint | ${qualityMetrics.lintErrors} errors, ${qualityMetrics.lintWarnings} warnings | ${hasLintIssues ? (blockOnLintErrors ? '❌ Blocking' : '⚠️ Non-blocking') : '✅'} |
 | Tests | ${qualityMetrics.testsPassed} passed, ${qualityMetrics.testsFailed} failed | ${hasTestFailures ? (blockOnTestFailures ? '❌ Blocking' : '⚠️ Non-blocking') : '✅'} |
 | Security | ${qualityMetrics.securityHigh} high, ${qualityMetrics.securityMedium} medium | ${hasSecurityIssues ? '🔴 Blocking' : '✅'} |
 
@@ -475,10 +476,12 @@ ${previousFeedback}
 ${qualityBelowThreshold ? `**⚠️ QUALITY SCORE BELOW ${minQualityScore}% - Consider requesting revision.**\n` : ''}
 ${hasTypeErrors && blockOnTypeErrors ? '**❌ TYPE ERRORS DETECTED - Organization requires these to be fixed.**\n' : ''}
 ${hasTypeErrors && !blockOnTypeErrors ? '**ℹ️ Type errors detected but blocking is DISABLED in org settings — do NOT request revision for type errors alone.**\n' : ''}
+${hasLintIssues && blockOnLintErrors ? '**❌ LINT ERRORS DETECTED - Organization requires these to be fixed.**\n' : ''}
+${hasLintIssues && !blockOnLintErrors ? '**ℹ️ Lint errors detected but blocking is DISABLED in org settings — do NOT request revision for lint errors alone.**\n' : ''}
 ${hasTestFailures && blockOnTestFailures ? '**❌ TEST FAILURES DETECTED - Organization requires these to be fixed.**\n' : ''}
 ${hasTestFailures && !blockOnTestFailures ? '**ℹ️ Test failures detected but blocking is DISABLED in org settings — do NOT request revision for test failures alone.**\n' : ''}
 ${hasSecurityIssues ? '**🔴 HIGH SEVERITY SECURITY ISSUES - These must be fixed.**\n' : ''}
-${!qualityBelowThreshold && !hasSecurityIssues && !(hasTypeErrors && blockOnTypeErrors) && !(hasTestFailures && blockOnTestFailures) ? '**✅ All quality gates pass per organization settings — bias toward approval.**\n' : ''}
+${!qualityBelowThreshold && !hasSecurityIssues && !(hasTypeErrors && blockOnTypeErrors) && !(hasTestFailures && blockOnTestFailures) && !(hasLintIssues && blockOnLintErrors) ? '**✅ All quality gates pass per organization settings — bias toward approval.**\n' : ''}
 
 ---
 
@@ -500,6 +503,8 @@ ${!qualityBelowThreshold && !hasSecurityIssues && !(hasTypeErrors && blockOnType
       else blockingRules.push("Type errors are **non-blocking** (note in feedback, do not request revision)");
       if (thresholds?.blockOnTestFailures) blockingRules.push("Test failures are **blocking**");
       else blockingRules.push("Test failures are **non-blocking** (note in feedback, do not request revision)");
+      if (thresholds?.blockOnLintErrors) blockingRules.push("Lint errors are **blocking**");
+      else blockingRules.push("Lint errors are **non-blocking** (note in feedback, do not request revision)");
       if (thresholds?.minQualityScore) blockingRules.push(`Quality score below ${thresholds.minQualityScore}% is **blocking**`);
       const blockingContext = blockingRules.length > 0 ? `\n\n**Organization blocking rules:**\n${blockingRules.map(r => `- ${r}`).join("\n")}\n` : "";
 

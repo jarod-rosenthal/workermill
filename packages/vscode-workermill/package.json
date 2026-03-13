@@ -359,6 +359,11 @@
           "default": false,
           "description": "Block PR creation on test failures."
         },
+        "workermill.blockOnLintErrors": {
+          "type": "boolean",
+          "default": true,
+          "description": "Block PR creation on lint errors (ruff, eslint, etc.)."
+        },
         "workermill.autoFixEnabled": {
           "type": "boolean",
           "default": true,

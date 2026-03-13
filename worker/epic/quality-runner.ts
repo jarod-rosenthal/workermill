@@ -284,9 +284,61 @@ function ensureDependenciesInstalled(cwd: string, languageId: string): void {
 }
 
 /**
- * Run quality verification on a repository and return metrics.
+ * Find a board gate command matching a quality check category.
+ * Returns the full command chain (joined with &&) or undefined if no match.
+ * Matches by gate name first, then by command content as fallback.
  */
-export async function runQualityVerification(repoPath: string): Promise<QualityMetrics> {
+function findBoardGateCommand(
+  gates: { name: string; trigger: string; commands: string[] }[],
+  category: "test" | "test-e2e" | "lint" | "typecheck"
+): string | undefined {
+  // Name patterns for each category
+  const namePatterns: Record<string, RegExp> = {
+    "test": /^test[-_]?(unit|backend)?$/i,
+    "test-e2e": /^test[-_]?e2e/i,
+    "lint": /^lint[-_]?(backend)?$/i,
+    "typecheck": /^type[-_]?check[-_]?(backend)?$/i,
+  };
+
+  // Command content patterns as fallback
+  const cmdPatterns: Record<string, RegExp> = {
+    "test": /\b(pytest|go\s+test|npm\s+test|vitest|jest)\b/,
+    "test-e2e": /\btest.e2e\b|test_e2e_workflows/,
+    "lint": /\b(ruff\s+check|eslint|golangci-lint|npm\s+run\s+lint)\b/,
+    "typecheck": /\b(mypy|tsc\s+--noEmit|npx\s+tsc|pyright)\b/,
+  };
+
+  const nameRe = namePatterns[category];
+  const cmdRe = cmdPatterns[category];
+
+  // Try name match first
+  let match = gates.find((g) => nameRe?.test(g.name));
+  // Fallback: match by command content (exclude e2e from unit test match)
+  if (!match && cmdRe) {
+    match = gates.find((g) => {
+      const joined = g.commands.join(" ");
+      if (!cmdRe.test(joined)) return false;
+      // For unit tests, exclude gates that are clearly e2e
+      if (category === "test" && /e2e|test_e2e/i.test(joined)) return false;
+      return true;
+    });
+  }
+
+  if (!match) return undefined;
+  return match.commands.join(" && ");
+}
+
+/**
+ * Run quality verification on a repository and return metrics.
+ * When boardGates are provided (from the board's quality gate configuration),
+ * uses those commands for lint/typecheck/test instead of generic profile commands.
+ * This ensures the quality runner uses the same service setup (docker compose),
+ * env vars (DATABASE_URL), and tool invocations that the integration gates use.
+ */
+export async function runQualityVerification(
+  repoPath: string,
+  boardGates?: { name: string; trigger: string; commands: string[] }[]
+): Promise<QualityMetrics> {
   console.log("[quality-runner] Running quality verification...");
 
   const metrics: QualityMetrics = {
@@ -320,11 +372,46 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
   // Stale or incomplete node_modules causes phantom type errors (e.g. 5000+ false TS errors).
   ensureDependenciesInstalled(effectiveCwd, profile.id);
 
+  // When board gate commands are available, use them instead of generic profile commands.
+  // This ensures the quality runner uses the same service setup (docker compose up),
+  // env vars (DATABASE_URL), and tool invocations that experts and integration gates use.
+  const boardLintCmd = boardGates?.length ? findBoardGateCommand(boardGates, "lint") : undefined;
+  const boardTypecheckCmd = boardGates?.length ? findBoardGateCommand(boardGates, "typecheck") : undefined;
+  const boardTestCmd = boardGates?.length ? findBoardGateCommand(boardGates, "test") : undefined;
+  const boardTestE2eCmd = boardGates?.length ? findBoardGateCommand(boardGates, "test-e2e") : undefined;
+
+  if (boardGates?.length) {
+    const matched = [boardLintCmd && "lint", boardTypecheckCmd && "typecheck", boardTestCmd && "test", boardTestE2eCmd && "test-e2e"].filter(Boolean);
+    console.log(`[quality-runner] Board gate commands available — using for: ${matched.join(", ") || "none (falling back to profile)"}`);
+  }
+
+  // Start services if any board gate uses docker compose (needed for tests).
+  // Service gates are recognized by their commands containing "docker compose up".
+  // Run them once before all checks; teardown happens at the end.
+  let servicesStarted = false;
+  if (boardGates?.length) {
+    const serviceGate = boardGates.find((g) =>
+      g.commands.some((c) => /docker\s+compose\s+up/i.test(c))
+    );
+    if (serviceGate) {
+      const setupCmd = serviceGate.commands.join(" && ");
+      console.log(`[quality-runner] Starting services: ${setupCmd}`);
+      const serviceResult = runCommand(setupCmd, repoPath, 120000);
+      if (serviceResult.exitCode === 0) {
+        servicesStarted = true;
+        console.log("[quality-runner] Services started successfully");
+      } else {
+        console.log(`[quality-runner] Service startup failed (exit ${serviceResult.exitCode}) — tests requiring services will be unavailable`);
+      }
+    }
+  }
+
   // Run TypeCheck
   console.log("[quality-runner] Running typecheck...");
   let typecheckAvailable = true;
-  if (profile.typecheck) {
-    const typecheckResult = runCommand(profile.typecheck, effectiveCwd);
+  const typecheckCmd = boardTypecheckCmd || profile.typecheck;
+  if (typecheckCmd) {
+    const typecheckResult = runCommand(typecheckCmd, effectiveCwd);
     const parsed = profile.parseTypecheck(typecheckResult.stdout, typecheckResult.stderr, typecheckResult.exitCode);
     metrics.typeErrors = parsed.errors;
     // If command failed but found 0 errors, the tool wasn't available (e.g. no tsconfig) — exclude from score
@@ -334,7 +421,7 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
       console.log(`[quality-runner] Typecheck: unavailable (command failed with no errors found) — excluding from score`);
     } else {
       metrics.typecheckScore = parsed.passed ? 100 : 0;
-      console.log(`[quality-runner] Typecheck (${profile.displayName}): ${metrics.typecheckScore}/100 (${metrics.typeErrors} errors)`);
+      console.log(`[quality-runner] Typecheck (${boardTypecheckCmd ? "board gate" : profile.displayName}): ${metrics.typecheckScore}/100 (${metrics.typeErrors} errors)`);
     }
   } else {
     typecheckAvailable = false;
@@ -344,13 +431,14 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
 
   // Run Lint
   console.log("[quality-runner] Running lint...");
-  if (profile.lint) {
-    const lintResult = runCommand(profile.lint, effectiveCwd);
+  const lintCmd = boardLintCmd || profile.lint;
+  if (lintCmd) {
+    const lintResult = runCommand(lintCmd, effectiveCwd);
     const parsedLint = profile.parseLint(lintResult.stdout, lintResult.stderr);
     metrics.lintErrors = parsedLint.errors;
     metrics.lintWarnings = parsedLint.warnings;
     metrics.lintScore = Math.max(0, 100 - metrics.lintErrors);
-    console.log(`[quality-runner] Lint (${profile.displayName}): ${metrics.lintScore}/100 (${metrics.lintErrors} errors, ${metrics.lintWarnings} warnings)`);
+    console.log(`[quality-runner] Lint (${boardLintCmd ? "board gate" : profile.displayName}): ${metrics.lintScore}/100 (${metrics.lintErrors} errors, ${metrics.lintWarnings} warnings)`);
   } else {
     metrics.lintScore = 100;
     console.log(`[quality-runner] Lint: skipped (not available for ${profile.displayName})`);
@@ -360,7 +448,9 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
   console.log("[quality-runner] Running tests...");
   let testsAvailable = true;
   {
-    const testResult = runCommand(profile.test, effectiveCwd, 300000);
+    // Use board test command (includes DATABASE_URL, docker compose, etc.) or fall back to generic
+    const testCmd = boardTestCmd || profile.test;
+    const testResult = runCommand(testCmd, effectiveCwd, 300000);
     const parsedTests = profile.parseTests(testResult.stdout, testResult.stderr);
     metrics.testsPassed = parsedTests.passed;
     metrics.testsFailed = parsedTests.failed;
@@ -374,7 +464,7 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
       console.log(`[quality-runner] Tests: unavailable (runner failed with no test results) — excluding from score`);
     } else {
       metrics.testScore = totalTests > 0 ? Math.round((metrics.testsPassed / totalTests) * 100) : (testResult.exitCode === 0 ? 100 : 0);
-      console.log(`[quality-runner] Tests (${profile.displayName}): ${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped)`);
+      console.log(`[quality-runner] Tests (${boardTestCmd ? "board gate" : profile.displayName}): ${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped)`);
     }
 
     // Extract coverage if available (Jest/Vitest format — TS only)
@@ -415,41 +505,70 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
   metrics.securityScore = Math.max(0, 100 - securityDeduction);
   console.log(`[quality-runner] Security (${profile.displayName}): ${metrics.securityScore}/100 (${metrics.securityHigh}H/${metrics.securityMedium}M/${metrics.securityLow}L)`);
 
-  // Run E2E tests if available (best-effort — Playwright may not be installed)
-  console.log("[quality-runner] Checking for E2E test script...");
+  // Run E2E tests if available
+  console.log("[quality-runner] Checking for E2E tests...");
   try {
-    const pkgJsonPath = path.join(repoPath, "package.json");
-    if (fs.existsSync(pkgJsonPath)) {
-      const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
-      if (pkgJson.scripts?.["test:e2e"]) {
-        metrics.e2eAvailable = true;
-        console.log("[quality-runner] E2E test script found, attempting to run...");
-        // Install Playwright browsers if needed, then run E2E tests (10 min timeout)
-        const e2eResult = runCommand(
-          "npx playwright install --with-deps chromium 2>&1 && npm run test:e2e 2>&1",
-          repoPath,
-          600000
-        );
+    if (boardTestE2eCmd) {
+      // Board gate E2E command available — use it directly (includes env vars, service setup, etc.)
+      metrics.e2eAvailable = true;
+      console.log(`[quality-runner] Running E2E tests (board gate): ${boardTestE2eCmd}`);
+      const e2eResult = runCommand(boardTestE2eCmd, repoPath, 600000);
 
-        // Parse Playwright output for pass/fail counts
-        // Playwright formats: "X passed", "X failed", "X skipped"
+      // Parse pytest-style output (e.g. "X passed, Y failed") and Playwright-style ("X passed")
+      const parsedE2e = profile.parseTests(e2eResult.stdout, e2eResult.stderr);
+      if (parsedE2e.passed > 0 || parsedE2e.failed > 0) {
+        metrics.e2ePassed = parsedE2e.passed;
+        metrics.e2eFailed = parsedE2e.failed;
+        metrics.e2eSkipped = parsedE2e.skipped;
+      } else {
+        // Fallback: try Playwright-style output parsing
         const e2ePassMatch = e2eResult.stdout.match(/(\d+)\s+passed/i);
         const e2eFailMatch = e2eResult.stdout.match(/(\d+)\s+failed/i);
         const e2eSkipMatch = e2eResult.stdout.match(/(\d+)\s+skipped/i);
         metrics.e2ePassed = e2ePassMatch ? parseInt(e2ePassMatch[1]) : 0;
         metrics.e2eFailed = e2eFailMatch ? parseInt(e2eFailMatch[1]) : 0;
         metrics.e2eSkipped = e2eSkipMatch ? parseInt(e2eSkipMatch[1]) : 0;
+      }
 
-        const totalE2e = metrics.e2ePassed + metrics.e2eFailed + metrics.e2eSkipped;
-        metrics.e2eScore = totalE2e > 0 ? Math.round((metrics.e2ePassed / totalE2e) * 100) : 100;
-        console.log(`[quality-runner] E2E: ${metrics.e2eScore}/100 (${metrics.e2ePassed} passed, ${metrics.e2eFailed} failed, ${metrics.e2eSkipped} skipped)`);
+      const totalE2e = metrics.e2ePassed + metrics.e2eFailed + metrics.e2eSkipped;
+      metrics.e2eScore = totalE2e > 0 ? Math.round((metrics.e2ePassed / totalE2e) * 100) : (e2eResult.exitCode === 0 ? 100 : 0);
+      console.log(`[quality-runner] E2E (board gate): ${metrics.e2eScore}/100 (${metrics.e2ePassed} passed, ${metrics.e2eFailed} failed, ${metrics.e2eSkipped} skipped)`);
 
-        if (metrics.e2eFailed > 0) {
-          console.log(`[quality-runner] ⚠️ E2E TESTS FAILING — ${metrics.e2eFailed} failures must be fixed before PR creation`);
+      if (metrics.e2eFailed > 0) {
+        console.log(`[quality-runner] E2E TESTS FAILING — ${metrics.e2eFailed} failures must be fixed before PR creation`);
+      }
+    } else {
+      // Fallback: check for test:e2e script in package.json (Playwright-style)
+      const pkgJsonPath = path.join(repoPath, "package.json");
+      if (fs.existsSync(pkgJsonPath)) {
+        const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
+        if (pkgJson.scripts?.["test:e2e"]) {
+          metrics.e2eAvailable = true;
+          console.log("[quality-runner] E2E test script found, attempting to run...");
+          const e2eResult = runCommand(
+            "npx playwright install --with-deps chromium 2>&1 && npm run test:e2e 2>&1",
+            repoPath,
+            600000
+          );
+
+          const e2ePassMatch = e2eResult.stdout.match(/(\d+)\s+passed/i);
+          const e2eFailMatch = e2eResult.stdout.match(/(\d+)\s+failed/i);
+          const e2eSkipMatch = e2eResult.stdout.match(/(\d+)\s+skipped/i);
+          metrics.e2ePassed = e2ePassMatch ? parseInt(e2ePassMatch[1]) : 0;
+          metrics.e2eFailed = e2eFailMatch ? parseInt(e2eFailMatch[1]) : 0;
+          metrics.e2eSkipped = e2eSkipMatch ? parseInt(e2eSkipMatch[1]) : 0;
+
+          const totalE2e = metrics.e2ePassed + metrics.e2eFailed + metrics.e2eSkipped;
+          metrics.e2eScore = totalE2e > 0 ? Math.round((metrics.e2ePassed / totalE2e) * 100) : 100;
+          console.log(`[quality-runner] E2E: ${metrics.e2eScore}/100 (${metrics.e2ePassed} passed, ${metrics.e2eFailed} failed, ${metrics.e2eSkipped} skipped)`);
+
+          if (metrics.e2eFailed > 0) {
+            console.log(`[quality-runner] E2E TESTS FAILING — ${metrics.e2eFailed} failures must be fixed before PR creation`);
+          }
+        } else {
+          metrics.e2eAvailable = false;
+          console.log("[quality-runner] No test:e2e script found — skipping E2E tests");
         }
-      } else {
-        metrics.e2eAvailable = false;
-        console.log("[quality-runner] No test:e2e script found — skipping E2E tests");
       }
     }
   } catch (e2eError) {
@@ -525,6 +644,17 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
     console.log(`  E2E Tests:  ${metrics.e2eScore}/100 (${metrics.e2ePassed} passed, ${metrics.e2eFailed} failed, ${metrics.e2eSkipped} skipped)`);
   }
   console.log("========================================\n");
+
+  // Tear down services if we started them (docker compose down)
+  if (servicesStarted) {
+    console.log("[quality-runner] Stopping services (docker compose down)...");
+    try {
+      runCommand("docker compose down --remove-orphans", repoPath, 60000);
+      console.log("[quality-runner] Services stopped");
+    } catch {
+      console.log("[quality-runner] Service teardown failed (non-fatal)");
+    }
+  }
 
   return metrics;
 }

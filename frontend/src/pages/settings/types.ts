@@ -101,6 +101,7 @@ export interface Settings {
   maxSecurityHighVulns: number | null;
   blockOnTypeErrors: boolean;
   blockOnTestFailures: boolean;
+  blockOnLintErrors: boolean;
   // External Quality Tools
   sonarqubeUrl: string | null;
   sonarqubeToken: string | null;

@@ -12,7 +12,7 @@ import { execSync, spawn } from "child_process";
 import { existsSync, readdirSync, statSync } from "fs";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { runGateCommand, loadRepoContext } from "./gate-utils.js";
-import type { EpicConfig, StreamMessage } from "./types.js";
+import type { ContextMessage, EpicConfig, StreamMessage } from "./types.js";
 import {
   createAIClient,
   type AIClient,
@@ -190,7 +190,8 @@ export class InlineIntegrationFixer {
   async fix(
     prNumber: number,
     qualityGateCommands: NonNullable<EpicConfig["qualityGateCommands"]>,
-    maxRetries: number
+    maxRetries: number,
+    completions?: ContextMessage[]
   ): Promise<IntegrationFixResult> {
     this.allOutput = "";
 
@@ -218,6 +219,17 @@ export class InlineIntegrationFixer {
       const failureHistory: string[] = [lastOutput];
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const ownershipContext = completions?.length
+          ? this.buildOwnershipContext(lastOutput, completions)
+          : "";
+
+        if (ownershipContext) {
+          await this.postLog(
+            `Identified story ownership for failing files — enriching fix agent with context`,
+            "system"
+          );
+        }
+
         await this.postLog(
           `Integration gate failed: ${lastFailedCommand} — spawning fix agent (attempt ${attempt}/${maxRetries})`,
           "error"
@@ -227,7 +239,8 @@ export class InlineIntegrationFixer {
           prNumber,
           qualityGateCommands,
           failureHistory.join("\n\n---\n\n"),
-          lastFailedCommand
+          lastFailedCommand,
+          ownershipContext
         );
 
         if (!fixResult.success) {
@@ -290,21 +303,31 @@ export class InlineIntegrationFixer {
     gates: NonNullable<EpicConfig["qualityGateCommands"]>
   ): Promise<{ passed: boolean; output: string; failedCommand: string }> {
     for (const gate of gates) {
-      // Skip gate if the trigger directory doesn't exist in the repo.
+      // Skip gate if none of the trigger directories exist in the repo.
       // Prevents failures like `cd web && npm run lint` when the `web/` directory
       // hasn't been created yet by any story in this run.
-      // Extract directory prefix from trigger glob: "src/**/*.ts" → "src",
+      // Triggers can be comma-separated: "src/**,tests/**" → check "src" OR "tests".
+      // Extract directory prefix from each glob: "src/**/*.ts" → "src",
       // "**/*.{ts,tsx}" → "" (root), "web/*.js" → "web"
-      const triggerPrefix = gate.trigger
-        .replace(/\/?\*\*\/.*/g, "")
-        .replace(/\/?\*\..*/g, "")
-        .replace(/\/?\{[^}]*\}.*/g, "")
-        .replace(/\/?\*$/g, "")
-        .replace(/\/+$/, "");
-      if (triggerPrefix && !existsSync(`${this.repoPath}/${triggerPrefix}`)) {
-        await this.postLog(`[Integration Gate] ⏭️ ${gate.name} gate skipped — directory '${triggerPrefix}/' does not exist`, "system");
+      const extractPrefix = (glob: string) =>
+        glob
+          .replace(/\/?\*\*.*$/g, "")   // strip /** and everything after (handles **, **/, **/*.ts)
+          .replace(/\/?\*\..*/g, "")    // strip /*.ext patterns
+          .replace(/\/?\{[^}]*\}.*/g, "") // strip /{...} patterns
+          .replace(/\/?\*$/g, "")       // strip trailing *
+          .replace(/\/+$/, "");         // strip trailing slashes
+      const triggerParts = gate.trigger.split(",").map((t) => t.trim());
+      const triggerPrefixes = triggerParts.map(extractPrefix);
+      // Gate should run if ANY trigger directory exists (or if any trigger resolves to root "")
+      const hasRootTrigger = triggerPrefixes.some((p) => p === "");
+      const hasExistingDir = triggerPrefixes.some((p) => p && existsSync(`${this.repoPath}/${p}`));
+      if (!hasRootTrigger && !hasExistingDir) {
+        const missing = triggerPrefixes.filter(Boolean).join(", ");
+        await this.postLog(`[Integration Gate] ⏭️ ${gate.name} gate skipped — no trigger directories found (${missing})`, "system");
         continue;
       }
+      // Use first non-empty prefix for Go/Node checks below
+      const triggerPrefix = triggerPrefixes.find((p) => p && existsSync(`${this.repoPath}/${p}`)) || "";
 
       // For Go gates, skip if go.mod doesn't exist in the target directory.
       const hasGoCommand = gate.commands.some((c) => /\bgo\s+(vet|test|build)\b/.test(c));
@@ -508,9 +531,10 @@ export class InlineIntegrationFixer {
     prNumber: number,
     gates: NonNullable<EpicConfig["qualityGateCommands"]>,
     failureOutput: string,
-    failedCommand: string
+    failedCommand: string,
+    ownershipContext?: string
   ): Promise<AgentResult> {
-    const prompt = this.buildFixPrompt(prNumber, gates, failureOutput, failedCommand);
+    const prompt = this.buildFixPrompt(prNumber, gates, failureOutput, failedCommand, ownershipContext);
 
     const systemPrompt = INTEGRATION_FIX_SYSTEM_PROMPT.replace(
       "{{ORG_GUIDELINES}}",
@@ -548,7 +572,8 @@ export class InlineIntegrationFixer {
     prNumber: number,
     gates: NonNullable<EpicConfig["qualityGateCommands"]>,
     failureOutput: string,
-    failedCommand: string
+    failedCommand: string,
+    ownershipContext?: string
   ): string {
     const maxLogLength = 8 * 1024;
     const truncatedOutput =
@@ -565,10 +590,12 @@ export class InlineIntegrationFixer {
       ? `\n### Repository Context (from AGENTS.md / CLAUDE.md)\n\n${repoContext}\n`
       : "";
 
+    const ownershipSection = ownershipContext ? `\n${ownershipContext}\n` : "";
+
     return `## Integration Gate Failure on PR #${prNumber}
 
 **Repository:** ${this.config.targetRepo}
-${repoContextSection}
+${repoContextSection}${ownershipSection}
 ### Failed Command
 
 \`${failedCommand}\`
@@ -593,6 +620,80 @@ The failure is likely caused by cross-story integration issues, not a bug in any
 3. Run each quality gate command to verify your fixes
 4. Commit with message "fix: resolve integration issues from story consolidation"
 5. Push to the current branch`;
+  }
+
+  /**
+   * Normalize a file path for comparison. Gate failure output emits paths in
+   * many forms: absolute (/workspace/api/src/foo.ts), relative with dot prefix
+   * (./src/foo.ts), or plain relative (src/foo.ts). Git metadata uses
+   * repo-root-relative paths. This strips common prefixes so suffix matching works.
+   */
+  normalizePath(p: string): string {
+    return p
+      .replace(/^\.\//, "")
+      .replace(/^\/.*?\/(workspace|repo)\//, "");
+  }
+
+  /**
+   * Check if two paths refer to the same file using suffix matching.
+   */
+  pathsMatch(a: string, b: string): boolean {
+    const na = this.normalizePath(a);
+    const nb = this.normalizePath(b);
+    return na === nb || na.endsWith("/" + nb) || nb.endsWith("/" + na);
+  }
+
+  /**
+   * Build ownership context from gate failure output and story completions.
+   * Returns a formatted section describing which stories own which failing files,
+   * or empty string if no ownership could be determined.
+   */
+  buildOwnershipContext(
+    failureOutput: string,
+    completions: ContextMessage[]
+  ): string {
+    const knownExtensions = /\.(py|ts|tsx|js|jsx|go|rs|java|rb|vue|svelte|css|scss|sql|sh|yaml|yml|json|toml)\b/;
+    const filePathPattern = /([\w./-]+\/[\w./-]+\.\w+)/gm;
+    const failedFiles = new Set<string>();
+    let match: RegExpExecArray | null;
+    while ((match = filePathPattern.exec(failureOutput)) !== null) {
+      const candidate = match[1];
+      if (knownExtensions.test(candidate)) {
+        failedFiles.add(candidate);
+      }
+    }
+
+    if (failedFiles.size === 0) return "";
+
+    const storyContext: string[] = [];
+
+    for (const completion of completions) {
+      const meta = completion.metadata || {};
+      const storyIndex = meta.storyIndex as number;
+      const description = (meta.description as string) || completion.content;
+      const filesModified = (meta.filesModified as string[]) || [];
+      const targetFiles = (meta.targetFiles as string[]) || [];
+      const allStoryFiles = [...filesModified, ...targetFiles];
+
+      const overlap = [...failedFiles].filter(f =>
+        allStoryFiles.some(sf => this.pathsMatch(f, sf))
+      );
+
+      if (overlap.length > 0) {
+        storyContext.push(
+          `- **Story ${storyIndex}** (${completion.persona}): "${description}"\n` +
+          `  Files in failure output: ${overlap.join(", ")}\n` +
+          `  All files modified: ${filesModified.join(", ")}`
+        );
+      }
+    }
+
+    if (storyContext.length === 0) return "";
+
+    return `### Story Ownership (which expert wrote what)\n\n` +
+      `The following stories' code appears in the failure output. ` +
+      `Focus your investigation on these files and understand the original intent:\n\n` +
+      storyContext.join("\n\n");
   }
 
   /**

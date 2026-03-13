@@ -1090,6 +1090,7 @@ router.get(
         maxSecurityHighVulns: org.maxSecurityHighVulns,
         blockOnTypeErrors: org.blockOnTypeErrors ?? false,
         blockOnTestFailures: org.blockOnTestFailures ?? false,
+        blockOnLintErrors: org.blockOnLintErrors ?? false,
         autoFixEnabled: org.autoFixEnabled ?? false,
         autoFixMaxIterations: org.autoFixMaxIterations,
       },

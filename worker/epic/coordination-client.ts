@@ -494,10 +494,8 @@ export class CoordinationClient extends EventEmitter {
       filesModified?: string[];
       filesCreated?: string[];
       revisionNumber?: number;
-      // Phased execution metadata
-      phasedExecution?: boolean;
-      totalTokens?: number;
-      phasesCompleted?: number;
+      description?: string;
+      targetFiles?: string[];
       // Validation results
       validation?: {
         passed: boolean;
@@ -520,6 +518,8 @@ export class CoordinationClient extends EventEmitter {
         filesModified: options?.filesModified,
         filesCreated: options?.filesCreated,
         revisionNumber: options?.revisionNumber ?? 0,
+        description: options?.description,
+        targetFiles: options?.targetFiles,
       },
       sessionId
     );

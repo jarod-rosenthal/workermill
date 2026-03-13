@@ -80,6 +80,7 @@ export interface StandaloneConfig {
     maxSecurityHighVulns?: number | null;
     blockOnTypeErrors?: boolean;
     blockOnTestFailures?: boolean;
+    blockOnLintErrors?: boolean;
     autoFixEnabled?: boolean;
     autoFixMaxIterations?: number;
     // Org-level guidelines
@@ -118,6 +119,7 @@ const DEFAULT_CONFIG: StandaloneConfig = {
     qualityGateEnabled: true,
     blockOnTypeErrors: true,
     blockOnTestFailures: false,
+    blockOnLintErrors: true,
     autoFixEnabled: true,
     autoFixMaxIterations: 3,
   },

@@ -2757,6 +2757,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
           normalized.thresholds = {
             blockOnTestFailures: true,
             blockOnTypeErrors: false,
+            blockOnLintErrors: false,
           };
         }
         if (normalized.qualityGateEnabled === undefined) normalized.qualityGateEnabled = true;

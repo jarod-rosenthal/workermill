@@ -101,6 +101,16 @@ export class LiveDiffManager {
   private fireDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingFireUris = new Set<string>();
 
+  /** Output channel for diagnostics (shared across instances) */
+  private static outputChannel: vscode.OutputChannel | null = null;
+
+  private log(msg: string): void {
+    if (!LiveDiffManager.outputChannel) {
+      LiveDiffManager.outputChannel = vscode.window.createOutputChannel("WorkerMill");
+    }
+    LiveDiffManager.outputChannel.appendLine(`[live-diff ${this.taskId.slice(0, 8)}] ${msg}`);
+  }
+
   // ── Static API ──
 
   /**
@@ -221,7 +231,10 @@ export class LiveDiffManager {
 
   private async poll(): Promise<void> {
     if (this.disposed) return;
-    if (!this.client.isConnected()) return;
+    if (!this.client.isConnected()) {
+      this.log("poll skipped — client disconnected");
+      return;
+    }
 
     try {
       const events = await this.client.getCodeEvents(
@@ -230,6 +243,7 @@ export class LiveDiffManager {
       );
 
       if (events.length > 0) {
+        this.log(`poll: ${events.length} new events`);
         this.lastTimestamp = events[events.length - 1].createdAt;
         this.processEvents(events);
       }
@@ -238,11 +252,13 @@ export class LiveDiffManager {
       if (this.currentInterval !== 5_000) {
         this.resetInterval(5_000);
       }
-    } catch {
+    } catch (err) {
       this.consecutiveErrors++;
+      this.log(`poll error #${this.consecutiveErrors}: ${err instanceof Error ? err.message : String(err)}`);
       if (this.consecutiveErrors >= 3) {
         const backed = Math.min(this.currentInterval * 2, 30_000);
         this.resetInterval(backed);
+        this.log(`backing off to ${backed}ms`);
       }
     }
   }

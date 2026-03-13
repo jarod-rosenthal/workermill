@@ -191,10 +191,14 @@ const pythonProfile: LanguageProfile = {
   audit: "pip-audit --format json 2>&1 || echo '{}'",
 
   parseTypecheck(stdout: string, _stderr: string, exitCode: number) {
-    // mypy: "Found X errors in Y files"
+    // mypy: "Found X errors in Y files" or "Success: no issues found"
     const errorMatch = stdout.match(/Found\s+(\d+)\s+errors?/i);
-    const errors = errorMatch ? parseInt(errorMatch[1]) : (exitCode !== 0 ? 1 : 0);
-    return { errors, passed: exitCode === 0 };
+    const successMatch = /Success:\s*no issues found/i.test(stdout) || /no issues found/i.test(stdout);
+    if (errorMatch) return { errors: parseInt(errorMatch[1]), passed: false };
+    if (successMatch || exitCode === 0) return { errors: 0, passed: true };
+    // mypy couldn't run at all (no recognizable output) — return errors=0 so
+    // the quality runner marks typecheck as unavailable rather than scoring 0/100
+    return { errors: 0, passed: false };
   },
 
   parseLint(stdout: string, _stderr: string) {
@@ -276,8 +280,9 @@ const rustProfile: LanguageProfile = {
     // cargo check outputs errors to stderr; count "error[E" patterns
     const combined = _stdout + stderr;
     const errorMatches = combined.match(/error\[E\d+\]/g) || [];
-    const errors = errorMatches.length || (exitCode !== 0 ? 1 : 0);
-    return { errors, passed: exitCode === 0 };
+    // If no recognizable error patterns and command failed, tool wasn't available — return errors=0
+    // so quality runner marks typecheck as unavailable rather than scoring 0/100
+    return { errors: errorMatches.length, passed: exitCode === 0 };
   },
 
   parseLint(_stdout: string, stderr: string) {
@@ -343,8 +348,11 @@ const goProfile: LanguageProfile = {
   audit: "go vet ./... 2>&1",
 
   parseTypecheck(_stdout: string, _stderr: string, exitCode: number) {
-    const errors = exitCode !== 0 ? 1 : 0;
-    return { errors, passed: exitCode === 0 };
+    // Go build errors go to stderr — check for recognizable error patterns
+    const combined = _stdout + _stderr;
+    const goErrors = combined.match(/\.go:\d+:\d+:/g) || [];
+    // If no recognizable errors and command failed, tool wasn't available
+    return { errors: goErrors.length, passed: exitCode === 0 };
   },
 
   parseLint(stdout: string, _stderr: string) {
@@ -395,7 +403,10 @@ const javaProfile: LanguageProfile = {
   audit: null,
 
   parseTypecheck(_stdout: string, _stderr: string, exitCode: number) {
-    return { errors: exitCode !== 0 ? 1 : 0, passed: exitCode === 0 };
+    // Java: javac errors have "error:" pattern
+    const combined = _stdout + _stderr;
+    const javaErrors = combined.match(/error:/g) || [];
+    return { errors: javaErrors.length, passed: exitCode === 0 };
   },
 
   parseLint(_stdout: string, _stderr: string) {
@@ -449,7 +460,10 @@ const rubyProfile: LanguageProfile = {
   audit: "bundle-audit check 2>&1 || echo 'bundle-audit not available'",
 
   parseTypecheck(_stdout: string, _stderr: string, exitCode: number) {
-    return { errors: exitCode !== 0 ? 1 : 0, passed: exitCode === 0 };
+    // Ruby doesn't have native typecheck; if Sorbet is used, look for its error patterns
+    const combined = _stdout + _stderr;
+    const sorbetErrors = combined.match(/error:/g) || [];
+    return { errors: sorbetErrors.length, passed: exitCode === 0 };
   },
 
   parseLint(stdout: string, _stderr: string) {

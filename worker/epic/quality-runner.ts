@@ -491,13 +491,18 @@ export async function runQualityVerification(
   const typecheckCmd = boardTypecheckCmd || profile.typecheck;
   if (typecheckCmd) {
     const typecheckResult = runCommand(typecheckCmd, effectiveCwd);
+    if (typecheckResult.exitCode !== 0) {
+      const out = typecheckResult.stdout.substring(0, 500);
+      const err = typecheckResult.stderr.substring(0, 500);
+      console.log(`[quality-runner] Typecheck command failed (exit ${typecheckResult.exitCode}):\n  STDOUT: ${out || "(empty)"}\n  STDERR: ${err || "(empty)"}`);
+    }
     const parsed = profile.parseTypecheck(typecheckResult.stdout, typecheckResult.stderr, typecheckResult.exitCode);
     metrics.typeErrors = parsed.errors;
-    // If command failed but found 0 errors, the tool wasn't available (e.g. no tsconfig) — exclude from score
+    // If command failed but found 0 errors, the tool wasn't available (e.g. no tsconfig, mypy not installed) — exclude from score
     if (!parsed.passed && parsed.errors === 0) {
       typecheckAvailable = false;
       metrics.typecheckScore = 0;
-      console.log(`[quality-runner] Typecheck: unavailable (command failed with no errors found) — excluding from score`);
+      console.log(`[quality-runner] Typecheck: unavailable (command failed with no recognizable output) — excluding from score`);
     } else {
       metrics.typecheckScore = parsed.passed ? 100 : 0;
       console.log(`[quality-runner] Typecheck (${boardTypecheckCmd ? "board gate" : profile.displayName}): ${metrics.typecheckScore}/100 (${metrics.typeErrors} errors)`);
@@ -513,6 +518,9 @@ export async function runQualityVerification(
   const lintCmd = boardLintCmd || profile.lint;
   if (lintCmd) {
     const lintResult = runCommand(lintCmd, effectiveCwd);
+    if (lintResult.exitCode !== 0) {
+      console.log(`[quality-runner] Lint command failed (exit ${lintResult.exitCode}):\n  STDOUT: ${lintResult.stdout.substring(0, 500) || "(empty)"}\n  STDERR: ${lintResult.stderr.substring(0, 500) || "(empty)"}`);
+    }
     const parsedLint = profile.parseLint(lintResult.stdout, lintResult.stderr);
     metrics.lintErrors = parsedLint.errors;
     metrics.lintWarnings = parsedLint.warnings;
@@ -530,6 +538,9 @@ export async function runQualityVerification(
     // Use board test command (includes DATABASE_URL, docker compose, etc.) or fall back to generic
     const testCmd = boardTestCmd || profile.test;
     const testResult = runCommand(testCmd, effectiveCwd, 300000);
+    if (testResult.exitCode !== 0) {
+      console.log(`[quality-runner] Test command failed (exit ${testResult.exitCode}):\n  STDOUT: ${testResult.stdout.substring(0, 500) || "(empty)"}\n  STDERR: ${testResult.stderr.substring(0, 500) || "(empty)"}`);
+    }
     const parsedTests = profile.parseTests(testResult.stdout, testResult.stderr);
     metrics.testsPassed = parsedTests.passed;
     metrics.testsFailed = parsedTests.failed;

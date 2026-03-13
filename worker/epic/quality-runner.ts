@@ -291,6 +291,53 @@ function ensureDependenciesInstalled(cwd: string, languageId: string): void {
     return;
   }
 
+  if (languageId === "rust") {
+    if (fs.existsSync(path.join(cwd, "Cargo.toml"))) {
+      console.log("[quality-runner] Fetching Rust dependencies...");
+      try {
+        execSync("cargo fetch", { cwd, stdio: "pipe", timeout: 120_000 });
+        console.log("[quality-runner] Rust dependencies fetched");
+      } catch {
+        console.log("[quality-runner] cargo fetch failed (non-fatal)");
+      }
+    }
+    return;
+  }
+
+  if (languageId === "ruby") {
+    if (fs.existsSync(path.join(cwd, "Gemfile"))) {
+      console.log("[quality-runner] Installing Ruby dependencies...");
+      try {
+        execSync("bundle install", { cwd, stdio: "pipe", timeout: 180_000 });
+        console.log("[quality-runner] Ruby dependencies installed");
+      } catch {
+        console.log("[quality-runner] bundle install failed (non-fatal)");
+      }
+    }
+    return;
+  }
+
+  if (languageId === "java") {
+    if (fs.existsSync(path.join(cwd, "pom.xml"))) {
+      console.log("[quality-runner] Resolving Java dependencies...");
+      try {
+        execSync("mvn dependency:resolve -q", { cwd, stdio: "pipe", timeout: 180_000 });
+        console.log("[quality-runner] Java dependencies resolved");
+      } catch {
+        console.log("[quality-runner] mvn dependency:resolve failed (non-fatal)");
+      }
+    } else if (fs.existsSync(path.join(cwd, "build.gradle")) || fs.existsSync(path.join(cwd, "build.gradle.kts"))) {
+      console.log("[quality-runner] Resolving Java dependencies...");
+      try {
+        execSync("gradle dependencies --no-daemon -q", { cwd, stdio: "pipe", timeout: 180_000 });
+        console.log("[quality-runner] Java dependencies resolved");
+      } catch {
+        console.log("[quality-runner] gradle dependencies failed (non-fatal)");
+      }
+    }
+    return;
+  }
+
   // JS/TS: detect package manager from lockfile and install
   let installCmd: string | null = null;
   if (fs.existsSync(path.join(cwd, "pnpm-lock.yaml"))) {

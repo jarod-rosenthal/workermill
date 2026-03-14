@@ -49,6 +49,11 @@ export interface PlannedStory {
   storyPoints: number;           // 1-3 scale (max 3 for Haiku accuracy)
   targetFiles: string[];         // Files to modify (max 5 per story)
   referenceFiles?: string[];     // Files to read for context/patterns
+  /** Interface contracts with other stories (shared API shapes, data models) */
+  interfaceContracts?: Array<{
+    targetStoryIndex: number;
+    description: string;
+  }>;
   // Per-story cost estimate (calculated post-parse)
   estimatedCost?: number;        // USD estimate for this story
 }

@@ -405,6 +405,7 @@ export class InlineIntegrationFixer {
             } else {
               await this.postLog(`[Integration Gate] ❌ ${cmd}\n${output}`, "error");
               // Capture service logs if docker compose is running
+              let enrichedOutput = output;
               if (isDockerDaemonReachable()) {
                 try {
                   const serviceLogs = execSync("docker compose logs --tail=100 2>&1", {
@@ -413,11 +414,11 @@ export class InlineIntegrationFixer {
                     timeout: 10_000,
                   });
                   if (serviceLogs.trim()) {
-                    output += "\n\n### Service Logs (docker compose logs)\n\n" + serviceLogs;
+                    enrichedOutput += "\n\n### Service Logs (docker compose logs)\n\n" + serviceLogs;
                   }
                 } catch { /* ignore — best effort */ }
               }
-              return { passed: false, output, failedCommand: cmd };
+              return { passed: false, output: enrichedOutput, failedCommand: cmd };
             }
           } else {
             await this.postLog(`[Integration Gate] ✅ ${cmd}`, "system");
@@ -448,6 +449,7 @@ export class InlineIntegrationFixer {
 
           await this.postLog(`[Integration Gate] ❌ ${cmd}\n${output}`, "error");
           // Capture service logs if docker compose is running
+          let enrichedOutput = output;
           if (isDockerDaemonReachable()) {
             try {
               const serviceLogs = execSync("docker compose logs --tail=100 2>&1", {
@@ -456,11 +458,11 @@ export class InlineIntegrationFixer {
                 timeout: 10_000,
               });
               if (serviceLogs.trim()) {
-                output += "\n\n### Service Logs (docker compose logs)\n\n" + serviceLogs;
+                enrichedOutput += "\n\n### Service Logs (docker compose logs)\n\n" + serviceLogs;
               }
             } catch { /* ignore — best effort */ }
           }
-          return { passed: false, output, failedCommand: cmd };
+          return { passed: false, output: enrichedOutput, failedCommand: cmd };
         }
       }
     }

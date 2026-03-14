@@ -128,6 +128,7 @@ export class EpicCoordinator {
   // Incremental integration tracking
   private integrationBranch: string | undefined;
   private integratedStoryIndices: Set<number> = new Set();
+  private gateBypassed: Set<number> = new Set();
   private integrationQueue: number[] = []; // stories completed but not yet integrated
   private integrationInProgress: boolean = false;
   // Epic timing (used by build report)
@@ -375,7 +376,8 @@ export class EpicCoordinator {
     // Queue revision for this story
     const revisionCount = this.storyRevisionCounts.get(storyIndex) || 0;
     if (revisionCount >= this.maxPerStoryRevisions) {
-      this.postDashboardLog(`Story ${storyIndex} exceeded max revisions — auto-approving integration`);
+      this.postDashboardLog(`Story ${storyIndex} exceeded max revisions — marking as gate_bypassed (will be flagged for integration fixer)`);
+      this.gateBypassed.add(storyIndex);
       this.integratedStoryIndices.add(storyIndex);
       return true;
     }
@@ -3213,6 +3215,13 @@ export class EpicCoordinator {
         } else {
           console.error("[Epic] Failed to create consolidated PR");
           this.postDashboardLog("Failed to create consolidated PR");
+        }
+
+        // Warn about gate-bypassed stories that need attention
+        if (this.gateBypassed.size > 0) {
+          const bypassedList = [...this.gateBypassed].sort((a, b) => a - b).join(", ");
+          this.postDashboardLog(`⚠️ Stories with gate bypass (exceeded max revisions): ${bypassedList} — quality issues may remain`);
+          console.warn(`[Epic] Gate-bypassed stories: ${bypassedList}`);
         }
       }
 

@@ -918,7 +918,7 @@ ${input.labels?.length ? `**Labels:** ${input.labels.join(", ")}` : ""}
 
 **EXPLORE FIRST:** Before creating your plan, use your tools to explore the repository. Run Glob to see the directory structure, read key files (package.json, README, config files), and search for code related to the task. Ground your targetFiles in actual paths you discovered — do NOT guess file paths.
 
-Then analyze this task and create an execution plan with stories. For each story, provide: id, title, a 2-3 line scope description, persona, priority, estimatedEffort, dependencies, and targetFiles.
+Then analyze this task and create an execution plan with stories. For each story, provide: id, title, a 2-3 line scope description, persona, priority, estimatedEffort, dependencies, targetFiles, and acceptanceCriteria.
 
 ## Available Personas
 
@@ -955,6 +955,8 @@ Do NOT invent personas (e.g., "fullstack_developer" does not exist). For full-st
 - **targetFiles: list ALL files each story will create or modify.** Most feature stories touch 3-10 files. Foundation/scaffolding stories may need 15-25+. There is no hard cap — size each story to its actual scope. Workers discover additional files from context.
 - **No overlapping targetFiles.** Two stories MUST NOT list the same file in their targetFiles — they execute in parallel worktrees, so concurrent edits to the same file cause merge conflicts. If multiple stories need the same file, put ALL changes to that file in ONE foundational story and make the others depend on it.
 - **Story descriptions are scope labels, not specs.** Each expert reads the ORIGINAL TICKET as their spec. Descriptions say which area of the codebase the expert owns (e.g., "Database layer — migrations and entity definitions. Adds the new user_preferences table and TypeORM entity."). Do NOT rewrite acceptance criteria.
+- **Scaffolding must include ALL build-referenced files.** If pyproject.toml references README.md, or package.json references tsconfig.json, create them in the same story. Build tools fail when referenced files are missing.
+- **acceptanceCriteria: 2+ specific, testable criteria per story.** Include exact endpoints, field names, status codes where applicable. BAD: "Login endpoint works". GOOD: "POST /api/auth/login returns 200 with { token: string }". These are verified during story validation.
 ${input.maxStories ? `- **Target ${Math.max(1, Math.round(input.maxStories * 0.7))}-${input.maxStories} stories.** Each story should be meaningful work, not trivial tasks. Prefer fewer, well-scoped stories over many small ones.` : ""}
 - Tasks requiring deployment or provisioning should have separate stories with devops_engineer persona.
 
@@ -976,17 +978,19 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
       "priority": 1,
       "estimatedEffort": "small",
       "dependencies": [],
-      "targetFiles": ["src/types/feature.ts", "src/config.ts"]
+      "targetFiles": ["src/types/feature.ts", "src/config.ts"],
+      "acceptanceCriteria": ["TypeScript interfaces compile without errors", "Config loads from environment variables"]
     },
     {
       "id": "story-1",
-      "title": "API endpoints",
-      "description": "REST API routes and request handlers.\\nAdds CRUD endpoints for the new feature resource.",
+      "title": "API endpoints and tests",
+      "description": "REST API routes, request handlers, and tests.\\nAdds CRUD endpoints for the new feature resource with passing test suite.",
       "persona": "backend_developer",
       "priority": 2,
       "estimatedEffort": "medium",
       "dependencies": ["story-0"],
-      "targetFiles": ["src/routes/feature.ts", "src/routes/feature.test.ts"]
+      "targetFiles": ["src/routes/feature.ts", "src/routes/feature.test.ts"],
+      "acceptanceCriteria": ["POST /api/feature returns 201 with created resource", "GET /api/feature/:id returns 200 with resource", "All tests pass"]
     }
   ],
   "risks": ["Risk 1"],

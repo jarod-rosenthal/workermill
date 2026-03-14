@@ -243,6 +243,7 @@ In addition to the card-level structure above, each card MUST include a \`storie
 - **targetFilePatterns are glob patterns**, not exact paths. You don't have repo access, so infer paths from the PRD context. Examples: \`api/handlers/*.go\`, \`web/src/routes/+page.svelte\`, \`api/models/flag.go\`, \`cmd/server/main.go\`. Use the most specific pattern you can infer from the PRD's technology stack and directory structure references.
 - **Story descriptions are scope labels**, not specs. Each expert reads the FULL PRD. Descriptions say which area the expert owns (2-3 lines).
 - Target 2-6 stories per card. Each story should be meaningful work, not trivial tasks.
+- **Scaffolding must include ALL build-referenced files.** If pyproject.toml references README.md, or package.json references tsconfig.json, those files MUST be created in the same scaffolding story. Build tools fail when referenced files are missing — don't defer them to later stories.
 
 ### Tests Belong With Implementation (CRITICAL)
 

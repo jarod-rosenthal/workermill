@@ -183,3 +183,10 @@ describe("buildOwnershipContext", () => {
     expect(result).toBe("");
   });
 });
+
+describe("runGatesOnBranch", () => {
+  it("exists as a method", () => {
+    const fixer = createFixer();
+    expect(typeof fixer.runGatesOnBranch).toBe("function");
+  });
+});

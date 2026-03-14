@@ -123,6 +123,13 @@ export class EpicCoordinator {
   private inFlightQuickAnswers: Set<string> = new Set();
   // Track story branch names (set by executor, used by PR creation and shutdown)
   private storyBranchNames: Map<number, string> = new Map();
+  // Incremental integration tracking
+  private integrationBranch: string | undefined;
+  private integratedStoryIndices: Set<number> = new Set();
+  private integrationQueue: number[] = []; // stories completed but not yet integrated
+  private integrationInProgress: boolean = false;
+  // Epic timing (used by build report)
+  private epicStartTime: number = Date.now();
   // Track whether any story has successfully committed and pushed code
   private hasAnyCommittedCode: boolean = false;
   // Track dependency merge conflicts per story (skip per-story review when present)

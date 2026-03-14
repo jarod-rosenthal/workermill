@@ -121,6 +121,33 @@ Multiple stories CAN depend on the same story (fan-out pattern):
 
 This creates parallel execution while maintaining natural flow.
 
+## Interface Contracts (CRITICAL for cross-story boundaries)
+
+**When one story produces something another story consumes (API endpoint, data model, shared type), you MUST specify the exact interface contract in BOTH stories.**
+
+This prevents the #1 cause of integration failures: mismatched interfaces between stories.
+
+### How to Write Contracts
+
+For each dependency between stories, ask: "What exact data shape crosses this boundary?"
+
+**API contracts — specify request and response shapes:**
+- Producer story scope: "Your POST /api/auth/login MUST return exactly: { token: string, expiresIn: number, refreshToken: string }"
+- Consumer story scope: "POST /api/auth/login returns: { token: string, expiresIn: number, refreshToken: string } — build your client against this exact shape"
+
+**Database model contracts — specify exact field names and types:**
+- Model story scope: "User model MUST have: id (UUID PK), email (string, unique), passwordHash (string), createdAt (Date)"
+- Consumer story scope: "User model has: id (UUID PK), email (string, unique), passwordHash (string), createdAt (Date)"
+
+**Shared type contracts — specify exact TypeScript/Python types:**
+- Producer story scope: "Export type UserResponse = { id: string, email: string, role: 'admin' | 'user' }"
+- Consumer story scope: "Import UserResponse from story 0 — shape: { id: string, email: string, role: 'admin' | 'user' }"
+
+### Rules
+- Include the contract text in BOTH stories' scope field
+- Use the interfaceContracts array to declare which stories share each contract
+- If a contract changes during implementation, the expert MUST post a decision to the coordination feed
+
 ## Acceptance Criteria Guidelines (CRITICAL)
 
 Each acceptance criterion MUST be:
@@ -330,7 +357,10 @@ Guidelines:
       "storyPoints": 1-3,
       "targetFiles": ["file1.ts"],
       "referenceFiles": ["ref1.ts"],
-      "estimatedComplexity": "small|medium|large"
+      "estimatedComplexity": "small|medium|large",
+      "interfaceContracts": [
+        { "targetStoryIndex": 2, "description": "POST /api/auth/login returns { token: string }" }
+      ]
     }
   ]
 }

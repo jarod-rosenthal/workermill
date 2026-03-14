@@ -1417,6 +1417,103 @@ git rm --cached --quiet .env 2>/dev/null || true
   }
 
   /**
+   * Create an integration branch for incremental story merging.
+   * The integration branch starts from the main branch and stories
+   * merge into it one at a time as they complete.
+   */
+  async createIntegrationBranch(jiraKey: string): Promise<string> {
+    const branchName = `integration/${jiraKey.toLowerCase()}`;
+
+    // Fetch latest
+    await this.git.fetch(["origin"]);
+
+    // Delete local branch if it exists (stale from previous run)
+    try {
+      await this.git.branch(["-D", branchName]);
+    } catch {
+      // Branch doesn't exist locally, fine
+    }
+
+    // Delete remote branch if it exists (stale from previous run)
+    try {
+      await this.git.push(["origin", "--delete", branchName]);
+    } catch {
+      // Branch doesn't exist on remote, fine
+    }
+
+    // Create from main
+    await this.git.checkoutBranch(branchName, `origin/${this.mainBranch}`);
+    await this.git.push(["origin", branchName, "-u"]);
+
+    // Return to main
+    await this.git.checkout(this.mainBranch);
+
+    this.log(`[GitOps] Created integration branch: ${branchName}`);
+    return branchName;
+  }
+
+  /**
+   * Merge a single story branch into the integration branch.
+   * Returns merge success status and any error details.
+   */
+  async mergeStoryIntoIntegration(
+    integrationBranch: string,
+    storyBranch: string,
+    storyIndex: number
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Fetch latest state
+      await this.git.fetch(["origin"]);
+
+      // Checkout integration branch
+      await this.git.checkout(integrationBranch);
+      await this.git.reset(["--hard", `origin/${integrationBranch}`]);
+
+      // Merge the story branch
+      const remoteBranch = `origin/${storyBranch}`;
+      try {
+        await this.git.merge([remoteBranch, "--no-edit", "--no-ff"]);
+      } catch (mergeError) {
+        const msg = mergeError instanceof Error ? mergeError.message : String(mergeError);
+
+        // Conflicts mean this story's code clashes with previously integrated stories.
+        // Do NOT auto-resolve — abort and route back for revision so the expert can
+        // fix the conflict with full context about what the other stories did.
+        try {
+          await this.git.merge(["--abort"]);
+        } catch {
+          // Reset hard as fallback
+          await this.git.reset(["--hard", `origin/${integrationBranch}`]);
+        }
+
+        const status = await this.git.status();
+        const conflictInfo = status.conflicted.length > 0
+          ? ` (conflicting files: ${status.conflicted.join(", ")})`
+          : "";
+        return { success: false, error: `Merge conflict with integration branch${conflictInfo}: ${msg}` };
+      }
+
+      // Push integration branch
+      await this.git.push(["origin", integrationBranch]);
+
+      this.log(`[GitOps] Merged story ${storyIndex} (${storyBranch}) into ${integrationBranch}`);
+      return { success: true };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.log(`[GitOps] Failed to merge story ${storyIndex} into integration: ${msg}`);
+
+      // Try to recover to a clean state
+      try {
+        await this.git.checkout(this.mainBranch);
+      } catch {
+        // Best effort
+      }
+
+      return { success: false, error: msg };
+    }
+  }
+
+  /**
    * Create a pull request (returns the PR creation command).
    * The actual PR creation is done via gh CLI for proper authentication.
    */

@@ -244,6 +244,29 @@ In addition to the card-level structure above, each card MUST include a \`storie
 - **Story descriptions are scope labels**, not specs. Each expert reads the FULL PRD. Descriptions say which area the expert owns (2-3 lines).
 - Target 2-6 stories per card. Each story should be meaningful work, not trivial tasks.
 
+### Tests Belong With Implementation (CRITICAL)
+
+**Do NOT create separate "test" stories.** Unit tests and integration tests MUST be in the SAME story as the code they test. The worker who writes the API endpoint also writes its tests — this prevents contract mismatches (e.g., API returns 200 but tests expect 201) that are the #1 cause of integration failures.
+
+**Good:**
+- story-1: "Auth endpoints + auth tests" (backend_developer) — targetFilePatterns: ["src/routes/auth.py", "tests/test_auth.py"]
+- story-2: "Inventory API + inventory tests" (backend_developer) — targetFilePatterns: ["src/routes/inventory.py", "tests/test_inventory.py"]
+
+**Bad:**
+- story-1: "Auth endpoints" (backend_developer)
+- story-5: "Auth tests" (qa_engineer) ← WRONG: separate worker writes tests against assumed contract
+
+The ONLY exception is **E2E workflow tests** — these span the entire application and should be a separate story (assigned to qa_engineer) that depends on ALL implementation stories. E2E tests verify cross-cutting flows (e.g., "register → login → create resource → verify"), not individual endpoints.
+
+### Interface Contracts (CRITICAL for cross-story boundaries)
+
+When one story produces something another story consumes (API endpoint, data model, shared type), specify the exact interface contract in BOTH stories' descriptions. This prevents mismatches at merge time.
+
+For each cross-story dependency, ask: "What exact data shape crosses this boundary?"
+- API contracts: "POST /api/auth/login returns { token: string, expiresIn: number }" — include in BOTH producer and consumer story descriptions
+- Model contracts: "User model has: id (UUID PK), email (unique), passwordHash (bcrypt)" — include in model story AND any story that queries users
+- Status codes: "201 for resource creation, 200 for retrieval, 204 for deletion" — be explicit, don't leave it ambiguous
+
 ### Extended Output Format
 
 The output format is the SAME as above, but each card object includes a \`stories\` array:
@@ -264,33 +287,33 @@ The output format is the SAME as above, but each card object includes a \`storie
       "stories": [
         {
           "id": "story-0",
-          "title": "Project scaffolding and CI",
-          "description": "Initialize Go module, Fiber app skeleton, Docker Compose, and CI workflow.\\nSets up the build system and quality gates for all subsequent stories.",
+          "title": "Project scaffolding, CI, and health check test",
+          "description": "Initialize Go module, Fiber app skeleton, Docker Compose, CI workflow, and a passing health check test.\\nSets up the build system and quality gates for all subsequent stories.",
           "persona": "backend_developer",
           "priority": 1,
           "estimatedEffort": "medium",
           "dependencies": [],
-          "targetFilePatterns": ["go.mod", "go.sum", "cmd/server/main.go", "Dockerfile", "docker-compose.yml", ".github/workflows/ci.yml"]
+          "targetFilePatterns": ["go.mod", "go.sum", "cmd/server/main.go", "Dockerfile", "docker-compose.yml", ".github/workflows/ci.yml", "api/*_test.go"]
         },
         {
           "id": "story-1",
-          "title": "Database models and seed data",
-          "description": "MongoDB models, connection setup, and seed data.\\nDefines all collections referenced by the API handlers.",
+          "title": "Database models, seed data, and model tests",
+          "description": "MongoDB models, connection setup, seed data, and unit tests for model validation.\\nDefines all collections referenced by the API handlers. Tests verify model CRUD against a real MongoDB container.",
           "persona": "backend_developer",
           "priority": 2,
           "estimatedEffort": "medium",
           "dependencies": ["story-0"],
-          "targetFilePatterns": ["api/models/*.go", "api/database/*.go", "scripts/seed.go"]
+          "targetFilePatterns": ["api/models/*.go", "api/models/*_test.go", "api/database/*.go", "scripts/seed.go"]
         },
         {
           "id": "story-2",
-          "title": "API handlers and middleware",
-          "description": "REST API route handlers, auth middleware, and request validation.\\nImplements all endpoints defined in the PRD.",
+          "title": "API handlers, middleware, and endpoint tests",
+          "description": "REST API route handlers, auth middleware, request validation, and tests for each endpoint.\\nImplements all endpoints defined in the PRD. Tests verify status codes, response shapes, and error handling.",
           "persona": "backend_developer",
           "priority": 2,
           "estimatedEffort": "large",
           "dependencies": ["story-1"],
-          "targetFilePatterns": ["api/handlers/*.go", "api/middleware/*.go", "api/routes.go"]
+          "targetFilePatterns": ["api/handlers/*.go", "api/handlers/*_test.go", "api/middleware/*.go", "api/middleware/*_test.go", "api/routes.go"]
         }
       ]
     }

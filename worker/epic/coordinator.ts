@@ -16,6 +16,7 @@ import type {
   ContextMessage,
   ResilienceConfig,
   EpicValidationResult,
+  BuildReport,
 } from "./types.js";
 import { getAvailableExperts, matchPersonaToExpert, loadExpertRegistry } from "./experts.js";
 import type { DecisionClient } from "./decision-client.js";
@@ -3583,6 +3584,41 @@ export class EpicCoordinator {
       await this.ticketOps.transitionTo("Done");
 
       console.log(`[Epic] Mission complete with status: ${taskStatus}`);
+
+      // Emit build report for future learning
+      try {
+        const buildReport: BuildReport = {
+          taskId: this.config.parentTaskId,
+          repo: this.config.targetRepo,
+          storyCount: this.totalStories,
+          completedCount: completions.length,
+          failedCount: this.failedStoryIndices.size,
+          outcome: this.failedStoryIndices.size === 0 ? "success"
+            : completions.length > 0 ? "partial_success" : "failure",
+          totalRevisions: this.revisionCount,
+          integrationFailures: [], // Populated by incremental integration tracking
+          verificationFailures: [], // Populated by spec verification
+          timings: {
+            totalDurationMs: Date.now() - this.epicStartTime,
+            storyDurationsMs: {},
+          },
+        };
+
+        await axios.post(
+          `${this.config.apiBaseUrl}/api/control-center/tasks/${this.config.parentTaskId}/build-report`,
+          buildReport,
+          {
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": this.config.orgApiKey,
+            },
+            timeout: 10000,
+          }
+        );
+        console.log("[Epic] Build report emitted");
+      } catch (reportErr) {
+        console.warn("[Epic] Failed to emit build report (non-fatal):", reportErr instanceof Error ? reportErr.message : reportErr);
+      }
 
       // Capture memories and extract skills from completed task
       await this.captureTaskMemories(storyCompletions, taskStatus === "completed" || taskStatus === "deployed");

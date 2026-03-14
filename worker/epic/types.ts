@@ -399,3 +399,33 @@ export interface StoryPRState {
 export interface EpicConfigWithResilience extends EpicConfig {
   resilience?: ResilienceConfig;
 }
+
+/**
+ * Structured build report emitted after each epic completes.
+ * Captures failure patterns for future decomposition improvement.
+ */
+export interface BuildReport {
+  taskId: string;
+  repo: string;
+  techStack?: string;
+  storyCount: number;
+  completedCount: number;
+  failedCount: number;
+  outcome: "success" | "partial_success" | "failure";
+  totalRevisions: number;
+  integrationFailures: Array<{
+    afterStoryIndex: number;
+    gatesFailed: string[];
+    rootCause: string;
+    fixedBy: "story_revision" | "integration_fixer" | "unfixed";
+  }>;
+  verificationFailures: Array<{
+    storyIndex: number;
+    criterion: string;
+    reason: string;
+  }>;
+  timings: {
+    totalDurationMs: number;
+    storyDurationsMs: Record<number, number>;
+  };
+}

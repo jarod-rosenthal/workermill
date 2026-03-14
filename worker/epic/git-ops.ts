@@ -1514,6 +1514,21 @@ git rm --cached --quiet .env 2>/dev/null || true
   }
 
   /**
+   * Rename a branch (local + remote).
+   */
+  async renameBranch(oldName: string, newName: string): Promise<void> {
+    await this.git.fetch(["origin"]);
+    await this.git.checkout(oldName);
+    await this.git.branch(["-m", oldName, newName]);
+    await this.git.push(["origin", newName]);
+    try {
+      await this.git.push(["origin", "--delete", oldName]);
+    } catch {
+      // Old branch may not exist on remote
+    }
+  }
+
+  /**
    * Create a pull request (returns the PR creation command).
    * The actual PR creation is done via gh CLI for proper authentication.
    */

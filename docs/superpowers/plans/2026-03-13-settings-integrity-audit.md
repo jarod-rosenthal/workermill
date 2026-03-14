@@ -240,12 +240,20 @@ const result = await this.executeAgent(
 
 Also update `executeAgent()` in inline-ci-fixer.ts to pass `maxTurns` through to the unified client (same pattern — add `maxTurns: options.maxTurns` to `clientOptions`).
 
-- [ ] **Step 5: Delete stale agent-sdk.d.ts**
+- [ ] **Step 5: Delete ALL stale .d.ts files in worker/epic/**
 
-The file `worker/epic/agent-sdk.d.ts` is a stale declaration file with an outdated `AgentOptions` interface (missing `maxTurns`, `systemPrompt`, `model`, `workingDir`, `maxTurns` fields). The Docker build may use this instead of the `.ts` source, causing type errors. Delete it and its source map:
+Three stale declaration files exist with outdated interfaces. The Docker build compiles from `.ts` source — these `.d.ts` files can cause type resolution conflicts:
+
+- `worker/epic/agent-sdk.d.ts` — outdated `AgentOptions` (missing `maxTurns`, `systemPrompt`, etc.)
+- `worker/epic/types.d.ts` — outdated `ExpertConfig` (missing fields added since)
+- `worker/epic/inline-reviewer.d.ts` — outdated `InlineReviewer` class
+
+Delete all 6 files (3 `.d.ts` + 3 `.d.ts.map`):
 
 ```bash
 rm worker/epic/agent-sdk.d.ts worker/epic/agent-sdk.d.ts.map
+rm worker/epic/types.d.ts worker/epic/types.d.ts.map
+rm worker/epic/inline-reviewer.d.ts worker/epic/inline-reviewer.d.ts.map
 ```
 
 - [ ] **Step 6: Run worker typecheck**
@@ -260,7 +268,7 @@ Expected: PASS (no errors)
 
 ```bash
 git add worker/epic/coordinator.ts worker/epic/inline-integration-fixer.ts worker/epic/inline-review-fixer.ts worker/epic/inline-ci-fixer.ts
-git rm worker/epic/agent-sdk.d.ts worker/epic/agent-sdk.d.ts.map
+git rm worker/epic/agent-sdk.d.ts worker/epic/agent-sdk.d.ts.map worker/epic/types.d.ts worker/epic/types.d.ts.map worker/epic/inline-reviewer.d.ts worker/epic/inline-reviewer.d.ts.map
 git commit -m "fix(worker): move maxTurns from expertConfig to options level — setting was silently ignored"
 ```
 
@@ -367,6 +375,7 @@ Then replace the raw `parseInt` calls for required values:
 ```typescript
 // In loadEpicConfig:
 maxParallelExperts: requireInt("MAX_PARALLEL_EXPERTS"),
+maxFixRetries: requireInt("MAX_FIX_RETRIES"),  // was conditional — always set by spawners
 maxReviewRevisions: requireInt("MAX_REVIEW_REVISIONS"),
 maxPerStoryRevisions: requireInt("MAX_PER_STORY_REVISIONS"),
 
@@ -375,6 +384,8 @@ blockerMaxAutoRetries: requireInt("BLOCKER_MAX_AUTO_RETRIES"),
 blockerWaitTimeoutMs: requireInt("BLOCKER_WAIT_TIMEOUT_MINUTES") * 60_000,
 ```
 
+This also changes `maxFixRetries` from optional (`process.env.MAX_FIX_RETRIES ? parseInt(...) : undefined`) to required. All spawners always set `MAX_FIX_RETRIES` from the org's DB column (default: 3), so it should never be missing.
+
 - [ ] **Step 2: Add same NaN guard helper to remote-bootstrap.ts**
 
 Add the same `requireInt` helper to `worker/epic/remote-bootstrap.ts` and replace the same `parseInt` calls:
@@ -382,6 +393,7 @@ Add the same `requireInt` helper to `worker/epic/remote-bootstrap.ts` and replac
 ```typescript
 // In loadEpicConfig:
 maxParallelExperts: requireInt("MAX_PARALLEL_EXPERTS"),
+maxFixRetries: requireInt("MAX_FIX_RETRIES"),
 maxReviewRevisions: requireInt("MAX_REVIEW_REVISIONS"),
 maxPerStoryRevisions: requireInt("MAX_PER_STORY_REVISIONS"),
 
@@ -389,7 +401,7 @@ maxPerStoryRevisions: requireInt("MAX_PER_STORY_REVISIONS"),
 blockerMaxAutoRetries: requireInt("BLOCKER_MAX_AUTO_RETRIES"),
 ```
 
-Note: `remote-bootstrap.ts` may not have `BLOCKER_WAIT_TIMEOUT_MINUTES` — check and add if present.
+Note: `remote-bootstrap.ts` does NOT have `BLOCKER_WAIT_TIMEOUT_MINUTES` in its `loadResilienceConfig()` — only `index.ts` has it. Do not add it to remote-bootstrap.
 
 - [ ] **Step 3: Run worker typecheck**
 
@@ -459,40 +471,42 @@ mergeAgentEnabled: boolean;
 
 These will be required once we wire them up in Tasks 7-14.
 
-- [ ] **Step 3: Fix maxFixRetries usage in coordinator.ts**
+- [ ] **Step 3: Make maxFixRetries required in EpicConfig**
 
-`maxFixRetries` is optional in `EpicConfig` (line 223: `maxFixRetries?: number`). It stays optional because it genuinely can be undefined (env var is conditionally set). Use nullish coalescing at call sites:
+Since Task 3 changed `maxFixRetries` to use `requireInt()` (always set by all spawners, DB default: 3), make it required in the type:
 
-Line 3146:
+In `worker/epic/types.ts`, line 223:
 ```typescript
 // BEFORE:
-this.config.maxFixRetries,
+maxFixRetries?: number;
 
 // AFTER:
-this.config.maxFixRetries ?? 0,
+maxFixRetries: number;
 ```
 
-Line 4082:
+This automatically resolves the TS errors at coordinator.ts lines 3146, 4082, and 4102 — no `?? 0` fallbacks needed.
+
+- [ ] **Step 4: Fix mergeAgentEnabled parsing in worker config loaders**
+
+`mergeAgentEnabled` defaults to `false` (opt-in), but the worker parses it with `!== "false"` which means a missing env var would enable it. Fix both config loaders:
+
+`worker/epic/index.ts:115`:
 ```typescript
 // BEFORE:
-if ((this.config.maxFixRetries) <= 0) {
-
+mergeAgentEnabled: process.env.MERGE_AGENT_ENABLED !== "false",
 // AFTER:
-if ((this.config.maxFixRetries ?? 0) <= 0) {
+mergeAgentEnabled: process.env.MERGE_AGENT_ENABLED === "true",
 ```
 
-Line 4101-4102:
+`worker/epic/remote-bootstrap.ts:420`:
 ```typescript
 // BEFORE:
-const maxRetries = this.config.maxFixRetries;
-while (this.ciFixRetryCount < maxRetries) {
-
+mergeAgentEnabled: process.env.MERGE_AGENT_ENABLED !== "false",
 // AFTER:
-const maxRetries = this.config.maxFixRetries ?? 0;
-while (this.ciFixRetryCount < maxRetries) {
+mergeAgentEnabled: process.env.MERGE_AGENT_ENABLED === "true",
 ```
 
-- [ ] **Step 4: Strip `?? true` / `?? false` from coordinator usage of resilience flags**
+- [ ] **Step 5: Strip `?? true` / `?? false` from coordinator usage of resilience flags**
 
 After making `fileOverlapGatingEnabled`, `incrementalRebaseEnabled`, `mergeAgentEnabled` required in types, remove the nullish coalescing at usage sites:
 
@@ -524,7 +538,7 @@ console.log("  - Incremental rebase: " + resilience.incrementalRebaseEnabled);
 console.log("  - Merge agent: " + resilience.mergeAgentEnabled);
 ```
 
-- [ ] **Step 5: Run worker typecheck**
+- [ ] **Step 6: Run worker typecheck**
 
 ```bash
 cd worker && npm run typecheck
@@ -532,10 +546,10 @@ cd worker && npm run typecheck
 
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add worker/epic/types.ts worker/epic/coordinator.ts worker/epic/executor.ts worker/epic/index.ts
+git add worker/epic/types.ts worker/epic/coordinator.ts worker/epic/executor.ts worker/epic/index.ts worker/epic/remote-bootstrap.ts
 git commit -m "fix(worker): make resilience config fields required, fix null safety in coordinator"
 ```
 

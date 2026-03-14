@@ -352,19 +352,19 @@ router.post(
     const taskId = req.params.taskId as string;
     const report = req.body;
 
-    // Store as task metadata — read, mutate, save pattern (safe from SQL injection)
     const taskRepo = AppDataSource.getRepository(WorkerTask);
-    const task = await taskRepo.findOneBy({ id: taskId });
-    if (!task) {
+
+    const result = await taskRepo.createQueryBuilder()
+      .update(WorkerTask)
+      .set({ jiraFields: () => `COALESCE("jiraFields", '{}'::jsonb) || :report::jsonb` })
+      .where("id = :id", { id: taskId })
+      .setParameters({ report: JSON.stringify({ buildReport: report }) })
+      .execute();
+
+    if (result.affected === 0) {
       res.status(404).json({ error: "Task not found" });
       return;
     }
-
-    const jiraFields = (task.jiraFields as Record<string, unknown>) || {};
-    jiraFields.buildReport = report;
-    task.jiraFields = jiraFields;
-
-    await taskRepo.save(task);
 
     res.json({ success: true });
   })

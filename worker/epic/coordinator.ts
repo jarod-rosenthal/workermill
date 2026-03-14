@@ -338,6 +338,9 @@ export class EpicCoordinator {
       this.config.qualityGateCommands
     );
 
+    // Return to main after running gates on integration branch
+    try { await this.gitOps.checkoutMain(); } catch { /* best effort */ }
+
     if (gateResult.passed) {
       this.integratedStoryIndices.add(storyIndex);
       this.postDashboardLog(`Story ${storyIndex} integrated — all gates passing`);
@@ -364,11 +367,7 @@ export class EpicCoordinator {
 
     // Revert the merge on the integration branch
     try {
-      execSync(`git -C "${this.gitOps.getRepoPath()}" checkout ${this.integrationBranch} && git -C "${this.gitOps.getRepoPath()}" reset --hard HEAD~1`, {
-        encoding: "utf-8",
-        timeout: 120_000,
-      });
-      await this.gitOps.pushBranch(this.integrationBranch);
+      await this.gitOps.revertLastMerge(this.integrationBranch);
     } catch (revertErr) {
       console.warn(`[Epic] Failed to revert integration merge: ${revertErr instanceof Error ? revertErr.message : revertErr}`);
     }
@@ -3434,7 +3433,7 @@ export class EpicCoordinator {
             const meta = c.metadata || {};
             const description = (meta.description as string) || c.content;
             // Extract acceptance criteria from description
-            const criteriaMatch = description.match(/## Acceptance Criteria\n([\s\S]*?)(?=\n##|\n---|\n\n\n|$)/);
+            const criteriaMatch = description.match(/##+ Acceptance Criteria\n([\s\S]*?)(?=\n##|\n---|\n\n\n|$)/i);
             const criteriaText = criteriaMatch?.[1] || "";
             const criteria = criteriaText
               .split("\n")

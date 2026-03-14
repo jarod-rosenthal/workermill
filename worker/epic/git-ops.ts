@@ -1417,6 +1417,24 @@ git rm --cached --quiet .env 2>/dev/null || true
   }
 
   /**
+   * Return to the main branch.
+   */
+  async checkoutMain(): Promise<void> {
+    await this.git.checkout(this.mainBranch);
+  }
+
+  /**
+   * Revert the last merge commit on a branch and force-push.
+   */
+  async revertLastMerge(branch: string): Promise<void> {
+    await this.git.checkout(branch);
+    await this.git.reset(["--hard", "HEAD~1"]);
+    await this.git.push(["origin", branch, "--force"]);
+    await this.git.checkout(this.mainBranch);
+    this.log(`[GitOps] Reverted last merge on ${branch}`);
+  }
+
+  /**
    * Create an integration branch for incremental story merging.
    * The integration branch starts from the main branch and stories
    * merge into it one at a time as they complete.

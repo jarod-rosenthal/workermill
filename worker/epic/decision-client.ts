@@ -44,6 +44,7 @@ export interface EvaluateQualityRequest {
     qualityScore?: number;
     typeErrors?: boolean;
     testFailures?: boolean;
+    e2eFailures?: boolean;
     testCoveragePercent?: number;
     securityVulnsHigh?: number;
   };

@@ -49,6 +49,18 @@ Fix ALL quality gate failures. You have access to ALL files in the repository.
 - Merge artifacts (<<<< ==== >>>>)
 - Incompatible function signatures across story boundaries
 - Missing dependencies that one story assumed another would provide
+- Service startup failures (missing env vars, database not seeded, wrong port bindings)
+- Middleware configuration errors (wrong order, missing CORS, auth misconfiguration)
+
+## Service Logs
+
+When available, service logs from docker compose are included in the failure output.
+These logs often reveal the ROOT CAUSE of E2E failures — check them FIRST before looking at test output.
+Common patterns:
+- "connection refused" → service not started or wrong port
+- "relation does not exist" → missing database migration
+- "unauthorized" / "403" → auth/middleware misconfiguration
+- "ECONNREFUSED" → service dependency not ready
 
 ## Rules
 
@@ -392,6 +404,19 @@ export class InlineIntegrationFixer {
               await this.postLog(`[Integration Gate] ✅ ${cmd}`, "system");
             } else {
               await this.postLog(`[Integration Gate] ❌ ${cmd}\n${output}`, "error");
+              // Capture service logs if docker compose is running
+              if (isDockerDaemonReachable()) {
+                try {
+                  const serviceLogs = execSync("docker compose logs --tail=100 2>&1", {
+                    cwd: this.repoPath,
+                    encoding: "utf-8",
+                    timeout: 10_000,
+                  });
+                  if (serviceLogs.trim()) {
+                    output += "\n\n### Service Logs (docker compose logs)\n\n" + serviceLogs;
+                  }
+                } catch { /* ignore — best effort */ }
+              }
               return { passed: false, output, failedCommand: cmd };
             }
           } else {
@@ -422,6 +447,19 @@ export class InlineIntegrationFixer {
           }
 
           await this.postLog(`[Integration Gate] ❌ ${cmd}\n${output}`, "error");
+          // Capture service logs if docker compose is running
+          if (isDockerDaemonReachable()) {
+            try {
+              const serviceLogs = execSync("docker compose logs --tail=100 2>&1", {
+                cwd: this.repoPath,
+                encoding: "utf-8",
+                timeout: 10_000,
+              });
+              if (serviceLogs.trim()) {
+                output += "\n\n### Service Logs (docker compose logs)\n\n" + serviceLogs;
+              }
+            } catch { /* ignore — best effort */ }
+          }
           return { passed: false, output, failedCommand: cmd };
         }
       }

@@ -203,6 +203,7 @@ export interface EpicConfig {
     blockOnTypeErrors: boolean;
     blockOnTestFailures: boolean;
     blockOnLintErrors: boolean;
+    blockOnE2EFailures: boolean;
     autoFixEnabled: boolean;
     autoFixMaxIterations: number;
   };

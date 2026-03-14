@@ -157,9 +157,9 @@ Quality gates define what "passing" means for the entire project. They are the S
 
 **If the PRD specifies exact quality gate commands** (e.g., in a "Pre-Commit Quality Gates" or "Quality Gates" section), use those EXACT commands as the \`qualityGates\` output. Copy them verbatim — do NOT generalize, simplify, or substitute with generic defaults. The PRD author chose those specific commands for a reason.
 
-**If the PRD does NOT specify quality gate commands**, infer them from the tech stack using the standard toolchain defaults below. When inferring, apply worker environment prefixes:
+**If the PRD does NOT specify quality gate commands**, infer them from the tech stack using the standard toolchain defaults below:
 - Commands run inside worker containers with the working directory already set to the repository root — do NOT prefix with \`cd\`
-- For Python projects using \`uv\`: prefix inferred commands with \`source $HOME/.local/bin/env &&\` to ensure uv is on PATH
+- Do NOT prefix commands with \`source $HOME/.local/bin/env &&\` or any shell sourcing — tools like \`uv\`, \`npm\`, \`go\` are already on PATH in the worker environment
 - For Node.js projects: no prefix needed
 
 ## Priority Assignment
@@ -179,22 +179,22 @@ Respond with ONLY a JSON object (no markdown fences, no explanation):
     {
       "name": "lint",
       "trigger": "src/**,tests/**",
-      "commands": ["source $HOME/.local/bin/env && uv run ruff check src/ tests/", "source $HOME/.local/bin/env && uv run ruff format --check src/ tests/"]
+      "commands": ["uv run ruff check src/ tests/", "uv run ruff format --check src/ tests/"]
     },
     {
       "name": "typecheck",
       "trigger": "src/**",
-      "commands": ["source $HOME/.local/bin/env && uv run mypy src"]
+      "commands": ["uv run mypy src"]
     },
     {
       "name": "test-unit",
       "trigger": "src/**,tests/**",
-      "commands": ["docker compose down --remove-orphans", "docker compose up -d --wait", "source $HOME/.local/bin/env && DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/dbname_test uv run pytest tests/ -v --tb=short --ignore=tests/test_e2e_workflows.py", "docker compose down"]
+      "commands": ["docker compose down --remove-orphans", "docker compose up -d --wait", "DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/dbname_test uv run pytest tests/ -v --tb=short --ignore=tests/test_e2e_workflows.py", "docker compose down"]
     },
     {
       "name": "test-e2e",
       "trigger": "src/**,tests/**",
-      "commands": ["docker compose down --remove-orphans", "docker compose up -d --wait", "source $HOME/.local/bin/env && DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/dbname_test uv run pytest tests/test_e2e_workflows.py -v --tb=short", "docker compose down"]
+      "commands": ["docker compose down --remove-orphans", "docker compose up -d --wait", "DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/dbname_test uv run pytest tests/test_e2e_workflows.py -v --tb=short", "docker compose down"]
     }
   ],
   "ciWorkflowPath": ".github/workflows/ci.yml",
@@ -211,7 +211,7 @@ Respond with ONLY a JSON object (no markdown fences, no explanation):
   ]
 }
 
-qualityGates: Extract pre-commit quality gate commands from the PRD. If the PRD has an explicit "Quality Gates" or "Pre-Commit Quality Gates" section with exact commands, use those commands VERBATIM — do not simplify or generalize. Do NOT merge separate test commands into one — if the PRD has separate unit test and E2E test commands, create separate gates ("test-unit" and "test-e2e"). E2E workflow tests are first-class citizens and MUST have their own gate with separate pass/fail visibility. Otherwise, infer from the tech stack using the standard toolchain only. Each gate has a name (e.g., "lint", "typecheck", "test-unit", "test-e2e"), a file trigger glob (e.g., "src/**,tests/**"), and the exact shell commands to run. Commands run in worker containers with the working directory already set to the repository root — do NOT prefix commands with "cd" to change directories. For Python/uv commands, prefix with "source $HOME/.local/bin/env &&" to ensure uv is on PATH. Standard toolchain defaults (use ONLY when PRD does not specify exact commands): For Go: "go vet ./...", "go test ./... -v -count=1 -race", "go build ./...", "gofmt -w ." (NOT golangci-lint or staticcheck). For Node.js: "npm run lint", "npm run test", "npm run build". For TypeScript: add "npx tsc --noEmit". For SvelteKit: use "npx svelte-check" instead of bare tsc. For Python with uv: "source $HOME/.local/bin/env && uv run ruff check src/ tests/", "source $HOME/.local/bin/env && uv run ruff format --check src/ tests/", "source $HOME/.local/bin/env && uv run mypy src", and for tests: split into two gates — "test-unit": "docker compose down --remove-orphans && docker compose up -d --wait" then "source $HOME/.local/bin/env && DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/dbname_test uv run pytest tests/ -v --tb=short --ignore=tests/test_e2e_workflows.py" then "docker compose down", and "test-e2e": "docker compose down --remove-orphans && docker compose up -d --wait" then "source $HOME/.local/bin/env && DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/dbname_test uv run pytest tests/test_e2e_workflows.py -v --tb=short" then "docker compose down" (substitute the actual DATABASE_URL from the PRD). For Python without uv: "python -m pytest", "python -m mypy .". IMPORTANT: The CI workflow MUST use the exact same commands as the quality gates — no divergence allowed.
+qualityGates: Extract pre-commit quality gate commands from the PRD. If the PRD has an explicit "Quality Gates" or "Pre-Commit Quality Gates" section with exact commands, use those commands VERBATIM — do not simplify or generalize. Do NOT merge separate test commands into one — if the PRD has separate unit test and E2E test commands, create separate gates ("test-unit" and "test-e2e"). E2E workflow tests are first-class citizens and MUST have their own gate with separate pass/fail visibility. Otherwise, infer from the tech stack using the standard toolchain only. Each gate has a name (e.g., "lint", "typecheck", "test-unit", "test-e2e"), a file trigger glob (e.g., "src/**,tests/**"), and the exact shell commands to run. Commands run in worker containers with the working directory already set to the repository root — do NOT prefix commands with "cd" to change directories. For Python/uv commands, prefix with "source $HOME/.local/bin/env &&" to ensure uv is on PATH. Standard toolchain defaults (use ONLY when PRD does not specify exact commands): For Go: "go vet ./...", "go test ./... -v -count=1 -race", "go build ./...", "gofmt -w ." (NOT golangci-lint or staticcheck). For Node.js: "npm run lint", "npm run test", "npm run build". For TypeScript: add "npx tsc --noEmit". For SvelteKit: use "npx svelte-check" instead of bare tsc. For Python with uv: "uv run ruff check src/ tests/", "uv run ruff format --check src/ tests/", "uv run mypy src", and for tests: split into two gates — "test-unit": "docker compose down --remove-orphans && docker compose up -d --wait" then "DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/dbname_test uv run pytest tests/ -v --tb=short --ignore=tests/test_e2e_workflows.py" then "docker compose down", and "test-e2e": "docker compose down --remove-orphans && docker compose up -d --wait" then "DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/dbname_test uv run pytest tests/test_e2e_workflows.py -v --tb=short" then "docker compose down" (substitute the actual DATABASE_URL from the PRD). For Python without uv: "python -m pytest", "python -m mypy .". IMPORTANT: The CI workflow MUST use the exact same commands as the quality gates — no divergence allowed.
 ciWorkflowPath: The path to the CI workflow file in the repo. GitHub repos use ".github/workflows/ci.yml", Bitbucket repos use "bitbucket-pipelines.yml". Used to detect when CI becomes available and to verify CI passes after push.
 estimatedSteps is the number of deliverables in the card (used for progress tracking).
 labels should include relevant technology or domain tags (e.g., "react", "api", "terraform", "auth").`;
@@ -948,7 +948,9 @@ export function validateDecomposedPrd(data: unknown): DecomposedPrd {
         qualityGates.push({
           name: g.name,
           trigger: g.trigger,
-          commands: g.commands as string[],
+          commands: (g.commands as string[]).map((c) =>
+            c.replace(/^(?:source|\.) +['"]?\$HOME\/\.local\/bin\/env['"]? *&& */i, "")
+          ),
         });
       }
     }

@@ -30,6 +30,7 @@ import { InlineImprover } from "./inline-improver.js";
 import { InlineCIFixer } from "./inline-ci-fixer.js";
 import { InlineIntegrationFixer } from "./inline-integration-fixer.js";
 import { InlineReviewFixer } from "./inline-review-fixer.js";
+import { InlineVerifier } from "./inline-verifier.js";
 import { createMemoryClient, type MemoryClient, type MemoryContext, type EnhancedContext } from "./memory-client.js";
 import { CredentialRotator } from "./credential-rotator.js";
 import { spawn, execSync } from "child_process";
@@ -3419,6 +3420,55 @@ export class EpicCoordinator {
         }
       } else if (allIncrementallyIntegrated) {
         this.postDashboardLog("Skipping integration gates — all stories validated incrementally");
+      }
+
+      // Run spec verification — independent QA agent checks acceptance criteria compliance
+      if (prUrl && prNumber) {
+        this.postDashboardLog("Running spec verification against acceptance criteria...");
+        await this.postProgressUpdate("integration_check", prUrl, prNumber);
+
+        // Collect acceptance criteria from completions
+        const storyAcceptanceCriteria = completions
+          .map(c => {
+            const meta = c.metadata || {};
+            const description = (meta.description as string) || c.content;
+            // Extract acceptance criteria from description
+            const criteriaMatch = description.match(/## Acceptance Criteria\n([\s\S]*?)(?=\n##|\n---|\n\n\n|$)/);
+            const criteriaText = criteriaMatch?.[1] || "";
+            const criteria = criteriaText
+              .split("\n")
+              .map(line => line.replace(/^[\s]*[-*•]\s*/, "").trim())
+              .filter(line => line.length > 0);
+
+            return {
+              storyIndex: (meta.storyIndex as number) || 0,
+              title: (meta.title as string) || c.content,
+              criteria,
+            };
+          })
+          .filter(s => s.criteria.length > 0);
+
+        if (storyAcceptanceCriteria.length > 0) {
+          const verifier = new InlineVerifier(this.config, this.gitOps.getRepoPath());
+          const verificationResult = await verifier.verify(storyAcceptanceCriteria);
+
+          if (verificationResult.decision === "pass") {
+            this.postDashboardLog("Spec verification passed — all acceptance criteria satisfied");
+          } else if (verificationResult.decision === "partial_pass") {
+            this.postDashboardLog(`Spec verification: partial pass — ${verificationResult.failedCriteria?.length || 0} criteria failed`);
+            await this.ticketOps.postComment(
+              `⚠️ Spec verification found ${verificationResult.failedCriteria?.length || 0} unmet criteria:\n\n` +
+              (verificationResult.failedCriteria || [])
+                .map(f => `- **Story ${f.storyIndex}**: "${f.criterion}" — ${f.reason}`)
+                .join("\n") +
+              `\n\nTech Lead will assess whether these require revision.`
+            );
+          } else {
+            this.postDashboardLog(`Spec verification failed: ${verificationResult.summary}`);
+          }
+        } else {
+          this.postDashboardLog("No acceptance criteria found in completions — skipping spec verification");
+        }
       }
 
       // If PR created and review enabled, run inline Tech Lead review

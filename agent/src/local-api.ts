@@ -2758,6 +2758,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
             blockOnTestFailures: true,
             blockOnTypeErrors: false,
             blockOnLintErrors: false,
+            blockOnE2EFailures: false,
           };
         }
         if (normalized.qualityGateEnabled === undefined) normalized.qualityGateEnabled = true;

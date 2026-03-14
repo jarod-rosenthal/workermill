@@ -81,6 +81,7 @@ export interface StandaloneConfig {
     blockOnTypeErrors?: boolean;
     blockOnTestFailures?: boolean;
     blockOnLintErrors?: boolean;
+    blockOnE2EFailures?: boolean;
     autoFixEnabled?: boolean;
     autoFixMaxIterations?: number;
     // Org-level guidelines
@@ -120,6 +121,7 @@ const DEFAULT_CONFIG: StandaloneConfig = {
     blockOnTypeErrors: true,
     blockOnTestFailures: false,
     blockOnLintErrors: true,
+    blockOnE2EFailures: false,
     autoFixEnabled: true,
     autoFixMaxIterations: 3,
   },

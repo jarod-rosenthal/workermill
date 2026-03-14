@@ -364,6 +364,11 @@
           "default": true,
           "description": "Block PR creation on lint errors (ruff, eslint, etc.)."
         },
+        "workermill.blockOnE2EFailures": {
+          "type": "boolean",
+          "default": false,
+          "description": "Block PR creation on E2E test failures."
+        },
         "workermill.autoFixEnabled": {
           "type": "boolean",
           "default": true,

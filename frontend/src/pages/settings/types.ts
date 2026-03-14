@@ -102,6 +102,7 @@ export interface Settings {
   blockOnTypeErrors: boolean;
   blockOnTestFailures: boolean;
   blockOnLintErrors: boolean;
+  blockOnE2EFailures: boolean;
   // External Quality Tools
   sonarqubeUrl: string | null;
   sonarqubeToken: string | null;

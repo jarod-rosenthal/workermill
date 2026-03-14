@@ -474,22 +474,6 @@ The same pattern applies to Redis, MongoDB, MySQL, etc. **Tests that pass locall
 
 **If the ticket, PRD, or task description specifies a dependency version, USE THAT VERSION.** Do NOT downgrade or "fix" versions you don't recognize — your training data has a cutoff and newer releases exist. Trust the spec over your knowledge.`;
 
-    // Inject board quality gate commands so workers know exactly what to run before committing
-    if (this.config.qualityGateCommands && this.config.qualityGateCommands.length > 0) {
-      const gateList = this.config.qualityGateCommands
-        .map((g) => g.commands.map((c) => `\`\`\`bash\n${c}\n\`\`\``).join("\n"))
-        .join("\n\n");
-      prompt += `
-
-## 🚦 Quality Gate Commands (MANDATORY)
-
-**Before committing your code, you MUST run ALL of these commands and ensure they pass:**
-
-${gateList}
-
-Run each command in order. If ANY command fails, fix the issue and re-run ALL commands until they all pass. Do NOT commit code that fails any of these checks. These are the exact same commands the quality gate system will use to evaluate your work — if you skip them, your story will fail integration and waste fix cycles.`;
-    }
-
     return prompt;
   }
 

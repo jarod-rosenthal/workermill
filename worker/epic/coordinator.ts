@@ -281,6 +281,40 @@ export class EpicCoordinator {
 
     if (!mergeResult.success) {
       this.postDashboardLog(`Story ${storyIndex} merge failed: ${mergeResult.error}`);
+
+      // Route merge failure back to the story as a revision (same as gate failure)
+      const revisionReason =
+        `Merge into integration branch failed.\n\n` +
+        `**Error:** ${mergeResult.error}\n\n` +
+        `Your code has merge conflicts with previously integrated stories. ` +
+        `Fix the conflicts — it is likely overlapping edits to the same files.`;
+
+      const revisionCount = this.storyRevisionCounts.get(storyIndex) || 0;
+      if (revisionCount >= this.maxPerStoryRevisions) {
+        this.postDashboardLog(`Story ${storyIndex} exceeded max revisions after merge failure — marking as failed`);
+        this.failedStoryIndices.add(storyIndex);
+        return false;
+      }
+
+      this.storyRevisionCounts.set(storyIndex, revisionCount + 1);
+
+      const readyStories = await this.coordination.getReadyStories();
+      const story = readyStories.find(s => s.storyIndex === storyIndex);
+      if (story) {
+        this.locallyCompletedStoryIndices.delete(storyIndex);
+        this.completedStoryIndices.delete(storyIndex);
+
+        if (!this.config.revisionReasons) this.config.revisionReasons = {};
+        this.config.revisionReasons[storyIndex] = revisionReason;
+        this.config.reviewFeedback = `Story ${storyIndex} failed to merge: ${mergeResult.error}`;
+
+        this.revisionStoriesQueued.push(story);
+        this.postDashboardLog(`Story ${storyIndex} queued for revision (merge failure)`);
+      } else {
+        console.warn(`[Epic] Story ${storyIndex} not found in ready stories for revision after merge failure — keeping as completed`);
+        this.integratedStoryIndices.add(storyIndex);
+      }
+
       return false;
     }
 
@@ -363,6 +397,9 @@ export class EpicCoordinator {
       // Queue for re-execution
       this.revisionStoriesQueued.push(story);
       this.postDashboardLog(`Story ${storyIndex} queued for revision (integration failure)`);
+    } else {
+      console.warn(`[Epic] Story ${storyIndex} not found in ready stories for revision — keeping as completed`);
+      this.integratedStoryIndices.add(storyIndex);
     }
 
     return false;
@@ -382,10 +419,10 @@ export class EpicCoordinator {
 
     // Process stories in dependency order — find the first one whose
     // dependencies are all already integrated
+    const readyStories = await this.coordination.getReadyStories();
     let nextIndex = -1;
     for (let i = 0; i < this.integrationQueue.length; i++) {
       const storyIndex = this.integrationQueue[i];
-      const readyStories = await this.coordination.getReadyStories();
       const story = readyStories.find(s => s.storyIndex === storyIndex);
       const deps = story?.dependencies || [];
 
@@ -2970,7 +3007,7 @@ export class EpicCoordinator {
 
     // Deadlock detection: all experts idle, no claimable stories, but failed/blocked stories remain
     // Instead of failing the entire task, proceed with partial completion (create PR with completed stories)
-    if (allIdle && readyToClaim.length === 0 && this.revisionStoriesQueued.length === 0 && (this.failedStoryIndices.size > 0 || this.blockedStoryIndices.size > 0) && completions.length > 0) {
+    if (allIdle && readyToClaim.length === 0 && this.revisionStoriesQueued.length === 0 && this.integrationQueue.length === 0 && !this.integrationInProgress && (this.failedStoryIndices.size > 0 || this.blockedStoryIndices.size > 0) && completions.length > 0) {
       const failedList = Array.from(this.failedStoryIndices).sort((a, b) => a - b);
       const blockedList = Array.from(this.blockedStoryIndices).sort((a, b) => a - b);
       console.log(`[Epic] Partial completion — ${completions.length} stories done, ${failedList.length} failed, ${blockedList.length} blocked`);
@@ -2982,7 +3019,7 @@ export class EpicCoordinator {
       // Fall through to the completion path below instead of failing
     }
 
-    if (allIdle && readyToClaim.length === 0 && this.revisionStoriesQueued.length === 0 && completions.length > 0) {
+    if (allIdle && readyToClaim.length === 0 && this.revisionStoriesQueued.length === 0 && this.integrationQueue.length === 0 && !this.integrationInProgress && completions.length > 0) {
       // Determine if this is a partial completion (some stories failed/blocked)
       const isPartialCompletion = this.failedStoryIndices.size > 0 || this.blockedStoryIndices.size > 0;
       if (isPartialCompletion) {
@@ -3131,8 +3168,11 @@ export class EpicCoordinator {
 
           // Rename integration branch to feature branch for PR
           const featureBranch = `feature/${this.config.jiraIssueKey.toLowerCase()}`;
+          let prBranchName = this.integrationBranch;
           try {
             await this.gitOps.renameBranch(this.integrationBranch, featureBranch);
+            this.integrationBranch = featureBranch;
+            prBranchName = featureBranch;
           } catch {
             // If rename fails, just use integration branch as-is
           }
@@ -3141,7 +3181,7 @@ export class EpicCoordinator {
           const storyListForPr = storyCompletions.map((s) => `- **${s.title}**`).join("\n");
 
           prUrl = await this.gitOps.createPRFromBranch(
-            this.integrationBranch === featureBranch ? featureBranch : this.integrationBranch,
+            prBranchName,
             this.config.jiraIssueKey,
             epicTitle,
             storyListForPr,

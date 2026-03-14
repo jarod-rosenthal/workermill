@@ -340,6 +340,37 @@ router.post(
 );
 
 /**
+ * POST /api/control-center/tasks/:taskId/build-report
+ * Store structured build report for future learning.
+ */
+router.post(
+  "/tasks/:taskId/build-report",
+  authenticateApiKey,
+  param("taskId").isUUID(),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const taskId = req.params.taskId as string;
+    const report = req.body;
+
+    // Store as task metadata — read, mutate, save pattern (safe from SQL injection)
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOneBy({ id: taskId });
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    const jiraFields = (task.jiraFields as Record<string, unknown>) || {};
+    jiraFields.buildReport = report;
+    task.jiraFields = jiraFields;
+
+    await taskRepo.save(task);
+
+    res.json({ success: true });
+  })
+);
+
+/**
  * Save story completion data for a task.
  * Called by the coordinator before PR creation to enable retry on failure.
  */

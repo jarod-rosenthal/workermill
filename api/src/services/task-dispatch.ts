@@ -681,6 +681,35 @@ export async function dispatchMultiStoryPlan(
       );
     }
 
+    // Include interface contracts (bidirectional)
+    const contracts: string[] = [];
+
+    // Contracts declared by THIS story (outgoing)
+    if ((story as any).interfaceContracts?.length) {
+      for (const contract of (story as any).interfaceContracts) {
+        contracts.push(`- **→ Story ${contract.targetStoryIndex}**: ${contract.description}`);
+      }
+    }
+
+    // Contracts from OTHER stories targeting THIS story (incoming)
+    for (const otherStory of executionPlan.stories!) {
+      if (otherStory.index === story.index) continue;
+      const incomingContracts = (otherStory as any).interfaceContracts?.filter(
+        (c: any) => c.targetStoryIndex === story.index
+      ) || [];
+      for (const contract of incomingContracts) {
+        contracts.push(`- **← Story ${otherStory.index} (${otherStory.persona})**: ${contract.description}`);
+      }
+    }
+
+    if (contracts.length > 0) {
+      descriptionParts.push(
+        `## Interface Contracts\n\n` +
+        `These are exact data shapes shared with other stories. Do NOT deviate without posting a decision.\n\n` +
+        contracts.join("\n")
+      );
+    }
+
     // Include estimated complexity
     if (story.estimatedComplexity) {
       descriptionParts.push(

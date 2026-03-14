@@ -132,6 +132,7 @@ router.post("/evaluate-quality", async (req: Request, res: Response) => {
         blockOnTestFailures: org.blockOnTestFailures ?? true,
         blockOnTypeErrors: org.blockOnTypeErrors ?? false,
         blockOnLintErrors: org.blockOnLintErrors ?? false,
+        blockOnE2EFailures: org.blockOnE2EFailures ?? false,
         minQualityScore: org.minQualityScore ?? undefined,
         minTestCoveragePercent: org.minTestCoveragePercent ?? undefined,
         maxSecurityHighVulns: org.maxSecurityHighVulns ?? undefined,

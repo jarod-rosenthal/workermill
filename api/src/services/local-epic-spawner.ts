@@ -840,6 +840,7 @@ class LocalEpicSpawner {
         blockOnTypeErrors: task.organization?.blockOnTypeErrors ?? false,
         blockOnTestFailures: task.organization?.blockOnTestFailures ?? false,
         blockOnLintErrors: task.organization?.blockOnLintErrors ?? false,
+        blockOnE2EFailures: task.organization?.blockOnE2EFailures ?? false,
         autoFixEnabled: task.organization?.autoFixEnabled ?? false,
         autoFixMaxIterations: task.organization?.autoFixMaxIterations,
       }),

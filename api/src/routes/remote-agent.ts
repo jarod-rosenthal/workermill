@@ -1091,6 +1091,7 @@ router.get(
         blockOnTypeErrors: org.blockOnTypeErrors ?? false,
         blockOnTestFailures: org.blockOnTestFailures ?? false,
         blockOnLintErrors: org.blockOnLintErrors ?? false,
+        blockOnE2EFailures: org.blockOnE2EFailures ?? false,
         autoFixEnabled: org.autoFixEnabled ?? false,
         autoFixMaxIterations: org.autoFixMaxIterations,
       },

@@ -63,6 +63,7 @@ export interface EvaluateQualityRequest {
     typeErrors?: boolean;
     testFailures?: boolean;
     lintErrors?: boolean;
+    e2eFailures?: boolean;
   };
   taskId?: string;
   bypassRequested: boolean;
@@ -74,6 +75,7 @@ export interface EvaluateQualityRequest {
     blockOnTypeErrors?: boolean;
     blockOnTestFailures?: boolean;
     blockOnLintErrors?: boolean;
+    blockOnE2EFailures?: boolean;
   };
 }
 
@@ -792,6 +794,11 @@ export function evaluateQuality(
   // Check: lint errors
   if (thresholds.blockOnLintErrors && req.metrics.lintErrors) {
     blockers.push("Lint errors detected and blocking is enabled");
+  }
+
+  // Check: E2E test failures
+  if (thresholds.blockOnE2EFailures && req.metrics.e2eFailures) {
+    blockers.push("E2E test failures detected and blocking is enabled");
   }
 
   const pass = blockers.length === 0;

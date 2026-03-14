@@ -152,6 +152,7 @@ router.get("/", async (req: Request, res: Response) => {
       blockOnTypeErrors: org.blockOnTypeErrors,
       blockOnTestFailures: org.blockOnTestFailures,
       blockOnLintErrors: org.blockOnLintErrors,
+      blockOnE2EFailures: org.blockOnE2EFailures,
 
       // External Quality Tool Integrations
       sonarqubeUrl: org.sonarqubeUrl || null,
@@ -313,6 +314,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       blockOnTypeErrors,
       blockOnTestFailures,
       blockOnLintErrors,
+      blockOnE2EFailures,
 
       // External Quality Tool Integrations
       sonarqubeUrl,
@@ -1051,6 +1053,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.blockOnLintErrors = Boolean(blockOnLintErrors);
     }
 
+    if (blockOnE2EFailures !== undefined) {
+      org.blockOnE2EFailures = Boolean(blockOnE2EFailures);
+    }
+
     // Validate and update External Quality Tool Integrations
     if (sonarqubeUrl !== undefined) {
       if (sonarqubeUrl === null || sonarqubeUrl === "") {
@@ -1370,6 +1376,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         blockOnTypeErrors: org.blockOnTypeErrors,
         blockOnTestFailures: org.blockOnTestFailures,
         blockOnLintErrors: org.blockOnLintErrors,
+        blockOnE2EFailures: org.blockOnE2EFailures,
         sonarqubeUrl: org.sonarqubeUrl || null,
         sonarqubeToken: org.sonarqubeToken ? "***" : null,
         coderabbitEnabled: org.coderabbitEnabled,

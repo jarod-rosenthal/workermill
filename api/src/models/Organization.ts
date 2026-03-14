@@ -513,6 +513,9 @@ export class Organization {
   @Column({ name: "block_on_lint_errors", type: "boolean", default: false })
   blockOnLintErrors: boolean;
 
+  @Column({ name: "block_on_e2e_failures", type: "boolean", default: false })
+  blockOnE2EFailures: boolean;
+
   // External Quality Tool Integrations
   @Column({ name: "sonarqube_url", type: "varchar", length: 500, nullable: true })
   sonarqubeUrl: string | null;

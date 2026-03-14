@@ -4,7 +4,7 @@
 
 **Goal:** Ensure every worker configuration value flows from the Organization DB column through spawners to worker env vars — no hardcoded fallbacks, no orphaned feature flags, no dead settings.
 
-**Architecture:** Three categories of fixes: (1) Strip hardcoded fallbacks from worker config loaders so missing env vars surface immediately. (2) Add missing env vars to spawners that skip them. (3) Wire up 3 orphaned feature flags (fileOverlapGatingEnabled, incrementalRebaseEnabled, mergeAgentEnabled) with the full stack: DB migration → Organization entity → API settings routes → remote-agent endpoint → spawners → frontend + VS Code toggles. Also fix maxAgentTurns which exists in DB/UI but never reaches the worker.
+**Architecture:** Four categories of fixes: (1) Strip hardcoded fallbacks from worker config loaders so missing env vars surface immediately. (2) Add missing env vars to spawners that skip them. (3) Wire up 3 orphaned feature flags (fileOverlapGatingEnabled, incrementalRebaseEnabled, mergeAgentEnabled) with the full stack: DB migration → Organization entity → API settings routes → remote-agent endpoint → spawners → frontend + VS Code toggles. Also fix maxAgentTurns which exists in DB/UI but never reaches the worker. (4) Fix critic approval threshold — `org.criticApprovalThreshold` exists in DB and is configurable in the settings UI, but the cloud planning workflow (`critic-agent.ts`) and local critic (`critic-agent-local.ts`) ignore the org value and use hardcoded 85.
 
 **Tech Stack:** TypeScript, TypeORM, Express, React, VS Code extension API
 
@@ -30,6 +30,10 @@
 | `agent-sdk.d.ts` stale — missing fields from `AgentOptions` | Stale declaration | Medium |
 | `pipeline-executor.ts` + `warm-pool.ts` missing new flags | Missing from spawner | High |
 | Frontend `index.tsx` has `?? N` fallbacks when loading settings | Hardcoded fallback | Medium |
+| `critic-agent.ts` uses `const AUTO_APPROVAL_THRESHOLD = 85` — ignores org setting | Hardcoded constant | Critical |
+| `critic-agent-local.ts` uses `process.env.AUTO_APPROVAL_THRESHOLD \|\| "85"` — ignores org setting | Hardcoded fallback | Critical |
+| `planning-workflow.ts` doesn't pass `org.criticApprovalThreshold` to `generateValidatedPlan()` | Dead setting | Critical |
+| `critic-agent.ts` `BEST_PLAN_FALLBACK_THRESHOLD = 50` — hardcoded, not configurable | Hardcoded constant | High |
 
 ---
 
@@ -1057,9 +1061,187 @@ git commit -m "feat(vscode): add toggles for fileOverlapGating, incrementalRebas
 
 ---
 
-## Chunk 4: Verification
+## Chunk 4: Fix critic approval threshold
 
-### Task 12: Full typecheck across all packages
+The `criticApprovalThreshold` org setting exists in the DB (default: 85), is exposed in the settings UI, and the agent-side code (`plan-validator.ts`) already fetches it from the API via `setCriticApprovalThreshold()`. But the cloud planning workflow ignores it entirely — `critic-agent.ts` uses a hardcoded `const AUTO_APPROVAL_THRESHOLD = 85` and `planning-workflow.ts` never passes the org value through.
+
+### Task 12: Pass criticApprovalThreshold through generateValidatedPlan
+
+**Files:**
+- Modify: `api/src/services/critic-agent.ts:54,729-737,844,892`
+- Modify: `api/src/services/planning-workflow.ts:476-484`
+
+- [ ] **Step 1: Add criticApprovalThreshold parameter to generateValidatedPlan()**
+
+In `api/src/services/critic-agent.ts`, line 729-737, add a new parameter:
+
+```typescript
+// BEFORE:
+export async function generateValidatedPlan(
+  prd: string,
+  agentConfig: PlanningAgentConfig = DEFAULT_CONFIG,
+  maxAttempts: number = MAX_ITERATIONS,
+  onProgress?: PlanProgressCallback,
+  skipCritic: boolean = false,
+  onStreamProgress?: PlanStreamProgressCallback,
+  maxTargetFiles = 15,
+): Promise<ExecutionPlanV2> {
+
+// AFTER:
+export async function generateValidatedPlan(
+  prd: string,
+  agentConfig: PlanningAgentConfig = DEFAULT_CONFIG,
+  maxAttempts: number = MAX_ITERATIONS,
+  onProgress?: PlanProgressCallback,
+  skipCritic: boolean = false,
+  onStreamProgress?: PlanStreamProgressCallback,
+  maxTargetFiles = 15,
+  criticApprovalThreshold = AUTO_APPROVAL_THRESHOLD,
+): Promise<ExecutionPlanV2> {
+```
+
+- [ ] **Step 2: Use the parameter instead of the hardcoded constant**
+
+In `api/src/services/critic-agent.ts`, line 844:
+
+```typescript
+// BEFORE:
+if (lastCriticResult.approved || lastCriticResult.score >= AUTO_APPROVAL_THRESHOLD) {
+
+// AFTER:
+if (lastCriticResult.approved || lastCriticResult.score >= criticApprovalThreshold) {
+```
+
+And in the logger at line 898:
+
+```typescript
+// BEFORE:
+logger.warn("Plan below threshold but above fallback minimum — returning with warning", {
+  lastScore,
+  threshold: AUTO_APPROVAL_THRESHOLD,
+
+// AFTER:
+logger.warn("Plan below threshold but above fallback minimum — returning with warning", {
+  lastScore,
+  threshold: criticApprovalThreshold,
+```
+
+- [ ] **Step 3: Pass org.criticApprovalThreshold from planning-workflow.ts**
+
+In `api/src/services/planning-workflow.ts`, line 476-484:
+
+```typescript
+// BEFORE:
+executionPlanV2 = await generateValidatedPlan(
+  prd,
+  agentConfig,
+  maxAttempts,
+  progressCallback,
+  skipCritic,
+  streamProgressCallback,
+  task.organization?.maxTargetFiles,
+);
+
+// AFTER:
+executionPlanV2 = await generateValidatedPlan(
+  prd,
+  agentConfig,
+  maxAttempts,
+  progressCallback,
+  skipCritic,
+  streamProgressCallback,
+  task.organization?.maxTargetFiles,
+  task.organization?.criticApprovalThreshold,
+);
+```
+
+- [ ] **Step 4: Run API typecheck**
+
+```bash
+cd api && npm run typecheck
+```
+
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add api/src/services/critic-agent.ts api/src/services/planning-workflow.ts
+git commit -m "fix(api): pass org.criticApprovalThreshold through generateValidatedPlan instead of hardcoded 85"
+```
+
+---
+
+### Task 13: Fix critic-agent-local.ts to use org threshold
+
+The local critic path reads the threshold from `process.env.AUTO_APPROVAL_THRESHOLD || "85"`. This env var is never set by any spawner — it silently falls back to 85. The local critic is called by the API for local Docker mode, so it has access to the org entity.
+
+**Files:**
+- Modify: `api/src/services/critic-agent-local.ts:486`
+
+- [ ] **Step 1: Trace how critic-agent-local is called**
+
+Find all call sites of `normalizeCriticResult` in `critic-agent-local.ts` and the function that receives org context. The threshold should be passed through from the caller that has access to `org.criticApprovalThreshold`.
+
+Check if the local critic's entry point receives the org or has access to it. If it does, pass `org.criticApprovalThreshold` to `normalizeCriticResult`. If not, add it as a parameter.
+
+```typescript
+// BEFORE (line 484-486):
+function normalizeCriticResult(parsed: Record<string, unknown>): CriticResult {
+  const score = typeof parsed.score === "number" ? parsed.score : 0;
+  const threshold = parseInt(process.env.AUTO_APPROVAL_THRESHOLD || "85", 10);
+
+// AFTER:
+function normalizeCriticResult(parsed: Record<string, unknown>, criticApprovalThreshold: number): CriticResult {
+  const score = typeof parsed.score === "number" ? parsed.score : 0;
+  const threshold = criticApprovalThreshold;
+```
+
+Then update all call sites of `normalizeCriticResult` to pass the threshold from the org entity.
+
+- [ ] **Step 2: Run API typecheck**
+
+```bash
+cd api && npm run typecheck
+```
+
+Expected: PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add api/src/services/critic-agent-local.ts
+git commit -m "fix(api): pass org.criticApprovalThreshold to local critic instead of env var fallback"
+```
+
+---
+
+### Task 14: Remove hardcoded AUTO_APPROVAL_THRESHOLD constant
+
+After Tasks 12-13, the constant `AUTO_APPROVAL_THRESHOLD = 85` at line 54 of `critic-agent.ts` is only used as the default parameter value in `generateValidatedPlan()`. This is acceptable — the default matches the DB column default, and callers that have org context (planning-workflow.ts) now pass the real value.
+
+**Files:**
+- Verify: `api/src/services/critic-agent.ts:54`
+
+- [ ] **Step 1: Verify no other usage of the constant**
+
+Grep for `AUTO_APPROVAL_THRESHOLD` across the entire codebase. After Tasks 12-13:
+- `critic-agent.ts:54` — definition (used as default parameter value — OK)
+- `critic-agent.ts:729` — default parameter `= AUTO_APPROVAL_THRESHOLD` — OK (matches DB default)
+- `critic-agent-local.ts` — should be removed (replaced by parameter)
+- `agent/src/plan-validator.ts:105` — `let AUTO_APPROVAL_THRESHOLD = 85` with `setCriticApprovalThreshold()` override — this path already works (agent fetches from API and calls the setter)
+
+No further changes needed — the constant as a default parameter is the correct pattern. The critical fix is that callers now pass the org value instead of relying on the default.
+
+- [ ] **Step 2: Commit (if any cleanup needed)**
+
+Only commit if grep revealed additional hardcoded uses.
+
+---
+
+## Chunk 5: Verification
+
+### Task 15: Full typecheck across all packages
 
 - [ ] **Step 1: Run all 4 typechecks**
 
@@ -1088,7 +1270,7 @@ cd api && npx vitest run src/services/worker-decision-engine.test.ts
 
 Expected: All tests pass.
 
-### Task 13: Docker worker build verification
+### Task 16: Docker worker build verification
 
 - [ ] **Step 1: Build worker Docker image locally**
 

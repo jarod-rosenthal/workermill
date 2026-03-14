@@ -955,10 +955,9 @@ The frontend builds to static files (`frontend/dist/`) and is served by the Fast
 
 ## Development Environment
 
-- **uv** is pre-installed. Run `source $HOME/.local/bin/env` before any `uv` commands to ensure it is on PATH.
+- **uv** is pre-installed and on PATH. Do NOT prefix commands with `source $HOME/.local/bin/env &&` — just call `uv` directly.
 - **Python 3.13** is available via uv — do not attempt to install Python separately.
 - **Docker and Docker Compose** are available for running PostgreSQL. Always run `docker compose down --remove-orphans` before `docker compose up -d --wait` to clean up stale containers from previous runs.
-- All quality gate commands must be prefixed with `source $HOME/.local/bin/env &&` to ensure uv is available.
 
 ---
 

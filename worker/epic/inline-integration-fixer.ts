@@ -59,6 +59,7 @@ Fix ALL quality gate failures. You have access to ALL files in the repository.
 - Push to current branch
 - **NEVER change language versions** (Go version in go.mod/Dockerfile, Node.js version, Python version, etc.). Version pins are intentional architectural decisions from the project specification. Fix the code to work with the specified version — do NOT downgrade the language.
 - **NEVER change framework or dependency major versions** unless the error explicitly shows an incompatibility that cannot be resolved any other way.
+- **NEVER modify configuration files** (pyproject.toml, tsconfig.json, .eslintrc, ruff.toml, etc.) to suppress lint/type errors. Fix the CODE that triggers the error — change variable names, add type annotations, remove unused imports, etc. Configuration files are set by the project specification and must not be altered.
 
 ## Organization Guidelines
 

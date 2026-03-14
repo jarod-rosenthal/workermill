@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="WorkerMill Demo" width="100%" />
+  <img src=".github/assets/demo.gif" alt="WorkerMill Demo" width="100%" />
 </p>
 
 ## Why WorkerMill?

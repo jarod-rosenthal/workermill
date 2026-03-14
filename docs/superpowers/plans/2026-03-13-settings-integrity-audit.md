@@ -25,7 +25,7 @@
 | `MAX_PER_STORY_REVISIONS` missing from worker-spawner.ts | Missing from spawner | High |
 | `fileOverlapGatingEnabled` — no DB column, no spawner, hardcoded true | Orphaned flag | High |
 | `incrementalRebaseEnabled` — no DB column, no spawner, hardcoded true | Orphaned flag | High |
-| `mergeAgentEnabled` — no DB column, no spawner, hardcoded false | Orphaned flag | High |
+| `mergeAgentEnabled` — no DB column, no spawner, hardcoded true | Orphaned flag | High |
 | `ExpertConfig` missing `maxTurns` field (TS error in Docker build) | Type mismatch | Medium |
 | `agent-sdk.d.ts` stale — missing fields from `AgentOptions` | Stale declaration | Medium |
 | `pipeline-executor.ts` + `warm-pool.ts` missing new flags | Missing from spawner | High |
@@ -486,27 +486,7 @@ maxFixRetries: number;
 
 This automatically resolves the TS errors at coordinator.ts lines 3146, 4082, and 4102 — no `?? 0` fallbacks needed.
 
-- [ ] **Step 4: Fix mergeAgentEnabled parsing in worker config loaders**
-
-`mergeAgentEnabled` defaults to `false` (opt-in), but the worker parses it with `!== "false"` which means a missing env var would enable it. Fix both config loaders:
-
-`worker/epic/index.ts:115`:
-```typescript
-// BEFORE:
-mergeAgentEnabled: process.env.MERGE_AGENT_ENABLED !== "false",
-// AFTER:
-mergeAgentEnabled: process.env.MERGE_AGENT_ENABLED === "true",
-```
-
-`worker/epic/remote-bootstrap.ts:420`:
-```typescript
-// BEFORE:
-mergeAgentEnabled: process.env.MERGE_AGENT_ENABLED !== "false",
-// AFTER:
-mergeAgentEnabled: process.env.MERGE_AGENT_ENABLED === "true",
-```
-
-- [ ] **Step 5: Strip `?? true` / `?? false` from coordinator usage of resilience flags**
+- [ ] **Step 4: Strip `?? true` / `?? false` from coordinator usage of resilience flags**
 
 After making `fileOverlapGatingEnabled`, `incrementalRebaseEnabled`, `mergeAgentEnabled` required in types, remove the nullish coalescing at usage sites:
 
@@ -538,7 +518,7 @@ console.log("  - Incremental rebase: " + resilience.incrementalRebaseEnabled);
 console.log("  - Merge agent: " + resilience.mergeAgentEnabled);
 ```
 
-- [ ] **Step 6: Run worker typecheck**
+- [ ] **Step 5: Run worker typecheck**
 
 ```bash
 cd worker && npm run typecheck
@@ -546,7 +526,7 @@ cd worker && npm run typecheck
 
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add worker/epic/types.ts worker/epic/coordinator.ts worker/epic/executor.ts worker/epic/index.ts worker/epic/remote-bootstrap.ts
@@ -670,7 +650,7 @@ export class AddResilienceFlags1742900000000 implements MigrationInterface {
       `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS incremental_rebase_enabled BOOLEAN DEFAULT true`
     );
     await queryRunner.query(
-      `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS merge_agent_enabled BOOLEAN DEFAULT false`
+      `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS merge_agent_enabled BOOLEAN DEFAULT true`
     );
   }
 
@@ -726,7 +706,7 @@ fileOverlapGatingEnabled: boolean;
 @Column({ name: "incremental_rebase_enabled", type: "boolean", default: true })
 incrementalRebaseEnabled: boolean;
 
-@Column({ name: "merge_agent_enabled", type: "boolean", default: false })
+@Column({ name: "merge_agent_enabled", type: "boolean", default: true })
 mergeAgentEnabled: boolean;
 ```
 
@@ -815,7 +795,7 @@ In `api/src/routes/remote-agent.ts`, near line 1066 after `selfReviewEnabled`:
 ```typescript
 fileOverlapGatingEnabled: org.fileOverlapGatingEnabled !== false,
 incrementalRebaseEnabled: org.incrementalRebaseEnabled !== false,
-mergeAgentEnabled: org.mergeAgentEnabled === true,  // default false — opt-in
+mergeAgentEnabled: org.mergeAgentEnabled !== false,
 ```
 
 - [ ] **Step 2: Add to worker-spawner.ts**
@@ -825,7 +805,7 @@ In `api/src/services/worker-spawner.ts`, near the resilience env vars block (aro
 ```typescript
 additionalEnv.FILE_OVERLAP_GATING_ENABLED = org.fileOverlapGatingEnabled !== false ? "true" : "false";
 additionalEnv.INCREMENTAL_REBASE_ENABLED = org.incrementalRebaseEnabled !== false ? "true" : "false";
-additionalEnv.MERGE_AGENT_ENABLED = org.mergeAgentEnabled === true ? "true" : "false";
+additionalEnv.MERGE_AGENT_ENABLED = org.mergeAgentEnabled !== false ? "true" : "false";
 ```
 
 - [ ] **Step 3: Add to local-epic-spawner.ts**
@@ -835,7 +815,7 @@ In `api/src/services/local-epic-spawner.ts`, near the resilience env vars (aroun
 ```typescript
 FILE_OVERLAP_GATING_ENABLED: task.organization?.fileOverlapGatingEnabled !== false ? "true" : "false",
 INCREMENTAL_REBASE_ENABLED: task.organization?.incrementalRebaseEnabled !== false ? "true" : "false",
-MERGE_AGENT_ENABLED: task.organization?.mergeAgentEnabled === true ? "true" : "false",
+MERGE_AGENT_ENABLED: task.organization?.mergeAgentEnabled !== false ? "true" : "false",
 ```
 
 - [ ] **Step 4: Add to agent/src/spawner.ts**
@@ -845,7 +825,7 @@ In `agent/src/spawner.ts`, near the resilience env vars (around line 368):
 ```typescript
 FILE_OVERLAP_GATING_ENABLED: orgConfig.fileOverlapGatingEnabled !== false ? "true" : "false",
 INCREMENTAL_REBASE_ENABLED: orgConfig.incrementalRebaseEnabled !== false ? "true" : "false",
-MERGE_AGENT_ENABLED: orgConfig.mergeAgentEnabled === true ? "true" : "false",
+MERGE_AGENT_ENABLED: orgConfig.mergeAgentEnabled !== false ? "true" : "false",
 ```
 
 Also check the agent's org config type definition and add `fileOverlapGatingEnabled`, `incrementalRebaseEnabled`, `mergeAgentEnabled` fields if missing.
@@ -857,7 +837,7 @@ In `agent/src/docker-spawner.ts`, near the resilience env vars (around line 740)
 ```typescript
 FILE_OVERLAP_GATING_ENABLED: orgConfig.fileOverlapGatingEnabled !== false ? "true" : "false",
 INCREMENTAL_REBASE_ENABLED: orgConfig.incrementalRebaseEnabled !== false ? "true" : "false",
-MERGE_AGENT_ENABLED: orgConfig.mergeAgentEnabled === true ? "true" : "false",
+MERGE_AGENT_ENABLED: orgConfig.mergeAgentEnabled !== false ? "true" : "false",
 ```
 
 - [ ] **Step 6: Add to pipeline-executor.ts**
@@ -867,7 +847,7 @@ In `api/src/services/pipeline-executor.ts`, near the block where `MAX_REVIEW_REV
 ```typescript
 additionalEnv.FILE_OVERLAP_GATING_ENABLED = org.fileOverlapGatingEnabled !== false ? "true" : "false";
 additionalEnv.INCREMENTAL_REBASE_ENABLED = org.incrementalRebaseEnabled !== false ? "true" : "false";
-additionalEnv.MERGE_AGENT_ENABLED = org.mergeAgentEnabled === true ? "true" : "false";
+additionalEnv.MERGE_AGENT_ENABLED = org.mergeAgentEnabled !== false ? "true" : "false";
 ```
 
 - [ ] **Step 7: Add to warm-pool.ts**
@@ -877,7 +857,7 @@ In `api/src/services/warm-pool.ts`, near the block where `MAX_REVIEW_REVISIONS` 
 ```typescript
 FILE_OVERLAP_GATING_ENABLED: credentials.fileOverlapGatingEnabled !== false ? "true" : "false",
 INCREMENTAL_REBASE_ENABLED: credentials.incrementalRebaseEnabled !== false ? "true" : "false",
-MERGE_AGENT_ENABLED: credentials.mergeAgentEnabled === true ? "true" : "false",
+MERGE_AGENT_ENABLED: credentials.mergeAgentEnabled !== false ? "true" : "false",
 ```
 
 Check what type `credentials` uses and ensure the 3 new fields are included in that type.
@@ -924,7 +904,7 @@ In `frontend/src/pages/settings/index.tsx`, in the defaults object (near line 18
 ```typescript
 fileOverlapGatingEnabled: true,
 incrementalRebaseEnabled: true,
-mergeAgentEnabled: false,
+mergeAgentEnabled: true,
 ```
 
 - [ ] **Step 3: Strip ALL hardcoded fallbacks in index.tsx data loading**
@@ -1042,7 +1022,7 @@ In `packages/vscode-workermill/package.json`, in the configuration properties se
 },
 "workermill.mergeAgentEnabled": {
   "type": "boolean",
-  "default": false,
+  "default": true,
   "description": "Use AI agent to resolve rebase conflicts automatically"
 }
 ```

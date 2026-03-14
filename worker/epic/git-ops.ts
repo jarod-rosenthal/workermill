@@ -1476,6 +1476,10 @@ git rm --cached --quiet .env 2>/dev/null || true
       } catch (mergeError) {
         const msg = mergeError instanceof Error ? mergeError.message : String(mergeError);
 
+        // Capture conflicted files BEFORE aborting — status is clean after abort
+        const status = await this.git.status();
+        const conflictedFiles = status.conflicted;
+
         // Conflicts mean this story's code clashes with previously integrated stories.
         // Do NOT auto-resolve — abort and route back for revision so the expert can
         // fix the conflict with full context about what the other stories did.
@@ -1486,9 +1490,8 @@ git rm --cached --quiet .env 2>/dev/null || true
           await this.git.reset(["--hard", `origin/${integrationBranch}`]);
         }
 
-        const status = await this.git.status();
-        const conflictInfo = status.conflicted.length > 0
-          ? ` (conflicting files: ${status.conflicted.join(", ")})`
+        const conflictInfo = conflictedFiles.length > 0
+          ? ` (conflicting files: ${conflictedFiles.join(", ")})`
           : "";
         return { success: false, error: `Merge conflict with integration branch${conflictInfo}: ${msg}` };
       }
@@ -1526,6 +1529,8 @@ git rm --cached --quiet .env 2>/dev/null || true
     } catch {
       // Old branch may not exist on remote
     }
+    await this.git.checkout(this.mainBranch);
+    this.log(`[GitOps] Renamed branch ${oldName} -> ${newName}`);
   }
 
   /**

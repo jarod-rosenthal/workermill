@@ -39,6 +39,20 @@ import {
   resolveApiKey,
 } from "./config.js";
 
+/**
+ * Strip redundant `source $HOME/.local/bin/env &&` prefix from gate commands.
+ * The gate runner already adds ~/.local/bin to PATH.
+ */
+function sanitizeGateCmd(cmd: string): string {
+  return cmd.replace(/^(?:source|\.) +['"]?\$HOME\/\.local\/bin\/env['"]? *&& */i, "");
+}
+function sanitizeGateCommands(
+  gates: Array<{ name: string; trigger?: string; commands: string[] }> | undefined,
+): Array<{ name: string; trigger?: string; commands: string[] }> | undefined {
+  if (!gates) return gates;
+  return gates.map((g) => ({ ...g, commands: g.commands.map(sanitizeGateCmd) }));
+}
+
 export class LocalBackend implements AgentBackend {
   readonly mode = "local" as const;
 
@@ -927,7 +941,7 @@ function rowToBoard(row: any, columnRows: any[]): Board {
     name: row.name,
     description: row.description || undefined,
     qualityGateCommands: row.quality_gate_commands
-      ? JSON.parse(row.quality_gate_commands)
+      ? sanitizeGateCommands(JSON.parse(row.quality_gate_commands))
       : undefined,
     ciWorkflowPath: row.ci_workflow_path || undefined,
     columns: columnRows.map(rowToColumn),

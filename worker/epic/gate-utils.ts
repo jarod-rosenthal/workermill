@@ -8,6 +8,30 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 /**
+ * Strip redundant `source $HOME/.local/bin/env &&` (or `. $HOME/...`) prefix
+ * from gate commands.  The gate runner already adds ~/.local/bin to PATH, so
+ * the source is unnecessary — and breaks when the command runs under /bin/sh
+ * (which doesn't have `source`) or when the env file doesn't exist.
+ *
+ * Applies to individual command strings AND to QualityGateCommand arrays.
+ */
+export function sanitizeGateCommand(cmd: string): string {
+  // Matches: source $HOME/.local/bin/env && | . $HOME/.local/bin/env &&
+  // with optional quoting and whitespace variations
+  return cmd.replace(/^(?:source|\.) +['"]?\$HOME\/\.local\/bin\/env['"]? *&& */i, "");
+}
+
+export function sanitizeGateCommands(
+  gates: Array<{ name: string; trigger?: string; commands: string[] }> | undefined,
+): Array<{ name: string; trigger?: string; commands: string[] }> | undefined {
+  if (!gates) return gates;
+  return gates.map((g) => ({
+    ...g,
+    commands: g.commands.map(sanitizeGateCommand),
+  }));
+}
+
+/**
  * Check if Docker daemon is reachable (socket mounted and responsive).
  * Returns true only if `docker info` succeeds — meaning workers can
  * actually spin up sibling containers. Cached after first call.

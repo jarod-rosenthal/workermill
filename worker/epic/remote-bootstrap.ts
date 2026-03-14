@@ -18,6 +18,7 @@ import { execSync, spawnSync } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync, readdirSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { sanitizeGateCommands } from "./gate-utils.js";
 import axios from "axios";
 import { EpicCoordinator } from "./coordinator.js";
 import { DecisionClient } from "./decision-client.js";
@@ -394,7 +395,7 @@ function loadConfig(repoDir: string, mainBranch: string): EpicConfig {
     qualityGateBypass: process.env.QUALITY_GATE_BYPASS === "true",
     isFoundationCard: process.env.IS_FOUNDATION_CARD === "true",
     qualityGateCommands: process.env.QUALITY_GATE_COMMANDS
-      ? JSON.parse(process.env.QUALITY_GATE_COMMANDS)
+      ? sanitizeGateCommands(JSON.parse(process.env.QUALITY_GATE_COMMANDS))
       : undefined,
     ciWorkflowPath: process.env.CI_WORKFLOW_PATH || undefined,
     maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10),

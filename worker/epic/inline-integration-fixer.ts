@@ -310,6 +310,32 @@ export class InlineIntegrationFixer {
   }
 
   /**
+   * Run quality gates on a specific branch. Used by incremental integration
+   * to validate each story merge independently.
+   */
+  async runGatesOnBranch(
+    branch: string,
+    qualityGateCommands: NonNullable<EpicConfig["qualityGateCommands"]>
+  ): Promise<{ passed: boolean; output: string; failedCommand: string }> {
+    // Checkout the branch
+    try {
+      execSync(`git fetch origin && git checkout ${branch} && git reset --hard origin/${branch}`, {
+        cwd: this.repoPath,
+        encoding: "utf-8",
+        timeout: 120_000,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return { passed: false, output: `Failed to checkout ${branch}: ${msg}`, failedCommand: "git checkout" };
+    }
+
+    // Install dependencies and run gates
+    await this.installSubdirectoryDeps();
+    this.runToolInstaller();
+    return this.runAllGates(qualityGateCommands);
+  }
+
+  /**
    * Run all quality gate commands (not filtered by trigger — full integration check).
    */
   private async runAllGates(

@@ -511,7 +511,7 @@ export async function runQualityVerification(
       metrics.typecheckScore = 0;
       console.log(`[quality-runner] Typecheck: unavailable (command failed with no recognizable output) — excluding from score`);
     } else {
-      metrics.typecheckScore = parsed.passed ? 100 : 0;
+      metrics.typecheckScore = parsed.passed ? 100 : Math.max(0, 100 - metrics.typeErrors * 20);
       console.log(`[quality-runner] Typecheck (${boardTypecheckCmd ? "board gate" : profile.displayName}): ${metrics.typecheckScore}/100 (${metrics.typeErrors} errors)`);
     }
   } else {

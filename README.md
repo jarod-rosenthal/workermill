@@ -21,8 +21,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=7tKQ6vKKUVU">
-    <img src="https://img.youtube.com/vi/7tKQ6vKKUVU/maxresdefault.jpg" alt="Watch WorkerMill in Action" width="100%" />
+  <a href="https://www.youtube.com/watch?v=sa0lug-G-cg">
+    <img src="https://img.youtube.com/vi/sa0lug-G-cg/maxresdefault.jpg" alt="Watch WorkerMill in Action" width="100%" />
   </a>
 </p>
 

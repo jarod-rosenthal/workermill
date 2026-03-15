@@ -1063,7 +1063,7 @@ git commit -m "feat(vscode): add toggles for fileOverlapGating, incrementalRebas
 
 ## Chunk 4: Fix critic approval threshold
 
-The `criticApprovalThreshold` org setting exists in the DB (default: 85), is exposed in the settings UI, and the agent-side code (`plan-validator.ts`) already fetches it from the API via `setCriticApprovalThreshold()`. But the cloud planning workflow ignores it entirely — `critic-agent.ts` uses a hardcoded `const AUTO_APPROVAL_THRESHOLD = 85` and `planning-workflow.ts` never passes the org value through.
+The `criticApprovalThreshold` org setting exists in the DB (default: 85), is exposed in the settings UI, and the agent-side code (`plan-validator.ts`) already fetches it from the API via `setCriticApprovalThreshold()`. But the cloud planning workflow ignores it entirely — `critic-agent.ts` uses a hardcoded `const AUTO_APPROVAL_THRESHOLD = 85` and `planning-workflow.ts` never passes the org value through. Additionally, `BEST_PLAN_FALLBACK_THRESHOLD = 50` (the "good enough" floor for accepting plans with a warning) is hardcoded independently — it should scale with the approval threshold.
 
 ### Task 12: Pass criticApprovalThreshold through generateValidatedPlan
 
@@ -1125,6 +1125,47 @@ logger.warn("Plan below threshold but above fallback minimum — returning with 
   lastScore,
   threshold: criticApprovalThreshold,
 ```
+
+- [ ] **Step 2b: Replace BEST_PLAN_FALLBACK_THRESHOLD with derived value**
+
+The `BEST_PLAN_FALLBACK_THRESHOLD = 50` at line 892 is the "good enough" floor — plans scoring below the approval threshold but above this floor are accepted with a warning. This should be derived from the approval threshold rather than hardcoded independently.
+
+In `api/src/services/critic-agent.ts`, line 892-905:
+
+```typescript
+// BEFORE:
+const BEST_PLAN_FALLBACK_THRESHOLD = 50;
+const lastScore = lastCriticResult?.score || 0;
+
+if (currentPlan && lastScore >= BEST_PLAN_FALLBACK_THRESHOLD) {
+  logger.warn("Plan below threshold but above fallback minimum — returning with warning", {
+    lastScore,
+    threshold: criticApprovalThreshold,
+    fallbackThreshold: BEST_PLAN_FALLBACK_THRESHOLD,
+    iterations: maxAttempts,
+  });
+
+  onProgress?.(
+    `${prefix} Plan below threshold (${lastScore}/100) but above fallback minimum (${BEST_PLAN_FALLBACK_THRESHOLD}). Proceeding with warnings.`,
+
+// AFTER:
+// Fallback floor = ~60% of the approval threshold (e.g. 85 → 50, 70 → 42)
+const fallbackThreshold = Math.round(criticApprovalThreshold * 0.6);
+const lastScore = lastCriticResult?.score || 0;
+
+if (currentPlan && lastScore >= fallbackThreshold) {
+  logger.warn("Plan below threshold but above fallback minimum — returning with warning", {
+    lastScore,
+    threshold: criticApprovalThreshold,
+    fallbackThreshold,
+    iterations: maxAttempts,
+  });
+
+  onProgress?.(
+    `${prefix} Plan below threshold (${lastScore}/100) but above fallback minimum (${fallbackThreshold}). Proceeding with warnings.`,
+```
+
+This way when an org lowers their approval threshold (e.g. to 70), the fallback floor automatically scales down (to 42) instead of staying at a hardcoded 50 that's dangerously close to the threshold.
 
 - [ ] **Step 3: Pass org.criticApprovalThreshold from planning-workflow.ts**
 

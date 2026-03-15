@@ -159,6 +159,16 @@ export function activate(context: vscode.ExtensionContext): void {
         currentFeedTaskId = info.id;
         currentFeedTaskStatus = "planning";
       }
+      // Sticky live diff: arm the session during planning so the eye icon is visible
+      if (liveDiffSticky) {
+        try {
+          LiveDiffManager.ensureOpen(client, { id: info.id, summary: info.summary });
+          log(`[sticky] auto-opened live diff during planning for ${info.id}`);
+        } catch (err) {
+          log(`[sticky] ERROR auto-opening live diff during planning: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
       // Focus feed first, then open terminal last so terminal gets final focus
       vscode.commands.executeCommand("workermill.feedPanel.focus");
       logManager.openLogs(info.id, info.summary);

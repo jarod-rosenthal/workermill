@@ -342,9 +342,8 @@ export default function ShowcaseGallery() {
         {/* Bottom note */}
         <div className="text-center mt-12 mb-12">
           <p className="text-sm text-muted-foreground">
-            Every showcase project powered by{" "}
-            <span className="text-emerald-400 font-semibold">Anthropic</span>.
-            Bring your own Anthropic account — WorkerMill handles the rest.
+            These showcase builds used Anthropic models.
+            WorkerMill supports multiple AI providers — bring your own API keys.
           </p>
         </div>
 

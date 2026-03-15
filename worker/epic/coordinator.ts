@@ -294,8 +294,11 @@ export class EpicCoordinator {
 
   /**
    * Integrate a completed story into the integration branch.
-   * Merges the story branch, runs quality gates, and handles failures.
-   * Returns true if integration succeeded, false if it needs revision.
+   * Merges the story branch and catches merge conflicts early.
+   * Quality gates run once on the fully consolidated branch in checkMissionComplete,
+   * not after each individual merge — partial merges produce false-positive gate failures
+   * (e.g. lint errors in files that later stories fix).
+   * Returns true if merge succeeded, false if it needs revision (merge conflict).
    */
   private async integrateCompletedStory(storyIndex: number): Promise<boolean> {
     const branchName = this.storyBranchNames.get(storyIndex);
@@ -306,7 +309,7 @@ export class EpicCoordinator {
 
     this.postDashboardLog(`Integrating story ${storyIndex} into integration branch...`);
 
-    // 1. Merge story into integration branch
+    // Merge story into integration branch
     const mergeResult = await this.gitOps.mergeStoryIntoIntegration(
       this.integrationBranch,
       branchName,
@@ -316,7 +319,7 @@ export class EpicCoordinator {
     if (!mergeResult.success) {
       this.postDashboardLog(`Story ${storyIndex} merge failed: ${mergeResult.error}`);
 
-      // Route merge failure back to the story as a revision (same as gate failure)
+      // Route merge failure back to the story as a revision
       const revisionReason =
         `Merge into integration branch failed.\n\n` +
         `**Error:** ${mergeResult.error}\n\n` +
@@ -352,104 +355,12 @@ export class EpicCoordinator {
       return false;
     }
 
-    // 2. Run quality gates on integration branch
-    if (!this.config.qualityGateCommands?.length) {
-      // No gates configured — integration passes by default
-      this.integratedStoryIndices.add(storyIndex);
-      this.postDashboardLog(`Story ${storyIndex} integrated (no quality gates configured)`);
-      return true;
-    }
-
-    const integrationFixer = new InlineIntegrationFixer(
-      this.config,
-      this.gitOps.getRepoPath()
-    );
-
-    const gateResult = await integrationFixer.runGatesOnBranch(
-      this.integrationBranch,
-      this.config.qualityGateCommands
-    );
-
-    // Return to main after running gates on integration branch
-    try { await this.gitOps.checkoutMain(); } catch { /* best effort */ }
-
-    if (gateResult.passed) {
-      this.integratedStoryIndices.add(storyIndex);
-      this.postDashboardLog(`Story ${storyIndex} integrated — all gates passing`);
-      return true;
-    }
-
-    // 3. Gates failed after merging this story — this story is the cause
-    this.postDashboardLog(
-      `Integration gates failed after merging story ${storyIndex}: ${gateResult.failedCommand}`
-    );
-
-    // Route failure back to the story as a revision
-    const maxOutputLen = 4 * 1024;
-    const truncatedOutput = gateResult.output.length > maxOutputLen
-      ? gateResult.output.substring(gateResult.output.length - maxOutputLen)
-      : gateResult.output;
-
-    const revisionReason =
-      `Integration gates failed after your story was merged into the integration branch.\n\n` +
-      `**Failed command:** \`${gateResult.failedCommand}\`\n\n` +
-      `**Output:**\n\`\`\`\n${truncatedOutput}\n\`\`\`\n\n` +
-      `Your code broke the build when combined with previously integrated stories. ` +
-      `Fix the integration issue — it is likely a cross-story type mismatch, missing import, or conflicting definition.`;
-
-    // Check revision count BEFORE reverting — if we're going to bypass,
-    // keep the merge on the integration branch so the PR has the code.
-    const revisionCount = this.storyRevisionCounts.get(storyIndex) || 0;
-
-    // Detect unfixable gate errors (e.g. missing directories in gate command)
-    // to avoid burning a useless revision attempt
-    const unfixable = isUnfixableGateError(gateResult.output);
-
-    if (revisionCount >= this.maxPerStoryRevisions || unfixable.unfixable) {
-      const reason = unfixable.unfixable
-        ? `unfixable gate error: ${unfixable.reason}`
-        : `exceeded max revisions`;
-      this.postDashboardLog(`Story ${storyIndex} ${reason} — marking as gate_bypassed (will be flagged for integration fixer)`);
-      // Keep the merge on the integration branch — bypassed stories retain
-      // their code so the PR includes it. The integration fixer or human
-      // reviewer will address the gate failures.
-      this.gateBypassed.add(storyIndex);
-      this.integratedStoryIndices.add(storyIndex);
-      return true;
-    }
-
-    // Only revert the merge when we're going to retry — the story will be
-    // re-executed and re-integrated with fixes.
-    try {
-      await this.gitOps.revertLastMerge(this.integrationBranch);
-    } catch (revertErr) {
-      console.warn(`[Epic] Failed to revert integration merge: ${revertErr instanceof Error ? revertErr.message : revertErr}`);
-    }
-
-    this.storyRevisionCounts.set(storyIndex, revisionCount + 1);
-
-    // Find the ready story and re-queue it for execution with feedback
-    const readyStories = await this.coordination.getReadyStories();
-    const story = readyStories.find(s => s.storyIndex === storyIndex);
-    if (story) {
-      // Remove from completed tracking
-      this.locallyCompletedStoryIndices.delete(storyIndex);
-      this.completedStoryIndices.delete(storyIndex);
-
-      // Set revision feedback for this story
-      if (!this.config.revisionReasons) this.config.revisionReasons = {};
-      this.config.revisionReasons[storyIndex] = revisionReason;
-      this.config.reviewFeedback = `Story ${storyIndex} failed integration gates: ${gateResult.failedCommand}`;
-
-      // Queue for re-execution
-      this.revisionStoriesQueued.push(story);
-      this.postDashboardLog(`Story ${storyIndex} queued for revision (integration failure)`);
-    } else {
-      console.warn(`[Epic] Story ${storyIndex} not found in ready stories for revision — keeping as completed`);
-      this.integratedStoryIndices.add(storyIndex);
-    }
-
-    return false;
+    // Merge succeeded — mark as integrated immediately.
+    // Quality gates run on the fully consolidated branch in checkMissionComplete,
+    // where the integration fixer can address any cross-story issues.
+    this.integratedStoryIndices.add(storyIndex);
+    this.postDashboardLog(`Story ${storyIndex} integrated into integration branch`);
+    return true;
   }
 
   /**
@@ -3442,11 +3353,9 @@ export class EpicCoordinator {
       // Run integration quality gates on consolidated branch before Tech Lead review.
       // This runs for ALL cards including foundation — by this point all stories are
       // complete and the consolidated branch has the full codebase.
-      // SKIP if incremental integration already validated all gates.
-      const allIncrementallyIntegrated = this.integrationBranch &&
-        this.integratedStoryIndices.size === storyCompletions.length;
-
-      if (prUrl && prNumber && (this.config.qualityGateCommands?.length ?? 0) > 0 && !allIncrementallyIntegrated) {
+      // Gates always run here on the fully merged branch; per-story integration
+      // only checks for merge conflicts, not quality gates.
+      if (prUrl && prNumber && (this.config.qualityGateCommands?.length ?? 0) > 0) {
         await this.postProgressUpdate("integration_check", prUrl, prNumber);
         this.postDashboardLog("Running integration quality gates on consolidated branch...");
 
@@ -3478,8 +3387,6 @@ export class EpicCoordinator {
             `⚠️ Integration issues could not be auto-fixed:\n\n${gateResult.summary}\n\nTech Lead will assess.`
           );
         }
-      } else if (allIncrementallyIntegrated) {
-        this.postDashboardLog("Skipping integration gates — all stories validated incrementally");
       }
 
       // Run spec verification — independent QA agent checks acceptance criteria compliance

@@ -759,25 +759,6 @@ async function releaseStaleAgentTasks(): Promise<void> {
 }
 
 /**
- * Sweep stalled board cascades — safety net for event-driven cascade triggers.
- * If a card completion event was lost or processUnblockedCards failed silently,
- * this picks up the slack by re-checking boards with pending cards.
- */
-export async function boardCascadeSweep(): Promise<void> {
-  try {
-    const { sweepStalledBoards } = await import("./board-execution.js");
-    const count = await sweepStalledBoards();
-    if (count > 0) {
-      logger.info("Board cascade sweep unstuck boards", { count });
-    }
-  } catch (error) {
-    logger.error("Error in boardCascadeSweep", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-/**
  * Cleanup loop - runs hourly
  * Cleans up old logs and checkpoints to prevent unbounded growth.
  * Distributed lock ensures only one orchestrator instance runs cleanup per hour.

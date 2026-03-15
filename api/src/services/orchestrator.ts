@@ -13,7 +13,7 @@ import { checkTrialReminders } from "./trial-reminder.js";
 // ensureValidOAuthToken removed — refresh moved to local-epic-spawner.ts pre-spawn
 import { findV2PipelineTasks, runSequentialPipeline } from "./pipeline-executor.js";
 import { maintainAllWarmPools } from "./warm-pool.js";
-import { cleanupLoop, failHungTasks, failOrphanedTasks, boardCascadeSweep } from "./task-cleanup.js";
+import { cleanupLoop, failHungTasks, failOrphanedTasks } from "./task-cleanup.js";
 import { findQueuedTasks, claimTask } from "./task-claimer.js";
 import { findPlanningTasks, processPlanningTask } from "./planning-workflow.js";
 import {
@@ -245,19 +245,6 @@ async function pollLoop(): Promise<void> {
           // Fail tasks with stale heartbeats (hung workers) or no heartbeat at all
           await failHungTasks().catch((error) => {
             logger.error("Error in failHungTasks", {
-              error: error instanceof Error ? error.message : String(error),
-            });
-          });
-        }
-      }
-
-      // Board cascade safety net — catch stalled PRD board cascades
-      // Run every ~1 minute — distributed lock prevents duplicate runs
-      if (state.tasksProcessed % 12 === 0 || state.tasksProcessed === 0) {
-        const wonCascade = await redis.setnx("orchestrator:lock:board-cascade-sweep", "1", 55);
-        if (wonCascade) {
-          await boardCascadeSweep().catch((error) => {
-            logger.error("Error in boardCascadeSweep", {
               error: error instanceof Error ? error.message : String(error),
             });
           });

@@ -379,11 +379,13 @@ export default function Hero() {
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </Link>
               <a
-                href="#how-it-works"
+                href="https://www.youtube.com/watch?v=7tKQ6vKKUVU"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="inline-flex items-center justify-center gap-2 px-8 py-4 text-foreground font-medium rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300"
               >
                 <Play className="w-5 h-5" />
-                See How It Works
+                Watch It Work
               </a>
             </div>
 

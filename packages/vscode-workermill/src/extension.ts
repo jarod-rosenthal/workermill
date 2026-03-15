@@ -172,9 +172,11 @@ export function activate(context: vscode.ExtensionContext): void {
       log(`[sticky] task:started id=${info.id} liveDiffSticky=${liveDiffSticky} activeSessions=${LiveDiffManager.hasActiveSessions()}`);
 
       // Auto-start live diff FIRST — before any other work that might throw
+      // Use ensureOpen (not createOrShow) so we don't toggle OFF a session the
+      // user already started during the planning phase of this same task.
       if (liveDiffSticky) {
         try {
-          LiveDiffManager.createOrShow(client, { id: info.id, summary: info.summary });
+          LiveDiffManager.ensureOpen(client, { id: info.id, summary: info.summary });
           log(`[sticky] auto-opened live diff for ${info.id}, sessions now=${LiveDiffManager.hasActiveSessions()}`);
           const label = info.summary.length > 50 ? `${info.summary.substring(0, 50)}...` : info.summary;
           vscode.window.setStatusBarMessage(`$(eye) Live code view: watching ${label}`, 5000);

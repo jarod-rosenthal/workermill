@@ -144,6 +144,19 @@ export class LiveDiffManager {
     new LiveDiffManager(client, task.id, task.summary);
   }
 
+  /**
+   * Ensure live diff is open for a task — does NOT toggle off if already active.
+   * Used by sticky auto-open on task:started to avoid killing a session the user
+   * already started during the planning phase.
+   */
+  static ensureOpen(
+    client: AgentClient,
+    task: { id: string; summary: string },
+  ): void {
+    if (managers.has(task.id)) return; // already watching — leave it alone
+    new LiveDiffManager(client, task.id, task.summary);
+  }
+
   /** Close the live diff session for a specific task. */
   static closeTask(taskId: string): void {
     const mgr = managers.get(taskId);

@@ -188,7 +188,7 @@ AFFECTED_REASONS: {"2": "Missing CI workflow configuration", "3": "Husky hooks n
 
 ## CI / GitHub Actions Awareness
 
-For GitHub repositories, you MUST check CI status as part of your review. CI failures are blocking — do NOT approve a PR with failing CI checks. If CI is failing due to a workflow file issue (e.g., invalid YAML, misconfigured jobs), that is a code quality problem that must be fixed via revision. If CI is still running, note it in your review but do not wait — the coordinator will poll CI separately.
+CI gate checks run BEFORE your review. The CI status is provided in the review prompt above the task details. If CI failed and could not be auto-fixed, this is noted in the prompt — factor it into your decision. Do NOT approve a PR with failing CI unless the failure is clearly unrelated to the code in this PR. Include CI status in your review body.
 
 ## Review Body Quality
 
@@ -312,7 +312,8 @@ export class InlineReviewer {
     previousFeedback?: string,
     qualityMetrics?: QualityMetrics,
     storyCompletions?: Array<{ storyIndex: number; title: string; filesModified?: string[] }>,
-    storyContext?: { storyIndex: number; title: string; description: string; totalStories: number; targetFiles?: string[] }
+    storyContext?: { storyIndex: number; title: string; description: string; totalStories: number; targetFiles?: string[] },
+    ciStatus?: { passed: boolean; fixed: boolean; log?: string }
   ): Promise<InlineReviewResult> {
     this.allOutput = ""; // Reset output accumulator
     this.storyCompletions = storyCompletions || [];
@@ -326,7 +327,7 @@ export class InlineReviewer {
 
     try {
       // Build the review prompt
-      const prompt = this.buildReviewPrompt(prUrl, prNumber, revisionCount, previousFeedback, qualityMetrics, storyCompletions, storyContext);
+      const prompt = this.buildReviewPrompt(prUrl, prNumber, revisionCount, previousFeedback, qualityMetrics, storyCompletions, storyContext, ciStatus);
 
       // Use manager model from environment (set by API from org settings) or config
       // NOTE: This reviewer uses the Claude Agent SDK (Anthropic only).
@@ -435,7 +436,8 @@ export class InlineReviewer {
     previousFeedback?: string,
     qualityMetrics?: QualityMetrics,
     storyCompletions?: Array<{ storyIndex: number; title: string; filesModified?: string[] }>,
-    storyContext?: { storyIndex: number; title: string; description: string; totalStories: number; targetFiles?: string[] }
+    storyContext?: { storyIndex: number; title: string; description: string; totalStories: number; targetFiles?: string[] },
+    ciStatus?: { passed: boolean; fixed: boolean; log?: string }
   ): string {
     const maxRevisions = this.config.maxReviewRevisions;
     const revisionSection = previousFeedback
@@ -498,6 +500,35 @@ ${!qualityBelowThreshold && !hasSecurityIssues && !(hasTypeErrors && blockOnType
 ---
 
 `;
+    }
+
+    // Build CI status section if available (CI gate runs before Tech Lead review)
+    let ciSection = "";
+    if (ciStatus) {
+      if (ciStatus.passed) {
+        ciSection = `## CI Pipeline Status
+
+| Check | Status |
+|-------|--------|
+| **GitHub Actions** | ${ciStatus.fixed ? '✅ Passing (fixed by CI Fix Agent)' : '✅ Passing'} |
+
+---
+
+`;
+      } else {
+        ciSection = `## CI Pipeline Status
+
+| Check | Status |
+|-------|--------|
+| **GitHub Actions** | ❌ Failing |
+
+${ciStatus.log ? `**CI Failure Details:**\n\`\`\`\n${ciStatus.log.substring(0, 1000)}\n\`\`\`\n` : ''}
+**CI Fix Agent was unable to resolve this issue.** Factor this into your review decision — if the CI failure is caused by code in this PR, request REVISION_NEEDED with specific details about the CI failure.
+
+---
+
+`;
+      }
     }
 
     // Build quality gate commands section — tells the reviewer what commands to run
@@ -612,18 +643,12 @@ ${this.config.jiraRequirements}
    \`\`\`
    For large PRs with many files, read individual files directly instead of loading the full diff.`;
 
-      reviewSubmitInstructions = `4. **Check CI status** (GitHub only — REQUIRED before submitting review):
-   \`\`\`bash
-   gh api repos/${targetRepo}/commits/$(gh pr view ${prNumber} -R ${targetRepo} --json headRefOid -q .headRefOid)/check-runs --jq '.check_runs[] | {name: .name, status: .status, conclusion: .conclusion}'
-   \`\`\`
-   If CI checks have failed, include the failure details in your review. If CI is still running, note that in your review. Do NOT ignore CI failures — they are part of your review scope.
-
-5. **Submit your review to GitHub** (REQUIRED):
+      reviewSubmitInstructions = `4. **Submit your review to GitHub** (REQUIRED):
 
    Your review body MUST be substantive. Include:
    - **Files reviewed**: count and key files examined
    - **Quality gate results**: lint, typecheck, test results you verified (pass/fail with counts)
-   - **CI status**: whether GitHub Actions checks are passing, failing, or pending
+   - **CI status**: reference the CI pipeline status from the prompt above
    - **Key findings**: specific observations about the code (positive or negative)
    - **Decision rationale**: why you are approving or requesting changes
 
@@ -639,7 +664,7 @@ ${this.config.jiraRequirements}
    gh pr review ${prNumber} -R ${targetRepo} --request-changes --body "Your detailed feedback with specific issues"
    \`\`\`
 
-6.`;
+5.`;
     } else if (isBitbucket) {
       // Bitbucket: Use REST API via curl or git diff
       // Environment has: BITBUCKET_EMAIL, SCM_TOKEN for API auth
@@ -709,7 +734,7 @@ Use \`git diff\` commands or Bitbucket API via curl as shown below.`
 
     return `# PR Code Review Task
 
-${revisionSection}${storySummarySection}${jiraSection}${qualitySection}${qualityGateCommandsSection}## Task Details
+${revisionSection}${storySummarySection}${jiraSection}${qualitySection}${ciSection}${qualityGateCommandsSection}## Task Details
 - **Jira Issue**: ${this.config.jiraIssueKey}
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}

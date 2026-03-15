@@ -3256,12 +3256,26 @@ export class EpicCoordinator {
         }
       }
 
+      // Run CI gate BEFORE Tech Lead review so the reviewer sees the full picture.
+      // CI fix agent handles infrastructure issues (broken workflow YAML, missing config)
+      // before the tech_lead evaluates code quality.
+      let ciStatus: { passed: boolean; fixed: boolean; log?: string } | undefined;
+      if (prUrl && prNumber && this.config.maxFixRetries > 0) {
+        this.postDashboardLog("Running CI gate checks...");
+        ciStatus = await this.runCIGate(prNumber);
+        if (ciStatus.passed) {
+          this.postDashboardLog(ciStatus.fixed ? "CI gate passed after fix" : "CI gate passed");
+        } else {
+          this.postDashboardLog(`CI gate failed — Tech Lead will assess`);
+        }
+      }
+
       // If PR created and review enabled, run inline Tech Lead review
       if (prUrl && prNumber && this.config.reviewEnabled) {
         // Update status so dashboard progress bar advances to "Tech Lead Review"
         await this.postProgressUpdate("reviewing", prUrl, prNumber);
         this.postDashboardLog("Launching Tech Lead review...");
-        const reviewResult = await this.runInlineReview(prUrl, prNumber, storyCompletions, summaryParts, capturedQualityMetrics);
+        const reviewResult = await this.runInlineReview(prUrl, prNumber, storyCompletions, summaryParts, capturedQualityMetrics, ciStatus);
         // If review triggered a revision loop, don't complete yet
         if (reviewResult === "continue") {
           return;
@@ -3441,6 +3455,62 @@ export class EpicCoordinator {
   }
 
   /**
+   * Run CI gate: poll + fix loop without merging.
+   * Returns CI status so the tech_lead can review with full context.
+   */
+  private async runCIGate(prNumber: number): Promise<{ passed: boolean; fixed: boolean; log?: string }> {
+    const scmProvider = process.env.SCM_PROVIDER || "github";
+    if (scmProvider !== "github") {
+      await this.postLog(`[CI Gate] SCM provider "${scmProvider}" — skipping CI gate`);
+      return { passed: true, fixed: false };
+    }
+
+    let ciResult = await this.pollPrCI(prNumber);
+
+    if (ciResult.passed) {
+      return { passed: true, fixed: false };
+    }
+
+    // CI failed — try fix loop
+    const maxRetries = this.config.maxFixRetries;
+    this.ciFixRetryCount = 0;
+
+    while (this.ciFixRetryCount < maxRetries) {
+      this.ciFixRetryCount++;
+      await this.postLog(
+        `[CI Gate] CI failed on PR #${prNumber} — launching CI Fix Agent (attempt ${this.ciFixRetryCount}/${maxRetries})`
+      );
+
+      const fixer = new InlineCIFixer(this.config, this.gitOps.getRepoPath());
+      const fixResult = await fixer.fix(prNumber, ciResult.log || "No detailed failure log available");
+
+      if (fixResult.decision === "unfixable") {
+        await this.postLog(`[CI Gate] CI Fix Agent reports issue is unfixable: ${fixResult.summary}`);
+        return { passed: false, fixed: false, log: ciResult.log };
+      }
+
+      if (fixResult.success) {
+        await this.postLog(`[CI Gate] CI Fix Agent applied fix: ${fixResult.summary} — waiting for CI re-run...`);
+        await new Promise(r => setTimeout(r, 10000));
+
+        ciResult = await this.pollPrCI(prNumber);
+        if (ciResult.passed) {
+          await this.postLog(`[CI Gate] CI now passing after fix`);
+          return { passed: true, fixed: true };
+        }
+      } else {
+        await this.postLog(`[CI Gate] CI Fix Agent failed: ${fixResult.summary}`);
+        return { passed: false, fixed: false, log: ciResult.log };
+      }
+    }
+
+    await this.postLog(
+      `❌ CI still failing after ${this.ciFixRetryCount} fix attempt(s)`
+    );
+    return { passed: false, fixed: false, log: ciResult.log };
+  }
+
+  /**
    * Run inline Tech Lead review with revision loop.
    * Returns "continue" if a revision was triggered (stories need to re-run).
    * Returns "done" if review completed (approved, rejected, or escalated).
@@ -3450,7 +3520,8 @@ export class EpicCoordinator {
     prNumber: number,
     storyCompletions: Array<{ storyIndex: number; title: string; filesModified: string[] }>,
     summaryParts: string[],
-    qualityMetrics?: QualityMetrics
+    qualityMetrics?: QualityMetrics,
+    ciStatus?: { passed: boolean; fixed: boolean; log?: string }
   ): Promise<"continue" | "done"> {
     console.log(`[Epic] Running inline Tech Lead review (attempt ${this.revisionCount + 1}/${this.maxRevisions})`);
     this.postDashboardLog("Starting Tech Lead review...");
@@ -3483,7 +3554,9 @@ export class EpicCoordinator {
         this.revisionCount,
         this.lastReviewFeedback,
         qualityMetrics,
-        storyCompletions  // Pass story completions for selective revision support
+        storyCompletions,  // Pass story completions for selective revision support
+        undefined,         // storyContext (not used for epic-level review)
+        ciStatus           // CI gate results
       );
     } else {
       // Use AI SDK executor for non-Anthropic providers (Google, OpenAI, Ollama)
@@ -3493,7 +3566,8 @@ export class EpicCoordinator {
         prNumber,
         managerProvider,
         managerModel,
-        qualityMetrics
+        qualityMetrics,
+        ciStatus
       );
     }
 
@@ -3644,19 +3718,21 @@ export class EpicCoordinator {
         ).catch(() => ({ data: [] })),
       ]);
 
-      // Check if agent already posted a review comment in the last 10 minutes
+      // Check if agent already posted a substantive review in the last 10 minutes.
+      // Short/generic reviews (under 200 chars) don't count — we'll post the full feedback.
       const cutoff = Date.now() - 10 * 60 * 1000;
-      const hasRecentComment = (commentsRes.data as Array<{ created_at: string; body: string }>).some(
+      const hasSubstantiveComment = (commentsRes.data as Array<{ created_at: string; body: string }>).some(
         (c) =>
           new Date(c.created_at).getTime() > cutoff &&
+          c.body.length > 200 &&
           /code review|review complete|approved|revision needed|request.changes/i.test(c.body)
       );
-      const hasRecentReview = (reviewsRes.data as Array<{ submitted_at: string }>).some(
-        (r) => new Date(r.submitted_at).getTime() > cutoff
+      const hasSubstantiveReview = (reviewsRes.data as Array<{ submitted_at: string; body: string }>).some(
+        (r) => new Date(r.submitted_at).getTime() > cutoff && (r.body || "").length > 200
       );
 
-      if (hasRecentComment || hasRecentReview) {
-        console.log("[Epic] Review already posted to PR by agent — skipping programmatic post");
+      if (hasSubstantiveComment || hasSubstantiveReview) {
+        console.log("[Epic] Substantive review already posted to PR by agent — skipping programmatic post");
         return;
       }
 
@@ -3706,10 +3782,11 @@ export class EpicCoordinator {
     prNumber: number,
     provider: string,
     model: string,
-    qualityMetrics?: QualityMetrics
+    qualityMetrics?: QualityMetrics,
+    ciStatus?: { passed: boolean; fixed: boolean; log?: string }
   ): Promise<InlineReviewResult> {
-    // Build review prompt with quality metrics
-    const prompt = this.buildAiSdkReviewPrompt(prUrl, prNumber, qualityMetrics);
+    // Build review prompt with quality metrics and CI status
+    const prompt = this.buildAiSdkReviewPrompt(prUrl, prNumber, qualityMetrics, ciStatus);
 
     // Write prompt to temp file
     const promptFile = `/tmp/epic-review-prompt-${Date.now()}.txt`;
@@ -3910,7 +3987,7 @@ export class EpicCoordinator {
   /**
    * Build review prompt for AI SDK executor.
    */
-  private buildAiSdkReviewPrompt(prUrl: string, prNumber: number, qualityMetrics?: QualityMetrics): string {
+  private buildAiSdkReviewPrompt(prUrl: string, prNumber: number, qualityMetrics?: QualityMetrics, ciStatus?: { passed: boolean; fixed: boolean; log?: string }): string {
     const revisionSection = this.lastReviewFeedback
       ? `## Previous Review Feedback (Revision ${this.revisionCount}/${this.maxRevisions})
 This is a revision attempt. The previous code was reviewed and these issues were identified:
@@ -3967,6 +4044,35 @@ ${qualityBelowThreshold ? `**⚠️ QUALITY SCORE BELOW ${minQualityScore}% - Co
       ? "\n   **NOTE: Review the quality metrics above. Only request REVISION_NEEDED for metrics marked as ❌ Blocking per organization settings. Metrics marked ⚠️ Non-blocking or ℹ️ Informational should be noted in feedback but are NOT grounds for revision.**"
       : "";
 
+    // Build CI status section if available
+    let ciSection = "";
+    if (ciStatus) {
+      if (ciStatus.passed) {
+        ciSection = `## CI Pipeline Status
+
+| Check | Status |
+|-------|--------|
+| **GitHub Actions** | ${ciStatus.fixed ? '✅ Passing (fixed by CI Fix Agent)' : '✅ Passing'} |
+
+---
+
+`;
+      } else {
+        ciSection = `## CI Pipeline Status
+
+| Check | Status |
+|-------|--------|
+| **GitHub Actions** | ❌ Failing |
+
+${ciStatus.log ? `**CI Failure Details:**\n\`\`\`\n${ciStatus.log.substring(0, 1000)}\n\`\`\`\n` : ''}
+**CI Fix Agent was unable to resolve this issue.** Factor this into your review decision — if the CI failure is caused by code in this PR, request REVISION_NEEDED.
+
+---
+
+`;
+      }
+    }
+
     // Build SCM-aware instructions
     const scmProvider = process.env.SCM_PROVIDER || "github";
     const isGitHub = scmProvider === "github";
@@ -3992,14 +4098,16 @@ ${qualityBelowThreshold ? `**⚠️ QUALITY SCORE BELOW ${minQualityScore}% - Co
 
       reviewSubmitInstructions = `4. **Submit your review to GitHub** (REQUIRED):
 
+   Your review body MUST be substantive — include files reviewed, quality gate results, CI status, key findings, and decision rationale. Do NOT write generic one-liners.
+
    **If APPROVE:**
    \`\`\`bash
-   gh pr review ${prNumber} -R ${targetRepo} --approve --body "Your approval message"
+   gh pr review ${prNumber} -R ${targetRepo} --approve --body "Your substantive review"
    \`\`\`
 
    **If REVISION_NEEDED or REJECT:**
    \`\`\`bash
-   gh pr review ${prNumber} -R ${targetRepo} --request-changes --body "Your detailed feedback"
+   gh pr review ${prNumber} -R ${targetRepo} --request-changes --body "Your detailed feedback with specific issues"
    \`\`\`
 
 5.`;
@@ -4060,7 +4168,7 @@ Use \`git diff\` commands or Bitbucket API via curl as shown below.`
 
     return `# PR Code Review Task
 
-${revisionSection}${qualitySection}## Task Details
+${revisionSection}${qualitySection}${ciSection}## Task Details
 - **Jira Issue**: ${this.config.jiraIssueKey}
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}

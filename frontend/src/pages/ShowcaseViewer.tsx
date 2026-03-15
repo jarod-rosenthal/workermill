@@ -198,9 +198,9 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     description:
       "Production-grade inventory management system with React 19 dashboard and FastAPI backend. JWT + API key authentication, full-text search, atomic stock transfers, audit logging, rate limiting, 174 tests, CI pipeline, and Swagger/ReDoc documentation. React dashboard with charts, data tables, and CRUD dialogs. 5 epics, all deployed. Live on Railway.",
     stack: "FastAPI + SQLAlchemy 2 + React 19 + Neon PostgreSQL",
-    storyCount: 33,
-    cost: "$42",
-    duration: "~222 min",
+    storyCount: 38,
+    cost: "$123",
+    duration: "~297 min",
     linesOfCode: "20,200",
     repoUrl: "https://github.com/workermill-examples/shipapi",
     liveUrl: "https://shipapi.workermill.com",

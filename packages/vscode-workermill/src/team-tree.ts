@@ -28,6 +28,11 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
   private issueLoadError: string | null = null;
   agentConfigured = false;
 
+  /** Debounce timer — coalesces rapid-fire events into a single refresh */
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Guard against concurrent refresh() calls racing each other */
+  private refreshInFlight = false;
+
   constructor(private client: AgentClient) {
     // Listen for task state changes
     client.on("connected", () => {
@@ -40,25 +45,37 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
       this._onDidChangeTreeData.fire(undefined);
     });
 
-    client.on("snapshot", (tasks: TaskInfo[]) => {
-      this.tasks = tasks;
-      this._onDidChangeTreeData.fire(undefined);
-    });
+    // Snapshot from agent cleanup timer only contains in-memory tasks —
+    // fetch the full merged list instead of blindly replacing.
+    client.on("snapshot", () => this.scheduleRefresh());
 
-    client.on("task:started", () => this.refresh());
-    client.on("task:completed", () => this.refresh());
-    client.on("task:failed", () => this.refresh());
-    client.on("task:planning", () => this.refresh());
-    client.on("task:plan_done", () => this.refresh());
-    client.on("state:changed", () => this.refresh());
+    client.on("task:started", () => this.scheduleRefresh());
+    client.on("task:completed", () => this.scheduleRefresh());
+    client.on("task:failed", () => this.scheduleRefresh());
+    client.on("task:planning", () => this.scheduleRefresh());
+    client.on("task:plan_done", () => this.scheduleRefresh());
+    client.on("state:changed", () => this.scheduleRefresh());
+  }
+
+  /** Debounced refresh — coalesces events within 300ms into a single fetch */
+  private scheduleRefresh(): void {
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      this.refresh();
+    }, 300);
   }
 
   async refresh(): Promise<void> {
     if (!this.client.isConnected()) return;
+    // Skip if a refresh is already in flight — it will pick up latest state
+    if (this.refreshInFlight) return;
+    this.refreshInFlight = true;
     try {
       this.tasks = await this.client.getTasks();
     } catch { /* ignore */ }
     await this.refreshIssues();
+    this.refreshInFlight = false;
     this._onDidChangeTreeData.fire(undefined);
   }
 

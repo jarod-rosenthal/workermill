@@ -367,33 +367,46 @@ async function main(): Promise<void> {
       );
     }
 
-    // Rebase onto latest main before pushing
-    const rebaseResult = rebaseOnMain(repoPath, baseBranch);
+    // Rebase onto latest main before pushing.
+    // Skip rebase for integration branches built with merge commits — rebase
+    // linearizes the history and drops merge commits, which can result in
+    // "No commits between main and <branch>" when the branch was built via
+    // sequential merge → revert cycles during incremental integration.
+    const skipRebase = process.env.SKIP_REBASE === "true";
 
-    if (!rebaseResult.success) {
-      if (rebaseResult.hadConflicts) {
-        console.error(`::result::rebase_conflict`);
-        console.error(`::conflict_files::${rebaseResult.conflictFiles?.join(",") || "unknown"}`);
-        throw new Error(
-          `Rebase conflict detected in files: ${rebaseResult.conflictFiles?.join(", ") || "unknown"}. ` +
-          `Another worker's changes conflict with this branch. Task will be retried.`
-        );
-      }
-      throw new Error("Rebase failed for unknown reason");
-    }
-
-    output.wasRebased = !rebaseResult.wasAlreadyUpToDate;
-    if (output.wasRebased) {
-      console.error(`[create_pr] Branch was rebased onto latest ${baseBranch}`);
+    if (skipRebase) {
+      console.error(`[create_pr] Skipping rebase (SKIP_REBASE=true — integration branch with merge commits)`);
+      output.wasRebased = false;
+      // Push without rebase — branch already has the correct merge topology
+      exec(`git push -u origin ${currentBranch} --force-with-lease`, repoPath);
     } else {
-      console.error(`[create_pr] Branch was already up to date with ${baseBranch}`);
-    }
+      const rebaseResult = rebaseOnMain(repoPath, baseBranch);
 
-    // Push the branch (force push needed after rebase)
-    const pushCmd = output.wasRebased
-      ? `git push -u origin ${currentBranch} --force-with-lease`
-      : `git push -u origin ${currentBranch}`;
-    exec(pushCmd, repoPath);
+      if (!rebaseResult.success) {
+        if (rebaseResult.hadConflicts) {
+          console.error(`::result::rebase_conflict`);
+          console.error(`::conflict_files::${rebaseResult.conflictFiles?.join(",") || "unknown"}`);
+          throw new Error(
+            `Rebase conflict detected in files: ${rebaseResult.conflictFiles?.join(", ") || "unknown"}. ` +
+            `Another worker's changes conflict with this branch. Task will be retried.`
+          );
+        }
+        throw new Error("Rebase failed for unknown reason");
+      }
+
+      output.wasRebased = !rebaseResult.wasAlreadyUpToDate;
+      if (output.wasRebased) {
+        console.error(`[create_pr] Branch was rebased onto latest ${baseBranch}`);
+      } else {
+        console.error(`[create_pr] Branch was already up to date with ${baseBranch}`);
+      }
+
+      // Push the branch (force push needed after rebase)
+      const pushCmd = output.wasRebased
+        ? `git push -u origin ${currentBranch} --force-with-lease`
+        : `git push -u origin ${currentBranch}`;
+      exec(pushCmd, repoPath);
+    }
 
     // Build PR title and body
     const prTitle = `${ticketKey}: ${ticketSummary}`;

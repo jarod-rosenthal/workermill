@@ -54,6 +54,37 @@ const QUESTION_INELIGIBLE_PERSONAS = new Set([
 ]);
 
 /**
+ * Detect gate errors that no revision can fix (e.g. missing directories
+ * referenced in the gate command, configuration errors).
+ * Returns { unfixable: true, reason } when the gate output contains
+ * patterns that indicate a structural problem rather than a code problem.
+ */
+function isUnfixableGateError(output: string): { unfixable: boolean; reason: string } {
+  // E902: ruff/flake8 "No such file or directory" — gate command references
+  // a path that doesn't exist in the repo (e.g. `ruff check src/ tests/`
+  // when tests/ hasn't been created yet)
+  const e902Match = output.match(/E902\s+No such file or directory.*?-->\s*(\S+)/);
+  if (e902Match) {
+    return { unfixable: true, reason: `gate command references non-existent path: ${e902Match[1]}` };
+  }
+
+  // Generic "No such file or directory" from shell commands trying to enter
+  // directories that don't exist
+  const noSuchDir = output.match(/(?:cd|ls|cat|pushd):\s*(.+?):\s*No such file or directory/);
+  if (noSuchDir) {
+    return { unfixable: true, reason: `gate command references non-existent path: ${noSuchDir[1]}` };
+  }
+
+  // Command not found — tool isn't installed in the container
+  const cmdNotFound = output.match(/(\S+):\s*(?:command not found|not found)/);
+  if (cmdNotFound) {
+    return { unfixable: true, reason: `required tool not installed: ${cmdNotFound[1]}` };
+  }
+
+  return { unfixable: false, reason: "" };
+}
+
+/**
  * Epic coordinator managing multi-agent collaboration.
  */
 export class EpicCoordinator {
@@ -366,20 +397,33 @@ export class EpicCoordinator {
       `Your code broke the build when combined with previously integrated stories. ` +
       `Fix the integration issue — it is likely a cross-story type mismatch, missing import, or conflicting definition.`;
 
-    // Revert the merge on the integration branch
+    // Check revision count BEFORE reverting — if we're going to bypass,
+    // keep the merge on the integration branch so the PR has the code.
+    const revisionCount = this.storyRevisionCounts.get(storyIndex) || 0;
+
+    // Detect unfixable gate errors (e.g. missing directories in gate command)
+    // to avoid burning a useless revision attempt
+    const unfixable = isUnfixableGateError(gateResult.output);
+
+    if (revisionCount >= this.maxPerStoryRevisions || unfixable.unfixable) {
+      const reason = unfixable.unfixable
+        ? `unfixable gate error: ${unfixable.reason}`
+        : `exceeded max revisions`;
+      this.postDashboardLog(`Story ${storyIndex} ${reason} — marking as gate_bypassed (will be flagged for integration fixer)`);
+      // Keep the merge on the integration branch — bypassed stories retain
+      // their code so the PR includes it. The integration fixer or human
+      // reviewer will address the gate failures.
+      this.gateBypassed.add(storyIndex);
+      this.integratedStoryIndices.add(storyIndex);
+      return true;
+    }
+
+    // Only revert the merge when we're going to retry — the story will be
+    // re-executed and re-integrated with fixes.
     try {
       await this.gitOps.revertLastMerge(this.integrationBranch);
     } catch (revertErr) {
       console.warn(`[Epic] Failed to revert integration merge: ${revertErr instanceof Error ? revertErr.message : revertErr}`);
-    }
-
-    // Queue revision for this story
-    const revisionCount = this.storyRevisionCounts.get(storyIndex) || 0;
-    if (revisionCount >= this.maxPerStoryRevisions) {
-      this.postDashboardLog(`Story ${storyIndex} exceeded max revisions — marking as gate_bypassed (will be flagged for integration fixer)`);
-      this.gateBypassed.add(storyIndex);
-      this.integratedStoryIndices.add(storyIndex);
-      return true;
     }
 
     this.storyRevisionCounts.set(storyIndex, revisionCount + 1);
@@ -3183,14 +3227,21 @@ export class EpicCoordinator {
           // Build story description for PR body
           const storyListForPr = storyCompletions.map((s) => `- **${s.title}**`).join("\n");
 
-          prUrl = await this.gitOps.createPRFromBranch(
-            prBranchName,
-            this.config.jiraIssueKey,
-            epicTitle,
-            storyListForPr,
-            storyListForPr,
-            undefined  // quality metrics computed later
-          );
+          // Skip rebase for integration branches — rebase linearizes merge
+          // commits and can produce "No commits between main and <branch>"
+          process.env.SKIP_REBASE = "true";
+          try {
+            prUrl = await this.gitOps.createPRFromBranch(
+              prBranchName,
+              this.config.jiraIssueKey,
+              epicTitle,
+              storyListForPr,
+              storyListForPr,
+              undefined  // quality metrics computed later
+            );
+          } finally {
+            delete process.env.SKIP_REBASE;
+          }
         } else {
           // Legacy path: consolidate all branches at once
           // Create PR without quality metrics — they haven't been computed yet.
@@ -3543,6 +3594,11 @@ export class EpicCoordinator {
         // This is a valid success case - feature may already be implemented or requirements already met
         taskStatus = "completed";
         jiraComment = `✅ **Analysis completed** — ${completions.length} stories analyzed.\n\n${storyList}\n\n*No code changes were required. The feature may already be implemented or the requirements are already met.*`;
+      } else if (this.config.jiraIssueKey) {
+        // PR creation was attempted but failed (e.g. empty branch after gate bypasses)
+        taskStatus = "failed";
+        errorMessage = "PR creation failed — story branches have been pushed but could not be consolidated into a PR";
+        jiraComment = `❌ **PR creation failed.**\n\n${storyList}\n\n*Stories completed and branches pushed, but the consolidated PR could not be created. Story branches may need manual consolidation.*`;
       } else {
         // No Jira key, so no PR was attempted — standalone mode or direct task
         taskStatus = "completed";

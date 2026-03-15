@@ -1538,6 +1538,13 @@ git rm --cached --quiet .env 2>/dev/null || true
    * Rename a branch (local + remote).
    */
   async renameBranch(oldName: string, newName: string): Promise<void> {
+    // No-op if names are identical — deleting the old remote when old === new
+    // would destroy the branch (and auto-close any PR targeting it).
+    if (oldName === newName) {
+      this.log(`[GitOps] renameBranch: old === new (${oldName}) — skipping`);
+      return;
+    }
+
     await this.git.fetch(["origin"]);
     await this.git.checkout(oldName);
     await this.git.branch(["-m", oldName, newName]);

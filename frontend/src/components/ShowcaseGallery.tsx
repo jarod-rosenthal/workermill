@@ -54,22 +54,11 @@ const showcaseProjects: ShowcaseProject[] = [
     category: "developer-tools",
     icon: <Zap className="w-4 h-4" />,
   },
-  {
-    id: "calmill",
-    name: "CalMill",
-    tagline: "Open scheduling platform with Google Calendar sync.",
-    description:
-      "Full-stack scheduling platform with event types, timezone-aware booking, team round-robin scheduling, Google Calendar integration, email notifications, and public booking pages. 8 epics, 100% success rate. Deployed to Vercel.",
-    stack: "Next.js 16 + Prisma 7 + TailwindCSS 4 + Neon PostgreSQL",
-    storyCount: 8,
-    cost: "$301",
-    duration: "~7 hrs",
-    linesOfCode: "41,000",
-    repoUrl: "https://github.com/workermill-examples/calmill",
-    liveUrl: "https://calmill.workermill.com",
-    category: "scheduling",
-    icon: <Calendar className="w-4 h-4" />,
-  },
+  // CalMill temporarily hidden — currently rebuilding
+  // {
+  //   id: "calmill",
+  //   ...
+  // },
   {
     id: "teamboard",
     name: "TeamBoard",
@@ -179,8 +168,8 @@ export default function ShowcaseGallery() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            303K lines of production code across 6 projects, deployed to AWS,
-            Vercel, and Railway. Every project built from tickets — planned,
+            81K lines of production code across 4 projects, deployed to
+            Vercel and Railway. Every project built from tickets — planned,
             coded, tested, reviewed, and deployed autonomously.
           </p>
         </div>
@@ -189,33 +178,33 @@ export default function ShowcaseGallery() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-12">
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
-              <TrendingUp className="w-4 h-4 text-emerald-400" />
-              <span className="text-2xl font-bold text-white">96%</span>
+              <FileCode className="w-4 h-4 text-amber-400" />
+              <span className="text-2xl font-bold text-white">81K</span>
             </div>
             <p className="text-xs text-slate-400">
-              Showcase task success rate
+              Lines of production code
             </p>
           </div>
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <CheckCircle className="w-4 h-4 text-emerald-400" />
-              <span className="text-2xl font-bold text-white">93%</span>
+              <span className="text-2xl font-bold text-white">97</span>
             </div>
-            <p className="text-xs text-slate-400">First-attempt success</p>
+            <p className="text-xs text-slate-400">Stories completed</p>
           </div>
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <GitPullRequest className="w-4 h-4 text-teal-400" />
-              <span className="text-2xl font-bold text-white">57</span>
+              <span className="text-2xl font-bold text-white">16</span>
             </div>
             <p className="text-xs text-slate-400">PRs shipped across builds</p>
           </div>
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
-              <FileCode className="w-4 h-4 text-amber-400" />
-              <span className="text-2xl font-bold text-white">~4,700</span>
+              <TrendingUp className="w-4 h-4 text-emerald-400" />
+              <span className="text-2xl font-bold text-white">~2,800</span>
             </div>
-            <p className="text-xs text-slate-400">Reviewed lines/hr</p>
+            <p className="text-xs text-slate-400">Lines shipped per hour</p>
           </div>
         </div>
 
@@ -368,11 +357,11 @@ export default function ShowcaseGallery() {
                 Real metrics, not cherry-picked
               </h3>
               <p className="text-sm text-slate-400 leading-relaxed">
-                Autonomous coding is hard. Across the 57 showcase tasks above, 2
-                failed — a planning agent that returned malformed JSON and a
-                manager review that caught inaccuracies the worker
-                couldn&apos;t fix in its allowed retries. That&apos;s a 96%
-                success rate, with zero manual code intervention.
+                Autonomous coding is hard. These builds required revision
+                cycles, escalations, and manual spec corrections along the
+                way. The numbers above reflect what shipped — not a
+                cherry-picked highlight reel. Every build log, cost, and
+                review comment is visible in the project detail pages.
               </p>
             </div>
           </div>

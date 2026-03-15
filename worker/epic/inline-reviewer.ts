@@ -186,6 +186,14 @@ AFFECTED_REASONS: {"2": "Missing CI workflow configuration", "3": "Husky hooks n
 - **Bias toward approval**: If the code works, passes quality gates, and implements the requirements, approve it. Cosmetic feedback belongs in comments, not in revision requests. Every revision cycle costs significant time and tokens — only block when there's a real functional or security issue.
 - A score of 7+ should almost always be an approval
 
+## CI / GitHub Actions Awareness
+
+For GitHub repositories, you MUST check CI status as part of your review. CI failures are blocking — do NOT approve a PR with failing CI checks. If CI is failing due to a workflow file issue (e.g., invalid YAML, misconfigured jobs), that is a code quality problem that must be fixed via revision. If CI is still running, note it in your review but do not wait — the coordinator will poll CI separately.
+
+## Review Body Quality
+
+Your GitHub PR review body represents WorkerMill's engineering standards. Every review MUST be substantive and demonstrate that you actually examined the code. Include specific file names, test counts, quality gate results, and CI status. Generic reviews like "Looks good" or "All quality gates pass" are unacceptable — they tell the reader nothing and make the platform look like a rubber stamp.
+
 ## Communication Style
 
 Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!", or similar. Start with the substance — what you found, your assessment, or what needs to change. Be concise and informative.
@@ -604,19 +612,34 @@ ${this.config.jiraRequirements}
    \`\`\`
    For large PRs with many files, read individual files directly instead of loading the full diff.`;
 
-      reviewSubmitInstructions = `4. **Submit your review to GitHub** (REQUIRED):
+      reviewSubmitInstructions = `4. **Check CI status** (GitHub only — REQUIRED before submitting review):
+   \`\`\`bash
+   gh api repos/${targetRepo}/commits/$(gh pr view ${prNumber} -R ${targetRepo} --json headRefOid -q .headRefOid)/check-runs --jq '.check_runs[] | {name: .name, status: .status, conclusion: .conclusion}'
+   \`\`\`
+   If CI checks have failed, include the failure details in your review. If CI is still running, note that in your review. Do NOT ignore CI failures — they are part of your review scope.
+
+5. **Submit your review to GitHub** (REQUIRED):
+
+   Your review body MUST be substantive. Include:
+   - **Files reviewed**: count and key files examined
+   - **Quality gate results**: lint, typecheck, test results you verified (pass/fail with counts)
+   - **CI status**: whether GitHub Actions checks are passing, failing, or pending
+   - **Key findings**: specific observations about the code (positive or negative)
+   - **Decision rationale**: why you are approving or requesting changes
+
+   Do NOT write generic one-liners like "All quality gates pass" or "Looks good." Every review must demonstrate that you actually examined the code.
 
    **If APPROVE:**
    \`\`\`bash
-   gh pr review ${prNumber} -R ${targetRepo} --approve --body "Your approval message"
+   gh pr review ${prNumber} -R ${targetRepo} --approve --body "Your substantive review"
    \`\`\`
 
    **If REVISION_NEEDED or REJECT:**
    \`\`\`bash
-   gh pr review ${prNumber} -R ${targetRepo} --request-changes --body "Your detailed feedback"
+   gh pr review ${prNumber} -R ${targetRepo} --request-changes --body "Your detailed feedback with specific issues"
    \`\`\`
 
-5.`;
+6.`;
     } else if (isBitbucket) {
       // Bitbucket: Use REST API via curl or git diff
       // Environment has: BITBUCKET_EMAIL, SCM_TOKEN for API auth
@@ -650,6 +673,8 @@ ${this.config.jiraRequirements}
       reviewSubmitInstructions = `4. **(Bitbucket: Review submission is handled automatically based on your decision markers)**
 
    Your REVIEW_DECISION and FEEDBACK markers will be used to update the PR status.
+
+   Your review feedback MUST be substantive — include specific files reviewed, quality gate results, and key findings. Generic one-liners are unacceptable.
 
 5.`;
     } else {

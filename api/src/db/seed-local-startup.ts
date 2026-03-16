@@ -65,13 +65,12 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
     blockerWaitTimeoutMinutes: 20,
   };
 
-  // Find or create default org — always apply defaults on startup
+  // Find or create default org — seed only on first run
   let org = await orgRepo.findOne({ where: { name: LOCAL_ORG_NAME } });
   if (org) {
-    // Org exists — update to latest defaults
-    Object.assign(org, DEFAULTS);
-    await orgRepo.save(org);
-    logger.info("Local mode: updated org settings to latest defaults");
+    // Org already exists — don't overwrite user's settings
+    const adminUser = await userRepo.findOne({ where: { role: "admin" } });
+    if (adminUser) return;
   } else {
     org = orgRepo.create({ name: LOCAL_ORG_NAME, ...DEFAULTS });
     await orgRepo.save(org);

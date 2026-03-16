@@ -828,7 +828,10 @@ deploy_frontend() {
     fi
 
     echo -e "${YELLOW}Syncing to S3...${NC}"
-    aws s3 sync dist/ s3://$S3_BUCKET/ --delete --exclude "agent/*" --exclude "install.sh" --exclude "install.ps1" --region $AWS_REGION
+    # Hashed assets (js/css) — cache aggressively, filename changes on each build
+    aws s3 sync dist/assets/ s3://$S3_BUCKET/assets/ --delete --cache-control "public, max-age=31536000, immutable" --region $AWS_REGION
+    # Everything else (index.html, images) — always revalidate so new deploys take effect immediately
+    aws s3 sync dist/ s3://$S3_BUCKET/ --delete --exclude "agent/*" --exclude "install.sh" --exclude "install.ps1" --exclude "assets/*" --cache-control "no-cache, no-store, must-revalidate" --region $AWS_REGION
 
     echo -e "${YELLOW}Invalidating CloudFront cache...${NC}"
     INVALIDATION_ID=$(aws cloudfront create-invalidation \

@@ -830,8 +830,6 @@ class LocalEpicSpawner {
       MAX_PARALLEL_EXPERTS: String(task.organization?.maxParallelExperts),
       ORG_GUIDELINES: task.organization?.aiGuidelines || "",
       CODEBASE_INDEXING_ENABLED: task.organization?.codebaseIndexingEnabled === true ? "true" : "false",
-      // Feature flag: unified AIClient for multi-provider Epic mode
-      USE_UNIFIED_CLIENT: task.organization?.featureFlags?.unifiedAiClient === true ? "true" : "false",
 
       // Quality gate thresholds (from org settings)
       QUALITY_THRESHOLDS: JSON.stringify({

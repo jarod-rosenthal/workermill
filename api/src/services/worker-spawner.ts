@@ -513,10 +513,6 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
       if (org.aiGuidelines) {
         additionalEnv.ORG_GUIDELINES = org.aiGuidelines;
       }
-      // Feature flag: unified AIClient for multi-provider Epic mode
-      if (org.featureFlags?.unifiedAiClient) {
-        additionalEnv.USE_UNIFIED_CLIENT = "true";
-      }
     }
 
     // Try to claim a warm container first (eliminates cold-start latency)

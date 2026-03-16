@@ -93,11 +93,10 @@ function loadConfig(): EpicConfig {
     maxPerStoryRevisions: parseInt(process.env.MAX_PER_STORY_REVISIONS, 10),
     // Intent Engineering — org guidelines from settings
     orgGuidelines: process.env.ORG_GUIDELINES || undefined,
-    // Unified AIClient — enables multi-provider routing through AIClient interface
-    // When true, executeAgent() uses AIClient.execute() instead of direct runAgent()
-    // Anthropic still goes through runAgent() via AnthropicAgentClient (no behavior change)
-    // Non-Anthropic providers (openai, google, ollama) go through AISdkClient
-    useUnifiedClient: process.env.USE_UNIFIED_CLIENT === "true",
+    // Unified AIClient — routes through AIClient interface for multi-provider support
+    // Anthropic: AnthropicAgentClient → runAgent() → Claude CLI (same as before)
+    // Non-Anthropic: AISdkClient → ai-sdk-executor (enables Epic mode with any provider)
+    useUnifiedClient: true,
     // Quality gate thresholds from organization settings
     qualityThresholds: process.env.QUALITY_THRESHOLDS
       ? JSON.parse(process.env.QUALITY_THRESHOLDS)
@@ -153,7 +152,7 @@ async function main(): Promise<void> {
     console.log("  - CI workflow path: " + (config.ciWorkflowPath || "NONE"));
     console.log("  - Quality gate bypass: " + (config.qualityGateBypass ? "YES" : "NO"));
     console.log("  - Foundation card: " + (config.isFoundationCard ? "YES (skip integration fixer)" : "NO"));
-    console.log("Unified Client: " + (config.useUnifiedClient ? "ENABLED (multi-provider AIClient routing)" : "disabled (Claude CLI direct)"));
+    console.log("Unified Client: ENABLED (multi-provider AIClient routing)");
 
     const decisionClient = new DecisionClient({
       apiBaseUrl: config.apiBaseUrl,

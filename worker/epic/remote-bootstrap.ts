@@ -406,7 +406,7 @@ function loadConfig(repoDir: string, mainBranch: string): EpicConfig {
     qualityThresholds: process.env.QUALITY_THRESHOLDS
       ? JSON.parse(process.env.QUALITY_THRESHOLDS)
       : undefined,
-    useUnifiedClient: process.env.USE_UNIFIED_CLIENT === "true",
+    useUnifiedClient: true,
   };
 }
 

@@ -82,6 +82,11 @@
         "title": "WorkerMill: Approve Plan"
       },
       {
+        "command": "workermill.newTask",
+        "title": "WorkerMill: New Task",
+        "icon": "$(add)"
+      },
+      {
         "command": "workermill.refreshTasks",
         "title": "WorkerMill: Refresh Tasks",
         "icon": "$(refresh)"
@@ -144,18 +149,6 @@
         "title": "WorkerMill: Sign In with GitHub"
       },
       {
-        "command": "workermill.signInWithEmail",
-        "title": "WorkerMill: Sign In with Email"
-      },
-      {
-        "command": "workermill.signInWithGoogle",
-        "title": "WorkerMill: Sign In with Google"
-      },
-      {
-        "command": "workermill.manualSetup",
-        "title": "WorkerMill: Manual Setup"
-      },
-      {
         "command": "workermill.setupStandalone",
         "title": "WorkerMill: Setup Standalone Mode"
       },
@@ -201,6 +194,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "workermill.newTask",
+          "when": "view == workermill.teamPanel && workermill.agentConnected",
+          "group": "navigation@0"
+        },
         {
           "command": "workermill.filterBacklog",
           "when": "view == workermill.teamPanel && workermill.agentConfigured",
@@ -422,7 +420,7 @@
     "viewsWelcome": [
       {
         "view": "workermill.teamPanel",
-        "contents": "WorkerMill assigns Jira and GitHub issues to AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Get Started — Standalone Mode (BYOK)](command:workermill.setupStandalone)\nRun with your own API keys. No account required.\n\n---\n\nHave a WorkerMill Cloud account?\n[Sign in with GitHub](command:workermill.signUpWithGitHub) · [Email](command:workermill.signInWithEmail) · [Google](command:workermill.signInWithGoogle) · [API key](command:workermill.manualSetup)",
+        "contents": "AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Get Started — Standalone Mode (BYOK)](command:workermill.setupStandalone)\nBring your own API keys. Runs entirely on your machine.\n\n---\n\nHave a WorkerMill Cloud account?\n[Sign in with GitHub](command:workermill.signUpWithGitHub)",
         "when": "!workermill.agentConfigured"
       },
       {

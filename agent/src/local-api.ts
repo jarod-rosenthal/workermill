@@ -51,6 +51,7 @@ export interface LocalTaskInfo {
   startedAt: string;
   cost?: number;
   jiraIssueKey?: string;
+  prUrl?: string;
 }
 
 export interface AgentState {
@@ -474,7 +475,14 @@ agentEvents.on("task:failed", (info) => broadcastSSE("tasks", "task:failed", inf
 agentEvents.on("task:rate_limited", (info) => broadcastSSE("tasks", "task:rate_limited", info));
 agentEvents.on("task:planning", (info) => broadcastSSE("tasks", "task:planning", info));
 agentEvents.on("task:plan_done", (info) => broadcastSSE("tasks", "task:plan_done", info));
-agentEvents.on("task:log", (info) => broadcastSSE(`logs:${info.id}`, "log", info));
+agentEvents.on("task:log", (info) => {
+  broadcastSSE(`logs:${info.id}`, "log", info);
+  // Forward stage-relevant log lines to the tasks channel so the sidebar
+  // can show progress stages without subscribing to per-task log streams
+  if (/\[CI Gate\]|\[validation\]|\[coordinator\]|quality.gate|cloning|pulling.*image|tech.lead|self.review/i.test(info.line)) {
+    broadcastSSE("tasks", "task:log", { id: info.id, line: info.line });
+  }
+});
 agentEvents.on("state:changed", () => broadcastSSE("tasks", "state:changed", {}));
 
 // Forward local event bus (orchestrator/worker) to SSE clients
@@ -568,7 +576,7 @@ async function getAllVisibleTasks(): Promise<LocalTaskInfo[]> {
     try {
       const db = getLocalDb();
       const rows = db.prepare(
-        "SELECT id, summary, description, status, github_repo, worker_model, jira_issue_key, created_at FROM tasks WHERE status IN ('queued','executing','completed','failed','cancelled','escalated','pr_approved') ORDER BY created_at DESC LIMIT 50"
+        "SELECT id, summary, description, status, github_repo, worker_model, jira_issue_key, github_pr_url, created_at FROM tasks WHERE status IN ('queued','executing','completed','failed','cancelled','escalated','pr_approved') ORDER BY created_at DESC LIMIT 50"
       ).all() as Array<Record<string, unknown>>;
       for (const row of rows) {
         const id = String(row.id);
@@ -582,6 +590,7 @@ async function getAllVisibleTasks(): Promise<LocalTaskInfo[]> {
           model: row.worker_model ? String(row.worker_model) : undefined,
           repo: row.github_repo ? String(row.github_repo) : undefined,
           jiraIssueKey: row.jira_issue_key ? String(row.jira_issue_key) : undefined,
+          prUrl: row.github_pr_url ? String(row.github_pr_url) : undefined,
           startedAt: row.created_at ? String(row.created_at) : new Date().toISOString(),
         });
       }

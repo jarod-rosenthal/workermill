@@ -29,6 +29,7 @@ import {
   stopAgentProcess,
   waitForAgentReady,
   promptInstallGit,
+  promptInstallClaudeCli,
   readAgentStartupError,
   writeApiKeyToKeychain,
   stripApiKeyFromConfig,
@@ -453,6 +454,52 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     ),
+
+    // New task — free-form description, no ticket key required
+    vscode.commands.registerCommand("workermill.newTask", async () => {
+      if (!client.isConnected()) {
+        vscode.window.showErrorMessage(
+          "WorkerMill agent is not running. Start with: workermill-agent start",
+        );
+        return;
+      }
+
+      const summary = await vscode.window.showInputBox({
+        prompt: "What do you want to build or fix?",
+        placeHolder: "e.g. Add dark mode toggle to the settings page",
+        ignoreFocusOut: true,
+      });
+      if (!summary) return;
+
+      // Auto-detect repo from workspace
+      let selectedRepo: string | undefined;
+      try {
+        const repoInfo = await client.getRepos();
+        if (repoInfo.repos.length === 1) {
+          selectedRepo = repoInfo.repos[0];
+        } else if (repoInfo.repos.length > 1) {
+          selectedRepo = await vscode.window.showQuickPick(repoInfo.repos, {
+            placeHolder: "Which repository?",
+          });
+          if (!selectedRepo) return;
+        } else if (repoInfo.defaultRepo) {
+          selectedRepo = repoInfo.defaultRepo;
+        }
+      } catch {
+        // No repos configured — proceed without, worker will use default
+      }
+
+      try {
+        await client.runFileAsTask(summary, summary, selectedRepo);
+        vscode.window.showInformationMessage(`WorkerMill: Task submitted`);
+        treeProvider.refresh();
+        vscode.commands.executeCommand("workermill.teamPanel.focus");
+      } catch (err) {
+        vscode.window.showErrorMessage(
+          `Failed to create task: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }),
 
     // Search and run via quick pick (command palette)
     vscode.commands.registerCommand("workermill.runTask", async () => {
@@ -1170,38 +1217,63 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("workermill.setupStandalone", async () => {
+      // Step 1: Install agent binary if needed (inline, no bail-out)
       if (!isAgentInstalled()) {
-        const choice = await vscode.window.showInformationMessage(
-          "WorkerMill agent binary is required. Install it first?",
-          "Install",
-        );
-        if (choice === "Install") {
-          vscode.commands.executeCommand("workermill.installAgent");
+        log("Agent binary not installed — installing...");
+        const installed = await installAgent();
+        if (!installed) {
+          vscode.window.showErrorMessage("Agent installation failed. Try again or install manually.");
+          return;
         }
+      }
+
+      // Step 2: Ensure prerequisites (Git, Claude CLI)
+      const hasGit = await promptInstallGit(log);
+      if (!hasGit) {
+        vscode.window.showWarningMessage("Git is required for WorkerMill. Install Git and try again.");
         return;
       }
-      // Launch standalone init in a terminal
-      const terminal = vscode.window.createTerminal("WorkerMill Standalone Setup");
+      const hasClaude = await promptInstallClaudeCli(log);
+      if (!hasClaude) {
+        vscode.window.showWarningMessage("Claude Code CLI is required for AI workers. Install it and try again.");
+        return;
+      }
+
+      // Step 3: Run standalone init in a terminal
+      const binary = getAgentBinaryPath();
+      const terminal = vscode.window.createTerminal("WorkerMill Setup");
       terminal.show();
-      terminal.sendText("workermill-agent init --standalone");
-      // Listen for config file creation
+      terminal.sendText(`"${binary}" init --standalone`);
+
+      // Step 4: Poll for config file creation, then auto-start
       const configPath = path.join(os.homedir(), ".workermill", "config.json");
-      const checkInterval = setInterval(() => {
+      const startTime = Date.now();
+      const checkInterval = setInterval(async () => {
         if (fs.existsSync(configPath)) {
+          // Verify it's a standalone config (not leftover cloud config)
+          try {
+            const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+            if (config.mode !== "standalone" && !config.roles) return;
+          } catch { return; }
+
           clearInterval(checkInterval);
           treeProvider.agentConfigured = true;
           vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
-          vscode.window.showInformationMessage(
-            "Standalone mode configured! Starting agent...",
-          );
+          vscode.window.showInformationMessage("Setup complete! Starting agent...");
           startAgentProcess(log);
-          waitForAgentReady(log, 10_000).then((port) => {
-            if (port) client.connect();
-          });
+          const port = await waitForAgentReady(log, 15_000);
+          if (port) {
+            client.connect();
+          } else {
+            const err = readAgentStartupError();
+            vscode.window.showErrorMessage(
+              `Agent failed to start${err ? ": " + err : ". Check ~/.workermill/agent.log for details."}`,
+            );
+          }
         }
+        // Stop checking after 5 minutes
+        if (Date.now() - startTime > 300_000) clearInterval(checkInterval);
       }, 2000);
-      // Stop checking after 5 minutes
-      setTimeout(() => clearInterval(checkInterval), 300_000);
     }),
 
     vscode.commands.registerCommand("workermill.configureScm", async () => {

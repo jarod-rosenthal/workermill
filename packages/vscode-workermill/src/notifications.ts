@@ -21,11 +21,15 @@ export class NotificationManager {
     try {
       const task = await this.client.getTask(info.id);
       const short = task.summary.length > 40 ? task.summary.substring(0, 40) + "..." : task.summary;
+      const prUrl = task.prUrl || task.githubPrUrl;
+      const actions = prUrl ? ["Open PR", "Show Logs"] : ["Show Logs"];
       vscode.window.showInformationMessage(
-        `WorkerMill: "${short}" completed`,
-        "Show Logs",
+        `WorkerMill: "${short}" completed${prUrl ? " — PR ready" : ""}`,
+        ...actions,
       ).then((action) => {
-        if (action === "Show Logs") {
+        if (action === "Open PR" && prUrl) {
+          vscode.env.openExternal(vscode.Uri.parse(prUrl));
+        } else if (action === "Show Logs") {
           vscode.commands.executeCommand("workermill.showTaskLogs");
         }
       });
@@ -41,11 +45,19 @@ export class NotificationManager {
         `WorkerMill: "${short}" failed${errorDetail}`,
         "Show Logs",
         "Retry",
-      ).then((action) => {
+      ).then(async (action) => {
         if (action === "Show Logs") {
           vscode.commands.executeCommand("workermill.showTaskLogs");
+        } else if (action === "Retry") {
+          try {
+            await this.client.retryTask(info.id);
+            vscode.window.showInformationMessage(`WorkerMill: Retrying "${short}"`);
+          } catch (err) {
+            vscode.window.showErrorMessage(
+              `Retry failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
         }
-        // Retry would need task recreation via cloud API
       });
     } catch { /* ignore */ }
   }

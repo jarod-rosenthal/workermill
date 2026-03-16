@@ -60,6 +60,8 @@ export interface TaskInfo {
   cost?: number;
   errorMessage?: string;
   jiraIssueKey?: string;
+  prUrl?: string;
+  githubPrUrl?: string;
 }
 
 export interface LogLine {

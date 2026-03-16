@@ -33,6 +33,9 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
   /** Guard against concurrent refresh() calls racing each other */
   private refreshInFlight = false;
 
+  /** Progress stage per task — parsed from log lines for richer status display */
+  private taskStages = new Map<string, string>();
+
   constructor(private client: AgentClient) {
     // Listen for task state changes
     client.on("connected", () => {
@@ -49,12 +52,59 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
     // fetch the full merged list instead of blindly replacing.
     client.on("snapshot", () => this.scheduleRefresh());
 
-    client.on("task:started", () => this.scheduleRefresh());
-    client.on("task:completed", () => this.scheduleRefresh());
-    client.on("task:failed", () => this.scheduleRefresh());
-    client.on("task:planning", () => this.scheduleRefresh());
+    client.on("task:started", (info: { id: string }) => {
+      this.taskStages.set(info.id, "starting");
+      this.scheduleRefresh();
+    });
+    client.on("task:completed", (info: { id: string }) => {
+      this.taskStages.delete(info.id);
+      this.scheduleRefresh();
+    });
+    client.on("task:failed", (info: { id: string }) => {
+      this.taskStages.delete(info.id);
+      this.scheduleRefresh();
+    });
+    client.on("task:planning", (info: { id: string }) => {
+      this.taskStages.set(info.id, "planning");
+      this.scheduleRefresh();
+    });
     client.on("task:plan_done", () => this.scheduleRefresh());
     client.on("state:changed", () => this.scheduleRefresh());
+
+    // Parse log lines for progress stage keywords
+    client.on("task:log", (info: { id: string; line: string }) => {
+      const stage = this.parseStage(info.line);
+      if (stage) {
+        this.taskStages.set(info.id, stage);
+        this.scheduleRefresh();
+      }
+    });
+  }
+
+  /** Extract a human-readable stage from a worker log line */
+  private parseStage(line: string): string | null {
+    // Order matters — match most specific first
+    if (/\[CI Gate\].*polling/i.test(line)) return "CI polling";
+    if (/\[CI Gate\].*passed/i.test(line)) return "CI passed";
+    if (/\[CI Gate\].*failed/i.test(line)) return "CI failed";
+    if (/\[CI Gate\].*fix/i.test(line)) return "CI fix";
+    if (/\[CI Gate\]/i.test(line)) return "CI check";
+    if (/\[validation\].*PR/i.test(line)) return "creating PR";
+    if (/\[validation\].*push/i.test(line)) return "pushing";
+    if (/\[validation\]/i.test(line)) return "validating";
+    if (/quality.gate|pre-commit|running.*lint|running.*test|running.*typecheck|running.*build/i.test(line)) return "quality gate";
+    if (/tech.lead.*review|manager.*review/i.test(line)) return "review";
+    if (/self.review/i.test(line)) return "self-review";
+    if (/cloning|clone.*repo/i.test(line)) return "cloning repo";
+    if (/\[coordinator\].*spawn/i.test(line)) return "spawning expert";
+    if (/expert.*start|story.*start|executing.*story/i.test(line)) return "coding";
+    if (/pulling.*image|docker.*pull/i.test(line)) return "pulling image";
+    return null;
+  }
+
+  /** Get the display stage for a task, falling back to status */
+  getTaskStage(taskId: string): string | undefined {
+    return this.taskStages.get(taskId);
   }
 
   /** Debounced refresh — coalesces events within 300ms into a single fetch */
@@ -127,10 +177,10 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
           undefined,
           "$(rocket)",
           vscode.TreeItemCollapsibleState.Expanded,
-          active.map((t) => new TaskTreeItem(t)),
+          active.map((t) => new TaskTreeItem(t, this.taskStages.get(t.id))),
         ));
       } else {
-        items.push(new InfoTreeItem("No active tasks", "Run a ticket from Backlog below", "$(inbox)"));
+        items.push(new InfoTreeItem("No active tasks", "Click + to create your first task", "$(inbox)"));
       }
 
       // Backlog (Jira issues)
@@ -228,14 +278,17 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
 }
 
 class TaskTreeItem extends vscode.TreeItem {
-  constructor(public readonly task: TaskInfo) {
+  constructor(public readonly task: TaskInfo, stage?: string) {
     const fullLabel = task.jiraIssueKey ? `${task.jiraIssueKey}: ${task.summary}` : task.summary;
     const label = fullLabel.length > 55 ? fullLabel.substring(0, 55) + "..." : fullLabel;
     super(label, vscode.TreeItemCollapsibleState.Collapsed);
 
     this.id = task.id;
-    this.description = task.status;
-    this.tooltip = `${task.summary}\nStatus: ${task.status}\nPersona: ${task.persona || "default"}\nStarted: ${task.startedAt}`;
+    // Show progress stage for active tasks, raw status for terminal states
+    this.description = (task.status === "running" || task.status === "planning") && stage
+      ? stage
+      : task.status;
+    this.tooltip = `${task.summary}\nStatus: ${task.status}${stage ? `\nStage: ${stage}` : ""}\nPersona: ${task.persona || "default"}\nStarted: ${task.startedAt}${task.errorMessage ? `\nError: ${task.errorMessage}` : ""}`;
 
     switch (task.status) {
       case "running":

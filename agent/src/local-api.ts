@@ -20,11 +20,69 @@ import { triggerPoll } from "./poller.js";
 import { detectGpu } from "./gpu-detector.js";
 import { getOllamaStatus, generateEmbeddings, ensureOllamaRunning, pullModel, installOllama, findOllamaPath } from "./ollama-manager.js";
 import { indexRepositoryLocally } from "./local-indexer.js";
-import { getActiveBackend, getBackend } from "./backends/selector.js";
-import { processQueuedTask, planAndProcessTask, stopWorkerTask } from "./backends/local/orchestrator.js";
+// NOTE: Do NOT statically import from backends/selector, backends/local/orchestrator,
+// backends/local/db, or backends/local/event-bus — they transitively load better-sqlite3
+// which fails if the native module wasn't compiled for this platform.
+// These are loaded dynamically via lazyStandalone() below.
 import { loadStandaloneConfig, getRoleConfig, isSelfHostedMode } from "./backends/local/config.js";
-import { getDb as getLocalDb, generateId } from "./backends/local/db.js";
-import { onStreamEvent } from "./backends/local/event-bus.js";
+
+// Lazy-loaded standalone modules (SQLite-dependent).
+// Populated by initStandaloneModules() called from startLocalApi().
+let _getActiveBackend: typeof import("./backends/selector.js").getActiveBackend;
+let _getBackend: typeof import("./backends/selector.js").getBackend;
+let _getLocalDb: typeof import("./backends/local/db.js").getDb;
+let _generateId: typeof import("./backends/local/db.js").generateId;
+let _processQueuedTask: typeof import("./backends/local/orchestrator.js").processQueuedTask;
+let _planAndProcessTask: typeof import("./backends/local/orchestrator.js").planAndProcessTask;
+let _stopWorkerTask: typeof import("./backends/local/orchestrator.js").stopWorkerTask;
+
+async function initStandaloneModules(): Promise<void> {
+  const [selector, orchestrator, db, eventBus] = await Promise.all([
+    import("./backends/selector.js"),
+    import("./backends/local/orchestrator.js"),
+    import("./backends/local/db.js"),
+    import("./backends/local/event-bus.js"),
+  ]);
+  _getActiveBackend = selector.getActiveBackend;
+  _getBackend = selector.getBackend;
+  _getLocalDb = db.getDb;
+  _generateId = db.generateId;
+  _processQueuedTask = orchestrator.processQueuedTask;
+  _planAndProcessTask = orchestrator.planAndProcessTask;
+  _stopWorkerTask = orchestrator.stopWorkerTask;
+
+  // Forward local event bus → SSE clients (only standalone mode)
+  eventBus.onStreamEvent((event: { ch: string; t: string; p: unknown }) => {
+    broadcastSSE(event.ch, event.t, event.p);
+    if (event.ch === "org:local:tasks" && event.t === "task_state") {
+      const p = event.p as { taskId: string; status: string; exitCode?: number; error?: string };
+      const ldb = _getLocalDb();
+      const task = ldb.prepare("SELECT id, summary, description, github_repo FROM tasks WHERE id = ?").get(p.taskId) as
+        { id: string; summary: string; description?: string; github_repo?: string } | undefined;
+      if (task) {
+        const info = { id: task.id, summary: task.summary, description: task.description, repo: task.github_repo };
+        if (p.status === "executing") {
+          broadcastSSE("tasks", "task:started", info);
+        } else if (p.status === "completed") {
+          broadcastSSE("tasks", "task:completed", { id: task.id });
+        } else if (p.status === "failed") {
+          broadcastSSE("tasks", "task:failed", { id: task.id, error: p.error });
+        } else if (p.status === "planning") {
+          broadcastSSE("tasks", "task:planning", info);
+        }
+      }
+    }
+  });
+}
+
+// Convenience aliases used throughout the route handlers
+function getActiveBackend() { return _getActiveBackend(); }
+function getBackend() { return _getBackend(); }
+function getLocalDb() { return _getLocalDb(); }
+function generateId() { return _generateId(); }
+function processQueuedTask(taskId: string) { return _processQueuedTask(taskId); }
+function planAndProcessTask(taskId: string) { return _planAndProcessTask(taskId); }
+function stopWorkerTask(taskId: string) { return _stopWorkerTask(taskId); }
 import {
   searchJiraIssues,
   listJiraProjects,
@@ -485,33 +543,9 @@ agentEvents.on("task:log", (info) => {
 });
 agentEvents.on("state:changed", () => broadcastSSE("tasks", "state:changed", {}));
 
-// Forward local event bus (orchestrator/worker) to SSE clients
-// Only active in standalone mode — self-hosted mode uses the real API's event system
-if (!isSelfHostedMode()) onStreamEvent((event) => {
-  broadcastSSE(event.ch, event.t, event.p);
-  // Bridge local orchestrator task_state events → agentEvents-style lifecycle events
-  // so VS Code extension features (sticky live diff, feed auto-switch, notifications) work
-  if (event.ch === "org:local:tasks" && event.t === "task_state") {
-    const p = event.p as { taskId: string; status: string; exitCode?: number; error?: string };
-    // Look up task details from SQLite for the event payload
-    const db = getLocalDb();
-    const task = db.prepare("SELECT id, summary, description, github_repo FROM tasks WHERE id = ?").get(p.taskId) as
-      { id: string; summary: string; description?: string; github_repo?: string } | undefined;
-    if (task) {
-      const info = { id: task.id, summary: task.summary, description: task.description, repo: task.github_repo };
-      if (p.status === "executing") {
-        broadcastSSE("tasks", "task:started", info);
-      } else if (p.status === "completed") {
-        broadcastSSE("tasks", "task:completed", { id: task.id });
-      } else if (p.status === "failed") {
-        broadcastSSE("tasks", "task:failed", { id: task.id, error: p.error });
-      } else if (p.status === "planning") {
-        broadcastSSE("tasks", "task:planning", info);
-      }
-    }
-    broadcastSSE("tasks", "state:changed", {});
-  }
-});
+// NOTE: Local event bus forwarding (onStreamEvent) is now initialized lazily
+// in initStandaloneModules() — called from startLocalApi() in standalone mode only.
+// This avoids loading better-sqlite3 at import time.
 
 // ── Cloud Task Merging ─────────────────────────────────
 
@@ -4649,9 +4683,15 @@ let server: ReturnType<typeof createServer> | null = null;
  * Start the local API server.
  * Finds an available port on localhost and writes it to ~/.workermill/agent.port.
  */
-export function startLocalApi(config: AgentConfig): Promise<number> {
+export async function startLocalApi(config: AgentConfig): Promise<number> {
   agentConfig = config;
   startTime = Date.now();
+
+  // Load SQLite-dependent modules only in standalone mode.
+  // Self-hosted and cloud modes skip this — they use the real API for data.
+  if (!isSelfHostedMode()) {
+    await initStandaloneModules();
+  }
 
   // Set up cloud proxy using the agent's existing axios instance.
   // Extract response data from axios errors so callers get the real API error message.

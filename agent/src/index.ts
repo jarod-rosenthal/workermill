@@ -18,8 +18,9 @@ import { selfUpdate, restartAgent } from "./updater.js";
 import { startLocalApi, stopLocalApi } from "./local-api.js";
 import { detectGpu } from "./gpu-detector.js";
 import { ensureOllamaRunning, pullModel, stopOllama, findOllamaPath, installOllama } from "./ollama-manager.js";
-import { getBackend, resetBackend } from "./backends/selector.js";
-import { initOrchestrator, shutdownOrchestrator } from "./backends/local/orchestrator.js";
+// NOTE: Do NOT statically import from backends/selector or backends/local/orchestrator
+// here — they transitively load better-sqlite3 which fails if the native module
+// wasn't compiled for this platform. Import them dynamically only in standalone mode.
 import { isCloudMode, isSelfHostedMode, loadStandaloneConfig, resolveApiKey, getRoleConfig } from "./backends/local/config.js";
 import { startCompose, stopCompose, SELF_HOSTED_API_URL } from "./compose-manager.js";
 import { bootstrapSelfHostedCredentials } from "./selfhosted-bootstrap.js";
@@ -108,6 +109,11 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
   }
 
   if (standaloneMode && !selfHosted) {
+    // Dynamic imports — these transitively load better-sqlite3 (native module).
+    // Only load when actually entering standalone mode.
+    const { getBackend, resetBackend } = await import("./backends/selector.js");
+    const { initOrchestrator, shutdownOrchestrator } = await import("./backends/local/orchestrator.js");
+
     console.log();
     console.log(chalk.bold.cyan("  WorkerMill Agent (Standalone)"));
     console.log(chalk.dim("  ─────────────────────────────────────"));

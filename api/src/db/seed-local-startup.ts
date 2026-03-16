@@ -40,8 +40,41 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
       name: LOCAL_ORG_NAME,
       plan: "enterprise",
       scmProvider: "github",
-      maxConcurrentWorkers: 8,
+      maxConcurrentWorkers: 1,
+      // Models — match workermill-examples production defaults
       defaultWorkerModel: "claude-sonnet-4-6",
+      managerModelId: "claude-opus-4-6",
+      planningAgentModel: "claude-opus-4-6",
+      primaryProvider: "anthropic",
+      planningAgentProvider: "anthropic",
+      managerProvider: "anthropic",
+      // Capacity
+      maxParallelExperts: 14,
+      ralphMaxStories: 10,
+      maxPerStoryRevisions: 0,
+      maxReviewRevisions: 4,
+      maxFixRetries: 5,
+      maxTargetFiles: 6,
+      // Planning
+      criticApprovalThreshold: 90,
+      planningMode: "simplified",
+      prdPlanningMode: "strict",
+      taskPlanningMode: "simplified",
+      // Quality gates
+      qualityGateEnabled: true,
+      blockOnTypeErrors: true,
+      blockOnTestFailures: true,
+      blockOnLintErrors: true,
+      blockOnE2EFailures: true,
+      autoFixEnabled: true,
+      autoFixMaxIterations: 3,
+      // Behavior
+      selfReviewEnabled: false,
+      pushAfterCommit: true,
+      gracefulShutdownEnabled: true,
+      blockerAutoRetryEnabled: true,
+      blockerMaxAutoRetries: 3,
+      blockerWaitTimeoutMinutes: 20,
     });
     await orgRepo.save(org);
     logger.info("Created local organization", { orgId: org.id });

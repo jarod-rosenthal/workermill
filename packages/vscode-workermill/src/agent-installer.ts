@@ -655,10 +655,35 @@ function isAgentAlive(log?: (msg: string) => void): boolean {
   return false;
 }
 
-export function startAgentProcess(log?: (msg: string) => void): void {
+export function startAgentProcess(log?: (msg: string) => void, runtime?: "wsl" | "windows"): void {
   // Prevent concurrent calls from multiple activation paths within this process
   if (startInFlight) {
     log?.("Start already in-flight — skipping");
+    return;
+  }
+
+  // WSL mode: spawn the agent inside WSL via wsl.exe
+  if (runtime === "wsl") {
+    if (isAgentAlive(log)) {
+      log?.("Agent already running — skipping start");
+      return;
+    }
+    startInFlight = true;
+    try {
+      const child = spawn("wsl.exe", ["-e", "bash", "-lc", "~/.workermill/bin/workermill-agent start"], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      child.on("error", (err) => {
+        log?.(`WSL spawn error: ${err.message}`);
+      });
+      child.unref();
+      log?.(`Agent spawned in WSL (child PID ${child.pid})`);
+    } catch (err) {
+      log?.(`WSL spawn failed: ${err instanceof Error ? err.message : String(err)}`);
+      startInFlight = false;
+    }
     return;
   }
 

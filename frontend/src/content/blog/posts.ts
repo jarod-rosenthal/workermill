@@ -13,6 +13,28 @@ const authors: Record<string, Author> = {
 
 export const blogPosts: BlogPost[] = [
   {
+    slug: "ai-coding-governance-gap",
+    title:
+      "The Governance Layer Your AI Coding Agents Are Missing",
+    excerpt:
+      "AI agents are shipping real code now. But there's a gap between 'AI can write code' and 'AI can safely ship code in a regulated environment.' Most of the industry is focused on the first part. Almost nobody is working on the second.",
+    date: "2026-03-16",
+    category: "ai-automation",
+    author: authors.jarod,
+    thumbnail:
+      "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=1200&h=600&fit=crop&q=80",
+    featured: true,
+    readingTime: 9,
+    tags: [
+      "governance",
+      "quality-gates",
+      "compliance",
+      "cost-controls",
+      "enterprise",
+      "ai-agents",
+    ],
+  },
+  {
     slug: "why-open-source-ai-coding-infrastructure",
     title:
       "Why Open Source Is the Only Sane Bet in AI Coding Infrastructure",
@@ -23,7 +45,6 @@ export const blogPosts: BlogPost[] = [
     author: authors.jarod,
     thumbnail:
       "https://images.unsplash.com/photo-1618401471353-b98afee0b2eb?w=1200&h=600&fit=crop&q=80",
-    featured: true,
     readingTime: 12,
     tags: [
       "open-source",

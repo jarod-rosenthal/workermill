@@ -14,6 +14,189 @@ import "./article.css";
 
 // Content for each blog post
 const postContent: Record<string, React.ReactNode> = {
+  "ai-coding-governance-gap": (
+    <>
+      <p className="article-lead">
+        AI coding agents are shipping real code now. Not suggestions in a
+        sidebar — actual commits, actual pull requests, actual production
+        deployments. If you're reading this, you probably already know that.
+        You're likely past the "is this real?" phase and into the{" "}
+        <strong>
+          "how do we make this work at scale without breaking things?"
+        </strong>{" "}
+        phase.
+      </p>
+
+      <p>
+        That's the phase where it gets uncomfortable.
+      </p>
+
+      <h2>The Problem Nobody Wants to Own</h2>
+      <p>
+        Here's the conversation happening in engineering orgs right now:
+        developers are using AI coding tools because they're productive.
+        Leadership is encouraging it because it's fast. And the people
+        responsible for CI pipelines, security posture, compliance, and cost
+        management are watching code flow into production through a process
+        that bypasses most of the controls they spent years building.
+      </p>
+      <p>
+        It's not that AI-generated code is bad. It's often good. The problem is
+        that "often good" isn't a quality standard. Your CI pipeline exists
+        because "often good" isn't good enough. Your code review process exists
+        because "usually correct" isn't a shipping criterion.
+      </p>
+      <p>
+        When a human developer writes code, it goes through your pipeline. When
+        an AI agent writes code, does it? Really? Or does the developer copy it
+        in, eyeball it, and push?
+      </p>
+      <p>
+        Be honest with yourself about this. Most teams are.
+      </p>
+
+      <h2>What "Governance" Actually Means Here</h2>
+      <p>
+        I'm not talking about bureaucracy. I'm talking about the basic
+        operational questions that every engineering leader should be able to
+        answer about their AI coding tools:
+      </p>
+
+      <ul>
+        <li>
+          <strong>Does AI-generated code pass our CI pipeline before it
+          merges?</strong> Not after someone manually shepherds it through.
+          Automatically, enforced, every time.
+        </li>
+        <li>
+          <strong>Can we trace what the AI agent did?</strong> When something
+          breaks in production and the commit came from an AI agent, can you
+          reconstruct what it was asked to do, what decisions it made, what
+          errors it encountered, and how it resolved them?
+        </li>
+        <li>
+          <strong>Do we know what it costs?</strong> Not at the end of the
+          billing cycle. Right now. Per task. Per day. With limits that actually
+          stop spending when they're hit.
+        </li>
+        <li>
+          <strong>Are we locked to one provider?</strong> When the next model
+          comes out and it's 3x better for your use case, can you switch without
+          retooling your entire workflow?
+        </li>
+      </ul>
+
+      <p>
+        If you can't answer yes to all four, you have a governance gap. And the
+        gap gets wider as you scale up AI agent usage.
+      </p>
+
+      <h2>Why This Is Hard</h2>
+      <p>
+        The market is structured wrong for solving this. AI coding tool vendors
+        are optimizing for developer adoption — speed, ease of use, magic demos.
+        Governance is friction. It slows things down. It's not what wins a
+        developer's heart in a 5-minute trial.
+      </p>
+      <p>
+        But governance is what gets a tool approved by your security team. It's
+        what keeps your compliance posture intact. It's what prevents a $500
+        surprise on your AI bill because an agent got stuck in a retry loop at
+        2am.
+      </p>
+      <p>
+        The tools that generate code and the systems that govern code are
+        different concerns. Mixing them produces tools that are either too loose
+        for enterprise use or too rigid for developer adoption. They need to be
+        separate layers.
+      </p>
+
+      <div className="article-callout">
+        <strong>The Core Insight:</strong>
+        Code generation and code governance are separate concerns. The industry
+        is pouring billions into generation. The governance layer — enforcement,
+        observability, cost control, provider flexibility — is an afterthought.
+        That's the gap.
+      </div>
+
+      <h2>What a Governance Layer Looks Like</h2>
+      <p>
+        Whatever tool you use, here's what to look for. These are the principles
+        that matter, not any specific implementation.
+      </p>
+
+      <h3>Quality Gates That Actually Block</h3>
+      <p>
+        Two layers: pre-commit checks (lint, types, tests) that run before code
+        is committed, and post-push CI polling that blocks the merge until your
+        real pipeline passes. The same pipeline your human developers go through.
+        If you're not enforcing CI on AI-generated code, you're building
+        technical debt faster than any human developer ever could.
+      </p>
+
+      <h3>Error Classification with Automatic Remediation</h3>
+      <p>
+        When AI-generated code fails a check, the system needs to know whether
+        it's fixable (TypeScript error, lint failure, test failure) or not (auth
+        issue, network problem, resource limit). Fixable errors should retry
+        automatically. Non-fixable errors should escalate to a human. Silent
+        failures are the enemy.
+      </p>
+
+      <h3>Real-Time Cost Tracking with Hard Limits</h3>
+      <p>
+        Per-task ceilings. Daily budgets. Monthly caps. Idempotent billing so
+        you can't double-count. Budget enforcement that runs <em>before</em> a
+        task starts, not after it finishes. If you've been surprised by an AI
+        coding bill, you know why this matters.
+      </p>
+
+      <h3>Provider Abstraction</h3>
+      <p>
+        Route different types of work to different models. Security reviews on
+        your most capable model. Routine fixes on your cheapest. Self-hosted
+        models for sensitive codebases. The ability to switch without changing
+        your workflow when the landscape shifts — and it will shift.
+      </p>
+
+      <h3>Full Observability</h3>
+      <p>
+        Every task should have a recorded lifecycle. What was requested, what
+        plan was generated, what code was written, what errors occurred, what it
+        cost, who approved it. When your auditor asks how AI-generated code gets
+        into production, you should have a clear answer.
+      </p>
+
+      <h2>The Real Risk</h2>
+      <p>
+        The risk isn't that AI coding tools produce bad code. They're getting
+        better fast. The risk is that organizations scale up AI code generation
+        before they have the operational controls to match. More code flowing
+        through fewer controls, faster. That's how you end up with a codebase
+        full of AI-generated commits that nobody can audit, nobody can trace, and
+        nobody budgeted for.
+      </p>
+      <p>
+        The governance layer isn't glamorous. It doesn't demo well. But it's the
+        difference between AI coding as a controlled engineering practice and AI
+        coding as shadow IT with commit access.
+      </p>
+
+      <div className="article-callout article-callout-success">
+        <strong>What We Built:</strong>
+        If you're interested in how we've approached this concretely,{" "}
+        <a
+          href="https://github.com/jarod-rosenthal/workermill"
+          className="text-teal-400 hover:text-teal-300"
+        >
+          WorkerMill is open source
+        </a>{" "}
+        — the quality gates, cost controls, observability, and provider routing
+        described above are all in the core under Apache 2.0. But whatever you
+        use, close the gap before you scale.
+      </div>
+    </>
+  ),
   "why-open-source-ai-coding-infrastructure": (
     <>
       <p className="article-lead">

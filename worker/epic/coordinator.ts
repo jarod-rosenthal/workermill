@@ -3155,23 +3155,12 @@ export class EpicCoordinator {
               this.postDashboardLog("Auto-fix is disabled in org settings — quality gate failure not recoverable");
             }
 
-            // If auto-fix didn't run or didn't succeed, block further progress
+            // If auto-fix didn't run or didn't succeed, log but do NOT return.
+            // The integration fixer (below) runs the same gates with its own fix loop
+            // and is the proper place to resolve cross-story issues on the merged branch.
             if (!autoFixSucceeded) {
-              console.log("[Epic] Quality gate failed — cannot proceed");
-              this.postDashboardLog("Quality gate failed — PR blocked");
-              const blockerMessages = qualityGateResult.blockers;
-              await this.ticketOps.postComment(
-                `❌ Quality gate failed.\n\n**Blockers:**\n${blockerMessages.map((r) => `- ${r}`).join("\n")}${qualityGateResult.reasons.length > 0 ? `\n\n**Passing checks:**\n${qualityGateResult.reasons.map((r) => `- ✅ ${r}`).join("\n")}` : ""}\n\n*Fix the issues and re-run, or add the \`bypass-quality-gate\` label to skip.*`,
-              );
-
-              await this.updateTaskStatus(
-                "quality_gate_failed",
-                `Quality gate failed: ${blockerMessages.join(", ")}`,
-                `Quality gate blocked: ${blockerMessages[0] || "quality check failed"}`,
-              );
-
-              this.missionActive = false;
-              return;
+              console.log("[Epic] Quality gate auto-fix incomplete — deferring to integration fixer");
+              this.postDashboardLog("Quality gate auto-fix incomplete — integration fixer will attempt resolution");
             }
           }
         } catch (qualityError) {

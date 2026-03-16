@@ -57,12 +57,12 @@ function readAgentConfig(): {
   return null;
 }
 
-/** Check if the agent is running in standalone mode (no cloud API). */
+/** Check if the agent is running in standalone or self-hosted mode (local settings). */
 function isStandaloneMode(): boolean {
   try {
     const configPath = path.join(os.homedir(), ".workermill", "config.json");
     const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    return raw.mode === "standalone";
+    return raw.mode === "standalone" || raw.mode === "self-hosted";
   } catch {
     return false;
   }

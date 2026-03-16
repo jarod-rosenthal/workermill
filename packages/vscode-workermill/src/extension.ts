@@ -1334,7 +1334,11 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const terminal = vscode.window.createTerminal(terminalOpts);
       terminal.show();
-      terminal.sendText(`"${binary}" init --standalone`);
+      // PowerShell needs & call operator for quoted paths with spaces
+      const cmd = process.platform === "win32"
+        ? `& "${binary}" init --standalone`
+        : `"${binary}" init --standalone`;
+      terminal.sendText(cmd);
 
       // Step 4: Poll for config file creation, then auto-start
       const configPath = path.join(os.homedir(), ".workermill", "config.json");

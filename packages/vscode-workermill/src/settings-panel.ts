@@ -35,6 +35,15 @@ function readAgentConfig(): {
   try {
     const configPath = path.join(os.homedir(), ".workermill", "config.json");
     const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+
+    // Self-hosted mode: API runs locally, no stored apiUrl/apiKey needed
+    if (raw.mode === "self-hosted") {
+      return {
+        apiUrl: "http://localhost:3001",
+        apiKey: "self-hosted",
+      };
+    }
+
     if (!raw.apiUrl) return null;
 
     // Try OS keychain first, fall back to config.json plaintext
@@ -57,12 +66,12 @@ function readAgentConfig(): {
   return null;
 }
 
-/** Check if the agent is running in standalone or self-hosted mode (local settings). */
+/** Check if the agent is running in standalone mode (local SQLite, no API). */
 function isStandaloneMode(): boolean {
   try {
     const configPath = path.join(os.homedir(), ".workermill", "config.json");
     const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    return raw.mode === "standalone" || raw.mode === "self-hosted";
+    return raw.mode === "standalone";
   } catch {
     return false;
   }

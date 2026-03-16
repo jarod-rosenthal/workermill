@@ -80,6 +80,9 @@ WorkerMill: the open-source operations layer for AI coding agents. Deployed at h
 - Code events: stateless API + client accumulation
 - Quality gates: two-gate system (pre-commit + post-push CI)
 
+### Git Rules
+- **NEVER override `.gitignore`** — do not use `git add -f`, `git add -A`, or `git add .` to stage files. Always add specific files by name. If a file is gitignored, it stays gitignored. If you think it should be tracked, ask first.
+
 ### Common Pitfalls
 - **TypeORM `.save()`** clobbers concurrent changes — use atomic `UPDATE...WHERE` for status transitions.
 - **Express route ordering**: `router.use(middleware)` applies to ALL routes defined after it.

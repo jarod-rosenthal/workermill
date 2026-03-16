@@ -13,6 +13,6 @@
     "sourceMap": true,
     "noImplicitAny": false
   },
-  "include": ["*.ts"],
+  "include": ["*.ts", "tools/*.ts"],
   "exclude": ["node_modules", "dist", "epic"]
 }

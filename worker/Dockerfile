@@ -115,6 +115,14 @@ RUN mkdir -p /app/multi-expert && \
     echo '{"type":"module"}' > /app/multi-expert/package.json && \
     echo 'export declare class MultiExpertCoordinator { start(): Promise<void>; stop(): void; }' > /app/multi-expert/index.d.ts
 
+# Copy and build AIClient module (unified interface for multi-provider execution)
+# Must be built BEFORE epic because epic/ai-client-types.ts re-exports from ai-clients/dist/.
+COPY ai-clients /app/ai-clients
+WORKDIR /app/ai-clients
+RUN npm install && (npx tsc || true) && \
+    test -f dist/index.js || (echo "FATAL: ai-clients tsc emitted no output" && exit 1)
+RUN echo "AIClient module compiled successfully!" && ls -la /app/ai-clients/dist/
+
 # Copy and build Epic executor (multi-agent collaboration with Agent SDK)
 COPY epic /app/epic
 WORKDIR /app/epic
@@ -154,6 +162,7 @@ RUN test -f /app/epic/dist/index.js && \
     test -f /app/multi-expert/dist/index.js && \
     test -f /app/manager/dist/index.js && \
     test -f /app/standard/dist/index.js && \
+    test -f /app/ai-clients/dist/index.js && \
     test -f /app/execution-compiled/git/create_pr.js && \
     test -f /app/agents/ai-sdk-executor.js && \
     test -f /app/AGENTS.md && \

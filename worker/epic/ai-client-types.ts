@@ -96,12 +96,13 @@ export interface AIClientConfig {
 }
 
 /**
- * Stub factory function - throws error if called.
- * Use the real createAIClient from worker/ai-clients when available.
+ * Re-export the real createAIClient factory from worker/ai-clients.
+ *
+ * Uses the same cross-component import pattern as ai-clients/anthropic-agent.ts
+ * which imports from "../epic/dist/agent-sdk.js". Here we import in the reverse
+ * direction: from epic/ into ai-clients/dist/.
+ *
+ * The ai-clients/ module must be compiled (tsc) and available at the sibling
+ * path. In the Docker container: /app/ai-clients/dist/index.js.
  */
-export function createAIClient(_config: AIClientConfig): AIClient {
-  throw new Error(
-    "createAIClient stub called - the unified AIClient feature requires " +
-    "the ai-clients module. Set useUnifiedClient: false in EpicConfig."
-  );
-}
+export { createAIClient } from "../ai-clients/dist/index.js";

@@ -42,14 +42,14 @@ Most AI coding tools are single-agent, single-file, one-shot. WorkerMill is an *
 # Install the agent binary (Mac/Linux)
 curl -fsSL https://workermill.com/install.sh | bash
 
-# Initialize standalone mode — auto-detects your repo, GitHub token, and API key
+# Initialize self-hosted mode — auto-detects your repo, GitHub token, and API key
 workermill-agent init --standalone
 
-# Start the agent
+# Start the agent (launches Docker Compose stack + agent)
 workermill-agent start
 ```
 
-That's it. The agent runs on your machine with your own API keys. No account, no server, no cloud dependency.
+**Requires Docker.** The agent starts a Docker Compose stack (API, PostgreSQL, Redis, web dashboard) and connects to it automatically. Your dashboard is at `http://localhost:5173`.
 
 Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=workermill.workermill) to get a sidebar for managing tasks, real-time log streaming, and live code diffs as workers write.
 
@@ -69,7 +69,7 @@ After `init --standalone`, your config lives at `~/.workermill/config.json`:
 
 ```jsonc
 {
-  "mode": "standalone",
+  "mode": "self-hosted",
   "roles": {
     "planner": { "provider": "anthropic", "model": "claude-opus-4-6" },
     "worker": { "provider": "anthropic", "model": "claude-sonnet-4-6" },
@@ -171,34 +171,9 @@ Full Product Build
 
 ## Deployment Options
 
-### Standalone (Default)
+### Self-Hosted (Default)
 
-The agent binary runs entirely on your machine. All state is stored locally in SQLite. No server infrastructure needed.
-
-```
-┌───────────────────────────────────────────────────────────┐
-│                    VS Code Extension                       │
-│      Sidebar tree, activity feed, live diff, log terms    │
-└─────────────────────┬─────────────────────────────────────┘
-                      │ localhost
-┌─────────────────────▼─────────────────────────────────────┐
-│                    Agent Binary                             │
-│                                                             │
-│  Local API (HTTP + SSE)      SQLite (tasks, boards, logs)  │
-│  Event-driven orchestrator   Worker spawner (native/Docker) │
-│  Planning (planner + critic) Coordination (in-process)     │
-└─────────────────────────────────────────────────────────────┘
-```
-
-- **Config**: `~/.workermill/config.json` — per-role model selection, SCM tokens, execution settings
-- **Storage**: `~/.workermill/data.db` — tasks, boards, logs, coordination messages
-- **Workers**: Native process self-invocation (or Docker sandbox, opt-in)
-- **Planning**: Full PRD decomposition and story planning, runs locally
-- **No internet required** for execution (only for LLM API calls and SCM push)
-
-### Self-Hosted (Full Stack)
-
-Run the complete platform yourself — API server, web dashboard, PostgreSQL, Redis. This gives you the web dashboard for monitoring, webhook integrations for Jira/GitHub/Linear, and the ability to run workers on remote infrastructure.
+Run the complete platform on your machine with Docker Compose — API server, web dashboard, PostgreSQL, Redis. The agent binary manages the stack automatically. Docker is required.
 
 <details>
 <summary>Self-hosted architecture</summary>
@@ -254,16 +229,16 @@ A hosted instance is available at [workermill.com](https://workermill.com) for t
 
 ### Comparison
 
-| | Standalone | Self-Hosted | Hosted |
-|---|---|---|---|
-| **Infrastructure** | None (single binary) | PostgreSQL + Redis + Node.js | Managed |
-| **Task storage** | SQLite (local) | PostgreSQL | PostgreSQL |
-| **Workers run on** | Your machine | Your machine or containers | Your machine or cloud containers |
-| **Web dashboard** | No (VS Code only) | Yes | Yes |
-| **Webhook triggers** | No (VS Code only) | Yes (Jira, GitHub, Linear) | Yes |
-| **API keys** | Your own (BYOK) | Your own | Your own or platform-provided |
-| **PRD decomposition** | Yes | Yes | Yes |
-| **Quality gates** | Yes | Yes | Yes |
+| | Self-Hosted | Hosted |
+|---|---|---|
+| **Infrastructure** | Docker Compose (auto-managed) | Managed |
+| **Task storage** | PostgreSQL | PostgreSQL |
+| **Workers run on** | Your machine | Your machine or cloud containers |
+| **Web dashboard** | Yes (localhost:5173) | Yes |
+| **Webhook triggers** | Yes (Jira, GitHub, Linear) | Yes |
+| **API keys** | Your own (BYOK) | Your own or platform-provided |
+| **PRD decomposition** | Yes | Yes |
+| **Quality gates** | Yes | Yes |
 
 ## Features
 
@@ -382,7 +357,7 @@ cd worker && npm run typecheck
 ```bash
 cd agent && npm install && npm run build
 
-# Build standalone binary
+# Build platform binary
 cd agent && npm run build:binary
 ```
 
@@ -395,7 +370,7 @@ If you're diving into the codebase, these are the patterns that hold the system 
 - **Real-time coordination** between experts uses Redis pub/sub with database polling as fallback
 - **Code events (live code view)** are stateless on the API — clients reconstruct file state from raw immutable events
 - **Quality gates** are two-phase: pre-commit shell commands + post-push CI pipeline polling
-- **The worker execution engine** (`worker/epic/`) is shared across all deployment options — standalone, self-hosted, and hosted all run the same code
+- **The worker execution engine** (`worker/epic/`) is shared across all deployment options — self-hosted and hosted run the same code
 
 ## Releases
 

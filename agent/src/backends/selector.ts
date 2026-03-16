@@ -2,8 +2,8 @@
  * Backend Selector
  *
  * Reads ~/.workermill/config.json and returns the appropriate backend.
- * - mode: "cloud" + apiKey → CloudBackend
- * - mode: "standalone" or no config → LocalBackend
+ * - mode: "cloud" or "self-hosted" + apiKey → CloudBackend
+ * - Standalone SQLite mode has been removed.
  */
 
 import { isCloudMode } from "./local/config.js";
@@ -22,8 +22,9 @@ export async function getBackend(): Promise<AgentBackend> {
     const { CloudBackend } = await import("./cloud/index.js");
     activeBackend = new CloudBackend();
   } else {
-    const { LocalBackend } = await import("./local/index.js");
-    activeBackend = new LocalBackend();
+    throw new Error(
+      "Standalone SQLite mode has been removed. Run `workermill-agent init --standalone` to set up self-hosted mode.",
+    );
   }
 
   await activeBackend.initialize();

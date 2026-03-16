@@ -20,71 +20,21 @@ import { triggerPoll } from "./poller.js";
 import { detectGpu } from "./gpu-detector.js";
 import { getOllamaStatus, generateEmbeddings, ensureOllamaRunning, pullModel, installOllama, findOllamaPath } from "./ollama-manager.js";
 import { indexRepositoryLocally } from "./local-indexer.js";
-// NOTE: Do NOT statically import from backends/selector, backends/local/orchestrator,
-// backends/local/db, or backends/local/event-bus — they transitively load better-sqlite3
-// which fails if the native module wasn't compiled for this platform.
-// These are loaded dynamically via lazyStandalone() below.
 import { loadStandaloneConfig, getRoleConfig, isSelfHostedMode } from "./backends/local/config.js";
 
-// Lazy-loaded standalone modules (SQLite-dependent).
-// Populated by initStandaloneModules() called from startLocalApi().
-let _getActiveBackend: typeof import("./backends/selector.js").getActiveBackend;
-let _getBackend: typeof import("./backends/selector.js").getBackend;
-let _getLocalDb: typeof import("./backends/local/db.js").getDb;
-let _generateId: typeof import("./backends/local/db.js").generateId;
-let _processQueuedTask: typeof import("./backends/local/orchestrator.js").processQueuedTask;
-let _planAndProcessTask: typeof import("./backends/local/orchestrator.js").planAndProcessTask;
-let _stopWorkerTask: typeof import("./backends/local/orchestrator.js").stopWorkerTask;
-
-async function initStandaloneModules(): Promise<void> {
-  const [selector, orchestrator, db, eventBus] = await Promise.all([
-    import("./backends/selector.js"),
-    import("./backends/local/orchestrator.js"),
-    import("./backends/local/db.js"),
-    import("./backends/local/event-bus.js"),
-  ]);
-  _getActiveBackend = selector.getActiveBackend;
-  _getBackend = selector.getBackend;
-  _getLocalDb = db.getDb;
-  _generateId = db.generateId;
-  _processQueuedTask = orchestrator.processQueuedTask;
-  _planAndProcessTask = orchestrator.planAndProcessTask;
-  _stopWorkerTask = orchestrator.stopWorkerTask;
-
-  // Forward local event bus → SSE clients (only standalone mode)
-  eventBus.onStreamEvent((event: { ch: string; t: string; p: unknown }) => {
-    broadcastSSE(event.ch, event.t, event.p);
-    if (event.ch === "org:local:tasks" && event.t === "task_state") {
-      const p = event.p as { taskId: string; status: string; exitCode?: number; error?: string };
-      const ldb = _getLocalDb();
-      const task = ldb.prepare("SELECT id, summary, description, github_repo FROM tasks WHERE id = ?").get(p.taskId) as
-        { id: string; summary: string; description?: string; github_repo?: string } | undefined;
-      if (task) {
-        const info = { id: task.id, summary: task.summary, description: task.description, repo: task.github_repo };
-        if (p.status === "executing") {
-          broadcastSSE("tasks", "task:started", info);
-        } else if (p.status === "completed") {
-          broadcastSSE("tasks", "task:completed", { id: task.id });
-        } else if (p.status === "failed") {
-          broadcastSSE("tasks", "task:failed", { id: task.id, error: p.error });
-        } else if (p.status === "planning") {
-          broadcastSSE("tasks", "task:planning", info);
-        }
-      }
-    }
-  });
-}
-
-// Convenience aliases used throughout the route handlers.
-// Optional chaining prevents crashes when SQLite modules aren't loaded
-// (e.g. self-hosted mode where the agent doesn't use local SQLite).
-function getActiveBackend() { return _getActiveBackend?.() ?? null; }
-function getBackend() { return _getBackend?.() ?? null; }
-function getLocalDb() { return _getLocalDb?.(); }
-function generateId() { return _generateId?.() ?? ""; }
-function processQueuedTask(taskId: string) { return _processQueuedTask?.(taskId); }
-function planAndProcessTask(taskId: string) { return _planAndProcessTask?.(taskId); }
-function stopWorkerTask(taskId: string) { return _stopWorkerTask?.(taskId); }
+// Standalone SQLite backend has been removed. These no-op stubs keep the route
+// handlers compiling — any `backend?.mode === "local"` guard will never be true
+// in cloud/self-hosted modes, so these are never meaningfully called.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getActiveBackend(): any { return null; }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getBackend(): Promise<any> { return null; }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getLocalDb(): any { return undefined; }
+function generateId(): string { return ""; }
+function processQueuedTask(_taskId: string): Promise<void> { return Promise.resolve(); }
+function planAndProcessTask(_taskId: string): Promise<void> { return Promise.resolve(); }
+function stopWorkerTask(_taskId: string): Promise<void> { return Promise.resolve(); }
 import {
   searchJiraIssues,
   listJiraProjects,
@@ -545,9 +495,6 @@ agentEvents.on("task:log", (info) => {
 });
 agentEvents.on("state:changed", () => broadcastSSE("tasks", "state:changed", {}));
 
-// NOTE: Local event bus forwarding (onStreamEvent) is now initialized lazily
-// in initStandaloneModules() — called from startLocalApi() in standalone mode only.
-// This avoids loading better-sqlite3 at import time.
 
 // ── Cloud Task Merging ─────────────────────────────────
 
@@ -1025,19 +972,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
           const boardId = body._boardId;
           if (cardId && boardId) {
             const task = await backend.runCard(boardId, cardId);
-            processQueuedTask(task.id).catch((e) => console.error("[orchestrator] processQueuedTask failed:", e));
+            processQueuedTask(task.id).catch((e: unknown) => console.error("[orchestrator] processQueuedTask failed:", e));
             return json(res, task, 201);
           }
           // Fallback: find card by key like "#3"
           const keyMatch = String(body.jiraIssueKey).match(/^#(\d+)$/);
           if (keyMatch) {
-            const db = (await import("./backends/local/db.js")).getDb();
+            const db = getLocalDb()!;
             const card = db.prepare(
               "SELECT c.id, c.board_id FROM cards c WHERE c.card_number = ?",
             ).get(parseInt(keyMatch[1], 10)) as any;
             if (card) {
               const task = await backend.runCard(card.board_id, card.id);
-              processQueuedTask(task.id).catch((e) => console.error("[orchestrator] processQueuedTask failed:", e));
+              processQueuedTask(task.id).catch((e: unknown) => console.error("[orchestrator] processQueuedTask failed:", e));
               return json(res, task, 201);
             }
           }
@@ -1068,9 +1015,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         });
         // If plan=true, run through planner first; otherwise execute directly
         if (body.plan) {
-          planAndProcessTask(task.id).catch((e) => console.error("[orchestrator] planAndProcessTask failed:", e));
+          planAndProcessTask(task.id).catch((e: unknown) => console.error("[orchestrator] planAndProcessTask failed:", e));
         } else {
-          processQueuedTask(task.id).catch((e) => console.error("[orchestrator] processQueuedTask failed:", e));
+          processQueuedTask(task.id).catch((e: unknown) => console.error("[orchestrator] processQueuedTask failed:", e));
         }
         return json(res, task, 201);
       } catch (err) {
@@ -1108,7 +1055,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
           workerModel: workerConfig.model,
           workerProvider: workerConfig.provider,
         });
-        processQueuedTask(task.id).catch((e) => console.error("[run-file] processQueuedTask failed:", e));
+        processQueuedTask(task.id).catch((e: unknown) => console.error("[run-file] processQueuedTask failed:", e));
         return json(res, task, 201);
       } catch (err) {
         return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
@@ -1135,8 +1082,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       try {
         const repos = await backend.getRepos();
         return json(res, {
-          repos: repos.map(r => r.url),
-          defaultRepo: repos.find(r => r.isDefault)?.url || null,
+          repos: repos.map((r: any) => r.url),
+          defaultRepo: repos.find((r: any) => r.isDefault)?.url || null,
           scmProvider: (await backend.getSettings()).scmProvider || "github",
         });
       } catch (err) {
@@ -1231,7 +1178,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       if (backend?.mode === "local") {
         // Standalone: create board directly in SQLite
         const board = await backend.createBoard({ name: decomposed.boardName, description: `Generated from PRD` });
-        const backlogCol = board.columns.find(c => c.name === "Backlog")!;
+        const backlogCol = board.columns.find((c: any) => c.name === "Backlog")!;
         const cardIds: string[] = [];
 
         for (let i = 0; i < decomposed.cards.length; i++) {
@@ -1247,7 +1194,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         }
 
         // Create dependencies
-        const db = (await import("./backends/local/db.js")).getDb();
+        const db = getLocalDb()!;
         for (let i = 0; i < decomposed.cards.length; i++) {
           const c = decomposed.cards[i] as any;
           if (Array.isArray(c.dependencyIndices)) {
@@ -1870,7 +1817,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
         // Clear in-memory coordination state for a fresh start
         coordStores.delete(taskId);
         // Re-process the now-queued task
-        const { processQueuedTask } = await import("./backends/local/orchestrator.js");
         await processQueuedTask(taskId);
         return json(res, { success: true });
       } catch (err) {
@@ -1941,10 +1887,10 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
             for (const board of boards) {
               if (projectFilter && board.id !== projectFilter) continue;
               const cards = await backend.getBoardCards(board.id);
-              const colMap = new Map(board.columns.map(c => [c.id, c.name]));
-              const db = (await import("./backends/local/db.js")).getDb();
+              const colMap = new Map(board.columns.map((c: any) => [c.id, c.name]));
+              const db = getLocalDb()!;
               for (const card of cards) {
-                const colName = colMap.get(card.columnId) || "Backlog";
+                const colName = String(colMap.get(card.columnId) || "Backlog");
                 if (statusFilter && colName.toLowerCase() !== statusFilter) continue;
                 const totalDeps = (db.prepare(
                   "SELECT COUNT(*) as cnt FROM card_dependencies WHERE card_id = ?",
@@ -2036,7 +1982,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
           case "internal":
           default: {
             const boards = await backend.getBoards();
-            return json(res, { projects: boards.map(b => ({ key: b.id, name: b.name })) });
+            return json(res, { projects: boards.map((b: any) => ({ key: b.id, name: b.name })) });
           }
         }
       } catch (err) {
@@ -3065,7 +3011,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
       const body = JSON.parse(await readBody(req));
       const backend = getActiveBackend();
       if (backend?.mode === "local") {
-        const db = (await import("./backends/local/db.js")).getDb();
+        const db = getLocalDb()!;
         const taskId = workerCompleteMatch[1];
         const status =
           body.exitCode === 0 ? (body.result || "completed") : "failed";
@@ -3076,10 +3022,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
         if (body.prUrl || body.githubPrUrl) {
           db.prepare("UPDATE tasks SET github_pr_url = ? WHERE id = ?").run(body.prUrl || body.githubPrUrl, taskId);
         }
-        const { emitStreamEvent } = await import(
-          "./backends/local/event-bus.js"
-        );
-        emitStreamEvent("org:local:tasks", "task_state", {
+        broadcastSSE("org:local:tasks", "task_state", {
           taskId,
           status,
         });
@@ -3100,8 +3043,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
       try {
         const body = JSON.parse(await readBody(req));
         const taskId = managerCompleteMatch[1];
-        const { getDb } = await import("./backends/local/db.js");
-        const db = getDb();
+        const db = getLocalDb()!;
         const decision = body.decision || body.result || "approved";
 
         if (decision === "approved" || decision === "approve") {
@@ -3151,8 +3093,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
         const taskId = workerProgressMatch[1];
         const status = body.status || body.result;
         if (status) {
-          const { getDb } = await import("./backends/local/db.js");
-          const db = getDb();
+          const db = getLocalDb()!;
           db.prepare(
             "UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?",
           ).run(status, taskId);
@@ -3178,8 +3119,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
         const body = JSON.parse(await readBody(req));
         const taskId = classifyMatch[1];
         const exitCode = Number(body.exitCode);
-        const { getDb } = await import("./backends/local/db.js");
-        const db = getDb();
+        const db = getLocalDb()!;
 
         // Get all error logs for this task, ordered by creation time
         const errorLogs = db.prepare(
@@ -3249,7 +3189,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
       const body = JSON.parse(await readBody(req));
       const backend = getActiveBackend();
       if (backend?.mode === "local") {
-        const db = (await import("./backends/local/db.js")).getDb();
+        const db = getLocalDb()!;
         if (body.status) {
           db.prepare("UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?")
             .run(body.status, taskStatusMatch[1]);
@@ -3269,8 +3209,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
       try {
         const body = JSON.parse(await readBody(req));
         const taskId = usagePartialMatch[1];
-        const { getDb } = await import("./backends/local/db.js");
-        const db = getDb();
+        const db = getLocalDb()!;
         const mode = body.mode || "greatest";
 
         if (mode === "add") {
@@ -3333,8 +3272,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
       try {
         const body = JSON.parse(await readBody(req));
         const taskId = usageFinalMatch[1];
-        const { getDb } = await import("./backends/local/db.js");
-        const db = getDb();
+        const db = getLocalDb()!;
         // Final usage — always overwrite (this is the definitive count)
         db.prepare(`
           UPDATE tasks SET
@@ -3374,8 +3312,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
       try {
         const body = JSON.parse(await readBody(req));
         const taskId = usagePhaseMatch[1];
-        const { getDb } = await import("./backends/local/db.js");
-        const db = getDb();
+        const db = getLocalDb()!;
         // Phase usage is additive (each phase is a separate session)
         db.prepare(`
           UPDATE tasks SET
@@ -3972,7 +3909,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     try {
       const task = await backend.runCard(runCardMatch[1], runCardMatch[2]);
       // Trigger orchestrator
-      processQueuedTask(task.id).catch((e) => console.error("[orchestrator] processQueuedTask failed:", e));
+      processQueuedTask(task.id).catch((e: unknown) => console.error("[orchestrator] processQueuedTask failed:", e));
       return json(res, task, 201);
     } catch (err) {
       return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
@@ -4688,12 +4625,6 @@ let server: ReturnType<typeof createServer> | null = null;
 export async function startLocalApi(config: AgentConfig): Promise<number> {
   agentConfig = config;
   startTime = Date.now();
-
-  // Load SQLite-dependent modules only in standalone mode.
-  // Self-hosted and cloud modes skip this — they use the real API for data.
-  if (!isSelfHostedMode()) {
-    await initStandaloneModules();
-  }
 
   // Set up cloud proxy using the agent's existing axios instance.
   // Extract response data from axios errors so callers get the real API error message.

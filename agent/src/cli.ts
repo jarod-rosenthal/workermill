@@ -16,10 +16,7 @@ import { statusCommand } from "./commands/status.js";
 import { logsCommand } from "./commands/logs.js";
 import { pullCommand } from "./commands/pull.js";
 import { updateCommand } from "./commands/update.js";
-import { initStandaloneCommand } from "./commands/init-standalone.js";
 import { initSelfHostedCommand } from "./commands/init-selfhosted.js";
-import { runStandaloneCommand } from "./commands/run-standalone.js";
-import { prdStandaloneCommand } from "./commands/prd-standalone.js";
 import { getConfigFile } from "./config.js";
 import { isStandaloneReady } from "./backends/local/config.js";
 import { AGENT_VERSION } from "./version.js";
@@ -81,20 +78,6 @@ program
     }
   });
 
-program
-  .command("run")
-  .description("Run a task in standalone mode")
-  .option("--repo <url>", "Target repository URL")
-  .requiredOption("--task <description>", "Task description for the AI worker")
-  .action(runStandaloneCommand);
-
-program
-  .command("prd")
-  .description("Decompose a PRD into a board with cards")
-  .option("--repo <url>", "Target repository URL")
-  .option("--file <path>", "Path to PRD file")
-  .option("--content <text>", "PRD content as text")
-  .action(prdStandaloneCommand);
 
 // If no command given, auto-detect: run setup if no config, otherwise start
 if (process.argv.length <= 2) {

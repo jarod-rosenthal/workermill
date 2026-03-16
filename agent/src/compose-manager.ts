@@ -8,8 +8,13 @@
 import { execFileSync } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
+import * as os from "os";
 import * as http from "http";
+import { fileURLToPath } from "url";
 import { findDockerBin } from "./config.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const SELF_HOSTED_API_URL = "http://localhost:3001";
 const HEALTH_ENDPOINT = `${SELF_HOSTED_API_URL}/health`;
@@ -19,6 +24,10 @@ const HEALTH_ENDPOINT = `${SELF_HOSTED_API_URL}/health`;
  * The agent binary bundles it at build time; fallback to repo root for dev.
  */
 function findComposeFile(): string {
+  // Check ~/.workermill/ first (written during `init --self-hosted`)
+  const wmDir = path.join(os.homedir(), ".workermill", "docker-compose.yml");
+  if (fs.existsSync(wmDir)) return wmDir;
+
   // Bundled with agent binary (adjacent to the binary)
   const bundled = path.join(path.dirname(process.execPath), "docker-compose.yml");
   if (fs.existsSync(bundled)) return bundled;
@@ -29,7 +38,7 @@ function findComposeFile(): string {
   if (fs.existsSync(repoCompose)) return repoCompose;
 
   throw new Error(
-    "docker-compose.yml not found. Reinstall the agent or run from the repo root."
+    "docker-compose.yml not found. Run 'workermill-agent init --self-hosted' first, or reinstall the agent."
   );
 }
 
@@ -83,7 +92,7 @@ export async function startCompose(
 
   // Wait for API to be healthy
   log?.("Waiting for API to be ready...");
-  const maxWaitMs = 120_000;
+  const maxWaitMs = 300_000; // 5 minutes — first-time builds + migrations + image pulls can be slow
   const pollMs = 2_000;
   const start = Date.now();
 
@@ -95,7 +104,7 @@ export async function startCompose(
     await new Promise((r) => setTimeout(r, pollMs));
   }
 
-  throw new Error("API did not become healthy within 2 minutes. Check: docker compose logs api");
+  throw new Error("API did not become healthy within 5 minutes. Check: docker compose logs api");
 }
 
 /**

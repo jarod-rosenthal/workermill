@@ -1352,7 +1352,7 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
           vscode.window.showInformationMessage("Setup complete! Starting agent...");
           startAgentProcess(log);
-          const port = await waitForAgentReady(log, 15_000);
+          const port = await waitForAgentReady(log, 60_000);
           if (port) {
             client.connect();
           } else {
@@ -1463,7 +1463,7 @@ export function activate(context: vscode.ExtensionContext): void {
   if (installed && configured) {
     startAgentProcess(log);
     // Check if agent actually started after a brief delay
-    waitForAgentReady(log, 10_000).then((port) => {
+    waitForAgentReady(log, 60_000).then((port) => {
       if (!port) {
         const error = readAgentStartupError();
         if (error) {

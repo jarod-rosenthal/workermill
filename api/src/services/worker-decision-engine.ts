@@ -31,6 +31,7 @@ export type ErrorCategory =
   | "test"
   | "build"
   | "auth"
+  | "auth_transient"
   | "network"
   | "resource"
   | "unknown";
@@ -243,7 +244,20 @@ const ERROR_PATTERNS: ErrorPattern[] = [
       "Fix build errors by resolving module imports or fixing syntax",
   },
 
-  // Auth errors (NOT FIXABLE)
+  // Auth errors — transient (token refresh, revocation) are auto-retryable
+  {
+    category: "auth_transient",
+    patterns: [
+      /OAuth.*revok/i,
+      /token.*revok/i,
+      /Token expired/i,
+      /Please run \/login/i,
+    ],
+    fixStrategy:
+      "Retry — transient auth error (token revoked/expired, will refresh on retry)",
+  },
+
+  // Auth errors — permanent (wrong credentials, missing permissions)
   {
     category: "auth",
     patterns: [
@@ -252,7 +266,6 @@ const ERROR_PATTERNS: ErrorPattern[] = [
       /Permission denied/i,
       /Authentication failed/i,
       /Invalid (API|access) (key|token)/i,
-      /Token expired/i,
       /Not authorized/i,
       /Access denied/i,
     ],
@@ -301,6 +314,7 @@ const FIXABLE_CATEGORIES: Set<ErrorCategory> = new Set([
   "lint",
   "test",
   "build",
+  "auth_transient",
 ]);
 
 /**
@@ -338,10 +352,17 @@ const CATEGORY_INFO: Record<
     userAction:
       "Check if a new dependency needs to be installed. Retry with guidance about missing packages.",
   },
+  auth_transient: {
+    description: "Transient authentication error",
+    explanation:
+      "A token was revoked or expired during execution. This is a temporary issue — the token will be refreshed on retry.",
+    userAction:
+      "Auto-retryable. The worker will re-authenticate on the next attempt.",
+  },
   auth: {
     description: "Authentication/permission error",
     explanation:
-      "The worker doesn't have permission to perform an action. This could be an expired token, missing API key, or insufficient permissions.",
+      "The worker doesn't have permission to perform an action. This could be an invalid API key, wrong credentials, or insufficient permissions.",
     userAction:
       "Check that all API keys and tokens are valid and have the required permissions. This usually needs manual intervention.",
   },

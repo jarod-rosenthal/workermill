@@ -230,6 +230,18 @@ export async function authenticateApiKey(
       return;
     }
 
+    // Self-hosted mode: auto-authenticate with the local org
+    if (process.env.EXECUTION_MODE === "local" && apiKey === "self-hosted") {
+      const orgRepo = AppDataSource.getRepository(Organization);
+      const org = await orgRepo.findOne({ where: { name: "Local" } });
+      if (org) {
+        req.organization = org;
+        req.orgRole = "admin";
+        next();
+        return;
+      }
+    }
+
     // First, try Organization API key (prefix + bcrypt verification)
     const orgRepo = AppDataSource.getRepository(Organization);
     const orgKeyPrefix = apiKey.substring(0, 12);
@@ -468,6 +480,18 @@ export async function authenticateSSE(
     if (!token) {
       const apiKey = req.headers["x-api-key"] as string;
       if (apiKey) {
+        // Self-hosted mode: auto-authenticate with the local org
+        if (process.env.EXECUTION_MODE === "local" && apiKey === "self-hosted") {
+          const orgRepo = AppDataSource.getRepository(Organization);
+          const org = await orgRepo.findOne({ where: { name: "Local" } });
+          if (org) {
+            req.organization = org;
+            req.orgRole = "admin";
+            next();
+            return;
+          }
+        }
+
         const orgRepo = AppDataSource.getRepository(Organization);
         const orgKeyPrefix = apiKey.substring(0, 12);
         const orgs = await orgRepo.find({ where: { apiKeyPrefix: orgKeyPrefix } });

@@ -8,6 +8,9 @@
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { execFileSync } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import {
   loadStandaloneConfig,
   saveStandaloneConfig,
@@ -15,6 +18,90 @@ import {
   type StandaloneConfig,
 } from "../backends/local/config.js";
 import { findDockerBin, checkDockerAvailable } from "../config.js";
+
+/**
+ * Embedded docker-compose.yml content.
+ * Written to ~/.workermill/docker-compose.yml during init so the compiled
+ * binary can find it without needing the repo on disk.
+ */
+const COMPOSE_FILE_CONTENT = `# WorkerMill Self-Hosted Stack
+# Usage: docker compose up -d
+# The agent binary manages this file — don't run manually.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: workermill-db
+    environment:
+      POSTGRES_USER: workermill
+      POSTGRES_PASSWORD: localdev
+      POSTGRES_DB: workermill
+    ports:
+      - "5434:5432"
+    volumes:
+      - workermill-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workermill"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: workermill-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: workermill-api
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      PORT: "3001"
+      EXECUTION_MODE: local
+      DATABASE_URL: postgresql://workermill:localdev@postgres:5432/workermill
+      REDIS_URL: redis://redis:6379
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "const h=require('http');h.get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: workermill-frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  workermill-data:
+    name: workermill-data
+`;
 
 function detectGitHubToken(): string | null {
   try {
@@ -135,8 +222,17 @@ export async function initSelfHostedCommand(): Promise<void> {
 
   saveStandaloneConfig(config);
 
+  // Write docker-compose.yml to ~/.workermill/ so the compiled binary can find it
+  const wmDir = path.join(os.homedir(), ".workermill");
+  if (!fs.existsSync(wmDir)) {
+    fs.mkdirSync(wmDir, { recursive: true });
+  }
+  const composePath = path.join(wmDir, "docker-compose.yml");
+  fs.writeFileSync(composePath, COMPOSE_FILE_CONTENT, { encoding: "utf-8" });
+
   console.log();
   console.log(`  ${chalk.green("✓")} Configuration saved to ~/.workermill/config.json`);
+  console.log(`  ${chalk.green("✓")} Docker Compose file written to ~/.workermill/docker-compose.yml`);
   console.log();
   if (!needsPrompt) {
     console.log(chalk.green("  All credentials auto-detected — zero prompts needed!"));

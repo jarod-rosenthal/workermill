@@ -75,14 +75,16 @@ async function initStandaloneModules(): Promise<void> {
   });
 }
 
-// Convenience aliases used throughout the route handlers
-function getActiveBackend() { return _getActiveBackend(); }
-function getBackend() { return _getBackend(); }
-function getLocalDb() { return _getLocalDb(); }
-function generateId() { return _generateId(); }
-function processQueuedTask(taskId: string) { return _processQueuedTask(taskId); }
-function planAndProcessTask(taskId: string) { return _planAndProcessTask(taskId); }
-function stopWorkerTask(taskId: string) { return _stopWorkerTask(taskId); }
+// Convenience aliases used throughout the route handlers.
+// Optional chaining prevents crashes when SQLite modules aren't loaded
+// (e.g. self-hosted mode where the agent doesn't use local SQLite).
+function getActiveBackend() { return _getActiveBackend?.() ?? null; }
+function getBackend() { return _getBackend?.() ?? null; }
+function getLocalDb() { return _getLocalDb?.(); }
+function generateId() { return _generateId?.() ?? ""; }
+function processQueuedTask(taskId: string) { return _processQueuedTask?.(taskId); }
+function planAndProcessTask(taskId: string) { return _planAndProcessTask?.(taskId); }
+function stopWorkerTask(taskId: string) { return _stopWorkerTask?.(taskId); }
 import {
   searchJiraIssues,
   listJiraProjects,

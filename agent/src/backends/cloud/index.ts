@@ -10,7 +10,8 @@ export class CloudBackend implements AgentBackend {
   readonly mode = "cloud" as const;
 
   async initialize(): Promise<void> {
-    throw new Error("CloudBackend not yet implemented — use 'workermill-agent setup' for cloud mode");
+    // No-op — self-hosted mode uses the API server directly, not this backend class.
+    // Cloud mode will implement this in Phase B.
   }
 
   async shutdown(): Promise<void> {}

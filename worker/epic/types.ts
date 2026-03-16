@@ -304,6 +304,7 @@ export type ErrorCategory =
   | "test"        // Test failures
   | "build"       // Build/bundler errors
   | "auth"        // Authentication/permission errors (NOT fixable)
+  | "auth_transient" // Token revoked/expired — auto-retryable
   | "network"     // Network connectivity issues (NOT fixable)
   | "resource"    // Out of memory, disk space (NOT fixable)
   | "unknown";    // Unclassified errors (NOT fixable)

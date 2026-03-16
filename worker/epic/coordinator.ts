@@ -3123,6 +3123,20 @@ export class EpicCoordinator {
                 this.postDashboardLog("Spawning Claude fix agent for quality issues...");
 
                 const agentFixed = await this.runQualityFixAgent(repoPath, qualityGateResult.blockers);
+
+                // Push any commits the fix agent made, even if full verification failed.
+                // This preserves partial fixes (e.g. TS errors resolved but tests still fail).
+                try {
+                  const unpushed = execSync(`git -C "${repoPath}" log @{u}..HEAD --oneline`, { encoding: "utf-8" }).trim();
+                  if (unpushed) {
+                    console.log(`[Epic] Pushing fix agent commits to remote:\n${unpushed}`);
+                    execSync(`git -C "${repoPath}" push`, { encoding: "utf-8", timeout: 60_000 });
+                    console.log("[Epic] Fix agent commits pushed successfully");
+                  }
+                } catch (pushErr) {
+                  console.log(`[Epic] Failed to push fix agent commits: ${pushErr instanceof Error ? pushErr.message : pushErr}`);
+                }
+
                 if (agentFixed) {
                   autoFixSucceeded = true;
 

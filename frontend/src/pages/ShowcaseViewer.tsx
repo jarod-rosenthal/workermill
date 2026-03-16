@@ -163,13 +163,13 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     id: "calmill",
     name: "CalMill",
     tagline:
-      "Open scheduling platform — built across 8 sequential epics by AI workers.",
+      "Open scheduling platform — built across 3 epics by AI workers.",
     description:
-      "Full-stack scheduling platform with event types, timezone-aware availability, public booking pages, team round-robin scheduling, Google Calendar integration, email notifications, and 499 tests (202 unit + 297 E2E). 8 epics executed sequentially, each building on the last. Deployed to Vercel at calmill.workermill.com.",
+      "Full-stack scheduling platform with Next.js 16, Prisma 7, and Neon PostgreSQL. Event types, timezone-aware booking, team round-robin scheduling, availability management, webhook integrations, and public booking pages. 3 epics, 48 stories. Deployed to Vercel at calmill.workermill.com.",
     stack: "Next.js 16 + Prisma 7 + TailwindCSS 4 + Neon PostgreSQL",
     storyCount: 48,
-    cost: "$301",
-    duration: "~434 min",
+    cost: "$247",
+    duration: "~717 min",
     linesOfCode: "41,000",
     repoUrl: "https://github.com/workermill-examples/calmill",
     liveUrl: "https://calmill.workermill.com",
@@ -184,7 +184,7 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     qualityScores: {
       lint: "0 errors",
       types: "0 errors",
-      tests: "202 unit + 297 E2E",
+      tests: "248 unit + E2E",
       security: "0 critical",
     },
     stories: [],

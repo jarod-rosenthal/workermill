@@ -54,11 +54,22 @@ const showcaseProjects: ShowcaseProject[] = [
     category: "developer-tools",
     icon: <Zap className="w-4 h-4" />,
   },
-  // CalMill temporarily hidden — currently rebuilding
-  // {
-  //   id: "calmill",
-  //   ...
-  // },
+  {
+    id: "calmill",
+    name: "CalMill",
+    tagline: "Open scheduling platform with timezone-aware booking and team round-robin.",
+    description:
+      "Full-stack scheduling platform with Next.js 16, Prisma 7, and Neon PostgreSQL. Event types, timezone-aware booking, team round-robin scheduling, availability management, webhook integrations, and public booking pages. 3 epics, 48 stories. Deployed to Vercel.",
+    stack: "Next.js 16 + Prisma 7 + TailwindCSS 4 + Neon PostgreSQL",
+    storyCount: 48,
+    cost: "$247",
+    duration: "~12 hrs",
+    linesOfCode: "41,000",
+    repoUrl: "https://github.com/workermill-examples/calmill",
+    liveUrl: "https://calmill.workermill.com",
+    category: "scheduling",
+    icon: <Calendar className="w-4 h-4" />,
+  },
   {
     id: "teamboard",
     name: "TeamBoard",
@@ -168,7 +179,7 @@ export default function ShowcaseGallery() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            81K lines of production code across 4 projects, deployed to
+            122K lines of production code across 5 projects, deployed to
             Vercel and Railway. Every project built from tickets — planned,
             coded, tested, reviewed, and deployed autonomously.
           </p>
@@ -179,7 +190,7 @@ export default function ShowcaseGallery() {
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <FileCode className="w-4 h-4 text-amber-400" />
-              <span className="text-2xl font-bold text-white">81K</span>
+              <span className="text-2xl font-bold text-white">122K</span>
             </div>
             <p className="text-xs text-slate-400">
               Lines of production code
@@ -188,23 +199,23 @@ export default function ShowcaseGallery() {
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <CheckCircle className="w-4 h-4 text-emerald-400" />
-              <span className="text-2xl font-bold text-white">97</span>
+              <span className="text-2xl font-bold text-white">145</span>
             </div>
             <p className="text-xs text-slate-400">Stories completed</p>
           </div>
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <GitPullRequest className="w-4 h-4 text-teal-400" />
-              <span className="text-2xl font-bold text-white">16</span>
+              <span className="text-2xl font-bold text-white">19</span>
             </div>
             <p className="text-xs text-slate-400">PRs shipped across builds</p>
           </div>
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <TrendingUp className="w-4 h-4 text-emerald-400" />
-              <span className="text-2xl font-bold text-white">~2,800</span>
+              <span className="text-2xl font-bold text-white">5</span>
             </div>
-            <p className="text-xs text-slate-400">Lines shipped per hour</p>
+            <p className="text-xs text-slate-400">Projects shipped</p>
           </div>
         </div>
 

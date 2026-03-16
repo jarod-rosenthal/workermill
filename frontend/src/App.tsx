@@ -183,8 +183,8 @@ function App() {
       <TosModal />
       <BrowserRouter>
         <Routes>
-          {/* Public marketing routes — forced dark theme */}
-          <Route path="/" element={<DarkRoute><LandingV0 /></DarkRoute>} />
+          {/* Root route: if authenticated go to dashboard, otherwise show landing */}
+          <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <DarkRoute><LandingV0 /></DarkRoute>} />
           <Route path="/product" element={<Navigate to="/#how-it-works" replace />} />
           <Route path="/solutions" element={<Navigate to="/#showcase" replace />} />
           <Route path="/pricing" element={<Navigate to="/#pricing" replace />} />

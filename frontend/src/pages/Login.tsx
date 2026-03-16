@@ -46,35 +46,32 @@ export function Login() {
   const [mfaCode, setMfaCode] = useState("");
   const [mfaLoading, setMfaLoading] = useState(false);
 
-  // LOCAL MODE: Auto-login for local development
+  // Auto-login: try /auth/me first. In local/self-hosted mode the API
+  // auto-authenticates all requests, so this succeeds and skips the login form.
+  // In cloud mode it returns 401 and we fall through to the normal login UI.
   useEffect(() => {
-    if (import.meta.env.VITE_LOCAL_MODE === "true") {
-      const autoLogin = async () => {
-        try {
-          setIsLoading(true);
-          // In local mode, the API auto-authenticates and returns user info
-          const response = await apiClient.get("/auth/me");
-          const { user, organization } = response.data;
+    const tryAutoLogin = async () => {
+      try {
+        setIsLoading(true);
+        const response = await apiClient.get("/auth/me");
+        const { user, organization } = response.data;
 
-          // Set mock tokens for local mode
-          setTokens({
-            accessToken: "local-dev-token",
-            refreshToken: "local-dev-refresh",
-            idToken: "local-dev-id",
-            expiresIn: 86400,
-          });
-          setUser(user);
-          setOrganization(organization);
-          navigate("/");
-        } catch (err) {
-          console.error("Local mode auto-login failed:", err);
-          setError("Local mode auto-login failed. Is the API running?");
-        } finally {
-          setIsLoading(false);
-        }
-      };
-      autoLogin();
-    }
+        setTokens({
+          accessToken: "local-dev-token",
+          refreshToken: "local-dev-refresh",
+          idToken: "local-dev-id",
+          expiresIn: 86400,
+        });
+        setUser(user);
+        setOrganization(organization);
+        navigate("/dashboard");
+      } catch {
+        // Not in local mode or API not reachable — show normal login form
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    tryAutoLogin();
   }, [navigate, setTokens, setUser, setOrganization]);
 
   // Handle GitHub login (direct OAuth)

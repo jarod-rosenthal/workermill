@@ -24,61 +24,67 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
   const orgRepo = AppDataSource.getRepository(Organization);
   const userRepo = AppDataSource.getRepository(User);
 
-  // Check if any admin user exists (auth middleware looks for this)
-  let adminUser = await userRepo.findOne({ where: { role: "admin" } });
-  if (adminUser) {
-    // Already have an admin — nothing to do
-    return;
-  }
+  // Production-tested defaults from workermill-examples org
+  const DEFAULTS: Partial<Organization> = {
+    plan: "enterprise",
+    scmProvider: "github",
+    maxConcurrentWorkers: 1,
+    // Models
+    defaultWorkerModel: "claude-sonnet-4-6",
+    managerModelId: "claude-opus-4-6",
+    planningAgentModel: "claude-opus-4-6",
+    primaryProvider: "anthropic",
+    planningAgentProvider: "anthropic",
+    managerProvider: "anthropic",
+    // Capacity
+    maxParallelExperts: 14,
+    ralphMaxStories: 10,
+    maxPerStoryRevisions: 0,
+    maxReviewRevisions: 4,
+    maxFixRetries: 5,
+    maxTargetFiles: 6,
+    // Planning
+    criticApprovalThreshold: 90,
+    planningMode: "simplified",
+    prdPlanningMode: "strict",
+    taskPlanningMode: "simplified",
+    // Quality gates
+    qualityGateEnabled: true,
+    blockOnTypeErrors: true,
+    blockOnTestFailures: true,
+    blockOnLintErrors: true,
+    blockOnE2EFailures: true,
+    autoFixEnabled: true,
+    autoFixMaxIterations: 3,
+    // Behavior
+    selfReviewEnabled: false,
+    pushAfterCommit: true,
+    gracefulShutdownEnabled: true,
+    blockerAutoRetryEnabled: true,
+    blockerMaxAutoRetries: 3,
+    blockerWaitTimeoutMinutes: 20,
+  };
 
-  logger.info("Local mode: seeding default organization and admin user");
-
-  // Find or create default org
+  // Find or create default org — always apply defaults on startup
   let org = await orgRepo.findOne({ where: { name: LOCAL_ORG_NAME } });
-  if (!org) {
-    org = orgRepo.create({
-      name: LOCAL_ORG_NAME,
-      plan: "enterprise",
-      scmProvider: "github",
-      maxConcurrentWorkers: 1,
-      // Models — match workermill-examples production defaults
-      defaultWorkerModel: "claude-sonnet-4-6",
-      managerModelId: "claude-opus-4-6",
-      planningAgentModel: "claude-opus-4-6",
-      primaryProvider: "anthropic",
-      planningAgentProvider: "anthropic",
-      managerProvider: "anthropic",
-      // Capacity
-      maxParallelExperts: 14,
-      ralphMaxStories: 10,
-      maxPerStoryRevisions: 0,
-      maxReviewRevisions: 4,
-      maxFixRetries: 5,
-      maxTargetFiles: 6,
-      // Planning
-      criticApprovalThreshold: 90,
-      planningMode: "simplified",
-      prdPlanningMode: "strict",
-      taskPlanningMode: "simplified",
-      // Quality gates
-      qualityGateEnabled: true,
-      blockOnTypeErrors: true,
-      blockOnTestFailures: true,
-      blockOnLintErrors: true,
-      blockOnE2EFailures: true,
-      autoFixEnabled: true,
-      autoFixMaxIterations: 3,
-      // Behavior
-      selfReviewEnabled: false,
-      pushAfterCommit: true,
-      gracefulShutdownEnabled: true,
-      blockerAutoRetryEnabled: true,
-      blockerMaxAutoRetries: 3,
-      blockerWaitTimeoutMinutes: 20,
-    });
+  if (org) {
+    // Org exists — update to latest defaults
+    Object.assign(org, DEFAULTS);
+    await orgRepo.save(org);
+    logger.info("Local mode: updated org settings to latest defaults");
+  } else {
+    org = orgRepo.create({ name: LOCAL_ORG_NAME, ...DEFAULTS });
     await orgRepo.save(org);
     logger.info("Created local organization", { orgId: org.id });
   }
+
+  // Check if admin user exists
+  let adminUser = await userRepo.findOne({ where: { role: "admin" } });
+  if (adminUser) {
+    return;
+  }
+
+  logger.info("Local mode: seeding admin user");
 
   // Create admin user
   adminUser = userRepo.create({

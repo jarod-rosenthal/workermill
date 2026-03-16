@@ -2779,6 +2779,14 @@ export class SettingsPanel {
         }
 
         // Set workspace mode radio to match current mode
+        // Hide the mode section entirely for self-hosted (Local org, not Standalone)
+        const isSelfHosted = d.orgName === "Local";
+        const modeSection = document.getElementById("section-mode");
+        const modeNav = document.querySelector('[data-section="section-mode"]');
+        if (isSelfHosted) {
+          if (modeSection) modeSection.classList.add("hidden");
+          if (modeNav) modeNav.classList.add("hidden");
+        }
         const modeCloud = document.getElementById("mode-cloud");
         const modeStandaloneRadio = document.getElementById("mode-standalone");
         if (isStandalone) {

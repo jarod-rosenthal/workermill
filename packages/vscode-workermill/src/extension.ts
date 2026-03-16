@@ -11,7 +11,6 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { execFileSync } from "child_process";
 import { AgentClient, type TaskInfo, type IssueInfo } from "./agent-client";
 import { TeamTreeProvider } from "./team-tree";
 import { FeedViewProvider } from "./feed-view";
@@ -1218,89 +1217,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("workermill.setupStandalone", async () => {
-      // On Windows, ask where to run — Windows (default) or WSL
-      let useWSL = false;
-      if (process.platform === "win32") {
-        const choices = [
-          { label: "$(terminal) Windows", description: "Recommended", detail: "Install and run on Windows natively", value: "windows" },
-          { label: "$(remote) WSL", description: "", detail: "Install and run inside Windows Subsystem for Linux", value: "wsl" },
-        ];
-        const pick = await vscode.window.showQuickPick(choices, {
-          title: "Where should WorkerMill run?",
-          placeHolder: "Choose your runtime environment",
-        });
-        if (!pick) return; // user cancelled
-        useWSL = pick.value === "wsl";
-      }
-
-      if (useWSL) {
-        // ── WSL flow: install + init inside WSL via bash terminal ──
-        log("WSL mode selected — installing agent inside WSL");
-        context.globalState.update("workermill.runtime", "wsl");
-
-        // Verify WSL is available
-        try {
-          execFileSync("wsl.exe", ["--status"], { stdio: "pipe", timeout: 5000, windowsHide: true });
-        } catch {
-          vscode.window.showErrorMessage("WSL is not installed or not running. Install WSL first: wsl --install");
-          return;
-        }
-
-        // Get the WSL home directory as a Windows UNC path for config polling
-        let wslConfigPath: string;
-        try {
-          const wslWinHome = execFileSync("wsl.exe", ["-e", "wslpath", "-w", path.posix.join("~", ".workermill")], {
-            encoding: "utf-8", timeout: 5000, windowsHide: true,
-          }).trim();
-          wslConfigPath = path.join(wslWinHome, "config.json");
-          log(`WSL config path: ${wslConfigPath}`);
-        } catch {
-          // Fallback: common default
-          const distro = (process.env.WSL_DISTRO_NAME || "Ubuntu").trim();
-          const user = os.userInfo().username;
-          wslConfigPath = `\\\\wsl$\\${distro}\\home\\${user}\\.workermill\\config.json`;
-          log(`WSL config path (fallback): ${wslConfigPath}`);
-        }
-
-        // Open WSL bash terminal and run install + init
-        const terminal = vscode.window.createTerminal({
-          name: "WorkerMill Setup (WSL)",
-          shellPath: "wsl.exe",
-          shellArgs: ["-e", "bash"],
-        });
-        terminal.show();
-        terminal.sendText("curl -fsSL https://workermill.com/agent/install.sh | bash && ~/.workermill/bin/workermill-agent init --standalone");
-
-        // Poll for config via UNC path
-        const startTime = Date.now();
-        const checkInterval = setInterval(async () => {
-          if (fs.existsSync(wslConfigPath)) {
-            try {
-              const config = JSON.parse(fs.readFileSync(wslConfigPath, "utf-8"));
-              if (config.mode !== "standalone" && config.mode !== "self-hosted" && !config.roles) return;
-            } catch { return; }
-
-            clearInterval(checkInterval);
-            treeProvider.agentConfigured = true;
-            vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
-            vscode.window.showInformationMessage("WSL setup complete! Starting agent in WSL...");
-            startAgentProcess(log, "wsl");
-            const port = await waitForAgentReady(log, 30_000); // WSL needs more time (Docker Compose)
-            if (port) {
-              client.connect();
-            } else {
-              const err = readAgentStartupError();
-              vscode.window.showErrorMessage(
-                `Agent failed to start in WSL${err ? ": " + err : ". Run 'wsl.exe -e cat ~/.workermill/agent.log' for details."}`,
-              );
-            }
-          }
-          if (Date.now() - startTime > 300_000) clearInterval(checkInterval);
-        }, 2000);
-        return;
-      }
-
-      // ── Windows / Unix flow (default) ──
       // Step 1: Install agent binary if needed (inline, no bail-out)
       if (!isAgentInstalled()) {
         log("Agent binary not installed — installing...");
@@ -1323,29 +1239,25 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      // Step 3: Run standalone init in a terminal
-      // On Windows, force PowerShell so the Windows binary path works even when
-      // VS Code's default terminal is WSL bash (which can't execute C:\ paths).
+      // Step 3: Run init in a terminal
+      // On Windows, use PowerShell with & call operator for quoted paths
       const binary = getAgentBinaryPath();
+      const isWindows = process.platform === "win32";
       const terminalOpts: vscode.TerminalOptions = { name: "WorkerMill Setup" };
-      if (process.platform === "win32") {
+      if (isWindows) {
         terminalOpts.shellPath = "powershell.exe";
-        context.globalState.update("workermill.runtime", "windows");
       }
       const terminal = vscode.window.createTerminal(terminalOpts);
       terminal.show();
-      // PowerShell needs & call operator for quoted paths with spaces
-      const cmd = process.platform === "win32"
+      terminal.sendText(isWindows
         ? `& "${binary}" init --standalone`
-        : `"${binary}" init --standalone`;
-      terminal.sendText(cmd);
+        : `"${binary}" init --standalone`);
 
       // Step 4: Poll for config file creation, then auto-start
       const configPath = path.join(os.homedir(), ".workermill", "config.json");
       const startTime = Date.now();
       const checkInterval = setInterval(async () => {
         if (fs.existsSync(configPath)) {
-          // Verify it's a standalone config (not leftover cloud config)
           try {
             const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
             if (config.mode !== "standalone" && config.mode !== "self-hosted" && !config.roles) return;
@@ -1366,7 +1278,6 @@ export function activate(context: vscode.ExtensionContext): void {
             );
           }
         }
-        // Stop checking after 5 minutes
         if (Date.now() - startTime > 300_000) clearInterval(checkInterval);
       }, 2000);
     }),

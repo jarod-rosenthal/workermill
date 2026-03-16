@@ -4068,7 +4068,9 @@ ${qualityBelowThreshold ? `**⚠️ QUALITY SCORE BELOW ${minQualityScore}% - Co
 | **GitHub Actions** | ❌ Failing |
 
 ${ciStatus.log ? `**CI Failure Details:**\n\`\`\`\n${ciStatus.log.substring(0, 1000)}\n\`\`\`\n` : ''}
-**CI Fix Agent was unable to resolve this issue.** Factor this into your review decision — if the CI failure is caused by code in this PR, request REVISION_NEEDED.
+**CI Fix Agent was unable to resolve this issue.**
+
+**⛔ MANDATORY: You MUST request REVISION_NEEDED when CI is failing.** Investigate the CI failure by reading the failure details above and the relevant source files. Identify the root cause and provide specific fix instructions in your revision request. Do NOT approve a PR with failing CI.
 
 ---
 

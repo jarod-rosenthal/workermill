@@ -1,57 +1,79 @@
-version: "3.8"
+# WorkerMill Self-Hosted Stack
+# Usage: docker compose up -d
+# The agent binary manages this file — don't run manually.
 
 services:
-  # PostgreSQL Database
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
+    container_name: workermill-db
     environment:
       POSTGRES_USER: workermill
-      POSTGRES_PASSWORD: workermill
+      POSTGRES_PASSWORD: localdev
       POSTGRES_DB: workermill
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - workermill-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U workermill"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    restart: unless-stopped
 
-  # WorkerMill API Server
+  redis:
+    image: redis:7-alpine
+    container_name: workermill-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   api:
     build:
-      context: .
-      dockerfile: docker/Dockerfile.api
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: workermill-api
     ports:
-      - "4000:4000"
+      - "3001:3001"
     environment:
       NODE_ENV: development
-      PORT: 4000
-      DATABASE_URL: postgresql://workermill:workermill@postgres:5432/workermill
-      # Add your API keys here or use .env file
-      # ANTHROPIC_API_KEY: sk-ant-xxx
+      PORT: "3001"
+      EXECUTION_MODE: local
+      DATABASE_URL: postgresql://workermill:localdev@postgres:5432/workermill
+      REDIS_URL: redis://redis:6379
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      # Mount source for hot-reload in development
-      - ./packages/core/src:/app/packages/core/src:ro
-      - ./packages/api/src:/app/packages/api/src:ro
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "const h=require('http');h.get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
 
-  # WorkerMill Dashboard
-  dashboard:
+  frontend:
     build:
-      context: .
-      dockerfile: docker/Dockerfile.dashboard
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: workermill-frontend
     ports:
-      - "3000:3000"
-    environment:
-      VITE_API_URL: http://localhost:4000
+      - "5173:5173"
     depends_on:
-      - api
-    volumes:
-      - ./packages/dashboard/src:/app/packages/dashboard/src:ro
+      api:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
-  postgres_data:
+  workermill-data:
+    name: workermill-data

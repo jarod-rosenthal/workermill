@@ -29,7 +29,7 @@ export interface RoleConfig {
 }
 
 export interface StandaloneConfig {
-  mode: "standalone" | "cloud";
+  mode: "standalone" | "cloud" | "self-hosted";
   /** Per-role LLM configuration (planner, worker, techLead). */
   roles?: {
     planner?: RoleConfig;
@@ -211,7 +211,7 @@ export function resolveApiKey(config: StandaloneConfig, role: "planner" | "worke
 /** Check if standalone mode is configured (has at least one role with a resolvable API key). */
 export function isStandaloneReady(): boolean {
   const config = loadStandaloneConfig();
-  if (config.mode !== "standalone") return false;
+  if (config.mode !== "standalone" && config.mode !== "self-hosted") return false;
 
   // Check if any role has a key (config, env var, or OAuth)
   return (
@@ -232,7 +232,19 @@ export function isCloudMode(): boolean {
   try {
     const raw = readFileSync(CONFIG_FILE, "utf-8");
     const parsed = JSON.parse(raw);
-    return parsed.mode === "cloud";
+    return parsed.mode === "cloud" || parsed.mode === "self-hosted";
+  } catch {
+    return false;
+  }
+}
+
+/** True when running in self-hosted mode (Docker Compose local stack). */
+export function isSelfHostedMode(): boolean {
+  try {
+    if (!existsSync(CONFIG_FILE)) return false;
+    const raw = readFileSync(CONFIG_FILE, "utf-8");
+    const config = JSON.parse(raw);
+    return config.mode === "self-hosted";
   } catch {
     return false;
   }

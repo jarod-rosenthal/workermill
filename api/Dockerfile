@@ -1,46 +1,30 @@
-# Build stage
-FROM node:20-alpine AS builder
+FROM node:22-bookworm-slim
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Install build dependencies for native modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
-RUN npm ci
+# Copy package files and install dependencies
+COPY package.json package-lock.json ./
+RUN npm ci --production=false
 
-# Copy source
+# Copy source code
 COPY tsconfig.json ./
-COPY src ./src
+COPY src/ src/
 
 # Build TypeScript
-RUN npm run build
+RUN npx tsc
 
-# Production stage
-FROM node:20-alpine
+# Prune dev dependencies
+RUN npm prune --production
 
-WORKDIR /app
-
-# Install production dependencies only
-COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
-
-# Copy built files
-COPY --from=builder /app/dist ./dist
-
-# Download AWS RDS CA bundle for SSL certificate validation
-RUN wget -q -O /app/rds-combined-ca-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
-
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001 -G nodejs
-
-USER nodejs
+EXPOSE 3001
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
-
-EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=5s --retries=10 \
+    CMD node -e "const h=require('http');h.get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"
 
 CMD ["node", "dist/index.js"]

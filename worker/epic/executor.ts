@@ -207,7 +207,7 @@ export class StoryExecutor {
   private getLogPrefix(expert: ExpertPersona, provider: string = "anthropic"): string {
     const emoji = this.personaIcons[expert] || "🤖";
     const providerIcon = this.providerIcons[provider] || "🤖";
-    return `[${emoji} ${expert} ${providerIcon}]`;
+    return `[${emoji}${expert}${providerIcon}]`;
   }
 
   /**
@@ -1527,7 +1527,7 @@ ${parts.join("\n\n")}
     const pendingQuestionsText = pendingQuestions
       .map((q) => {
         const emoji = this.personaIcons[q.fromPersona] || "🤖";
-        return `- ⚠️ [${emoji} ${q.fromPersona}] is waiting for your answer: "${q.content}"`;
+        return `- ⚠️ [${emoji}${q.fromPersona}] is waiting for your answer: "${q.content}"`;
       })
       .join("\n");
 
@@ -1537,9 +1537,9 @@ ${parts.join("\n\n")}
       .map((msg) => {
         const emoji = this.personaIcons[msg.persona] || "🤖";
         if (msg.messageType === "question") {
-          return `- [${emoji} ${msg.persona}] Q: ${msg.content}`;
+          return `- [${emoji}${msg.persona}] Q: ${msg.content}`;
         } else {
-          return `- [${emoji} ${msg.persona}] A: ${msg.content}`;
+          return `- [${emoji}${msg.persona}] A: ${msg.content}`;
         }
       })
       .join("\n");

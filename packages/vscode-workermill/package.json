@@ -421,7 +421,7 @@
     "viewsWelcome": [
       {
         "view": "workermill.teamPanel",
-        "contents": "AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Get Started — Standalone Mode (BYOK)](command:workermill.setupStandalone)\nBring your own API keys. Runs entirely on your machine.\n\n---\n\nHave a WorkerMill Cloud account?\n[Sign in with GitHub](command:workermill.signUpWithGitHub)",
+        "contents": "AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Get Started](command:workermill.setupStandalone)\nRuns locally with Docker. Bring your own API keys.\n\n---\n\nHave a WorkerMill Cloud account?\n[Sign in with GitHub](command:workermill.signUpWithGitHub)",
         "when": "!workermill.agentConfigured"
       },
       {

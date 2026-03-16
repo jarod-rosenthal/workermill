@@ -113,7 +113,26 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
   let config: AgentConfig;
   const standaloneCheck = loadStandaloneConfig();
 
-  if (standaloneCheck.mode === "standalone" && !isCloudMode()) {
+  if (standaloneCheck.mode === "self-hosted") {
+    const sc = standaloneCheck;
+    config = {
+      apiUrl: "http://localhost:3001",
+      apiKey: "self-hosted",
+      agentId: `agent-${homedir().split(/[\\/]/).pop() || "local"}`,
+      maxWorkers: sc.settings?.maxParallelExperts ?? 4,
+      pollIntervalMs: 5000,
+      heartbeatIntervalMs: 30000,
+      githubToken: sc.scm?.token || "",
+      bitbucketToken: "",
+      gitlabToken: "",
+      githubReviewerToken: "",
+      sandbox: (sc.sandbox === "docker" ? "docker" : "none") as "docker" | "none",
+      dockerImage: "ghcr.io/jarod-rosenthal/worker",
+      dockerMemoryGb: 4,
+      localRag: false,
+      ollamaPort: 11434,
+    };
+  } else if (standaloneCheck.mode === "standalone" && !isCloudMode()) {
     const sc = standaloneCheck;
     config = {
       apiUrl: "",

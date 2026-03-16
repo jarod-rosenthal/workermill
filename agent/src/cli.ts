@@ -17,6 +17,7 @@ import { logsCommand } from "./commands/logs.js";
 import { pullCommand } from "./commands/pull.js";
 import { updateCommand } from "./commands/update.js";
 import { initStandaloneCommand } from "./commands/init-standalone.js";
+import { initSelfHostedCommand } from "./commands/init-selfhosted.js";
 import { runStandaloneCommand } from "./commands/run-standalone.js";
 import { prdStandaloneCommand } from "./commands/prd-standalone.js";
 import { getConfigFile } from "./config.js";
@@ -69,13 +70,14 @@ program
 
 program
   .command("init")
-  .description("Initialize standalone mode - configure LLM keys and repo")
-  .option("--standalone", "Run in standalone mode (no cloud API)")
+  .description("Initialize self-hosted mode - configure LLM keys and repo")
+  .option("--standalone", "Run in self-hosted mode (Docker Compose stack)")
+  .option("--self-hosted", "Run in self-hosted mode (Docker Compose stack)")
   .action(async (opts) => {
-    if (opts.standalone) {
-      await initStandaloneCommand();
+    if (opts.standalone || opts.selfHosted) {
+      await initSelfHostedCommand();
     } else {
-      console.log("Use --standalone for offline mode, or 'workermill-agent setup' for cloud mode.");
+      console.log("Use --standalone for self-hosted mode, or 'workermill-agent setup' for cloud mode.");
     }
   });
 

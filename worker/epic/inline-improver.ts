@@ -188,7 +188,7 @@ export class InlineImprover {
     message: string,
     type: "system" | "manager" | "tool" | "output" | "error" = "output"
   ): Promise<void> {
-    const prefix = "[🤖 improver 🤖]";
+    const prefix = "[🤖improver🤖]";
     console.log(`${prefix} ${message}`);
 
     try {

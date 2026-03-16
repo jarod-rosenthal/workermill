@@ -166,7 +166,7 @@ export class InlineCIFixer {
     message: string,
     type: "system" | "manager" | "tool" | "output" | "error" = "output"
   ): Promise<void> {
-    const prefix = "[🔬 qa_engineer 🤖]";
+    const prefix = "[🔬qa_engineer🤖]";
     console.log(`${prefix} ${message}`);
 
     try {

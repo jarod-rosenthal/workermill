@@ -138,7 +138,7 @@ if (Object.keys(PERSONA_CONFIGS).length === 0) {
 function getLogPrefix(persona, provider) {
   const personaConfig = PERSONA_CONFIGS[persona] || { emoji: '🤖' };
   const providerIcon = PROVIDER_ICONS[provider] || '🤖';
-  return `[${personaConfig.emoji} ${persona} ${providerIcon}]`;
+  return `[${personaConfig.emoji}${persona}${providerIcon}]`;
 }
 
 /**
@@ -146,7 +146,7 @@ function getLogPrefix(persona, provider) {
  */
 function getShortPrefix(persona) {
   const personaConfig = PERSONA_CONFIGS[persona] || { emoji: '🤖' };
-  return `[${personaConfig.emoji} ${persona}]`;
+  return `[${personaConfig.emoji}${persona}]`;
 }
 
 // Global log prefix (set during runAgent initialization)

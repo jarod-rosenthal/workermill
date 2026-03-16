@@ -583,7 +583,7 @@ export class InlineDeployer {
     message: string,
     type: "system" | "manager" | "tool" | "output" | "error" = "output"
   ): Promise<void> {
-    const prefix = "[🔧 devops_engineer 🤖]";
+    const prefix = "[🔧devops_engineer🤖]";
     console.log(`${prefix} ${message}`);
 
     try {

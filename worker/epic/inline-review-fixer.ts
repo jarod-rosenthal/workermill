@@ -170,7 +170,7 @@ export class InlineReviewFixer {
     message: string,
     type: "system" | "manager" | "tool" | "output" | "error" = "output",
   ): Promise<void> {
-    const prefix = "[📝 review_fixer 🤖]";
+    const prefix = "[📝review_fixer🤖]";
     console.log(`${prefix} ${message}`);
 
     try {

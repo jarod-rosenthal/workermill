@@ -131,7 +131,7 @@ export class InlineVerifier {
     message: string,
     type: "system" | "manager" | "tool" | "output" | "error" = "output"
   ): Promise<void> {
-    const prefix = "[🔍 verifier 🤖]";
+    const prefix = "[🔍verifier🤖]";
     console.log(`${prefix} ${message}`);
 
     try {

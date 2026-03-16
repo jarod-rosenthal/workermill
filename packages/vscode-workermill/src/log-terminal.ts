@@ -43,9 +43,9 @@ const PERSONA_COLORS: Record<string, string> = {
   project_manager: YELLOW,
 };
 
-/** Extract persona name from `[emoji persona_name icon]` prefix */
+/** Extract persona name from `[emoji persona_name icon]` prefix (no spaces around emojis) */
 function extractPersona(line: string): { persona: string; prefixEnd: number } | null {
-  const m = line.match(/^\[.+?\s+(\w+)\s+.+?\]\s*/);
+  const m = line.match(/^\[.+?(\w+).+?\]\s*/);
   if (!m) return null;
   const persona = m[1];
   if (persona in PERSONA_COLORS) return { persona, prefixEnd: m[0].length };

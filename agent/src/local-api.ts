@@ -22,7 +22,7 @@ import { getOllamaStatus, generateEmbeddings, ensureOllamaRunning, pullModel, in
 import { indexRepositoryLocally } from "./local-indexer.js";
 import { getActiveBackend, getBackend } from "./backends/selector.js";
 import { processQueuedTask, planAndProcessTask, stopWorkerTask } from "./backends/local/orchestrator.js";
-import { loadStandaloneConfig, getRoleConfig } from "./backends/local/config.js";
+import { loadStandaloneConfig, getRoleConfig, isSelfHostedMode } from "./backends/local/config.js";
 import { getDb as getLocalDb, generateId } from "./backends/local/db.js";
 import { onStreamEvent } from "./backends/local/event-bus.js";
 import {
@@ -486,7 +486,8 @@ agentEvents.on("task:log", (info) => {
 agentEvents.on("state:changed", () => broadcastSSE("tasks", "state:changed", {}));
 
 // Forward local event bus (orchestrator/worker) to SSE clients
-onStreamEvent((event) => {
+// Only active in standalone mode — self-hosted mode uses the real API's event system
+if (!isSelfHostedMode()) onStreamEvent((event) => {
   broadcastSSE(event.ch, event.t, event.p);
   // Bridge local orchestrator task_state events → agentEvents-style lifecycle events
   // so VS Code extension features (sticky live diff, feed auto-switch, notifications) work

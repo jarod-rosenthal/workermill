@@ -179,7 +179,7 @@ export interface RepoInfo {
 }
 
 export interface AgentSettings {
-  mode: "standalone" | "cloud";
+  mode: "standalone" | "cloud" | "self-hosted";
   llmProvider?: string;
   llmModel?: string;
   scmProvider?: string;

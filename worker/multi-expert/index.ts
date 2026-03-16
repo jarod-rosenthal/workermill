@@ -336,7 +336,7 @@ export class MultiExpertCoordinator {
   private getLogPrefix(persona: string, provider?: string): string {
     const emoji = this.personaIcons[persona] || "🤖";
     const providerIcon = provider ? (this.providerIcons[provider] || "🤖") : "";
-    return provider ? `[${emoji} ${persona} ${providerIcon}]` : `[${emoji} ${persona}]`;
+    return provider ? `[${emoji}${persona}${providerIcon}]` : `[${emoji}${persona}]`;
   }
 
   /**
@@ -2073,7 +2073,7 @@ The repository is cloned at: **${promptRepoPath}**
         status = "pending";
       }
 
-      lines.push(`- ${personaEmoji} ${s.persona} (Story ${s.storyIndex}): ${status}`);
+      lines.push(`- ${personaEmoji}${s.persona} (Story ${s.storyIndex}): ${status}`);
     }
 
     return lines.join("\n");
@@ -2155,12 +2155,12 @@ The repository is cloned at: **${promptRepoPath}**
       const emoji = this.personaIcons[msg.persona] || "🤖";
 
       if (msg.messageType === "question") {
-        lines.push(`- [${emoji} ${msg.persona}] Q: ${msg.content}`);
+        lines.push(`- [${emoji}${msg.persona}] Q: ${msg.content}`);
       } else if (msg.messageType === "answer") {
-        lines.push(`- [${emoji} ${msg.persona}] A: ${msg.content}`);
+        lines.push(`- [${emoji}${msg.persona}] A: ${msg.content}`);
       } else if (msg.messageType === "consultation") {
         const target = msg.metadata?.targetPersona as string || "unknown";
-        lines.push(`- [${emoji} ${msg.persona}] → ${target}: ${msg.content}`);
+        lines.push(`- [${emoji}${msg.persona}] → ${target}: ${msg.content}`);
       }
     }
 
@@ -2178,7 +2178,7 @@ The repository is cloned at: **${promptRepoPath}**
     for (const c of consultations) {
       const emoji = this.personaIcons[c.persona] || "🤖";
       const blocking = c.metadata?.blocking ? " [BLOCKING]" : "";
-      lines.push(`- [${emoji} ${c.persona}]${blocking} asks you: ${c.content}`);
+      lines.push(`- [${emoji}${c.persona}]${blocking} asks you: ${c.content}`);
     }
 
     return lines.join("\n");

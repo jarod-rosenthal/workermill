@@ -60,9 +60,7 @@ services:
     restart: unless-stopped
 
   api:
-    build:
-      context: ./api
-      dockerfile: Dockerfile
+    image: ghcr.io/jarod-rosenthal/api:latest
     container_name: workermill-api
     ports:
       - "3001:3001"
@@ -87,9 +85,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: ghcr.io/jarod-rosenthal/frontend:latest
     container_name: workermill-frontend
     ports:
       - "5173:5173"

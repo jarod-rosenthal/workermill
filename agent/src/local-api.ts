@@ -1868,9 +1868,19 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
-      const result = await cloudProxy("POST", `/api/tasks/${retryMatch[1]}/retry`, {});
-      const task = localTasks.get(retryMatch[1]);
-      if (task) task.status = "running";
+      const taskId = retryMatch[1];
+      const result = await cloudProxy("POST", `/api/tasks/${taskId}/retry`, {});
+      const task = localTasks.get(taskId);
+      if (task) {
+        task.status = "running";
+        // Emit task:started so the extension reopens/restarts the log terminal
+        broadcastSSE("tasks", "task:started", {
+          id: taskId,
+          summary: task.summary,
+          description: task.description,
+          repo: task.repo,
+        });
+      }
       broadcastSSE("tasks", "state:changed", {});
       triggerPoll();
       return json(res, result);

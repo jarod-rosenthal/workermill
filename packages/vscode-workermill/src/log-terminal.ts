@@ -230,6 +230,19 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
     if (this.pollTimer) clearInterval(this.pollTimer);
   }
 
+  /** Restart polling after a retry — resume log streaming */
+  restart(): void {
+    if (this.disposed) return;
+    this.writeLine("");
+    this.writeLine(`${DIM}--- Retrying task ---${RESET}`);
+    this.writeLine("");
+    if (!this.pollTimer) {
+      this.currentInterval = 4_000;
+      this.consecutiveErrors = 0;
+      this.pollCloudLogs();
+    }
+  }
+
   /** Stop polling and write a final status line */
   onTaskFinished(status: "completed" | "failed"): void {
     // Do one last poll to capture final logs, then stop
@@ -358,12 +371,14 @@ export class LogTerminalManager {
     });
   }
 
-  /** Open (or focus) a log terminal for a task */
+  /** Open (or focus) a log terminal for a task. Restarts polling if terminal was stopped. */
   openLogs(taskId: string, taskSummary: string): void {
-    // Reuse existing terminal
+    // Reuse existing terminal — restart polling if it was stopped (retry scenario)
     const existing = this.terminals.get(taskId);
     if (existing) {
       existing.show();
+      const pty = this.ptys.get(taskId);
+      if (pty) pty.restart();
       return;
     }
 

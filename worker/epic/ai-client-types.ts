@@ -96,36 +96,13 @@ export interface AIClientConfig {
 }
 
 /**
- * Factory function — dynamically loads the real AIClient factory at runtime.
+ * Re-export the real createAIClient factory from worker/ai-clients.
  *
- * Why dynamic: This file is bundled into TWO different contexts:
- * 1. Worker Docker image (esbuild bundles from epic/dist/, resolves via crossComponentPlugin)
- * 2. Agent binary (esbuild bundles from source, no ai-clients/ available)
+ * This static re-export is resolved at bundle time by esbuild. In the Docker
+ * worker image (worker/bundle.mjs), esbuild's crossComponentPlugin resolves
+ * ../ai-clients/dist/index.js to /app/ai-clients/dist/index.js and inlines it.
  *
- * The agent binary never calls createAIClient (useUnifiedClient is only set in workers),
- * so a runtime-only import is safe — it only fails if actually called without ai-clients present.
+ * For the agent binary build (agent/build.mjs), the ai-clients path is marked
+ * as external so esbuild skips it — the agent never calls createAIClient.
  */
-let _cachedFactory: ((config: AIClientConfig) => AIClient) | null = null;
-
-export function createAIClient(config: AIClientConfig): AIClient {
-  if (!_cachedFactory) {
-    try {
-      // Runtime-only dynamic import — the path is computed so esbuild cannot
-      // statically resolve it (prevents agent binary build from failing when
-      // ai-clients/ is not present).
-      // In Docker workers: /app/ai-clients/dist/index.js exists.
-      // In agent binary: this path doesn't exist, but createAIClient is never called.
-      const modulePath = [".", ".", "ai-clients", "dist", "index.js"].join("/");
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const mod = require(modulePath);
-      _cachedFactory = mod.createAIClient;
-    } catch {
-      throw new Error(
-        "createAIClient: ai-clients module not found. " +
-        "This is expected in the agent binary (which doesn't use useUnifiedClient). " +
-        "In Docker workers, ensure ai-clients/ is compiled in the Dockerfile."
-      );
-    }
-  }
-  return _cachedFactory!(config);
-}
+export { createAIClient } from "../ai-clients/dist/index.js";

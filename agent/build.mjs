@@ -95,11 +95,15 @@ renameSync("dist/index.bundle.js", "dist/index.js");
 chmodSync("dist/cli.js", 0o755);
 
 // Step 3: Bundle epic worker entry point (from worker/ source)
+// Mark ai-clients as external — it's only available in the Docker worker image,
+// not in the agent binary. The agent never calls createAIClient (useUnifiedClient
+// is only true inside Docker workers where ai-clients/ is compiled).
 await build({
   ...shared,
   entryPoints: ["../worker/epic/remote-bootstrap.ts"],
   outfile: "dist/worker.js",
   banner: { js: "// WorkerMill Worker" },
+  external: ["../ai-clients/*"],
 });
 console.log("✓ dist/worker.js bundled from worker/epic/remote-bootstrap.ts");
 
@@ -109,6 +113,7 @@ await build({
   entryPoints: ["../worker/manager/index.ts"],
   outfile: "dist/manager-worker.js",
   banner: { js: "// WorkerMill Manager" },
+  external: ["../ai-clients/*"],
 });
 console.log("✓ dist/manager-worker.js bundled from worker/manager/index.ts");
 
@@ -118,6 +123,7 @@ await build({
   entryPoints: ["../worker/multi-expert/index.ts"],
   outfile: "dist/multi-expert-worker.js",
   banner: { js: "// WorkerMill Multi-Expert" },
+  external: ["../ai-clients/*"],
 });
 console.log("✓ dist/multi-expert-worker.js bundled from worker/multi-expert/index.ts");
 
@@ -144,7 +150,7 @@ await build({
   entryPoints: ["src/entry.ts"],
   outfile: "dist/entry.js",
   packages: undefined, // Override shared.packages: inline ALL npm packages
-  external: nodeBuiltins, // Keep Node builtins external (provided by Bun & Node.js runtimes)
+  external: [...nodeBuiltins, "../ai-clients/*"], // Keep Node builtins + ai-clients external
   banner: { js: createRequireBanner },
 });
 console.log("✓ dist/entry.js unified bundle (for binary compilation)");

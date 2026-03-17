@@ -145,13 +145,31 @@ console.log("✓ dist/ai-sdk-executor.js bundled from worker/agents/ai-sdk-execu
 // CJS packages (form-data via axios) use require() for builtins — esbuild wraps these
 // in a shim that checks `typeof require`. In Bun, require is always available.
 // In Node.js ESM, it's not — so we create one from import.meta.url.
+// Plugin: stub out ai-clients for the unified binary.
+// The agent binary never calls createAIClient — it's only used inside Docker workers.
+// Providing a stub prevents bun compile from failing on unresolved imports.
+const aiClientsStubPlugin = {
+  name: "ai-clients-stub",
+  setup(b) {
+    b.onResolve({ filter: /ai-clients/ }, () => ({
+      path: "ai-clients-stub",
+      namespace: "ai-clients-stub",
+    }));
+    b.onLoad({ filter: /.*/, namespace: "ai-clients-stub" }, () => ({
+      contents: `export function createAIClient() { throw new Error("createAIClient not available in agent binary"); }`,
+      loader: "js",
+    }));
+  },
+};
+
 await build({
   ...shared,
   entryPoints: ["src/entry.ts"],
   outfile: "dist/entry.js",
   packages: undefined, // Override shared.packages: inline ALL npm packages
-  external: [...nodeBuiltins, "../ai-clients/*"], // Keep Node builtins + ai-clients external
+  external: nodeBuiltins, // Keep Node builtins external (provided by Bun & Node.js runtimes)
   banner: { js: createRequireBanner },
+  plugins: [aiClientsStubPlugin],
 });
 console.log("✓ dist/entry.js unified bundle (for binary compilation)");
 

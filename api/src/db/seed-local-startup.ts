@@ -57,6 +57,7 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
     autoFixEnabled: true,
     autoFixMaxIterations: 3,
     // Behavior
+    autoReviewEnabled: true,
     selfReviewEnabled: false,
     pushAfterCommit: true,
     gracefulShutdownEnabled: true,

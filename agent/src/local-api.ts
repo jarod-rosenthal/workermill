@@ -584,11 +584,19 @@ async function getAllVisibleTasks(): Promise<LocalTaskInfo[]> {
   }
 
   // 3. Cloud tasks (if cloud proxy is available)
+  // Cloud is the source of truth for status — update in-memory tasks
   if (cloudProxy) {
     try {
       const merged = await getMergedTasks();
       for (const task of merged) {
-        if (!seenIds.has(task.id)) {
+        if (seenIds.has(task.id)) {
+          // Update in-memory status from cloud (cloud is authoritative)
+          const local = localTasks.get(task.id);
+          if (local && local.status !== task.status) {
+            local.status = task.status;
+            if (task.prUrl) local.prUrl = task.prUrl;
+          }
+        } else {
           seenIds.add(task.id);
           result.push(task);
         }

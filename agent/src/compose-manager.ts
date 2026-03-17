@@ -109,17 +109,24 @@ export async function startCompose(
     ? "Updating self-hosted stack..."
     : `Starting self-hosted stack from ${composeFile}`);
 
-  // Pull and start services
+  // Pull and start services — use spawn instead of execFileSync to avoid
+  // output buffer deadlock on large image pulls
   try {
-    execFileSync(docker, ["compose", "-f", composeFile, "up", "-d", "--pull", "always"], {
+    const { spawnSync } = await import("child_process");
+    const result = spawnSync(docker, ["compose", "-f", composeFile, "up", "-d", "--pull", "always"], {
       cwd: composeDir,
-      stdio: "pipe",
-      timeout: 300_000, // 5 minutes for first build
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 600_000, // 10 minutes — first-time image pulls can be slow
       windowsHide: true,
+      maxBuffer: 10 * 1024 * 1024, // 10MB buffer
     });
+    if (result.status !== 0) {
+      const stderr = result.stderr?.toString?.() || "";
+      throw new Error(stderr || `docker compose exited with code ${result.status}`);
+    }
   } catch (err) {
-    const stderr = (err as { stderr?: Buffer })?.stderr?.toString?.() || "";
-    throw new Error(`Failed to start self-hosted stack: ${stderr || (err instanceof Error ? err.message : String(err))}`);
+    if (err instanceof Error && err.message.includes("docker compose")) throw err;
+    throw new Error(`Failed to start self-hosted stack: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // Wait for API to be healthy

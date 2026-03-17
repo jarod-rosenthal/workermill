@@ -79,7 +79,7 @@ export async function startCompose(
 
   // Build and start services
   try {
-    execFileSync(docker, ["compose", "-f", composeFile, "up", "-d", "--build"], {
+    execFileSync(docker, ["compose", "-f", composeFile, "up", "-d", "--pull", "always"], {
       cwd: composeDir,
       stdio: "pipe",
       timeout: 300_000, // 5 minutes for first build

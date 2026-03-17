@@ -928,8 +928,9 @@ export async function planTask(
 ): Promise<boolean> {
   const taskLabel = chalk.cyan(task.id.slice(0, 8));
 
-  console.log(`${ts()} ${taskLabel} Fetching planning prompt...`);
-  await postLog(task.id, `${PREFIX} Fetching planning prompt from cloud API...`);
+  const repoLabel = task.githubRepo ? ` for ${task.githubRepo}` : "";
+  console.log(`${ts()} ${taskLabel} Fetching planning prompt${repoLabel}...`);
+  await postLog(task.id, `${PREFIX} Fetching planning prompt${repoLabel}...`);
 
   // 1. Fetch the assembled planning prompt from the cloud API
   let promptResponse;
@@ -1162,7 +1163,7 @@ export async function planTask(
       await postLog(task.id, `${PREFIX} Re-planning${iterLabel} using ${providerLabel}`);
     } else {
       console.log(`${ts()} ${taskLabel} Running planner ${chalk.dim(`(${chalk.yellow(providerLabel)})`)}`);
-      await postLog(task.id, `${PREFIX} Starting planning agent using ${providerLabel}`);
+      await postLog(task.id, `${PREFIX} Starting planning agent${repoLabel} using ${providerLabel}`);
     }
 
     // 2a. Generate plan via Claude CLI (Anthropic) or HTTP API (other providers)

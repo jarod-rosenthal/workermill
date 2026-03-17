@@ -558,7 +558,7 @@ async function runWithClaudeCli(
     onPlanningProgress?.({
       phase: "initializing",
       elapsedSeconds: 0,
-      detail: "Starting planning agent...",
+      detail: `Starting planning agent${input.githubRepo ? ` for ${input.githubRepo}` : ""}...`,
       charsGenerated: 0,
       toolCallCount: 0,
     });
@@ -575,7 +575,7 @@ async function runWithClaudeCli(
     // Build a human-readable status line for the current phase
     function phaseStatusLine(phase: PlanningPhase, elapsed: number): string {
       switch (phase) {
-        case "initializing": return "Starting planning agent...";
+        case "initializing": return `Starting planning agent${input.githubRepo ? ` for ${input.githubRepo}` : ""}...`;
         case "reading_repo": return "Reading repository structure...";
         case "analyzing": return "Analyzing requirements...";
         case "generating_plan": return `Generating execution plan... (${elapsed}s)`;

@@ -3260,10 +3260,10 @@ export class EpicCoordinator {
       }
 
       // Run CI gate BEFORE Tech Lead review so the reviewer sees the full picture.
-      // CI fix agent handles infrastructure issues (broken workflow YAML, missing config)
-      // before the tech_lead evaluates code quality.
+      // Only runs when quality gate commands are configured on the board — if the user
+      // didn't set up quality gates, they want a simple run without CI polling.
       let ciStatus: { passed: boolean; fixed: boolean; log?: string } | undefined;
-      if (prUrl && prNumber && this.config.maxFixRetries > 0) {
+      if (prUrl && prNumber && (this.config.qualityGateCommands?.length ?? 0) > 0) {
         this.postDashboardLog("Running CI gate checks...");
         ciStatus = await this.runCIGate(prNumber);
         if (ciStatus.passed) {
@@ -4325,9 +4325,9 @@ Begin your review now. Start by fetching the code changes.`;
     prNumber: number,
     mergeLabel: string
   ): Promise<{ merged: boolean }> {
-    // If CI fix retries disabled, merge directly
-    if ((this.config.maxFixRetries) <= 0) {
-      await this.postLog(`Merging PR #${prNumber} (${mergeLabel}, CI check disabled)...`);
+    // If no quality gate commands configured, merge directly — no CI polling needed
+    if ((this.config.qualityGateCommands?.length ?? 0) === 0) {
+      await this.postLog(`Merging PR #${prNumber} (${mergeLabel}, no quality gates configured)...`);
       const merged = await this.gitOps.mergePR(prUrl, prNumber);
       return { merged };
     }

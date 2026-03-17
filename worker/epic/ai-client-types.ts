@@ -96,13 +96,36 @@ export interface AIClientConfig {
 }
 
 /**
- * Re-export the real createAIClient factory from worker/ai-clients.
+ * Factory function — dynamically loads the real AIClient factory at runtime.
  *
- * Uses the same cross-component import pattern as ai-clients/anthropic-agent.ts
- * which imports from "../epic/dist/agent-sdk.js". Here we import in the reverse
- * direction: from epic/ into ai-clients/dist/.
+ * Why dynamic: This file is bundled into TWO different contexts:
+ * 1. Worker Docker image (esbuild bundles from epic/dist/, resolves via crossComponentPlugin)
+ * 2. Agent binary (esbuild bundles from source, no ai-clients/ available)
  *
- * The ai-clients/ module must be compiled (tsc) and available at the sibling
- * path. In the Docker container: /app/ai-clients/dist/index.js.
+ * The agent binary never calls createAIClient (useUnifiedClient is only set in workers),
+ * so a runtime-only import is safe — it only fails if actually called without ai-clients present.
  */
-export { createAIClient } from "../ai-clients/dist/index.js";
+let _cachedFactory: ((config: AIClientConfig) => AIClient) | null = null;
+
+export function createAIClient(config: AIClientConfig): AIClient {
+  if (!_cachedFactory) {
+    try {
+      // Runtime-only dynamic import — the path is computed so esbuild cannot
+      // statically resolve it (prevents agent binary build from failing when
+      // ai-clients/ is not present).
+      // In Docker workers: /app/ai-clients/dist/index.js exists.
+      // In agent binary: this path doesn't exist, but createAIClient is never called.
+      const modulePath = [".", ".", "ai-clients", "dist", "index.js"].join("/");
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require(modulePath);
+      _cachedFactory = mod.createAIClient;
+    } catch {
+      throw new Error(
+        "createAIClient: ai-clients module not found. " +
+        "This is expected in the agent binary (which doesn't use useUnifiedClient). " +
+        "In Docker workers, ensure ai-clients/ is compiled in the Dockerfile."
+      );
+    }
+  }
+  return _cachedFactory!(config);
+}

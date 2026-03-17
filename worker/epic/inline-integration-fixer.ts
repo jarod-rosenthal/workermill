@@ -135,6 +135,7 @@ export class InlineIntegrationFixer {
         },
         useAgentSdk: true,
         githubToken: config.githubToken,
+        oauthToken: config.anthropicApiKey ? undefined : "mounted",
       });
     }
   }

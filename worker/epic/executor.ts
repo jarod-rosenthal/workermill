@@ -133,6 +133,9 @@ export class StoryExecutor {
         apiConfig: { baseUrl: config.apiBaseUrl, orgApiKey: config.orgApiKey },
         useAgentSdk: true,
         githubToken: config.githubToken,
+        // Docker sandbox mounts ~/.claude/.credentials.json — Claude CLI reads it directly.
+        // Pass "mounted" as a truthy sentinel so validateApiKey() doesn't reject.
+        oauthToken: config.anthropicApiKey ? undefined : "mounted",
       });
     }
   }

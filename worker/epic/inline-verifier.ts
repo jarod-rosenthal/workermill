@@ -94,6 +94,7 @@ export class InlineVerifier {
         apiConfig: { baseUrl: config.apiBaseUrl, orgApiKey: config.orgApiKey },
         useAgentSdk: true,
         githubToken: config.githubToken,
+        oauthToken: config.anthropicApiKey ? undefined : "mounted",
       });
     }
   }

@@ -123,6 +123,7 @@ export class InlineReviewFixer {
         },
         useAgentSdk: true,
         githubToken: config.githubToken,
+        oauthToken: config.anthropicApiKey ? undefined : "mounted",
       });
     }
   }

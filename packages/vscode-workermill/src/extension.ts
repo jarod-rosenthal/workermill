@@ -34,6 +34,7 @@ import {
   writeApiKeyToKeychain,
   stripApiKeyFromConfig,
   deleteApiKeyFromKeychain,
+  resetStartAttempts,
 } from "./agent-installer";
 import {
   signUpWithGitHub,
@@ -1380,22 +1381,55 @@ export function activate(context: vscode.ExtensionContext): void {
   // Auto-start agent if installed and configured, otherwise let welcome view guide user
   if (installed && configured) {
     startAgentProcess(log);
-    // Check if agent actually started after a brief delay
-    waitForAgentReady(log, 60_000).then((port) => {
-      if (!port) {
-        const error = readAgentStartupError();
-        if (error) {
-          // Agent still starting up (Docker image pull, Ollama, etc.) — not a real error
-          if (/pulling|downloading|starting ollama/i.test(error)) {
-            vscode.window.showInformationMessage(
-              "WorkerMill agent is starting up (this may take a moment).",
-            );
+    // Show progress while waiting for agent to start (Docker Compose can take minutes)
+    vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "WorkerMill",
+        cancellable: false,
+      },
+      async (progress) => {
+        progress.report({ message: "Starting agent..." });
+        // Poll for ready with progress updates
+        const start = Date.now();
+        const timeoutMs = 120_000; // 2 minutes
+        const pollMs = 2_000;
+        while (Date.now() - start < timeoutMs) {
+          const elapsed = Math.round((Date.now() - start) / 1000);
+          if (elapsed < 15) {
+            progress.report({ message: "Starting Docker Compose..." });
+          } else if (elapsed < 60) {
+            progress.report({ message: `Pulling images and starting services (${elapsed}s)...` });
           } else {
-            vscode.window.showErrorMessage(`WorkerMill: ${error}`);
+            progress.report({ message: `Waiting for API to be ready (${elapsed}s)...` });
           }
+          // Check if port file appeared
+          const portFile = path.join(os.homedir(), ".workermill", "agent.port");
+          try {
+            const port = parseInt(fs.readFileSync(portFile, "utf-8").trim(), 10);
+            if (port > 0) {
+              progress.report({ message: "Agent connected!" });
+              client.connect();
+              return;
+            }
+          } catch { /* not ready yet */ }
+          await new Promise((r) => setTimeout(r, pollMs));
         }
-      }
-    });
+        // Timed out
+        const error = readAgentStartupError();
+        if (error && /pulling|downloading|starting ollama/i.test(error)) {
+          vscode.window.showInformationMessage(
+            "WorkerMill agent is still starting up (this may take a few more minutes for first-time image downloads).",
+          );
+        } else if (error) {
+          vscode.window.showErrorMessage(`WorkerMill: ${error}`);
+        } else {
+          vscode.window.showWarningMessage(
+            "WorkerMill agent is still starting. Check ~/.workermill/agent.log for progress.",
+          );
+        }
+      },
+    );
   } else if (configured && !installed) {
     log("Agent configured but not installed — auto-installing...");
     installAgent().then((success) => {
@@ -1416,6 +1450,7 @@ export function activate(context: vscode.ExtensionContext): void {
   client.on("connected", (status) => {
     log(`Connected to agent ${status.agentId} (v${status.version})`);
     vscode.commands.executeCommand("setContext", "workermill.agentConnected", true);
+    resetStartAttempts(); // Agent is alive — allow future restarts
   });
 
   client.on("disconnected", () => {

@@ -615,6 +615,13 @@ function cleanAgentState(): void {
  * redirecting stdio to the log file and calling child.unref().
  */
 let startInFlight = false;
+let startAttempts = 0;
+const MAX_START_ATTEMPTS = 3;
+
+/** Reset the spawn attempt counter (call on successful connection). */
+export function resetStartAttempts(): void {
+  startAttempts = 0;
+}
 
 /**
  * Check if agent is already running by probing its local API port.
@@ -661,6 +668,13 @@ export function startAgentProcess(log?: (msg: string) => void, runtime?: "wsl" |
     log?.("Start already in-flight — skipping");
     return;
   }
+
+  // Prevent infinite respawn loops — give up after MAX_START_ATTEMPTS
+  if (startAttempts >= MAX_START_ATTEMPTS) {
+    log?.(`Agent failed to start after ${MAX_START_ATTEMPTS} attempts — giving up. Check ~/.workermill/agent.log`);
+    return;
+  }
+  startAttempts++;
 
   // WSL mode: spawn the agent inside WSL via wsl.exe
   if (runtime === "wsl") {
@@ -753,7 +767,7 @@ export function startAgentProcess(log?: (msg: string) => void, runtime?: "wsl" |
     }
 
     stdinFd = fs.openSync(os.devNull, "r");
-    const child = spawn(binary, ["start"], {
+    const child = spawn(binary, ["start", "--foreground"], {
       detached: true,
       stdio: [stdinFd, logFd, logFd],
       env,

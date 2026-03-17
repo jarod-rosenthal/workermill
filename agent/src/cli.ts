@@ -36,8 +36,8 @@ program
 program
   .command("start")
   .description("Start the agent, polling the cloud API for tasks")
-  .option("--detach", "Run in background (daemon mode)")
-  .action(startCommand);
+  .option("--foreground", "Run in foreground (show logs in terminal)")
+  .action((opts) => startCommand({ detach: !opts.foreground }));
 
 program
   .command("stop")

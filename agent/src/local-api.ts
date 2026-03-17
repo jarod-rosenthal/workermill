@@ -1768,6 +1768,9 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     if (cloudProxy) {
       try {
         const result = await cloudProxy("DELETE", `/api/tasks/${taskId}`);
+        // Also remove from in-memory task list so the sidebar updates
+        localTasks.delete(taskId);
+        broadcastSSE("tasks", "state:changed", {});
         return json(res, result);
       } catch (err: any) {
         return json(res, err.data || { error: String(err) }, err.status || 500);

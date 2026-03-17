@@ -808,6 +808,7 @@ export function startAgentProcess(log?: (msg: string) => void, runtime?: "wsl" |
  */
 export async function stopAgentProcess(): Promise<boolean> {
   startInFlight = false;
+  startAttempts = 0;
   // Fast path: SIGTERM via PID (completes in <1s typically)
   const pid = readAgentPid();
   if (pid && isProcessAlive(pid)) {
@@ -826,8 +827,27 @@ export async function stopAgentProcess(): Promise<boolean> {
       }
     }
     cleanAgentState();
-    return true;
   }
+
+  // Stop Docker Compose stack — fire-and-forget detached process so it
+  // doesn't block VS Code's deactivate() time budget. On reload, the new
+  // extension instance will find the stack down and restart it.
+  const composeFile = path.join(os.homedir(), ".workermill", "docker-compose.yml");
+  if (fs.existsSync(composeFile)) {
+    try {
+      const docker = process.platform === "win32" ? "docker.exe" : "docker";
+      const child = spawn(docker, ["compose", "-f", composeFile, "down"], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      child.unref();
+    } catch {
+      // Best effort — Docker may not be running
+    }
+  }
+
+  return true;
 
   // No PID or process already dead — try CLI stop as fallback
   // (handles edge case where PID file was deleted but process is alive)

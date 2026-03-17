@@ -644,7 +644,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
       try {
         const tasks = await client.getTasks();
-        const activeTasks = tasks.filter((t) => t.status === "running");
+        const activeStatuses = new Set(["running", "executing", "consolidating", "integration_check", "deploying"]);
+        const activeTasks = tasks.filter((t) => activeStatuses.has(t.status));
 
         if (activeTasks.length === 0) {
           vscode.window.showInformationMessage("No active tasks to talk to.");
@@ -696,9 +697,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
       try {
         const tasks = await client.getTasks();
-        const activeTasks = tasks.filter(
-          (t) => t.status === "running" || t.status === "planning",
-        );
+        const runningStatuses = new Set(["running", "executing", "planning", "consolidating",
+          "integration_check", "deploying", "queued", "dispatching", "claimed", "environment_setup"]);
+        const activeTasks = tasks.filter((t) => runningStatuses.has(t.status));
 
         if (activeTasks.length === 0) {
           vscode.window.showInformationMessage("No active tasks.");
@@ -742,7 +743,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
       try {
         const tasks = await client.getTasks();
-        const planningTasks = tasks.filter((t) => t.status === "planning");
+        const planningTasks = tasks.filter((t) => t.status === "planning" || t.status === "pending_plan_approval");
 
         if (planningTasks.length === 0) {
           vscode.window.showInformationMessage("No plans awaiting approval.");
@@ -808,7 +809,9 @@ export function activate(context: vscode.ExtensionContext): void {
           // Fallback: pick from active tasks
           try {
             const tasks = await client.getTasks();
-            const active = tasks.filter((t) => t.status === "running" || t.status === "planning");
+            const actStatuses = new Set(["running", "executing", "planning", "pending_plan_approval",
+              "consolidating", "integration_check", "deploying", "queued", "dispatching", "claimed", "environment_setup"]);
+            const active = tasks.filter((t) => actStatuses.has(t.status));
             if (active.length === 0) {
               vscode.window.showInformationMessage("No active tasks to cancel.");
               return;

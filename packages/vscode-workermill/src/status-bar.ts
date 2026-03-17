@@ -91,8 +91,11 @@ export class StatusBar {
       return;
     }
 
-    const active = this.tasks.filter((t) => t.status === "running" || t.status === "planning");
-    const attention = this.tasks.filter((t) => t.status === "failed" || t.status === "escalated");
+    const terminalStatuses = new Set(["completed", "deployed", "failed", "cancelled", "review_rejected",
+      "pr_created", "review_requested", "pr_approved", "review_approved"]);
+    const attentionStatuses = new Set(["failed", "escalated", "review_rejected"]);
+    const active = this.tasks.filter((t) => !terminalStatuses.has(t.status) && !attentionStatuses.has(t.status));
+    const attention = this.tasks.filter((t) => attentionStatuses.has(t.status));
 
     const sandboxTag = this.sandbox === "docker" ? " $(shield) Docker" : "";
     const modeTag = this.mode === "local" ? " Standalone" : "";

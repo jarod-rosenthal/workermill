@@ -508,10 +508,10 @@ export class TaskDetailPanel {
   </div>
 </div>
 
-<div class="actions-bar" id="actionsBar"${task.status === "failed" || task.status === "cancelled" || task.status === "completed" || task.status === "pr_approved" || task.status === "escalated" ? ` style="display:none"` : ""}>
+<div class="actions-bar" id="actionsBar"${["failed","cancelled","completed","deployed","pr_approved","review_approved","pr_created","review_requested","escalated","review_rejected"].includes(task.status) ? ` style="display:none"` : ""}>
   <button class="action-btn danger" onclick="cancelTask()">Cancel Task</button>
 </div>
-<div class="actions-bar" id="retryBar"${task.status === "failed" || task.status === "cancelled" || task.status === "escalated" ? ` style="display:flex"` : ` style="display:none"`}>
+<div class="actions-bar" id="retryBar"${["failed","cancelled","escalated","review_rejected"].includes(task.status) ? ` style="display:flex"` : ` style="display:none"`}>
   <button class="action-btn primary" id="retryBtn" onclick="retryTask()">Retry Task</button>
 </div>
 
@@ -538,8 +538,8 @@ export class TaskDetailPanel {
   </div>
 </div>
 
-<div class="finished-banner${task.status === "completed" ? " visible completed" : task.status === "pr_approved" ? " visible completed" : task.status === "failed" ? " visible failed" : task.status === "escalated" ? " visible failed" : task.status === "cancelled" ? " visible cancelled" : ""}" id="finishedBanner">${task.status === "completed" ? "&#x2705; Task completed successfully" : task.status === "pr_approved" ? "&#x2705; PR approved" : task.status === "failed" ? "&#x274C; Task failed" : task.status === "escalated" ? "&#x26A0; Task escalated — needs attention" : task.status === "cancelled" ? "&#x274C; Task cancelled" : ""}</div>
-<div class="error-detail${task.status === "failed" && task.errorMessage ? " visible" : ""}" id="errorDetail">${task.status === "failed" && task.errorMessage ? `<span class="error-label">Error:</span>${esc(task.errorMessage)}` : ""}</div>
+<div class="finished-banner${["completed","deployed","pr_approved","review_approved","pr_created","review_requested"].includes(task.status) ? " visible completed" : ["failed","review_rejected"].includes(task.status) ? " visible failed" : task.status === "escalated" ? " visible failed" : task.status === "cancelled" ? " visible cancelled" : ""}" id="finishedBanner">${task.status === "completed" ? "&#x2705; Task completed successfully" : task.status === "deployed" ? "&#x2705; Deployed" : ["pr_approved","review_approved"].includes(task.status) ? "&#x2705; PR approved" : ["pr_created","review_requested"].includes(task.status) ? "&#x2705; PR ready for review" : ["failed","review_rejected"].includes(task.status) ? "&#x274C; Task failed" : task.status === "escalated" ? "&#x26A0; Task escalated — needs attention" : task.status === "cancelled" ? "&#x274C; Task cancelled" : ""}</div>
+<div class="error-detail${["failed","review_rejected"].includes(task.status) && task.errorMessage ? " visible" : ""}" id="errorDetail">${["failed","review_rejected"].includes(task.status) && task.errorMessage ? `<span class="error-label">Error:</span>${esc(task.errorMessage)}` : ""}</div>
 
 
 <script>
@@ -583,18 +583,25 @@ function updateStatus(status, errorMessage) {
   badge.className = "badge badge-status " + status;
 
   // Show finished banner for terminal states
-  if (status === "completed" || status === "pr_approved" || status === "failed" || status === "escalated" || status === "cancelled") {
+  var successStatuses = ["completed", "deployed", "pr_approved", "review_approved", "pr_created", "review_requested"];
+  var failStatuses = ["failed", "review_rejected"];
+  var retryStatuses = ["failed", "cancelled", "escalated", "review_rejected"];
+  var terminalStatuses = successStatuses.concat(failStatuses).concat(["escalated", "cancelled"]);
+  if (terminalStatuses.indexOf(status) !== -1) {
     const banner = document.getElementById("finishedBanner");
-    const bannerClass = (status === "completed" || status === "pr_approved") ? "completed" : (status === "escalated") ? "failed" : status;
+    const bannerClass = (successStatuses.indexOf(status) !== -1) ? "completed" : (status === "escalated") ? "failed" : status;
     banner.className = "finished-banner visible " + bannerClass;
     banner.textContent = status === "completed" ? "\\u2705 Task completed successfully"
-      : status === "pr_approved" ? "\\u2705 PR approved"
+      : status === "deployed" ? "\\u2705 Deployed"
+      : status === "pr_approved" || status === "review_approved" ? "\\u2705 PR approved"
+      : status === "pr_created" || status === "review_requested" ? "\\u2705 PR ready for review"
       : status === "escalated" ? "\\u26A0 Task escalated \\u2014 needs attention"
       : status === "cancelled" ? "\\u274C Task cancelled"
+      : status === "review_rejected" ? "\\u274C Review rejected"
       : "\\u274C Task failed";
     // Show error detail for failed tasks
     var errEl = document.getElementById("errorDetail");
-    if (status === "failed" && errorMessage) {
+    if (failStatuses.indexOf(status) !== -1 && errorMessage) {
       errEl.innerHTML = '<span class="error-label">Error:</span>' + escHtml(errorMessage);
       errEl.className = "error-detail visible";
     } else {
@@ -602,7 +609,7 @@ function updateStatus(status, errorMessage) {
       errEl.innerHTML = "";
     }
     document.getElementById("actionsBar").style.display = "none";
-    document.getElementById("retryBar").style.display = (status === "failed" || status === "cancelled" || status === "escalated") ? "flex" : "none";
+    document.getElementById("retryBar").style.display = (retryStatuses.indexOf(status) !== -1) ? "flex" : "none";
     var retryBtn = document.getElementById("retryBtn");
     if (retryBtn) retryBtn.disabled = false;
   } else {

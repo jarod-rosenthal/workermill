@@ -298,7 +298,9 @@ class TaskTreeItem extends vscode.TreeItem {
 
     this.id = task.id;
     // Show progress stage for active tasks, raw status for terminal states
-    this.description = (task.status === "running" || task.status === "planning") && stage
+    const activeForStage = new Set(["running", "executing", "planning", "pending_plan_approval",
+      "consolidating", "integration_check", "deploying", "queued", "dispatching", "claimed", "environment_setup"]);
+    this.description = activeForStage.has(task.status) && stage
       ? stage
       : task.status;
     this.tooltip = `${task.summary}\nStatus: ${task.status}${stage ? `\nStage: ${stage}` : ""}\nPersona: ${task.persona || "default"}\nStarted: ${task.startedAt}${task.errorMessage ? `\nError: ${task.errorMessage}` : ""}`;

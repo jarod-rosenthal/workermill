@@ -730,7 +730,7 @@ export async function processPlanningTask(task: WorkerTask): Promise<void> {
       await logTaskEvent(
         task.id,
         "status_change",
-        "Starting PRD analysis with Planning Agent",
+        "Starting task analysis with Planning Agent",
       );
     }
 
@@ -744,7 +744,7 @@ export async function processPlanningTask(task: WorkerTask): Promise<void> {
       await logTaskEvent(
         task.id,
         "info",
-        "Using V3 inventory-based planning (PRD/Epic detected)",
+        "Using V3 inventory-based planning",
       );
     } else if (useV2 && !isReplanning) {
       await logTaskEvent(

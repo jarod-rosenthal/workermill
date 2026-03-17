@@ -134,9 +134,9 @@ function getBackend(agentConfig: PlanningAgentConfig): LLMBackend {
  */
 const PLAN_GENERATION_PROMPT = `You are a technical planning agent for the V2 Pipeline.
 
-Analyze this PRD and create an execution plan with the MINIMUM number of steps needed.
+Analyze the task requirements and create an execution plan with the MINIMUM number of steps needed.
 
-## PRD (Product Requirements Document)
+## Task Requirements
 {{PRD}}
 
 ## CRITICAL: Right-Size the Plan
@@ -189,7 +189,7 @@ Match plan complexity to task complexity:
 
 ## Operational/Deployment Tasks
 
-When a PRD requires running commands (terraform apply, deploy scripts, database migrations, etc.):
+When the task requires running commands (terraform apply, deploy scripts, database migrations, etc.):
 - Create steps with \`verificationType: "operational"\`
 - The step description MUST include the exact commands to run
 - verificationInstructions MUST specify how to confirm success (e.g., "terraform apply exits 0, resources created in AWS")
@@ -268,7 +268,7 @@ JSON Schema for the plan:
  */
 const REFINEMENT_PROMPT = `You are a technical planning agent refining an execution plan based on Critic feedback.
 
-## Original PRD
+## Original Task Requirements
 {{PRD}}
 
 ## Previous Plan (Rejected)
@@ -294,7 +294,7 @@ Focus on:
 4. Fixing dependency relationships
 5. Breaking down oversized steps (>3 files)
 6. Adding verification strategies for complex logic
-7. Adding operational/deployment steps when the PRD requires running commands, not just writing files
+7. Adding operational/deployment steps when the task requires running commands, not just writing files
 
 First, explain your refinements (2-4 sentences). What feedback are you addressing? What changes are you making?
 
@@ -321,9 +321,9 @@ The main issues were [issues]. I'm improving the plan by [changes].
 function buildCloudCriticPrompt(maxTargetFiles = 15): string {
   return `You are a Senior Architect reviewing an execution plan. Your job is to ensure the plan is appropriately sized for the task.
 
-Review this execution plan against the PRD:
+Review this execution plan against the task requirements:
 
-## PRD (Product Requirements Document)
+## Task Requirements
 {{PRD}}
 
 ## PROPOSED EXECUTION PLAN
@@ -342,11 +342,11 @@ Review this execution plan against the PRD:
 - Using one persona when only one skill is needed
 
 **DO check for:**
-1. **Missing Requirements** - Does the plan cover what the PRD asks for?
+1. **Missing Requirements** - Does the plan cover what the task asks for?
 2. **Vague Instructions** - Will the worker know what to do?
 3. **Security Issues** - Only for tasks involving auth, user data, or external input
 4. **Unfocused Scope** - Each step should own a single concern (e.g., "database layer", "auth system", "UI components"). Deduct points only if a step mixes unrelated concerns. Do NOT penalize steps for listing many files — foundation/scaffolding steps legitimately touch 15-25+ files.
-5. **Missing Operational Steps** - If the PRD requires deployment, provisioning, migrations, or running commands, does the plan include operational steps? Writing code is not the same as deploying it.
+5. **Missing Operational Steps** - If the task requires deployment, provisioning, migrations, or running commands, does the plan include operational steps? Writing code is not the same as deploying it.
 6. **Overlapping File Scope** - If two or more steps share the same targetFiles, this causes parallel merge conflicts. Steps MUST NOT overlap on targetFiles. Deduct 10 points per shared file across steps.
 7. **Serialization Bottleneck** - If more than half the stories depend on a single story, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
 
@@ -534,7 +534,7 @@ export type PlanStreamProgressCallback = (event: PlanningProgressEvent) => void;
  * Generate initial V2 execution plan using the configured provider
  * Streams reasoning/thoughts before outputting JSON plan.
  *
- * @param prd - The PRD text
+ * @param prd - The task requirements text
  * @param agentConfig - Provider/model configuration from org settings
  * @param previousPlan - Previous plan for refinement (optional)
  * @param criticFeedback - Critic feedback for refinement (optional)
@@ -651,7 +651,7 @@ export async function generatePlan(
 /**
  * Validate an execution plan against a PRD using the configured provider
  *
- * @param prd - The Product Requirements Document text
+ * @param prd - The task requirements text
  * @param plan - The execution plan to validate
  * @param agentConfig - Provider/model configuration from org settings
  */
@@ -719,7 +719,7 @@ export type PlanProgressCallback = (message: string, details?: {
  *
  * This is the main entry point for V2 pipeline plan generation.
  *
- * @param prd - The Product Requirements Document text
+ * @param prd - The task requirements text
  * @param agentConfig - Provider/model configuration from org settings
  * @param maxAttempts - Maximum Planner-Critic iterations (default: 3)
  * @param onProgress - Optional callback for reporting iteration progress

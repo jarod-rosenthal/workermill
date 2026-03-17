@@ -12,6 +12,7 @@ import * as os from "os";
 import * as http from "http";
 import { fileURLToPath } from "url";
 import { findDockerBin } from "./config.js";
+import { DOCKER_IMAGE_TAG } from "./version.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -65,19 +66,35 @@ export function isStackHealthy(): Promise<boolean> {
 export async function startCompose(
   log?: (msg: string) => void,
 ): Promise<void> {
-  // Check if already running
-  if (await isStackHealthy()) {
-    log?.("Self-hosted stack already running");
-    return;
-  }
-
   const docker = findDockerBin();
   const composeFile = findComposeFile();
   const composeDir = path.dirname(composeFile);
 
-  log?.(`Starting self-hosted stack from ${composeFile}`);
+  // Pin API + frontend image tags to the agent version (same as worker image)
+  // Rewrites the compose file so image versions stay in sync with the agent binary
+  try {
+    let content = fs.readFileSync(composeFile, "utf-8");
+    const tag = DOCKER_IMAGE_TAG; // e.g. "0.10.239" or "latest" in dev
+    content = content.replace(
+      /ghcr\.io\/jarod-rosenthal\/api:[^\s"]+/g,
+      `ghcr.io/jarod-rosenthal/api:${tag}`,
+    );
+    content = content.replace(
+      /ghcr\.io\/jarod-rosenthal\/frontend:[^\s"]+/g,
+      `ghcr.io/jarod-rosenthal/frontend:${tag}`,
+    );
+    fs.writeFileSync(composeFile, content);
+    log?.(`Image tags pinned to ${tag}`);
+  } catch {
+    // Non-fatal — compose will use whatever tags are in the file
+  }
 
-  // Build and start services
+  const alreadyRunning = await isStackHealthy();
+  log?.(alreadyRunning
+    ? "Updating self-hosted stack..."
+    : `Starting self-hosted stack from ${composeFile}`);
+
+  // Pull and start services
   try {
     execFileSync(docker, ["compose", "-f", composeFile, "up", "-d", "--pull", "always"], {
       cwd: composeDir,

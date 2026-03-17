@@ -111,6 +111,26 @@ jobs:
             ghcr.io/jarod-rosenthal/worker:${{ steps.version.outputs.version }}
             ghcr.io/jarod-rosenthal/worker:latest
 
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./api
+          file: api/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/jarod-rosenthal/api:${{ steps.version.outputs.version }}
+            ghcr.io/jarod-rosenthal/api:latest
+
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: frontend/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/jarod-rosenthal/frontend:${{ steps.version.outputs.version }}
+            ghcr.io/jarod-rosenthal/frontend:latest
+
       - name: Make GHCR package public
         run: |
           curl -s -X PATCH \

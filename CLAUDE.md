@@ -61,9 +61,9 @@ WorkerMill: the open-source operations layer for AI coding agents. Deployed at h
 | Path | Where code lives | Rebuild |
 |------|-----------------|---------|
 | Remote agent native | Bundled in agent binary | Release new agent binary |
-| Remote agent Docker sandbox | Docker image | Agent release CI pushes automatically |
+| Remote agent Docker sandbox | GHCR image | `git tag agent-v<version>` → CI builds + pushes to GHCR + updates ECS |
 | Local Docker | Docker image via `tsc` | `./bin/local-workermill build-worker` |
-| Cloud ECS | Container image | `./deploy.sh --worker` |
+| Cloud ECS | GHCR image (via task definition) | Automatic on agent release; manual: `./deploy.sh --worker [version]` |
 
 ### Four Spawners
 `agent/src/spawner.ts` (remote native), `agent/src/docker-spawner.ts` (remote Docker sandbox), `api/src/services/local-epic-spawner.ts` (local), `api/src/services/ecs-task-runner.ts` (cloud container). Always ask which environment before changes.

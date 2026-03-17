@@ -1071,9 +1071,9 @@ router.get(
       providerRouting: org.providerRouting ?? {},
       managerModelId: org.managerModelId ?? null,
       ollamaBaseUrl: org.ollamaBaseUrl ?? null,
-      // Worker image registry (keeps ECR details server-side)
-      workerImageUrl: `${process.env.ECR_REGISTRY || ""}/${process.env.ECR_WORKER_REPO || ""}:latest`,
-      ecrRegistry: process.env.ECR_REGISTRY || "",
+      // Worker image registry
+      workerImageUrl: "ghcr.io/jarod-rosenthal/worker:latest",
+      ecrRegistry: "",
       // Intent Engineering
       aiGuidelines: org.aiGuidelines ?? null,
       // Review workflow settings

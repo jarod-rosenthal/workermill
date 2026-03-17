@@ -26,7 +26,7 @@ declare -A ENV_CONFIG
 
 # Production environment (default) - resource names from ~/.workermill/env
 ENV_CONFIG[prod_ecr_api_repo]="${WM_PROD_ECR_API_REPO:?Set WM_PROD_ECR_API_REPO in ~/.workermill/env}"
-ENV_CONFIG[prod_ecr_worker_repo]="${WM_PROD_ECR_WORKER_REPO:?Set WM_PROD_ECR_WORKER_REPO in ~/.workermill/env}"
+ENV_CONFIG[prod_ecr_worker_repo]="${WM_PROD_ECR_WORKER_REPO:-}"
 ENV_CONFIG[prod_ecs_cluster]="${WM_PROD_ECS_CLUSTER:?Set WM_PROD_ECS_CLUSTER in ~/.workermill/env}"
 ENV_CONFIG[prod_ecs_service]="${WM_PROD_ECS_SERVICE:?Set WM_PROD_ECS_SERVICE in ~/.workermill/env}"
 ENV_CONFIG[prod_s3_bucket]="${WM_PROD_S3_BUCKET:?Set WM_PROD_S3_BUCKET in ~/.workermill/env}"
@@ -36,7 +36,7 @@ ENV_CONFIG[prod_tf_dir]="infrastructure/terraform/environments/prod"
 
 # Development environment - resource names from ~/.workermill/env
 ENV_CONFIG[dev_ecr_api_repo]="${WM_DEV_ECR_API_REPO:?Set WM_DEV_ECR_API_REPO in ~/.workermill/env}"
-ENV_CONFIG[dev_ecr_worker_repo]="${WM_DEV_ECR_WORKER_REPO:?Set WM_DEV_ECR_WORKER_REPO in ~/.workermill/env}"
+ENV_CONFIG[dev_ecr_worker_repo]="${WM_DEV_ECR_WORKER_REPO:-}"
 ENV_CONFIG[dev_ecs_cluster]="${WM_DEV_ECS_CLUSTER:?Set WM_DEV_ECS_CLUSTER in ~/.workermill/env}"
 ENV_CONFIG[dev_ecs_service]="${WM_DEV_ECS_SERVICE:?Set WM_DEV_ECS_SERVICE in ~/.workermill/env}"
 ENV_CONFIG[dev_s3_bucket]="${WM_DEV_S3_BUCKET:?Set WM_DEV_S3_BUCKET in ~/.workermill/env}"
@@ -53,6 +53,7 @@ DEPLOY_WORKER=false
 DEPLOY_FRONTEND=false
 PUBLISH_AGENT=false
 SKIP_BUILD=false
+WORKER_VERSION="latest"
 ENVIRONMENT="prod"  # Default to production
 
 # Database/bastion feature flags
@@ -73,7 +74,7 @@ show_help() {
     echo ""
     echo "Options:"
     echo "  --api              Deploy API to ECS"
-    echo "  --worker           Deploy Worker image to ECR"
+    echo "  --worker [version] Update Worker ECS task definition to GHCR image (default: latest)"
     echo "  --frontend         Deploy Frontend to S3/CloudFront"
     echo "  --all              Deploy API, Worker, and Frontend"
     echo "  --publish-agent    Build and publish @workermill/agent to npm"
@@ -116,7 +117,13 @@ while [[ $# -gt 0 ]]; do
             ;;
         --worker)
             DEPLOY_WORKER=true
-            shift
+            # Capture optional version argument (e.g., --worker 0.10.213)
+            if [[ -n "${2:-}" && ! "$2" =~ ^-- ]]; then
+                WORKER_VERSION="$2"
+                shift 2
+            else
+                shift
+            fi
             ;;
         --frontend)
             DEPLOY_FRONTEND=true
@@ -700,45 +707,35 @@ deploy_api() {
     cd "$SCRIPT_DIR"
 }
 
-# Function to deploy worker image
+# Function to update worker task definition to use GHCR image
 deploy_worker() {
     echo -e "${GREEN}----------------------------------------${NC}"
-    echo -e "${GREEN}Deploying Worker Image to ECR (${ENVIRONMENT})${NC}"
+    echo -e "${GREEN}Updating Worker Image (${ENVIRONMENT})${NC}"
     echo -e "${GREEN}----------------------------------------${NC}"
 
-    cd "$SCRIPT_DIR/worker"
+    local GHCR_IMAGE="ghcr.io/jarod-rosenthal/worker"
+    local FULL_IMAGE="${GHCR_IMAGE}:${WORKER_VERSION}"
 
-    echo -e "${YELLOW}Logging into ECR...${NC}"
-    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+    echo -e "${YELLOW}Pulling GHCR image ${FULL_IMAGE}...${NC}"
+    docker pull "$FULL_IMAGE" 2>&1
 
-    echo -e "${YELLOW}Building Docker image (no cache)...${NC}"
-    docker build --no-cache -t $ECR_WORKER_REPO:latest .
-
-    echo -e "${YELLOW}Tagging image...${NC}"
-    docker tag $ECR_WORKER_REPO:latest $ECR_REGISTRY/$ECR_WORKER_REPO:latest
-
-    echo -e "${YELLOW}Pushing to ECR...${NC}"
-    PUSH_OUTPUT=$(docker push $ECR_REGISTRY/$ECR_WORKER_REPO:latest 2>&1)
-    echo "$PUSH_OUTPUT"
-
-    # Extract digest from push output
-    WORKER_DIGEST=$(echo "$PUSH_OUTPUT" | grep -o 'sha256:[a-f0-9]*' | head -1)
+    WORKER_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$FULL_IMAGE" 2>/dev/null | grep -o 'sha256:[a-f0-9]*')
     if [[ -z "$WORKER_DIGEST" ]]; then
-        echo -e "${RED}Failed to extract image digest from push output${NC}"
+        echo -e "${RED}Failed to resolve digest for ${FULL_IMAGE}${NC}"
         exit 1
     fi
     echo -e "${GREEN}Image digest: $WORKER_DIGEST${NC}"
 
     # Get current task definition
-    echo -e "${YELLOW}Creating new task definition with image digest...${NC}"
+    echo -e "${YELLOW}Creating new task definition with GHCR image...${NC}"
     TASK_DEF=$(aws ecs describe-task-definition \
         --task-definition ${ECS_CLUSTER}-worker \
         --region $AWS_REGION \
         --query 'taskDefinition' \
         --output json)
 
-    # Update the image in the container definition to use digest
-    NEW_IMAGE="$ECR_REGISTRY/$ECR_WORKER_REPO@$WORKER_DIGEST"
+    # Update the image in the container definition to use GHCR digest
+    NEW_IMAGE="${GHCR_IMAGE}@${WORKER_DIGEST}"
     NEW_TASK_DEF=$(echo "$TASK_DEF" | jq --arg IMAGE "$NEW_IMAGE" '
         del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
         .containerDefinitions[0].image = $IMAGE
@@ -755,9 +752,8 @@ deploy_worker() {
     rm -f "$TASK_DEF_FILE"
 
     echo -e "${GREEN}Registered new task definition: $NEW_TASK_ARN${NC}"
-    echo -e "${GREEN}Worker image deployed!${NC}"
-    echo -e "${GREEN}Image: $NEW_IMAGE${NC}"
-    echo -e "${YELLOW}Note: New worker tasks will use the updated image${NC}"
+    echo -e "${GREEN}Worker image updated to: ${FULL_IMAGE} (${WORKER_DIGEST})${NC}"
+    echo -e "${YELLOW}Note: New worker tasks will use the GHCR image${NC}"
 
     cd "$SCRIPT_DIR"
 }

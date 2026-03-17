@@ -39,7 +39,6 @@ env:
   AWS_REGION: us-east-1
   ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
   ECR_API_REPO: ${{ vars.ECR_API_REPO }}
-  ECR_WORKER_REPO: ${{ vars.ECR_WORKER_REPO }}
   ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
   ECS_SERVICE: ${{ vars.ECS_SERVICE }}
   S3_BUCKET: ${{ vars.FRONTEND_S3_BUCKET }}
@@ -357,13 +356,18 @@ jobs:
           echo "Distribution: ${{ env.CLOUDFRONT_DISTRIBUTION }}"
 
   deploy-worker:
-    name: Deploy Worker Image to ECR
+    name: Update Worker Image from GHCR
     runs-on: ubuntu-latest
     if: inputs.deploy_worker == true
     environment:
       name: production
     steps:
-      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -372,27 +376,38 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build, tag, and push worker image to ECR
-        id: image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+      - name: Update ECS task definition to latest GHCR image
         run: |
-          cd worker
-          docker build -t $ECR_REGISTRY/$ECR_WORKER_REPO:$IMAGE_TAG \
-                       -t $ECR_REGISTRY/$ECR_WORKER_REPO:latest .
-          docker push $ECR_REGISTRY/$ECR_WORKER_REPO:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_WORKER_REPO:latest
-          echo "image=$ECR_REGISTRY/$ECR_WORKER_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          GHCR_IMAGE="ghcr.io/jarod-rosenthal/worker"
+
+          docker pull "${GHCR_IMAGE}:latest"
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${GHCR_IMAGE}:latest" | grep -o 'sha256:[a-f0-9]*')
+          NEW_IMAGE="${GHCR_IMAGE}@${DIGEST}"
+          echo "Updating ECS task definition to: ${NEW_IMAGE}"
+
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition "${ECS_CLUSTER}-worker" \
+            --region ${{ env.AWS_REGION }} \
+            --query 'taskDefinition' \
+            --output json)
+
+          NEW_TASK_DEF=$(echo "$TASK_DEF" | jq --arg IMAGE "$NEW_IMAGE" '
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
+            .containerDefinitions[0].image = $IMAGE
+          ')
+
+          echo "$NEW_TASK_DEF" > /tmp/task-def.json
+          NEW_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/task-def.json \
+            --region ${{ env.AWS_REGION }} \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "Worker task definition updated: ${NEW_ARN}"
 
       - name: Verify worker image deployment
         run: |
-          echo "Worker image deployed to ECR."
-          echo "Image: ${{ steps.image.outputs.image }}"
+          echo "Worker image updated from GHCR."
           echo "New worker tasks will use the updated image."
 
   # ============================================================================
@@ -437,7 +452,7 @@ jobs:
             echo "  Frontend: Skipped"
           fi
           if [ "${{ inputs.deploy_worker }}" == "true" ]; then
-            echo "  Worker: ${{ needs.deploy-worker.result }} - Image updated in ECR"
+            echo "  Worker: ${{ needs.deploy-worker.result }} - Image updated from GHCR"
           else
             echo "  Worker: Skipped"
           fi

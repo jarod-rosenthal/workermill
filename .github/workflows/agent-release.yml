@@ -118,3 +118,48 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/users/jarod-rosenthal/packages/container/worker" \
             -d '{"visibility":"public"}' || echo "Warning: could not set package visibility (may need org admin to set it manually once)"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Update ECS worker task definition
+        if: success()
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          GHCR_IMAGE="ghcr.io/jarod-rosenthal/worker"
+          ECS_CLUSTER="${{ secrets.WM_PROD_ECS_CLUSTER }}"
+
+          # Get the digest from GHCR registry (image is NOT local — BuildKit pushed directly)
+          DIGEST=$(docker buildx imagetools inspect "${GHCR_IMAGE}:${VERSION}" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          if [[ -z "$DIGEST" ]]; then
+            echo "::error::Failed to resolve digest for ${GHCR_IMAGE}:${VERSION}"
+            exit 1
+          fi
+          NEW_IMAGE="${GHCR_IMAGE}@${DIGEST}"
+          echo "Updating ECS task definition to: ${NEW_IMAGE}"
+
+          # Fetch current task definition
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition "${ECS_CLUSTER}-worker" \
+            --region us-east-1 \
+            --query 'taskDefinition' \
+            --output json)
+
+          # Update image and register new revision
+          NEW_TASK_DEF=$(echo "$TASK_DEF" | jq --arg IMAGE "$NEW_IMAGE" '
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
+            .containerDefinitions[0].image = $IMAGE
+          ')
+
+          echo "$NEW_TASK_DEF" > /tmp/task-def.json
+          NEW_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/task-def.json \
+            --region us-east-1 \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "Registered new task definition: ${NEW_ARN}"

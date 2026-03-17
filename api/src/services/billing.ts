@@ -667,6 +667,14 @@ export async function canCreateTask(org: Organization): Promise<{
     };
   }
 
+  // Self-hosted / local mode: no billing enforcement
+  if (process.env.EXECUTION_MODE === "local") {
+    return {
+      allowed: true,
+      usage: { used: org.taskUsageThisMonth, quota: -1 },
+    };
+  }
+
   // Check if billing is paused
   if (org.billingPaused) {
     return {

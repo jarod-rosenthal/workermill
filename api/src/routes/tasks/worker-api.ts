@@ -158,7 +158,13 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
         newStatus = "pr_created";
         break;
       case "review_requested":
-        newStatus = "review_requested";
+        // If no auto-review is configured and task isn't set for review,
+        // treat as terminal — PR is created, nothing more will happen
+        if (task.skipManagerReview !== false && !org.autoReviewEnabled) {
+          newStatus = "completed";
+        } else {
+          newStatus = "review_requested";
+        }
         break;
       case "pr_approved":
         // Epic + Review: Tech Lead approved, PR ready for human merge

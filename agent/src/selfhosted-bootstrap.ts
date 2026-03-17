@@ -33,9 +33,10 @@ export async function bootstrapSelfHostedCredentials(
     if (!apiKey) continue;
 
     // Skip OAuth tokens — the worker container mounts ~/.claude directly
-    // and the API's local-epic-spawner handles OAuth file mounting.
-    // Only bootstrap explicit API keys.
-    if (rc.provider === "anthropic" && apiKey.startsWith("eyJ")) continue;
+    // and docker-spawner handles OAuth file mounting.
+    // Only bootstrap explicit API keys (sk-ant-api03-...).
+    // OAuth tokens come in multiple formats: sk-ant-oat01-..., eyJ... (JWT)
+    if (rc.provider === "anthropic" && !apiKey.startsWith("sk-ant-api")) continue;
 
     try {
       await api.put(`/api/settings/providers/${rc.provider}/credentials`, {

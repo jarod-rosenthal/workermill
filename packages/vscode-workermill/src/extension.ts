@@ -35,6 +35,7 @@ import {
   stripApiKeyFromConfig,
   deleteApiKeyFromKeychain,
   resetStartAttempts,
+  getAgentLogPath,
 } from "./agent-installer";
 import {
   signUpWithGitHub,
@@ -1062,11 +1063,15 @@ export function activate(context: vscode.ExtensionContext): void {
           client.connect();
           vscode.window.showInformationMessage("Agent starting...");
         } else {
-          const terminal = vscode.window.createTerminal("WorkerMill Setup");
+          const binaryPath = getAgentBinaryPath();
+          const isWindows = process.platform === "win32";
+          const terminalOpts: vscode.TerminalOptions = { name: "WorkerMill Setup" };
+          if (isWindows) terminalOpts.shellPath = "powershell.exe";
+          const terminal = vscode.window.createTerminal(terminalOpts);
           terminal.show();
-          terminal.sendText("workermill-agent setup");
+          terminal.sendText(isWindows ? `& "${binaryPath}" setup` : `"${binaryPath}" setup`);
           vscode.window.showInformationMessage(
-            "Agent installed! Complete setup in the terminal, then run 'workermill-agent start'.",
+            "Agent installed! Complete setup in the terminal, then start the agent.",
           );
         }
       }
@@ -1085,9 +1090,13 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       if (!isAgentConfigured()) {
-        const terminal = vscode.window.createTerminal("WorkerMill Setup");
+        const binaryPath = getAgentBinaryPath();
+        const isWindows = process.platform === "win32";
+        const terminalOpts: vscode.TerminalOptions = { name: "WorkerMill Setup" };
+        if (isWindows) terminalOpts.shellPath = "powershell.exe";
+        const terminal = vscode.window.createTerminal(terminalOpts);
         terminal.show();
-        terminal.sendText("workermill-agent setup");
+        terminal.sendText(isWindows ? `& "${binaryPath}" setup` : `"${binaryPath}" setup`);
         vscode.window.showInformationMessage(
           "Run setup first, then start the agent.",
         );
@@ -1278,7 +1287,7 @@ export function activate(context: vscode.ExtensionContext): void {
           } else {
             const err = readAgentStartupError();
             vscode.window.showErrorMessage(
-              `Agent failed to start${err ? ": " + err : ". Check ~/.workermill/agent.log for details."}`,
+              `Agent failed to start${err ? ": " + err : ". Check ${getAgentLogPath()} for details."}`,
             );
           }
         }
@@ -1353,7 +1362,7 @@ export function activate(context: vscode.ExtensionContext): void {
             }
           } else {
             vscode.window.showWarningMessage(
-              "Agent didn't start. Check ~/.workermill/agent.log for details.",
+              `Agent didn't start. Check ${getAgentLogPath()} for details.`,
             );
           }
         }
@@ -1425,7 +1434,7 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.window.showErrorMessage(`WorkerMill: ${error}`);
         } else {
           vscode.window.showWarningMessage(
-            "WorkerMill agent is still starting. Check ~/.workermill/agent.log for progress.",
+            `WorkerMill agent is still starting. Check ${getAgentLogPath()} for progress.`,
           );
         }
       },

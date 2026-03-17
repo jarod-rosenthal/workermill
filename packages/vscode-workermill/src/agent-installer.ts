@@ -83,7 +83,9 @@ export async function promptInstallGit(
   if (isWin) {
     installCmd = "winget install --id Git.Git -e --source winget";
   } else if (isMac) {
-    installCmd = "xcode-select --install 2>/dev/null || brew install git";
+    // xcode-select --install opens a macOS GUI dialog and returns immediately.
+    // Don't chain with || brew — the dialog needs to complete first.
+    installCmd = "xcode-select --install";
   } else {
     installCmd = "sudo apt-get install -y git || sudo dnf install -y git || sudo pacman -S --noconfirm git";
   }
@@ -361,6 +363,16 @@ export async function promptInstallClaudeCli(
   return true; // user chose to continue
 }
 
+/** Human-readable path to agent.log for error messages (platform-correct). */
+export function getAgentLogPath(): string {
+  if (process.platform === "win32") {
+    const localAppData =
+      process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    return path.join(localAppData, "workermill", "agent.log");
+  }
+  return path.join(os.homedir(), ".workermill", "agent.log");
+}
+
 /** Canonical install location used by install.sh / install.ps1 and the installer. */
 function getCanonicalInstallPath(): string {
   if (process.platform === "win32") {
@@ -417,6 +429,7 @@ function getBinaryName(): string {
   if (p === "win32") return "workermill-agent-win-x64.exe";
   if (p === "darwin" && a === "arm64") return "workermill-agent-darwin-arm64";
   if (p === "darwin") return "workermill-agent-darwin-x64";
+  if (p === "linux" && a === "arm64") return "workermill-agent-linux-arm64";
   return "workermill-agent-linux-x64";
 }
 
@@ -560,6 +573,19 @@ export async function installAgent(): Promise<boolean> {
           fs.chmodSync(binaryPath, 0o755);
         }
 
+        // macOS: remove quarantine xattr so Gatekeeper doesn't block the binary.
+        // Downloaded files get com.apple.quarantine which causes EPERM on spawn.
+        if (process.platform === "darwin") {
+          try {
+            execFileSync("xattr", ["-d", "com.apple.quarantine", binaryPath], {
+              timeout: 5_000,
+              stdio: "pipe",
+            });
+          } catch {
+            // Attribute may not exist (e.g., re-download) — safe to ignore
+          }
+        }
+
         vscode.window.showInformationMessage(`WorkerMill Agent v${version} installed.`);
         return true;
       } catch (err) {
@@ -662,7 +688,7 @@ function isAgentAlive(log?: (msg: string) => void): boolean {
   return false;
 }
 
-export function startAgentProcess(log?: (msg: string) => void, runtime?: "wsl" | "windows"): void {
+export function startAgentProcess(log?: (msg: string) => void): void {
   // Prevent concurrent calls from multiple activation paths within this process
   if (startInFlight) {
     log?.("Start already in-flight — skipping");
@@ -671,35 +697,10 @@ export function startAgentProcess(log?: (msg: string) => void, runtime?: "wsl" |
 
   // Prevent infinite respawn loops — give up after MAX_START_ATTEMPTS
   if (startAttempts >= MAX_START_ATTEMPTS) {
-    log?.(`Agent failed to start after ${MAX_START_ATTEMPTS} attempts — giving up. Check ~/.workermill/agent.log`);
+    log?.(`Agent failed to start after ${MAX_START_ATTEMPTS} attempts — giving up. Check ${getAgentLogPath()}`);
     return;
   }
   startAttempts++;
-
-  // WSL mode: spawn the agent inside WSL via wsl.exe
-  if (runtime === "wsl") {
-    if (isAgentAlive(log)) {
-      log?.("Agent already running — skipping start");
-      return;
-    }
-    startInFlight = true;
-    try {
-      const child = spawn("wsl.exe", ["-e", "bash", "-lc", "~/.workermill/bin/workermill-agent start"], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      child.on("error", (err) => {
-        log?.(`WSL spawn error: ${err.message}`);
-      });
-      child.unref();
-      log?.(`Agent spawned in WSL (child PID ${child.pid})`);
-    } catch (err) {
-      log?.(`WSL spawn failed: ${err instanceof Error ? err.message : String(err)}`);
-      startInFlight = false;
-    }
-    return;
-  }
 
   const binary = getAgentBinaryPath();
   log?.(`Binary resolved to: ${binary}`);
@@ -847,32 +848,6 @@ export async function stopAgentProcess(): Promise<boolean> {
     }
   }
 
-  return true;
-
-  // No PID or process already dead — try CLI stop as fallback
-  // (handles edge case where PID file was deleted but process is alive)
-  const binary = getAgentBinaryPath();
-  if (fs.existsSync(binary)) {
-    const stopped = await new Promise<boolean>((resolve) => {
-      const child = spawn(binary, ["stop"], { stdio: "pipe", cwd: os.homedir(), windowsHide: true });
-      child.on("close", (code) => resolve(code === 0));
-      child.on("error", () => resolve(false));
-      setTimeout(() => {
-        try {
-          child.kill();
-        } catch {
-          /* ignore */
-        }
-        resolve(false);
-      }, 5_000);
-    });
-    if (stopped) {
-      cleanAgentState();
-      return true;
-    }
-  }
-
-  cleanAgentState();
   return true;
 }
 

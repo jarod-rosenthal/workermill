@@ -29,6 +29,7 @@ import {
   promptInstallClaudeCli,
   readAgentStartupError,
   writeApiKeyToKeychain,
+  getAgentLogPath,
 } from "./agent-installer";
 import { storeApiKey } from "./secret-storage";
 
@@ -528,6 +529,11 @@ async function finishSetup(
   const keychainOk = writeApiKeyToKeychain(apiKey);
   if (!keychainOk) {
     log("Warning: OS keychain not available — API key will be stored in config.json as fallback");
+    if (process.platform === "linux") {
+      vscode.window.showWarningMessage(
+        "Credentials stored in plaintext (config.json). Install libsecret-tools for secure keychain storage.",
+      );
+    }
   }
 
   // Write config.json WITHOUT apiKey (it's now in the keychain).
@@ -587,7 +593,7 @@ async function finishSetup(
       }
     } else {
       vscode.window.showWarningMessage(
-        "Agent didn't start. Check ~/.workermill/agent.log for details.",
+        `Agent didn't start. Check ${getAgentLogPath()} for details.`,
       );
     }
     return false;
@@ -639,6 +645,20 @@ async function finishSetup(
           if (process.platform === "darwin") {
             execFileSync("open", ["-a", "Docker"], { timeout: 5000, stdio: "pipe", windowsHide: true });
             launched = true;
+          } else if (process.platform === "linux") {
+            // Linux: try starting Docker Engine via systemctl (most common setup)
+            try {
+              execFileSync("systemctl", ["start", "docker"], { timeout: 10_000, stdio: "pipe" });
+              launched = true;
+            } catch {
+              // systemctl may require sudo or Docker Desktop may be installed instead
+              try {
+                execFileSync("systemctl", ["--user", "start", "docker-desktop"], { timeout: 10_000, stdio: "pipe" });
+                launched = true;
+              } catch {
+                /* neither worked — will show manual start message below */
+              }
+            }
           } else {
             // Windows — try common Docker Desktop executable paths
             const dockerPaths = [
@@ -721,6 +741,15 @@ function checkDockerAvailable(): boolean {
     execFileSync("docker", ["version"], { timeout: 5000, stdio: "pipe", windowsHide: true });
     return true;
   } catch {
+    // On macOS, Docker CLI may not be in the extension host PATH even when installed.
+    // Try via login shell (same approach used for findClaudeCli).
+    if (process.platform === "darwin") {
+      try {
+        const shell = process.env.SHELL || "/bin/zsh";
+        execFileSync(shell, ["-l", "-c", "docker version"], { timeout: 10_000, stdio: "pipe" });
+        return true;
+      } catch { /* truly not available */ }
+    }
     return false;
   }
 }
@@ -730,6 +759,13 @@ function isDockerInstalled(): boolean {
     execFileSync("docker", ["--version"], { timeout: 5000, stdio: "pipe", windowsHide: true });
     return true;
   } catch {
+    if (process.platform === "darwin") {
+      try {
+        const shell = process.env.SHELL || "/bin/zsh";
+        execFileSync(shell, ["-l", "-c", "docker --version"], { timeout: 10_000, stdio: "pipe" });
+        return true;
+      } catch { /* truly not installed */ }
+    }
     return false;
   }
 }

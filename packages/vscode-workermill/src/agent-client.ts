@@ -52,7 +52,18 @@ export interface TaskInfo {
   id: string;
   summary: string;
   description?: string;
-  status: "planning" | "running" | "completed" | "failed" | "cancelled" | "pr_approved" | "review_requested" | "escalated";
+  status:
+    // Planning
+    | "planning" | "pending_plan_approval"
+    // Active
+    | "queued" | "dispatching" | "claimed" | "environment_setup" | "executing"
+    | "running"  // legacy alias for executing
+    | "consolidating" | "integration_check" | "deploying"
+    // Waiting
+    | "blocked" | "pr_created" | "review_requested" | "manager_review"
+    | "revision_needed" | "pr_approved" | "review_approved" | "escalated"
+    // Terminal
+    | "completed" | "deployed" | "failed" | "cancelled" | "review_rejected";
   persona?: string;
   model?: string;
   repo?: string;

@@ -164,9 +164,22 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
 
     if (!element) {
       // Root level — show categories
-      const active = this.tasks.filter((t) => t.status === "running" || t.status === "planning");
-      const approved = this.tasks.filter((t) => t.status === "pr_approved" || t.status === "completed" || t.status === "review_requested");
-      const needsAttention = this.tasks.filter((t) => t.status === "failed" || t.status === "escalated" || t.status === "cancelled");
+      const activeStatuses = new Set([
+        "planning", "pending_plan_approval",
+        "queued", "dispatching", "claimed", "environment_setup", "executing",
+        "running", "consolidating", "integration_check", "deploying",
+        "blocked", "manager_review", "revision_needed",
+      ]);
+      const doneStatuses = new Set([
+        "pr_created", "review_requested", "pr_approved", "review_approved",
+        "completed", "deployed",
+      ]);
+      const attentionStatuses = new Set([
+        "failed", "escalated", "cancelled", "review_rejected",
+      ]);
+      const active = this.tasks.filter((t) => activeStatuses.has(t.status));
+      const approved = this.tasks.filter((t) => doneStatuses.has(t.status));
+      const needsAttention = this.tasks.filter((t) => attentionStatuses.has(t.status));
 
       const items: TreeItem[] = [];
 
@@ -190,7 +203,7 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
         // Filter out issues that already have an active task
         const activeKeys = new Set(
           this.tasks
-            .filter((t) => t.status === "running" || t.status === "planning")
+            .filter((t) => activeStatuses.has(t.status))
             .map((t) => {
               // Extract issue key from summary (e.g. "OCS-142: Add dark mode" → "OCS-142")
               const match = t.summary.match(/^([A-Z]+-\d+)/);
@@ -291,25 +304,56 @@ class TaskTreeItem extends vscode.TreeItem {
     this.tooltip = `${task.summary}\nStatus: ${task.status}${stage ? `\nStage: ${stage}` : ""}\nPersona: ${task.persona || "default"}\nStarted: ${task.startedAt}${task.errorMessage ? `\nError: ${task.errorMessage}` : ""}`;
 
     switch (task.status) {
+      // Active — spinning
       case "running":
+      case "executing":
+      case "consolidating":
+      case "integration_check":
+      case "deploying":
         this.iconPath = new vscode.ThemeIcon("sync~spin", new vscode.ThemeColor("charts.green"));
         break;
+      // Planning — yellow
       case "planning":
+      case "pending_plan_approval":
         this.iconPath = new vscode.ThemeIcon("lightbulb", new vscode.ThemeColor("charts.yellow"));
         break;
-      case "completed":
-        this.iconPath = new vscode.ThemeIcon("check", new vscode.ThemeColor("charts.green"));
+      // Queued/starting — waiting
+      case "queued":
+      case "dispatching":
+      case "claimed":
+      case "environment_setup":
+        this.iconPath = new vscode.ThemeIcon("clock", new vscode.ThemeColor("charts.yellow"));
         break;
+      // Blocked/review in progress
+      case "blocked":
+        this.iconPath = new vscode.ThemeIcon("lock", new vscode.ThemeColor("charts.orange"));
+        break;
+      case "manager_review":
+        this.iconPath = new vscode.ThemeIcon("eye", new vscode.ThemeColor("charts.blue"));
+        break;
+      case "revision_needed":
+        this.iconPath = new vscode.ThemeIcon("pencil", new vscode.ThemeColor("charts.orange"));
+        break;
+      // PR created/awaiting review
+      case "pr_created":
       case "review_requested":
         this.iconPath = new vscode.ThemeIcon("git-pull-request", new vscode.ThemeColor("charts.blue"));
         break;
+      // Approved/completed
       case "pr_approved":
+      case "review_approved":
         this.iconPath = new vscode.ThemeIcon("check-all", new vscode.ThemeColor("charts.green"));
         break;
+      case "completed":
+      case "deployed":
+        this.iconPath = new vscode.ThemeIcon("check", new vscode.ThemeColor("charts.green"));
+        break;
+      // Needs attention
       case "escalated":
         this.iconPath = new vscode.ThemeIcon("megaphone", new vscode.ThemeColor("charts.orange"));
         break;
       case "failed":
+      case "review_rejected":
         this.iconPath = new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
         break;
       case "cancelled":

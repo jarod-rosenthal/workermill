@@ -79,11 +79,13 @@ function isAgentRunning(): { alive: boolean; detail: string } {
 }
 
 export async function startCommand(options: { detach?: boolean }): Promise<void> {
-  // Check config exists
+  // Check config exists — must happen BEFORE detach so the parent process
+  // can report the error instead of spawning a child that immediately crashes.
   if (!existsSync(getConfigFile())) {
     console.log(chalk.red("No configuration found."));
-    console.log(`Run ${chalk.cyan("workermill-agent setup")} first.`);
-    process.exit(1);
+    console.log(`Run ${chalk.cyan("workermill-agent init --standalone")} first.`);
+    // Return instead of process.exit so the caller can handle it
+    return;
   }
 
   // Single-instance guard: refuse to start if another agent is alive.

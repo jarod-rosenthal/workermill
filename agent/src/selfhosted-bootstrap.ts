@@ -9,8 +9,13 @@
  * and the API client is initialized. Idempotent — safe to run on every startup.
  */
 
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import { api } from "./api.js";
 import { loadStandaloneConfig, resolveApiKey, getRoleConfig } from "./backends/local/config.js";
+
+const FLAG_FILE = path.join(os.homedir(), ".workermill", ".bootstrap-done");
 
 /**
  * Push credentials from config.json into the API so workers can receive them
@@ -19,6 +24,11 @@ import { loadStandaloneConfig, resolveApiKey, getRoleConfig } from "./backends/l
 export async function bootstrapSelfHostedCredentials(
   log?: (msg: string) => void,
 ): Promise<void> {
+  if (fs.existsSync(FLAG_FILE)) {
+    log?.("Credentials already bootstrapped — skipping");
+    return;
+  }
+
   const sc = loadStandaloneConfig();
 
   // Bootstrap AI provider credentials — check all three roles for keys,
@@ -107,4 +117,7 @@ export async function bootstrapSelfHostedCredentials(
       log?.(`Warning: failed to sync Linear credentials: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+
+  // Mark bootstrap as done so user changes in the UI are never overwritten
+  try { fs.writeFileSync(FLAG_FILE, new Date().toISOString()); } catch {}
 }

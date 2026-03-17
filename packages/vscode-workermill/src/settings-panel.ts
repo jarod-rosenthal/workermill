@@ -426,7 +426,7 @@ export class SettingsPanel {
         linear: { configured: !!(sc.issueTracker as Record<string, unknown>)?.linear },
         // Worker behavior settings
         maxPerStoryRevisions: settings.maxPerStoryRevisions ?? 1,
-        maxReviewRevisions: settings.maxReviewRevisions ?? 3,
+        maxReviewRevisions: settings.maxReviewRevisions ?? 4,
         qualityGateMaxRetries: settings.qualityGateMaxRetries ?? 5,
         maxCiFixRetries: settings.maxCiFixRetries ?? 3,
         blockerWaitTimeoutMinutes: settings.blockerWaitTimeoutMinutes ?? 20,
@@ -441,10 +441,10 @@ export class SettingsPanel {
         autoFixMaxIterations: settings.autoFixMaxIterations ?? 3,
         // Planning settings
         planningMode: settings.planningMode ?? "simplified",
-        criticApprovalThreshold: settings.criticApprovalThreshold ?? 85,
-        maxParallelExperts: settings.maxParallelExperts ?? 8,
-        maxStories: settings.maxStories ?? 8,
-        maxTargetFiles: settings.maxTargetFiles ?? 15,
+        criticApprovalThreshold: settings.criticApprovalThreshold ?? 90,
+        maxParallelExperts: settings.maxParallelExperts ?? 14,
+        maxStories: settings.maxStories ?? 10,
+        maxTargetFiles: settings.maxTargetFiles ?? 6,
         // Resilience settings
         selfReviewEnabled: settings.selfReviewEnabled ?? true,
         blockerAutoRetryEnabled: settings.blockerAutoRetryEnabled ?? true,
@@ -2578,10 +2578,10 @@ export class SettingsPanel {
           blockerWaitTimeoutMinutes: parseInt(document.getElementById("wk-blocker-timeout").value) || 20,
           pushAfterCommit: document.getElementById("wk-push-after-commit").checked,
           planningMode: document.getElementById("wk-planning-mode").value,
-          criticApprovalThreshold: parseInt(document.getElementById("wk-critic-threshold").value) || 85,
-          maxParallelExperts: parseInt(document.getElementById("wk-max-parallel").value) || 8,
-          maxStories: parseInt(document.getElementById("wk-max-stories").value) || 8,
-          maxTargetFiles: parseInt(document.getElementById("wk-max-target-files").value) || 15,
+          criticApprovalThreshold: parseInt(document.getElementById("wk-critic-threshold").value) || 90,
+          maxParallelExperts: parseInt(document.getElementById("wk-max-parallel").value) || 14,
+          maxStories: parseInt(document.getElementById("wk-max-stories").value) || 10,
+          maxTargetFiles: parseInt(document.getElementById("wk-max-target-files").value) || 6,
           selfReviewEnabled: document.getElementById("wk-self-review").checked,
           blockerAutoRetryEnabled: document.getElementById("wk-blocker-auto-retry").checked,
           gracefulShutdownEnabled: document.getElementById("wk-graceful-shutdown").checked,
@@ -2886,7 +2886,7 @@ export class SettingsPanel {
         const wkFixRetries = document.getElementById("wk-fix-retries");
         const wkBlockerTimeout = document.getElementById("wk-blocker-timeout");
         const wkPush = document.getElementById("wk-push-after-commit");
-        if (wkPr) wkPr.value = String(d.maxReviewRevisions ?? 3);
+        if (wkPr) wkPr.value = String(d.maxReviewRevisions ?? 4);
         if (wkFixRetries) wkFixRetries.value = String(d.qualityGateMaxRetries ?? 5);
         if (wkBlockerTimeout) wkBlockerTimeout.value = String(d.blockerWaitTimeoutMinutes ?? 20);
         if (wkPush) wkPush.checked = d.pushAfterCommit !== false;
@@ -2922,11 +2922,11 @@ export class SettingsPanel {
         var wkBlockerAutoRetry = document.getElementById("wk-blocker-auto-retry");
         var wkGracefulShutdown = document.getElementById("wk-graceful-shutdown");
         if (wkPlanningMode) wkPlanningMode.value = d.planningMode || "simplified";
-        if (wkCriticThreshold) wkCriticThreshold.value = String(d.criticApprovalThreshold ?? 85);
+        if (wkCriticThreshold) wkCriticThreshold.value = String(d.criticApprovalThreshold ?? 90);
         if (wkThresholdField) wkThresholdField.style.display = (d.planningMode || "simplified") === "strict" ? "" : "none";
-        if (wkMaxParallel) wkMaxParallel.value = String(d.maxParallelExperts ?? 8);
-        if (wkMaxStories) wkMaxStories.value = String(d.maxStories ?? 8);
-        if (wkMaxTargetFiles) wkMaxTargetFiles.value = String(d.maxTargetFiles ?? 15);
+        if (wkMaxParallel) wkMaxParallel.value = String(d.maxParallelExperts ?? 14);
+        if (wkMaxStories) wkMaxStories.value = String(d.maxStories ?? 10);
+        if (wkMaxTargetFiles) wkMaxTargetFiles.value = String(d.maxTargetFiles ?? 6);
         if (wkSelfReview) wkSelfReview.checked = d.selfReviewEnabled !== false;
         if (wkBlockerAutoRetry) wkBlockerAutoRetry.checked = d.blockerAutoRetryEnabled !== false;
         if (wkGracefulShutdown) wkGracefulShutdown.checked = d.gracefulShutdownEnabled !== false;

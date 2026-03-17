@@ -726,6 +726,24 @@ export function setCloudProxy(fn: (method: string, path: string, body?: unknown)
   cloudProxy = fn;
 }
 
+// Cached API settings for self-hosted mode — avoids reading config.json when API is the source of truth
+let _cachedApiSettings: Record<string, unknown> | null = null;
+let _cachedApiSettingsAt = 0;
+const API_SETTINGS_CACHE_TTL = 60_000; // 1 minute
+
+async function getApiSettings(): Promise<Record<string, unknown> | null> {
+  if (!cloudProxy || !isSelfHostedMode()) return null;
+  const now = Date.now();
+  if (_cachedApiSettings && now - _cachedApiSettingsAt < API_SETTINGS_CACHE_TTL) return _cachedApiSettings;
+  try {
+    _cachedApiSettings = (await cloudProxy("GET", "/api/settings")) as Record<string, unknown>;
+    _cachedApiSettingsAt = now;
+    return _cachedApiSettings;
+  } catch {
+    return _cachedApiSettings; // return stale cache on error
+  }
+}
+
 // ── Request Handler ────────────────────────────────────
 
 async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -1269,8 +1287,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         }
 
         const config = loadStandaloneConfig();
-        const baseMaxStories = config.settings?.maxStories ?? 8;
-        const maxTargetFiles = config.settings?.maxTargetFiles ?? 8;
+        // In self-hosted mode, prefer API settings over config.json
+        const apiSettings = await getApiSettings();
+        const effectiveSettings = apiSettings || config.settings || {};
+        const baseMaxStories = (effectiveSettings as Record<string, unknown>).ralphMaxStories as number
+          ?? (config.settings?.maxStories ?? 10);
+        const maxTargetFiles = (effectiveSettings as Record<string, unknown>).maxTargetFiles as number
+          ?? (config.settings?.maxTargetFiles ?? 6);
         const plannerConfig = getRoleConfig(config, "planner");
 
         // Extract jiraFields early — needed for maxStories calculation before prompt template
@@ -1376,9 +1399,10 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
           storyCap,
           maxTargetFiles,
           planningMode: isBuildPageTask
-            ? (config.settings?.prdPlanningMode || "simplified")
-            : (config.settings?.planningMode || "simplified"),
-          criticApprovalThreshold: config.settings?.criticApprovalThreshold ?? 85,
+            ? ((effectiveSettings as Record<string, unknown>).prdPlanningMode as string || config.settings?.prdPlanningMode || "simplified")
+            : ((effectiveSettings as Record<string, unknown>).planningMode as string || config.settings?.planningMode || "simplified"),
+          criticApprovalThreshold: (effectiveSettings as Record<string, unknown>).criticApprovalThreshold as number
+            ?? config.settings?.criticApprovalThreshold ?? 90,
           validPersonas,
           ...(preComputedStories ? { preComputedStories } : {}),
         });
@@ -1416,7 +1440,9 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
         // Apply safety caps — use higher cap for PRD/build-page tasks
         const config = loadStandaloneConfig();
-        const baseMaxStories = config.settings?.maxStories ?? 8;
+        const planApiSettings = await getApiSettings();
+        const baseMaxStories = (planApiSettings as Record<string, unknown>)?.ralphMaxStories as number
+          ?? config.settings?.maxStories ?? 10;
         const task = db.prepare("SELECT jira_fields FROM tasks WHERE id = ?").get(taskId) as { jira_fields?: string } | undefined;
         let isBuildPage = false;
         try { isBuildPage = task?.jira_fields ? JSON.parse(task.jira_fields).buildPage === true : false; } catch { /* ignore */ }
@@ -1658,6 +1684,9 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("POST", `/api/tasks/${approveMatch[1]}/plan/approve`, {});
+      const approvedTask = localTasks.get(approveMatch[1]);
+      if (approvedTask) approvedTask.status = "running";
+      broadcastSSE("tasks", "state:changed", {});
       return json(res, result);
     } catch (err) {
       return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
@@ -1697,6 +1726,9 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
       const result = await cloudProxy("POST", `/api/tasks/${rejectMatch[1]}/plan/request-changes`, {
         feedback: body.feedback,
       });
+      const rejectedTask = localTasks.get(rejectMatch[1]);
+      if (rejectedTask) rejectedTask.status = "cancelled";
+      broadcastSSE("tasks", "state:changed", {});
       return json(res, result);
     } catch (err) {
       return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
@@ -1829,6 +1861,9 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("POST", `/api/tasks/${retryMatch[1]}/retry`, {});
+      const task = localTasks.get(retryMatch[1]);
+      if (task) task.status = "running";
+      broadcastSSE("tasks", "state:changed", {});
       triggerPoll();
       return json(res, result);
     } catch (err) {

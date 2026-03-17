@@ -258,8 +258,11 @@ export async function initSelfHostedCommand(): Promise<void> {
     console.log(chalk.green("  All credentials auto-detected — zero prompts needed!"));
     console.log();
   }
-  console.log(`  Run ${chalk.cyan("workermill-agent start")} to launch.`);
   console.log(`  Dashboard will be at ${chalk.cyan("http://localhost:5173")}`);
   console.log();
-  process.exit(0);
+  console.log(chalk.dim("  Starting agent..."));
+
+  // Import and call startCommand with detach mode
+  const { startCommand } = await import("./start.js");
+  await startCommand({ detach: true });
 }

@@ -52,7 +52,7 @@ export interface TaskInfo {
   id: string;
   summary: string;
   description?: string;
-  status: "planning" | "running" | "completed" | "failed" | "cancelled" | "pr_approved" | "escalated";
+  status: "planning" | "running" | "completed" | "failed" | "cancelled" | "pr_approved" | "review_requested" | "escalated";
   persona?: string;
   model?: string;
   repo?: string;

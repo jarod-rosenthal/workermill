@@ -165,7 +165,7 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
     if (!element) {
       // Root level — show categories
       const active = this.tasks.filter((t) => t.status === "running" || t.status === "planning");
-      const approved = this.tasks.filter((t) => t.status === "pr_approved" || t.status === "completed");
+      const approved = this.tasks.filter((t) => t.status === "pr_approved" || t.status === "completed" || t.status === "review_requested");
       const needsAttention = this.tasks.filter((t) => t.status === "failed" || t.status === "escalated" || t.status === "cancelled");
 
       const items: TreeItem[] = [];
@@ -299,6 +299,9 @@ class TaskTreeItem extends vscode.TreeItem {
         break;
       case "completed":
         this.iconPath = new vscode.ThemeIcon("check", new vscode.ThemeColor("charts.green"));
+        break;
+      case "review_requested":
+        this.iconPath = new vscode.ThemeIcon("git-pull-request", new vscode.ThemeColor("charts.blue"));
         break;
       case "pr_approved":
         this.iconPath = new vscode.ThemeIcon("check-all", new vscode.ThemeColor("charts.green"));

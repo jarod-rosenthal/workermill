@@ -22,19 +22,6 @@ import { getOllamaStatus, generateEmbeddings, ensureOllamaRunning, pullModel, in
 import { indexRepositoryLocally } from "./local-indexer.js";
 import { loadStandaloneConfig, getRoleConfig, isSelfHostedMode } from "./backends/local/config.js";
 
-// Standalone SQLite backend has been removed. These no-op stubs keep the route
-// handlers compiling — any `backend?.mode === "local"` guard will never be true
-// in cloud/self-hosted modes, so these are never meaningfully called.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getActiveBackend(): any { return null; }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getBackend(): Promise<any> { return null; }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getLocalDb(): any { return undefined; }
-function generateId(): string { return ""; }
-function processQueuedTask(_taskId: string): Promise<void> { return Promise.resolve(); }
-function planAndProcessTask(_taskId: string): Promise<void> { return Promise.resolve(); }
-function stopWorkerTask(_taskId: string): Promise<void> { return Promise.resolve(); }
 import {
   searchJiraIssues,
   listJiraProjects,
@@ -141,93 +128,26 @@ function getCoordStore(taskId: string): CoordStore {
   store = { contexts: [], initialized: false };
   coordStores.set(taskId, store);
 
-  try {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      const db = getLocalDb();
-      const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as Record<string, unknown> | undefined;
-      if (task) {
-        // Check for execution plan (from PRD decomposition or planning)
-        let plan: { steps?: Array<Record<string, unknown>> } | null = null;
-        if (task.execution_plan) {
-          try {
-            plan = JSON.parse(String(task.execution_plan));
-          } catch { /* invalid JSON, fall through to single-story */ }
-        }
-
-        if (plan?.steps?.length) {
-          // Hydrate stories from execution plan — same logic as publishStoriesReady()
-          hydrateStoriesFromPlan(store, taskId, plan.steps);
-        } else {
-          // Single story fallback — use task summary/description
-          store.contexts.push({
-            id: `story-${taskId.slice(0, 8)}`,
-            parentTaskId: taskId,
-            taskId,
-            persona: "backend_developer",
-            messageType: "story_ready",
-            content: String(task.summary || "Implement task"),
-            metadata: {
-              storyIndex: 0,
-              persona: "backend_developer",
-              description: String(task.description || task.summary || ""),
-              dependencies: [],
-              targetFiles: [],
-              mutexGroups: [],
-            },
-            createdAt: new Date().toISOString(),
-          });
-        }
-
-        // Hydrate persisted coordination messages from SQLite
-        // These are messages posted during previous execution (survives restarts)
-        try {
-          const persisted = db.prepare(
-            "SELECT * FROM coordination_messages WHERE parent_task_id = ? ORDER BY created_at ASC",
-          ).all(taskId) as any[];
-          for (const row of persisted) {
-            // Avoid duplicating story_ready messages already hydrated from execution_plan
-            if (row.message_type === "story_ready") continue;
-            let content = row.content || "";
-            try { content = JSON.parse(content); content = JSON.stringify(content); } catch { /* keep as-is */ }
-            store.contexts.push({
-              id: `db-${row.id}`,
-              parentTaskId: row.parent_task_id,
-              taskId: row.task_id || taskId,
-              persona: "",
-              messageType: row.message_type,
-              content: typeof content === "string" ? content : JSON.stringify(content),
-              metadata: {},
-              createdAt: row.created_at,
-            });
-          }
-        } catch { /* SQLite read failed — proceed with what we have */ }
-
-        store.initialized = true;
-      }
-    }
-  } catch {
-    // If we can't read the task, create a minimal story
-    if (!store.initialized) {
-      store.contexts.push({
-        id: `story-${taskId.slice(0, 8)}`,
-        parentTaskId: taskId,
-        taskId,
+  // No SQLite backend — create a minimal story so workers have something to claim
+  if (!store.initialized) {
+    store.contexts.push({
+      id: `story-${taskId.slice(0, 8)}`,
+      parentTaskId: taskId,
+      taskId,
+      persona: "backend_developer",
+      messageType: "story_ready",
+      content: "Implement task",
+      metadata: {
+        storyIndex: 0,
         persona: "backend_developer",
-        messageType: "story_ready",
-        content: "Implement task",
-        metadata: {
-          storyIndex: 0,
-          persona: "backend_developer",
-          description: "",
-          dependencies: [],
-          targetFiles: [],
-          mutexGroups: [],
-        },
-        createdAt: new Date().toISOString(),
-      });
-      store.initialized = true;
-    }
+        description: "",
+        dependencies: [],
+        targetFiles: [],
+        mutexGroups: [],
+      },
+      createdAt: new Date().toISOString(),
+    });
+    store.initialized = true;
   }
 
   return store;
@@ -554,36 +474,7 @@ async function getAllVisibleTasks(): Promise<LocalTaskInfo[]> {
     result.push(task);
   }
 
-  // 2. SQLite tasks (standalone mode — orchestrator writes here)
-  const backend = getActiveBackend();
-  if (backend?.mode === "local") {
-    try {
-      const db = getLocalDb();
-      const rows = db.prepare(
-        "SELECT id, summary, description, status, github_repo, worker_model, jira_issue_key, github_pr_url, created_at FROM tasks WHERE status IN ('queued','executing','completed','failed','cancelled','escalated','pr_approved') ORDER BY created_at DESC LIMIT 50"
-      ).all() as Array<Record<string, unknown>>;
-      for (const row of rows) {
-        const id = String(row.id);
-        if (seenIds.has(id)) continue;
-        seenIds.add(id);
-        result.push({
-          id,
-          summary: String(row.summary || ""),
-          description: row.description ? String(row.description) : undefined,
-          status: mapLocalStatus(String(row.status || "queued")),
-          model: row.worker_model ? String(row.worker_model) : undefined,
-          repo: row.github_repo ? String(row.github_repo) : undefined,
-          jiraIssueKey: row.jira_issue_key ? String(row.jira_issue_key) : undefined,
-          prUrl: row.github_pr_url ? String(row.github_pr_url) : undefined,
-          startedAt: row.created_at ? String(row.created_at) : new Date().toISOString(),
-        });
-      }
-    } catch {
-      // SQLite not available — continue with what we have
-    }
-  }
-
-  // 3. Cloud tasks (if cloud proxy is available)
+  // 2. Cloud tasks (if cloud proxy is available)
   // Cloud is the source of truth for status — update in-memory tasks
   if (cloudProxy) {
     try {
@@ -605,18 +496,6 @@ async function getAllVisibleTasks(): Promise<LocalTaskInfo[]> {
   }
 
   return result;
-}
-
-function mapLocalStatus(status: string): LocalTaskInfo["status"] {
-  switch (status) {
-    case "queued": return "running";
-    case "executing": return "running";
-    case "completed": return "completed";
-    case "failed": return "failed";
-    case "cancelled": return "cancelled";
-    case "escalated": return "escalated";
-    default: return "running";
-  }
 }
 
 async function getMergedTasks(): Promise<LocalTaskInfo[]> {
@@ -673,13 +552,6 @@ async function getMergedTasks(): Promise<LocalTaskInfo[]> {
 }
 
 // ── HTTP Routing ───────────────────────────────────────
-
-/** Get active backend, lazy-initializing if needed (handles startup race). */
-async function ensureBackend() {
-  const b = getActiveBackend();
-  if (b) return b;
-  try { return await getBackend(); } catch { return null; }
-}
 
 function parseUrl(url: string): { path: string; params: Record<string, string> } {
   const [pathPart, queryPart] = url.split("?");
@@ -779,7 +651,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   // ── GET endpoints ──
 
   if (req.method === "GET" && path === "/api/status") {
-    const backend = getActiveBackend();
     const tasks = await getAllVisibleTasks();
     const state: AgentState & { mode?: string } = {
       version: AGENT_VERSION,
@@ -788,7 +659,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       uptime: Math.round((Date.now() - startTime) / 1000),
       sandbox: agentConfig?.sandbox || "none",
       tasks,
-      mode: backend?.mode || "cloud",
+      mode: "cloud",
     };
     return json(res, state);
   }
@@ -803,23 +674,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   if (req.method === "GET" && taskMatch) {
     const task = localTasks.get(taskMatch[1]);
     if (task) return json(res, task);
-    // Fall through to SQLite for worker-spawned tasks
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const row = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskMatch[1]) as Record<string, unknown> | undefined;
-        if (row) {
-          return json(res, {
-            id: row.id,
-            summary: row.summary || "",
-            description: row.description || "",
-            status: row.status,
-            github_repo: row.github_repo,
-          });
-        }
-      } catch { /* fall through to 404 */ }
-    }
     return json(res, { error: "Task not found" }, 404);
   }
 
@@ -835,19 +689,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // GET /api/tasks/:id/detail — local SQLite or cloud control center
+  // GET /api/tasks/:id/detail — cloud control center
   const detailMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/detail$/);
   if (req.method === "GET" && detailMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const task = await backend.getTask(detailMatch[1]);
-        if (!task) return json(res, { error: "Task not found" }, 404);
-        return json(res, task);
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const dashboard = await cloudProxy("GET", "/api/control-center") as {
@@ -867,23 +711,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // GET /api/tasks/:id/logs — local SQLite or cloud proxy
+  // GET /api/tasks/:id/logs — cloud proxy
   const logsMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/logs$/);
   if (req.method === "GET" && logsMatch) {
-    const backend = getActiveBackend();
-    // Standalone mode — read from SQLite task_logs
-    if (backend?.mode === "local") {
-      try {
-        const { params: qp } = parseUrl(req.url || "");
-        const since = qp.since || undefined;
-        const lim = parseInt(qp.limit || "500", 10);
-        const result = await backend.getLogBackfill(logsMatch[1], since, lim);
-        return json(res, result.data);
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
-    // Cloud mode — proxy to cloud API
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const { params: qp } = parseUrl(req.url || "");
@@ -898,20 +728,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // GET /api/tasks/:id/code-events — local SQLite or cloud proxy
+  // GET /api/tasks/:id/code-events — cloud proxy
   const codeEventsMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/code-events$/);
   if (req.method === "GET" && codeEventsMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const { params: qp } = parseUrl(req.url || "");
-        const since = qp.since || undefined;
-        const result = await backend.getCodeBackfill(codeEventsMatch[1], since);
-        return json(res, result.data);
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const { params: qp } = parseUrl(req.url || "");
@@ -985,71 +804,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   // ── POST commands ──
 
-  // POST /api/tasks/run — create a task via the cloud API or local backend
+  // POST /api/tasks/run — create a task via the cloud API
   if (req.method === "POST" && path === "/api/tasks/run") {
-    const backend = await ensureBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-
-        // Handle card run via jiraIssueKey (standalone: "#N" or card/board IDs)
-        if (body.jiraIssueKey || body._cardId) {
-          const cardId = body._cardId;
-          const boardId = body._boardId;
-          if (cardId && boardId) {
-            const task = await backend.runCard(boardId, cardId);
-            processQueuedTask(task.id).catch((e: unknown) => console.error("[orchestrator] processQueuedTask failed:", e));
-            return json(res, task, 201);
-          }
-          // Fallback: find card by key like "#3"
-          const keyMatch = String(body.jiraIssueKey).match(/^#(\d+)$/);
-          if (keyMatch) {
-            const db = getLocalDb()!;
-            const card = db.prepare(
-              "SELECT c.id, c.board_id FROM cards c WHERE c.card_number = ?",
-            ).get(parseInt(keyMatch[1], 10)) as any;
-            if (card) {
-              const task = await backend.runCard(card.board_id, card.id);
-              processQueuedTask(task.id).catch((e: unknown) => console.error("[orchestrator] processQueuedTask failed:", e));
-              return json(res, task, 201);
-            }
-          }
-          return json(res, { error: "Card not found" }, 404);
-        }
-
-        const task = await backend.createTask({
-          summary: body.summary,
-          description: body.description,
-          githubRepo: body.githubRepo || body.repo,
-          scmProvider: body.scmProvider,
-          workerModel: body.workerModel,
-          workerProvider: body.workerProvider,
-          workerPersona: body.workerPersona,
-          parentTaskId: body.parentTaskId,
-          taskNotes: body.taskNotes,
-          jiraIssueKey: body.jiraIssueKey,
-          jiraFields: body.jiraFields,
-          deploymentEnabled: body.deploymentEnabled,
-          improvementEnabled: body.improvementEnabled,
-          qualityGateBypass: body.qualityGateBypass,
-          standardSdkMode: body.standardSdkMode,
-          targetFiles: body.targetFiles,
-          referenceFiles: body.referenceFiles,
-          targetBranch: body.targetBranch,
-          storyBranch: body.storyBranch,
-          skipManagerReview: body.skipManagerReview,
-        });
-        // If plan=true, run through planner first; otherwise execute directly
-        if (body.plan) {
-          planAndProcessTask(task.id).catch((e: unknown) => console.error("[orchestrator] planAndProcessTask failed:", e));
-        } else {
-          processQueuedTask(task.id).catch((e: unknown) => console.error("[orchestrator] processQueuedTask failed:", e));
-        }
-        return json(res, task, 201);
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
@@ -1067,26 +823,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   // POST /api/tasks/run-file — create a Quick Tasks card + run as worker task
   if (req.method === "POST" && path === "/api/tasks/run-file") {
-    const backend = await ensureBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const config = (await import("./backends/local/config.js")).loadStandaloneConfig();
-        const workerConfig = (await import("./backends/local/config.js")).getRoleConfig(config, "worker");
-        const task = await backend.createTask({
-          summary: body.summary,
-          description: body.description,
-          githubRepo: body.githubRepo || config.defaultRepo,
-          scmProvider: config.scm?.provider,
-          workerModel: workerConfig.model,
-          workerProvider: workerConfig.provider,
-        });
-        processQueuedTask(task.id).catch((e: unknown) => console.error("[run-file] processQueuedTask failed:", e));
-        return json(res, task, 201);
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
@@ -1103,19 +839,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   // GET /api/repos — lightweight repos endpoint for VS Code repo picker
   if (req.method === "GET" && path === "/api/repos") {
-    const backend = await ensureBackend();
-    if (backend?.mode === "local") {
-      try {
-        const repos = await backend.getRepos();
-        return json(res, {
-          repos: repos.map((r: any) => r.url),
-          defaultRepo: repos.find((r: any) => r.isDefault)?.url || null,
-          scmProvider: (await backend.getSettings()).scmProvider || "github",
-        });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const settings = await cloudProxy("GET", "/api/settings") as Record<string, unknown>;
@@ -1137,8 +860,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   // POST /api/prd/build — decompose PRD locally with SSE streaming
   if (req.method === "POST" && path === "/api/prd/build") {
-    const backend = getActiveBackend();
-    if (!backend && !cloudProxy) return json(res, { error: "No backend available" }, 503);
+    if (!cloudProxy) return json(res, { error: "No backend available" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
       const prdContent = body.content;
@@ -1162,21 +884,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         provider: "anthropic",
         model: "",
       };
-      if (backend?.mode === "local") {
-        // Standalone: read from local config
-        const { loadStandaloneConfig: lsc, getRoleConfig: grc, resolveApiKey: rak } = await import("./backends/local/config.js");
-        const sc = lsc();
-        const plannerRole = grc(sc, "planner");
-        planningConfig = { provider: plannerRole.provider, model: plannerRole.model, apiKey: rak(sc, "planner") };
-      } else if (cloudProxy) {
-        // Cloud: fetch from server
-        try {
-          const settings = await cloudProxy("GET", "/api/settings") as Record<string, unknown>;
-          if (settings?.planningAgentProvider) planningConfig.provider = settings.planningAgentProvider as string;
-          if (settings?.planningAgentModel) planningConfig.model = settings.planningAgentModel as string;
-          if (settings?.planningApiKey) planningConfig.apiKey = settings.planningApiKey as string;
-        } catch { /* fall back to defaults */ }
-      }
+      // Cloud: fetch from server
+      try {
+        const settings = await cloudProxy("GET", "/api/settings") as Record<string, unknown>;
+        if (settings?.planningAgentProvider) planningConfig.provider = settings.planningAgentProvider as string;
+        if (settings?.planningAgentModel) planningConfig.model = settings.planningAgentModel as string;
+        if (settings?.planningApiKey) planningConfig.apiKey = settings.planningApiKey as string;
+      } catch { /* fall back to defaults */ }
 
       // Fetch PRD system prompt from the API (single source of truth)
       let prdSystemPrompt: string | undefined;
@@ -1201,60 +915,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
       sendEvent("progress", { message: `Creating board with ${decomposed.cards.length} cards...` });
 
-      if (backend?.mode === "local") {
-        // Standalone: create board directly in SQLite
-        const board = await backend.createBoard({ name: decomposed.boardName, description: `Generated from PRD` });
-        const backlogCol = board.columns.find((c: any) => c.name === "Backlog")!;
-        const cardIds: string[] = [];
-
-        for (let i = 0; i < decomposed.cards.length; i++) {
-          const c = decomposed.cards[i] as any;
-          const card = await backend.createCard(board.id, {
-            columnId: backlogCol.id,
-            title: c.title,
-            description: c.description,
-            priority: c.priority || "medium",
-            position: i,
-          });
-          cardIds.push(card.id);
-        }
-
-        // Create dependencies
-        const db = getLocalDb()!;
-        for (let i = 0; i < decomposed.cards.length; i++) {
-          const c = decomposed.cards[i] as any;
-          if (Array.isArray(c.dependencyIndices)) {
-            for (const depIdx of c.dependencyIndices) {
-              if (depIdx >= 0 && depIdx < cardIds.length) {
-                db.prepare(
-                  "INSERT INTO card_dependencies (id, card_id, depends_on_card_id) VALUES (?, ?, ?)",
-                ).run(generateId(), cardIds[i], cardIds[depIdx]);
-              }
-            }
-          }
-        }
-
-        // Store quality gates on board
-        if ((decomposed as any).qualityGates) {
-          db.prepare("UPDATE boards SET quality_gate_commands = ? WHERE id = ?")
-            .run(JSON.stringify((decomposed as any).qualityGates), board.id);
-        }
-        if ((decomposed as any).ciWorkflowPath) {
-          db.prepare("UPDATE boards SET ci_workflow_path = ? WHERE id = ?")
-            .run((decomposed as any).ciWorkflowPath, board.id);
-        }
-
-        sendEvent("done", {
-          result: { boardId: board.id, boardName: board.name, cardCount: cardIds.length },
-        });
-      } else {
-        // Cloud: send pre-decomposed cards to cloud API to create the board
-        const result = await cloudProxy!("POST", "/api/prd/decompose", {
-          ...body,
-          preDecomposed: decomposed,
-        });
-        sendEvent("done", { result });
-      }
+      // Cloud: send pre-decomposed cards to cloud API to create the board
+      const result = await cloudProxy!("POST", "/api/prd/decompose", {
+        ...body,
+        preDecomposed: decomposed,
+      });
+      sendEvent("done", { result });
       res.end();
     } catch (err: unknown) {
       const e = err as { status?: number; data?: unknown; message?: string };
@@ -1281,144 +947,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   // GET /api/agent/planning-prompt — assemble planning prompt for a task
   if (req.method === "GET" && path === "/api/agent/planning-prompt") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const taskId = new URL(req.url || "", "http://localhost").searchParams.get("taskId");
-        if (!taskId) return json(res, { error: "taskId query parameter is required" }, 400);
-
-        const db = getLocalDb();
-        const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as any;
-        if (!task) return json(res, { error: "Task not found" }, 404);
-        if (task.status !== "planning") {
-          return json(res, { error: `Task is in '${task.status}' state, expected 'planning'` }, 409);
-        }
-
-        const config = loadStandaloneConfig();
-        // In self-hosted mode, prefer API settings over config.json
-        const apiSettings = await getApiSettings();
-        const effectiveSettings = apiSettings || config.settings || {};
-        const baseMaxStories = (effectiveSettings as Record<string, unknown>).ralphMaxStories as number
-          ?? (config.settings?.maxStories ?? 10);
-        const maxTargetFiles = (effectiveSettings as Record<string, unknown>).maxTargetFiles as number
-          ?? (config.settings?.maxTargetFiles ?? 6);
-        const plannerConfig = getRoleConfig(config, "planner");
-
-        // Extract jiraFields early — needed for maxStories calculation before prompt template
-        let jiraFields: Record<string, unknown> = {};
-        try {
-          jiraFields = task.jira_fields ? JSON.parse(task.jira_fields) : {};
-        } catch { /* ignore malformed JSON */ }
-
-        // Detect PRD/full-build task (matches remote-agent.ts)
-        const isBuildPageTask = jiraFields.buildPage === true;
-
-        // Prompt hint: always use base cap so LLM targets a reasonable number
-        const maxStories = baseMaxStories;
-        // Truncation ceiling: PRD tasks get higher cap so valid stories aren't chopped
-        const storyCap = isBuildPageTask ? Math.max(baseMaxStories, 20) : baseMaxStories;
-
-        // Get available personas from worker-config
-        let validPersonas: string[] = [];
-        try {
-          const wc = await getWorkerConfig();
-          validPersonas = Object.keys(wc.personaIcons || {});
-        } catch { /* use defaults below */ }
-
-        // Build a planning prompt from task data
-        const prompt = `You are a technical planning agent. Your job is to analyze a task and break it down into executable stories.
-
-## Task Details
-
-**Title:** ${task.summary || "Unnamed Task"}
-
-**Description:**
-${task.description || "No description provided."}
-
-## Instructions
-
-**EXPLORE FIRST:** Before creating your plan, use your tools to explore the repository. Run Glob to see the directory structure, read key files (package.json, README, config files), and search for code related to the task. Ground your targetFiles in actual paths you discovered — do NOT guess file paths.
-
-Then analyze this task and create an execution plan with stories. For each story, provide: id, title, a 2-3 line scope description, persona, priority, estimatedEffort, dependencies, and targetFiles.
-
-## Available Personas
-
-You MUST use one of these exact persona values for each story:
-
-- \`architect\` — System decomposition, task planning, architecture design
-- \`backend_developer\` — REST APIs, database, server-side logic, GraphQL, OpenAPI, query optimization
-- \`frontend_developer\` — React, TypeScript, Tailwind, UI components, accessibility
-- \`mobile_developer\` — iOS (Swift, SwiftUI), Android (Kotlin, Jetpack Compose), React Native
-- \`devops_engineer\` — Terraform, Docker, CI/CD, AWS, infrastructure
-- \`security_engineer\` — OWASP, vulnerability assessment, security auditing
-- \`qa_engineer\` — Test automation, Playwright, Jest, quality assurance
-- \`data_ml_engineer\` — ETL/ELT, data pipelines, ML model training, MLOps
-- \`tech_writer\` — Documentation, API docs, technical guides
-- \`tech_lead\` — Code review, architecture review, quality gate
-- \`project_manager\` — Task breakdown, planning, coordination
-
-Do NOT invent personas (e.g., "fullstack_developer" does not exist). For full-stack work, split into \`backend_developer\` and \`frontend_developer\` stories.
-
-## Planning Advice
-
-- **No circular dependencies.** If A depends on B, B must not depend on A (directly or transitively).
-- **No operational stories.** \`npm install\`, etc. are NOT stories — include them as pre-step instructions in the story that needs the output.
-- **Maximize parallelism via persona diversity.** Each unique persona runs as a separate parallel expert.
-- **targetFiles: list ALL files each story will create or modify.** Most feature stories touch 3-10 files. Foundation/scaffolding stories may need 15-25+. There is no hard cap — size each story to its actual scope. Workers discover additional files from context.
-- **No overlapping targetFiles.** Two stories MUST NOT list the same file in their targetFiles.
-- **Target ${Math.max(1, Math.round(maxStories * 0.7))}-${maxStories} stories.** Prefer fewer, well-scoped stories over many small ones.
-
-## Output Format — YOU MUST OUTPUT THIS JSON
-
-After exploring the repo, output a \`\`\`json code block with this EXACT structure:
-
-\`\`\`json
-{
-  "summary": "Brief summary of the overall plan",
-  "stories": [
-    {
-      "id": "story-0",
-      "title": "Foundation — shared types and config",
-      "description": "Shared layout and type definitions.",
-      "persona": "backend_developer",
-      "priority": 1,
-      "estimatedEffort": "small",
-      "dependencies": [],
-      "targetFiles": ["src/types/feature.ts", "src/config.ts"]
-    }
-  ],
-  "risks": ["Risk 1"],
-  "assumptions": ["Assumption 1"]
-}
-\`\`\`
-`;
-
-        // Extract preComputedStories from jiraFields (parsed above)
-        const preComputedStories = Array.isArray(jiraFields.preComputedStories) && jiraFields.preComputedStories.length > 0
-          ? jiraFields.preComputedStories
-          : undefined;
-
-        return json(res, {
-          taskId,
-          prompt,
-          model: plannerConfig.model,
-          provider: plannerConfig.provider,
-          maxStories,
-          storyCap,
-          maxTargetFiles,
-          planningMode: isBuildPageTask
-            ? ((effectiveSettings as Record<string, unknown>).prdPlanningMode as string || config.settings?.prdPlanningMode || "simplified")
-            : ((effectiveSettings as Record<string, unknown>).planningMode as string || config.settings?.planningMode || "simplified"),
-          criticApprovalThreshold: (effectiveSettings as Record<string, unknown>).criticApprovalThreshold as number
-            ?? config.settings?.criticApprovalThreshold ?? 90,
-          validPersonas,
-          ...(preComputedStories ? { preComputedStories } : {}),
-        });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
-    // Cloud proxy fallback
     if (cloudProxy) {
       try {
         const qs = new URL(req.url || "", "http://localhost").search;
@@ -1433,58 +961,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // POST /api/agent/plan-result — store approved plan on task
   if (req.method === "POST" && path === "/api/agent/plan-result") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const { taskId, rawOutput, criticScore, criticIterations } = body;
-        if (!taskId || !rawOutput) return json(res, { error: "taskId and rawOutput are required" }, 400);
-
-        const db = getLocalDb();
-
-        // Parse execution plan from raw output (reuse plan-validator.ts logic)
-        const { parseExecutionPlan, applyFileCap, applyStoryCap, resolveFileOverlaps, fixInvalidPersonas } = await import("./plan-validator.js");
-        const rawPlan = parseExecutionPlan(rawOutput);
-
-        // Apply safety caps — use higher cap for PRD/build-page tasks
-        const config = loadStandaloneConfig();
-        const planApiSettings = await getApiSettings();
-        const baseMaxStories = (planApiSettings as Record<string, unknown>)?.ralphMaxStories as number
-          ?? config.settings?.maxStories ?? 10;
-        const task = db.prepare("SELECT jira_fields FROM tasks WHERE id = ?").get(taskId) as { jira_fields?: string } | undefined;
-        let isBuildPage = false;
-        try { isBuildPage = task?.jira_fields ? JSON.parse(task.jira_fields).buildPage === true : false; } catch { /* ignore */ }
-        const maxStories = isBuildPage ? Math.max(baseMaxStories, 20) : baseMaxStories;
-        applyStoryCap(rawPlan, maxStories);
-        applyFileCap(rawPlan);
-        resolveFileOverlaps(rawPlan);
-        fixInvalidPersonas(rawPlan, [
-          "architect", "backend_developer", "frontend_developer", "mobile_developer",
-          "devops_engineer", "security_engineer", "qa_engineer", "data_ml_engineer",
-          "tech_writer", "tech_lead", "project_manager",
-        ]);
-
-        // Store execution plan and transition to queued
-        const planJson = JSON.stringify(rawPlan);
-        const result = db.prepare(
-          "UPDATE tasks SET execution_plan = ?, status = 'queued', updated_at = datetime('now') WHERE id = ? AND status = 'planning'",
-        ).run(planJson, taskId);
-
-        if (result.changes === 0) {
-          return json(res, { error: "Task not in planning status" }, 409);
-        }
-
-        broadcastSSE("tasks", "state:changed", { taskId, status: "queued" });
-
-        // Re-trigger processing — task is now queued with a plan
-        processQueuedTask(taskId).catch(() => {});
-
-        return json(res, { success: true, taskId, stories: rawPlan.stories.length, criticScore });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
-    // Cloud proxy fallback
     if (cloudProxy) {
       try {
         const body = JSON.parse(await readBody(req));
@@ -1499,26 +975,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // POST /api/agent/plan-failed — mark planning as failed
   if (req.method === "POST" && path === "/api/agent/plan-failed") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const { taskId, reason, status } = body;
-        if (!taskId) return json(res, { error: "taskId is required" }, 400);
-
-        const db = getLocalDb();
-        const finalStatus = status === "escalated" ? "failed" : (status || "failed");
-        db.prepare(
-          "UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?",
-        ).run(finalStatus, taskId);
-        broadcastSSE("tasks", "state:changed", { taskId, status: finalStatus, error: reason });
-
-        return json(res, { success: true });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
-    // Cloud proxy fallback
     if (cloudProxy) {
       try {
         const body = JSON.parse(await readBody(req));
@@ -1538,58 +994,12 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // POST /api/control-center/logs/batch — batch log posting from planner
   if (req.method === "POST" && path === "/api/control-center/logs/batch") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const entries = body.entries || [];
-        for (const entry of entries) {
-          if (entry.taskId && entry.message) {
-            await backend.postLog({
-              taskId: entry.taskId,
-              type: entry.type || "execution",
-              message: entry.message,
-              severity: entry.severity || "info",
-            });
-          }
-        }
-      } catch { /* best-effort */ }
-    }
     return json(res, { success: true });
   }
 
   // POST /api/tasks/:id/talk — send message to worker
   const talkMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/talk$/);
   if (req.method === "POST" && talkMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const taskId = talkMatch[1];
-        // Resolve parentTaskId — Epic workers poll PARENT_TASK_ID for commands
-        const localTask = localTasks.get(taskId);
-        const parentId = localTask?.parentTaskId || taskId;
-        // Post as user_message to in-memory coordination store + SSE push
-        const store = getCoordStore(parentId);
-        const ctx: CoordContext = {
-          id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          parentTaskId: parentId,
-          taskId: parentId,
-          persona: "",
-          messageType: "user_message",
-          content: JSON.stringify({ message: body.message || body.content }),
-          metadata: {},
-          createdAt: new Date().toISOString(),
-        };
-        store.contexts.push(ctx);
-        pushCoordEvent(parentId, ctx);
-        // Also persist to SQLite coordination_messages
-        await backend.talkToWorker(parentId, body.message || body.content);
-        return json(res, { success: true });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
@@ -1609,42 +1019,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
   // POST /api/tasks/:id/blocker — respond to blocker
   const blockerMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/blocker$/);
   if (req.method === "POST" && blockerMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const taskId = blockerMatch[1];
-        const localTask = localTasks.get(taskId);
-        const parentId = localTask?.parentTaskId || taskId;
-        // Post blocker_resolved to in-memory coordination store + SSE push
-        const store = getCoordStore(parentId);
-        const ctx: CoordContext = {
-          id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          parentTaskId: parentId,
-          taskId: parentId,
-          persona: "",
-          messageType: "blocker_resolved",
-          content: JSON.stringify({
-            blockerId: body.blockerId,
-            action: body.action,
-            guidance: body.guidance,
-          }),
-          metadata: {},
-          createdAt: new Date().toISOString(),
-        };
-        store.contexts.push(ctx);
-        pushCoordEvent(parentId, ctx);
-        // Also persist to SQLite
-        await backend.respondToBlocker(parentId, {
-          blockerId: body.blockerId,
-          action: body.action,
-          guidance: body.guidance,
-        });
-        return json(res, { success: true });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
@@ -1662,33 +1036,9 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     }
   }
 
-  // POST /api/tasks/:id/plan/approve — local backend or cloud proxy
+  // POST /api/tasks/:id/plan/approve — cloud proxy
   const approveMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/plan\/approve$/);
   if (req.method === "POST" && approveMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const taskId = approveMatch[1];
-        await backend.approvePlan(taskId);
-        // Also push to in-memory coordination store so worker picks it up
-        const store = getCoordStore(taskId);
-        const ctx: CoordContext = {
-          id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          parentTaskId: taskId,
-          taskId,
-          persona: "",
-          messageType: "plan_approved",
-          content: JSON.stringify({ approved: true }),
-          metadata: {},
-          createdAt: new Date().toISOString(),
-        };
-        store.contexts.push(ctx);
-        pushCoordEvent(taskId, ctx);
-        return json(res, { success: true });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("POST", `/api/tasks/${approveMatch[1]}/plan/approve`, {});
@@ -1701,33 +1051,9 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     }
   }
 
-  // POST /api/tasks/:id/plan/reject — local backend or cloud proxy
+  // POST /api/tasks/:id/plan/reject — cloud proxy
   const rejectMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/plan\/reject$/);
   if (req.method === "POST" && rejectMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const taskId = rejectMatch[1];
-        await backend.rejectPlan(taskId, body.feedback || "");
-        const store = getCoordStore(taskId);
-        const ctx: CoordContext = {
-          id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          parentTaskId: taskId,
-          taskId,
-          persona: "",
-          messageType: "plan_rejected",
-          content: JSON.stringify({ feedback: body.feedback }),
-          metadata: {},
-          createdAt: new Date().toISOString(),
-        };
-        store.contexts.push(ctx);
-        pushCoordEvent(taskId, ctx);
-        return json(res, { success: true });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const body = JSON.parse(await readBody(req));
@@ -1759,14 +1085,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     if (localTask) localTask.status = "failed";
     agentEvents.emit("task:failed", { id: taskId });
 
-    // Update local backend if in standalone mode
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      stopWorkerTask(taskId);
-      await backend.cancelTask(taskId);
-      return json(res, { success: true, message: "Task cancelled" });
-    }
-
     // Best-effort cloud status update — don't fail if cloud is stale
     if (cloudProxy) {
       try {
@@ -1777,34 +1095,10 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     return json(res, { success: true, message: "Task cancelled" });
   }
 
-  // DELETE /api/tasks/:id — remove a completed/failed/cancelled task from SQLite
+  // DELETE /api/tasks/:id — remove task via cloud proxy
   const deleteTaskMatch = path.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)$/);
   if (req.method === "DELETE" && deleteTaskMatch) {
     const taskId = deleteTaskMatch[1];
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const task = db.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as { status: string } | undefined;
-        if (!task) return json(res, { error: "Task not found" }, 404);
-        if (task.status === "executing" || task.status === "queued") {
-          return json(res, { error: "Cannot delete an active task — cancel it first" }, 400);
-        }
-        db.prepare("DELETE FROM tasks WHERE id = ?").run(taskId);
-        localTasks.delete(taskId);
-        coordStores.delete(taskId);
-        const coordClients = coordSseClients.get(taskId);
-        if (coordClients) {
-          for (const c of coordClients) { try { c.end(); } catch { /* ignore */ } }
-          coordSseClients.delete(taskId);
-        }
-        broadcastSSE("tasks", "state:changed", {});
-        return json(res, { success: true });
-      } catch (err: unknown) {
-        return json(res, { error: String(err) }, 500);
-      }
-    }
-    // Cloud mode: proxy to cloud API
     if (cloudProxy) {
       try {
         const result = await cloudProxy("DELETE", `/api/tasks/${taskId}`);
@@ -1821,51 +1115,12 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // POST /api/tasks/clear — bulk delete completed/failed/cancelled tasks
   if (req.method === "POST" && path === "/api/tasks/clear") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const result = db.prepare(
-          "DELETE FROM tasks WHERE status IN ('completed', 'failed', 'cancelled')"
-        ).run();
-        // Clear matching entries from in-memory maps
-        for (const [id, task] of localTasks) {
-          if (["completed", "failed"].includes(task.status)) {
-            localTasks.delete(id);
-            coordStores.delete(id);
-            const coordClients = coordSseClients.get(id);
-            if (coordClients) {
-              for (const c of coordClients) { try { c.end(); } catch { /* ignore */ } }
-              coordSseClients.delete(id);
-            }
-          }
-        }
-        broadcastSSE("tasks", "state:changed", {});
-        return json(res, { success: true, deleted: result.changes });
-      } catch (err: unknown) {
-        return json(res, { error: String(err) }, 500);
-      }
-    }
     return json(res, { error: "Clear not supported in cloud mode" }, 400);
   }
 
-  // POST /api/tasks/:id/retry — local SQLite or cloud proxy
+  // POST /api/tasks/:id/retry — cloud proxy
   const retryMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/retry$/);
   if (req.method === "POST" && retryMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const taskId = retryMatch[1];
-        await backend.retryTask(taskId);
-        // Clear in-memory coordination state for a fresh start
-        coordStores.delete(taskId);
-        // Re-process the now-queued task
-        await processQueuedTask(taskId);
-        return json(res, { success: true });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const taskId = retryMatch[1];
@@ -1889,100 +1144,8 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     }
   }
 
-  // GET /api/issues — search issues (board cards in standalone, Jira in cloud)
+  // GET /api/issues — search issues via cloud proxy
   if (req.method === "GET" && path === "/api/issues") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const { params: qp } = parseUrl(req.url || "");
-        const config = loadStandaloneConfig();
-        const provider = config.issueTracker?.provider || "internal";
-        const filters = {
-          q: qp.q,
-          project: qp.project,
-          status: qp.status,
-          maxResults: Math.min(Number(qp.maxResults) || 20, 50),
-        };
-
-        switch (provider) {
-          case "jira": {
-            const creds = config.issueTracker?.jira;
-            if (!creds?.baseUrl || !creds.email || !creds.apiToken) {
-              return json(res, { error: "Jira not configured. Open Settings to add credentials." }, 400);
-            }
-            const issues = await searchJiraIssues(creds, filters);
-            return json(res, { issues });
-          }
-          case "linear": {
-            const apiKey = config.issueTracker?.linear?.apiKey;
-            if (!apiKey) {
-              return json(res, { error: "Linear not configured. Open Settings to add your API key." }, 400);
-            }
-            const issues = await searchLinearIssues(apiKey, filters);
-            return json(res, { issues });
-          }
-          case "github-issues": {
-            const token = config.scm?.token;
-            const repo = config.defaultRepo;
-            if (!token) {
-              return json(res, { error: "GitHub token not configured. Open Settings to add your SCM token." }, 400);
-            }
-            if (!repo) {
-              return json(res, { error: "No default repository configured. Set a target repo in Settings." }, 400);
-            }
-            const issues = await searchGitHubIssues(token, repo, filters);
-            return json(res, { issues });
-          }
-          case "internal":
-          default: {
-            // Existing board cards logic
-            const statusFilter = qp.status?.toLowerCase();
-            const projectFilter = qp.project;
-            const boards = await backend.getBoards();
-            const issues: unknown[] = [];
-            for (const board of boards) {
-              if (projectFilter && board.id !== projectFilter) continue;
-              const cards = await backend.getBoardCards(board.id);
-              const colMap = new Map(board.columns.map((c: any) => [c.id, c.name]));
-              const db = getLocalDb()!;
-              for (const card of cards) {
-                const colName = String(colMap.get(card.columnId) || "Backlog");
-                if (statusFilter && colName.toLowerCase() !== statusFilter) continue;
-                const totalDeps = (db.prepare(
-                  "SELECT COUNT(*) as cnt FROM card_dependencies WHERE card_id = ?",
-                ).get(card.id) as any)?.cnt || 0;
-                const unmetDeps = totalDeps > 0
-                  ? (db.prepare(`
-                      SELECT COUNT(*) as cnt FROM card_dependencies cd
-                      JOIN cards dep ON dep.id = cd.depends_on_card_id
-                      LEFT JOIN tasks t ON t.id = dep.task_id
-                      WHERE cd.card_id = ? AND (t.id IS NULL OR t.status != 'completed')
-                    `).get(card.id) as any)?.cnt || 0
-                  : 0;
-                issues.push({
-                  key: `#${card.cardNumber || card.id.slice(0, 6)}`,
-                  summary: card.title,
-                  description: card.description || null,
-                  status: colName,
-                  issueType: "Story",
-                  priority: card.priority || "medium",
-                  labels: [board.name],
-                  project: { key: board.id, name: board.name },
-                  assignee: null,
-                  blockedByCount: unmetDeps,
-                  dependencyCount: totalDeps,
-                  _cardId: card.id,
-                  _boardId: board.id,
-                });
-              }
-            }
-            return json(res, { issues });
-          }
-        }
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const { params: qp } = parseUrl(req.url || "");
@@ -1997,54 +1160,8 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     }
   }
 
-  // GET /api/issues/projects — list projects (boards in standalone, Jira in cloud)
+  // GET /api/issues/projects — list projects via cloud proxy
   if (req.method === "GET" && path === "/api/issues/projects") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const config = loadStandaloneConfig();
-        const provider = config.issueTracker?.provider || "internal";
-
-        switch (provider) {
-          case "jira": {
-            const creds = config.issueTracker?.jira;
-            if (!creds?.baseUrl || !creds.email || !creds.apiToken) {
-              return json(res, { error: "Jira not configured" }, 400);
-            }
-            const projects = await listJiraProjects(creds);
-            return json(res, { projects });
-          }
-          case "linear": {
-            const apiKey = config.issueTracker?.linear?.apiKey;
-            if (!apiKey) {
-              return json(res, { error: "Linear not configured" }, 400);
-            }
-            const projects = await listLinearTeams(apiKey);
-            return json(res, { projects });
-          }
-          case "github-issues": {
-            const token = config.scm?.token;
-            if (!token) {
-              return json(res, { error: "GitHub token not configured" }, 400);
-            }
-            // If a default repo is set, return just that; otherwise list user repos
-            const repo = config.defaultRepo;
-            if (repo) {
-              return json(res, { projects: [{ key: repo, name: repo }] });
-            }
-            const projects = await listGitHubRepos(token);
-            return json(res, { projects });
-          }
-          case "internal":
-          default: {
-            const boards = await backend.getBoards();
-            return json(res, { projects: boards.map((b: any) => ({ key: b.id, name: b.name })) });
-          }
-        }
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("GET", "/api/issues/projects");
@@ -2056,60 +1173,8 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // ── Persona CRUD endpoints ──
 
-  // Seed system personas into SQLite if not yet present.
-  // Idempotent — only inserts missing slugs.
-  function seedSystemPersonas(): void {
-    const db = getLocalDb();
-    const existing = db.prepare("SELECT slug FROM personas WHERE is_system = 1").all() as { slug: string }[];
-    const existingSlugs = new Set(existing.map((r: { slug: string }) => r.slug));
-
-    const SYSTEM_PERSONAS: Record<string, { name: string; emoji: string; color: string; shortLabel: string; description: string; skills: string; riskLevel: string; priority: number }> = {
-      architect: { name: "Architect", emoji: "🏗️", color: "purple-500", shortLabel: "Arch", description: "Designs system architecture, defines component boundaries, and ensures scalability.", skills: "Architecture,System Design,Scalability", riskLevel: "high", priority: 1 },
-      frontend_developer: { name: "Frontend Developer", emoji: "🎨", color: "pink-500", shortLabel: "Frontend", description: "Builds user interfaces with React, CSS, and modern frontend frameworks.", skills: "React,TypeScript,CSS,UI/UX", riskLevel: "low", priority: 2 },
-      backend_developer: { name: "Backend Developer", emoji: "💻", color: "blue-500", shortLabel: "Backend", description: "Implements server-side logic, APIs, and database operations.", skills: "Node.js,TypeScript,APIs,Databases", riskLevel: "medium", priority: 3 },
-      devops_engineer: { name: "DevOps Engineer", emoji: "🔧", color: "orange-500", shortLabel: "DevOps", description: "Manages infrastructure, CI/CD pipelines, and deployment automation.", skills: "Docker,Kubernetes,CI/CD,Infrastructure", riskLevel: "high", priority: 4 },
-      security_engineer: { name: "Security Engineer", emoji: "🛡️", color: "red-500", shortLabel: "Security", description: "Performs security audits, implements auth, and hardens systems.", skills: "Security,Auth,Encryption,OWASP", riskLevel: "high", priority: 5 },
-      qa_engineer: { name: "QA Engineer", emoji: "🧪", color: "green-500", shortLabel: "QA", description: "Writes tests, performs quality assurance, and validates features.", skills: "Testing,E2E,Unit Tests,QA", riskLevel: "low", priority: 6 },
-      tech_writer: { name: "Tech Writer", emoji: "📝", color: "yellow-500", shortLabel: "Docs", description: "Creates documentation, API references, and technical guides.", skills: "Documentation,API Docs,Technical Writing", riskLevel: "low", priority: 7 },
-      project_manager: { name: "Project Manager", emoji: "📋", color: "gray-500", shortLabel: "PM", description: "Coordinates tasks, manages project timelines, and stakeholder communication.", skills: "Project Management,Planning,Coordination", riskLevel: "low", priority: 8 },
-      data_ml_engineer: { name: "Data/ML Engineer", emoji: "📊", color: "teal-500", shortLabel: "Data/ML", description: "Builds data pipelines, ML models, and analytics systems.", skills: "Python,ML,Data Pipelines,Analytics", riskLevel: "medium", priority: 9 },
-      mobile_developer: { name: "Mobile Developer", emoji: "📱", color: "indigo-500", shortLabel: "Mobile", description: "Develops mobile applications with React Native or native platforms.", skills: "React Native,Mobile,iOS,Android", riskLevel: "medium", priority: 10 },
-      tech_lead: { name: "Tech Lead", emoji: "👑", color: "amber-500", shortLabel: "Lead", description: "Reviews code, provides technical guidance, and ensures quality standards.", skills: "Code Review,Architecture,Mentoring", riskLevel: "medium", priority: 11 },
-      planning_agent: { name: "Planning Agent", emoji: "💡", color: "cyan-500", shortLabel: "Planner", description: "Decomposes tasks into stories, assigns experts, and creates execution plans.", skills: "Planning,Decomposition,Estimation", riskLevel: "low", priority: 12 },
-      manager: { name: "Manager", emoji: "👔", color: "slate-500", shortLabel: "Manager", description: "Manages review cycles, approves PRs, and coordinates team output.", skills: "Management,Review,Coordination", riskLevel: "low", priority: 13 },
-    };
-
-    const insert = db.prepare(
-      "INSERT INTO personas (id, slug, name, emoji, color, short_label, description, enabled, is_system, priority, skills, risk_level) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?)"
-    );
-    for (const [slug, p] of Object.entries(SYSTEM_PERSONAS)) {
-      if (!existingSlugs.has(slug)) {
-        insert.run(generateId(), slug, p.name, p.emoji, p.color, p.shortLabel, p.description, p.priority, p.skills, p.riskLevel);
-      }
-    }
-  }
-
-  // GET /api/personas — list all personas (system + user-created), cloud proxy in cloud mode
+  // GET /api/personas — list all personas via cloud proxy
   if (req.method === "GET" && path === "/api/personas") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        seedSystemPersonas();
-        const personas = db.prepare(
-          "SELECT id, slug, name, emoji, color, short_label, description, enabled, is_system, priority, skills, risk_level, keyword_pattern, label_shortcuts, created_at, updated_at FROM personas WHERE slug != '__common__' ORDER BY priority ASC, name ASC"
-        ).all() as any[];
-        return json(res, personas.map((p: any) => ({
-          ...p,
-          enabled: !!p.enabled,
-          isSystem: !!p.is_system,
-          skills: p.skills ? p.skills.split(",").map((s: string) => s.trim()).filter(Boolean) : [],
-          labelShortcuts: p.label_shortcuts ? p.label_shortcuts.split(",").map((s: string) => s.trim()).filter(Boolean) : [],
-        })));
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("GET", "/api/personas");
@@ -2119,37 +1184,9 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     }
   }
 
-  // POST /api/personas — create a new persona (standalone only)
+  // POST /api/personas — create a new persona via cloud proxy
   if (req.method === "POST" && path === "/api/personas") {
     const body = JSON.parse(await readBody(req));
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        seedSystemPersonas();
-        const { slug, name, emoji, color, shortLabel, description, skills, riskLevel, keywordPattern, labelShortcuts, priority } = body;
-        if (!slug || !name) return json(res, { error: "slug and name are required" }, 400);
-        if (!/^[a-z][a-z0-9_]*$/.test(slug)) return json(res, { error: "slug must match /^[a-z][a-z0-9_]*$/" }, 400);
-        const existing = db.prepare("SELECT id FROM personas WHERE slug = ?").get(slug);
-        if (existing) return json(res, { error: `Persona with slug '${slug}' already exists` }, 409);
-        const id = generateId();
-        db.prepare(
-          "INSERT INTO personas (id, slug, name, emoji, color, short_label, description, enabled, is_system, priority, skills, risk_level, keyword_pattern, label_shortcuts) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)"
-        ).run(
-          id, slug, name,
-          emoji || null, color || null, shortLabel || null, description || null,
-          priority ?? 0,
-          Array.isArray(skills) ? skills.join(",") : (skills || null),
-          riskLevel || "medium",
-          keywordPattern || null,
-          Array.isArray(labelShortcuts) ? labelShortcuts.join(",") : (labelShortcuts || null),
-        );
-        const created = db.prepare("SELECT * FROM personas WHERE id = ?").get(id) as any;
-        return json(res, { ...created, enabled: !!created.enabled, isSystem: false }, 201);
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("POST", "/api/personas", body);
@@ -2161,71 +1198,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // GET /api/personas/worker/:slug/bundle — persona bundle for worker directive injection
   if (req.method === "GET" && /^\/api\/personas\/worker\/[^/]+\/bundle$/.test(path)) {
-    const slug = path.split("/")[5];
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        seedSystemPersonas();
-        const persona = db.prepare("SELECT * FROM personas WHERE slug = ? AND enabled = 1").get(slug) as any;
-        if (!persona) return json(res, { error: `Persona '${slug}' not found` }, 404);
-
-        // Get active readme directive
-        const readmeDirective = db.prepare(
-          "SELECT id, content, version FROM persona_directives WHERE persona_id = ? AND type = 'readme' AND is_active = 1 ORDER BY version DESC LIMIT 1"
-        ).get(persona.id) as any;
-
-        // Get active common directives for this persona
-        const personaCommon = db.prepare(
-          "SELECT id, filename, content, version FROM persona_directives WHERE persona_id = ? AND type = 'common' AND is_active = 1"
-        ).all(persona.id) as any[];
-
-        // Also get global __common__ directives
-        const commonPersona = db.prepare("SELECT id FROM personas WHERE slug = '__common__'").get() as any;
-        let globalCommon: any[] = [];
-        if (commonPersona) {
-          globalCommon = db.prepare(
-            "SELECT id, filename, content, version FROM persona_directives WHERE persona_id = ? AND type = 'common' AND is_active = 1"
-          ).all(commonPersona.id) as any[];
-        }
-
-        // Merge: global common first, persona-specific overrides by filename
-        const commonMap: Record<string, string> = {};
-        const commonMeta: Record<string, { id: string; version: number }> = {};
-        for (const d of globalCommon) {
-          if (d.filename) {
-            commonMap[d.filename] = d.content;
-            commonMeta[d.filename] = { id: d.id, version: d.version };
-          }
-        }
-        for (const d of personaCommon) {
-          if (d.filename) {
-            commonMap[d.filename] = d.content;
-            commonMeta[d.filename] = { id: d.id, version: d.version };
-          }
-        }
-
-        return json(res, {
-          persona: {
-            id: persona.id,
-            slug: persona.slug,
-            name: persona.name,
-            emoji: persona.emoji,
-            color: persona.color,
-            description: persona.description,
-          },
-          directives: {
-            readme: readmeDirective?.content ?? null,
-            readmeMeta: readmeDirective ? { id: readmeDirective.id, version: readmeDirective.version } : null,
-            common: commonMap,
-            commonMeta,
-          },
-          scripts: {},
-        });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("GET", path);
@@ -2237,38 +1209,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // GET /api/personas/worker/experts — expert registry for workers
   if (req.method === "GET" && path === "/api/personas/worker/experts") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        seedSystemPersonas();
-        const personas = db.prepare(
-          "SELECT id, slug, name, emoji, color, description, skills FROM personas WHERE enabled = 1 AND slug != '__common__' ORDER BY priority ASC"
-        ).all() as any[];
-
-        const experts = personas.map((p: any) => {
-          // Get readme directive as systemPrompt
-          const readmeDirective = db.prepare(
-            "SELECT content FROM persona_directives WHERE persona_id = ? AND type = 'readme' AND is_active = 1 ORDER BY version DESC LIMIT 1"
-          ).get(p.id) as any;
-
-          return {
-            slug: p.slug,
-            name: p.name,
-            emoji: p.emoji,
-            color: p.color,
-            description: p.description,
-            systemPrompt: readmeDirective?.content || `You are a ${p.name}. ${p.description || ""}`,
-            specialties: p.skills ? p.skills.split(",").map((s: string) => s.trim()).filter(Boolean) : [],
-            tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch", "TodoWrite"],
-            reviewOnly: p.slug === "tech_lead" || p.slug === "manager",
-          };
-        });
-        return json(res, { experts });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("GET", "/api/personas/worker/experts");
@@ -2278,44 +1218,9 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     }
   }
 
-  // PUT /api/personas/:id — update persona metadata (standalone only)
+  // PUT /api/personas/:id — update persona metadata via cloud proxy
   if (req.method === "PUT" && /^\/api\/personas\/[^/]+$/.test(path) && !path.includes("/worker/")) {
     const body = JSON.parse(await readBody(req));
-    const personaId = path.split("/")[3];
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const persona = db.prepare("SELECT * FROM personas WHERE id = ?").get(personaId) as any;
-        if (!persona) return json(res, { error: "Persona not found" }, 404);
-
-        const { name, emoji, color, shortLabel, description, enabled, priority, skills, riskLevel, keywordPattern, labelShortcuts } = body;
-        const updates: string[] = [];
-        const values: any[] = [];
-
-        if (name !== undefined) { updates.push("name = ?"); values.push(name); }
-        if (emoji !== undefined) { updates.push("emoji = ?"); values.push(emoji); }
-        if (color !== undefined) { updates.push("color = ?"); values.push(color); }
-        if (shortLabel !== undefined) { updates.push("short_label = ?"); values.push(shortLabel); }
-        if (description !== undefined) { updates.push("description = ?"); values.push(description); }
-        if (enabled !== undefined) { updates.push("enabled = ?"); values.push(enabled ? 1 : 0); }
-        if (priority !== undefined) { updates.push("priority = ?"); values.push(priority); }
-        if (skills !== undefined) { updates.push("skills = ?"); values.push(Array.isArray(skills) ? skills.join(",") : skills); }
-        if (riskLevel !== undefined) { updates.push("risk_level = ?"); values.push(riskLevel); }
-        if (keywordPattern !== undefined) { updates.push("keyword_pattern = ?"); values.push(keywordPattern); }
-        if (labelShortcuts !== undefined) { updates.push("label_shortcuts = ?"); values.push(Array.isArray(labelShortcuts) ? labelShortcuts.join(",") : labelShortcuts); }
-
-        if (updates.length > 0) {
-          updates.push("updated_at = datetime('now')");
-          db.prepare(`UPDATE personas SET ${updates.join(", ")} WHERE id = ?`).run(...values, personaId);
-        }
-
-        const updated = db.prepare("SELECT * FROM personas WHERE id = ?").get(personaId) as any;
-        return json(res, { ...updated, enabled: !!updated.enabled, isSystem: !!updated.is_system });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("PUT", path, body);
@@ -2325,22 +1230,8 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     }
   }
 
-  // DELETE /api/personas/:id — delete a user-created persona (standalone only, system personas blocked)
+  // DELETE /api/personas/:id — delete a persona via cloud proxy
   if (req.method === "DELETE" && /^\/api\/personas\/[^/]+$/.test(path) && !path.includes("/worker/") && !path.includes("/directives")) {
-    const personaId = path.split("/")[3];
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const persona = db.prepare("SELECT * FROM personas WHERE id = ?").get(personaId) as any;
-        if (!persona) return json(res, { error: "Persona not found" }, 404);
-        if (persona.is_system) return json(res, { error: "Cannot delete system personas" }, 403);
-        db.prepare("DELETE FROM personas WHERE id = ?").run(personaId);
-        return json(res, { success: true });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("DELETE", path);
@@ -2352,26 +1243,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // GET /api/personas/:personaId/directives — list active directives for a persona
   if (req.method === "GET" && /^\/api\/personas\/[^/]+\/directives$/.test(path) && !path.includes("/worker/") && !path.includes("/common/")) {
-    const personaId = path.split("/")[3];
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const persona = db.prepare("SELECT id FROM personas WHERE id = ?").get(personaId) as any;
-        if (!persona) return json(res, { error: "Persona not found" }, 404);
-        const directives = db.prepare(
-          "SELECT id, persona_id, type, filename, version, is_active, change_summary, created_at, length(content) as content_length FROM persona_directives WHERE persona_id = ? AND is_active = 1 ORDER BY type, filename"
-        ).all(personaId) as any[];
-        return json(res, directives.map((d: any) => ({
-          ...d,
-          isActive: !!d.is_active,
-          contentPreview: undefined,
-          contentLength: d.content_length,
-        })));
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("GET", path);
@@ -2383,18 +1254,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // GET /api/personas/:personaId/directives/:id — get full directive content
   if (req.method === "GET" && /^\/api\/personas\/[^/]+\/directives\/[^/]+$/.test(path) && !path.includes("/worker/")) {
-    const directiveId = path.split("/")[5];
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const directive = db.prepare("SELECT * FROM persona_directives WHERE id = ?").get(directiveId) as any;
-        if (!directive) return json(res, { error: "Directive not found" }, 404);
-        return json(res, { ...directive, isActive: !!directive.is_active });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("GET", path);
@@ -2407,42 +1266,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
   // POST /api/personas/:personaId/directives — create new directive version
   if (req.method === "POST" && /^\/api\/personas\/[^/]+\/directives$/.test(path) && !path.includes("/worker/") && !path.includes("/common/")) {
     const body = JSON.parse(await readBody(req));
-    const personaId = path.split("/")[3];
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const persona = db.prepare("SELECT id FROM personas WHERE id = ?").get(personaId) as any;
-        if (!persona) return json(res, { error: "Persona not found" }, 404);
-
-        const { type, filename, content, changeSummary } = body;
-        if (!type || !content) return json(res, { error: "type and content are required" }, 400);
-        if (type !== "readme" && type !== "common") return json(res, { error: "type must be 'readme' or 'common'" }, 400);
-        if (type === "common" && !filename) return json(res, { error: "filename is required for common directives" }, 400);
-
-        // Get current max version for this type+filename
-        const maxRow = db.prepare(
-          "SELECT MAX(version) as maxVer FROM persona_directives WHERE persona_id = ? AND type = ? AND (filename = ? OR (filename IS NULL AND ? IS NULL))"
-        ).get(personaId, type, filename || null, filename || null) as any;
-        const nextVersion = (maxRow?.maxVer ?? 0) + 1;
-
-        // Deactivate previous active versions for this type+filename
-        db.prepare(
-          "UPDATE persona_directives SET is_active = 0 WHERE persona_id = ? AND type = ? AND (filename = ? OR (filename IS NULL AND ? IS NULL)) AND is_active = 1"
-        ).run(personaId, type, filename || null, filename || null);
-
-        // Insert new version
-        const id = generateId();
-        db.prepare(
-          "INSERT INTO persona_directives (id, persona_id, type, filename, content, version, is_active, change_summary) VALUES (?, ?, ?, ?, ?, ?, 1, ?)"
-        ).run(id, personaId, type, filename || null, content, nextVersion, changeSummary || null);
-
-        const created = db.prepare("SELECT * FROM persona_directives WHERE id = ?").get(id) as any;
-        return json(res, { ...created, isActive: true }, 201);
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("POST", path, body);
@@ -2454,22 +1277,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // DELETE /api/personas/:personaId/directives/:id — delete all versions of a directive
   if (req.method === "DELETE" && /^\/api\/personas\/[^/]+\/directives\/[^/]+$/.test(path) && !path.includes("/worker/")) {
-    const directiveId = path.split("/")[5];
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const directive = db.prepare("SELECT * FROM persona_directives WHERE id = ?").get(directiveId) as any;
-        if (!directive) return json(res, { error: "Directive not found" }, 404);
-        // Delete all versions with same persona_id + type + filename
-        db.prepare(
-          "DELETE FROM persona_directives WHERE persona_id = ? AND type = ? AND (filename = ? OR (filename IS NULL AND ? IS NULL))"
-        ).run(directive.persona_id, directive.type, directive.filename, directive.filename);
-        return json(res, { success: true });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("DELETE", path);
@@ -2481,26 +1288,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // GET /api/personas/common/directives — list global common directives
   if (req.method === "GET" && path === "/api/personas/common/directives") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        seedSystemPersonas();
-        // Ensure __common__ pseudo-persona exists
-        let commonPersona = db.prepare("SELECT id FROM personas WHERE slug = '__common__'").get() as any;
-        if (!commonPersona) {
-          const id = generateId();
-          db.prepare("INSERT INTO personas (id, slug, name, enabled, is_system, priority) VALUES (?, '__common__', 'Common Directives', 1, 1, 0)").run(id);
-          commonPersona = { id };
-        }
-        const directives = db.prepare(
-          "SELECT id, persona_id, type, filename, version, is_active, change_summary, created_at, length(content) as content_length FROM persona_directives WHERE persona_id = ? AND is_active = 1 ORDER BY filename"
-        ).all(commonPersona.id) as any[];
-        return json(res, directives.map((d: any) => ({ ...d, isActive: !!d.is_active, contentLength: d.content_length })));
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("GET", "/api/personas/common/directives");
@@ -2513,41 +1300,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
   // POST /api/personas/common/directives — create/update a common directive
   if (req.method === "POST" && path === "/api/personas/common/directives") {
     const body = JSON.parse(await readBody(req));
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        seedSystemPersonas();
-        // Ensure __common__ pseudo-persona
-        let commonPersona = db.prepare("SELECT id FROM personas WHERE slug = '__common__'").get() as any;
-        if (!commonPersona) {
-          const id = generateId();
-          db.prepare("INSERT INTO personas (id, slug, name, enabled, is_system, priority) VALUES (?, '__common__', 'Common Directives', 1, 1, 0)").run(id);
-          commonPersona = { id };
-        }
-        const { filename, content, changeSummary } = body;
-        if (!filename || !content) return json(res, { error: "filename and content are required" }, 400);
-
-        const maxRow = db.prepare(
-          "SELECT MAX(version) as maxVer FROM persona_directives WHERE persona_id = ? AND type = 'common' AND filename = ?"
-        ).get(commonPersona.id, filename) as any;
-        const nextVersion = (maxRow?.maxVer ?? 0) + 1;
-
-        db.prepare(
-          "UPDATE persona_directives SET is_active = 0 WHERE persona_id = ? AND type = 'common' AND filename = ? AND is_active = 1"
-        ).run(commonPersona.id, filename);
-
-        const id = generateId();
-        db.prepare(
-          "INSERT INTO persona_directives (id, persona_id, type, filename, content, version, is_active, change_summary) VALUES (?, ?, 'common', ?, ?, ?, 1, ?)"
-        ).run(id, commonPersona.id, filename, content, nextVersion, changeSummary || null);
-
-        const created = db.prepare("SELECT * FROM persona_directives WHERE id = ?").get(id) as any;
-        return json(res, { ...created, isActive: true }, 201);
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("POST", "/api/personas/common/directives", body);
@@ -2557,30 +1309,8 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     }
   }
 
-  // GET /api/personas/:id — get single persona with directives (standalone only)
+  // GET /api/personas/:id — get single persona with directives
   if (req.method === "GET" && /^\/api\/personas\/[^/]+$/.test(path) && !path.includes("/worker/") && !path.includes("/common")) {
-    const personaId = path.split("/")[3];
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        seedSystemPersonas();
-        const persona = db.prepare("SELECT * FROM personas WHERE id = ?").get(personaId) as any;
-        if (!persona) return json(res, { error: "Persona not found" }, 404);
-        const directives = db.prepare(
-          "SELECT id, type, filename, version, is_active, change_summary, created_at, length(content) as content_length FROM persona_directives WHERE persona_id = ? AND is_active = 1 ORDER BY type, filename"
-        ).all(personaId) as any[];
-        return json(res, {
-          ...persona,
-          enabled: !!persona.enabled,
-          isSystem: !!persona.is_system,
-          skills: persona.skills ? persona.skills.split(",").map((s: string) => s.trim()).filter(Boolean) : [],
-          directives: directives.map((d: any) => ({ ...d, isActive: !!d.is_active, contentLength: d.content_length })),
-        });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (!cloudProxy) return json(res, { error: "Cloud API not connected" }, 503);
     try {
       const result = await cloudProxy("GET", path);
@@ -2952,18 +1682,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
           createdAt: msg.createdAt,
         });
       }
-      // Write-through to SQLite for persistence across agent restarts
-      const backend = getActiveBackend();
-      if (backend?.mode === "local") {
-        try {
-          await backend.postCoordinationMessage({
-            parentTaskId: taskId,
-            taskId: body.taskId || taskId,
-            messageType: msg.messageType,
-            content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
-          });
-        } catch { /* best-effort persistence */ }
-      }
       return json(res, msg, 201);
     } catch {
       return json(res, { success: true });
@@ -2996,18 +1714,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
       store.contexts.push(claimed);
       // Push to SSE subscribers
       pushCoordEvent(parentTaskId, claimed);
-      // Write-through to SQLite
-      const backend = getActiveBackend();
-      if (backend?.mode === "local") {
-        try {
-          await backend.postCoordinationMessage({
-            parentTaskId,
-            taskId: parentTaskId,
-            messageType: "story_claimed",
-            content: claimed.content,
-          });
-        } catch { /* best-effort */ }
-      }
       return json(res, { success: true, claimedBy: body.claimedBy });
     } catch {
       return json(res, { success: true });
@@ -3063,30 +1769,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     /^\/api\/tasks\/([a-f0-9-]+)\/worker-complete$/,
   );
   if (req.method === "POST" && workerCompleteMatch) {
-    try {
-      const body = JSON.parse(await readBody(req));
-      const backend = getActiveBackend();
-      if (backend?.mode === "local") {
-        const db = getLocalDb()!;
-        const taskId = workerCompleteMatch[1];
-        const status =
-          body.exitCode === 0 ? (body.result || "completed") : "failed";
-        db.prepare(
-          "UPDATE tasks SET status = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
-        ).run(status, taskId);
-        // Store PR URL if provided
-        if (body.prUrl || body.githubPrUrl) {
-          db.prepare("UPDATE tasks SET github_pr_url = ? WHERE id = ?").run(body.prUrl || body.githubPrUrl, taskId);
-        }
-        broadcastSSE("org:local:tasks", "task_state", {
-          taskId,
-          status,
-        });
-      }
-      return json(res, { success: true });
-    } catch {
-      return json(res, { success: true });
-    }
+    return json(res, { success: true });
   }
 
   // POST /api/tasks/:id/manager-complete — manager review result
@@ -3094,46 +1777,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     /^\/api\/tasks\/([a-f0-9-]+)\/manager-complete$/,
   );
   if (req.method === "POST" && managerCompleteMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const taskId = managerCompleteMatch[1];
-        const db = getLocalDb()!;
-        const decision = body.decision || body.result || "approved";
-
-        if (decision === "approved" || decision === "approve") {
-          db.prepare(
-            "UPDATE tasks SET status = 'completed', completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
-          ).run(taskId);
-          broadcastSSE("tasks", "state:changed", { taskId, status: "completed" });
-        } else if (decision === "revision_needed" || decision === "revise") {
-          // Manager wants revisions — re-queue the task for another worker run
-          db.prepare(
-            "UPDATE tasks SET status = 'queued', updated_at = datetime('now') WHERE id = ?",
-          ).run(taskId);
-          broadcastSSE("tasks", "state:changed", { taskId, status: "queued" });
-          // Store review feedback in coordination context
-          if (body.feedback) {
-            try {
-              await backend.postCoordinationMessage({
-                parentTaskId: taskId,
-                taskId,
-                messageType: "manager_feedback",
-                content: JSON.stringify({ decision, feedback: body.feedback }),
-              });
-            } catch { /* best-effort */ }
-          }
-          processQueuedTask(taskId).catch(() => {});
-        } else {
-          // Rejected — mark as failed
-          db.prepare(
-            "UPDATE tasks SET status = 'failed', completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
-          ).run(taskId);
-          broadcastSSE("tasks", "state:changed", { taskId, status: "failed" });
-        }
-      } catch { /* best-effort */ }
-    }
     return json(res, { success: true });
   }
 
@@ -3142,25 +1785,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     /^\/api\/tasks\/([a-f0-9-]+)\/worker-progress$/,
   );
   if (req.method === "POST" && workerProgressMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const taskId = workerProgressMatch[1];
-        const status = body.status || body.result;
-        if (status) {
-          const db = getLocalDb()!;
-          db.prepare(
-            "UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?",
-          ).run(status, taskId);
-          // Store PR URL if provided (used by manager review after completion)
-          if (body.prUrl || body.githubPrUrl) {
-            db.prepare("UPDATE tasks SET github_pr_url = ? WHERE id = ?").run(body.prUrl || body.githubPrUrl, taskId);
-          }
-          broadcastSSE("tasks", "state:changed", { taskId, status });
-        }
-      } catch { /* best-effort */ }
-    }
     return json(res, { success: true });
   }
 
@@ -3169,67 +1793,12 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     /^\/api\/control-center\/logs\/([a-f0-9-]+)\/classify-errors$/,
   );
   if (req.method === "POST" && classifyMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const taskId = classifyMatch[1];
-        const exitCode = Number(body.exitCode);
-        const db = getLocalDb()!;
-
-        // Get all error logs for this task, ordered by creation time
-        const errorLogs = db.prepare(
-          "SELECT id FROM task_logs WHERE task_id = ? AND severity = 'error' ORDER BY created_at ASC",
-        ).all(taskId) as { id: number }[];
-
-        if (errorLogs.length > 0) {
-          let fatalCount = 0;
-          let recoverableCount = 0;
-
-          for (let i = 0; i < errorLogs.length; i++) {
-            const isLastError = i === errorLogs.length - 1;
-            const errorType = (exitCode !== 0 && isLastError) ? "fatal" : "recoverable";
-            db.prepare("UPDATE task_logs SET error_type = ? WHERE id = ?").run(errorType, errorLogs[i].id);
-            if (errorType === "fatal") fatalCount++;
-            else recoverableCount++;
-          }
-
-          return json(res, {
-            taskId,
-            classified: errorLogs.length,
-            fatal: fatalCount,
-            recoverable: recoverableCount,
-          });
-        }
-        return json(res, { taskId, classified: 0, message: "No error logs to classify" });
-      } catch { /* non-fatal */ }
-    }
     return json(res, { success: true });
   }
 
   // POST /api/control-center/logs — worker log posting (alias)
   if (req.method === "POST" && path === "/api/control-center/logs") {
-    try {
-      const body = JSON.parse(await readBody(req));
-      const backend = getActiveBackend();
-      if (backend?.mode === "local" && body.taskId) {
-        await backend.postLog({
-          taskId: body.taskId,
-          type: body.type || "execution",
-          message: body.message || body.log,
-          severity: body.severity || "info",
-        });
-        // Broadcast to SSE so VS Code terminal sees the log in real-time
-        broadcastSSE(`logs:${body.taskId}`, "log", {
-          taskId: body.taskId,
-          type: body.type || "execution",
-          message: body.message || body.log,
-          severity: body.severity || "info",
-          createdAt: new Date().toISOString(),
-        });
-      }
-      return json(res, { success: true });
-    } catch { return json(res, { success: true }); }
+    return json(res, { success: true });
   }
 
   // GET /api/tasks/:id/expert-registry — return empty registry
@@ -3241,18 +1810,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
   // POST /api/tasks/:id/status — worker updates task status
   const taskStatusMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/status$/);
   if (req.method === "POST" && taskStatusMatch) {
-    try {
-      const body = JSON.parse(await readBody(req));
-      const backend = getActiveBackend();
-      if (backend?.mode === "local") {
-        const db = getLocalDb()!;
-        if (body.status) {
-          db.prepare("UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?")
-            .run(body.status, taskStatusMatch[1]);
-        }
-      }
-      return json(res, { success: true });
-    } catch { return json(res, { success: true }); }
+    return json(res, { success: true });
   }
 
   // POST /api/tasks/:id/usage/partial — incremental token usage from workers
@@ -3260,61 +1818,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     /^\/api\/tasks\/([a-f0-9]+)\/usage\/partial$/,
   );
   if (req.method === "POST" && usagePartialMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const taskId = usagePartialMatch[1];
-        const db = getLocalDb()!;
-        const mode = body.mode || "greatest";
-
-        if (mode === "add") {
-          db.prepare(`
-            UPDATE tasks SET
-              input_tokens = COALESCE(input_tokens, 0) + ?,
-              output_tokens = COALESCE(output_tokens, 0) + ?,
-              cache_creation_tokens = COALESCE(cache_creation_tokens, 0) + ?,
-              cache_read_tokens = COALESCE(cache_read_tokens, 0) + ?,
-              updated_at = datetime('now')
-            WHERE id = ?
-          `).run(
-            Number(body.inputTokens) || 0,
-            Number(body.outputTokens) || 0,
-            Number(body.cacheCreationTokens) || 0,
-            Number(body.cacheReadTokens) || 0,
-            taskId,
-          );
-        } else {
-          db.prepare(`
-            UPDATE tasks SET
-              input_tokens = MAX(COALESCE(input_tokens, 0), ?),
-              output_tokens = MAX(COALESCE(output_tokens, 0), ?),
-              cache_creation_tokens = MAX(COALESCE(cache_creation_tokens, 0), ?),
-              cache_read_tokens = MAX(COALESCE(cache_read_tokens, 0), ?),
-              updated_at = datetime('now')
-            WHERE id = ?
-          `).run(
-            Number(body.inputTokens) || 0,
-            Number(body.outputTokens) || 0,
-            Number(body.cacheCreationTokens) || 0,
-            Number(body.cacheReadTokens) || 0,
-            taskId,
-          );
-        }
-
-        // Calculate estimated cost (Sonnet 3.5 pricing as reasonable default)
-        const task = db.prepare("SELECT input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens FROM tasks WHERE id = ?").get(taskId) as any;
-        if (task) {
-          const cost =
-            ((task.input_tokens || 0) * 3.0 / 1_000_000) +
-            ((task.output_tokens || 0) * 15.0 / 1_000_000) +
-            ((task.cache_creation_tokens || 0) * 3.75 / 1_000_000) +
-            ((task.cache_read_tokens || 0) * 0.30 / 1_000_000);
-          db.prepare("UPDATE tasks SET estimated_cost_usd = ? WHERE id = ?").run(cost, taskId);
-          broadcastSSE("tasks", "usage:updated", { taskId, estimatedCostUsd: cost });
-        }
-      } catch { /* fire-and-forget */ }
-    }
     return json(res, { success: true });
   }
 
@@ -3323,38 +1826,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     /^\/api\/tasks\/([a-f0-9]+)\/usage$/,
   );
   if (req.method === "POST" && usageFinalMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const taskId = usageFinalMatch[1];
-        const db = getLocalDb()!;
-        // Final usage — always overwrite (this is the definitive count)
-        db.prepare(`
-          UPDATE tasks SET
-            input_tokens = ?,
-            output_tokens = ?,
-            cache_creation_tokens = ?,
-            cache_read_tokens = ?,
-            updated_at = datetime('now')
-          WHERE id = ?
-        `).run(
-          Number(body.inputTokens) || 0,
-          Number(body.outputTokens) || 0,
-          Number(body.cacheCreationTokens) || 0,
-          Number(body.cacheReadTokens) || 0,
-          taskId,
-        );
-        // Calculate final cost
-        const cost =
-          ((Number(body.inputTokens) || 0) * 3.0 / 1_000_000) +
-          ((Number(body.outputTokens) || 0) * 15.0 / 1_000_000) +
-          ((Number(body.cacheCreationTokens) || 0) * 3.75 / 1_000_000) +
-          ((Number(body.cacheReadTokens) || 0) * 0.30 / 1_000_000);
-        db.prepare("UPDATE tasks SET estimated_cost_usd = ? WHERE id = ?").run(cost, taskId);
-        broadcastSSE("tasks", "usage:updated", { taskId, estimatedCostUsd: cost });
-      } catch { /* fire-and-forget */ }
-    }
     return json(res, { success: true });
   }
 
@@ -3363,30 +1834,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     /^\/api\/tasks\/([a-f0-9]+)\/usage\/phase$/,
   );
   if (req.method === "POST" && usagePhaseMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const taskId = usagePhaseMatch[1];
-        const db = getLocalDb()!;
-        // Phase usage is additive (each phase is a separate session)
-        db.prepare(`
-          UPDATE tasks SET
-            input_tokens = COALESCE(input_tokens, 0) + ?,
-            output_tokens = COALESCE(output_tokens, 0) + ?,
-            cache_creation_tokens = COALESCE(cache_creation_tokens, 0) + ?,
-            cache_read_tokens = COALESCE(cache_read_tokens, 0) + ?,
-            updated_at = datetime('now')
-          WHERE id = ?
-        `).run(
-          Number(body.inputTokens) || 0,
-          Number(body.outputTokens) || 0,
-          Number(body.cacheCreationTokens) || 0,
-          Number(body.cacheReadTokens) || 0,
-          taskId,
-        );
-      } catch { /* fire-and-forget */ }
-    }
     return json(res, { success: true });
   }
 
@@ -3408,331 +1855,57 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // POST /api/directives/usage — track directive usage per task
   if (req.method === "POST" && path === "/api/directives/usage") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const { taskId, directives } = body;
-        if (taskId && Array.isArray(directives)) {
-          const db = getLocalDb();
-          const insert = db.prepare(
-            "INSERT INTO directive_usage (id, task_id, directive_id, version, type, persona_slug) VALUES (?, ?, ?, ?, ?, ?)"
-          );
-          for (const d of directives) {
-            insert.run(generateId(), taskId, d.directiveId || "", d.version || 1, d.type || "readme", d.personaSlug || "");
-          }
-        }
-      } catch { /* non-fatal */ }
-    }
     return json(res, { success: true });
   }
 
   // GET /api/directives/effectiveness — directive effectiveness metrics
   if (req.method === "GET" && path === "/api/directives/effectiveness") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const metrics = db.prepare(`
-          SELECT
-            du.directive_id,
-            du.persona_slug,
-            du.type,
-            COUNT(DISTINCT du.task_id) as usage_count,
-            COUNT(DISTINCT CASE WHEN t.status = 'completed' THEN du.task_id END) as success_count,
-            COUNT(DISTINCT CASE WHEN t.status = 'failed' THEN du.task_id END) as failure_count
-          FROM directive_usage du
-          LEFT JOIN tasks t ON du.task_id = t.id
-          GROUP BY du.directive_id, du.persona_slug, du.type
-          ORDER BY usage_count DESC
-        `).all() as any[];
-        return json(res, { metrics });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     return json(res, { metrics: [] });
   }
 
-  // POST /api/tasks/:id/ticket-comment — store as log entry in standalone
+  // POST /api/tasks/:id/ticket-comment — store as log entry
   const ticketCommentMatch = path.match(
     /^\/api\/tasks\/([a-f0-9-]+)\/ticket-comment$/,
   );
   if (req.method === "POST" && ticketCommentMatch) {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const taskId = ticketCommentMatch[1];
-        const comment = body.comment;
-        if (comment) {
-          // Store as a log entry so it's visible in the task log stream
-          await backend.postLog({
-            taskId,
-            type: "ticket_comment",
-            message: comment,
-            severity: "info",
-          });
-          broadcastSSE(`logs:${taskId}`, "log", {
-            taskId,
-            type: "ticket_comment",
-            message: comment,
-            severity: "info",
-            createdAt: new Date().toISOString(),
-          });
-        }
-      } catch { /* non-fatal */ }
-    }
     return json(res, { success: true });
   }
 
-  // ── Memory API (SQLite-backed) ──
+  // ── Memory API (stubs — SQLite backend removed) ──
 
-  // POST /api/memory/search — search across all memory types by text
   if (req.method === "POST" && path === "/api/memory/search") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const { query, repository, memoryTypes, limit } = body;
-        const searchLimit = limit || 10;
-        const types = memoryTypes || ["semantic", "episodic", "procedural"];
-        const db = getLocalDb();
-        const likeQuery = `%${(query || "").replace(/[%_]/g, "")}%`;
-
-        const semantic = types.includes("semantic") ? db.prepare(
-          `SELECT * FROM semantic_memories WHERE (subject LIKE ? OR knowledge LIKE ?) ${repository ? "AND repository = ?" : ""} ORDER BY confidence DESC, evidence_count DESC LIMIT ?`
-        ).all(...(repository ? [likeQuery, likeQuery, repository, searchLimit] : [likeQuery, likeQuery, searchLimit])) as any[] : [];
-
-        const episodic = types.includes("episodic") ? db.prepare(
-          `SELECT * FROM episodic_memories WHERE (summary LIKE ? OR outcome_details LIKE ?) ${repository ? "AND repository = ?" : ""} ORDER BY created_at DESC LIMIT ?`
-        ).all(...(repository ? [likeQuery, likeQuery, repository, searchLimit] : [likeQuery, likeQuery, searchLimit])) as any[] : [];
-
-        const procedural = types.includes("procedural") ? db.prepare(
-          `SELECT * FROM procedural_memories WHERE (name LIKE ? OR description LIKE ? OR insight LIKE ?) ${repository ? "AND repository = ?" : ""} ORDER BY success_count DESC LIMIT ?`
-        ).all(...(repository ? [likeQuery, likeQuery, likeQuery, repository, searchLimit] : [likeQuery, likeQuery, likeQuery, searchLimit])) as any[] : [];
-
-        // Bump retrieval counts
-        for (const m of semantic) { db.prepare("UPDATE semantic_memories SET retrieval_count = retrieval_count + 1, last_retrieved_at = datetime('now') WHERE id = ?").run(m.id); }
-        for (const m of episodic) { db.prepare("UPDATE episodic_memories SET retrieval_count = retrieval_count + 1, last_retrieved_at = datetime('now') WHERE id = ?").run(m.id); }
-        for (const m of procedural) { db.prepare("UPDATE procedural_memories SET retrieval_count = retrieval_count + 1, last_retrieved_at = datetime('now') WHERE id = ?").run(m.id); }
-
-        return json(res, {
-          query, repository,
-          results: { semantic, episodic, procedural },
-          totalResults: semantic.length + episodic.length + procedural.length,
-        });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     return json(res, { query: "", results: { semantic: [], episodic: [], procedural: [] }, totalResults: 0 });
   }
 
-  // POST /api/memory/similar-tasks — find similar past tasks
   if (req.method === "POST" && path === "/api/memory/similar-tasks") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const { description, limit } = body;
-        const searchLimit = limit || 10;
-        const db = getLocalDb();
-        const likeQuery = `%${(description || "").substring(0, 100).replace(/[%_]/g, "")}%`;
-        const results = db.prepare(
-          "SELECT * FROM episodic_memories WHERE (summary LIKE ? OR outcome_details LIKE ?) AND event_type IN ('task_completed', 'task_failed') ORDER BY created_at DESC LIMIT ?"
-        ).all(likeQuery, likeQuery, searchLimit) as any[];
-        return json(res, { query: description, totalResults: results.length, results });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     return json(res, { query: "", totalResults: 0, results: [] });
   }
 
-  // GET /api/memory/semantic — list semantic memories
   if (req.method === "GET" && path === "/api/memory/semantic") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const params = new URL(req.url || "", "http://localhost").searchParams;
-        const repository = params.get("repository");
-        const category = params.get("category");
-        const limit = parseInt(params.get("limit") || "50", 10);
-        const offset = parseInt(params.get("offset") || "0", 10);
-
-        let sql = "SELECT * FROM semantic_memories WHERE 1=1";
-        const args: any[] = [];
-        if (repository) { sql += " AND repository = ?"; args.push(repository); }
-        if (category) { sql += " AND category = ?"; args.push(category); }
-        sql += " ORDER BY updated_at DESC LIMIT ? OFFSET ?";
-        args.push(limit, offset);
-
-        const memories = db.prepare(sql).all(...args) as any[];
-        const countSql = sql.replace(/SELECT \*/, "SELECT COUNT(*) as total").replace(/ ORDER BY.*$/, "");
-        const countArgs = args.slice(0, -2);
-        const countRow = db.prepare(countSql).get(...countArgs) as any;
-        return json(res, { memories, pagination: { total: countRow?.total || 0, limit, offset } });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     return json(res, { memories: [], pagination: { total: 0, limit: 50, offset: 0 } });
   }
 
-  // POST /api/memory/semantic — store semantic memory (upserts on subject+scope+category)
   if (req.method === "POST" && path === "/api/memory/semantic") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const { repository, scope, category, subject, knowledge, confidence, source } = body;
-        if (!subject || !knowledge) return json(res, { error: "subject and knowledge are required" }, 400);
-
-        const db = getLocalDb();
-        const existing = db.prepare(
-          "SELECT id, evidence_count FROM semantic_memories WHERE subject = ? AND scope = ? AND category = ? AND (repository = ? OR (repository IS NULL AND ? IS NULL))"
-        ).get(subject, scope || "repository", category || "convention", repository || null, repository || null) as any;
-
-        if (existing) {
-          db.prepare(
-            "UPDATE semantic_memories SET knowledge = ?, confidence = ?, evidence_count = evidence_count + 1, updated_at = datetime('now') WHERE id = ?"
-          ).run(knowledge, confidence ?? 0.5, existing.id);
-          const updated = db.prepare("SELECT * FROM semantic_memories WHERE id = ?").get(existing.id);
-          return json(res, { memory: updated, updated: true });
-        }
-
-        const id = generateId();
-        db.prepare(
-          "INSERT INTO semantic_memories (id, repository, scope, category, subject, knowledge, confidence, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-        ).run(id, repository || null, scope || "repository", category || "convention", subject, knowledge, confidence ?? 0.5, source || "explicit");
-        const created = db.prepare("SELECT * FROM semantic_memories WHERE id = ?").get(id);
-        return json(res, { memory: created, updated: false });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     return json(res, { success: true, id: "none" });
   }
 
-  // GET /api/memory/episodic — list episodic memories
   if (req.method === "GET" && path === "/api/memory/episodic") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const params = new URL(req.url || "", "http://localhost").searchParams;
-        const repository = params.get("repository");
-        const eventType = params.get("eventType");
-        const limit = parseInt(params.get("limit") || "50", 10);
-        const offset = parseInt(params.get("offset") || "0", 10);
-
-        let sql = "SELECT * FROM episodic_memories WHERE 1=1";
-        const args: any[] = [];
-        if (repository) { sql += " AND repository = ?"; args.push(repository); }
-        if (eventType) { sql += " AND event_type = ?"; args.push(eventType); }
-        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
-        args.push(limit, offset);
-
-        const memories = db.prepare(sql).all(...args) as any[];
-        return json(res, { memories, pagination: { total: memories.length, limit, offset } });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     return json(res, { memories: [], pagination: { total: 0, limit: 50, offset: 0 } });
   }
 
-  // POST /api/memory/episodic — store episodic memory
   if (req.method === "POST" && path === "/api/memory/episodic") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const { repository, eventType, summary, details, outcome, outcomeDetails, taskId, persona, model } = body;
-        if (!eventType || !summary) return json(res, { error: "eventType and summary are required" }, 400);
-
-        const db = getLocalDb();
-        const id = generateId();
-        db.prepare(
-          "INSERT INTO episodic_memories (id, task_id, repository, event_type, summary, details, outcome, outcome_details, persona, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ).run(id, taskId || null, repository || null, eventType, summary, details ? JSON.stringify(details) : null, outcome || "success", outcomeDetails || null, persona || null, model || null);
-        const created = db.prepare("SELECT * FROM episodic_memories WHERE id = ?").get(id);
-        return json(res, { memory: created });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     return json(res, { success: true, id: "none" });
   }
 
-  // GET /api/memory/procedural — list procedural memories (skills)
   if (req.method === "GET" && path === "/api/memory/procedural") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const params = new URL(req.url || "", "http://localhost").searchParams;
-        const repository = params.get("repository");
-        const limit = parseInt(params.get("limit") || "50", 10);
-        const offset = parseInt(params.get("offset") || "0", 10);
-
-        let sql = "SELECT * FROM procedural_memories WHERE 1=1";
-        const args: any[] = [];
-        if (repository) { sql += " AND repository = ?"; args.push(repository); }
-        sql += " ORDER BY success_count DESC, updated_at DESC LIMIT ? OFFSET ?";
-        args.push(limit, offset);
-
-        const skills = db.prepare(sql).all(...args) as any[];
-        return json(res, { skills, pagination: { total: skills.length, limit, offset } });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     return json(res, { skills: [], pagination: { total: 0, limit: 50, offset: 0 } });
   }
 
-  // POST /api/memory/procedural — store procedural memory (skill)
   if (req.method === "POST" && path === "/api/memory/procedural") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const { name, description, steps, repository, applicableTo, prerequisites, sourceTaskId, insight } = body;
-        if (!name || !steps) return json(res, { error: "name and steps are required" }, 400);
-
-        const db = getLocalDb();
-        const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-        const id = generateId();
-        db.prepare(
-          "INSERT INTO procedural_memories (id, name, slug, description, insight, repository, applicable_to, steps, prerequisites, source_task_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ).run(id, name, slug, description || null, insight || null, repository || null, applicableTo ? JSON.stringify(applicableTo) : null, JSON.stringify(steps), prerequisites ? JSON.stringify(prerequisites) : null, sourceTaskId || null);
-        const created = db.prepare("SELECT * FROM procedural_memories WHERE id = ?").get(id);
-        return json(res, { skill: created });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     return json(res, { success: true, id: "none" });
   }
 
-  // DELETE /api/memory/:type/:id — delete a specific memory
   if (req.method === "DELETE" && /^\/api\/memory\/(semantic|episodic|procedural)\/[^/]+$/.test(path)) {
-    const parts = path.split("/");
-    const memoryType = parts[3];
-    const memoryId = parts[4];
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const table = memoryType === "semantic" ? "semantic_memories" : memoryType === "episodic" ? "episodic_memories" : "procedural_memories";
-        db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(memoryId);
-        return json(res, { deleted: true });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     return json(res, { deleted: true });
   }
 
@@ -3814,216 +1987,61 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     return json(res, { snippets: [], chunks: [], total: 0 });
   }
 
-  // ── Worker ingestion endpoints (standalone mode) ──
+  // ── Worker ingestion endpoints (stubs — SQLite backend removed) ──
 
-  // POST /api/tasks/:id/logs — worker posts log entries
   const workerLogMatch = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/logs$/);
   if (req.method === "POST" && workerLogMatch) {
-    const backend = getActiveBackend();
-    if (!backend || backend.mode !== "local") return notFound(res);
-    try {
-      const body = JSON.parse(await readBody(req));
-      const taskId = workerLogMatch[1];
-      await backend.postLog({
-        taskId,
-        type: body.type || "execution",
-        message: body.message,
-        severity: body.severity || "info",
-      });
-      broadcastSSE(`logs:${taskId}`, "log", {
-        taskId,
-        type: body.type || "execution",
-        message: body.message,
-        severity: body.severity || "info",
-        createdAt: new Date().toISOString(),
-      });
-      return json(res, { success: true });
-    } catch (err) {
-      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-    }
+    return notFound(res);
   }
 
-  // POST /api/coordination/messages — worker posts coordination messages
   if (req.method === "POST" && path === "/api/coordination/messages") {
-    const backend = getActiveBackend();
-    if (!backend || backend.mode !== "local") return notFound(res);
-    try {
-      const body = JSON.parse(await readBody(req));
-      await backend.postCoordinationMessage({
-        parentTaskId: body.parentTaskId,
-        taskId: body.taskId,
-        messageType: body.messageType || body.type,
-        content: body.content,
-      });
-      return json(res, { success: true });
-    } catch (err) {
-      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-    }
+    return notFound(res);
   }
 
-  // POST /api/control-center/code-events — worker posts code events
   if (req.method === "POST" && path === "/api/control-center/code-events") {
-    const backend = getActiveBackend();
-    if (!backend || backend.mode !== "local") return notFound(res);
-    try {
-      const body = JSON.parse(await readBody(req));
-      await backend.postCodeEvent({
-        taskId: body.taskId,
-        filePath: body.filePath,
-        toolName: body.toolName,
-        expert: body.expert,
-        metadata: body.metadata,
-      });
-      return json(res, { success: true });
-    } catch (err) {
-      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-    }
+    return notFound(res);
   }
 
-  // ── Board endpoints (standalone mode) ──
+  // ── Board endpoints ──
 
-  // GET /api/boards
+  // GET /api/boards — proxy to cloud
   if (req.method === "GET" && path === "/api/boards") {
-    const backend = getActiveBackend();
-    if (!backend || backend.mode !== "local") {
-      if (cloudProxy) {
-        try {
-          const result = await cloudProxy("GET", "/api/boards");
-          return json(res, result);
-        } catch (err) {
-          return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-        }
-      }
-      return json(res, { error: "No backend available" }, 503);
-    }
-    try {
-      const boards = await backend.getBoards();
-      return json(res, boards);
-    } catch (err) {
-      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-    }
-  }
-
-  // POST /api/boards
-  if (req.method === "POST" && path === "/api/boards") {
-    const backend = getActiveBackend();
-    if (!backend || backend.mode !== "local") return json(res, { error: "No backend available" }, 503);
-    try {
-      const body = JSON.parse(await readBody(req));
-      const board = await backend.createBoard(body as { name: string; description?: string });
-      return json(res, board, 201);
-    } catch (err) {
-      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-    }
-  }
-
-  // GET /api/boards/:id/cards
-  const boardCardsMatch = path.match(/^\/api\/boards\/([a-f0-9]+)\/cards$/);
-  if (req.method === "GET" && boardCardsMatch) {
-    const backend = getActiveBackend();
-    if (!backend || backend.mode !== "local") return json(res, { error: "No backend available" }, 503);
-    try {
-      const cards = await backend.getBoardCards(boardCardsMatch[1]);
-      return json(res, cards);
-    } catch (err) {
-      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-    }
-  }
-
-  // POST /api/boards/:id/cards
-  const addCardMatch = path.match(/^\/api\/boards\/([a-f0-9]+)\/cards$/);
-  if (req.method === "POST" && addCardMatch) {
-    const backend = getActiveBackend();
-    if (!backend || backend.mode !== "local") return json(res, { error: "No backend available" }, 503);
-    try {
-      const body = JSON.parse(await readBody(req));
-      const card = await backend.createCard(addCardMatch[1], body as { columnId: string; title: string; description?: string; priority?: string; position?: number });
-      return json(res, card, 201);
-    } catch (err) {
-      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-    }
-  }
-
-  // DELETE /api/boards/:id/cards/:cardId
-  const deleteCardMatch = path.match(/^\/api\/boards\/([a-f0-9]+)\/cards\/([a-f0-9]+)$/);
-  if (req.method === "DELETE" && deleteCardMatch) {
-    const backend = getActiveBackend();
-    if (!backend || backend.mode !== "local") return json(res, { error: "No backend available" }, 503);
-    try {
-      await backend.deleteCard(deleteCardMatch[2]);
-      return json(res, { ok: true });
-    } catch (err) {
-      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-    }
-  }
-
-  // POST /api/boards/:id/cards/:cardId/run
-  const runCardMatch = path.match(/^\/api\/boards\/([a-f0-9]+)\/cards\/([a-f0-9]+)\/run$/);
-  if (req.method === "POST" && runCardMatch) {
-    const backend = getActiveBackend();
-    if (!backend || backend.mode !== "local") return json(res, { error: "No backend available" }, 503);
-    try {
-      const task = await backend.runCard(runCardMatch[1], runCardMatch[2]);
-      // Trigger orchestrator
-      processQueuedTask(task.id).catch((e: unknown) => console.error("[orchestrator] processQueuedTask failed:", e));
-      return json(res, task, 201);
-    } catch (err) {
-      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-    }
-  }
-
-  // ── Analytics endpoints (standalone — query SQLite) ──
-
-  // GET /api/analytics/tasks — task stats and daily breakdown
-  if (req.method === "GET" && path === "/api/analytics/tasks") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
+    if (cloudProxy) {
       try {
-        const db = getLocalDb();
-        const params = new URL(req.url || "", "http://localhost").searchParams;
-        const range = params.get("range") || "30d";
-        const days = parseInt(range.replace("d", ""), 10) || 30;
-
-        const stats = db.prepare(`
-          SELECT
-            COUNT(*) as total,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-            SUM(CASE WHEN status IN ('running', 'planning') THEN 1 ELSE 0 END) as in_progress,
-            SUM(estimated_cost_usd) as total_cost
-          FROM tasks
-          WHERE created_at >= datetime('now', ?)
-        `).get(`-${days} days`) as any;
-
-        const daily = db.prepare(`
-          SELECT
-            date(created_at) as date,
-            COUNT(*) as tasks,
-            SUM(estimated_cost_usd) as cost
-          FROM tasks
-          WHERE created_at >= datetime('now', ?)
-          GROUP BY date(created_at)
-          ORDER BY date ASC
-        `).all(`-${days} days`) as any[];
-
-        return json(res, {
-          stats: {
-            total: stats?.total || 0,
-            completed: stats?.completed || 0,
-            failed: stats?.failed || 0,
-            inProgress: stats?.in_progress || 0,
-          },
-          daily,
-          summary: {
-            totalTasks: stats?.total || 0,
-            totalCost: stats?.total_cost || 0,
-            successRate: stats?.total > 0 ? ((stats?.completed || 0) / stats.total * 100).toFixed(1) : "0.0",
-          },
-        });
+        const result = await cloudProxy("GET", "/api/boards");
+        return json(res, result);
       } catch (err) {
         return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
       }
     }
+    return json(res, { error: "No backend available" }, 503);
+  }
+
+  // POST /api/boards — no longer supported without SQLite backend
+  if (req.method === "POST" && path === "/api/boards") {
+    return json(res, { error: "No backend available" }, 503);
+  }
+
+  // Board card endpoints — no longer supported without SQLite backend
+  const boardCardsMatch = path.match(/^\/api\/boards\/([a-f0-9]+)\/cards$/);
+  if (boardCardsMatch) {
+    return json(res, { error: "No backend available" }, 503);
+  }
+
+  const deleteCardMatch = path.match(/^\/api\/boards\/([a-f0-9]+)\/cards\/([a-f0-9]+)$/);
+  if (req.method === "DELETE" && deleteCardMatch) {
+    return json(res, { error: "No backend available" }, 503);
+  }
+
+  const runCardMatch = path.match(/^\/api\/boards\/([a-f0-9]+)\/cards\/([a-f0-9]+)\/run$/);
+  if (req.method === "POST" && runCardMatch) {
+    return json(res, { error: "No backend available" }, 503);
+  }
+
+  // ── Analytics endpoints (proxy to cloud) ──
+
+  // GET /api/analytics/tasks — task stats and daily breakdown
+  if (req.method === "GET" && path === "/api/analytics/tasks") {
     if (cloudProxy) {
       try { return json(res, await cloudProxy("GET", path + "?" + (new URL(req.url || "", "http://localhost").search || ""))); } catch { /* fall through */ }
     }
@@ -4032,44 +2050,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // GET /api/analytics/workers — per-persona worker stats
   if (req.method === "GET" && path === "/api/analytics/workers") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const params = new URL(req.url || "", "http://localhost").searchParams;
-        const range = params.get("range") || "30d";
-        const days = parseInt(range.replace("d", ""), 10) || 30;
-
-        const workers = db.prepare(`
-          SELECT
-            worker_persona as persona,
-            COUNT(*) as total,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as success,
-            ROUND(SUM(CASE WHEN status = 'completed' THEN 1.0 ELSE 0 END) / COUNT(*) * 100, 1) as success_rate,
-            AVG(CASE WHEN completed_at IS NOT NULL AND started_at IS NOT NULL
-              THEN (julianday(completed_at) - julianday(started_at)) * 86400
-              ELSE NULL END) as avg_duration_seconds,
-            SUM(estimated_cost_usd) as total_cost
-          FROM tasks
-          WHERE created_at >= datetime('now', ?) AND worker_persona IS NOT NULL
-          GROUP BY worker_persona
-          ORDER BY total DESC
-        `).all(`-${days} days`) as any[];
-
-        return json(res, {
-          workers: workers.map((w: any) => ({
-            persona: w.persona,
-            total: w.total,
-            success: w.success,
-            successRate: w.success_rate || 0,
-            avgDuration: w.avg_duration_seconds ? Math.round(w.avg_duration_seconds) : null,
-            totalCost: w.total_cost || 0,
-          })),
-        });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (cloudProxy) {
       try { return json(res, await cloudProxy("GET", path)); } catch { /* fall through */ }
     }
@@ -4078,58 +2058,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // GET /api/analytics/costs — cost breakdown by model
   if (req.method === "GET" && path === "/api/analytics/costs") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const params = new URL(req.url || "", "http://localhost").searchParams;
-        const range = params.get("range") || "30d";
-        const days = parseInt(range.replace("d", ""), 10) || 30;
-
-        const totals = db.prepare(`
-          SELECT
-            SUM(estimated_cost_usd) as total_cost,
-            COUNT(*) as total_tasks,
-            SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) as total_tokens
-          FROM tasks
-          WHERE created_at >= datetime('now', ?)
-        `).get(`-${days} days`) as any;
-
-        const byModel = db.prepare(`
-          SELECT
-            worker_model as model,
-            COUNT(*) as tasks,
-            SUM(estimated_cost_usd) as cost,
-            SUM(input_tokens) as input_tokens,
-            SUM(output_tokens) as output_tokens
-          FROM tasks
-          WHERE created_at >= datetime('now', ?) AND worker_model IS NOT NULL
-          GROUP BY worker_model
-          ORDER BY cost DESC
-        `).all(`-${days} days`) as any[];
-
-        const daily = db.prepare(`
-          SELECT
-            date(created_at) as date,
-            SUM(estimated_cost_usd) as cost,
-            COUNT(*) as tasks
-          FROM tasks
-          WHERE created_at >= datetime('now', ?)
-          GROUP BY date(created_at)
-          ORDER BY date ASC
-        `).all(`-${days} days`) as any[];
-
-        return json(res, {
-          totalCost: totals?.total_cost || 0,
-          totalTasks: totals?.total_tasks || 0,
-          totalTokens: totals?.total_tokens || 0,
-          byModel,
-          daily,
-        });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (cloudProxy) {
       try { return json(res, await cloudProxy("GET", path)); } catch { /* fall through */ }
     }
@@ -4138,51 +2066,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // GET /api/analytics/failures — failure analysis
   if (req.method === "GET" && path === "/api/analytics/failures") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const params = new URL(req.url || "", "http://localhost").searchParams;
-        const range = params.get("range") || "30d";
-        const days = parseInt(range.replace("d", ""), 10) || 30;
-
-        const summary = db.prepare(`
-          SELECT
-            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as total_failures,
-            COUNT(*) as total_tasks,
-            ROUND(SUM(CASE WHEN status = 'failed' THEN 1.0 ELSE 0 END) / MAX(COUNT(*), 1) * 100, 1) as failure_rate
-          FROM tasks
-          WHERE created_at >= datetime('now', ?)
-        `).get(`-${days} days`) as any;
-
-        const byPersona = db.prepare(`
-          SELECT worker_persona as persona, COUNT(*) as count
-          FROM tasks
-          WHERE status = 'failed' AND created_at >= datetime('now', ?) AND worker_persona IS NOT NULL
-          GROUP BY worker_persona ORDER BY count DESC
-        `).all(`-${days} days`) as any[];
-
-        const byModel = db.prepare(`
-          SELECT worker_model as model, COUNT(*) as count
-          FROM tasks
-          WHERE status = 'failed' AND created_at >= datetime('now', ?) AND worker_model IS NOT NULL
-          GROUP BY worker_model ORDER BY count DESC
-        `).all(`-${days} days`) as any[];
-
-        return json(res, {
-          period: `${days}d`,
-          summary: {
-            totalFailures: summary?.total_failures || 0,
-            totalTasks: summary?.total_tasks || 0,
-            failureRate: summary?.failure_rate || 0,
-          },
-          byPersona,
-          byModel,
-        });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (cloudProxy) {
       try { return json(res, await cloudProxy("GET", path)); } catch { /* fall through */ }
     }
@@ -4191,36 +2074,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // GET /api/analytics/token-usage — token breakdown
   if (req.method === "GET" && path === "/api/analytics/token-usage") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const params = new URL(req.url || "", "http://localhost").searchParams;
-        const range = params.get("range") || "30d";
-        const days = parseInt(range.replace("d", ""), 10) || 30;
-
-        const totals = db.prepare(`
-          SELECT
-            SUM(input_tokens) as input_tokens,
-            SUM(output_tokens) as output_tokens,
-            SUM(cache_creation_tokens) as cache_creation_tokens,
-            SUM(cache_read_tokens) as cache_read_tokens,
-            SUM(estimated_cost_usd) as total_cost
-          FROM tasks
-          WHERE created_at >= datetime('now', ?)
-        `).get(`-${days} days`) as any;
-
-        return json(res, {
-          inputTokens: totals?.input_tokens || 0,
-          outputTokens: totals?.output_tokens || 0,
-          cacheCreationTokens: totals?.cache_creation_tokens || 0,
-          cacheReadTokens: totals?.cache_read_tokens || 0,
-          totalCost: totals?.total_cost || 0,
-        });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (cloudProxy) {
       try { return json(res, await cloudProxy("GET", path)); } catch { /* fall through */ }
     }
@@ -4229,40 +2082,6 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 
   // GET /api/analytics/effectiveness — success and completion metrics
   if (req.method === "GET" && path === "/api/analytics/effectiveness") {
-    const backend = getActiveBackend();
-    if (backend?.mode === "local") {
-      try {
-        const db = getLocalDb();
-        const params = new URL(req.url || "", "http://localhost").searchParams;
-        const range = params.get("range") || "30d";
-        const days = parseInt(range.replace("d", ""), 10) || 30;
-
-        const stats = db.prepare(`
-          SELECT
-            COUNT(*) as total,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-            SUM(CASE WHEN github_pr_url IS NOT NULL THEN 1 ELSE 0 END) as prs_created,
-            SUM(CASE WHEN status = 'pr_approved' THEN 1 ELSE 0 END) as prs_approved
-          FROM tasks
-          WHERE created_at >= datetime('now', ?)
-        `).get(`-${days} days`) as any;
-
-        const total = stats?.total || 0;
-        return json(res, {
-          successRate: total > 0 ? ((stats?.completed || 0) / total * 100).toFixed(1) : "0.0",
-          prCreationRate: total > 0 ? ((stats?.prs_created || 0) / total * 100).toFixed(1) : "0.0",
-          prApprovalRate: (stats?.prs_created || 0) > 0 ? ((stats?.prs_approved || 0) / stats.prs_created * 100).toFixed(1) : "0.0",
-          totalTasks: total,
-          completedTasks: stats?.completed || 0,
-          failedTasks: stats?.failed || 0,
-          prsCreated: stats?.prs_created || 0,
-          prsApproved: stats?.prs_approved || 0,
-        });
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
     if (cloudProxy) {
       try { return json(res, await cloudProxy("GET", path)); } catch { /* fall through */ }
     }

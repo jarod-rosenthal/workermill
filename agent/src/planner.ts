@@ -1384,13 +1384,13 @@ export async function planTask(
         await postLog(task.id, sugMsg);
       }
 
-      // Refinement pass: send critic feedback back to the planner to incorporate suggestions.
-      // Skip in simplified mode — the whole point is speed, and the plan is already approved.
-      const hasFeedback = !isSimplifiedMode && (
+      // Refinement pass: always send critic feedback back to the planner to
+      // incorporate suggestions — even in simplified mode and even when approved.
+      // The critic's job is to improve the plan; ignoring feedback defeats the purpose.
+      const hasFeedback =
         (criticResult.risks.length > 0) ||
         (criticResult.suggestions && criticResult.suggestions.length > 0) ||
-        (criticResult.storyFeedback && criticResult.storyFeedback.length > 0)
-      );
+        (criticResult.storyFeedback && criticResult.storyFeedback.length > 0);
 
       let finalPlan = plan;
       if (hasFeedback) {

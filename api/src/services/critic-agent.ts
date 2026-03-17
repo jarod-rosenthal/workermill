@@ -848,6 +848,36 @@ export async function generateValidatedPlan(
         approved: lastCriticResult.approved,
       });
 
+      // Always incorporate critic feedback, even on approval — suggestions
+      // improve the plan and should never be discarded.
+      const hasSuggestions =
+        lastCriticResult.risks.length > 0 ||
+        (lastCriticResult.suggestions && lastCriticResult.suggestions.length > 0) ||
+        (lastCriticResult.storyFeedback && lastCriticResult.storyFeedback.length > 0);
+
+      if (hasSuggestions) {
+        onProgress?.(
+          `${prefix} Plan approved (score: ${lastCriticResult.score}/100). Running refinement pass to incorporate reviewer suggestions...`,
+          { iteration, maxIterations: maxAttempts, score: lastCriticResult.score, stepCount: currentPlan.steps.length, phase: "refining" }
+        );
+
+        try {
+          llmCalls++;
+          const refinedPlan = await generatePlan(prd, agentConfig, currentPlan, lastCriticResult, thoughtCallback, onStreamProgress);
+          currentPlan = refinedPlan;
+          logger.info("Refinement pass complete — incorporated critic suggestions", {
+            iteration,
+            originalSteps: currentPlan.steps.length,
+            refinedSteps: refinedPlan.steps.length,
+          });
+        } catch (refineErr) {
+          logger.warn("Refinement pass failed, using original approved plan", {
+            error: refineErr instanceof Error ? refineErr.message : String(refineErr),
+          });
+          // Fall through with original approved plan
+        }
+      }
+
       onProgress?.(
         `${prefix} Plan approved (score: ${lastCriticResult.score}/100) after ${iteration} iteration${iteration > 1 ? "s" : ""}.`,
         { iteration, maxIterations: maxAttempts, score: lastCriticResult.score, stepCount: currentPlan.steps.length, phase: "approved" }

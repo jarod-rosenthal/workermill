@@ -4633,6 +4633,12 @@ export async function startLocalApi(config: AgentConfig): Promise<number> {
       try {
         const resp = method === "GET"
           ? await api.get(path)
+          : method === "DELETE"
+          ? await api.delete(path)
+          : method === "PUT"
+          ? await api.put(path, body)
+          : method === "PATCH"
+          ? await api.patch(path, body)
           : await api.post(path, body);
         return resp.data;
       } catch (err: unknown) {

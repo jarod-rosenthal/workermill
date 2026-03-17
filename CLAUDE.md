@@ -35,7 +35,7 @@ WorkerMill: the open-source operations layer for AI coding agents. Deployed at h
 | Build agent | `cd agent && npm run build:binary` |
 | Build worker | `./bin/local-workermill build-worker` |
 | Package VS Code ext | `cd packages/vscode-workermill && npm run package` (bump version first) |
-| Deploy (cloud) | `./deploy.sh --api`, `--frontend`, `--worker`, or `--all` |
+| Deploy (cloud) | `./deploy.sh --api [version]`, `--frontend`, `--worker [version]`, or `--all` (pulls from GHCR) |
 | Connect to prod DB | `./bin/bastion start` (prints connection string) |
 | Disconnect prod DB | `./bin/bastion stop` |
 

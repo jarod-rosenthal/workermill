@@ -37,8 +37,6 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
-  ECR_API_REPO: ${{ vars.ECR_API_REPO }}
   ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
   ECS_SERVICE: ${{ vars.ECS_SERVICE }}
   S3_BUCKET: ${{ vars.FRONTEND_S3_BUCKET }}
@@ -208,11 +206,9 @@ jobs:
   # ============================================================================
 
   deploy-api:
-    name: Deploy API to ECS
-    # Depend on tests if they ran, otherwise just CI
+    name: Update API from GHCR
     needs: [api-ci, integration-tests]
     runs-on: ubuntu-latest
-    # Only deploy if explicitly requested and tests passed (or were skipped)
     if: |
       always() &&
       inputs.deploy_api == true &&
@@ -222,7 +218,12 @@ jobs:
       name: production
       url: https://api.workermill.com
     steps:
-      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -231,31 +232,46 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build, tag, and push API image to ECR
-        id: image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+      - name: Update ECS API + orchestrator to latest GHCR image
         run: |
-          cd api
-          docker build -t $ECR_REGISTRY/$ECR_API_REPO:$IMAGE_TAG \
-                       -t $ECR_REGISTRY/$ECR_API_REPO:latest .
-          docker push $ECR_REGISTRY/$ECR_API_REPO:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_API_REPO:latest
-          echo "image=$ECR_REGISTRY/$ECR_API_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
-          echo "digest=$(docker inspect --format='{{index .RepoDigests 0}}' $ECR_REGISTRY/$ECR_API_REPO:$IMAGE_TAG)" >> $GITHUB_OUTPUT
+          GHCR_IMAGE="ghcr.io/jarod-rosenthal/api"
 
-      - name: Update ECS service
-        run: |
-          aws ecs update-service \
-            --cluster ${{ env.ECS_CLUSTER }} \
-            --service ${{ env.ECS_SERVICE }} \
-            --force-new-deployment \
-            --region ${{ env.AWS_REGION }}
+          docker pull "${GHCR_IMAGE}:latest"
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${GHCR_IMAGE}:latest" | grep -o 'sha256:[a-f0-9]*')
+          NEW_IMAGE="${GHCR_IMAGE}@${DIGEST}"
+          echo "Updating ECS to: ${NEW_IMAGE}"
+
+          # Update API task definition + service
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition "${{ env.ECS_CLUSTER }}-api" --region ${{ env.AWS_REGION }} \
+            --query 'taskDefinition' --output json)
+          NEW_TASK_DEF=$(echo "$TASK_DEF" | jq --arg IMAGE "$NEW_IMAGE" '
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
+            .containerDefinitions[0].image = $IMAGE')
+          echo "$NEW_TASK_DEF" > /tmp/api-task-def.json
+          API_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/api-task-def.json --region ${{ env.AWS_REGION }} \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+
+          aws ecs update-service --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} --task-definition "$API_ARN" \
+            --region ${{ env.AWS_REGION }} --output text > /dev/null
+
+          # Update orchestrator task definition + service (same image)
+          ORCH_DEF=$(aws ecs describe-task-definition \
+            --task-definition "${{ env.ECS_CLUSTER }}-orchestrator" --region ${{ env.AWS_REGION }} \
+            --query 'taskDefinition' --output json)
+          NEW_ORCH_DEF=$(echo "$ORCH_DEF" | jq --arg IMAGE "$NEW_IMAGE" '
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
+            .containerDefinitions[0].image = $IMAGE')
+          echo "$NEW_ORCH_DEF" > /tmp/orch-task-def.json
+          ORCH_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/orch-task-def.json --region ${{ env.AWS_REGION }} \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+
+          aws ecs update-service --cluster ${{ env.ECS_CLUSTER }} \
+            --service "${{ env.ECS_CLUSTER }}-orchestrator" --task-definition "$ORCH_ARN" \
+            --region ${{ env.AWS_REGION }} --output text > /dev/null
 
       - name: Wait for service stability
         run: |
@@ -271,7 +287,7 @@ jobs:
           aws ecs describe-services \
             --cluster ${{ env.ECS_CLUSTER }} \
             --services ${{ env.ECS_SERVICE }} \
-            --query 'services[0].{status:status, runningCount:runningCount, desiredCount:desiredCount, deployments:deployments[0]}' \
+            --query 'services[0].{status:status, runningCount:runningCount, desiredCount:desiredCount}' \
             --output table \
             --region ${{ env.AWS_REGION }}
 
@@ -442,7 +458,7 @@ jobs:
           echo ""
           echo "Deployments:"
           if [ "${{ inputs.deploy_api }}" == "true" ]; then
-            echo "  API: ${{ needs.deploy-api.result }} - https://workermill.com/api"
+            echo "  API: ${{ needs.deploy-api.result }} - Image updated from GHCR - https://workermill.com/api"
           else
             echo "  API: Skipped"
           fi

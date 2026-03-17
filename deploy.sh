@@ -19,14 +19,11 @@ NC='\033[0m' # No Color
 
 # Default configuration (production)
 AWS_REGION="us-east-1"
-ECR_REGISTRY="${AWS_ACCOUNT_ID:?Set AWS_ACCOUNT_ID env var}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
 # Environment-specific configuration
 declare -A ENV_CONFIG
 
 # Production environment (default) - resource names from ~/.workermill/env
-ENV_CONFIG[prod_ecr_api_repo]="${WM_PROD_ECR_API_REPO:?Set WM_PROD_ECR_API_REPO in ~/.workermill/env}"
-ENV_CONFIG[prod_ecr_worker_repo]="${WM_PROD_ECR_WORKER_REPO:-}"
 ENV_CONFIG[prod_ecs_cluster]="${WM_PROD_ECS_CLUSTER:?Set WM_PROD_ECS_CLUSTER in ~/.workermill/env}"
 ENV_CONFIG[prod_ecs_service]="${WM_PROD_ECS_SERVICE:?Set WM_PROD_ECS_SERVICE in ~/.workermill/env}"
 ENV_CONFIG[prod_s3_bucket]="${WM_PROD_S3_BUCKET:?Set WM_PROD_S3_BUCKET in ~/.workermill/env}"
@@ -35,8 +32,6 @@ ENV_CONFIG[prod_url]="https://workermill.com"
 ENV_CONFIG[prod_tf_dir]="infrastructure/terraform/environments/prod"
 
 # Development environment - resource names from ~/.workermill/env
-ENV_CONFIG[dev_ecr_api_repo]="${WM_DEV_ECR_API_REPO:?Set WM_DEV_ECR_API_REPO in ~/.workermill/env}"
-ENV_CONFIG[dev_ecr_worker_repo]="${WM_DEV_ECR_WORKER_REPO:-}"
 ENV_CONFIG[dev_ecs_cluster]="${WM_DEV_ECS_CLUSTER:?Set WM_DEV_ECS_CLUSTER in ~/.workermill/env}"
 ENV_CONFIG[dev_ecs_service]="${WM_DEV_ECS_SERVICE:?Set WM_DEV_ECS_SERVICE in ~/.workermill/env}"
 ENV_CONFIG[dev_s3_bucket]="${WM_DEV_S3_BUCKET:?Set WM_DEV_S3_BUCKET in ~/.workermill/env}"
@@ -54,6 +49,7 @@ DEPLOY_FRONTEND=false
 PUBLISH_AGENT=false
 SKIP_BUILD=false
 WORKER_VERSION="latest"
+API_VERSION="latest"
 ENVIRONMENT="prod"  # Default to production
 
 # Database/bastion feature flags
@@ -73,7 +69,7 @@ show_help() {
     echo "Usage: ./deploy.sh [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --api              Deploy API to ECS"
+    echo "  --api [version]    Update API + orchestrator ECS task definitions to GHCR image (default: latest)"
     echo "  --worker [version] Update Worker ECS task definition to GHCR image (default: latest)"
     echo "  --frontend         Deploy Frontend to S3/CloudFront"
     echo "  --all              Deploy API, Worker, and Frontend"
@@ -113,7 +109,13 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --api)
             DEPLOY_API=true
-            shift
+            # Capture optional version argument (e.g., --api 0abcdef)
+            if [[ -n "${2:-}" && ! "$2" =~ ^-- ]]; then
+                API_VERSION="$2"
+                shift 2
+            else
+                shift
+            fi
             ;;
         --worker)
             DEPLOY_WORKER=true
@@ -184,8 +186,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Set environment-specific variables
-ECR_API_REPO="${ENV_CONFIG[${ENVIRONMENT}_ecr_api_repo]}"
-ECR_WORKER_REPO="${ENV_CONFIG[${ENVIRONMENT}_ecr_worker_repo]}"
 ECS_CLUSTER="${ENV_CONFIG[${ENVIRONMENT}_ecs_cluster]}"
 ECS_SERVICE="${ENV_CONFIG[${ENVIRONMENT}_ecs_service]}"
 S3_BUCKET="${ENV_CONFIG[${ENVIRONMENT}_s3_bucket]}"
@@ -599,67 +599,44 @@ validate_migrations() {
     cd "$SCRIPT_DIR"
 }
 
-# Function to deploy API
+# Function to deploy API image from GHCR
 deploy_api() {
     echo -e "${GREEN}----------------------------------------${NC}"
-    echo -e "${GREEN}Deploying API to ECS (${ENVIRONMENT})${NC}"
+    echo -e "${GREEN}Updating API Image (${ENVIRONMENT})${NC}"
     echo -e "${GREEN}----------------------------------------${NC}"
 
-    # Run pre-deployment database checks (if any flags set)
+    # Pre-deployment safety checks
     run_pre_deploy_db_checks
-
-    # Validate migrations before deploying
     validate_migrations
 
-    cd "$SCRIPT_DIR/api"
+    local GHCR_IMAGE="ghcr.io/jarod-rosenthal/api"
+    local FULL_IMAGE="${GHCR_IMAGE}:${API_VERSION}"
 
-    if [[ "$SKIP_BUILD" == "false" ]]; then
-        echo -e "${YELLOW}Building API...${NC}"
-        npm run build
-        if [[ $? -ne 0 ]]; then
-            echo -e "${RED}API build failed!${NC}"
-            exit 1
-        fi
-        echo -e "${GREEN}API build successful${NC}"
-    fi
+    echo -e "${YELLOW}Pulling GHCR image ${FULL_IMAGE}...${NC}"
+    docker pull "$FULL_IMAGE" 2>&1
 
-    echo -e "${YELLOW}Logging into ECR...${NC}"
-    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
-
-    echo -e "${YELLOW}Building Docker image (no cache)...${NC}"
-    docker build --no-cache -t $ECR_API_REPO:latest .
-
-    echo -e "${YELLOW}Tagging image...${NC}"
-    docker tag $ECR_API_REPO:latest $ECR_REGISTRY/$ECR_API_REPO:latest
-
-    echo -e "${YELLOW}Pushing to ECR...${NC}"
-    PUSH_OUTPUT=$(docker push $ECR_REGISTRY/$ECR_API_REPO:latest 2>&1)
-    echo "$PUSH_OUTPUT"
-
-    # Extract digest from push output
-    API_DIGEST=$(echo "$PUSH_OUTPUT" | grep -o 'sha256:[a-f0-9]*' | head -1)
+    API_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$FULL_IMAGE" 2>/dev/null | grep -o 'sha256:[a-f0-9]*')
     if [[ -z "$API_DIGEST" ]]; then
-        echo -e "${RED}Failed to extract image digest from push output${NC}"
+        echo -e "${RED}Failed to resolve digest for ${FULL_IMAGE}${NC}"
         exit 1
     fi
     echo -e "${GREEN}Image digest: $API_DIGEST${NC}"
 
-    # Get current task definition
-    echo -e "${YELLOW}Creating new task definition with image digest...${NC}"
+    NEW_IMAGE="${GHCR_IMAGE}@${API_DIGEST}"
+
+    # --- Update API task definition ---
+    echo -e "${YELLOW}Updating API task definition...${NC}"
     TASK_DEF=$(aws ecs describe-task-definition \
         --task-definition ${ECS_CLUSTER}-api \
         --region $AWS_REGION \
         --query 'taskDefinition' \
         --output json)
 
-    # Update the image in the container definition to use digest
-    NEW_IMAGE="$ECR_REGISTRY/$ECR_API_REPO@$API_DIGEST"
     NEW_TASK_DEF=$(echo "$TASK_DEF" | jq --arg IMAGE "$NEW_IMAGE" '
         del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
         .containerDefinitions[0].image = $IMAGE
     ')
 
-    # Register new task definition (use temp file for Windows/Git Bash compatibility)
     TASK_DEF_FILE=$(mktemp)
     echo "$NEW_TASK_DEF" > "$TASK_DEF_FILE"
     NEW_TASK_ARN=$(MSYS_NO_PATHCONV=1 aws ecs register-task-definition \
@@ -669,9 +646,9 @@ deploy_api() {
         --output text)
     rm -f "$TASK_DEF_FILE"
 
-    echo -e "${GREEN}Registered new task definition: $NEW_TASK_ARN${NC}"
+    echo -e "${GREEN}Registered API task definition: $NEW_TASK_ARN${NC}"
 
-    echo -e "${YELLOW}Updating ECS service with new task definition...${NC}"
+    echo -e "${YELLOW}Updating API ECS service...${NC}"
     aws ecs update-service \
         --cluster $ECS_CLUSTER \
         --service $ECS_SERVICE \
@@ -682,15 +659,37 @@ deploy_api() {
     echo -e "${GREEN}API deployment initiated!${NC}"
     echo -e "${GREEN}Image: $NEW_IMAGE${NC}"
 
-    # Force-redeploy orchestrator so it picks up the same image
-    # The orchestrator uses :latest tag, so force-new-deployment makes ECS pull the fresh image
+    # --- Update Orchestrator task definition (same image) ---
     ORCHESTRATOR_SERVICE="${ECS_CLUSTER}-orchestrator"
     if aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ORCHESTRATOR_SERVICE" --region "$AWS_REGION" --query 'services[0].status' --output text 2>/dev/null | grep -q "ACTIVE"; then
-        echo -e "${YELLOW}Force-redeploying orchestrator to pick up new image...${NC}"
+        echo -e "${YELLOW}Updating orchestrator task definition...${NC}"
+        ORCH_TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition ${ECS_CLUSTER}-orchestrator \
+            --region $AWS_REGION \
+            --query 'taskDefinition' \
+            --output json)
+
+        NEW_ORCH_TASK_DEF=$(echo "$ORCH_TASK_DEF" | jq --arg IMAGE "$NEW_IMAGE" '
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
+            .containerDefinitions[0].image = $IMAGE
+        ')
+
+        ORCH_TASK_DEF_FILE=$(mktemp)
+        echo "$NEW_ORCH_TASK_DEF" > "$ORCH_TASK_DEF_FILE"
+        NEW_ORCH_ARN=$(MSYS_NO_PATHCONV=1 aws ecs register-task-definition \
+            --cli-input-json "file://$ORCH_TASK_DEF_FILE" \
+            --region $AWS_REGION \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+        rm -f "$ORCH_TASK_DEF_FILE"
+
+        echo -e "${GREEN}Registered orchestrator task definition: $NEW_ORCH_ARN${NC}"
+
+        echo -e "${YELLOW}Redeploying orchestrator...${NC}"
         aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
             --service "$ORCHESTRATOR_SERVICE" \
-            --force-new-deployment \
+            --task-definition "$NEW_ORCH_ARN" \
             --region "$AWS_REGION" \
             --output text > /dev/null
         echo -e "${GREEN}Orchestrator redeployment initiated${NC}"

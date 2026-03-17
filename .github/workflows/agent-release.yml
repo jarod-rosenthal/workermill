@@ -131,13 +131,15 @@ jobs:
             ghcr.io/jarod-rosenthal/frontend:${{ steps.version.outputs.version }}
             ghcr.io/jarod-rosenthal/frontend:latest
 
-      - name: Make GHCR package public
+      - name: Make GHCR packages public
         run: |
-          curl -s -X PATCH \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/users/jarod-rosenthal/packages/container/worker" \
-            -d '{"visibility":"public"}' || echo "Warning: could not set package visibility (may need org admin to set it manually once)"
+          for pkg in worker api frontend; do
+            curl -s -X PATCH \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/users/jarod-rosenthal/packages/container/${pkg}" \
+              -d '{"visibility":"public"}' || echo "Warning: could not set ${pkg} package visibility"
+          done
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -146,40 +148,58 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Update ECS worker task definition
+      - name: Update ECS task definitions
         if: success()
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          GHCR_IMAGE="ghcr.io/jarod-rosenthal/worker"
           ECS_CLUSTER="${{ secrets.WM_PROD_ECS_CLUSTER }}"
 
-          # Get the digest from GHCR registry (image is NOT local — BuildKit pushed directly)
-          DIGEST=$(docker buildx imagetools inspect "${GHCR_IMAGE}:${VERSION}" --format '{{json .Manifest.Digest}}' | tr -d '"')
-          if [[ -z "$DIGEST" ]]; then
-            echo "::error::Failed to resolve digest for ${GHCR_IMAGE}:${VERSION}"
-            exit 1
-          fi
-          NEW_IMAGE="${GHCR_IMAGE}@${DIGEST}"
-          echo "Updating ECS task definition to: ${NEW_IMAGE}"
+          # Helper: resolve GHCR digest via buildx (image is NOT local — BuildKit pushed directly)
+          resolve_digest() {
+            docker buildx imagetools inspect "$1:${VERSION}" --format '{{json .Manifest.Digest}}' | tr -d '"'
+          }
 
-          # Fetch current task definition
-          TASK_DEF=$(aws ecs describe-task-definition \
-            --task-definition "${ECS_CLUSTER}-worker" \
-            --region us-east-1 \
-            --query 'taskDefinition' \
-            --output json)
+          # Helper: update an ECS task definition's first container image
+          update_task_def() {
+            local FAMILY="$1" IMAGE="$2"
+            TASK_DEF=$(aws ecs describe-task-definition \
+              --task-definition "$FAMILY" --region us-east-1 \
+              --query 'taskDefinition' --output json)
+            NEW_DEF=$(echo "$TASK_DEF" | jq --arg IMAGE "$IMAGE" '
+              del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
+              .containerDefinitions[0].image = $IMAGE')
+            echo "$NEW_DEF" > /tmp/task-def.json
+            ARN=$(aws ecs register-task-definition \
+              --cli-input-json file:///tmp/task-def.json --region us-east-1 \
+              --query 'taskDefinition.taskDefinitionArn' --output text)
+            echo "$ARN"
+          }
 
-          # Update image and register new revision
-          NEW_TASK_DEF=$(echo "$TASK_DEF" | jq --arg IMAGE "$NEW_IMAGE" '
-            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
-            .containerDefinitions[0].image = $IMAGE
-          ')
+          # --- Worker ---
+          WORKER_DIGEST=$(resolve_digest "ghcr.io/jarod-rosenthal/worker")
+          WORKER_IMAGE="ghcr.io/jarod-rosenthal/worker@${WORKER_DIGEST}"
+          echo "Worker image: ${WORKER_IMAGE}"
+          WORKER_ARN=$(update_task_def "${ECS_CLUSTER}-worker" "$WORKER_IMAGE")
+          echo "Worker task definition: ${WORKER_ARN}"
 
-          echo "$NEW_TASK_DEF" > /tmp/task-def.json
-          NEW_ARN=$(aws ecs register-task-definition \
-            --cli-input-json file:///tmp/task-def.json \
-            --region us-east-1 \
-            --query 'taskDefinition.taskDefinitionArn' \
-            --output text)
+          # --- API ---
+          API_DIGEST=$(resolve_digest "ghcr.io/jarod-rosenthal/api")
+          API_IMAGE="ghcr.io/jarod-rosenthal/api@${API_DIGEST}"
+          echo "API image: ${API_IMAGE}"
+          API_ARN=$(update_task_def "${ECS_CLUSTER}-api" "$API_IMAGE")
+          echo "API task definition: ${API_ARN}"
 
-          echo "Registered new task definition: ${NEW_ARN}"
+          # Update API service
+          aws ecs update-service --cluster "${ECS_CLUSTER}" \
+            --service "${ECS_CLUSTER}-api" --task-definition "$API_ARN" \
+            --region us-east-1 --output text > /dev/null
+          echo "API service updated"
+
+          # --- Orchestrator (same image as API) ---
+          ORCH_ARN=$(update_task_def "${ECS_CLUSTER}-orchestrator" "$API_IMAGE")
+          echo "Orchestrator task definition: ${ORCH_ARN}"
+
+          aws ecs update-service --cluster "${ECS_CLUSTER}" \
+            --service "${ECS_CLUSTER}-orchestrator" --task-definition "$ORCH_ARN" \
+            --region us-east-1 --output text > /dev/null
+          echo "Orchestrator service updated"

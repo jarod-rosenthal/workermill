@@ -70,11 +70,26 @@ export async function startCompose(
   const composeFile = findComposeFile();
   const composeDir = path.dirname(composeFile);
 
-  // Pin API + frontend image tags to the agent version (same as worker image)
-  // Rewrites the compose file so image versions stay in sync with the agent binary
+  // Pin API + frontend image tags to the agent version, fall back to :latest
+  // Same pattern as docker-spawner: try versioned tag, use latest if not available
   try {
     let content = fs.readFileSync(composeFile, "utf-8");
-    const tag = DOCKER_IMAGE_TAG; // e.g. "0.10.239" or "latest" in dev
+    const versionedTag = DOCKER_IMAGE_TAG; // e.g. "0.10.242" or "latest" in dev
+    let tag = versionedTag;
+
+    // Check if the versioned API image exists in the registry
+    if (versionedTag !== "latest") {
+      try {
+        execFileSync(docker, ["manifest", "inspect", `ghcr.io/jarod-rosenthal/api:${versionedTag}`], {
+          stdio: "pipe", timeout: 15_000, windowsHide: true,
+        });
+      } catch {
+        // Versioned tag not available yet — fall back to latest
+        tag = "latest";
+        log?.(`Image tag ${versionedTag} not available, falling back to latest`);
+      }
+    }
+
     content = content.replace(
       /ghcr\.io\/jarod-rosenthal\/api:[^\s"]+/g,
       `ghcr.io/jarod-rosenthal/api:${tag}`,

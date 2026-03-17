@@ -836,13 +836,22 @@ export async function stopAgentProcess(): Promise<boolean> {
   const composeFile = path.join(os.homedir(), ".workermill", "docker-compose.yml");
   if (fs.existsSync(composeFile)) {
     try {
-      const docker = process.platform === "win32" ? "docker.exe" : "docker";
-      const child = spawn(docker, ["compose", "-f", composeFile, "down"], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      child.unref();
+      if (process.platform === "win32") {
+        // Use cmd /c to avoid visible console window on Windows
+        const child = spawn("cmd.exe", ["/c", "docker", "compose", "-f", composeFile, "down"], {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        child.unref();
+      } else {
+        const child = spawn("docker", ["compose", "-f", composeFile, "down"], {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        child.unref();
+      }
     } catch {
       // Best effort — Docker may not be running
     }

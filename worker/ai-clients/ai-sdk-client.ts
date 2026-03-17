@@ -1,15 +1,15 @@
 /**
  * AI SDK Client
  *
- * AIClient implementation that wraps the AI SDK executor (ai-sdk-executor.js).
- * This provides multi-provider support (OpenAI, Google, Ollama, and Anthropic via AI SDK)
+ * AIClient implementation using Vercel AI SDK directly (no subprocess).
+ * Provides multi-provider support (OpenAI, Google, Ollama, and Anthropic via AI SDK)
  * through the unified AIClient interface.
+ *
+ * Previously this spawned ai-sdk-executor.js as a subprocess and parsed output
+ * markers from stdout. Now it calls generateText() directly as a library call.
  */
 
-import { spawn, type ChildProcess } from "child_process";
-import { writeFile, unlink } from "fs/promises";
-import { tmpdir } from "os";
-import { join } from "path";
+import { generateText, stepCountIs } from "ai";
 import type {
   AIClient,
   AIClientCapabilities,
@@ -21,20 +21,10 @@ import type {
   StreamMessage,
   TokenUsage,
 } from "./types.js";
+import { createModel, buildCostTrackingMetadata, buildReasoningOptions } from "./model-factory.js";
+import { createToolDefinitions } from "./tools/index.js";
 
-/**
- * Get the path to the AI SDK executor script.
- * The executor is at worker/agents/ai-sdk-executor.js relative to the worker root.
- * In containers, this is /app/agents/ai-sdk-executor.js.
- * Locally, we use the WORKER_ROOT environment variable or default to process.cwd().
- */
-function getExecutorPath(): string {
-  // In ECS containers, the worker is at /app
-  const workerRoot = process.env.WORKER_ROOT || "/app";
-  return join(workerRoot, "agents", "ai-sdk-executor.js");
-}
-
-// Default models per provider (must match ai-sdk-executor.js)
+// Default models per provider
 const PROVIDER_DEFAULT_MODELS: Record<AIProvider, string> = {
   anthropic: "claude-haiku-4-5",
   openai: "gpt-4o",
@@ -46,7 +36,7 @@ const PROVIDER_DEFAULT_MODELS: Record<AIProvider, string> = {
 // Provider capabilities
 const PROVIDER_CAPABILITIES: Record<AIProvider, AIClientCapabilities> = {
   anthropic: {
-    supportsCaching: false, // AI SDK doesn't expose caching
+    supportsCaching: false,
     maxContextTokens: 200000,
     supportsStreaming: true,
     supportsStructuredOutput: true,
@@ -54,14 +44,14 @@ const PROVIDER_CAPABILITIES: Record<AIProvider, AIClientCapabilities> = {
   },
   openai: {
     supportsCaching: false,
-    maxContextTokens: 128000, // GPT-4o context
+    maxContextTokens: 128000,
     supportsStreaming: true,
     supportsStructuredOutput: true,
     supportedTools: ["bash", "read_file", "write_file", "edit_file", "glob", "grep"],
   },
   google: {
     supportsCaching: false,
-    maxContextTokens: 1000000, // Gemini 2.0 Pro
+    maxContextTokens: 1000000,
     supportsStreaming: true,
     supportsStructuredOutput: true,
     supportedTools: ["bash", "read_file", "write_file", "edit_file", "glob", "grep"],
@@ -75,18 +65,18 @@ const PROVIDER_CAPABILITIES: Record<AIProvider, AIClientCapabilities> = {
   },
   ollama: {
     supportsCaching: false,
-    maxContextTokens: 32000, // Depends on model
+    maxContextTokens: 32000,
     supportsStreaming: true,
-    supportsStructuredOutput: false, // Most Ollama models don't support JSON mode well
+    supportsStructuredOutput: false,
     supportedTools: ["bash", "read_file", "write_file", "edit_file", "glob", "grep"],
   },
 };
 
 /**
- * AI SDK Client using Vercel AI SDK via subprocess.
+ * AI SDK Client using Vercel AI SDK directly.
  *
- * This client spawns ai-sdk-executor.js as a child process and parses
- * output markers to extract results, PR URLs, token counts, etc.
+ * Calls generateText() in-process with tool definitions. No subprocess,
+ * no output markers, no temp files, no stdout parsing.
  */
 export class AISdkClient implements AIClient {
   readonly provider: AIProvider;
@@ -101,7 +91,7 @@ export class AISdkClient implements AIClient {
   }
 
   /**
-   * Execute a prompt using AI SDK executor subprocess.
+   * Execute a prompt using Vercel AI SDK generateText() directly.
    */
   async execute(options: AIClientOptions): Promise<AIClientResult> {
     const messages: StreamMessage[] = [];
@@ -110,372 +100,179 @@ export class AISdkClient implements AIClient {
       outputTokens: 0,
     };
     const markers: OutputMarkers = {};
-    let modelUsed = options.model || PROVIDER_DEFAULT_MODELS[this.provider];
-    let tempPromptFile: string | null = null;
+    const modelName = options.model || PROVIDER_DEFAULT_MODELS[this.provider];
+
+    // Set provider-specific API keys in process.env before creating the model.
+    // The AI SDK provider packages read from environment variables.
+    this.setProviderEnv();
 
     try {
-      // Write prompt to temp file
-      tempPromptFile = await this.writeTempPromptFile(options.prompt);
+      const model = createModel(this.provider, modelName);
+      const tools = createToolDefinitions(options.workingDir);
 
-      // Build environment variables for the executor
-      const env = this.buildEnvironment(options);
+      const result = await generateText({
+        model,
+        system: options.systemPrompt,
+        prompt: options.prompt,
+        tools,
+        stopWhen: stepCountIs(options.maxTurns || 100),
+        abortSignal: AbortSignal.timeout(options.timeoutMs || 30 * 60 * 1000),
+        ...buildCostTrackingMetadata(this.provider, options.env?.ORG_ID, options.parentTaskId),
+        ...buildReasoningOptions(this.provider, modelName),
+      });
 
-      // Build CLI arguments
-      const args = this.buildArgs(options, tempPromptFile);
-
-      // Spawn the executor process
-      const result = await this.spawnExecutor(args, env, options, messages, tokenUsage, markers);
-
-      // Extract model from markers if available
-      if (markers.result === undefined && result.exitCode !== 0) {
-        markers.result = "failed";
+      // Map steps to StreamMessage array for dashboard logging
+      if (result.steps) {
+        for (const step of result.steps) {
+          // Text output from this step
+          if (step.text) {
+            const msg: StreamMessage = { type: "text", content: step.text };
+            messages.push(msg);
+            options.onMessage?.(msg);
+          }
+          // Tool calls
+          if (step.toolCalls) {
+            for (const toolCall of step.toolCalls) {
+              messages.push({
+                type: "tool_use",
+                toolName: toolCall.toolName,
+                toolInput: toolCall.args as Record<string, unknown>,
+              });
+            }
+          }
+          // Tool results
+          if (step.toolResults) {
+            for (const toolResult of step.toolResults) {
+              messages.push({
+                type: "tool_result",
+                content: typeof toolResult.result === "string"
+                  ? toolResult.result
+                  : JSON.stringify(toolResult.result),
+              });
+            }
+          }
+        }
       }
 
-      // Use extracted model if available
-      if (result.model) {
-        modelUsed = result.model;
+      // Final text as result message
+      if (result.text) {
+        messages.push({ type: "result", content: result.text });
+      }
+
+      // Extract markers from the final text output
+      this.extractMarkers(result.text, markers);
+
+      // Token usage from the AI SDK result
+      if (result.usage) {
+        tokenUsage.inputTokens = result.usage.promptTokens || 0;
+        tokenUsage.outputTokens = result.usage.completionTokens || 0;
+      }
+      options.onTokenUsage?.(tokenUsage);
+
+      return {
+        success: true,
+        messages,
+        tokenUsage,
+        modelUsed: modelName,
+        markers,
+        structuredOutput: markers.reviewDecision ? {
+          decision: markers.reviewDecision,
+          codeQualityScore: markers.codeQualityScore,
+          feedback: markers.feedback,
+        } : undefined,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Check for timeout
+      if (errorMessage.includes("aborted") || errorMessage.includes("timeout")) {
+        return {
+          success: false,
+          messages,
+          error: `Execution timed out after ${(options.timeoutMs || 30 * 60 * 1000) / 60000} minutes`,
+          tokenUsage,
+          modelUsed: modelName,
+          markers: { result: "failed" },
+        };
       }
 
       return {
-        success: result.exitCode === 0 && markers.result !== "failed",
+        success: false,
         messages,
-        error: result.exitCode !== 0 ? result.stderr || `Process exited with code ${result.exitCode}` : undefined,
+        error: errorMessage,
         tokenUsage,
-        modelUsed,
-        structuredOutput: result.structuredOutput,
-        markers,
+        modelUsed: modelName,
+        markers: { result: "failed" },
       };
-    } finally {
-      // Clean up temp file
-      if (tempPromptFile) {
-        try {
-          await unlink(tempPromptFile);
-        } catch {
-          // Ignore cleanup errors
-        }
-      }
     }
   }
 
   /**
-   * Write the prompt to a temporary file.
+   * Set provider-specific API keys in process.env.
+   * The AI SDK provider packages read credentials from environment variables.
    */
-  private async writeTempPromptFile(prompt: string): Promise<string> {
-    const tempDir = tmpdir();
-    const fileName = `workermill-prompt-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`;
-    const filePath = join(tempDir, fileName);
-    await writeFile(filePath, prompt, "utf-8");
-    return filePath;
-  }
-
-  /**
-   * Build environment variables for the executor.
-   */
-  private buildEnvironment(options: AIClientOptions): Record<string, string> {
-    const env: Record<string, string> = {
-      ...process.env as Record<string, string>,
-      // Pass through any additional env vars
-      ...(options.env || {}),
-      // Working directory
-      AGENT_WORKING_DIR: options.workingDir,
-      // System prompt via env var
-      AGENT_SYSTEM_PROMPT: options.systemPrompt,
-      // Max steps
-      AGENT_MAX_STEPS: String(options.maxTurns || 100),
-      // Task context for cost tracking
-      ORG_ID: options.env?.ORG_ID || "",
-      TASK_ID: options.parentTaskId || "",
-      // Enable streaming for real-time token tracking
-      AGENT_STREAMING: "true",
-    };
-
-    // Set provider-specific API keys
+  private setProviderEnv(): void {
     switch (this.provider) {
       case "anthropic":
         if (this.config.apiKeys.anthropic) {
-          env.ANTHROPIC_API_KEY = this.config.apiKeys.anthropic;
+          process.env.ANTHROPIC_API_KEY = this.config.apiKeys.anthropic;
         }
         break;
       case "openai":
         if (this.config.apiKeys.openai) {
-          env.OPENAI_API_KEY = this.config.apiKeys.openai;
+          process.env.OPENAI_API_KEY = this.config.apiKeys.openai;
         }
         break;
       case "google":
       case "gemini":
         if (this.config.apiKeys.google) {
-          env.GOOGLE_API_KEY = this.config.apiKeys.google;
-          env.GOOGLE_GENERATIVE_AI_API_KEY = this.config.apiKeys.google;
+          process.env.GOOGLE_API_KEY = this.config.apiKeys.google;
+          process.env.GOOGLE_GENERATIVE_AI_API_KEY = this.config.apiKeys.google;
         }
         break;
       case "ollama":
         if (this.config.apiKeys.ollamaHost) {
-          env.OLLAMA_HOST = this.config.apiKeys.ollamaHost;
+          process.env.OLLAMA_HOST = this.config.apiKeys.ollamaHost;
         }
         break;
     }
-
-    return env;
   }
 
   /**
-   * Build CLI arguments for ai-sdk-executor.js.
+   * Extract output markers from the agent's final text output.
+   * Agents are instructed to emit markers like ::result::completed, ::pr_url::..., etc.
    */
-  private buildArgs(options: AIClientOptions, promptFile: string): string[] {
-    const args: string[] = [
-      getExecutorPath(),
-      "--provider",
-      this.provider,
-      "--persona",
-      options.persona,
-      "--prompt-file",
-      promptFile,
-    ];
+  private extractMarkers(text: string, markers: OutputMarkers): void {
+    if (!text) return;
 
-    // Add model if specified (otherwise executor uses default)
-    const model = options.model || PROVIDER_DEFAULT_MODELS[this.provider];
-    if (model) {
-      args.push("--model", model);
+    const resultMatch = text.match(/::result::(\w+)/);
+    if (resultMatch) markers.result = resultMatch[1];
+
+    const prUrlMatch = text.match(/::pr_url::(https?:\/\/[^\s\n]+)/);
+    if (prUrlMatch) markers.prUrl = prUrlMatch[1];
+
+    const prNumberMatch = text.match(/::pr_number::(\d+)/);
+    if (prNumberMatch) markers.prNumber = prNumberMatch[1];
+
+    const branchMatch = text.match(/::branch::([^\s\n]+)/);
+    if (branchMatch) markers.branch = branchMatch[1];
+
+    const reviewMatch = text.match(/::review_decision::(approved|revision_needed|rejected)/);
+    if (reviewMatch) markers.reviewDecision = reviewMatch[1] as "approved" | "revision_needed" | "rejected";
+
+    const qualityMatch = text.match(/::code_quality_score::(\d+)/);
+    if (qualityMatch) markers.codeQualityScore = parseInt(qualityMatch[1], 10);
+
+    const feedbackMatch = text.match(/::feedback::(.+)/);
+    if (feedbackMatch) markers.feedback = feedbackMatch[1].trim();
+
+    const learningPattern = /::learning::(.+)/g;
+    let learningMatch;
+    const learnings: string[] = [];
+    while ((learningMatch = learningPattern.exec(text)) !== null) {
+      learnings.push(learningMatch[1].trim());
     }
-
-    return args;
-  }
-
-  /**
-   * Spawn the executor process and parse output.
-   */
-  private async spawnExecutor(
-    args: string[],
-    env: Record<string, string>,
-    options: AIClientOptions,
-    messages: StreamMessage[],
-    tokenUsage: TokenUsage,
-    markers: OutputMarkers
-  ): Promise<{
-    exitCode: number;
-    stdout: string;
-    stderr: string;
-    model?: string;
-    structuredOutput?: Record<string, unknown>;
-  }> {
-    return new Promise((resolve, reject) => {
-      let stdout = "";
-      let stderr = "";
-      let extractedModel: string | undefined;
-      let structuredOutput: Record<string, unknown> | undefined;
-
-      // Set timeout
-      const timeoutMs = options.timeoutMs || 30 * 60 * 1000; // 30 minutes default
-      let timeoutId: NodeJS.Timeout | null = null;
-
-      const process: ChildProcess = spawn("node", args, {
-        env,
-        cwd: options.workingDir,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-
-      // Set timeout
-      timeoutId = setTimeout(() => {
-        process.kill("SIGTERM");
-        reject(new Error(`Executor timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-
-      // Parse stdout line by line
-      let stdoutBuffer = "";
-      process.stdout?.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        stdout += chunk;
-        stdoutBuffer += chunk;
-
-        // Process complete lines
-        const lines = stdoutBuffer.split("\n");
-        stdoutBuffer = lines.pop() || ""; // Keep incomplete line in buffer
-
-        for (const line of lines) {
-          this.parseLine(line, messages, tokenUsage, markers, options);
-
-          // Extract model from ::model:: marker
-          const modelMatch = line.match(/::model::(.+)/);
-          if (modelMatch) {
-            extractedModel = modelMatch[1].trim();
-          }
-        }
-      });
-
-      // Capture stderr
-      process.stderr?.on("data", (data: Buffer) => {
-        stderr += data.toString();
-      });
-
-      process.on("error", (error) => {
-        if (timeoutId) clearTimeout(timeoutId);
-        reject(error);
-      });
-
-      process.on("close", (exitCode) => {
-        if (timeoutId) clearTimeout(timeoutId);
-
-        // Process any remaining buffered output
-        if (stdoutBuffer) {
-          this.parseLine(stdoutBuffer, messages, tokenUsage, markers, options);
-        }
-
-        // Build structured output from review markers if present
-        if (markers.reviewDecision) {
-          structuredOutput = {
-            decision: markers.reviewDecision,
-            codeQualityScore: markers.codeQualityScore,
-            feedback: markers.feedback,
-          };
-        }
-
-        resolve({
-          exitCode: exitCode ?? 1,
-          stdout,
-          stderr,
-          model: extractedModel,
-          structuredOutput,
-        });
-      });
-    });
-  }
-
-  /**
-   * Parse a single line of output for markers and messages.
-   */
-  private parseLine(
-    line: string,
-    messages: StreamMessage[],
-    tokenUsage: TokenUsage,
-    markers: OutputMarkers,
-    options: AIClientOptions
-  ): void {
-    const trimmedLine = line.trim();
-    if (!trimmedLine) return;
-
-    // Check for output markers
-    // ::result::VALUE
-    const resultMatch = trimmedLine.match(/^::result::(\w+)$/);
-    if (resultMatch) {
-      markers.result = resultMatch[1];
-      messages.push({ type: "result", content: resultMatch[1] });
-      return;
-    }
-
-    // ::pr_url::URL
-    const prUrlMatch = trimmedLine.match(/^::pr_url::(https?:\/\/[^\s]+)$/);
-    if (prUrlMatch) {
-      markers.prUrl = prUrlMatch[1];
-      return;
-    }
-
-    // ::pr_number::NUMBER
-    const prNumberMatch = trimmedLine.match(/^::pr_number::(\d+)$/);
-    if (prNumberMatch) {
-      markers.prNumber = prNumberMatch[1];
-      return;
-    }
-
-    // ::branch::NAME
-    const branchMatch = trimmedLine.match(/^::branch::([^\s]+)$/);
-    if (branchMatch) {
-      markers.branch = branchMatch[1];
-      return;
-    }
-
-    // ::input_tokens::NUMBER
-    const inputTokensMatch = trimmedLine.match(/^::input_tokens::(\d+)$/);
-    if (inputTokensMatch) {
-      tokenUsage.inputTokens = parseInt(inputTokensMatch[1], 10);
-      // Notify callback of token usage update
-      options.onTokenUsage?.(tokenUsage);
-      return;
-    }
-
-    // ::output_tokens::NUMBER
-    const outputTokensMatch = trimmedLine.match(/^::output_tokens::(\d+)$/);
-    if (outputTokensMatch) {
-      tokenUsage.outputTokens = parseInt(outputTokensMatch[1], 10);
-      // Notify callback of token usage update
-      options.onTokenUsage?.(tokenUsage);
-      return;
-    }
-
-    // ::model::NAME (handled in spawnExecutor for return value)
-    if (trimmedLine.startsWith("::model::")) {
-      return;
-    }
-
-    // ::review_decision::VALUE
-    const reviewDecisionMatch = trimmedLine.match(/^::review_decision::(approved|revision_needed|rejected)$/);
-    if (reviewDecisionMatch) {
-      markers.reviewDecision = reviewDecisionMatch[1] as "approved" | "revision_needed" | "rejected";
-      return;
-    }
-
-    // ::code_quality_score::NUMBER
-    const qualityScoreMatch = trimmedLine.match(/^::code_quality_score::(\d+)$/);
-    if (qualityScoreMatch) {
-      markers.codeQualityScore = parseInt(qualityScoreMatch[1], 10);
-      return;
-    }
-
-    // ::feedback::TEXT
-    const feedbackMatch = trimmedLine.match(/^::feedback::(.+)$/);
-    if (feedbackMatch) {
-      markers.feedback = feedbackMatch[1];
-      return;
-    }
-
-    // ::learning::TEXT (multiple allowed)
-    const learningMatch = trimmedLine.match(/^::learning::(.+)$/);
-    if (learningMatch) {
-      if (!markers.learnings) markers.learnings = [];
-      markers.learnings.push(learningMatch[1].trim());
-      return;
-    }
-
-    // ::error::TEXT
-    const errorMatch = trimmedLine.match(/^::error::(.+)$/);
-    if (errorMatch) {
-      messages.push({ type: "error", content: errorMatch[1] });
-      return;
-    }
-
-    // Check for tool usage patterns (Epic style: [persona] Tool: name - summary)
-    const toolMatch = trimmedLine.match(/^\[.+\] Tool: (\w+)(?: - (.*))?$/);
-    if (toolMatch) {
-      messages.push({
-        type: "tool_use",
-        toolName: toolMatch[1],
-        content: toolMatch[2] || "",
-      });
-      return;
-    }
-
-    // All other output is text
-    // Filter out log prefix lines that are just status messages
-    if (
-      !trimmedLine.startsWith("[") ||
-      trimmedLine.includes("Starting agent") ||
-      trimmedLine.includes("Agent execution completed")
-    ) {
-      // Skip status messages but keep substantive text
-      if (
-        !trimmedLine.includes("Provider:") &&
-        !trimmedLine.includes("Using streaming") &&
-        !trimmedLine.includes("Using blocking") &&
-        !trimmedLine.includes("Token tracking") &&
-        !trimmedLine.includes("Partial token update") &&
-        !trimmedLine.includes("Cost tracking")
-      ) {
-        // Only add as text message if it has substantive content
-        if (trimmedLine.length > 0) {
-          messages.push({ type: "text", content: trimmedLine });
-          options.onMessage?.({ type: "text", content: trimmedLine });
-        }
-      }
-    }
+    if (learnings.length > 0) markers.learnings = learnings;
   }
 }
 

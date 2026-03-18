@@ -670,9 +670,14 @@ router.post("/bitbucket/test", async (req: Request, res: Response) => {
     }
 
     // Test by fetching current user
+    // Use Bearer auth for tokens without a colon (Repository Access Tokens),
+    // Basic auth for username:password format (App Passwords)
+    const isBasicAuth = authString.includes(":");
     const response = await fetch("https://api.bitbucket.org/2.0/user", {
       headers: {
-        Authorization: `Basic ${Buffer.from(authString).toString("base64")}`,
+        Authorization: isBasicAuth
+          ? `Basic ${Buffer.from(authString).toString("base64")}`
+          : `Bearer ${authString}`,
         "Content-Type": "application/json",
       },
     });

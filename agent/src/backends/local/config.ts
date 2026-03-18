@@ -45,7 +45,8 @@ export interface StandaloneConfig {
   scm?: {
     provider: string;
     token: string;
-    username?: string;
+    username?: string;  // Bitbucket: git clone username (resolved from API, NOT email)
+    email?: string;     // Bitbucket: login email (for REST API auth)
   };
   issueTracker?: {
     provider: "internal" | "jira" | "linear" | "github-issues";

@@ -77,6 +77,7 @@ export async function bootstrapSelfHostedCredentials(
       } else if (provider === "bitbucket") {
         await api.put("/api/settings/integrations/bitbucket", {
           username: sc.scm.username || "",
+          email: sc.scm.email || "",
           appPassword: sc.scm.token,
           ...(sc.defaultRepo ? { defaultRepo: sc.defaultRepo } : {}),
         });

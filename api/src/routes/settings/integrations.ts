@@ -769,13 +769,14 @@ router.put(
   requireAdmin,
   requireMultiProvider,
   body("username").optional().isString().withMessage("username must be a string"),
+  body("email").optional().isString().withMessage("email must be a string"),
   body("appPassword").optional().isString().withMessage("appPassword must be a string"),
   body("defaultRepo").optional().isString().withMessage("defaultRepo must be a string"),
   body("webhookSecret").optional().isString().withMessage("webhookSecret must be a string"),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
-      const { username, appPassword, defaultRepo, webhookSecret } = req.body;
+      const { username, email, appPassword, defaultRepo, webhookSecret } = req.body;
       const org = req.organization!;
 
       // Require at least one field to update
@@ -787,9 +788,9 @@ router.put(
       const secretPrefix = `workermill/${config.environment}`;
 
       // Save credentials to org-specific path in Secrets Manager if provided
-      if (username || appPassword) {
+      if (username || email || appPassword) {
         // Get existing credentials to merge
-        let existingCreds: { username?: string; app_password?: string } = {};
+        let existingCreds: { username?: string; email?: string; app_password?: string } = {};
         const existingSecret = await getOrgSecret(org.id, "bitbucket-token", secretPrefix);
         if (existingSecret) {
           try {
@@ -806,6 +807,7 @@ router.put(
         // Merge with new values
         const newCreds = {
           username: username || existingCreds.username || "",
+          email: email || existingCreds.email || "",
           app_password: appPassword || existingCreds.app_password || "",
         };
 

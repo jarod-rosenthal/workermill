@@ -228,15 +228,12 @@ export async function getOrgCredentials(
             bitbucketEmail = bbCreds.email; // CRITICAL: Required for API calls
             scmToken = bbCreds.api_token;
           }
-          // Legacy app password format
+          // App password format: { username, app_password }
+          // Git clone requires the Bitbucket USERNAME (not email, not x-token-auth).
+          // ATATT prefix = app password (NOT API token). App passwords always use username.
           else if (bbCreds.username && bbCreds.app_password) {
-            // Detect if app_password is actually an Atlassian API token (starts with ATATT)
-            // API tokens require x-bitbucket-api-token-auth as username, not the email
-            if (bbCreds.app_password.startsWith("ATATT")) {
-              bitbucketUsername = "x-bitbucket-api-token-auth";
-            } else {
-              bitbucketUsername = bbCreds.username;
-            }
+            bitbucketUsername = bbCreds.username;
+            bitbucketEmail = bbCreds.email || ""; // email for API calls if available
             scmToken = bbCreds.app_password;
           }
           // Fallback

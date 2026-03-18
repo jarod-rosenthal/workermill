@@ -199,6 +199,7 @@ export async function initSelfHostedCommand(): Promise<void> {
   let scmProvider = existingScmProvider;
   let scmToken = existing.scm?.token || autoGhToken || "";
   let scmUsername = (existing.scm as Record<string, string> | undefined)?.username || "";
+  let scmEmail = (existing.scm as Record<string, string> | undefined)?.email || "";
 
   if (!scmToken) {
     const { provider } = await inquirer.prompt([{
@@ -225,13 +226,12 @@ export async function initSelfHostedCommand(): Promise<void> {
       }]);
       scmToken = token;
     } else if (provider === "bitbucket") {
-      const { username } = await inquirer.prompt([{
+      const { email } = await inquirer.prompt([{
         type: "input",
-        name: "username",
-        message: "Bitbucket username:",
-        validate: (v: string) => v.length > 0 || "Username is required",
+        name: "email",
+        message: "Bitbucket email (login email):",
+        validate: (v: string) => v.length > 0 || "Email is required",
       }]);
-      scmUsername = username;
       const { appPassword } = await inquirer.prompt([{
         type: "password",
         name: "appPassword",
@@ -240,6 +240,30 @@ export async function initSelfHostedCommand(): Promise<void> {
         validate: (v: string) => v.length > 0 || "App password is required to push code",
       }]);
       scmToken = appPassword;
+
+      // Resolve Bitbucket username from API — git clone requires username, not email
+      console.log(chalk.dim("  Resolving Bitbucket username..."));
+      try {
+        const resp = await fetch("https://api.bitbucket.org/2.0/user", {
+          headers: {
+            Authorization: `Basic ${Buffer.from(`${email}:${appPassword}`).toString("base64")}`,
+            Accept: "application/json",
+          },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!resp.ok) {
+          console.log(chalk.red(`  Bitbucket authentication failed (HTTP ${resp.status}). Check your email and app password.`));
+          process.exit(1);
+        }
+        const user = await resp.json() as { username?: string };
+        scmUsername = user.username || email;
+        scmEmail = email;
+        console.log(`  ${chalk.green("✓")} Bitbucket user: ${scmUsername}`);
+      } catch (err) {
+        console.log(chalk.yellow(`  ⚠ Could not resolve username — using email as fallback`));
+        scmUsername = email;
+        scmEmail = email;
+      }
     } else if (provider === "gitlab") {
       const { token } = await inquirer.prompt([{
         type: "password",
@@ -277,6 +301,7 @@ export async function initSelfHostedCommand(): Promise<void> {
       provider: scmProvider,
       token: scmToken,
       ...(scmUsername ? { username: scmUsername } : {}),
+      ...(scmEmail ? { email: scmEmail } : {}),
     },
     defaultRepo: finalDefaultRepo || undefined,
     sandbox: "docker",

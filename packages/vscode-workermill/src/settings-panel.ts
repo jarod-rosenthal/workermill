@@ -528,7 +528,14 @@ export class SettingsPanel {
         token = msg.token || "";
       }
 
-      sc.scm = { provider: msg.provider, token, ...(msg.username ? { username: msg.username } : {}) };
+      // For Bitbucket: the "username" field from the UI is the email (used for API auth).
+      // The actual git username is resolved on test connection and stored separately.
+      if (msg.provider === "bitbucket" && msg.username) {
+        const existingScm = (sc.scm || {}) as Record<string, string>;
+        sc.scm = { provider: msg.provider, token, email: msg.username, username: existingScm.username || "" };
+      } else {
+        sc.scm = { provider: msg.provider, token, ...(msg.username ? { username: msg.username } : {}) };
+      }
       writeStandaloneConfigFile(sc);
       // Clear bootstrap flag and restart agent so credentials re-sync to DB
       try { fs.unlinkSync(path.join(os.homedir(), ".workermill", ".bootstrap-done")); } catch { /* may not exist */ }
@@ -626,16 +633,16 @@ export class SettingsPanel {
     try {
       this.postMessage({ type: "scm-test-testing" });
       const sc = readStandaloneConfigFile();
-      const scm = sc.scm as { provider?: string; token?: string; username?: string } | undefined;
+      const scm = sc.scm as { provider?: string; token?: string; username?: string; email?: string } | undefined;
       if (!scm?.token || scm.provider !== "bitbucket") {
         this.postMessage({ type: "scm-test-error", message: "Save Bitbucket credentials first" });
         return;
       }
       const token = scm.token;
-      const username = scm.username || "";
-      // If username is present, use Basic auth (App Password); otherwise Bearer (Repo Access Token)
-      const authHeader = username
-        ? `Basic ${Buffer.from(`${username}:${token}`).toString("base64")}`
+      // Bitbucket API requires email:appPassword for Basic auth (not username)
+      const email = scm.email || scm.username || "";
+      const authHeader = email
+        ? `Basic ${Buffer.from(`${email}:${token}`).toString("base64")}`
         : `Bearer ${token}`;
       const resp = await fetch("https://api.bitbucket.org/2.0/user", {
         headers: { Authorization: authHeader, Accept: "application/json" },
@@ -643,12 +650,19 @@ export class SettingsPanel {
       });
       if (!resp.ok) {
         const msg = resp.status === 401
-          ? "Bitbucket authentication failed. Check your credentials."
+          ? "Bitbucket authentication failed. Check your email and app password."
           : `Bitbucket connection failed (HTTP ${resp.status})`;
         this.postMessage({ type: "scm-test-error", message: msg });
         return;
       }
       const data = (await resp.json()) as { display_name?: string; username?: string };
+
+      // Auto-resolve and save the Bitbucket username for git clone
+      if (data.username && data.username !== scm.username) {
+        sc.scm = { ...scm, username: data.username };
+        writeStandaloneConfigFile(sc);
+      }
+
       this.postMessage({ type: "scm-test-success", message: `Connected as ${data.display_name || data.username || "unknown"}` });
     } catch (err) {
       this.postMessage({ type: "scm-test-error", message: err instanceof Error ? err.message : String(err) });

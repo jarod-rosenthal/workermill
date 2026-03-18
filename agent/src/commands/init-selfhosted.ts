@@ -354,20 +354,40 @@ export async function initSelfHostedCommand(): Promise<void> {
         ], { stdio: "pipe", timeout: 15_000, windowsHide: true });
         try { fs.unlinkSync(scriptPath); } catch { /* cleanup best effort */ }
       } else {
-        // Append to shell profile if not already there
+        // Append to shell profile(s) if not already there.
+        // macOS zsh: Terminal.app uses login shells (.zprofile), VS Code uses .zshrc.
+        // Write to both if zsh to cover all cases.
         const shell = process.env.SHELL || "/bin/bash";
-        const profileFile = shell.includes("zsh")
-          ? path.join(os.homedir(), ".zshrc")
-          : path.join(os.homedir(), ".bashrc");
         const exportLine = `export PATH="$PATH:${binDir}"`;
-        try {
-          const existing = fs.readFileSync(profileFile, "utf-8");
-          if (!existing.includes(binDir)) {
-            fs.appendFileSync(profileFile, `\n# WorkerMill agent\n${exportLine}\n`);
+        const profileFiles: string[] = [];
+        if (shell.includes("zsh")) {
+          profileFiles.push(path.join(os.homedir(), ".zshrc"));
+          // Also add to .zprofile for macOS login shells (Terminal.app, iTerm2)
+          if (process.platform === "darwin") {
+            profileFiles.push(path.join(os.homedir(), ".zprofile"));
           }
-        } catch {
-          // Profile doesn't exist — create it
-          fs.writeFileSync(profileFile, `# WorkerMill agent\n${exportLine}\n`);
+        } else if (shell.includes("fish")) {
+          // fish uses a different syntax and config path
+          const fishConfigDir = path.join(os.homedir(), ".config", "fish", "conf.d");
+          try { fs.mkdirSync(fishConfigDir, { recursive: true }); } catch { /* exists */ }
+          const fishFile = path.join(fishConfigDir, "workermill.fish");
+          if (!fs.existsSync(fishFile)) {
+            fs.writeFileSync(fishFile, `set -gx PATH $PATH ${binDir}\n`);
+          }
+        } else {
+          // bash: .bashrc for interactive, .profile for login shells
+          profileFiles.push(path.join(os.homedir(), ".bashrc"));
+        }
+        for (const profileFile of profileFiles) {
+          try {
+            const existing = fs.readFileSync(profileFile, "utf-8");
+            if (!existing.includes(binDir)) {
+              fs.appendFileSync(profileFile, `\n# WorkerMill agent\n${exportLine}\n`);
+            }
+          } catch {
+            // Profile doesn't exist — create it
+            fs.writeFileSync(profileFile, `# WorkerMill agent\n${exportLine}\n`);
+          }
         }
       }
       console.log(`  ${chalk.green("✓")} Added ${binDir} to PATH (restart terminal to take effect)`);

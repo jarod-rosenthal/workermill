@@ -1010,7 +1010,12 @@ export class SettingsPanel {
           return;
         }
         body = { appPassword: msg.appPassword };
-        if (msg.username) body.username = msg.username;
+        // The UI "username" field is actually the Bitbucket email address.
+        // API needs it as both: email (for REST API auth) and username (legacy compat).
+        if (msg.username) {
+          body.email = msg.username;
+          body.username = msg.username;
+        }
       } else if (msg.provider === "gitlab") {
         if (!msg.token) {
           this.postMessage({ type: "scm-save-error", message: "Token is required" });

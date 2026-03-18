@@ -1176,8 +1176,11 @@ export default function Settings() {
     setBitbucketSaving(true);
     setMessage(null);
     try {
-      const payload: { username?: string; appPassword?: string; defaultRepo?: string; webhookSecret?: string } = {};
-      if (bitbucketUsername) payload.username = bitbucketUsername;
+      const payload: { username?: string; email?: string; appPassword?: string; defaultRepo?: string; webhookSecret?: string } = {};
+      if (bitbucketUsername) {
+        payload.username = bitbucketUsername;
+        payload.email = bitbucketUsername; // Bitbucket REST API auth requires email:token
+      }
       if (bitbucketAppPassword) payload.appPassword = bitbucketAppPassword;
       if (bitbucketDefaultRepo) payload.defaultRepo = bitbucketDefaultRepo;
       if (bitbucketWebhookSecret) payload.webhookSecret = bitbucketWebhookSecret;

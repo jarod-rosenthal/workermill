@@ -316,6 +316,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Register commands
   context.subscriptions.push(
     treeView,
+    { dispose: () => treeProvider.dispose() },
     feedViewDisposable,
 
     vscode.commands.registerCommand("workermill.refreshTasks", () => {

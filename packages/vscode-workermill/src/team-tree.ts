@@ -32,6 +32,8 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   /** Guard against concurrent refresh() calls racing each other */
   private refreshInFlight = false;
+  /** Periodic poll interval — catches missed SSE events */
+  private pollInterval: ReturnType<typeof setInterval> | null = null;
 
   /** Progress stage per task — parsed from log lines for richer status display */
   private taskStages = new Map<string, string>();
@@ -41,10 +43,12 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
     client.on("connected", () => {
       this.connected = true;
       this.refresh();
+      this.startPolling();
     });
 
     client.on("disconnected", () => {
       this.connected = false;
+      this.stopPolling();
       this._onDidChangeTreeData.fire(undefined);
     });
 
@@ -114,6 +118,24 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
       this.refreshTimer = null;
       this.refresh();
     }, 300);
+  }
+
+  /** Poll task status every 15s to catch missed SSE events */
+  private startPolling(): void {
+    this.stopPolling();
+    this.pollInterval = setInterval(() => this.scheduleRefresh(), 15000);
+  }
+
+  private stopPolling(): void {
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+      this.pollInterval = null;
+    }
+  }
+
+  dispose(): void {
+    this.stopPolling();
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
   }
 
   async refresh(): Promise<void> {

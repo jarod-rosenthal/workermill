@@ -17,20 +17,22 @@ const execFileAsync = promisify(execFile);
 
 /**
  * Build the correct Authorization header for Bitbucket API calls.
- * API Tokens (ATATT prefix) require email:token Basic auth.
- * Repository Access Tokens use Bearer auth.
+ *
+ * Bitbucket API tokens (the only supported credential type since app passwords
+ * were deprecated Sept 2025) require Basic auth with email:token.
+ * Git clone uses x-bitbucket-api-token-auth:{token} — but REST API calls
+ * MUST use the account email, not the git username.
  */
 export function getBitbucketAuthHeader(token: string): string {
   const bitbucketEmail = process.env.BITBUCKET_EMAIL;
 
-  // API Tokens (start with ATATT) require email:token Basic auth
-  if (bitbucketEmail) {
-    const credentials = Buffer.from(`${bitbucketEmail}:${token}`).toString("base64");
-    return `Basic ${credentials}`;
+  if (!bitbucketEmail) {
+    console.error("[Bitbucket] WARNING: BITBUCKET_EMAIL not set — API calls will fail. Bitbucket REST API requires Basic auth with email:token.");
   }
 
-  // Fallback to Bearer (for Repository Access Tokens)
-  return `Bearer ${token}`;
+  // Always Basic auth: email:token (or just :token if email missing — will 401 but with a clear log above)
+  const credentials = Buffer.from(`${bitbucketEmail || ""}:${token}`).toString("base64");
+  return `Basic ${credentials}`;
 }
 
 /**

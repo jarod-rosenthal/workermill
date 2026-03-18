@@ -277,6 +277,7 @@ export interface ManagerCredentials {
   scmToken?: string;
   githubToken?: string;
   bitbucketUsername?: string;
+  bitbucketEmail?: string;
 }
 
 /**
@@ -329,6 +330,7 @@ export async function spawnManagerWorker(
     GH_TOKEN: githubToken,
     BITBUCKET_TOKEN: bitbucketToken,
     BITBUCKET_USERNAME: credentials?.bitbucketUsername || "x-bitbucket-api-token-auth",
+    BITBUCKET_EMAIL: credentials?.bitbucketEmail || "",
     GITLAB_TOKEN: gitlabToken,
 
     MANAGER_PROVIDER: credentials?.managerProvider || "",

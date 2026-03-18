@@ -108,32 +108,20 @@ interface BitbucketPrResponse {
 /**
  * Build the correct Authorization header for Bitbucket API calls.
  *
- * Bitbucket authentication depends on the credential type:
- * - API Token (new format): Requires email:token Basic auth for API calls
- *   - Git clone uses x-bitbucket-api-token-auth:<token>
- *   - API calls use Basic auth with email:token (NOT x-bitbucket-api-token-auth!)
- * - App Password (legacy): Uses username:password Basic auth for both git and API
- * - Repository Access Token: Uses Bearer token
+ * Bitbucket API tokens require Basic auth with email:token.
+ * Git clone uses x-bitbucket-api-token-auth:{token} — but REST API calls
+ * MUST use the account email, not the git username.
+ * App passwords were deprecated Sept 2025.
  */
-function getBitbucketAuthHeader(username: string, token: string): string {
-  // Check for email in environment (passed by orchestrator for API token format)
+function getBitbucketAuthHeader(token: string): string {
   const bitbucketEmail = process.env.BITBUCKET_EMAIL;
 
-  if (bitbucketEmail) {
-    // API Token format: API calls require email:token Basic auth
-    const credentials = Buffer.from(`${bitbucketEmail}:${token}`).toString("base64");
-    return `Basic ${credentials}`;
+  if (!bitbucketEmail) {
+    console.error("[create_pr] WARNING: BITBUCKET_EMAIL not set — Bitbucket REST API requires Basic auth with email:token.");
   }
 
-  // Check if this looks like an app password scenario (username is not x-token-auth)
-  if (username && username !== "x-token-auth" && username !== "x-bitbucket-api-token-auth") {
-    // App Password format: use username:token
-    const credentials = Buffer.from(`${username}:${token}`).toString("base64");
-    return `Basic ${credentials}`;
-  }
-
-  // Fallback: Repository Access Token uses Bearer auth
-  return `Bearer ${token}`;
+  const credentials = Buffer.from(`${bitbucketEmail || ""}:${token}`).toString("base64");
+  return `Basic ${credentials}`;
 }
 
 /**
@@ -169,7 +157,7 @@ async function createBitbucketPR(
   });
 
   // Get the appropriate auth header based on credential type
-  const authHeader = getBitbucketAuthHeader(username, token);
+  const authHeader = getBitbucketAuthHeader(token);
 
   return new Promise((resolve, reject) => {
     const url = new URL(apiUrl);
@@ -227,7 +215,7 @@ async function findExistingBitbucketPR(
   const apiUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pullrequests?q=source.branch.name="${sourceBranch}"&state=OPEN`;
 
   // Get the appropriate auth header based on credential type
-  const authHeader = getBitbucketAuthHeader(username, token);
+  const authHeader = getBitbucketAuthHeader(token);
 
   return new Promise((resolve, reject) => {
     const url = new URL(apiUrl);

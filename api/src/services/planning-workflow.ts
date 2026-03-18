@@ -25,7 +25,6 @@ import {
   planningProgressEmitter,
   type PlanningProgressEvent,
 } from "./planning-progress-events.js";
-import { isClaudeCliMode } from "./llm-backend.js";
 import {
   runPlanningAgent,
   runPlanningAgentV2,
@@ -243,18 +242,6 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       "Aborting cloud planning - task claimed by remote agent or status changed",
       { taskId: task.id },
     );
-    return;
-  }
-
-  // LOCAL / SELF-HOSTED MODE: The API runs inside a Docker container without
-  // the Claude CLI binary. Planning is always handled by the remote agent
-  // (which runs on the host and has access to Claude CLI / OAuth credentials).
-  // Just return and let the agent's polling loop pick up the planning task.
-  const isLocalMode = isClaudeCliMode();
-  if (isLocalMode) {
-    logger.info("Self-hosted mode — deferring planning to remote agent", {
-      taskId: task.id,
-    });
     return;
   }
 

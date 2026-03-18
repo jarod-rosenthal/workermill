@@ -230,25 +230,6 @@ export async function authenticateApiKey(
       return;
     }
 
-    // Self-hosted mode: auto-authenticate with the local org
-    if (process.env.EXECUTION_MODE === "local" && apiKey === "self-hosted") {
-      const orgRepo = AppDataSource.getRepository(Organization);
-      // Use first org in DB (stable across renames — self-hosted has only one org)
-      const org = await orgRepo.findOne({ where: {}, order: { createdAt: "ASC" } });
-      if (org) {
-        req.organization = org;
-        req.orgRole = "admin";
-        // Also set req.user so downstream handlers have a user context
-        const userRepo = AppDataSource.getRepository(User);
-        const user = await userRepo.findOne({ where: { orgId: org.id, role: "admin" } });
-        if (user) {
-          req.user = user;
-        }
-        next();
-        return;
-      }
-    }
-
     // First, try Organization API key (prefix + bcrypt verification)
     const orgRepo = AppDataSource.getRepository(Organization);
     const orgKeyPrefix = apiKey.substring(0, 12);
@@ -487,25 +468,6 @@ export async function authenticateSSE(
     if (!token) {
       const apiKey = req.headers["x-api-key"] as string;
       if (apiKey) {
-        // Self-hosted mode: auto-authenticate with the local org
-        if (process.env.EXECUTION_MODE === "local" && apiKey === "self-hosted") {
-          const orgRepo = AppDataSource.getRepository(Organization);
-          // Use first org in DB (stable across renames — self-hosted has only one org)
-          const org = await orgRepo.findOne({ where: {}, order: { createdAt: "ASC" } });
-          if (org) {
-            req.organization = org;
-            req.orgRole = "admin";
-            // Also set req.user so downstream handlers have a user context
-            const userRepo2 = AppDataSource.getRepository(User);
-            const user2 = await userRepo2.findOne({ where: { orgId: org.id, role: "admin" } });
-            if (user2) {
-              req.user = user2;
-            }
-            next();
-            return;
-          }
-        }
-
         const orgRepo = AppDataSource.getRepository(Organization);
         const orgKeyPrefix = apiKey.substring(0, 12);
         const orgs = await orgRepo.find({ where: { apiKeyPrefix: orgKeyPrefix } });

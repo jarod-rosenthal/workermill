@@ -18,7 +18,7 @@ import type {
 } from "./types.js";
 import { getExpertConfig, COORDINATION_INSTRUCTIONS, LEARNING_INSTRUCTIONS } from "./experts.js";
 import { CoordinationClient } from "./coordination-client.js";
-import { GitOps } from "./git-ops.js";
+import { GitOps, getBitbucketAuthHeader } from "./git-ops.js";
 import { TicketOps } from "./ticket-ops.js";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
@@ -728,7 +728,7 @@ The same pattern applies to Redis, MongoDB, MySQL, etc. **Tests that pass locall
 
   /**
    * Poll Bitbucket Pipelines API for CI status.
-   * Uses Bearer token auth (Repository Access Token).
+   * Uses Basic auth with email:token (Bitbucket API tokens).
    */
   private async pollBitbucketPipelinesCI(
     workspace: string,
@@ -737,6 +737,7 @@ The same pattern applies to Redis, MongoDB, MySQL, etc. **Tests that pass locall
     expert: ExpertPersona
   ): Promise<{ passed: boolean; log?: string; summary: string; infrastructureFailure?: boolean }> {
     const token = process.env.SCM_TOKEN || process.env.BITBUCKET_TOKEN || this.config.githubToken;
+    const bitbucketAuth = getBitbucketAuthHeader(token);
     const maxWaitMs = 600_000;
     const pollIntervalMs = 10_000;
     const startTime = Date.now();
@@ -746,7 +747,7 @@ The same pattern applies to Redis, MongoDB, MySQL, etc. **Tests that pass locall
       try {
         const url = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pipelines/?target.branch=${encodeURIComponent(branchName)}&sort=-created_on&pagelen=1`;
         const response = await axios.get(url, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: bitbucketAuth },
           timeout: 15_000,
         });
 
@@ -768,7 +769,7 @@ The same pattern applies to Redis, MongoDB, MySQL, etc. **Tests that pass locall
             try {
               const stepsUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pipelines/${pipeline.uuid}/steps/`;
               const stepsResp = await axios.get(stepsUrl, {
-                headers: { Authorization: `Bearer ${token}` },
+                headers: { Authorization: bitbucketAuth },
                 timeout: 15_000,
               });
               const failedSteps = (stepsResp.data?.values || [])

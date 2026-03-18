@@ -337,13 +337,22 @@ export async function initSelfHostedCommand(): Promise<void> {
   if (!currentPath.split(path.delimiter).includes(binDir)) {
     try {
       if (process.platform === "win32") {
-        // Add to user PATH via PowerShell registry append (safe — doesn't truncate like setx)
-        const psCmd = `$p = [Environment]::GetEnvironmentVariable('Path','User'); if ($p -notlike '*${binDir.replace(/\\/g, "\\\\")}*') { [Environment]::SetEnvironmentVariable('Path', "$p;${binDir.replace(/\\/g, "\\\\")}", 'User') }`;
-        execFileSync("powershell.exe", ["-NoProfile", "-Command", psCmd], {
-          stdio: "pipe",
-          timeout: 10_000,
-          windowsHide: true,
-        });
+        // Write a small .ps1 script to avoid escaping issues with inline commands.
+        // Uses [Environment]::SetEnvironmentVariable (User scope, no elevation needed,
+        // no 1024-char truncation like setx).
+        const scriptPath = path.join(os.tmpdir(), "workermill-add-path.ps1");
+        const scriptContent = [
+          `$binDir = '${binDir}'`,
+          `$currentPath = [Environment]::GetEnvironmentVariable('Path', 'User')`,
+          `if ($currentPath -and $currentPath.Split(';') -contains $binDir) { exit 0 }`,
+          `$newPath = if ($currentPath) { "$currentPath;$binDir" } else { $binDir }`,
+          `[Environment]::SetEnvironmentVariable('Path', $newPath, 'User')`,
+        ].join("\n");
+        fs.writeFileSync(scriptPath, scriptContent, "utf-8");
+        execFileSync("powershell.exe", [
+          "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath,
+        ], { stdio: "pipe", timeout: 15_000, windowsHide: true });
+        try { fs.unlinkSync(scriptPath); } catch { /* cleanup best effort */ }
       } else {
         // Append to shell profile if not already there
         const shell = process.env.SHELL || "/bin/bash";
@@ -361,9 +370,11 @@ export async function initSelfHostedCommand(): Promise<void> {
           fs.writeFileSync(profileFile, `# WorkerMill agent\n${exportLine}\n`);
         }
       }
-      console.log(`  ${chalk.green("✓")} Added ${binDir} to PATH`);
-    } catch {
-      console.log(`  ${chalk.yellow("⚠")} Could not add to PATH — run commands with full path: ${path.join(binDir, process.platform === "win32" ? "workermill-agent.exe" : "workermill-agent")}`);
+      console.log(`  ${chalk.green("✓")} Added ${binDir} to PATH (restart terminal to take effect)`);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.log(`  ${chalk.yellow("⚠")} Could not add to PATH: ${detail}`);
+      console.log(`    Add manually: ${binDir}`);
     }
   }
 

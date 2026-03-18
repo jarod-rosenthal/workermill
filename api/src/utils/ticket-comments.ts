@@ -10,6 +10,7 @@ import { postLinearComment } from "./linear.js";
 import { AppDataSource } from "../db/connection.js";
 import { Organization, WorkerTask, KbCard, KbComment } from "../models/index.js";
 import { logger } from "./logger.js";
+import { getOrgCredentials } from "../services/org-credentials.js";
 
 export async function postTicketComment(
   orgId: string,
@@ -18,7 +19,7 @@ export async function postTicketComment(
 ): Promise<boolean> {
   const org = await AppDataSource.getRepository(Organization).findOne({
     where: { id: orgId },
-    select: ["issueTrackerProvider"],
+    select: ["issueTrackerProvider", "defaultGithubRepo"],
   });
   const system = org?.issueTrackerProvider || "internal";
 
@@ -71,6 +72,45 @@ export async function postTicketComment(
           orgId,
           issueKey,
           error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      }
+    }
+    case "github-issues": {
+      try {
+        const credentials = await getOrgCredentials(orgId);
+        const token = credentials.githubToken || credentials.scmToken;
+        const repo = org?.defaultGithubRepo;
+        if (!token || !repo) {
+          logger.warn("Missing GitHub credentials for issue comment", { orgId });
+          return false;
+        }
+        const issueNumber = issueKey.replace(/^(GH-|#)/, "");
+        const response = await fetch(
+          `https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/vnd.github+json",
+              "Content-Type": "application/json",
+              "User-Agent": "WorkerMill-API",
+              "X-GitHub-Api-Version": "2022-11-28",
+            },
+            body: JSON.stringify({ body: comment }),
+            signal: AbortSignal.timeout(10000),
+          },
+        );
+        if (!response.ok) {
+          logger.warn("Failed to post GitHub issue comment", {
+            orgId, issueKey, status: response.status,
+          });
+          return false;
+        }
+        return true;
+      } catch (err) {
+        logger.error("Error posting GitHub issue comment", {
+          orgId, issueKey, error: err instanceof Error ? err.message : String(err),
         });
         return false;
       }

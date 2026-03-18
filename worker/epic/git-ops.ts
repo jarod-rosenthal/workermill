@@ -1320,8 +1320,8 @@ ${UNSTAGE_DIRS.map(d => `git rm -r --cached --quiet "${d}/" 2>/dev/null || true`
 git rm --cached --quiet .env.local 2>/dev/null || true
 git rm --cached --quiet .env 2>/dev/null || true
 `;
-      writeFileSync(path.join(actualHooksDir, "pre-commit"), hookScript);
-      chmodSync(path.join(actualHooksDir, "pre-commit"), 0o755);
+      writeFileSync(path.join(hooksDir, "pre-commit"), hookScript);
+      chmodSync(path.join(hooksDir, "pre-commit"), 0o755);
       console.log("[GitOps] Installed pre-commit hook in worktree");
     } catch (e) {
       console.warn("[GitOps] Could not install pre-commit hook:", e);

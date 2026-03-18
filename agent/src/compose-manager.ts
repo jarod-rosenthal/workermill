@@ -120,20 +120,20 @@ export async function startCompose(
     fs.writeFileSync(envPath, envContent, { encoding: "utf-8" });
   } catch { /* best effort — compose will use fallback */ }
 
-  // All compose images use :latest tags. No version pinning — avoids
-  // stacking old copies on disk (each version set was ~6 GB).
-  // Users get updates via `init --standalone` or `docker compose pull`.
+  // All compose images use :latest tags. Pull on every startup to get
+  // API/frontend fixes without requiring manual `docker compose pull`.
+  // Docker's pull is fast when layers haven't changed (digest check only).
 
   const alreadyRunning = await isStackHealthy();
   log?.(alreadyRunning
     ? "Updating self-hosted stack..."
     : `Starting self-hosted stack from ${composeFile}`);
 
-  // Start services — only pull images that don't exist locally.
+  // Start services — always pull latest images so API/frontend fixes land automatically.
   // Use spawn instead of execFileSync to avoid output buffer deadlock.
   try {
     const { spawnSync } = await import("child_process");
-    const result = spawnSync(docker, ["compose", "-f", composeFile, "up", "-d", "--pull", "missing"], {
+    const result = spawnSync(docker, ["compose", "-f", composeFile, "up", "-d", "--pull", "always"], {
       cwd: composeDir,
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 600_000, // 10 minutes — first-time image pulls can be slow

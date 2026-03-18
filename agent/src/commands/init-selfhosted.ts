@@ -208,7 +208,7 @@ export async function initSelfHostedCommand(): Promise<void> {
       choices: [
         { name: "GitHub", value: "github" },
         { name: "Bitbucket", value: "bitbucket" },
-        { name: "GitLab", value: "gitlab" },
+        // { name: "GitLab", value: "gitlab" }, // GitLab support not yet tested
       ],
       default: existingScmProvider,
     }]);

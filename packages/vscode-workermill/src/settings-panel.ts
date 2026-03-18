@@ -1843,9 +1843,10 @@ export class SettingsPanel {
       <div class="radio-group" style="flex-wrap: wrap;">
         <label><input type="radio" name="scm" value="github" /> GitHub <span id="scm-github-badge"></span></label>
         <label id="scm-bitbucket-label" class="locked-option"><input type="radio" name="scm" value="bitbucket" disabled /> Bitbucket <span class="pro-badge">MAX</span> <span id="scm-bitbucket-badge"></span></label>
-        <label id="scm-gitlab-label" class="locked-option"><input type="radio" name="scm" value="gitlab" disabled /> GitLab <span class="pro-badge">MAX</span> <span id="scm-gitlab-badge"></span></label>
+        <!-- GitLab hidden — not yet tested -->
+        <label id="scm-gitlab-label" class="locked-option" style="display:none;"><input type="radio" name="scm" value="gitlab" disabled /> GitLab <span class="pro-badge">MAX</span> <span id="scm-gitlab-badge"></span></label>
       </div>
-      <div id="scm-upgrade" class="upgrade-hint hidden">Upgrade to Max to unlock Bitbucket and GitLab. <a id="btn-upgrade-scm" href="#">View plans</a></div>
+      <div id="scm-upgrade" class="upgrade-hint hidden">Upgrade to Max to unlock Bitbucket. <a id="btn-upgrade-scm" href="#">View plans</a></div>
 
       <!-- GitHub SCM fields -->
       <div id="scm-github-fields" class="hidden">

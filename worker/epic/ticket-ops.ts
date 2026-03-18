@@ -12,6 +12,11 @@ import axios from "axios";
 
 type TicketSystem = "jira" | "linear" | "github" | "internal";
 
+/** Extract numeric issue number from GH-42, #42, or bare 42 formats */
+export function extractGithubIssueNumber(key: string): string {
+  return key.replace(/^(GH-|#)/, "");
+}
+
 export class TicketOps {
   private ticketKey: string;
   private ticketSystem: TicketSystem;
@@ -235,7 +240,7 @@ export class TicketOps {
 
   private async transitionGithub(statusName: string): Promise<void> {
     const repo = process.env.GITHUB_REPO!;
-    const issueNumber = this.getEffectiveTicketKey().replace(/^#/, "");
+    const issueNumber = extractGithubIssueNumber(this.getEffectiveTicketKey());
     const stateMap: Record<string, string> = {
       done: "closed",
       closed: "closed",
@@ -258,7 +263,7 @@ export class TicketOps {
 
   private async commentGithub(ticketKey: string, comment: string): Promise<void> {
     const repo = process.env.GITHUB_REPO!;
-    const issueNumber = ticketKey.replace(/^#/, "");
+    const issueNumber = extractGithubIssueNumber(ticketKey);
     await axios.post(
       `https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`,
       { body: comment },

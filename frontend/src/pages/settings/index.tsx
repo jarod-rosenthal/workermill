@@ -1153,6 +1153,8 @@ export default function Settings() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to save GitLab credentials");
+      // Auto-set GitLab as the default SCM provider
+      await handleSetDefaultScm("gitlab");
       setMessage({ type: "success", text: "GitLab settings saved successfully" });
       setGitlabToken("");
       setGitlabWebhookSecret("");
@@ -1184,6 +1186,8 @@ export default function Settings() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to save BitBucket credentials");
+      // Auto-set Bitbucket as the default SCM provider
+      await handleSetDefaultScm("bitbucket");
       setMessage({ type: "success", text: "BitBucket settings saved successfully" });
       setBitbucketUsername("");
       setBitbucketAppPassword("");

@@ -1392,21 +1392,56 @@ export function activate(context: vscode.ExtensionContext): void {
       },
       async (progress) => {
         progress.report({ message: "Starting agent..." });
-        // Poll for ready with progress updates
         const start = Date.now();
-        const timeoutMs = 120_000; // 2 minutes
-        const pollMs = 2_000;
+        const timeoutMs = 300_000; // 5 minutes — first-time image pulls can be slow
+        const pollMs = 1_500;
+        const portFile = path.join(os.homedir(), ".workermill", "agent.port");
+        const logFile = path.join(os.homedir(), ".workermill", "agent.log");
+        let lastLogSize = 0;
+        try { lastLogSize = fs.statSync(logFile).size; } catch { /* no log yet */ }
+
         while (Date.now() - start < timeoutMs) {
           const elapsed = Math.round((Date.now() - start) / 1000);
-          if (elapsed < 15) {
-            progress.report({ message: "Starting Docker Compose..." });
-          } else if (elapsed < 60) {
-            progress.report({ message: `Pulling images and starting services (${elapsed}s)...` });
-          } else {
-            progress.report({ message: `Waiting for API to be ready (${elapsed}s)...` });
-          }
-          // Check if port file appeared
-          const portFile = path.join(os.homedir(), ".workermill", "agent.port");
+
+          // Read new lines from agent.log to show real progress
+          let statusMsg = `Starting up (${elapsed}s)...`;
+          try {
+            const currentSize = fs.statSync(logFile).size;
+            if (currentSize > lastLogSize) {
+              // Read last chunk of new log content
+              const fd = fs.openSync(logFile, "r");
+              const readSize = Math.min(currentSize - lastLogSize, 4096);
+              const buf = Buffer.alloc(readSize);
+              fs.readSync(fd, buf, 0, readSize, currentSize - readSize);
+              fs.closeSync(fd);
+              const recent = buf.toString("utf-8");
+              lastLogSize = currentSize;
+
+              // Extract meaningful progress from log lines
+              if (/pulling|Pulling/i.test(recent)) {
+                const imageMatch = recent.match(/Pulling.*?(ghcr\.io\/[^\s]+|pgvector[^\s]*|redis[^\s]*)/i);
+                statusMsg = imageMatch
+                  ? `Downloading ${imageMatch[1]} (${elapsed}s)...`
+                  : `Downloading Docker images (${elapsed}s)...`;
+              } else if (/API is healthy/i.test(recent)) {
+                statusMsg = "API is ready, connecting...";
+              } else if (/Waiting for API/i.test(recent)) {
+                statusMsg = `Waiting for API to be ready (${elapsed}s)...`;
+              } else if (/Starting self-hosted|Starting Docker|docker compose/i.test(recent)) {
+                statusMsg = `Starting Docker services (${elapsed}s)...`;
+              } else if (/Stack running/i.test(recent)) {
+                statusMsg = "Services running, connecting...";
+              } else if (/Connected to/i.test(recent)) {
+                statusMsg = "Agent connected!";
+              } else if (/Running migrations|migration/i.test(recent)) {
+                statusMsg = `Running database migrations (${elapsed}s)...`;
+              }
+            }
+          } catch { /* log file not available yet */ }
+
+          progress.report({ message: statusMsg });
+
+          // Check if port file appeared (agent is ready)
           try {
             const port = parseInt(fs.readFileSync(portFile, "utf-8").trim(), 10);
             if (port > 0) {
@@ -1417,19 +1452,10 @@ export function activate(context: vscode.ExtensionContext): void {
           } catch { /* not ready yet */ }
           await new Promise((r) => setTimeout(r, pollMs));
         }
-        // Timed out
-        const error = readAgentStartupError();
-        if (error && /pulling|downloading|starting ollama/i.test(error)) {
-          vscode.window.showInformationMessage(
-            "WorkerMill agent is still starting up (this may take a few more minutes for first-time image downloads).",
-          );
-        } else if (error) {
-          vscode.window.showErrorMessage(`WorkerMill: ${error}`);
-        } else {
-          vscode.window.showWarningMessage(
-            `WorkerMill agent is still starting. Check ${getAgentLogPath()} for progress.`,
-          );
-        }
+        // Timed out — but agent may still be starting
+        vscode.window.showInformationMessage(
+          "WorkerMill agent is still starting — first-time setup downloads ~2 GB of Docker images. Click 'Connect Agent' once it's ready.",
+        );
       },
     );
   } else if (configured && !installed) {

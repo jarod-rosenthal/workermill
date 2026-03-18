@@ -667,13 +667,14 @@ function buildCloneUrl(
   repo: string,
   token: string,
   scmProvider: string,
+  bitbucketUsername?: string,
 ): string {
   // If repo is already a full URL, inject auth credentials into it
   if (repo.startsWith("https://") || repo.startsWith("http://")) {
     const url = new URL(repo);
     switch (scmProvider) {
       case "bitbucket":
-        url.username = "x-token-auth";
+        url.username = bitbucketUsername || "x-token-auth";
         break;
       case "gitlab":
         url.username = "oauth2";
@@ -694,7 +695,7 @@ function buildCloneUrl(
   // Short form: owner/repo
   switch (scmProvider) {
     case "bitbucket":
-      return `https://x-token-auth:${token}@bitbucket.org/${repo}.git`;
+      return `https://${encodeURIComponent(bitbucketUsername || "x-token-auth")}:${encodeURIComponent(token)}@bitbucket.org/${repo}.git`;
     case "gitlab":
       return `https://oauth2:${token}@gitlab.com/${repo}.git`;
     case "github":
@@ -816,12 +817,13 @@ async function cloneTargetRepo(
   token: string,
   scmProvider: string,
   taskId: string,
+  bitbucketUsername?: string,
 ): Promise<string | null> {
   const taskLabel = chalk.cyan(taskId.slice(0, 8));
   const tmpDir = `${tmpdir()}/workermill-planning-${taskId.slice(0, 8)}-${Date.now()}`;
 
   try {
-    const cloneUrl = buildCloneUrl(repo, token, scmProvider);
+    const cloneUrl = buildCloneUrl(repo, token, scmProvider, bitbucketUsername);
     // Log repo (redact token) so we can debug clone failures
     const safeUrl = cloneUrl.replace(/\/\/[^@]+@/, "//***@");
     console.log(
@@ -1005,11 +1007,15 @@ export async function planTask(
           : credentials?.githubToken || config.githubToken;
 
     if (scmToken) {
+      const bbUsername = scmProvider === "bitbucket"
+        ? credentials?.bitbucketUsername || credentials?.bitbucketEmail
+        : undefined;
       repoPath = await cloneTargetRepo(
         task.githubRepo,
         scmToken,
         scmProvider,
         task.id,
+        bbUsername,
       );
       if (!repoPath) {
         // Clone failed — treat as planning failure instead of producing a low-quality plan

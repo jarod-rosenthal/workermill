@@ -599,139 +599,26 @@ async function finishSetup(
     return false;
   }
 
-  // Auto-enable Docker sandbox if available with sufficient RAM, otherwise warn
-  const ramGB = Math.round(os.totalmem() / (1024 * 1024 * 1024));
-  if (checkDockerAvailable() && ramGB >= 8) {
-    // Auto-enable Docker sandbox — no prompt
-    log("Docker detected with sufficient RAM — enabling sandbox mode");
-    enableDockerSandbox(log);
-    await stopAgentProcess();
-    startAgentProcess(log);
-    const dockerPort = await waitForAgentReady(log);
-    if (!dockerPort) {
-      // Docker sandbox failed to start — fall back to native
-      log("Docker sandbox failed — falling back to native mode");
-      disableDockerSandbox(log);
-      startAgentProcess(log);
-      await waitForAgentReady(log);
-    }
-  } else if (isDockerInstalled() && ramGB >= 8) {
-    // Docker installed but not running — explain why Docker matters + confirm to skip
-    let showPrompt = true;
-    while (showPrompt) {
-      const action = await vscode.window.showWarningMessage(
-        "Docker Desktop is installed but not running. Without it, workers run as native processes " +
-          "without filesystem isolation. Start Docker and WorkerMill will use it automatically.",
-        "Open Docker Desktop",
-        "Continue Without Sandbox",
+  // Docker is required — verify it's available
+  if (!checkDockerAvailable()) {
+    if (isDockerInstalled()) {
+      vscode.window.showErrorMessage(
+        "Docker Desktop is installed but not running. WorkerMill requires Docker for worker execution. Please start Docker Desktop and try again.",
       );
-      if (action === "Continue Without Sandbox") {
-        const confirm = await vscode.window.showInformationMessage(
-          "You can start Docker later and enable sandbox in WorkerMill Settings.",
-          "I Understand, Continue",
-          "Go Back",
-        );
-        if (confirm === "I Understand, Continue") {
-          showPrompt = false;
-        }
-        // "Go Back" or dismissed → loop back to step 1
-        if (confirm !== "I Understand, Continue") {
-          continue;
-        }
-      } else if (action === "Open Docker Desktop") {
-        showPrompt = false;
-        let launched = false;
-        try {
-          if (process.platform === "darwin") {
-            execFileSync("open", ["-a", "Docker"], { timeout: 5000, stdio: "pipe", windowsHide: true });
-            launched = true;
-          } else if (process.platform === "linux") {
-            // Linux: try starting Docker Engine via systemctl (most common setup)
-            try {
-              execFileSync("systemctl", ["start", "docker"], { timeout: 10_000, stdio: "pipe" });
-              launched = true;
-            } catch {
-              // systemctl may require sudo or Docker Desktop may be installed instead
-              try {
-                execFileSync("systemctl", ["--user", "start", "docker-desktop"], { timeout: 10_000, stdio: "pipe" });
-                launched = true;
-              } catch {
-                /* neither worked — will show manual start message below */
-              }
-            }
-          } else {
-            // Windows — try common Docker Desktop executable paths
-            const dockerPaths = [
-              "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe",
-              `${process.env.LOCALAPPDATA || ""}\\Docker\\Docker Desktop.exe`,
-              `${process.env.PROGRAMFILES || ""}\\Docker\\Docker\\Docker Desktop.exe`,
-            ];
-            for (const p of dockerPaths) {
-              try {
-                if (fs.existsSync(p)) {
-                  execFileSync("cmd.exe", ["/c", "start", "", p], {
-                    timeout: 5000,
-                    stdio: "pipe",
-                    windowsHide: true,
-                  });
-                  launched = true;
-                  break;
-                }
-              } catch {
-                /* try next path */
-              }
-            }
-          }
-        } catch (err) {
-          log(`Failed to launch Docker Desktop: ${err instanceof Error ? err.message : String(err)}`);
-        }
-
-        if (launched) {
-          vscode.window.showInformationMessage(
-            "Docker Desktop is starting. WorkerMill will use it automatically once it's ready.",
-          );
-        } else {
-          log("Could not find Docker Desktop executable — prompting manual start");
-          vscode.window.showWarningMessage(
-            "Could not launch Docker Desktop automatically. Please start it manually, then WorkerMill will use it automatically.",
-          );
-        }
-      } else {
-        // Dismissed — exit loop
-        showPrompt = false;
-      }
-    }
-  } else {
-    // No Docker or insufficient RAM — two-step flow before native mode
-    let showPrompt = true;
-    while (showPrompt) {
-      const action = await vscode.window.showWarningMessage(
-        "Without Docker, AI workers run as native processes with the same permissions as any program " +
-          "on your machine. For filesystem and network isolation, install Docker Desktop.",
-        "Install Docker (Recommended)",
-        "Continue Without Sandbox",
+    } else {
+      const action = await vscode.window.showErrorMessage(
+        "Docker is required for WorkerMill. Please install Docker Desktop (16 GB RAM minimum, 32 GB+ recommended).",
+        "Install Docker",
       );
-      if (action === "Install Docker (Recommended)") {
-        showPrompt = false;
+      if (action === "Install Docker") {
         vscode.env.openExternal(
           vscode.Uri.parse("https://www.docker.com/products/docker-desktop/"),
         );
-      } else if (action === "Continue Without Sandbox") {
-        const confirm = await vscode.window.showInformationMessage(
-          "You can enable sandbox mode later in WorkerMill Settings if you install Docker.",
-          "I Understand, Continue",
-          "Go Back",
-        );
-        if (confirm === "I Understand, Continue") {
-          showPrompt = false;
-        }
-        // "Go Back" or dismissed → loop back to step 1
-      } else {
-        // Dismissed — exit loop
-        showPrompt = false;
       }
     }
+    return false;
   }
+  log("Docker is running — sandbox mode active");
 
   return true;
 }
@@ -770,31 +657,6 @@ function isDockerInstalled(): boolean {
   }
 }
 
-function enableDockerSandbox(log?: (msg: string) => void): void {
-  const configPath = path.join(os.homedir(), ".workermill", "config.json");
-  let config: Record<string, unknown> = {};
-  try {
-    config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  } catch {
-    /* no existing config */
-  }
-  config.sandbox = "docker";
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
-  log?.("Docker sandbox enabled in config");
-}
-
-function disableDockerSandbox(log?: (msg: string) => void): void {
-  const configPath = path.join(os.homedir(), ".workermill", "config.json");
-  let config: Record<string, unknown> = {};
-  try {
-    config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  } catch {
-    /* no existing config */
-  }
-  delete config.sandbox;
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
-  log?.("Docker sandbox removed from config");
-}
 
 /**
  * Sign up via GitHub SSO — stays entirely inside VS Code.

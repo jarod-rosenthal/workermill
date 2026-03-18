@@ -10,7 +10,6 @@ import { inferPersonaFromJiraIssue } from "../../services/persona-inference.js";
 import { logger } from "../../utils/logger.js";
 import { logTaskCreated } from "../../services/audit.js";
 import { trackLegacyWebhookUsage } from "../../services/legacy-webhook-alert.js";
-import { KbCard } from "../../models/KbCard.js";
 import {
   body,
   header,
@@ -263,18 +262,13 @@ router.post(
       return;
     }
 
-    // PRD dedup: skip task creation if this issue was created by PRD decomposition
-    const boardCardRepo = AppDataSource.getRepository(KbCard);
-    const prdCard = await boardCardRepo
-      .createQueryBuilder("card")
-      .innerJoin("card.board", "board")
-      .where("board.orgId = :orgId", { orgId: org.id })
-      .andWhere("board.prd_content IS NOT NULL")
-      .andWhere("card.title = :title", { title })
-      .getOne();
-
-    if (prdCard) {
-      logger.info("GitHub Issues webhook: skipping PRD-synced ticket", { issueKey, title });
+    // PRD dedup: skip if this issue is already linked to a child task (created by /prd/decompose dispatch)
+    const existingChildTask = await taskRepo.findOne({
+      where: { orgId: org.id, jiraIssueKey: issueKey },
+      select: ["id", "parentTaskId"],
+    });
+    if (existingChildTask?.parentTaskId) {
+      logger.info("GitHub Issues webhook: skipping PRD child issue", { issueKey, parentTaskId: existingChildTask.parentTaskId });
       res.json({ status: "ignored", reason: "PRD-managed ticket" });
       return;
     }
@@ -504,18 +498,13 @@ router.post(
         return;
       }
 
-      // PRD dedup: skip task creation if this issue was created by PRD decomposition
-      const boardCardRepo = AppDataSource.getRepository(KbCard);
-      const prdCard = await boardCardRepo
-        .createQueryBuilder("card")
-        .innerJoin("card.board", "board")
-        .where("board.orgId = :orgId", { orgId: org.id })
-        .andWhere("board.prd_content IS NOT NULL")
-        .andWhere("card.title = :title", { title })
-        .getOne();
-
-      if (prdCard) {
-        logger.info("GitHub Issues webhook: skipping PRD-synced ticket", { issueKey, title });
+      // PRD dedup: skip if this issue is already linked to a child task (created by /prd/decompose dispatch)
+      const existingChildTask = await taskRepo.findOne({
+        where: { orgId: org.id, jiraIssueKey: issueKey },
+        select: ["id", "parentTaskId"],
+      });
+      if (existingChildTask?.parentTaskId) {
+        logger.info("GitHub Issues webhook: skipping PRD child issue", { issueKey, parentTaskId: existingChildTask.parentTaskId });
         res.json({ status: "ignored", reason: "PRD-managed ticket" });
         return;
       }

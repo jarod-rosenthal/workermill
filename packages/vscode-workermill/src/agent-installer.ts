@@ -811,37 +811,17 @@ export function startAgentProcess(log?: (msg: string) => void): void {
 export async function stopAgentProcess(): Promise<boolean> {
   startInFlight = false;
   startAttempts = 0;
-  // Fast path: SIGTERM via PID (completes in <1s typically)
-  const pid = readAgentPid();
-  if (pid && isProcessAlive(pid)) {
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      /* ignore */
-    }
-    // Brief wait for graceful exit
-    await new Promise((r) => setTimeout(r, 2000));
-    if (isProcessAlive(pid)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        /* ignore */
-      }
-    }
-    cleanAgentState();
-  }
 
-  // Stop Docker Compose stack — fire-and-forget detached process so it
-  // doesn't block VS Code's deactivate() time budget. On reload, the new
-  // extension instance will find the stack down and restart it.
+  // IMPORTANT: Spawn compose down FIRST, before any awaits. VS Code's
+  // deactivate() has a very short time budget — if we await the 2s SIGTERM
+  // wait, VS Code kills the extension host and compose down never fires.
   const composeFile = path.join(os.homedir(), ".workermill", "docker-compose.yml");
   if (fs.existsSync(composeFile)) {
     try {
       if (process.platform === "win32") {
-        // Use powershell with -WindowStyle Hidden to completely suppress console window
         const child = spawn("powershell.exe", [
           "-WindowStyle", "Hidden", "-NoProfile", "-NonInteractive",
-          "-Command", `docker compose -f '${composeFile}' down`,
+          "-Command", `docker compose -f "${composeFile}" down`,
         ], {
           detached: true,
           stdio: "ignore",
@@ -859,6 +839,23 @@ export async function stopAgentProcess(): Promise<boolean> {
     } catch {
       // Best effort — Docker may not be running
     }
+  }
+
+  // Now kill the agent process (non-blocking — don't await the sleep)
+  const pid = readAgentPid();
+  if (pid && isProcessAlive(pid)) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      /* ignore */
+    }
+    // Schedule a force-kill after 2s, but don't block deactivate() on it
+    setTimeout(() => {
+      if (isProcessAlive(pid)) {
+        try { process.kill(pid, "SIGKILL"); } catch { /* ignore */ }
+      }
+      cleanAgentState();
+    }, 2000);
   }
 
   return true;

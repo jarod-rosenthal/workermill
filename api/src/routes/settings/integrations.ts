@@ -657,7 +657,11 @@ router.post("/bitbucket/test", async (req: Request, res: Response) => {
         email?: string;
         api_token?: string;
       };
-      if (creds.username && creds.app_password) {
+      if (creds.email && creds.app_password) {
+        // App password: API auth uses email (not username — username is for git clone only)
+        authString = `${creds.email}:${creds.app_password}`;
+      } else if (creds.username && creds.app_password) {
+        // Legacy: no email stored, try username (may fail if it's not the email)
         authString = `${creds.username}:${creds.app_password}`;
       } else if (creds.email && creds.api_token) {
         authString = `${creds.email}:${creds.api_token}`;

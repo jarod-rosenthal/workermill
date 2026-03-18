@@ -1514,6 +1514,6 @@ export async function deactivate(): Promise<void> {
   if (notifications) notifications.dispose();
   if (client) client.dispose();
 
-  // Stop the agent process when VS Code closes
-  await stopAgentProcess();
+  // Stop the agent + compose stack — non-blocking, compose down is fire-and-forget
+  stopAgentProcess();
 }

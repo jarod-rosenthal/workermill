@@ -143,9 +143,10 @@ export class BitBucketProvider extends BaseScmProvider {
       return `${result.email}:${result.api_token}`;
     }
 
-    // Legacy app password format (deprecated)
-    if (result.username && result.app_password) {
-      return `${result.username}:${result.app_password}`;
+    // App password format — use email for API auth if available, fall back to username
+    if (result.app_password) {
+      const authUser = result.email || result.username || "";
+      if (authUser) return `${authUser}:${result.app_password}`;
     }
 
     // Fallback: treat as plain token

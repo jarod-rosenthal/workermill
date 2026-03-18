@@ -17,17 +17,6 @@ function GoogleIcon({ className }: { className?: string }) {
   );
 }
 
-function MicrosoftIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M11.4 11.4H0V0h11.4v11.4z" fill="#F25022"/>
-      <path d="M24 11.4H12.6V0H24v11.4z" fill="#7FBA00"/>
-      <path d="M11.4 24H0V12.6h11.4V24z" fill="#00A4EF"/>
-      <path d="M24 24H12.6V12.6H24V24z" fill="#FFB900"/>
-    </svg>
-  );
-}
-
 function GitHubIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor">
@@ -158,24 +147,6 @@ export function Login() {
     window.location.href = authorizeUrl;
   };
 
-  // Handle Microsoft Work account login (direct OAuth, bypasses Cognito)
-  const handleMicrosoftLogin = async () => {
-    setSsoLoading("Microsoft");
-
-    if (inviteToken) {
-      sessionStorage.setItem("pendingInviteToken", inviteToken);
-    }
-
-    try {
-      const response = await authAPI.getMicrosoftAuthUrl(inviteToken);
-      window.location.href = response.authorizeUrl;
-    } catch (err) {
-      console.error("Failed to get Microsoft auth URL:", err);
-      setError("Failed to initiate Microsoft sign-in. Please try again.");
-      setSsoLoading(null);
-    }
-  };
-
   // Handle GitHub login (direct OAuth)
   const handleGitHubLogin = async () => {
     setSsoLoading("GitHub");
@@ -199,8 +170,6 @@ export function Login() {
     switch (providerName) {
       case "Google":
         return <GoogleIcon className="w-5 h-5" />;
-      case "Microsoft":
-        return <MicrosoftIcon className="w-5 h-5" />;
       case "GitHub":
         return <GitHubIcon className="w-5 h-5" />;
       default:
@@ -607,9 +576,7 @@ export function Login() {
                         key={provider.name}
                         type="button"
                         onClick={() =>
-                          provider.name === "Microsoft"
-                            ? handleMicrosoftLogin()
-                            : provider.name === "GitHub"
+                          provider.name === "GitHub"
                             ? handleGitHubLogin()
                             : handleSsoLogin(provider.name)
                         }
@@ -624,8 +591,6 @@ export function Login() {
                         <span className="font-medium">
                           {ssoLoading === provider.name
                             ? `Redirecting to ${provider.displayName}...`
-                            : provider.name === "Microsoft"
-                            ? "Sign in with Microsoft (Work)"
                             : `Continue with ${provider.displayName}`
                           }
                         </span>

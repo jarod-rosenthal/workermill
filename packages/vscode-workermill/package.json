@@ -413,7 +413,7 @@
     "viewsWelcome": [
       {
         "view": "workermill.teamPanel",
-        "contents": "AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Get Started](command:workermill.setupStandalone)\nRuns locally with Docker. Bring your own API keys.\n\n---\n\nHave a WorkerMill Cloud account?\n[Sign in with GitHub](command:workermill.signUpWithGitHub)",
+        "contents": "AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Get Started](command:workermill.setupStandalone)\nRuns locally with Docker. Bring your own API keys.\n\n---\n\nHave a WorkerMill Cloud account?\n[Sign in with GitHub](command:workermill.signUpWithGitHub)\n[Sign in with Google](command:workermill.signInWithGoogle)",
         "when": "!workermill.agentConfigured"
       },
       {

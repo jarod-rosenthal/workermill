@@ -1226,6 +1226,8 @@ export default function Settings() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to save GitHub credentials");
+      // Auto-set GitHub as the default SCM provider
+      await handleSetDefaultScm("github");
       setMessage({ type: "success", text: "GitHub settings saved successfully" });
       setGithubToken("");
       setGithubReviewerToken("");

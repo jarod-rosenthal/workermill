@@ -1869,8 +1869,8 @@ export class SettingsPanel {
       <!-- Bitbucket SCM fields -->
       <div id="scm-bitbucket-fields" class="hidden">
         <div class="field">
-          <label>Username</label>
-          <input type="text" id="scm-bb-username" placeholder="workspace/username" />
+          <label>Username / Email</label>
+          <input type="text" id="scm-bb-username" placeholder="email address (for app passwords)" />
         </div>
         <div class="field">
           <label>App Password or Repository Access Token</label>

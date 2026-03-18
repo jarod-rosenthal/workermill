@@ -60,7 +60,7 @@ export async function bootstrapSelfHostedCredentials(
     }
   }
 
-  // Bootstrap SCM (GitHub/GitLab/Bitbucket) token
+  // Bootstrap SCM (GitHub/GitLab/Bitbucket) token + set scmProvider on org
   if (sc.scm?.token) {
     const provider = sc.scm.provider || "github";
     try {
@@ -72,11 +72,13 @@ export async function bootstrapSelfHostedCredentials(
       } else if (provider === "gitlab") {
         await api.put("/api/settings/integrations/gitlab", {
           token: sc.scm.token,
+          ...(sc.defaultRepo ? { defaultRepo: sc.defaultRepo } : {}),
         });
       } else if (provider === "bitbucket") {
         await api.put("/api/settings/integrations/bitbucket", {
           username: sc.scm.username || "",
           appPassword: sc.scm.token,
+          ...(sc.defaultRepo ? { defaultRepo: sc.defaultRepo } : {}),
         });
       }
       log?.(`Synced ${provider} credentials`);
@@ -84,16 +86,12 @@ export async function bootstrapSelfHostedCredentials(
       log?.(`Warning: failed to sync ${provider} credentials: ${err instanceof Error ? err.message : String(err)}`);
       hasErrors = true;
     }
-  }
 
-  // Bootstrap default repo on the organization (even if SCM token was already set)
-  if (sc.defaultRepo) {
+    // Update the org's scmProvider field so the agent displays the correct provider
     try {
-      await api.put("/api/settings/integrations/github", {
-        defaultRepo: sc.defaultRepo,
-      });
+      await api.put("/api/settings", { scmProvider: provider });
     } catch {
-      // Best effort — may have already been set above
+      // Best effort — org settings endpoint may not accept scmProvider directly
     }
   }
 

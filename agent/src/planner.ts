@@ -674,7 +674,7 @@ function buildCloneUrl(
     const url = new URL(repo);
     switch (scmProvider) {
       case "bitbucket":
-        url.username = bitbucketUsername || "x-token-auth";
+        url.username = bitbucketUsername || "x-bitbucket-api-token-auth";
         break;
       case "gitlab":
         url.username = "oauth2";
@@ -695,7 +695,7 @@ function buildCloneUrl(
   // Short form: owner/repo
   switch (scmProvider) {
     case "bitbucket":
-      return `https://${encodeURIComponent(bitbucketUsername || "x-token-auth")}:${encodeURIComponent(token)}@bitbucket.org/${repo}.git`;
+      return `https://${encodeURIComponent(bitbucketUsername || "x-bitbucket-api-token-auth")}:${encodeURIComponent(token)}@bitbucket.org/${repo}.git`;
     case "gitlab":
       return `https://oauth2:${token}@gitlab.com/${repo}.git`;
     case "github":

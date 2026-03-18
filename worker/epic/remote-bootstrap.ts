@@ -166,8 +166,9 @@ function setupCredentials(): string {
     case "bitbucket": {
       const base = scmBaseUrl || "bitbucket.org";
       const encodedToken = encodeURIComponent(token);
-      repoUrl = `https://x-token-auth:${encodedToken}@${base}/${targetRepo}.git`;
-      credLine = `https://x-token-auth:${encodedToken}@${base}`;
+      const bbUser = process.env.BITBUCKET_USERNAME || "x-bitbucket-api-token-auth";
+      repoUrl = `https://${bbUser}:${encodedToken}@${base}/${targetRepo}.git`;
+      credLine = `https://${bbUser}:${encodedToken}@${base}`;
       break;
     }
     default:

@@ -286,7 +286,7 @@ function buildCloneUrl(
   // If it's already a full URL, inject the token
   if (repo.startsWith("https://")) {
     const url = new URL(repo);
-    url.username = scmProvider === "bitbucket" ? "x-token-auth" : "x-access-token";
+    url.username = scmProvider === "bitbucket" ? "x-bitbucket-api-token-auth" : "x-access-token";
     url.password = token;
     if (!url.pathname.endsWith(".git")) {
       url.pathname += ".git";

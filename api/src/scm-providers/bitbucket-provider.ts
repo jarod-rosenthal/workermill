@@ -196,7 +196,7 @@ export class BitBucketProvider extends BaseScmProvider {
   getCloneUrl(repo: ScmRepoIdentifier, credentials: ScmCredentials): string {
     const password = credentials.appPassword || credentials.token || "";
     // Default to x-token-auth for Repository Access Tokens (no username provided)
-    const username = credentials.username || (password ? "x-token-auth" : "");
+    const username = credentials.username || (password ? "x-bitbucket-api-token-auth" : "");
     return `https://${username}:${password}@bitbucket.org/${repo.fullPath}.git`;
   }
 

@@ -328,7 +328,7 @@ export async function spawnManagerWorker(
     GITHUB_TOKEN: githubToken,
     GH_TOKEN: githubToken,
     BITBUCKET_TOKEN: bitbucketToken,
-    BITBUCKET_USERNAME: credentials?.bitbucketUsername || "x-token-auth",
+    BITBUCKET_USERNAME: credentials?.bitbucketUsername || "x-bitbucket-api-token-auth",
     GITLAB_TOKEN: gitlabToken,
 
     MANAGER_PROVIDER: credentials?.managerProvider || "",

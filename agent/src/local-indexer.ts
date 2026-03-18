@@ -133,7 +133,7 @@ function buildCloneUrl(repo: string, token: string, scmProvider: string): string
     const url = new URL(repo);
     switch (scmProvider) {
       case "bitbucket":
-        url.username = "x-token-auth";
+        url.username = "x-bitbucket-api-token-auth";
         break;
       case "gitlab":
         url.username = "oauth2";

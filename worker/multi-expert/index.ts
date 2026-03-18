@@ -775,7 +775,7 @@ export class MultiExpertCoordinator {
     return new Promise((resolve, reject) => {
       // Build clone URL based on SCM provider
       const scmProvider = process.env.SCM_PROVIDER || "github";
-      const bitbucketUsername = process.env.BITBUCKET_USERNAME || "x-token-auth";
+      const bitbucketUsername = process.env.BITBUCKET_USERNAME || "x-bitbucket-api-token-auth";
       let cloneUrl: string;
 
       if (scmProvider === "bitbucket") {

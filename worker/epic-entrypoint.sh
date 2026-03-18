@@ -134,11 +134,11 @@ case "${SCM_PROVIDER}" in
     bitbucket)
         SCM_BASE_URL="${SCM_BASE_URL:-bitbucket.org}"
 
-        # BitBucket uses Repository Access Tokens with x-token-auth as username
         # URL-encode special characters in token
         ENCODED_BB_TOKEN=$(printf '%s' "${SCM_TOKEN:-${BITBUCKET_TOKEN}}" | sed 's/=/%3D/g; s/+/%2B/g; s/\//%2F/g')
-        REPO_URL="https://x-token-auth:${ENCODED_BB_TOKEN}@${SCM_BASE_URL}/${TARGET_REPO}.git"
-        echo "https://x-token-auth:${ENCODED_BB_TOKEN}@${SCM_BASE_URL}" > ~/.git-credentials
+        BB_USER="${BITBUCKET_USERNAME:-x-bitbucket-api-token-auth}"
+        REPO_URL="https://${BB_USER}:${ENCODED_BB_TOKEN}@${SCM_BASE_URL}/${TARGET_REPO}.git"
+        echo "https://${BB_USER}:${ENCODED_BB_TOKEN}@${SCM_BASE_URL}" > ~/.git-credentials
         ;;
 
     *)
@@ -148,7 +148,7 @@ case "${SCM_PROVIDER}" in
 esac
 
 # Mask token in URL for logging
-MASKED_URL=$(echo "${REPO_URL}" | sed 's/:x-access-token:[^@]*@/:x-access-token:***@/; s/:oauth2:[^@]*@/:oauth2:***@/; s/:x-token-auth:[^@]*@/:x-token-auth:***@/')
+MASKED_URL=$(echo "${REPO_URL}" | sed 's/:x-access-token:[^@]*@/:x-access-token:***@/; s/:oauth2:[^@]*@/:oauth2:***@/; s/:x-token-auth:[^@]*@/:x-token-auth:***@/; s/:x-bitbucket-api-token-auth:[^@]*@/:x-bitbucket-api-token-auth:***@/')
 echo "[Epic] SCM Provider: ${SCM_PROVIDER}"
 echo "[Epic] Clone URL: ${MASKED_URL}"
 

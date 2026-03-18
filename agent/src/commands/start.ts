@@ -115,7 +115,7 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
   let config: AgentConfig;
   const standaloneCheck = loadStandaloneConfig();
 
-  if (standaloneCheck.mode === "self-hosted") {
+  if (standaloneCheck.mode === "self-hosted" || standaloneCheck.mode === "standalone") {
     const sc = standaloneCheck;
     config = {
       apiUrl: "http://localhost:3001",
@@ -127,25 +127,6 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
       githubToken: sc.scm?.provider === "github" ? (sc.scm?.token || "") : "",
       bitbucketToken: sc.scm?.provider === "bitbucket" ? (sc.scm?.token || "") : "",
       gitlabToken: sc.scm?.provider === "gitlab" ? (sc.scm?.token || "") : "",
-      githubReviewerToken: "",
-      sandbox: (sc.sandbox === "none" ? "none" : "docker") as "docker" | "none",
-      dockerImage: "ghcr.io/jarod-rosenthal/worker",
-      dockerMemoryGb: 4,
-      localRag: false,
-      ollamaPort: 11434,
-    };
-  } else if (standaloneCheck.mode === "standalone" && !isCloudMode()) {
-    const sc = standaloneCheck;
-    config = {
-      apiUrl: "",
-      apiKey: "",
-      agentId: "standalone",
-      maxWorkers: sc.settings?.maxParallelExperts ?? 0,
-      pollIntervalMs: 5000,
-      heartbeatIntervalMs: 30000,
-      githubToken: sc.scm?.token || "",
-      bitbucketToken: sc.scm?.token || "",
-      gitlabToken: "",
       githubReviewerToken: "",
       sandbox: (sc.sandbox === "none" ? "none" : "docker") as "docker" | "none",
       dockerImage: "ghcr.io/jarod-rosenthal/worker",

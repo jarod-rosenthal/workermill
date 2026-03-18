@@ -1,6 +1,6 @@
 {
   "name": "@workermill/agent",
-  "version": "0.10.253",
+  "version": "0.10.254",
   "license": "Apache-2.0",
   "description": "WorkerMill Remote Agent - Run AI workers locally with your own AI provider credentials",
   "type": "module",

@@ -61,8 +61,7 @@ export interface StandaloneConfig {
     maxTargetFiles?: number;
     maxPerStoryRevisions?: number;
     maxReviewRevisions?: number;
-    qualityGateMaxRetries?: number;
-    maxCiFixRetries?: number;
+    maxFixRetries?: number;
     blockerWaitTimeoutMinutes?: number;
     pushAfterCommit?: boolean;
     prdPlanningMode?: "strict" | "simplified";
@@ -108,8 +107,7 @@ const DEFAULT_CONFIG: StandaloneConfig = {
     // Worker behavior
     maxPerStoryRevisions: 1,
     maxReviewRevisions: 3,
-    qualityGateMaxRetries: 5,
-    maxCiFixRetries: 3,
+    maxFixRetries: 5,
     blockerWaitTimeoutMinutes: 20,
     pushAfterCommit: true,
     // Resilience
@@ -233,7 +231,8 @@ export function isCloudMode(): boolean {
   try {
     const raw = readFileSync(CONFIG_FILE, "utf-8");
     const parsed = JSON.parse(raw);
-    return parsed.mode === "cloud" || parsed.mode === "self-hosted";
+    // "standalone" is a legacy alias for "self-hosted" (pre-SQLite removal)
+    return parsed.mode === "cloud" || parsed.mode === "self-hosted" || parsed.mode === "standalone";
   } catch {
     return false;
   }
@@ -245,7 +244,7 @@ export function isSelfHostedMode(): boolean {
     if (!existsSync(CONFIG_FILE)) return false;
     const raw = readFileSync(CONFIG_FILE, "utf-8");
     const config = JSON.parse(raw);
-    return config.mode === "self-hosted";
+    return config.mode === "self-hosted" || config.mode === "standalone";
   } catch {
     return false;
   }

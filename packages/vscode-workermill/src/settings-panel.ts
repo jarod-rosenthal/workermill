@@ -66,12 +66,12 @@ function readAgentConfig(): {
   return null;
 }
 
-/** Check if the agent is running in standalone mode (local SQLite, no API). */
+/** Check if the agent is running in standalone/self-hosted mode (not cloud). */
 function isStandaloneMode(): boolean {
   try {
     const configPath = path.join(os.homedir(), ".workermill", "config.json");
     const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    return raw.mode === "standalone";
+    return raw.mode === "standalone" || raw.mode === "self-hosted";
   } catch {
     return false;
   }
@@ -241,6 +241,10 @@ export class SettingsPanel {
           this.testJiraStandalone();
         } else if (msg.type === "test-scm-bitbucket") {
           this.testBitbucketStandalone();
+        } else if (msg.type === "test-scm-github") {
+          this.testScmStandalone("github");
+        } else if (msg.type === "test-scm-gitlab") {
+          this.testScmStandalone("gitlab");
         } else if (msg.type === "save-linear") {
           this.saveLinearStandalone(msg);
         } else if (msg.type === "open-dashboard" || msg.type === "open-web-settings" || msg.type === "open-pricing") {
@@ -271,11 +275,15 @@ export class SettingsPanel {
         const dashboardBase = config.apiUrl.includes("localhost:3001") ? "http://localhost:5173" : config.apiUrl;
         vscode.env.openExternal(vscode.Uri.parse(`${dashboardBase}/dashboard`));
       } else if (msg.type === "save-repo") {
-        await this.saveRepo(config, msg.defaultRepo);
+        await this.saveRepo(config, msg.defaultRepo, msg.provider);
       } else if (msg.type === "save-scm") {
         await this.saveScm(config, msg);
       } else if (msg.type === "test-scm-bitbucket") {
         await this.testBitbucket(config);
+      } else if (msg.type === "test-scm-github") {
+        await this.testScm(config, "github");
+      } else if (msg.type === "test-scm-gitlab") {
+        await this.testScm(config, "gitlab");
       } else if (msg.type === "open-web-settings") {
         // Self-hosted: API is localhost:3001 but frontend is localhost:5173
         const settingsBase = config.apiUrl.includes("localhost:3001") ? "http://localhost:5173" : config.apiUrl;
@@ -319,7 +327,9 @@ export class SettingsPanel {
         return;
       }
 
-      sc.mode = mode;
+      // Write "self-hosted" (not "standalone") — the agent only recognizes
+      // "cloud" and "self-hosted" as valid modes.
+      sc.mode = mode === "standalone" ? "self-hosted" : mode;
       writeStandaloneConfigFile(sc);
 
       // Restart agent to pick up new mode
@@ -435,8 +445,7 @@ export class SettingsPanel {
         // Worker behavior settings
         maxPerStoryRevisions: settings.maxPerStoryRevisions ?? 1,
         maxReviewRevisions: settings.maxReviewRevisions ?? 4,
-        qualityGateMaxRetries: settings.qualityGateMaxRetries ?? 5,
-        maxCiFixRetries: settings.maxCiFixRetries ?? 3,
+        maxFixRetries: settings.maxFixRetries ?? settings.qualityGateMaxRetries ?? 5,
         blockerWaitTimeoutMinutes: settings.blockerWaitTimeoutMinutes ?? 20,
         pushAfterCommit: settings.pushAfterCommit ?? true,
         // Quality gate settings
@@ -656,8 +665,7 @@ export class SettingsPanel {
   private saveWorkerBehaviorStandalone(msg: {
     maxPerStoryRevisions: number;
     maxReviewRevisions: number;
-    qualityGateMaxRetries: number;
-    maxCiFixRetries: number;
+    maxFixRetries: number;
     blockerWaitTimeoutMinutes: number;
     pushAfterCommit: boolean;
     planningMode: string;
@@ -674,8 +682,7 @@ export class SettingsPanel {
       const settings = (sc.settings || {}) as Record<string, unknown>;
       settings.maxPerStoryRevisions = msg.maxPerStoryRevisions;
       settings.maxReviewRevisions = msg.maxReviewRevisions;
-      settings.qualityGateMaxRetries = msg.qualityGateMaxRetries;
-      settings.maxCiFixRetries = msg.maxCiFixRetries;
+      settings.maxFixRetries = msg.maxFixRetries;
       settings.blockerWaitTimeoutMinutes = msg.blockerWaitTimeoutMinutes;
       settings.pushAfterCommit = msg.pushAfterCommit;
       settings.planningMode = msg.planningMode;
@@ -817,8 +824,7 @@ export class SettingsPanel {
     msg: {
       maxPerStoryRevisions: number;
       maxReviewRevisions: number;
-      qualityGateMaxRetries: number;
-      maxCiFixRetries: number;
+      maxFixRetries: number;
       blockerWaitTimeoutMinutes: number;
       pushAfterCommit: boolean;
       maxParallelExperts: number;
@@ -838,8 +844,7 @@ export class SettingsPanel {
         {
           maxPerStoryRevisions: msg.maxPerStoryRevisions,
           maxReviewRevisions: msg.maxReviewRevisions,
-          qualityGateMaxRetries: msg.qualityGateMaxRetries,
-          maxCiFixRetries: msg.maxCiFixRetries,
+          maxFixRetries: msg.maxFixRetries,
           blockerWaitTimeoutMinutes: msg.blockerWaitTimeoutMinutes,
           pushAfterCommit: msg.pushAfterCommit,
           maxParallelExperts: msg.maxParallelExperts,
@@ -924,11 +929,12 @@ export class SettingsPanel {
   private async saveRepo(
     config: { apiUrl: string; apiKey: string },
     defaultRepo: string,
+    provider: string = "github",
   ): Promise<void> {
     try {
       const { status, data } = await apiRequest<{ success?: boolean; error?: string }>(
         "PUT",
-        `${config.apiUrl}/api/settings/integrations/github`,
+        `${config.apiUrl}/api/settings/integrations/${provider}`,
         config.apiKey,
         { defaultRepo },
       );
@@ -1505,20 +1511,42 @@ export class SettingsPanel {
 
   private async testBitbucket(config: { apiUrl: string; apiKey: string }): Promise<void> {
     try {
-      this.postMessage({ type: "scm-test-testing" });
+      this.postMessage({ type: "scm-test-testing", provider: "bitbucket" });
       const { status, data } = await apiRequest<{ success?: boolean; message?: string; error?: string; user?: string }>(
         "POST",
         `${config.apiUrl}/api/settings/integrations/bitbucket/test`,
         config.apiKey,
       );
       if (status >= 200 && status < 300 && (data as { success?: boolean }).success) {
-        this.postMessage({ type: "scm-test-success", message: `Connected as ${(data as { user?: string }).user || "unknown"}` });
+        this.postMessage({ type: "scm-test-success", provider: "bitbucket", message: `Connected as ${(data as { user?: string }).user || "unknown"}` });
       } else {
-        this.postMessage({ type: "scm-test-error", message: (data as { error?: string }).error || `HTTP ${status}` });
+        this.postMessage({ type: "scm-test-error", provider: "bitbucket", message: (data as { error?: string }).error || `HTTP ${status}` });
       }
     } catch (err) {
-      this.postMessage({ type: "scm-test-error", message: err instanceof Error ? err.message : String(err) });
+      this.postMessage({ type: "scm-test-error", provider: "bitbucket", message: err instanceof Error ? err.message : String(err) });
     }
+  }
+
+  private async testScm(config: { apiUrl: string; apiKey: string }, provider: "github" | "gitlab"): Promise<void> {
+    try {
+      this.postMessage({ type: "scm-test-testing", provider });
+      const { status, data } = await apiRequest<{ success?: boolean; message?: string; error?: string; user?: string }>(
+        "POST",
+        `${config.apiUrl}/api/settings/integrations/${provider}/test`,
+        config.apiKey,
+      );
+      if (status >= 200 && status < 300 && (data as { success?: boolean }).success) {
+        this.postMessage({ type: "scm-test-success", provider, message: `Connected as ${(data as { user?: string }).user || "unknown"}` });
+      } else {
+        this.postMessage({ type: "scm-test-error", provider, message: (data as { error?: string }).error || `HTTP ${status}` });
+      }
+    } catch (err) {
+      this.postMessage({ type: "scm-test-error", provider, message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private testScmStandalone(provider: "github" | "gitlab"): void {
+    this.postMessage({ type: "scm-test-error", provider, message: `${provider === "github" ? "GitHub" : "GitLab"} connection test is not available in standalone mode. Save credentials and try in cloud mode.` });
   }
 
   private async switchOrg(
@@ -1899,6 +1927,7 @@ export class SettingsPanel {
           <div class="hint">Separate token for PR approvals (uses main token if blank)</div>
         </div>
         <div class="btn-row">
+          <button class="btn-secondary" id="btn-test-scm-github">Test Connection</button>
           <button class="btn-primary" id="btn-save-scm-github">Save</button>
         </div>
         <div id="scm-github-status" class="status"></div>
@@ -1930,6 +1959,7 @@ export class SettingsPanel {
           <div class="hint">Personal access token with api scope</div>
         </div>
         <div class="btn-row">
+          <button class="btn-secondary" id="btn-test-scm-gitlab">Test Connection</button>
           <button class="btn-primary" id="btn-save-scm-gitlab">Save</button>
         </div>
         <div id="scm-gitlab-status" class="status"></div>
@@ -2549,6 +2579,12 @@ export class SettingsPanel {
     document.getElementById("btn-test-scm-bitbucket").addEventListener("click", () => {
       vscode.postMessage({ type: "test-scm-bitbucket" });
     });
+    document.getElementById("btn-test-scm-github")?.addEventListener("click", () => {
+      vscode.postMessage({ type: "test-scm-github" });
+    });
+    document.getElementById("btn-test-scm-gitlab")?.addEventListener("click", () => {
+      vscode.postMessage({ type: "test-scm-gitlab" });
+    });
     document.getElementById("btn-save-scm-gitlab").addEventListener("click", () => {
       vscode.postMessage({
         type: "save-scm",
@@ -2608,7 +2644,8 @@ export class SettingsPanel {
       autosave("repo", 800, () => {
         const repo = document.getElementById("default-repo").value.trim();
         if (repo) {
-          vscode.postMessage({ type: "save-repo", defaultRepo: repo });
+          const activeScm = (document.querySelector('input[name="scm"]:checked') || {}).value || "github";
+          vscode.postMessage({ type: "save-repo", defaultRepo: repo, provider: activeScm });
           // Update RAG label to match
           if (indexRepoLabel) indexRepoLabel.textContent = repo;
         }
@@ -2637,8 +2674,7 @@ export class SettingsPanel {
           type: "save-worker-behavior",
           maxPerStoryRevisions: 0,
           maxReviewRevisions: parseInt(document.getElementById("wk-pr-revisions").value) || 0,
-          qualityGateMaxRetries: fixRetries,
-          maxCiFixRetries: fixRetries,
+          maxFixRetries: fixRetries,
           blockerWaitTimeoutMinutes: parseInt(document.getElementById("wk-blocker-timeout").value) || 20,
           pushAfterCommit: document.getElementById("wk-push-after-commit").checked,
           planningMode: document.getElementById("wk-planning-mode").value,
@@ -2951,7 +2987,7 @@ export class SettingsPanel {
         const wkBlockerTimeout = document.getElementById("wk-blocker-timeout");
         const wkPush = document.getElementById("wk-push-after-commit");
         if (wkPr) wkPr.value = String(d.maxReviewRevisions ?? 4);
-        if (wkFixRetries) wkFixRetries.value = String(d.qualityGateMaxRetries ?? 5);
+        if (wkFixRetries) wkFixRetries.value = String(d.maxFixRetries ?? 5);
         if (wkBlockerTimeout) wkBlockerTimeout.value = String(d.blockerWaitTimeoutMinutes ?? 20);
         if (wkPush) wkPush.checked = d.pushAfterCommit !== false;
 
@@ -3123,17 +3159,20 @@ export class SettingsPanel {
         const el = document.getElementById("scm-" + activeScm + "-status");
         if (el) showStatus(el, "error", msg.message || "Failed to save credentials");
       }
-      // SCM test messages — target the Bitbucket status div
+      // SCM test messages — target the active provider's status div
       if (msg.type === "scm-test-testing") {
-        const el = document.getElementById("scm-bitbucket-status");
+        const provider = msg.provider || (document.querySelector('input[name="scm"]:checked') || {}).value || "github";
+        const el = document.getElementById("scm-" + provider + "-status");
         if (el) showStatus(el, "info", "Testing connection...");
       }
       if (msg.type === "scm-test-success") {
-        const el = document.getElementById("scm-bitbucket-status");
+        const provider = msg.provider || (document.querySelector('input[name="scm"]:checked') || {}).value || "github";
+        const el = document.getElementById("scm-" + provider + "-status");
         if (el) { showStatus(el, "success", msg.message); setTimeout(() => el.classList.remove("visible"), 3000); }
       }
       if (msg.type === "scm-test-error") {
-        const el = document.getElementById("scm-bitbucket-status");
+        const provider = msg.provider || (document.querySelector('input[name="scm"]:checked') || {}).value || "github";
+        const el = document.getElementById("scm-" + provider + "-status");
         if (el) showStatus(el, "error", msg.message);
       }
 

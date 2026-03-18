@@ -154,13 +154,18 @@ export async function initSelfHostedCommand(): Promise<void> {
     needsPrompt = true;
   }
 
-  // Auto-detect GitHub token
-  const ghToken = existing.scm?.token || detectGitHubToken();
-  if (ghToken) {
-    const masked = ghToken.slice(0, 8) + "..." + ghToken.slice(-4);
+  // Auto-detect SCM credentials from existing config or environment
+  const existingScmProvider = existing.scm?.provider || "github";
+  const autoGhToken = (existingScmProvider === "github" && existing.scm?.token) || detectGitHubToken();
+
+  if (existing.scm?.token) {
+    const masked = existing.scm.token.slice(0, 8) + "..." + existing.scm.token.slice(-4);
+    console.log(`  ${chalk.green("✓")} ${existingScmProvider} credentials: ${masked}`);
+  } else if (autoGhToken) {
+    const masked = autoGhToken.slice(0, 8) + "..." + autoGhToken.slice(-4);
     console.log(`  ${chalk.green("✓")} GitHub token: ${masked}`);
   } else {
-    console.log(`  ${chalk.yellow("⚠")} No GitHub token found`);
+    console.log(`  ${chalk.yellow("⚠")} No SCM credentials found`);
     needsPrompt = true;
   }
 
@@ -172,9 +177,8 @@ export async function initSelfHostedCommand(): Promise<void> {
 
   console.log();
 
-  // Prompt for missing credentials
+  // Prompt for missing AI key
   let finalAiKey = aiKey || "";
-  let finalGhToken = ghToken || "";
 
   if (!aiKey) {
     const { key } = await inquirer.prompt([{
@@ -187,16 +191,73 @@ export async function initSelfHostedCommand(): Promise<void> {
     finalAiKey = key;
   }
 
-  if (!ghToken) {
-    console.log(chalk.dim("  Tip: Run 'gh auth login' first for automatic detection."));
-    const { token } = await inquirer.prompt([{
-      type: "password",
-      name: "token",
-      message: "GitHub token (for pushing branches/PRs):",
-      mask: "*",
-      validate: (v: string) => v.length > 0 || "Token is required to push code",
+  // SCM provider selection and credentials
+  let scmProvider = existingScmProvider;
+  let scmToken = existing.scm?.token || autoGhToken || "";
+  let scmUsername = (existing.scm as Record<string, string> | undefined)?.username || "";
+
+  if (!scmToken) {
+    const { provider } = await inquirer.prompt([{
+      type: "list",
+      name: "provider",
+      message: "Source control provider:",
+      choices: [
+        { name: "GitHub", value: "github" },
+        { name: "Bitbucket", value: "bitbucket" },
+        { name: "GitLab", value: "gitlab" },
+      ],
+      default: existingScmProvider,
     }]);
-    finalGhToken = token;
+    scmProvider = provider;
+
+    if (provider === "github") {
+      console.log(chalk.dim("  Tip: Run 'gh auth login' first for automatic detection."));
+      const { token } = await inquirer.prompt([{
+        type: "password",
+        name: "token",
+        message: "GitHub token (for pushing branches/PRs):",
+        mask: "*",
+        validate: (v: string) => v.length > 0 || "Token is required to push code",
+      }]);
+      scmToken = token;
+    } else if (provider === "bitbucket") {
+      const { username } = await inquirer.prompt([{
+        type: "input",
+        name: "username",
+        message: "Bitbucket username:",
+        validate: (v: string) => v.length > 0 || "Username is required",
+      }]);
+      scmUsername = username;
+      const { appPassword } = await inquirer.prompt([{
+        type: "password",
+        name: "appPassword",
+        message: "Bitbucket app password (with repo + PR permissions):",
+        mask: "*",
+        validate: (v: string) => v.length > 0 || "App password is required to push code",
+      }]);
+      scmToken = appPassword;
+    } else if (provider === "gitlab") {
+      const { token } = await inquirer.prompt([{
+        type: "password",
+        name: "token",
+        message: "GitLab personal access token (with api scope):",
+        mask: "*",
+        validate: (v: string) => v.length > 0 || "Token is required to push code",
+      }]);
+      scmToken = token;
+    }
+  }
+
+  // Default repository
+  let finalDefaultRepo = defaultRepo;
+  if (!defaultRepo) {
+    const repoExample = scmProvider === "bitbucket" ? "workspace/repo" : "owner/repo";
+    const { repo } = await inquirer.prompt([{
+      type: "input",
+      name: "repo",
+      message: `Default repository (e.g., ${repoExample}):`,
+    }]);
+    finalDefaultRepo = repo;
   }
 
   // Save config — preserve existing roles if present (re-run safety)
@@ -209,10 +270,11 @@ export async function initSelfHostedCommand(): Promise<void> {
     mode: "self-hosted",
     roles: existing.roles || defaultRoles,
     scm: {
-      provider: "github",
-      token: finalGhToken,
+      provider: scmProvider,
+      token: scmToken,
+      ...(scmUsername ? { username: scmUsername } : {}),
     },
-    defaultRepo: defaultRepo || undefined,
+    defaultRepo: finalDefaultRepo || undefined,
     sandbox: "docker",
     settings: existing.settings || {
       maxParallelExperts: 14,
@@ -223,8 +285,7 @@ export async function initSelfHostedCommand(): Promise<void> {
       criticApprovalThreshold: 90,
       maxPerStoryRevisions: 0,
       maxReviewRevisions: 4,
-      qualityGateMaxRetries: 5,
-      maxCiFixRetries: 5,
+      maxFixRetries: 5,
       blockerWaitTimeoutMinutes: 20,
       pushAfterCommit: true,
       blockerAutoRetryEnabled: true,

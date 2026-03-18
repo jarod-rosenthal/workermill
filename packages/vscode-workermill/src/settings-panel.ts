@@ -422,8 +422,8 @@ export class SettingsPanel {
         // SCM
         scmProvider: scm.provider || "github",
         github: { configured: scm.provider === "github" && !!scm.token, defaultRepo: sc.defaultRepo || "" },
-        bitbucket: { configured: scm.provider === "bitbucket" && !!scm.token },
-        gitlab: { configured: scm.provider === "gitlab" && !!scm.token },
+        bitbucket: { configured: scm.provider === "bitbucket" && !!scm.token, defaultRepo: sc.defaultRepo || "" },
+        gitlab: { configured: scm.provider === "gitlab" && !!scm.token, defaultRepo: sc.defaultRepo || "" },
         // Tracker — standalone supports all providers
         defaultIssueTracker: (sc.issueTracker as Record<string, unknown>)?.provider || "internal",
         jira: {

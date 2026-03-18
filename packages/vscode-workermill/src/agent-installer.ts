@@ -930,9 +930,15 @@ export function readAgentStartupError(): string | null {
       }
     }
 
-    // Fallback: return the last non-empty line
+    // Fallback: return the last non-empty line, but only if it looks like an error.
+    // Skip known progress messages that appear during normal startup.
     if (tail.length > 0) {
-      return tail[tail.length - 1].trim();
+      const last = tail[tail.length - 1].trim();
+      // Don't report progress messages as errors
+      if (/Starting self-hosted|Waiting for API|Pulling|Image tag|Updating|Stack running|Connected|Polling|Agent is running|starting agent|Starting agent|Dashboard/i.test(last)) {
+        return null;
+      }
+      return last;
     }
 
     return null;

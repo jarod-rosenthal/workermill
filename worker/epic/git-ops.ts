@@ -1296,26 +1296,16 @@ export class GitOps {
    */
   private installPreCommitHook(worktreePath: string): void {
     try {
-      const hooksDir = path.join(worktreePath, ".git", "hooks");
-      // Worktree .git is a file pointing to the main repo's worktree dir.
-      // The actual hooks dir is inside the worktree's git dir.
-      const gitFile = path.join(worktreePath, ".git");
-      let actualHooksDir: string;
-      if (existsSync(gitFile) && !readdirSync(path.dirname(gitFile)).includes(".git")) {
-        // .git is a file — read the gitdir reference
-        const content = readFileSync(gitFile, "utf-8").trim();
-        const gitdirMatch = content.match(/^gitdir:\s*(.+)$/);
-        if (gitdirMatch) {
-          const gitdir = path.resolve(worktreePath, gitdirMatch[1]);
-          actualHooksDir = path.join(gitdir, "hooks");
-        } else {
-          actualHooksDir = hooksDir;
-        }
-      } else {
-        actualHooksDir = hooksDir;
+      // In a worktree, .git is a file (pointer), not a directory.
+      // Skip hook installation — the quality runner handles gate enforcement
+      // after execution, so hooks here are redundant.
+      const gitPath = path.join(worktreePath, ".git");
+      if (existsSync(gitPath) && !lstatSync(gitPath).isDirectory()) {
+        return;
       }
 
-      mkdirSync(actualHooksDir, { recursive: true });
+      const hooksDir = path.join(worktreePath, ".git", "hooks");
+      mkdirSync(hooksDir, { recursive: true });
 
       // Only unstage dangerous dirs — do NOT modify .gitignore (PRD may specify exact content)
       const UNSTAGE_DIRS = [".next", "dist", "build", "out", ".nuxt", ".output", ".svelte-kit", "node_modules", "__pycache__", ".venv", "venv"];

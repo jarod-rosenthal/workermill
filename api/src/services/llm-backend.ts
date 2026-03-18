@@ -214,7 +214,7 @@ class ClaudeCliBackend implements LLMBackend {
   private claudePath: string;
 
   constructor() {
-    this.claudePath = process.env.CLAUDE_CLI_PATH || "/home/user/.local/bin/claude";
+    this.claudePath = process.env.CLAUDE_CLI_PATH || "claude";
   }
 
   async generate(options: LLMGenerateOptions): Promise<LLMGenerateResult> {

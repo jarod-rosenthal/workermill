@@ -247,9 +247,31 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
   }
 
   // LOCAL MODE: Use local Claude CLI planning path (spawns claude process directly)
+  // But ONLY if no remote agent is connected — in self-hosted mode, the remote
+  // agent handles planning on the host where Claude CLI is installed.
   const isLocalMode = isClaudeCliMode();
   if (isLocalMode) {
-    logger.info("Local mode detected — using local Claude CLI planning path", {
+    // Check if a remote agent has heartbeated recently (last 60s)
+    const { RemoteAgent } = await import("../models/index.js");
+    const agentRepo = AppDataSource.getRepository(RemoteAgent);
+    const recentAgent = await agentRepo
+      .createQueryBuilder("agent")
+      .where("agent.orgId = :orgId", { orgId: task.orgId })
+      .andWhere("agent.lastHeartbeatAt > :since", {
+        since: new Date(Date.now() - 60_000),
+      })
+      .getOne();
+
+    if (recentAgent) {
+      // Remote agent is connected — leave planning to it
+      logger.info("Remote agent connected — skipping local planning, agent will handle it", {
+        taskId: task.id,
+        agentId: recentAgent.agentId,
+      });
+      return;
+    }
+
+    logger.info("Local mode, no remote agent — using local Claude CLI planning path", {
       taskId: task.id,
       executionMode: process.env.EXECUTION_MODE,
     });

@@ -23,7 +23,7 @@ export interface AgentConfig {
   bitbucketToken: string;
   gitlabToken: string;
   githubReviewerToken: string;
-  sandbox: "none" | "docker";
+  sandbox: "docker";
   dockerImage: string;
   dockerMemoryGb: number;
   localRag: boolean;
@@ -128,7 +128,7 @@ export function loadConfigFromFile(): AgentConfig {
     bitbucketToken: fc.tokens?.bitbucket || "",
     gitlabToken: fc.tokens?.gitlab || "",
     githubReviewerToken: fc.tokens?.githubReviewer || "",
-    sandbox: fc.sandbox || "none",
+    sandbox: "docker",
     dockerImage: fc.dockerImage || "ghcr.io/jarod-rosenthal/worker",
     dockerMemoryGb: fc.dockerMemoryGb || 4,
     localRag: fc.localRag ?? false,
@@ -184,7 +184,7 @@ export function loadConfig(): AgentConfig {
     bitbucketToken: process.env.BITBUCKET_TOKEN || "",
     gitlabToken: process.env.GITLAB_TOKEN || "",
     githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN || "",
-    sandbox: sandboxEnv === "docker" ? "docker" : "none",
+    sandbox: "docker",
     dockerImage: process.env.WORKERMILL_DOCKER_IMAGE || "ghcr.io/jarod-rosenthal/worker",
     dockerMemoryGb: parseInt(process.env.WORKERMILL_DOCKER_MEMORY_GB || "4", 10),
     localRag: process.env.WORKERMILL_LOCAL_RAG === "true",

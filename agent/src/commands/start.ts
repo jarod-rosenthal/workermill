@@ -128,7 +128,7 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
       bitbucketToken: sc.scm?.provider === "bitbucket" ? (sc.scm?.token || "") : "",
       gitlabToken: sc.scm?.provider === "gitlab" ? (sc.scm?.token || "") : "",
       githubReviewerToken: "",
-      sandbox: (sc.sandbox === "none" ? "none" : "docker") as "docker" | "none",
+      sandbox: "docker",
       dockerImage: "ghcr.io/jarod-rosenthal/worker",
       dockerMemoryGb: 4,
       localRag: false,

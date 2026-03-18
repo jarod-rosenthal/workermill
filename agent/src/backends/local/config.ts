@@ -54,7 +54,7 @@ export interface StandaloneConfig {
     // github-issues uses scm.token — no extra credentials needed
   };
   defaultRepo?: string;
-  sandbox?: "docker" | "none";
+  sandbox?: "docker";
   settings?: {
     maxParallelExperts?: number;
     maxStories?: number;

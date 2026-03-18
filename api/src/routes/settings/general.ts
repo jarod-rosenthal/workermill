@@ -682,8 +682,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     if (maxReviewRevisions !== undefined) {
       const value = Number(maxReviewRevisions);
-      if (isNaN(value) || value < 1 || value > 10) {
-        res.status(400).json({ error: "maxReviewRevisions must be between 1 and 10" });
+      // 0 = tech lead review disabled
+      if (isNaN(value) || value < 0 || value > 10) {
+        res.status(400).json({ error: "maxReviewRevisions must be between 0 and 10" });
         return;
       }
       org.maxReviewRevisions = value;

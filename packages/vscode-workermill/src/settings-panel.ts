@@ -239,6 +239,8 @@ export class SettingsPanel {
           this.saveJiraStandalone(msg);
         } else if (msg.type === "test-jira") {
           this.testJiraStandalone();
+        } else if (msg.type === "test-scm-bitbucket") {
+          this.testBitbucketStandalone();
         } else if (msg.type === "save-linear") {
           this.saveLinearStandalone(msg);
         } else if (msg.type === "open-dashboard" || msg.type === "open-web-settings" || msg.type === "open-pricing") {
@@ -265,13 +267,19 @@ export class SettingsPanel {
       } else if (msg.type === "save-tracker") {
         await this.saveTracker(config, msg.tracker);
       } else if (msg.type === "open-dashboard") {
-        vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/dashboard`));
+        // Self-hosted: API is localhost:3001 but frontend is localhost:5173
+        const dashboardBase = config.apiUrl.includes("localhost:3001") ? "http://localhost:5173" : config.apiUrl;
+        vscode.env.openExternal(vscode.Uri.parse(`${dashboardBase}/dashboard`));
       } else if (msg.type === "save-repo") {
         await this.saveRepo(config, msg.defaultRepo);
       } else if (msg.type === "save-scm") {
         await this.saveScm(config, msg);
+      } else if (msg.type === "test-scm-bitbucket") {
+        await this.testBitbucket(config);
       } else if (msg.type === "open-web-settings") {
-        vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/settings`));
+        // Self-hosted: API is localhost:3001 but frontend is localhost:5173
+        const settingsBase = config.apiUrl.includes("localhost:3001") ? "http://localhost:5173" : config.apiUrl;
+        vscode.env.openExternal(vscode.Uri.parse(`${settingsBase}/settings`));
       } else if (msg.type === "open-pricing") {
         vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/pricing`));
       } else if (msg.type === "save-models") {
@@ -511,7 +519,7 @@ export class SettingsPanel {
         token = msg.token || "";
       }
 
-      sc.scm = { provider: msg.provider, token };
+      sc.scm = { provider: msg.provider, token, ...(msg.username ? { username: msg.username } : {}) };
       writeStandaloneConfigFile(sc);
       this.postMessage({ type: "scm-saved", message: `${msg.provider} credentials saved` });
       // Reload to reflect new state
@@ -593,6 +601,39 @@ export class SettingsPanel {
       this.postMessage({ type: "test-success", message: `Connected as ${data.displayName || "unknown"}` });
     } catch (err) {
       this.postMessage({ type: "test-error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async testBitbucketStandalone(): Promise<void> {
+    try {
+      this.postMessage({ type: "scm-test-testing" });
+      const sc = readStandaloneConfigFile();
+      const scm = sc.scm as { provider?: string; token?: string; username?: string } | undefined;
+      if (!scm?.token || scm.provider !== "bitbucket") {
+        this.postMessage({ type: "scm-test-error", message: "Save Bitbucket credentials first" });
+        return;
+      }
+      const token = scm.token;
+      const username = scm.username || "";
+      // If username is present, use Basic auth (App Password); otherwise Bearer (Repo Access Token)
+      const authHeader = username
+        ? `Basic ${Buffer.from(`${username}:${token}`).toString("base64")}`
+        : `Bearer ${token}`;
+      const resp = await fetch("https://api.bitbucket.org/2.0/user", {
+        headers: { Authorization: authHeader, Accept: "application/json" },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!resp.ok) {
+        const msg = resp.status === 401
+          ? "Bitbucket authentication failed. Check your credentials."
+          : `Bitbucket connection failed (HTTP ${resp.status})`;
+        this.postMessage({ type: "scm-test-error", message: msg });
+        return;
+      }
+      const data = (await resp.json()) as { display_name?: string; username?: string };
+      this.postMessage({ type: "scm-test-success", message: `Connected as ${data.display_name || data.username || "unknown"}` });
+    } catch (err) {
+      this.postMessage({ type: "scm-test-error", message: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -935,11 +976,12 @@ export class SettingsPanel {
         body = { token: msg.token };
         if (msg.reviewerToken) body.reviewerToken = msg.reviewerToken;
       } else if (msg.provider === "bitbucket") {
-        if (!msg.username || !msg.appPassword) {
-          this.postMessage({ type: "scm-save-error", message: "Username and token are required" });
+        if (!msg.appPassword) {
+          this.postMessage({ type: "scm-save-error", message: "Token is required" });
           return;
         }
-        body = { username: msg.username, appPassword: msg.appPassword };
+        body = { appPassword: msg.appPassword };
+        if (msg.username) body.username = msg.username;
       } else if (msg.provider === "gitlab") {
         if (!msg.token) {
           this.postMessage({ type: "scm-save-error", message: "Token is required" });
@@ -1461,6 +1503,24 @@ export class SettingsPanel {
     }
   }
 
+  private async testBitbucket(config: { apiUrl: string; apiKey: string }): Promise<void> {
+    try {
+      this.postMessage({ type: "scm-test-testing" });
+      const { status, data } = await apiRequest<{ success?: boolean; message?: string; error?: string; user?: string }>(
+        "POST",
+        `${config.apiUrl}/api/settings/integrations/bitbucket/test`,
+        config.apiKey,
+      );
+      if (status >= 200 && status < 300 && (data as { success?: boolean }).success) {
+        this.postMessage({ type: "scm-test-success", message: `Connected as ${(data as { user?: string }).user || "unknown"}` });
+      } else {
+        this.postMessage({ type: "scm-test-error", message: (data as { error?: string }).error || `HTTP ${status}` });
+      }
+    } catch (err) {
+      this.postMessage({ type: "scm-test-error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   private async switchOrg(
     config: { apiUrl: string; apiKey: string },
     orgId: string,
@@ -1851,12 +1911,13 @@ export class SettingsPanel {
           <input type="text" id="scm-bb-username" placeholder="workspace/username" />
         </div>
         <div class="field">
-          <label>Repository Access Token</label>
-          <input type="password" id="scm-bb-token" placeholder="Repository access token" />
-          <div class="hint">Generate a Repository Access Token in Bitbucket repo settings</div>
+          <label>App Password or Repository Access Token</label>
+          <input type="password" id="scm-bb-token" placeholder="App password or repository access token" />
+          <div class="hint">App Password (requires username above) or Repository Access Token (username optional, defaults to x-token-auth)</div>
         </div>
         <div class="btn-row">
           <button class="btn-primary" id="btn-save-scm-bitbucket">Save</button>
+          <button class="btn-secondary" id="btn-test-scm-bitbucket">Test Connection</button>
         </div>
         <div id="scm-bitbucket-status" class="status"></div>
       </div>
@@ -2485,6 +2546,9 @@ export class SettingsPanel {
         appPassword: document.getElementById("scm-bb-token").value.trim(),
       });
     });
+    document.getElementById("btn-test-scm-bitbucket").addEventListener("click", () => {
+      vscode.postMessage({ type: "test-scm-bitbucket" });
+    });
     document.getElementById("btn-save-scm-gitlab").addEventListener("click", () => {
       vscode.postMessage({
         type: "save-scm",
@@ -3058,6 +3122,19 @@ export class SettingsPanel {
         const activeScm = (document.querySelector('input[name="scm"]:checked') || {}).value || "github";
         const el = document.getElementById("scm-" + activeScm + "-status");
         if (el) showStatus(el, "error", msg.message || "Failed to save credentials");
+      }
+      // SCM test messages — target the Bitbucket status div
+      if (msg.type === "scm-test-testing") {
+        const el = document.getElementById("scm-bitbucket-status");
+        if (el) showStatus(el, "info", "Testing connection...");
+      }
+      if (msg.type === "scm-test-success") {
+        const el = document.getElementById("scm-bitbucket-status");
+        if (el) { showStatus(el, "success", msg.message); setTimeout(() => el.classList.remove("visible"), 3000); }
+      }
+      if (msg.type === "scm-test-error") {
+        const el = document.getElementById("scm-bitbucket-status");
+        if (el) showStatus(el, "error", msg.message);
       }
 
       // Sandbox messages

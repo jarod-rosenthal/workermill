@@ -27,6 +27,7 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
   // Production-tested defaults from workermill-examples org
   const DEFAULTS: Partial<Organization> = {
     plan: "enterprise",
+    slug: "local",
     scmProvider: "github",
     maxConcurrentWorkers: 1,
     // Models
@@ -44,6 +45,7 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
     maxFixRetries: 5,
     maxTargetFiles: 6,
     // Planning
+    // 90 matches production (workermill-examples org). CLAUDE.md mentions 85 but that's outdated.
     criticApprovalThreshold: 90,
     planningMode: "simplified",
     prdPlanningMode: "strict",
@@ -57,7 +59,7 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
     autoFixEnabled: true,
     autoFixMaxIterations: 3,
     // Behavior
-    autoReviewEnabled: true,
+    autoReviewEnabled: false,
     selfReviewEnabled: false,
     pushAfterCommit: true,
     gracefulShutdownEnabled: true,

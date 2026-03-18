@@ -132,6 +132,7 @@ export class AgentClient extends EventEmitter {
 
   /** Try to discover and connect to the agent */
   async connect(): Promise<boolean> {
+    this.reconnectAttempts = 0;
     this.port = this.discoverPort();
     this.token = this.discoverToken();
     if (!this.port) {

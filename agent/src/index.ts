@@ -111,10 +111,12 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
     );
   }
 
-  console.log();
-  console.log(chalk.bold.cyan("  WorkerMill Remote Agent"));
-  console.log(chalk.dim("  ─────────────────────────────────────"));
-  console.log();
+  if (!selfHosted) {
+    console.log();
+    console.log(chalk.bold.cyan("  WorkerMill Remote Agent"));
+    console.log(chalk.dim("  ─────────────────────────────────────"));
+    console.log();
+  }
 
   // Initialize API client
   initApi(config.apiUrl, config.apiKey);

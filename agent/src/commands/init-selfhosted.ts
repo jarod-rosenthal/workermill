@@ -37,7 +37,7 @@ services:
       POSTGRES_PASSWORD: localdev
       POSTGRES_DB: workermill
     ports:
-      - "5434:5432"
+      - "127.0.0.1:5434:5432"
     volumes:
       - workermill-data:/var/lib/postgresql/data
     healthcheck:
@@ -51,7 +51,7 @@ services:
     image: redis:7-alpine
     container_name: workermill-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -63,14 +63,14 @@ services:
     image: ghcr.io/jarod-rosenthal/api:latest
     container_name: workermill-api
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     environment:
+      # Must be 'development' — the API blocks EXECUTION_MODE=local in production mode (api/src/index.ts line 99)
       NODE_ENV: development
       PORT: "3001"
       EXECUTION_MODE: local
       DATABASE_URL: postgresql://workermill:localdev@postgres:5432/workermill
       REDIS_URL: redis://redis:6379
-      NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
       postgres:
         condition: service_healthy
@@ -88,7 +88,7 @@ services:
     image: ghcr.io/jarod-rosenthal/frontend:latest
     container_name: workermill-frontend
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     depends_on:
       api:
         condition: service_healthy
@@ -199,14 +199,15 @@ export async function initSelfHostedCommand(): Promise<void> {
     finalGhToken = token;
   }
 
-  // Save config
+  // Save config — preserve existing roles if present (re-run safety)
+  const defaultRoles = {
+    planner: { provider: "anthropic", model: "claude-opus-4-6", ...(finalAiKey && !aiKey ? { apiKey: finalAiKey } : {}) },
+    worker: { provider: "anthropic", model: "claude-sonnet-4-6", ...(finalAiKey && !aiKey ? { apiKey: finalAiKey } : {}) },
+    techLead: { provider: "anthropic", model: "claude-opus-4-6", ...(finalAiKey && !aiKey ? { apiKey: finalAiKey } : {}) },
+  };
   const config: StandaloneConfig = {
     mode: "self-hosted",
-    roles: {
-      planner: { provider: "anthropic", model: "claude-opus-4-6", ...(finalAiKey && !aiKey ? { apiKey: finalAiKey } : {}) },
-      worker: { provider: "anthropic", model: "claude-sonnet-4-6", ...(finalAiKey && !aiKey ? { apiKey: finalAiKey } : {}) },
-      techLead: { provider: "anthropic", model: "claude-opus-4-6", ...(finalAiKey && !aiKey ? { apiKey: finalAiKey } : {}) },
-    },
+    roles: existing.roles || defaultRoles,
     scm: {
       provider: "github",
       token: finalGhToken,
@@ -240,6 +241,12 @@ export async function initSelfHostedCommand(): Promise<void> {
     },
   };
 
+  // Delete bootstrap-done flag so credentials are re-synced on next startup
+  const bootstrapFlag = path.join(os.homedir(), ".workermill", ".bootstrap-done");
+  if (fs.existsSync(bootstrapFlag)) {
+    try { fs.unlinkSync(bootstrapFlag); } catch { /* best effort */ }
+  }
+
   saveStandaloneConfig(config);
 
   // Write docker-compose.yml to ~/.workermill/ so the compiled binary can find it
@@ -248,7 +255,9 @@ export async function initSelfHostedCommand(): Promise<void> {
     fs.mkdirSync(wmDir, { recursive: true });
   }
   const composePath = path.join(wmDir, "docker-compose.yml");
-  fs.writeFileSync(composePath, COMPOSE_FILE_CONTENT, { encoding: "utf-8" });
+  if (!fs.existsSync(composePath)) {
+    fs.writeFileSync(composePath, COMPOSE_FILE_CONTENT, { encoding: "utf-8" });
+  }
 
   console.log();
   console.log(`  ${chalk.green("✓")} Configuration saved to ~/.workermill/config.json`);

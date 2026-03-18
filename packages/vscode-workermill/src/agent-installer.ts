@@ -781,6 +781,7 @@ export function startAgentProcess(log?: (msg: string) => void): void {
     });
 
     child.unref();
+    startInFlight = false;
 
     // Write PID file immediately so subsequent calls see it before the agent
     // async startup writes its own. The agent will overwrite with the same PID.

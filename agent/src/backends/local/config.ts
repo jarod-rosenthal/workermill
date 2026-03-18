@@ -45,6 +45,7 @@ export interface StandaloneConfig {
   scm?: {
     provider: string;
     token: string;
+    username?: string;
   };
   issueTracker?: {
     provider: "internal" | "jira" | "linear" | "github-issues";

@@ -43,6 +43,25 @@ router.get(
       return;
     }
 
+    // Local mode: read logs from worker_task_logs table instead of ECS/CloudWatch
+    if (process.env.EXECUTION_MODE === "local") {
+      const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+      const logs = await logRepo.find({
+        where: { taskId: id },
+        order: { createdAt: "ASC" },
+        take: Number(limit),
+      });
+      res.json({
+        events: logs.map((l) => ({
+          type: l.type,
+          message: l.message,
+          severity: l.severity,
+          timestamp: l.createdAt,
+        })),
+      });
+      return;
+    }
+
     if (!task.ecsTaskId) {
       res.json({ events: [], message: "Task has not started yet" });
       return;
@@ -241,7 +260,13 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
     }
 
     // Atomic update — only writes the fields we changed, won't clobber concurrent updates
-    await taskRepo.update({ id: taskId, orgId: org.id }, updates);
+    // Match both orgId and billingOrgId (same WHERE as the findOne above)
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set(updates)
+      .where("id = :id AND (org_id = :orgId OR billing_org_id = :orgId)", { id: taskId, orgId: org.id })
+      .execute();
 
     // Sync InternalTask status and board column when worker completes
     if (task.internalTaskId && ["review_requested", "pr_created", "pr_approved", "completed", "deployed", "failed", "escalated"].includes(newStatus)) {
@@ -666,7 +691,25 @@ router.post("/:id/manager-complete", authenticateApiKey, async (req: Request, re
       logger.info("Manager approved, re-queueing for deployment", { taskId });
     }
 
-    await taskRepo.save(task);
+    // Atomic update — avoid .save() which clobbers concurrent changes
+    const managerUpdates: Record<string, unknown> = {
+      status: task.status,
+      reviewFeedback: task.reviewFeedback,
+    };
+    if (task.revisionCount !== undefined) managerUpdates.revisionCount = task.revisionCount;
+    if (task.taskNotes !== undefined) managerUpdates.taskNotes = task.taskNotes;
+    if (task.errorMessage !== undefined) managerUpdates.errorMessage = task.errorMessage;
+    if (task.completedAt === null) managerUpdates.completedAt = null;
+    if (task.ecsTaskArn === null) managerUpdates.ecsTaskArn = null;
+    if (task.ecsTaskId === null) managerUpdates.ecsTaskId = null;
+    if (task.startedAt === null) managerUpdates.startedAt = null;
+
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set(managerUpdates)
+      .where("id = :id AND (org_id = :orgId OR billing_org_id = :orgId)", { id: taskId, orgId: org.id })
+      .execute();
 
     // Post review decision to comms channel so workers can see it
     try {

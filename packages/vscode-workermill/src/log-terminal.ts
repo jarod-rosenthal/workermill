@@ -239,6 +239,7 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
     if (!this.pollTimer) {
       this.currentInterval = 4_000;
       this.consecutiveErrors = 0;
+      this.pollTimer = setInterval(() => this.pollCloudLogs(), this.currentInterval);
       this.pollCloudLogs();
     }
   }

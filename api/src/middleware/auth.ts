@@ -233,10 +233,17 @@ export async function authenticateApiKey(
     // Self-hosted mode: auto-authenticate with the local org
     if (process.env.EXECUTION_MODE === "local" && apiKey === "self-hosted") {
       const orgRepo = AppDataSource.getRepository(Organization);
-      const org = await orgRepo.findOne({ where: { name: "Local" } });
+      // Use first org in DB (stable across renames — self-hosted has only one org)
+      const org = await orgRepo.findOne({ where: {}, order: { createdAt: "ASC" } });
       if (org) {
         req.organization = org;
         req.orgRole = "admin";
+        // Also set req.user so downstream handlers have a user context
+        const userRepo = AppDataSource.getRepository(User);
+        const user = await userRepo.findOne({ where: { orgId: org.id, role: "admin" } });
+        if (user) {
+          req.user = user;
+        }
         next();
         return;
       }
@@ -483,10 +490,17 @@ export async function authenticateSSE(
         // Self-hosted mode: auto-authenticate with the local org
         if (process.env.EXECUTION_MODE === "local" && apiKey === "self-hosted") {
           const orgRepo = AppDataSource.getRepository(Organization);
-          const org = await orgRepo.findOne({ where: { name: "Local" } });
+          // Use first org in DB (stable across renames — self-hosted has only one org)
+          const org = await orgRepo.findOne({ where: {}, order: { createdAt: "ASC" } });
           if (org) {
             req.organization = org;
             req.orgRole = "admin";
+            // Also set req.user so downstream handlers have a user context
+            const userRepo2 = AppDataSource.getRepository(User);
+            const user2 = await userRepo2.findOne({ where: { orgId: org.id, role: "admin" } });
+            if (user2) {
+              req.user = user2;
+            }
             next();
             return;
           }

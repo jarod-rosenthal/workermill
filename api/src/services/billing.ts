@@ -686,7 +686,7 @@ export async function canCreateTask(org: Organization): Promise<{
 
   // Pro plan: allow during active trial OR with active Stripe subscription
   if (org.plan === "pro") {
-    // Active Stripe subscription — always allow
+    // Active Stripe subscription — fall through to quota check below
     if (
       org.stripeSubscriptionStatus === "active" ||
       org.stripeSubscriptionStatus === "trialing"
@@ -702,13 +702,14 @@ export async function canCreateTask(org: Organization): Promise<{
           "Your Pro trial has expired. Subscribe to continue using WorkerMill.",
         usage: { used: org.taskUsageThisMonth, quota: -1 },
       };
+    } else {
+      // trialExpiresAt is null and no subscription — block (no valid entitlement)
+      return {
+        allowed: false,
+        reason: "No active subscription or trial. Subscribe to start using WorkerMill.",
+        usage: { used: org.taskUsageThisMonth, quota: -1 },
+      };
     }
-    // trialExpiresAt is null and no subscription — block (no valid entitlement)
-    return {
-      allowed: false,
-      reason: "No active subscription or trial. Subscribe to start using WorkerMill.",
-      usage: { used: org.taskUsageThisMonth, quota: -1 },
-    };
   }
 
   // Check subscription status for paid plans (Max and Enterprise require active subscription)

@@ -72,6 +72,7 @@ export async function startCompose(
 
   // Pin API + frontend image tags to the agent version, fall back to :latest
   // Same pattern as docker-spawner: try versioned tag, use latest if not available
+  let pinnedComposeFile: string | null = null;
   try {
     let content = fs.readFileSync(composeFile, "utf-8");
     const versionedTag = DOCKER_IMAGE_TAG; // e.g. "0.10.242" or "latest" in dev
@@ -98,23 +99,29 @@ export async function startCompose(
       /ghcr\.io\/jarod-rosenthal\/frontend:[^\s"]+/g,
       `ghcr.io/jarod-rosenthal/frontend:${tag}`,
     );
-    fs.writeFileSync(composeFile, content);
+    // Write tag-pinned version to a temp file so the original is never mutated
+    pinnedComposeFile = path.join(os.homedir(), ".workermill", "docker-compose.pinned.yml");
+    fs.writeFileSync(pinnedComposeFile, content);
     log?.(`Image tags pinned to ${tag}`);
   } catch {
     // Non-fatal — compose will use whatever tags are in the file
   }
 
+  // Use the pinned file if available, otherwise the original
+  const effectiveComposeFile = pinnedComposeFile || composeFile;
+  const effectiveComposeDir = path.dirname(effectiveComposeFile);
+
   const alreadyRunning = await isStackHealthy();
   log?.(alreadyRunning
     ? "Updating self-hosted stack..."
-    : `Starting self-hosted stack from ${composeFile}`);
+    : `Starting self-hosted stack from ${effectiveComposeFile}`);
 
   // Pull and start services — use spawn instead of execFileSync to avoid
   // output buffer deadlock on large image pulls
   try {
     const { spawnSync } = await import("child_process");
-    const result = spawnSync(docker, ["compose", "-f", composeFile, "up", "-d", "--pull", "always"], {
-      cwd: composeDir,
+    const result = spawnSync(docker, ["compose", "-f", effectiveComposeFile, "up", "-d", "--pull", "always"], {
+      cwd: effectiveComposeDir,
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 600_000, // 10 minutes — first-time image pulls can be slow
       windowsHide: true,

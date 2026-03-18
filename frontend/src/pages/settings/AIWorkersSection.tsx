@@ -324,7 +324,7 @@ export function AIWorkersSection({
                 <div className="flex items-center gap-4">
                   <input
                     type="range"
-                    min="1"
+                    min="0"
                     max="10"
                     value={settings.maxReviewRevisions}
                     onChange={(e) => updateSetting("maxReviewRevisions", parseInt(e.target.value))}
@@ -335,7 +335,8 @@ export function AIWorkersSection({
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Circuit breaker for consolidated PR review. If the Tech Lead requests changes this many times, the task will be escalated.
+                  {/* 0 = tech lead review disabled */}
+                  Circuit breaker for consolidated PR review. Set to 0 to disable tech lead review. Otherwise, the task will be escalated after this many revision rounds.
                 </p>
               </div>
               {/* Max Per-Story Revisions */}

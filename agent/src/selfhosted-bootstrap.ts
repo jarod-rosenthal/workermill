@@ -30,6 +30,7 @@ export async function bootstrapSelfHostedCredentials(
   }
 
   const sc = loadStandaloneConfig();
+  let hasErrors = false;
 
   // Bootstrap AI provider credentials — check all three roles for keys,
   // deduplicate by provider so we only save each provider's key once.
@@ -55,6 +56,7 @@ export async function bootstrapSelfHostedCredentials(
       log?.(`Synced ${rc.provider} credentials`);
     } catch (err) {
       log?.(`Warning: failed to sync ${rc.provider} credentials: ${err instanceof Error ? err.message : String(err)}`);
+      hasErrors = true;
     }
   }
 
@@ -73,12 +75,14 @@ export async function bootstrapSelfHostedCredentials(
         });
       } else if (provider === "bitbucket") {
         await api.put("/api/settings/integrations/bitbucket", {
-          token: sc.scm.token,
+          username: sc.scm.username || "",
+          appPassword: sc.scm.token,
         });
       }
       log?.(`Synced ${provider} credentials`);
     } catch (err) {
       log?.(`Warning: failed to sync ${provider} credentials: ${err instanceof Error ? err.message : String(err)}`);
+      hasErrors = true;
     }
   }
 
@@ -104,6 +108,7 @@ export async function bootstrapSelfHostedCredentials(
       log?.("Synced Jira credentials");
     } catch (err) {
       log?.(`Warning: failed to sync Jira credentials: ${err instanceof Error ? err.message : String(err)}`);
+      hasErrors = true;
     }
   }
 
@@ -115,9 +120,13 @@ export async function bootstrapSelfHostedCredentials(
       log?.("Synced Linear credentials");
     } catch (err) {
       log?.(`Warning: failed to sync Linear credentials: ${err instanceof Error ? err.message : String(err)}`);
+      hasErrors = true;
     }
   }
 
   // Mark bootstrap as done so user changes in the UI are never overwritten
-  try { fs.writeFileSync(FLAG_FILE, new Date().toISOString()); } catch {}
+  // Only write the flag if all syncs succeeded — otherwise next startup will retry
+  if (!hasErrors) {
+    try { fs.writeFileSync(FLAG_FILE, new Date().toISOString()); } catch {}
+  }
 }

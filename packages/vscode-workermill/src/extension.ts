@@ -1293,6 +1293,8 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         if (Date.now() - startTime > 300_000) clearInterval(checkInterval);
       }, 2000);
+      // Ensure the polling interval is cleaned up when the extension deactivates
+      context.subscriptions.push({ dispose: () => clearInterval(checkInterval) });
     }),
 
     vscode.commands.registerCommand("workermill.configureScm", async () => {

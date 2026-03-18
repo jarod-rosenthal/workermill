@@ -22,6 +22,7 @@
 import "dotenv/config";
 import { StandardExecutor } from "./executor.js";
 import type { StandardConfig } from "./types.js";
+import { getTicketLabel } from "../epic/types.js";
 
 /**
  * Load configuration from environment variables.
@@ -104,7 +105,7 @@ async function main(): Promise<void> {
     console.log("Task ID: " + config.taskId);
     console.log("Persona: " + config.persona);
     console.log("Target Repo: " + config.targetRepo);
-    console.log("Jira Issue: " + (config.jiraIssueKey || "N/A"));
+    console.log(getTicketLabel() + ": " + (config.jiraIssueKey || "N/A"));
     console.log("Model: " + (config.model || "sonnet (default)"));
     console.log("Review Enabled: " + config.reviewEnabled);
     console.log("Deploy Enabled: " + config.deploymentEnabled);

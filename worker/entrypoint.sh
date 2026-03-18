@@ -1171,7 +1171,14 @@ fi
 
 post_log "system" "Starting WorkerMill AI Worker"
 post_log "system" "Task ID: ${TASK_ID}"
-post_log "system" "Jira Issue: ${JIRA_ISSUE_KEY}"
+# Use the correct ticket system label based on TICKET_SYSTEM env var
+case "${TICKET_SYSTEM:-internal}" in
+  jira)   _TICKET_LABEL="Jira" ;;
+  linear) _TICKET_LABEL="Linear" ;;
+  github) _TICKET_LABEL="Issue" ;;
+  *)      _TICKET_LABEL="Ticket" ;;
+esac
+post_log "system" "${_TICKET_LABEL}: ${JIRA_ISSUE_KEY}"
 post_log "system" "Persona: ${WORKER_PERSONA}"
 post_log "system" "Model: ${CLAUDE_MODEL}"
 post_log "system" "Retry: ${RETRY_NUMBER:-0}"

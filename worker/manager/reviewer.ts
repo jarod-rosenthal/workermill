@@ -8,6 +8,7 @@
 import axios from "axios";
 import { runAgent } from "./agent-sdk.js";
 import { createDecisionClient, type DecisionClient } from "../epic/dist/decision-client.js";
+import { getTicketLabel } from "../epic/types.js";
 import type {
   ManagerConfig,
   ManagerResult,
@@ -174,7 +175,7 @@ export class PRReviewer {
   async review(): Promise<ManagerResult> {
     await this.postLog("Starting PR review", "system");
     await this.postLog(`PR: ${this.config.prUrl}`, "system");
-    await this.postLog(`Jira: ${this.config.jiraIssueKey}`, "system");
+    await this.postLog(`${getTicketLabel()}: ${this.config.jiraIssueKey}`, "system");
 
     try {
       // Build the review prompt

@@ -6,6 +6,20 @@
  */
 
 /**
+ * Get the display label for the current ticket system.
+ * Uses TICKET_SYSTEM env var or falls back to the provided ticketSystem config.
+ */
+export function getTicketLabel(ticketSystem?: string): string {
+  const system = ticketSystem || process.env.TICKET_SYSTEM || "internal";
+  switch (system) {
+    case "jira": return "Jira";
+    case "linear": return "Linear";
+    case "github": return "Issue";
+    default: return "Ticket";
+  }
+}
+
+/**
  * Expert persona identifier — dynamically loaded from API.
  * System defaults: frontend_developer, backend_developer, security_engineer, etc.
  * Custom personas: any slug created in PersonaStudio.

@@ -10,7 +10,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { CoordinationClient } from "./coordination-client.js";
-import type { EpicConfig, StreamMessage } from "./types.js";
+import { getTicketLabel, type EpicConfig, type StreamMessage } from "./types.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 
 /**
@@ -610,7 +610,7 @@ export class InlineDeployer {
 
     await this.postLog("Starting inline deployment", "system");
     await this.postLog(`PR: ${prUrl}`, "system");
-    await this.postLog(`Jira: ${this.config.jiraIssueKey}`, "system");
+    await this.postLog(`${getTicketLabel(this.config.ticketSystem)}: ${this.config.jiraIssueKey}`, "system");
 
     try {
       // ============================================

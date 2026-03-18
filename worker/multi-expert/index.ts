@@ -13,6 +13,7 @@ import { spawn } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
 import * as https from "https";
 import axios, { AxiosInstance } from "axios";
+import { getTicketLabel } from "../epic/types.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { JiraClient } from "./jira-client.js";
 import { withRetry } from "../lib/dist/api-retry.js";
@@ -1101,7 +1102,7 @@ export class MultiExpertCoordinator {
       const prTitle = `${this.config.jiraIssueKey}: ${truncatedSummary}`;
 
       // Build PR body with quality metrics (same format as Epic mode)
-      let prBody = `## Summary\nImplementation completed by WorkerMill Multi-Provider mode.\n\nJira: ${this.config.jiraIssueKey}`;
+      let prBody = `## Summary\nImplementation completed by WorkerMill Multi-Provider mode.\n\n${getTicketLabel(this.config.ticketSystem)}: ${this.config.jiraIssueKey}`;
 
       // Add quality metrics section if available
       if (this.qualityMetrics) {

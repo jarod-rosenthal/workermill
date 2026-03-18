@@ -8,6 +8,7 @@
 import { spawn } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
 import axios, { AxiosInstance } from "axios";
+import { getTicketLabel } from "../epic/types.js";
 
 // Tech Lead persona prefix for consistent logging
 const TECH_LEAD_PREFIX = "[👑 tech_lead]";
@@ -190,7 +191,7 @@ export class InlineReviewerAiSdk {
 
     await this.postLog("Starting inline Tech Lead review (AI SDK)", "system");
     await this.postLog(`PR: ${prUrl}`, "system");
-    await this.postLog(`Jira: ${this.config.jiraIssueKey}`, "system");
+    await this.postLog(`${getTicketLabel(this.config.ticketSystem)}: ${this.config.jiraIssueKey}`, "system");
     await this.postLog(`Provider: ${this.config.provider} | Model: ${this.config.model}`, "system");
     const maxRevisions = this.config.maxReviewRevisions;
     if (revisionCount > 0) {

@@ -3672,14 +3672,19 @@ export class EpicCoordinator {
   }
 
   /**
-   * Ensure the Tech Lead review is posted to the GitHub PR.
-   * The reviewer agent may or may not have run `gh pr review` or `gh pr comment`.
-   * This checks for existing recent review content and posts if missing.
+   * Ensure the Tech Lead review is posted to the SCM PR.
+   * Currently only supported for GitHub (formal review + comment API).
+   * Bitbucket and GitLab review posting is handled by the reviewer agent directly.
    */
   private async ensureGitHubReviewPosted(
     prNumber: number,
     reviewResult: InlineReviewResult
   ): Promise<void> {
+    // Only GitHub supports programmatic formal PR reviews via API
+    if (this.config.scmProvider && this.config.scmProvider !== "github") {
+      return;
+    }
+
     const token = this.config.githubReviewerToken || this.config.githubToken;
     if (!token || !this.config.targetRepo) return;
 

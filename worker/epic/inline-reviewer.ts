@@ -7,7 +7,7 @@
 
 import axios from "axios";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
-import type { EpicConfig, StreamMessage } from "./types.js";
+import { getTicketLabel, type EpicConfig, type StreamMessage } from "./types.js";
 import type { QualityMetrics } from "./quality-runner.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 
@@ -321,7 +321,7 @@ export class InlineReviewer {
 
     await this.postLog("Starting inline Tech Lead review", "system");
     await this.postLog(`PR: ${prUrl}`, "system");
-    await this.postLog(`Jira: ${this.config.jiraIssueKey}`, "system");
+    await this.postLog(`${getTicketLabel(this.config.ticketSystem)}: ${this.config.jiraIssueKey}`, "system");
     if (revisionCount > 0) {
       await this.postLog(`Review ${revisionCount + 1}/${this.config.maxReviewRevisions} (revision ${revisionCount + 1})`, "system");
     }

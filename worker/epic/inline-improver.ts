@@ -11,7 +11,7 @@
 import axios from "axios";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
-import type { EpicConfig, StreamMessage } from "./types.js";
+import { getTicketLabel, type EpicConfig, type StreamMessage } from "./types.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 
 // IAM role for WorkerMill self-improvement operations
@@ -248,7 +248,7 @@ export class InlineImprover {
 
     await this.postLog("Starting inline improvement analysis", "system");
     await this.postLog(`Task ID: ${this.config.parentTaskId}`, "system");
-    await this.postLog(`Jira Issue: ${this.config.jiraIssueKey}`, "system");
+    await this.postLog(`${getTicketLabel(this.config.ticketSystem)}: ${this.config.jiraIssueKey}`, "system");
 
     try {
       // Assume IAM role for elevated permissions

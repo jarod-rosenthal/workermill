@@ -609,9 +609,7 @@ export async function spawnDockerWorker(
     GITHUB_REVIEWER_TOKEN:
       credentials?.githubReviewerToken || config.githubReviewerToken || "",
     BITBUCKET_TOKEN: bitbucketToken,
-    // Use actual username from credentials when available (App Password auth).
-    // Default to x-token-auth only for Repository Access Tokens (no username).
-    BITBUCKET_USERNAME: credentials?.bitbucketUsername || "x-token-auth",
+    BITBUCKET_USERNAME: "x-bitbucket-api-token-auth",
     GITLAB_TOKEN: gitlabToken,
 
     TARGET_REPO: task.githubRepo || "",

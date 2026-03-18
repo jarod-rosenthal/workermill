@@ -213,45 +213,30 @@ export async function getOrgCredentials(
       }
 
       if (org.scmProvider === "bitbucket") {
-        // BitBucket credentials - supports both new API token and legacy app password formats
-        // New format (2025+): { email, api_token } - git uses x-bitbucket-api-token-auth as username
-        //   - Git clone: https://x-bitbucket-api-token-auth:<token>@bitbucket.org/...
-        //   - API calls: Basic auth with email:token (NOT x-bitbucket-api-token-auth:token!)
-        // Legacy format: { username, app_password }
-        //   - Both git and API use username:app_password
+        // Bitbucket credentials — simple two-field format:
+        //   Git clone: https://x-bitbucket-api-token-auth:{token}@bitbucket.org/...
+        //   API calls: Basic auth with email:{token}
+        // Supports both { email, api_token } and legacy { username, app_password }.
+        // App passwords (ATATT prefix) and API tokens both work with x-bitbucket-api-token-auth.
         try {
           const bbCreds = JSON.parse(scmSecretString);
 
-          // New API token format
-          if (bbCreds.api_token) {
-            bitbucketUsername = "x-bitbucket-api-token-auth";
-            bitbucketEmail = bbCreds.email; // CRITICAL: Required for API calls
-            scmToken = bbCreds.api_token;
-          }
-          // App password format: { username, app_password }
-          // Git clone requires the Bitbucket USERNAME (not email, not x-token-auth).
-          // ATATT prefix = app password (NOT API token). App passwords always use username.
-          else if (bbCreds.username && bbCreds.app_password) {
-            bitbucketUsername = bbCreds.username;
-            bitbucketEmail = bbCreds.email || ""; // email for API calls if available
-            scmToken = bbCreds.app_password;
-          }
-          // Fallback
-          else if (bbCreds.token) {
-            bitbucketUsername = "x-bitbucket-api-token-auth";
-            bitbucketEmail = bbCreds.email;
-            scmToken = bbCreds.token;
-          }
+          // Always use x-bitbucket-api-token-auth for git clone
+          bitbucketUsername = "x-bitbucket-api-token-auth";
+          // Email for API auth
+          bitbucketEmail = bbCreds.email || "";
+          // Token — accept any field name
+          scmToken = bbCreds.api_token || bbCreds.app_password || bbCreds.token || "";
 
           if (!scmToken) {
             throw new Error(
-              "BitBucket credentials missing api_token or app_password",
+              "BitBucket credentials missing token",
             );
           }
         } catch (parseError) {
           throw new Error(
             `Invalid BitBucket credentials format for organization '${org.name}'. ` +
-              `Expected JSON with 'email' and 'api_token' (new) or 'username' and 'app_password' (legacy).`,
+              `Expected JSON with 'email' and 'api_token'.`,
           );
         }
       } else {

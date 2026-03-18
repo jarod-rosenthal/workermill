@@ -145,7 +145,7 @@ export class ECSTaskRunner {
       { name: "SCM_PROVIDER", value: credentials.scmProvider || "github" },
       { name: "SCM_BASE_URL", value: credentials.scmBaseUrl || "" },
       { name: "SCM_TOKEN", value: credentials.scmToken || credentials.githubToken || "" },
-      { name: "BITBUCKET_USERNAME", value: credentials.bitbucketUsername || "x-token-auth" },
+      { name: "BITBUCKET_USERNAME", value: "x-bitbucket-api-token-auth" },
       { name: "BITBUCKET_EMAIL", value: credentials.bitbucketEmail || "" },
       { name: "API_BASE_URL", value: config.apiBaseUrl },
       { name: "RETRY_NUMBER", value: String(task.retryCount) },

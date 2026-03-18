@@ -1008,7 +1008,7 @@ export async function planTask(
 
     if (scmToken) {
       const bbUsername = scmProvider === "bitbucket"
-        ? credentials?.bitbucketUsername || credentials?.bitbucketEmail
+        ? "x-bitbucket-api-token-auth"
         : undefined;
       repoPath = await cloneTargetRepo(
         task.githubRepo,

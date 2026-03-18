@@ -724,7 +724,7 @@ class LocalEpicSpawner {
     const githubToken = credentials?.githubToken || process.env.GITHUB_TOKEN || "";
     const scmToken = credentials?.scmToken || this.getScmToken(task);
     const bitbucketToken = (scmProvider === "bitbucket" && credentials?.scmToken) || process.env.BITBUCKET_TOKEN || "";
-    const bitbucketUsername = credentials?.bitbucketUsername || "x-bitbucket-api-token-auth";
+    const bitbucketUsername = "x-bitbucket-api-token-auth";
     const bitbucketEmail = credentials?.bitbucketEmail || process.env.BITBUCKET_EMAIL || "";
 
     const vars: Record<string, string> = {

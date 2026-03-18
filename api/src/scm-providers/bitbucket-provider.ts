@@ -167,23 +167,13 @@ export class BitBucketProvider extends BaseScmProvider {
 
     if (!result) return null;
 
-    // New API token format - use special username for git
-    if (result.api_token) {
-      return {
-        username: "x-bitbucket-api-token-auth",
-        password: result.api_token,
-      };
-    }
-
-    // Legacy app password format
-    if (result.username && result.app_password) {
-      return {
-        username: result.username,
-        password: result.app_password,
-      };
-    }
-
-    return null;
+    // Always use x-bitbucket-api-token-auth for git clone
+    const password = result.api_token || result.app_password;
+    if (!password) return null;
+    return {
+      username: "x-bitbucket-api-token-auth",
+      password,
+    };
   }
 
   // =========================================================================

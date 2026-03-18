@@ -243,4 +243,53 @@ router.get("/worker-config", async (_req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/worker-decisions/ci-status
+ *
+ * Get CI/CD commit statuses for a specific commit SHA.
+ * Used by the worker to poll CI checks across all SCM providers (GitHub, BitBucket, GitLab).
+ *
+ * Request body: { repo: string, commitSha: string }
+ * Response: { statuses: CommitStatus[], total: number }
+ */
+router.post("/ci-status", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const { repo, commitSha } = req.body;
+
+    if (!repo || typeof repo !== "string") {
+      res.status(400).json({ error: "repo string is required" });
+      return;
+    }
+    if (!commitSha || typeof commitSha !== "string") {
+      res.status(400).json({ error: "commitSha string is required" });
+      return;
+    }
+
+    const { getScmProvider } = await import("../scm-providers/index.js");
+    const { Organization } = await import("../models/index.js");
+    const orgEntity = await AppDataSource.getRepository(Organization).findOne({ where: { id: org.id } });
+
+    if (!orgEntity) {
+      res.status(404).json({ error: "Organization not found" });
+      return;
+    }
+
+    const scmProvider = getScmProvider(orgEntity);
+    const repoId = scmProvider.parseRepoIdentifier(repo);
+    const statuses = await scmProvider.getCommitStatuses(repoId, commitSha);
+
+    res.json({
+      statuses,
+      total: statuses.length,
+    });
+  } catch (error) {
+    logger.error("ci-status failed", {
+      error: error instanceof Error ? error.message : String(error),
+      body: JSON.stringify(req.body).substring(0, 500),
+    });
+    res.status(500).json({ error: "Failed to get CI status" });
+  }
+});
+
 export default router;

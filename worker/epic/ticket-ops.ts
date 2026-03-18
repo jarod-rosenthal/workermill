@@ -71,21 +71,23 @@ export class TicketOps {
       return;
     }
 
-    // Transitions only apply to Jira and GitHub
-    if (this.ticketSystem !== "jira" && this.ticketSystem !== "github") {
-      console.log(
-        `[TicketOps] Skipping transition - not supported for ${this.ticketSystem}`,
-      );
-      return;
-    }
-
     try {
-      if (this.ticketSystem === "jira") {
-        await this.transitionJira(statusName);
-      } else if (this.ticketSystem === "github") {
-        await this.transitionGithub(statusName);
+      switch (this.ticketSystem) {
+        case "jira":
+          await this.transitionJira(statusName);
+          break;
+        case "github":
+          await this.transitionGithub(statusName);
+          break;
+        case "internal":
+          await this.transitionInternal(statusName);
+          break;
+        case "linear":
+          // Linear transitions not yet implemented
+          console.log("[TicketOps] Linear transitions not yet supported — skipping");
+          return;
       }
-      console.log(`[TicketOps] Transitioned to "${statusName}"`);
+      console.log(`[TicketOps] Transitioned to "${statusName}" (${this.ticketSystem})`);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[TicketOps] Transition failed: ${msg}`);
@@ -299,6 +301,17 @@ export class TicketOps {
   }
 
   // --- Internal (WorkerMill API) ---
+
+  private async transitionInternal(statusName: string): Promise<void> {
+    const apiBaseUrl = process.env.API_BASE_URL;
+    const taskId = process.env.TASK_ID;
+    const apiKey = process.env.ORG_API_KEY;
+    await axios.post(
+      `${apiBaseUrl}/api/tasks/${taskId}/ticket-transition`,
+      { status: statusName },
+      { headers: { "x-api-key": apiKey, "Content-Type": "application/json" } },
+    );
+  }
 
   private async commentInternal(comment: string): Promise<void> {
     const apiBaseUrl = process.env.API_BASE_URL;

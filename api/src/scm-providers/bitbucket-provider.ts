@@ -30,6 +30,7 @@ import type {
   MergePullRequestOptions,
   UpdateBranchResult,
   PullRequestConflicts,
+  CommitStatus,
   CodebaseContext,
   WebhookEvent,
   WebhookEventType,
@@ -806,6 +807,76 @@ export class BitBucketProvider extends BaseScmProvider {
     }
 
     return null;
+  }
+
+  // =========================================================================
+  // CI/CD Status Operations
+  // =========================================================================
+
+  /**
+   * Get commit statuses via BitBucket Pipelines commit statuses API.
+   *
+   * API: GET /2.0/repositories/{workspace}/{repo_slug}/commit/{hash}/statuses
+   * Response values have state: SUCCESSFUL | FAILED | STOPPED | INPROGRESS
+   */
+  async getCommitStatuses(
+    repo: ScmRepoIdentifier,
+    commitSha: string
+  ): Promise<CommitStatus[]> {
+    const token = await this.getToken();
+    if (!token) {
+      logger.warn("Cannot get commit statuses - no BitBucket credentials", {
+        repo: repo.fullPath,
+        commitSha: commitSha.substring(0, 7),
+      });
+      return [];
+    }
+
+    const result = await this.httpRequest<{
+      values: Array<{
+        state: string;
+        name: string;
+        url: string;
+        key: string;
+      }>;
+    }>(
+      `${this.getApiBaseUrl()}/repositories/${repo.fullPath}/commit/${commitSha}/statuses`,
+      { headers: this.buildHeaders(token) },
+      "Get commit statuses"
+    );
+
+    if (!result.ok || !result.data) {
+      logger.warn("Failed to get commit statuses", {
+        repo: repo.fullPath,
+        commitSha: commitSha.substring(0, 7),
+        status: result.status,
+      });
+      return [];
+    }
+
+    return result.data.values.map((s) => {
+      let state: CommitStatus["state"];
+      switch (s.state) {
+        case "SUCCESSFUL":
+          state = "passed";
+          break;
+        case "INPROGRESS":
+          state = "pending";
+          break;
+        case "FAILED":
+        case "STOPPED":
+        default:
+          state = "failed";
+          break;
+      }
+
+      return {
+        state,
+        name: s.name,
+        url: s.url || undefined,
+        rawState: s.state,
+      };
+    });
   }
 
   // =========================================================================

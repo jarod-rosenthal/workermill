@@ -1655,6 +1655,22 @@ git rm --cached --quiet .env 2>/dev/null || true
   }
 
   /**
+   * Get the HEAD commit SHA of the current branch.
+   */
+  getHeadSha(): string {
+    try {
+      const sha = execSync("git rev-parse HEAD", {
+        cwd: this.repoPath,
+        encoding: "utf-8",
+        timeout: 5000,
+      }).trim();
+      return sha;
+    } catch {
+      return "";
+    }
+  }
+
+  /**
    * Get current branch name.
    */
   async getCurrentBranch(): Promise<string> {

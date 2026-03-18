@@ -24,6 +24,7 @@ import type {
   MergePullRequestOptions,
   UpdateBranchResult,
   PullRequestConflicts,
+  CommitStatus,
   CodebaseContext,
   WebhookEvent,
   WebhookEventType,
@@ -721,6 +722,76 @@ export class GitLabProvider extends BaseScmProvider {
     }
 
     return null;
+  }
+
+  // =========================================================================
+  // CI/CD Status Operations
+  // =========================================================================
+
+  /**
+   * Get commit statuses via GitLab Commit Statuses API.
+   *
+   * API: GET /api/v4/projects/{id}/repository/commits/{sha}/statuses
+   * Response has status: success | failed | canceled | running | pending
+   */
+  async getCommitStatuses(
+    repo: ScmRepoIdentifier,
+    commitSha: string
+  ): Promise<CommitStatus[]> {
+    const token = await this.getToken();
+    if (!token) {
+      logger.warn("Cannot get commit statuses - no GitLab token", {
+        repo: repo.fullPath,
+        commitSha: commitSha.substring(0, 7),
+      });
+      return [];
+    }
+
+    const projectPath = encodeURIComponent(repo.fullPath);
+    const result = await this.httpRequest<Array<{
+      status: string;
+      name: string;
+      target_url: string | null;
+    }>>(
+      `${this.getApiBaseUrl()}/projects/${projectPath}/repository/commits/${commitSha}/statuses`,
+      { headers: this.buildHeaders(token) },
+      "Get commit statuses"
+    );
+
+    if (!result.ok || !result.data) {
+      logger.warn("Failed to get commit statuses", {
+        repo: repo.fullPath,
+        commitSha: commitSha.substring(0, 7),
+        status: result.status,
+      });
+      return [];
+    }
+
+    return result.data.map((s) => {
+      let state: CommitStatus["state"];
+      switch (s.status) {
+        case "success":
+          state = "passed";
+          break;
+        case "running":
+        case "pending":
+        case "created":
+          state = "pending";
+          break;
+        case "failed":
+        case "canceled":
+        default:
+          state = "failed";
+          break;
+      }
+
+      return {
+        state,
+        name: s.name,
+        url: s.target_url || undefined,
+        rawState: s.status,
+      };
+    });
   }
 
   // =========================================================================

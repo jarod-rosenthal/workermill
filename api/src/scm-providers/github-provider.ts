@@ -18,6 +18,7 @@ import type {
   MergePullRequestOptions,
   UpdateBranchResult,
   PullRequestConflicts,
+  CommitStatus,
   CodebaseContext,
   WebhookEvent,
   WebhookEventType,
@@ -737,6 +738,108 @@ export class GitHubProvider extends BaseScmProvider {
     }
 
     return null;
+  }
+
+  // =========================================================================
+  // CI/CD Status Operations
+  // =========================================================================
+
+  /**
+   * Get commit statuses via GitHub Check Runs API.
+   * Covers GitHub Actions, third-party CI, and commit status API.
+   */
+  async getCommitStatuses(
+    repo: ScmRepoIdentifier,
+    commitSha: string
+  ): Promise<CommitStatus[]> {
+    const token = await this.getToken();
+    if (!token) {
+      logger.warn("Cannot get commit statuses - no GitHub token", {
+        repo: repo.fullPath,
+        commitSha: commitSha.substring(0, 7),
+      });
+      return [];
+    }
+
+    const statuses: CommitStatus[] = [];
+
+    // 1. Check Runs API (GitHub Actions and integrations)
+    const checkRunsResult = await this.httpRequest<{
+      total_count: number;
+      check_runs: Array<{
+        name: string;
+        status: string;
+        conclusion: string | null;
+        html_url: string;
+      }>;
+    }>(
+      `${this.getApiBaseUrl()}/repos/${repo.fullPath}/commits/${commitSha}/check-runs`,
+      { headers: this.buildHeaders(token) },
+      "Get check runs"
+    );
+
+    if (checkRunsResult.ok && checkRunsResult.data) {
+      for (const run of checkRunsResult.data.check_runs) {
+        let state: CommitStatus["state"];
+        if (run.status !== "completed") {
+          state = "pending";
+        } else if (
+          run.conclusion === "success" ||
+          run.conclusion === "skipped" ||
+          run.conclusion === "neutral"
+        ) {
+          state = "passed";
+        } else {
+          state = "failed";
+        }
+
+        statuses.push({
+          state,
+          name: run.name,
+          url: run.html_url,
+          rawState: run.status === "completed" ? (run.conclusion || "unknown") : run.status,
+        });
+      }
+    }
+
+    // 2. Commit Status API (legacy status checks)
+    // Only fetch if no check runs found — many repos use one or the other
+    if (statuses.length === 0) {
+      const statusResult = await this.httpRequest<{
+        state: string;
+        statuses: Array<{
+          state: string;
+          context: string;
+          target_url: string | null;
+        }>;
+      }>(
+        `${this.getApiBaseUrl()}/repos/${repo.fullPath}/commits/${commitSha}/status`,
+        { headers: this.buildHeaders(token) },
+        "Get commit status"
+      );
+
+      if (statusResult.ok && statusResult.data) {
+        for (const s of statusResult.data.statuses) {
+          let state: CommitStatus["state"];
+          if (s.state === "success") {
+            state = "passed";
+          } else if (s.state === "pending") {
+            state = "pending";
+          } else {
+            state = "failed";
+          }
+
+          statuses.push({
+            state,
+            name: s.context,
+            url: s.target_url || undefined,
+            rawState: s.state,
+          });
+        }
+      }
+    }
+
+    return statuses;
   }
 
   // =========================================================================

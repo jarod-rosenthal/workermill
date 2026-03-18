@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { AppDataSource } from "../../db/connection.js";
-import { WorkerTask, WorkerTaskLog, WorkerContext, KbCard, Organization } from "../../models/index.js";
+import { WorkerTask, WorkerTaskLog, WorkerContext, KbCard, Organization, InternalTask, BoardColumn, type BoardColumnType } from "../../models/index.js";
 import { authenticateRequest, authenticateApiKey } from "../../middleware/auth.js";
 import { requireCurrentTos } from "../../middleware/tos.js";
 import { getECSTaskRunner } from "../../services/ecs-task-runner.js";
@@ -919,6 +919,132 @@ router.post("/:id/ticket-comment", authenticateApiKey, async (req: Request, res:
   } catch (error) {
     logger.error("Error posting ticket comment", { error, taskId: req.params.id });
     res.status(500).json({ error: "Failed to post ticket comment" });
+  }
+});
+
+/**
+ * POST /api/tasks/:id/ticket-transition
+ * Transition the linked internal board card to a new column.
+ * Maps standard Jira-compatible status names to internal board columns.
+ * Called by the worker container for "internal" ticket system.
+ */
+router.post("/:id/ticket-transition", authenticateApiKey, async (req: Request, res: Response) => {
+  try {
+    const taskId = req.params.id as string;
+    const org = req.organization!;
+    const { status } = req.body;
+
+    if (!status || typeof status !== "string") {
+      res.status(400).json({ error: "status string is required" });
+      return;
+    }
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: [
+        { id: taskId, orgId: org.id },
+        { id: taskId, billingOrgId: org.id },
+      ],
+      select: ["id", "orgId", "internalTaskId"],
+    });
+
+    if (!task || !task.internalTaskId) {
+      res.status(404).json({ error: "Task or linked internal task not found" });
+      return;
+    }
+
+    // Map Jira-compatible status names to board column types
+    const statusMap: Record<string, BoardColumnType> = {
+      "to do": "backlog",
+      "open": "backlog",
+      "reopened": "backlog",
+      "backlog": "backlog",
+      "in progress": "in_progress",
+      "in review": "review",
+      "review": "review",
+      "review requested": "review",
+      "pr approved": "pr_approved",
+      "approved": "pr_approved",
+      "done": "deployed",
+      "closed": "deployed",
+      "resolved": "deployed",
+      "deployed": "deployed",
+    };
+
+    const targetColumnType = statusMap[status.toLowerCase()];
+    if (!targetColumnType) {
+      logger.info("Ticket transition status not mapped — skipping", { status, taskId });
+      res.json({ success: true, skipped: true, reason: `Status "${status}" not mapped to a board column` });
+      return;
+    }
+
+    const internalTaskRepo = AppDataSource.getRepository(InternalTask);
+    const columnRepo = AppDataSource.getRepository(BoardColumn);
+
+    const internalTask = await internalTaskRepo.findOne({
+      where: { id: task.internalTaskId },
+    });
+    if (!internalTask) {
+      res.status(404).json({ error: "Internal task not found" });
+      return;
+    }
+
+    const targetColumn = await columnRepo.findOne({
+      where: { projectId: internalTask.projectId, columnType: targetColumnType },
+    });
+    if (!targetColumn) {
+      res.json({ success: true, skipped: true, reason: `No "${targetColumnType}" column found` });
+      return;
+    }
+
+    // Already in this column — idempotent no-op
+    if (internalTask.columnId === targetColumn.id) {
+      res.json({ success: true, alreadyInColumn: true });
+      return;
+    }
+
+    // Get next position in target column
+    const maxPosResult = await internalTaskRepo
+      .createQueryBuilder("task")
+      .where("task.columnId = :columnId", { columnId: targetColumn.id })
+      .select("MAX(task.columnPosition)", "maxPos")
+      .getRawOne();
+    const newPosition = (maxPosResult?.maxPos ?? -1) + 1;
+
+    // Map column type to internal task status
+    const columnStatusMap: Record<BoardColumnType, string> = {
+      backlog: "ready",
+      in_progress: "executing",
+      review: "review",
+      pr_approved: "pr_approved",
+      deployed: "deployed",
+    };
+
+    // Atomic update — prevent clobbering concurrent board changes
+    await internalTaskRepo
+      .createQueryBuilder()
+      .update("internal_tasks")
+      .set({
+        columnId: targetColumn.id,
+        columnPosition: newPosition,
+        status: columnStatusMap[targetColumnType],
+      })
+      .where("id = :id", { id: internalTask.id })
+      .execute();
+
+    logger.info("Ticket transition: moved internal card", {
+      internalTaskId: internalTask.id,
+      taskKey: internalTask.taskKey,
+      from: internalTask.columnId,
+      to: targetColumn.id,
+      targetColumnType,
+      status,
+    });
+
+    res.json({ success: true, column: targetColumnType });
+  } catch (error) {
+    logger.error("Error transitioning internal ticket", { error, taskId: req.params.id });
+    res.status(500).json({ error: "Failed to transition ticket" });
   }
 });
 

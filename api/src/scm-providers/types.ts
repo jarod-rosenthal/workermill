@@ -177,6 +177,25 @@ export interface PullRequestConflicts {
 }
 
 /**
+ * CI/CD commit status (normalized across providers)
+ *
+ * Maps provider-specific states:
+ * - GitHub: success/failure/error/pending → passed/failed/failed/pending
+ * - BitBucket: SUCCESSFUL/FAILED/STOPPED/INPROGRESS → passed/failed/failed/pending
+ * - GitLab: success/failed/canceled/running/pending → passed/failed/failed/pending/pending
+ */
+export interface CommitStatus {
+  /** Normalized status */
+  state: "passed" | "failed" | "pending";
+  /** Check/pipeline name */
+  name: string;
+  /** URL to the check details */
+  url?: string;
+  /** Provider-specific raw state (e.g. "SUCCESSFUL", "success") */
+  rawState: string;
+}
+
+/**
  * Core SCM Provider interface
  *
  * All SCM providers must implement this interface to provide a consistent
@@ -318,6 +337,21 @@ export interface IScmProvider {
     repo: ScmRepoIdentifier,
     branch?: string
   ): Promise<CodebaseContext>;
+
+  // =========================================================================
+  // CI/CD Status Operations
+  // =========================================================================
+
+  /**
+   * Get commit statuses/check-runs for a specific commit SHA.
+   * Returns normalized status across all CI providers.
+   * @param repo - Repository identifier
+   * @param commitSha - The commit SHA to check
+   */
+  getCommitStatuses(
+    repo: ScmRepoIdentifier,
+    commitSha: string
+  ): Promise<CommitStatus[]>;
 
   // =========================================================================
   // Webhook Operations

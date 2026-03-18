@@ -18,6 +18,7 @@ import type {
   MergePullRequestOptions,
   UpdateBranchResult,
   PullRequestConflicts,
+  CommitStatus,
   CodebaseContext,
   WebhookEvent,
 } from "./types.js";
@@ -242,6 +243,11 @@ export abstract class BaseScmProvider implements IScmProvider {
     repo: ScmRepoIdentifier,
     branch?: string
   ): Promise<CodebaseContext>;
+
+  abstract getCommitStatuses(
+    repo: ScmRepoIdentifier,
+    commitSha: string
+  ): Promise<CommitStatus[]>;
 
   abstract verifyWebhookSignature(
     headers: Record<string, string | string[] | undefined>,

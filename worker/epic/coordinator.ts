@@ -3462,12 +3462,6 @@ export class EpicCoordinator {
    * Returns CI status so the tech_lead can review with full context.
    */
   private async runCIGate(prNumber: number): Promise<{ passed: boolean; fixed: boolean; log?: string }> {
-    const scmProvider = process.env.SCM_PROVIDER || "github";
-    if (scmProvider !== "github") {
-      await this.postLog(`[CI Gate] SCM provider "${scmProvider}" — skipping CI gate`);
-      return { passed: true, fixed: false };
-    }
-
     let ciResult = await this.pollPrCI(prNumber);
 
     if (ciResult.passed) {
@@ -4050,12 +4044,17 @@ ${qualityBelowThreshold ? `**⚠️ QUALITY SCORE BELOW ${minQualityScore}% - Co
     // Build CI status section if available
     let ciSection = "";
     if (ciStatus) {
+      const ciProviderLabel = (process.env.SCM_PROVIDER || "github") === "bitbucket"
+        ? "Bitbucket Pipelines"
+        : (process.env.SCM_PROVIDER || "github") === "gitlab"
+        ? "GitLab CI"
+        : "GitHub Actions";
       if (ciStatus.passed) {
         ciSection = `## CI Pipeline Status
 
 | Check | Status |
 |-------|--------|
-| **GitHub Actions** | ${ciStatus.fixed ? '✅ Passing (fixed by CI Fix Agent)' : '✅ Passing'} |
+| **${ciProviderLabel}** | ${ciStatus.fixed ? '✅ Passing (fixed by CI Fix Agent)' : '✅ Passing'} |
 
 ---
 
@@ -4065,7 +4064,7 @@ ${qualityBelowThreshold ? `**⚠️ QUALITY SCORE BELOW ${minQualityScore}% - Co
 
 | Check | Status |
 |-------|--------|
-| **GitHub Actions** | ❌ Failing |
+| **${ciProviderLabel}** | ❌ Failing |
 
 ${ciStatus.log ? `**CI Failure Details:**\n\`\`\`\n${ciStatus.log.substring(0, 1000)}\n\`\`\`\n` : ''}
 **CI Fix Agent was unable to resolve this issue.**
@@ -4209,16 +4208,24 @@ Begin your review now. Start by fetching the code changes.`;
 
   /**
    * Poll CI check-runs on a PR's head commit.
-   * Uses the GitHub Check Runs API which covers all CI providers (Actions, third-party).
+   * For GitHub: uses the GitHub Check Runs API via `gh` CLI.
+   * For BitBucket/GitLab: uses the WorkerMill API's ci-status endpoint.
    */
   private async pollPrCI(prNumber: number): Promise<{ passed: boolean; pending: boolean; log?: string }> {
     const scmProvider = process.env.SCM_PROVIDER || "github";
-    if (scmProvider !== "github") {
-      // For non-GitHub providers, skip CI polling — Bitbucket/GitLab CI is checked in Gate 2
-      await this.postLog(`[CI Gate] SCM provider "${scmProvider}" — skipping PR CI poll`);
-      return { passed: true, pending: false };
+
+    if (scmProvider === "github") {
+      return this.pollPrCIGitHub(prNumber);
     }
 
+    // For BitBucket and GitLab, poll CI via the WorkerMill API
+    return this.pollPrCIViaApi(prNumber, scmProvider);
+  }
+
+  /**
+   * Poll CI via GitHub Check Runs API (gh CLI).
+   */
+  private async pollPrCIGitHub(prNumber: number): Promise<{ passed: boolean; pending: boolean; log?: string }> {
     const [owner, repo] = this.config.targetRepo.split("/");
     const token = this.config.githubToken;
 
@@ -4308,6 +4315,95 @@ Begin your review now. Start by fetching the code changes.`;
       const waitMinutes = Math.round(maxWaitMs / 60_000);
       await this.postLog(`[CI Gate] CI checks still pending after ${waitMinutes} minutes — treating as failed`);
       return { passed: false, pending: true, log: `CI checks did not complete within ${waitMinutes} minutes` };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      await this.postLog(`[CI Gate] Error polling CI: ${msg} — treating as failed`);
+      return { passed: false, pending: false, log: `CI polling error: ${msg}` };
+    }
+  }
+
+  /**
+   * Poll CI via WorkerMill API ci-status endpoint.
+   * Works for BitBucket Pipelines, GitLab CI, and any other SCM provider.
+   */
+  private async pollPrCIViaApi(prNumber: number, scmProvider: string): Promise<{ passed: boolean; pending: boolean; log?: string }> {
+    try {
+      // Get the PR head SHA from the SCM provider via git
+      // The worker has the repo cloned, so we can get the HEAD SHA directly
+      const headSha = this.gitOps.getHeadSha();
+      if (!headSha) {
+        await this.postLog("[CI Gate] Could not determine HEAD SHA — treating as failed");
+        return { passed: false, pending: false, log: "Could not determine HEAD SHA" };
+      }
+
+      const maxWaitMs = this.resilience.blockerWaitTimeoutMs;
+      const pollIntervalMs = 30 * 1000;
+      const noChecksGraceMs = 3 * 60 * 1000;
+      const startTime = Date.now();
+      const providerLabel = scmProvider === "bitbucket" ? "Bitbucket Pipelines" : scmProvider === "gitlab" ? "GitLab CI" : `${scmProvider} CI`;
+
+      await this.postLog(`[CI Gate] Polling ${providerLabel} on PR #${prNumber} (SHA: ${headSha.substring(0, 7)})...`);
+
+      while (Date.now() - startTime < maxWaitMs) {
+        // Call WorkerMill API to get CI statuses
+        const response = await axios.post(
+          `${this.config.apiBaseUrl}/api/worker-decisions/ci-status`,
+          {
+            repo: this.config.targetRepo,
+            commitSha: headSha,
+          },
+          {
+            headers: {
+              "x-api-key": this.config.orgApiKey,
+              "Content-Type": "application/json",
+            },
+            timeout: 15000,
+          }
+        );
+
+        const { statuses, total } = response.data as {
+          statuses: Array<{ state: "passed" | "failed" | "pending"; name: string; url?: string; rawState: string }>;
+          total: number;
+        };
+
+        if (total === 0) {
+          if (Date.now() - startTime > noChecksGraceMs) {
+            await this.postLog(`[CI Gate] No ${providerLabel} checks found after 3 minutes — treating as failed`);
+            return { passed: false, pending: false, log: `No ${providerLabel} checks found after 3 minute grace period` };
+          }
+          await new Promise(r => setTimeout(r, pollIntervalMs));
+          continue;
+        }
+
+        const pendingChecks = statuses.filter((s: { state: string }) => s.state === "pending");
+        if (pendingChecks.length > 0) {
+          const completedCount = total - pendingChecks.length;
+          await this.postLog(`[CI Gate] ${completedCount}/${total} checks completed — waiting...`);
+          await new Promise(r => setTimeout(r, pollIntervalMs));
+          continue;
+        }
+
+        // All checks completed
+        const failed = statuses.filter((s: { state: string }) => s.state === "failed");
+
+        if (failed.length === 0) {
+          await this.postLog(`[CI Gate] All ${total} ${providerLabel} checks passed`);
+          return { passed: true, pending: false };
+        }
+
+        // Collect failure details
+        const failureLog = failed.map((s: { name: string; rawState: string; url?: string }) =>
+          `${s.name}: ${s.rawState}${s.url ? ` (${s.url})` : ""}`
+        ).join("\n");
+
+        await this.postLog(`[CI Gate] ${failed.length} ${providerLabel} check(s) failed:\n${failureLog}`);
+        return { passed: false, pending: false, log: failureLog };
+      }
+
+      // Timeout
+      const waitMinutes = Math.round(maxWaitMs / 60_000);
+      await this.postLog(`[CI Gate] ${providerLabel} checks still pending after ${waitMinutes} minutes — treating as failed`);
+      return { passed: false, pending: true, log: `${providerLabel} checks did not complete within ${waitMinutes} minutes` };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       await this.postLog(`[CI Gate] Error polling CI: ${msg} — treating as failed`);

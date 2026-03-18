@@ -18,9 +18,7 @@ import { selfUpdate, restartAgent } from "./updater.js";
 import { startLocalApi, stopLocalApi } from "./local-api.js";
 import { detectGpu } from "./gpu-detector.js";
 import { ensureOllamaRunning, pullModel, stopOllama, findOllamaPath, installOllama } from "./ollama-manager.js";
-import { isCloudMode, isSelfHostedMode, loadStandaloneConfig, resolveApiKey, getRoleConfig } from "./backends/local/config.js";
-import { startCompose, stopCompose, SELF_HOSTED_API_URL } from "./compose-manager.js";
-import { bootstrapSelfHostedCredentials } from "./selfhosted-bootstrap.js";
+
 
 // ── Single-instance enforcement via PID file ────────────────────────────
 const PID_FILE = path.join(os.homedir(), ".workermill", "agent.pid");
@@ -79,56 +77,13 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
   killExistingAgent();
   writePidFile();
 
-  const selfHosted = isSelfHostedMode();
-  const standaloneMode = !isCloudMode();
-
-  if (selfHosted) {
-    console.log();
-    console.log(chalk.bold.cyan("  WorkerMill Agent (Self-Hosted)"));
-    console.log(chalk.dim("  ─────────────────────────────────────"));
-    console.log();
-    console.log(`  ${chalk.dim("Version:")}    ${AGENT_VERSION}`);
-    console.log(`  ${chalk.dim("Mode:")}       ${chalk.green("Self-Hosted")} (Docker Compose)`);
-    console.log();
-
-    // Start the Docker Compose stack
-    await startCompose((msg) => console.log(`  ${chalk.dim(msg)}`));
-
-    // Override config to point at local API
-    config.apiUrl = SELF_HOSTED_API_URL;
-    config.apiKey = "self-hosted";
-
-    console.log(`  ${chalk.green("●")} Stack running at ${chalk.cyan(SELF_HOSTED_API_URL)}`);
-    console.log(`  ${chalk.dim("Dashboard:")} http://localhost:5173`);
-    console.log();
-
-    // Fall through to cloud-agent flow (register, poll, spawn workers)
-  }
-
-  if (standaloneMode && !selfHosted) {
-    throw new Error(
-      "Standalone SQLite mode has been removed. Run `workermill-agent init --standalone` to set up self-hosted mode.",
-    );
-  }
-
-  if (!selfHosted) {
-    console.log();
-    console.log(chalk.bold.cyan("  WorkerMill Remote Agent"));
-    console.log(chalk.dim("  ─────────────────────────────────────"));
-    console.log();
-  }
+  console.log();
+  console.log(chalk.bold.cyan("  WorkerMill Remote Agent"));
+  console.log(chalk.dim("  ─────────────────────────────────────"));
+  console.log();
 
   // Initialize API client
   initApi(config.apiUrl, config.apiKey);
-
-  // Self-hosted: bootstrap credentials from config.json into the API database.
-  // The API reads credentials from org_credentials table, but the user configured
-  // them in ~/.workermill/config.json via `init --standalone`. Bridge the gap.
-  if (selfHosted) {
-    await bootstrapSelfHostedCredentials(
-      (msg) => console.log(`  ${chalk.dim(msg)}`),
-    );
-  }
 
   // Verify connectivity
   try {
@@ -280,9 +235,6 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
       // Best-effort deregister
     }
     await stopAll();
-    if (selfHosted) {
-      await stopCompose((msg) => console.log(`  ${chalk.dim(msg)}`));
-    }
     removePidFile();
     console.log(`  ${chalk.red("●")} Agent stopped.`);
   };

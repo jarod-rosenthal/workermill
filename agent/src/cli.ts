@@ -8,6 +8,7 @@
  */
 
 import { existsSync } from "fs";
+import chalk from "chalk";
 import { Command } from "commander";
 import { setupCommand } from "./commands/setup.js";
 import { startCommand } from "./commands/start.js";
@@ -16,9 +17,7 @@ import { statusCommand } from "./commands/status.js";
 import { logsCommand } from "./commands/logs.js";
 import { pullCommand } from "./commands/pull.js";
 import { updateCommand } from "./commands/update.js";
-import { initSelfHostedCommand } from "./commands/init-selfhosted.js";
 import { getConfigFile } from "./config.js";
-import { isStandaloneReady } from "./backends/local/config.js";
 import { AGENT_VERSION } from "./version.js";
 
 const program = new Command();
@@ -65,29 +64,13 @@ program
   .description("Update the agent to the latest version")
   .action(updateCommand);
 
-program
-  .command("init")
-  .description("Initialize self-hosted mode - configure LLM keys and repo")
-  .option("--standalone", "Run in self-hosted mode (Docker Compose stack)")
-  .option("--self-hosted", "Run in self-hosted mode (Docker Compose stack)")
-  .action(async (opts) => {
-    if (opts.standalone || opts.selfHosted) {
-      await initSelfHostedCommand();
-    } else {
-      console.log("Use --standalone for self-hosted mode, or 'workermill-agent setup' for cloud mode.");
-    }
-  });
-
-
 // If no command given, auto-detect: run setup if no config, otherwise start
 if (process.argv.length <= 2) {
-  if (existsSync(getConfigFile()) || isStandaloneReady()) {
+  if (existsSync(getConfigFile())) {
     startCommand({ detach: false });
   } else {
-    // No config at all — prompt for setup
-    console.log("No configuration found. Choose a setup mode:");
-    console.log("  workermill-agent setup         — Connect to WorkerMill Cloud");
-    console.log("  workermill-agent init --standalone — Run fully offline");
+    console.log("No configuration found.");
+    console.log(`  Run ${chalk.cyan("workermill-agent setup")} to connect to WorkerMill Cloud.`);
     process.exit(0);
   }
 } else {

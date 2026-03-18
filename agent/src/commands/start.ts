@@ -27,12 +27,9 @@ import type { AgentConfig } from "../config.js";
 import { rotateLogs } from "../log-rotation.js";
 import { startAgent } from "../index.js";
 import {
-  isStandaloneReady,
   isCloudMode,
   loadStandaloneConfig,
   saveStandaloneConfig,
-  getRoleConfig,
-  resolveApiKey,
 } from "../backends/local/config.js";
 
 /**
@@ -83,7 +80,7 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
   // can report the error instead of spawning a child that immediately crashes.
   if (!existsSync(getConfigFile())) {
     console.log(chalk.red("No configuration found."));
-    console.log(`Run ${chalk.cyan("workermill-agent init --standalone")} first.`);
+    console.log(`Run ${chalk.cyan("workermill-agent setup")} to get started.`);
     // Return instead of process.exit so the caller can handle it
     return;
   }
@@ -107,36 +104,7 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     saveStandaloneConfig(rawConfig);
   }
 
-  // ── Standalone mode detection ──
-  // Standalone config has `mode: "standalone"` with `roles` but no `apiUrl`.
-  // Detect it early to skip cloud-specific validation.
-  // Use loadStandaloneConfig() directly — don't gate on isStandaloneReady()
-  // which validates API keys (may fail if OAuth token is expired/missing).
-  let config: AgentConfig;
-  const standaloneCheck = loadStandaloneConfig();
-
-  if (standaloneCheck.mode === "self-hosted" || standaloneCheck.mode === "standalone") {
-    const sc = standaloneCheck;
-    config = {
-      apiUrl: "http://localhost:3001",
-      apiKey: "self-hosted",
-      agentId: `agent-${homedir().split(/[\\/]/).pop() || "local"}`,
-      maxWorkers: sc.settings?.maxParallelExperts ?? 4,
-      pollIntervalMs: 5000,
-      heartbeatIntervalMs: 30000,
-      githubToken: sc.scm?.provider === "github" ? (sc.scm?.token || "") : "",
-      bitbucketToken: sc.scm?.provider === "bitbucket" ? (sc.scm?.token || "") : "",
-      gitlabToken: sc.scm?.provider === "gitlab" ? (sc.scm?.token || "") : "",
-      githubReviewerToken: "",
-      sandbox: "docker",
-      dockerImage: "ghcr.io/jarod-rosenthal/worker",
-      dockerMemoryGb: 4,
-      localRag: false,
-      ollamaPort: 11434,
-    };
-  } else {
-    config = loadConfigFromFile();
-  }
+  const config = loadConfigFromFile();
 
   // Validate prerequisites (Git, Claude CLI, Claude auth, Node.js)
   const prereqs = checkPrerequisites();

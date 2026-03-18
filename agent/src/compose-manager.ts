@@ -20,6 +20,40 @@ const SELF_HOSTED_API_URL = "http://localhost:3001";
 const HEALTH_ENDPOINT = `${SELF_HOSTED_API_URL}/health`;
 
 /**
+ * Find the Claude config directory, checking WSL Windows paths.
+ * Matches docker-spawner.ts findClaudeConfigDir() logic.
+ */
+function findClaudeConfigDirForCompose(): string {
+  const standardDir = path.join(os.homedir(), ".claude");
+  if (fs.existsSync(path.join(standardDir, ".credentials.json"))) return standardDir;
+
+  // Check USERPROFILE (Windows via WSL)
+  const userProfile = process.env.USERPROFILE;
+  if (userProfile) {
+    const wslPath = userProfile
+      .replace(/^([A-Za-z]):/, (_, drive: string) => `/mnt/${drive.toLowerCase()}`)
+      .replace(/\\/g, "/");
+    const wslClaudeDir = path.join(wslPath, ".claude");
+    if (fs.existsSync(path.join(wslClaudeDir, ".credentials.json"))) return wslClaudeDir;
+  }
+
+  // Scan /mnt/c/Users for any .claude directory with credentials
+  const windowsUsersDir = "/mnt/c/Users";
+  if (fs.existsSync(windowsUsersDir)) {
+    try {
+      for (const user of fs.readdirSync(windowsUsersDir)) {
+        if (["Public", "Default", "Default User", "All Users"].includes(user)) continue;
+        const claudeDir = path.join(windowsUsersDir, user, ".claude");
+        if (fs.existsSync(path.join(claudeDir, ".credentials.json"))) return claudeDir;
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Fallback to standard dir even if credentials don't exist yet
+  return standardDir;
+}
+
+/**
  * Find the docker-compose.yml bundled with the agent or in the repo.
  * The agent binary bundles it at build time; fallback to repo root for dev.
  */
@@ -71,8 +105,9 @@ export async function startCompose(
 
   // Ensure .env has the host Claude config path for the API container volume mount.
   // Written on every startup so it stays current if the user's home dir changes.
+  // Use the same discovery logic as docker-spawner: check WSL Windows paths too.
   const envPath = path.join(composeDir, ".env");
-  const claudeConfigDir = path.join(os.homedir(), ".claude");
+  const claudeConfigDir = findClaudeConfigDirForCompose();
   try {
     // Read existing .env and update/add CLAUDE_CONFIG_DIR without clobbering other vars
     let envContent = "";

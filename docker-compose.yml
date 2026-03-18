@@ -45,6 +45,8 @@ services:
       EXECUTION_MODE: local
       DATABASE_URL: postgresql://workermill:localdev@postgres:5432/workermill
       REDIS_URL: redis://redis:6379
+    volumes:
+      - ${CLAUDE_CONFIG_DIR:-~/.claude}:/root/.claude:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -768,7 +768,7 @@ class LocalEpicSpawner {
       JIRA_API_TOKEN: credentials?.jiraApiToken || process.env.JIRA_API_TOKEN || "",
 
       // Issue tracker system (jira, linear, github-issues)
-      TICKET_SYSTEM: task.organization?.issueTrackerProvider || "internal",
+      TICKET_SYSTEM: task.organization?.issueTrackerProvider === "github-issues" ? "github" : (task.organization?.issueTrackerProvider || "internal"),
       LINEAR_API_KEY: credentials?.linearApiKey || process.env.LINEAR_API_KEY || "",
 
       // AWS credentials (for workers that need to deploy infrastructure)

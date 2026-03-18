@@ -343,7 +343,7 @@ export async function spawnManagerWorker(
     JIRA_BASE_URL: credentials?.jiraBaseUrl || "",
     JIRA_EMAIL: credentials?.jiraEmail || "",
     JIRA_API_TOKEN: credentials?.jiraApiToken || "",
-    TICKET_SYSTEM: credentials?.issueTrackerProvider || "internal",
+    TICKET_SYSTEM: credentials?.issueTrackerProvider === "github-issues" ? "github" : (credentials?.issueTrackerProvider || "internal"),
     LINEAR_API_KEY: credentials?.linearApiKey || "",
   };
 

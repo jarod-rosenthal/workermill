@@ -246,36 +246,15 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     return;
   }
 
-  // LOCAL MODE: Use local Claude CLI planning path (spawns claude process directly)
-  // But ONLY if no remote agent is connected — in self-hosted mode, the remote
-  // agent handles planning on the host where Claude CLI is installed.
+  // LOCAL / SELF-HOSTED MODE: The API runs inside a Docker container without
+  // the Claude CLI binary. Planning is always handled by the remote agent
+  // (which runs on the host and has access to Claude CLI / OAuth credentials).
+  // Just return and let the agent's polling loop pick up the planning task.
   const isLocalMode = isClaudeCliMode();
   if (isLocalMode) {
-    // Check if a remote agent has heartbeated recently (last 60s)
-    const { RemoteAgent } = await import("../models/index.js");
-    const agentRepo = AppDataSource.getRepository(RemoteAgent);
-    const recentAgent = await agentRepo
-      .createQueryBuilder("agent")
-      .where("agent.orgId = :orgId", { orgId: task.orgId })
-      .andWhere("agent.lastHeartbeatAt > :since", {
-        since: new Date(Date.now() - 60_000),
-      })
-      .getOne();
-
-    if (recentAgent) {
-      // Remote agent is connected — leave planning to it
-      logger.info("Remote agent connected — skipping local planning, agent will handle it", {
-        taskId: task.id,
-        agentId: recentAgent.agentId,
-      });
-      return;
-    }
-
-    logger.info("Local mode, no remote agent — using local Claude CLI planning path", {
+    logger.info("Self-hosted mode — deferring planning to remote agent", {
       taskId: task.id,
-      executionMode: process.env.EXECUTION_MODE,
     });
-    await processLocalPlanningAgent(task, taskRepo);
     return;
   }
 

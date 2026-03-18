@@ -230,12 +230,9 @@ class TaskPseudoterminal implements vscode.Pseudoterminal {
     if (this.pollTimer) clearInterval(this.pollTimer);
   }
 
-  /** Restart polling after a retry — resume log streaming */
+  /** Restart polling — resume log streaming (e.g., planning → execution transition) */
   restart(): void {
     if (this.disposed) return;
-    this.writeLine("");
-    this.writeLine(`${DIM}--- Retrying task ---${RESET}`);
-    this.writeLine("");
     if (!this.pollTimer) {
       this.currentInterval = 4_000;
       this.consecutiveErrors = 0;

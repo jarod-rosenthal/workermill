@@ -832,9 +832,11 @@ Begin your review now. Start by fetching the code changes.`;
     console.log("[👑 tech_lead 🤖] Using LLM extraction for review decision (no clear marker found)");
 
     // Skip LLM extraction if no API key (e.g. OAuth/local mode — Claude CLI doesn't expose a raw API key)
+    // Default to revision_needed so unreviewed code is never silently approved.
+    // This is bounded by maxReviewRevisions so it won't cause infinite retries.
     if (!this.config.anthropicApiKey) {
-      console.warn("[👑 tech_lead 🤖] No Anthropic API key available — skipping LLM extraction");
-      return { decision: "approved", feedback: "Review parse failure — approved by default (no API key for LLM extraction). Manual review recommended.", score: 5 };
+      console.warn("[👑 tech_lead 🤖] No Anthropic API key available — skipping LLM extraction, defaulting to revision_needed");
+      return { decision: "revision_needed", feedback: "Review could not be parsed (no API key for LLM extraction). Please review manually.", score: 0 };
     }
 
     // Use Anthropic SDK directly for a quick, structured extraction

@@ -174,6 +174,93 @@ async function cleanupOldLogs(): Promise<void> {
 }
 
 /**
+ * Fail orphaned tasks in local (self-hosted) mode.
+ *
+ * Checks Docker container status via localEpicSpawner instead of ECS ARN.
+ * Tasks in executing/dispatching status whose containers have exited or were
+ * never tracked are failed after a 5-minute grace period.
+ */
+async function failOrphanedLocalTasks(): Promise<void> {
+  const taskRepo = getTaskRepo();
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+
+  try {
+    const activeTasks = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.status IN (:...statuses)", {
+        statuses: ["executing", "dispatching"],
+      })
+      .andWhere("task.claimed_by_agent IS NULL")
+      .limit(20)
+      .getMany();
+
+    if (activeTasks.length === 0) return;
+
+    let failedCount = 0;
+
+    for (const task of activeTasks) {
+      const containerStatus = localEpicSpawner.getTaskStatus(task.id);
+
+      // Container is still running — skip
+      if (containerStatus?.status === "running") {
+        continue;
+      }
+
+      // Container exited or was never tracked — apply grace period
+      if (task.updatedAt >= fiveMinutesAgo) {
+        continue;
+      }
+
+      const minutesSinceUpdate = Math.round(
+        (Date.now() - task.updatedAt.getTime()) / 60000,
+      );
+      const reason = containerStatus
+        ? `container exited with status '${containerStatus.status}'`
+        : "no container tracked (process may have crashed before spawning)";
+
+      logger.warn("Failing orphaned local task", {
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        status: task.status,
+        updatedAt: task.updatedAt,
+        minutesSinceUpdate,
+        reason,
+      });
+
+      const errorMsg = `Task orphaned in local mode: stuck in '${task.status}' for ${minutesSinceUpdate} minutes — ${reason}`;
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "failed" as WorkerTaskStatus,
+          completedAt: new Date(),
+          errorMessage: errorMsg,
+        })
+        .where("id = :id AND status NOT IN (:...terminal)", {
+          id: task.id,
+          terminal: ["completed", "failed", "cancelled"],
+        })
+        .execute();
+      task.status = "failed";
+      task.errorMessage = errorMsg;
+      await notifyTaskFailed(task);
+      await logTaskEvent(task.id, "error", task.errorMessage, {
+        severity: "error",
+      });
+      failedCount++;
+    }
+
+    if (failedCount > 0) {
+      logger.info("Failed orphaned local tasks", { count: failedCount });
+    }
+  } catch (error) {
+    logger.error("Error in failOrphanedLocalTasks", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Fail orphaned tasks that are stuck in non-terminal states
  *
  * Orphaned tasks are ones that:
@@ -183,8 +270,9 @@ async function cleanupOldLogs(): Promise<void> {
  * This prevents webhooks from being blocked by stuck tasks
  */
 export async function failOrphanedTasks(): Promise<void> {
-  // Skip orphan detection in local mode - ECS ARN checks don't apply
+  // Local mode uses Docker container tracking instead of ECS ARN checks
   if (localEpicSpawner.isLocalMode()) {
+    await failOrphanedLocalTasks();
     return;
   }
 

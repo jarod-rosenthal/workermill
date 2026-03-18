@@ -956,6 +956,110 @@ export async function cascadeCancellationToChildren(
 
 
 /**
+ * Monitor executing tasks in local (self-hosted) mode.
+ *
+ * Checks Docker container status via localEpicSpawner instead of ECS.
+ * - If container is still running, skip.
+ * - If container completed (exit 0) but task is still executing after 2 min grace, mark completed.
+ * - If container failed (non-zero exit), mark task as failed immediately.
+ */
+async function monitorLocalExecutingTasks(): Promise<void> {
+  const taskRepo = getTaskRepo();
+  const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+
+  try {
+    const executingTasks = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.status = :status", { status: "executing" })
+      .andWhere("task.claimed_by_agent IS NULL")
+      .limit(10)
+      .getMany();
+
+    if (executingTasks.length === 0) return;
+
+    for (const task of executingTasks) {
+      const containerStatus = localEpicSpawner.getTaskStatus(task.id);
+
+      // Container still running — nothing to do
+      if (!containerStatus || containerStatus.status === "running") {
+        continue;
+      }
+
+      if (containerStatus.status === "completed") {
+        // Container exited cleanly but task is still "executing" — the worker
+        // callback may have been lost. Apply a 2-minute grace period before
+        // marking completed so the callback has time to arrive.
+        if (task.updatedAt >= twoMinutesAgo) {
+          continue;
+        }
+
+        logger.warn("Local container completed but task still executing — marking completed (missed callback)", {
+          taskId: task.id,
+          jiraIssueKey: task.jiraIssueKey,
+          updatedAt: task.updatedAt,
+        });
+
+        const result = await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            status: "completed" as WorkerTaskStatus,
+            completedAt: new Date(),
+            errorMessage: "Container exited successfully but completion callback was not received. Marked completed by monitor.",
+          })
+          .where("id = :id AND status = :expected", {
+            id: task.id,
+            expected: "executing",
+          })
+          .execute();
+
+        if (result.affected && result.affected > 0) {
+          task.status = "completed";
+          await notifyTaskCompleted(task);
+          await logTaskEvent(task.id, "system", "Task completed (detected by local container monitor — callback was missed)", {
+            severity: "warning",
+          });
+        }
+      } else if (containerStatus.status === "failed") {
+        // Container exited with non-zero code — fail immediately
+        logger.warn("Local container failed — marking task as failed", {
+          taskId: task.id,
+          jiraIssueKey: task.jiraIssueKey,
+        });
+
+        const errorMsg = "Docker container exited with non-zero exit code";
+        const result = await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            status: "failed" as WorkerTaskStatus,
+            completedAt: new Date(),
+            errorMessage: errorMsg,
+          })
+          .where("id = :id AND status = :expected", {
+            id: task.id,
+            expected: "executing",
+          })
+          .execute();
+
+        if (result.affected && result.affected > 0) {
+          task.status = "failed";
+          task.errorMessage = errorMsg;
+          await notifyTaskFailed(task);
+          await logTaskEvent(task.id, "error", errorMsg, {
+            severity: "error",
+          });
+        }
+      }
+    }
+  } catch (error) {
+    logger.error("Error in monitorLocalExecutingTasks", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Monitor all executing tasks and detect completion via ECS status
  * This is the PRIMARY completion detection mechanism - worker callbacks are a backup
  *
@@ -965,8 +1069,9 @@ export async function cascadeCancellationToChildren(
  * 3. Capture PR details if present
  */
 export async function monitorExecutingTasks(): Promise<void> {
-  // Skip ECS monitoring in local mode - local tasks complete via API calls or local monitoring
+  // Local mode uses Docker container tracking instead of ECS
   if (localEpicSpawner.isLocalMode()) {
+    await monitorLocalExecutingTasks();
     return;
   }
 

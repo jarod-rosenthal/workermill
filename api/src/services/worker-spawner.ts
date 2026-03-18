@@ -509,6 +509,14 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
       additionalEnv.BLOCKER_WAIT_TIMEOUT_MINUTES = String(org.blockerWaitTimeoutMinutes);
       additionalEnv.PUSH_AFTER_COMMIT = org.pushAfterCommit !== false ? "true" : "false";
       additionalEnv.GRACEFUL_SHUTDOWN_ENABLED = org.gracefulShutdownEnabled !== false ? "true" : "false";
+      additionalEnv.MAX_REVIEW_REVISIONS = String(org.maxReviewRevisions ?? 4);
+      additionalEnv.MAX_PER_STORY_REVISIONS = String(org.maxPerStoryRevisions ?? 0);
+      additionalEnv.MAX_PARALLEL_EXPERTS = String(org.maxParallelExperts ?? 14);
+      additionalEnv.QUALITY_GATE_MAX_RETRIES = String(org.maxFixRetries ?? 5);
+      additionalEnv.MAX_CI_FIX_RETRIES = String(org.maxFixRetries ?? 3);
+      if (org.codebaseIndexingEnabled != null) {
+        additionalEnv.CODEBASE_INDEXING_ENABLED = org.codebaseIndexingEnabled ? "true" : "false";
+      }
       // Intent Engineering — org guidelines flow into worker system prompt
       if (org.aiGuidelines) {
         additionalEnv.ORG_GUIDELINES = org.aiGuidelines;

@@ -1548,7 +1548,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         const normalized = {
           errorText: body.errorText || body.errorOutput || "",
           retryCount: body.retryCount ?? 0,
-          maxAutoRetries: body.maxAutoRetries ?? standaloneConfig.settings?.qualityGateMaxRetries ?? 3,
+          maxAutoRetries: body.maxAutoRetries ?? standaloneConfig.settings?.maxFixRetries ?? 3,
           storyContext:
             body.storyContext && typeof body.storyContext === "object"
               ? body.storyContext

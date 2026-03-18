@@ -43,6 +43,7 @@ export interface Settings {
   taskRetentionDays: number;
   maxConcurrentWorkers: number;
   maxParallelExperts: number;
+  ralphMaxStories: number;
   defaultMaxRetries: number;
   taskCooldownSeconds: number;
   defaultWorkerModel: string;
@@ -145,6 +146,7 @@ export interface ValidationErrors {
   taskRetentionDays?: string;
   maxConcurrentWorkers?: string;
   maxParallelExperts?: string;
+  ralphMaxStories?: string;
   defaultMaxRetries?: string;
   taskCooldownSeconds?: string;
   costAlertThresholdUsd?: string;

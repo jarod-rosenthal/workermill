@@ -445,7 +445,7 @@ export class SettingsPanel {
         // Worker behavior settings
         maxPerStoryRevisions: settings.maxPerStoryRevisions ?? 1,
         maxReviewRevisions: settings.maxReviewRevisions ?? 4,
-        maxFixRetries: settings.maxFixRetries ?? settings.qualityGateMaxRetries ?? 5,
+        maxFixRetries: settings.maxFixRetries ?? 5,
         blockerWaitTimeoutMinutes: settings.blockerWaitTimeoutMinutes ?? 20,
         pushAfterCommit: settings.pushAfterCommit ?? true,
         // Quality gate settings

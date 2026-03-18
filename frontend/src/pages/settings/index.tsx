@@ -108,6 +108,7 @@ export default function Settings() {
     taskRetentionDays: 7,
     maxConcurrentWorkers: 1,
     maxParallelExperts: 3,
+    ralphMaxStories: 10,
     defaultMaxRetries: 3,
     taskCooldownSeconds: 0,
     defaultWorkerModel: "claude-sonnet-4-6",
@@ -120,7 +121,7 @@ export default function Settings() {
     managerProvider: "anthropic",
     managerModelId: "claude-opus-4-6",
     maxReviewRevisions: 3,
-    maxPerStoryRevisions: 1,
+    maxPerStoryRevisions: 0,
     planningAgentProvider: "anthropic",
     planningAgentModel: "claude-opus-4-6",
     planningMode: "simplified",
@@ -164,9 +165,9 @@ export default function Settings() {
     minTestCoveragePercent: null,
     maxSecurityHighVulns: null,
     blockOnTypeErrors: false,
-    blockOnTestFailures: false,
+    blockOnTestFailures: true,
     blockOnLintErrors: false,
-    blockOnE2EFailures: false,
+    blockOnE2EFailures: true,
     sonarqubeUrl: null,
     sonarqubeToken: null,
     coderabbitEnabled: false,
@@ -450,6 +451,7 @@ export default function Settings() {
         taskRetentionDays: data.taskRetentionDays ?? 7,
         maxConcurrentWorkers: data.maxConcurrentWorkers ?? 1,
         maxParallelExperts: data.maxParallelExperts ?? 3,
+        ralphMaxStories: data.ralphMaxStories ?? 10,
         defaultMaxRetries: Math.min(data.defaultMaxRetries ?? 3, 5),
         taskCooldownSeconds: data.taskCooldownSeconds ?? 0,
         defaultWorkerModel: data.defaultWorkerModel || "claude-sonnet-4-6",
@@ -891,6 +893,9 @@ export default function Settings() {
     }
     if (settings.maxParallelExperts < 1 || settings.maxParallelExperts > 14) {
       errors.maxParallelExperts = "Must be between 1 and 14";
+    }
+    if (settings.ralphMaxStories < 1 || settings.ralphMaxStories > 50) {
+      errors.ralphMaxStories = "Must be between 1 and 50";
     }
     if (settings.defaultMaxRetries < 0 || settings.defaultMaxRetries > 5) {
       errors.defaultMaxRetries = "Must be between 0 and 5 retries";

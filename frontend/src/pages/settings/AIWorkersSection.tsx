@@ -646,6 +646,37 @@ export function AIWorkersSection({
                 </p>
               </div>
 
+              {/* Max Stories per Epic */}
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-2">Max Stories per Epic</label>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="range"
+                    min="1"
+                    max="50"
+                    value={settings.ralphMaxStories}
+                    onChange={(e) => updateSetting("ralphMaxStories", parseInt(e.target.value))}
+                    className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-accent"
+                  />
+                  <div className="w-20">
+                    <input
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={settings.ralphMaxStories}
+                      onChange={(e) => updateSetting("ralphMaxStories", parseInt(e.target.value) || 10)}
+                      className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
+                    />
+                  </div>
+                </div>
+                {validationErrors.ralphMaxStories && (
+                  <p className="text-xs text-red-500 mt-1">{validationErrors.ralphMaxStories}</p>
+                )}
+                <p className="text-xs text-muted-foreground mt-1">
+                  Maximum number of stories to decompose an epic into (1-50)
+                </p>
+              </div>
+
               {/* Max Retries */}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-2">Default Max Retries</label>

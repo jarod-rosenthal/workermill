@@ -3365,20 +3365,6 @@ export class EpicCoordinator {
         resultSummary = `Epic: ${summaryParts.join(", ")} (${completions.length} stories)`;
       }
 
-      // Report zero usage for local/remote agent mode (users pay via Claude Max subscription)
-      if (process.env.EXECUTION_MODE === "local") {
-        try {
-          await axios.post(
-            `${this.config.apiBaseUrl}/api/tasks/${this.config.parentTaskId}/usage/partial`,
-            { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedCost: 0, mode: "set" },
-            { headers: { "Content-Type": "application/json", "x-api-key": this.config.orgApiKey }, timeout: 5000 }
-          );
-          console.log("[Epic] Reported zero usage for local mode");
-        } catch (err) {
-          console.warn("[Epic] Failed to report zero usage:", err instanceof Error ? err.message : err);
-        }
-      }
-
       await this.updateTaskStatus(
         taskStatus,
         resultSummary,

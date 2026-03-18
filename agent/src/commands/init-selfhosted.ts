@@ -335,4 +335,8 @@ export async function initSelfHostedCommand(): Promise<void> {
   // Import and call startCommand with detach mode
   const { startCommand } = await import("./start.js");
   await startCommand({ detach: true });
+
+  // Force exit — inquirer keeps stdin listeners open which prevents
+  // Node from exiting naturally after the detached child is spawned.
+  process.exit(0);
 }

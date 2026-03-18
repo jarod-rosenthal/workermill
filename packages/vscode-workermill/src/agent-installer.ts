@@ -870,7 +870,7 @@ export async function stopAgentProcess(): Promise<boolean> {
  */
 export async function waitForAgentReady(
   log?: (msg: string) => void,
-  timeoutMs = 15_000,
+  timeoutMs = 180_000,
 ): Promise<number> {
   const portFile = path.join(os.homedir(), ".workermill", "agent.port");
   const pollMs = 500;

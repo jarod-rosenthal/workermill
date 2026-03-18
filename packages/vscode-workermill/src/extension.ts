@@ -1281,13 +1281,12 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
           vscode.window.showInformationMessage("Setup complete! Starting agent...");
           startAgentProcess(log);
-          const port = await waitForAgentReady(log, 60_000);
+          const port = await waitForAgentReady(log, 180_000);
           if (port) {
             client.connect();
           } else {
-            const err = readAgentStartupError();
-            vscode.window.showErrorMessage(
-              `Agent failed to start${err ? ": " + err : ". Check ${getAgentLogPath()} for details."}`,
+            vscode.window.showInformationMessage(
+              "WorkerMill agent is still starting — this can take a few minutes on first run. Click 'Connect Agent' once it's ready.",
             );
           }
         }
@@ -1353,20 +1352,11 @@ export function activate(context: vscode.ExtensionContext): void {
         if (port) {
           client.connect();
         } else {
-          const error = readAgentStartupError();
-          if (error) {
-            if (/pulling|downloading|starting ollama/i.test(error)) {
-              vscode.window.showInformationMessage(
-                "WorkerMill agent is starting up (this may take a moment).",
-              );
-            } else {
-              vscode.window.showErrorMessage(`WorkerMill agent failed to start: ${error}`);
-            }
-          } else {
-            vscode.window.showWarningMessage(
-              `Agent didn't start. Check ${getAgentLogPath()} for details.`,
-            );
-          }
+          // Self-hosted mode can take several minutes on first start (image pulls,
+          // migrations, health checks). Don't alarm the user — just inform them.
+          vscode.window.showInformationMessage(
+            "WorkerMill agent is still starting — this can take a few minutes on first run. Click 'Connect Agent' once it's ready.",
+          );
         }
       }
     }),

@@ -71,6 +71,10 @@ services:
       EXECUTION_MODE: local
       DATABASE_URL: postgresql://workermill:localdev@postgres:5432/workermill
       REDIS_URL: redis://redis:6379
+    volumes:
+      # Mount host Claude credentials so the API can use Claude CLI for planning.
+      # The agent writes the correct host path as CLAUDE_CONFIG_DIR in .env.
+      - "\${CLAUDE_CONFIG_DIR:-./.claude}:/root/.claude:ro"
     depends_on:
       postgres:
         condition: service_healthy
@@ -315,10 +319,15 @@ export async function initSelfHostedCommand(): Promise<void> {
   if (!fs.existsSync(wmDir)) {
     fs.mkdirSync(wmDir, { recursive: true });
   }
+  // Always write compose file — ensures volume mounts and image refs stay current
   const composePath = path.join(wmDir, "docker-compose.yml");
-  if (!fs.existsSync(composePath)) {
-    fs.writeFileSync(composePath, COMPOSE_FILE_CONTENT, { encoding: "utf-8" });
-  }
+  fs.writeFileSync(composePath, COMPOSE_FILE_CONTENT, { encoding: "utf-8" });
+
+  // Write .env for docker-compose with the host's Claude config path.
+  // Docker Compose reads this automatically when running from ~/.workermill/.
+  const claudeConfigDir = path.join(os.homedir(), ".claude");
+  const envPath = path.join(wmDir, ".env");
+  fs.writeFileSync(envPath, `CLAUDE_CONFIG_DIR=${claudeConfigDir}\n`, { encoding: "utf-8" });
 
   console.log();
   console.log(`  ${chalk.green("✓")} Configuration saved to ~/.workermill/config.json`);

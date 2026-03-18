@@ -70,6 +70,22 @@ export async function startCompose(
   const composeFile = findComposeFile();
   const composeDir = path.dirname(composeFile);
 
+  // Ensure .env has the host Claude config path for the API container volume mount.
+  // Written on every startup so it stays current if the user's home dir changes.
+  const envPath = path.join(composeDir, ".env");
+  const claudeConfigDir = path.join(os.homedir(), ".claude");
+  try {
+    // Read existing .env and update/add CLAUDE_CONFIG_DIR without clobbering other vars
+    let envContent = "";
+    try { envContent = fs.readFileSync(envPath, "utf-8"); } catch { /* doesn't exist yet */ }
+    if (envContent.includes("CLAUDE_CONFIG_DIR=")) {
+      envContent = envContent.replace(/CLAUDE_CONFIG_DIR=.*/g, `CLAUDE_CONFIG_DIR=${claudeConfigDir}`);
+    } else {
+      envContent = envContent.trimEnd() + (envContent ? "\n" : "") + `CLAUDE_CONFIG_DIR=${claudeConfigDir}\n`;
+    }
+    fs.writeFileSync(envPath, envContent, { encoding: "utf-8" });
+  } catch { /* best effort — compose will use fallback */ }
+
   // Pin API + frontend image tags to the agent version, fall back to :latest
   // Same pattern as docker-spawner: try versioned tag, use latest if not available
   let pinnedComposeFile: string | null = null;

@@ -14,7 +14,7 @@ export class StatusBar {
   private item: vscode.StatusBarItem;
   private connected = false;
   private tasks: TaskInfo[] = [];
-  private sandbox: "none" | "docker" = "none";
+  private sandbox: "docker" = "docker";
   private mode: "local" | "cloud" = "cloud";
   private orgName: string | undefined;
 

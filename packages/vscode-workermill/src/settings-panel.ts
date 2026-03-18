@@ -514,7 +514,7 @@ export class SettingsPanel {
     }
   }
 
-  private saveScmStandalone(msg: { provider: string; token?: string; reviewerToken?: string; username?: string; appPassword?: string }): void {
+  private async saveScmStandalone(msg: { provider: string; token?: string; reviewerToken?: string; username?: string; appPassword?: string }): Promise<void> {
     try {
       this.postMessage({ type: "scm-saving" });
       const sc = readStandaloneConfigFile();
@@ -530,20 +530,29 @@ export class SettingsPanel {
 
       sc.scm = { provider: msg.provider, token, ...(msg.username ? { username: msg.username } : {}) };
       writeStandaloneConfigFile(sc);
-      this.postMessage({ type: "scm-saved", message: `${msg.provider} credentials saved` });
-      // Reload to reflect new state
+      // Clear bootstrap flag and restart agent so credentials re-sync to DB
+      try { fs.unlinkSync(path.join(os.homedir(), ".workermill", ".bootstrap-done")); } catch { /* may not exist */ }
+      this.postMessage({ type: "scm-saved", message: `${msg.provider} credentials saved — restarting agent...` });
+      await stopAgentProcess();
+      startAgentProcess();
+      await waitForAgentReady(undefined, 60_000);
       this.loadIntegrationsStandalone();
     } catch (err) {
       this.postMessage({ type: "scm-save-error", message: err instanceof Error ? err.message : String(err) });
     }
   }
 
-  private saveRepoStandalone(defaultRepo: string): void {
+  private async saveRepoStandalone(defaultRepo: string): Promise<void> {
     try {
       const sc = readStandaloneConfigFile();
       sc.defaultRepo = defaultRepo;
       writeStandaloneConfigFile(sc);
-      this.postMessage({ type: "repo-saved", message: "Target repository saved" });
+      // Clear bootstrap flag and restart agent so repo re-syncs to DB
+      try { fs.unlinkSync(path.join(os.homedir(), ".workermill", ".bootstrap-done")); } catch { /* may not exist */ }
+      this.postMessage({ type: "repo-saved", message: "Target repository saved — restarting agent..." });
+      await stopAgentProcess();
+      startAgentProcess();
+      await waitForAgentReady(undefined, 60_000);
       this.loadIntegrationsStandalone();
     } catch (err) {
       this.postMessage({ type: "repo-save-error", message: err instanceof Error ? err.message : String(err) });

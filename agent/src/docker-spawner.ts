@@ -370,20 +370,25 @@ export async function spawnDockerWorker(
     return;
   }
 
-  // Pre-flight: verify Docker is running (retry once after 3s — daemon can be slow on Windows)
+  // Pre-flight: verify Docker is running.
+  // Docker Desktop can take several seconds after startup before the daemon
+  // accepts commands — retry with progressive backoff (2s, 4s).
   const dockerBin = findDockerBin();
   let dockerOk = false;
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const maxAttempts = 3;
+  const backoffMs = [2_000, 4_000];
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       execFileSync(dockerBin, ["version"], { stdio: "pipe", timeout: 10_000, windowsHide: true });
       dockerOk = true;
       break;
     } catch (err: unknown) {
       lastErr = err;
-      if (attempt === 0) {
-        console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Docker pre-flight failed, retrying in 3s...`);
-        await new Promise((r) => setTimeout(r, 3_000));
+      if (attempt < maxAttempts - 1) {
+        const delay = backoffMs[attempt] || 4_000;
+        console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Docker not ready, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${maxAttempts})...`);
+        await new Promise((r) => setTimeout(r, delay));
       }
     }
   }

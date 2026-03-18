@@ -20,8 +20,6 @@ import { triggerPoll } from "./poller.js";
 import { detectGpu } from "./gpu-detector.js";
 import { getOllamaStatus, generateEmbeddings, ensureOllamaRunning, pullModel, installOllama, findOllamaPath } from "./ollama-manager.js";
 import { indexRepositoryLocally } from "./local-indexer.js";
-import { loadStandaloneConfig, getRoleConfig, isSelfHostedMode } from "./backends/local/config.js";
-
 import {
   searchJiraIssues,
   listJiraProjects,
@@ -30,10 +28,6 @@ import {
   searchGitHubIssues,
   listGitHubRepos,
 } from "./issue-fetchers.js";
-// Decision engine — pure functions from the API service, bundled by esbuild.
-// @ts-ignore — esbuild resolves cross-package imports at bundle time (outside tsc rootDir)
-import { classifyError, evaluateQuality, parseReviewOutcome, routeQuestion, routeProvider, getWorkerConfig } from "../../api/src/services/worker-decision-engine.js";
-
 // ── Types ──────────────────────────────────────────────
 
 export interface LocalTaskInfo {
@@ -93,218 +87,6 @@ agentEvents.setMaxListeners(100);
  */
 const localTasks = new Map<string, LocalTaskInfo>();
 
-// ── Coordination Store (standalone mode) ──────────────
-// In-memory context store per task. Mirrors the cloud coordination API.
-// When first queried, hydrates story_ready messages from:
-//   1. EXECUTION_PLAN (if task was decomposed) — full stories with personas,
-//      dependencies, targetFiles, mutexGroups (same logic as publishStoriesReady)
-//   2. Task summary/description (single-story fallback)
-
-interface CoordContext {
-  id: string;
-  parentTaskId: string;
-  taskId: string;
-  persona: string;
-  messageType: string;
-  content: string;
-  metadata: Record<string, unknown>;
-  createdAt: string;
-}
-
-interface CoordStore {
-  contexts: CoordContext[];
-  initialized: boolean;
-}
-
-const coordStores = new Map<string, CoordStore>();
-
-// SSE clients subscribed to coordination streams (for real-time push)
-const coordSseClients = new Map<string, Set<ServerResponse>>();
-
-function getCoordStore(taskId: string): CoordStore {
-  let store = coordStores.get(taskId);
-  if (store) return store;
-
-  store = { contexts: [], initialized: false };
-  coordStores.set(taskId, store);
-
-  // No SQLite backend — create a minimal story so workers have something to claim
-  if (!store.initialized) {
-    store.contexts.push({
-      id: `story-${taskId.slice(0, 8)}`,
-      parentTaskId: taskId,
-      taskId,
-      persona: "backend_developer",
-      messageType: "story_ready",
-      content: "Implement task",
-      metadata: {
-        storyIndex: 0,
-        persona: "backend_developer",
-        description: "",
-        dependencies: [],
-        targetFiles: [],
-        mutexGroups: [],
-      },
-      createdAt: new Date().toISOString(),
-    });
-    store.initialized = true;
-  }
-
-  return store;
-}
-
-/**
- * Hydrate story_ready messages from an execution plan.
- * Mirrors publishStoriesReady() in api/src/services/pipeline-executor.ts:
- * - Computes file-level overlap mutex groups across stories
- * - Derives directory-level mutex groups from targetFiles
- * - Assigns __unscoped__ mutex to stories without targetFiles
- * - Publishes ALL stories upfront with dependencies in metadata
- */
-function hydrateStoriesFromPlan(
-  store: CoordStore,
-  taskId: string,
-  steps: Array<Record<string, unknown>>,
-): void {
-  // Pre-compute file-level overlap mutex groups across all stories
-  const fileOverlapMutexByStep = new Map<number, string[]>();
-  for (let i = 0; i < steps.length; i++) {
-    const stepA = steps[i];
-    const idxA = (stepA.index as number) ?? i;
-    const filesA = (stepA.targetFiles as string[]) || [];
-    if (filesA.length === 0) continue;
-    for (let j = i + 1; j < steps.length; j++) {
-      const stepB = steps[j];
-      const idxB = (stepB.index as number) ?? j;
-      const filesB = (stepB.targetFiles as string[]) || [];
-      if (filesB.length === 0) continue;
-      const shared = filesA.filter((f) => filesB.includes(f));
-      if (shared.length > 0) {
-        const fileMutexes = shared.map((f) => `file:${f}`);
-        fileOverlapMutexByStep.set(
-          idxA,
-          [...(fileOverlapMutexByStep.get(idxA) || []), ...fileMutexes],
-        );
-        fileOverlapMutexByStep.set(
-          idxB,
-          [...(fileOverlapMutexByStep.get(idxB) || []), ...fileMutexes],
-        );
-      }
-    }
-  }
-
-  for (let si = 0; si < steps.length; si++) {
-    const step = steps[si];
-    const index = (step.index as number) ?? si;
-    const persona = (step.persona as string) || "backend_developer";
-    const title = (step.title as string) || "Implement step";
-    const description = (step.description as string) || title;
-    const targetFiles = (step.targetFiles as string[]) || [];
-    const referenceFiles = (step.referenceFiles as string[]) || [];
-    const verificationType = (step.verificationType as string) || undefined;
-    const dependencies = (step.dependsOn as number[]) || (step.dependencies as number[]) || [];
-
-    // Compute mutex groups (same logic as publishStoriesReady)
-    let mutexGroups = (step.mutexGroups as string[]) || [];
-    if (mutexGroups.length === 0 && targetFiles.length > 0) {
-      const dirs = new Set<string>();
-      for (const file of targetFiles) {
-        const lastSlash = file.lastIndexOf("/");
-        const dir = lastSlash > 0 ? file.substring(0, lastSlash) : "root";
-        dirs.add(`dir:${dir}`);
-      }
-      mutexGroups = Array.from(dirs);
-    } else if (mutexGroups.length === 0) {
-      mutexGroups = ["__unscoped__"];
-    }
-
-    // Merge in file-level overlap mutex groups
-    const overlapMutexes = fileOverlapMutexByStep.get(index) || [];
-    if (overlapMutexes.length > 0) {
-      mutexGroups = [...new Set([...mutexGroups, ...overlapMutexes])];
-    }
-
-    store.contexts.push({
-      id: `story-${taskId.slice(0, 8)}-${index}`,
-      parentTaskId: taskId,
-      taskId,
-      persona,
-      messageType: "story_ready",
-      content: title,
-      metadata: {
-        storyIndex: index,
-        persona,
-        title,
-        description,
-        targetFiles,
-        referenceFiles,
-        verificationType,
-        dependencies,
-        mutexGroups,
-      },
-      createdAt: new Date().toISOString(),
-    });
-  }
-}
-
-/**
- * Push a coordination event to all SSE subscribers for a task.
- */
-function pushCoordEvent(taskId: string, context: CoordContext): void {
-  const clients = coordSseClients.get(taskId);
-  if (!clients || clients.size === 0) return;
-  const payload = JSON.stringify({ type: "context", data: context });
-  for (const res of clients) {
-    try {
-      res.write(`data: ${payload}\n\n`);
-    } catch {
-      clients.delete(res);
-    }
-  }
-}
-
-/**
- * Fallback worker config when getWorkerConfig() fails (bundled binary
- * won't have api/data/ on disk). Same values as the decision engine constants.
- */
-async function getWorkerConfigFallback(): Promise<Record<string, unknown>> {
-  return {
-    agentsMd: "",
-    personaIcons: {
-      architect: "\uD83C\uDFD7\uFE0F",
-      frontend_developer: "\uD83C\uDFA8",
-      backend_developer: "\uD83D\uDCBB",
-      devops_engineer: "\uD83D\uDD27",
-      security_engineer: "\uD83D\uDEE1\uFE0F",
-      qa_engineer: "\uD83E\uDDEA",
-      tech_writer: "\uD83D\uDCDD",
-      project_manager: "\uD83D\uDCCB",
-      data_ml_engineer: "\uD83D\uDCCA",
-      mobile_developer: "\uD83D\uDCF1",
-      tech_lead: "\uD83D\uDC51",
-      planning_agent: "\uD83D\uDCA1",
-      manager: "\uD83D\uDC54",
-    },
-    providerIcons: {
-      anthropic: "\uD83E\uDD16",
-      openai: "\uD83D\uDD37",
-      google: "\uD83D\uDD35",
-      gemini: "\uD83D\uDD35",
-      ollama: "\uD83C\uDFE0",
-    },
-    reviewSchema: {
-      decision: ["approved", "revision_needed", "rejected"],
-      scoreRange: [1, 10],
-    },
-    claudeMdTemplate: "# Project\n\nThis project uses TypeScript and follows standard patterns.\n",
-    defaults: {
-      blockerMaxAutoRetries: 3,
-      maxReviewRevisions: 3,
-      maxPerStoryRevisions: 1, // matches org DB default and worker env fallback
-    },
-  };
-}
-
 agentEvents.on("task:started", (info: { id: string; parentTaskId?: string; summary: string; description?: string; persona?: string; model?: string; repo?: string; jiraIssueKey?: string }) => {
   localTasks.set(info.id, {
     id: info.id,
@@ -358,13 +140,6 @@ let cleanupInterval: ReturnType<typeof setInterval> | null = setInterval(() => {
     if ((task.status === "completed" || task.status === "failed" || task.status === "pr_approved" || task.status === "cancelled") &&
         new Date(task.startedAt).getTime() < cutoff) {
       localTasks.delete(id);
-      coordStores.delete(id);
-      // Close and remove any lingering coordination SSE clients
-      const coordClients = coordSseClients.get(id);
-      if (coordClients) {
-        for (const c of coordClients) { try { c.end(); } catch { /* ignore */ } }
-        coordSseClients.delete(id);
-      }
       didDelete = true;
     }
   }
@@ -604,24 +379,6 @@ let cloudProxy: ((method: string, path: string, body?: unknown) => Promise<unkno
 
 export function setCloudProxy(fn: (method: string, path: string, body?: unknown) => Promise<unknown>): void {
   cloudProxy = fn;
-}
-
-// Cached API settings for self-hosted mode — avoids reading config.json when API is the source of truth
-let _cachedApiSettings: Record<string, unknown> | null = null;
-let _cachedApiSettingsAt = 0;
-const API_SETTINGS_CACHE_TTL = 60_000; // 1 minute
-
-async function getApiSettings(): Promise<Record<string, unknown> | null> {
-  if (!cloudProxy || !isSelfHostedMode()) return null;
-  const now = Date.now();
-  if (_cachedApiSettings && now - _cachedApiSettingsAt < API_SETTINGS_CACHE_TTL) return _cachedApiSettings;
-  try {
-    _cachedApiSettings = (await cloudProxy("GET", "/api/settings")) as Record<string, unknown>;
-    _cachedApiSettingsAt = now;
-    return _cachedApiSettings;
-  } catch {
-    return _cachedApiSettings; // return stale cache on error
-  }
 }
 
 // ── Request Handler ────────────────────────────────────
@@ -943,7 +700,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return; // Response already ended in try or catch
   }
 
-  // ── Agent Planning Endpoints (standalone mode) ──
+  // ── Agent Planning Endpoints ──
 
   // GET /api/agent/planning-prompt — assemble planning prompt for a task
   if (req.method === "GET" && path === "/api/agent/planning-prompt") {
@@ -987,7 +744,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return json(res, { error: "No backend available" }, 503);
   }
 
-  // POST /api/agent/planning-progress — log planning progress (no-op in standalone, planner prints to console)
+  // POST /api/agent/planning-progress — log planning progress (no-op, planner prints to console)
   if (req.method === "POST" && path === "/api/agent/planning-progress") {
     return json(res, { success: true });
   }
@@ -1485,309 +1242,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
   }
 
-  // ── Worker API stubs (standalone mode) ──
-  // These endpoints are called by the worker process. In cloud mode they go
-  // to the real API; in standalone we return sensible defaults so the worker
-  // can operate without a cloud backend.
-
-  // GET /api/worker-decisions/worker-config — real worker config (same as cloud API)
-  if (req.method === "GET" && path === "/api/worker-decisions/worker-config") {
-    try {
-      const config = await getWorkerConfig();
-      return json(res, config);
-    } catch (err) {
-      // Fallback to defaults if file read fails (bundled binary won't have api/data/)
-      return json(res, await getWorkerConfigFallback());
-    }
-  }
-
-  // POST /api/worker-decisions/* — real decision engine (same pure functions as cloud API)
-  if (req.method === "POST" && path.startsWith("/api/worker-decisions/")) {
-    const action = path.split("/").pop();
-    try {
-      const body = JSON.parse(await readBody(req));
-      const standaloneConfig = loadStandaloneConfig();
-
-      if (action === "evaluate-quality") {
-        // Normalize: if client sends flat { diff, storyDescription } instead of { metrics, ... }
-        let normalized = body;
-        if (body.diff !== undefined && body.metrics === undefined) {
-          const diffStr = String(body.diff);
-          const scoreMatch = diffStr.match(/score=(\d+)/);
-          const typeErrorsMatch = diffStr.match(/typeErrors=(true|false)/);
-          const testsFailedMatch = diffStr.match(/testsFailed=(\d+|true|false)/);
-          normalized = {
-            metrics: {
-              qualityScore: scoreMatch ? parseInt(scoreMatch[1], 10) : undefined,
-              typeErrors: typeErrorsMatch ? typeErrorsMatch[1] === "true" : false,
-              testFailures: testsFailedMatch
-                ? testsFailedMatch[1] === "true" || parseInt(testsFailedMatch[1], 10) > 0
-                : false,
-            },
-            taskId: body.taskId,
-            bypassRequested: false,
-            qualityGateEnabled: true,
-            thresholds: body.thresholds,
-          };
-        }
-        // Default thresholds if not provided
-        if (!normalized.thresholds) {
-          normalized.thresholds = {
-            blockOnTestFailures: true,
-            blockOnTypeErrors: false,
-            blockOnLintErrors: false,
-            blockOnE2EFailures: false,
-          };
-        }
-        if (normalized.qualityGateEnabled === undefined) normalized.qualityGateEnabled = true;
-        if (normalized.bypassRequested === undefined) normalized.bypassRequested = false;
-        return json(res, evaluateQuality(normalized));
-      }
-
-      if (action === "classify-error") {
-        const normalized = {
-          errorText: body.errorText || body.errorOutput || "",
-          retryCount: body.retryCount ?? 0,
-          maxAutoRetries: body.maxAutoRetries ?? standaloneConfig.settings?.maxFixRetries ?? 3,
-          storyContext:
-            body.storyContext && typeof body.storyContext === "object"
-              ? body.storyContext
-              : {
-                  title: typeof body.storyContext === "string" ? body.storyContext : "",
-                  persona: body.persona || "",
-                  targetFiles: body.affectedFiles || [],
-                },
-        };
-        return json(res, classifyError(normalized));
-      }
-
-      if (action === "review-outcome") {
-        const normalized = {
-          reviewerOutput: body.reviewerOutput || body.reviewOutput || "",
-          revisionCount: body.revisionCount ?? body.revisionNumber ?? 0,
-          maxRevisions: body.maxRevisions ?? standaloneConfig.settings?.maxReviewRevisions ?? 3,
-          perStoryRevisionCount: body.perStoryRevisionCount ?? 0,
-          maxPerStoryRevisions: body.maxPerStoryRevisions ?? standaloneConfig.settings?.maxPerStoryRevisions ?? 1,
-        };
-        return json(res, parseReviewOutcome(normalized));
-      }
-
-      if (action === "route-question") {
-        return json(res, routeQuestion(body));
-      }
-
-      if (action === "route-provider") {
-        return json(res, routeProvider(body));
-      }
-
-      return json(res, {});
-    } catch (err) {
-      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-    }
-  }
-
-  // POST /api/coordination/heartbeat — worker heartbeat (fire-and-forget)
-  if (req.method === "POST" && path === "/api/coordination/heartbeat") {
-    return json(res, { success: true });
-  }
-
-  // ── Coordination API (standalone mode) ──
-  // The epic worker uses these endpoints for story claiming, context posting,
-  // and multi-expert coordination. In standalone mode we serve a single story
-  // derived from the task's summary/description.
-
-  // GET /api/coordination/context/:taskId — get coordination contexts
-  const coordCtxMatch = path.match(/^\/api\/coordination\/context\/([a-zA-Z0-9_-]+)$/);
-  if (req.method === "GET" && coordCtxMatch) {
-    const taskId = coordCtxMatch[1];
-    const store = getCoordStore(taskId);
-    const { params: coordParams } = parseUrl(req.url || "");
-    const messageType = coordParams.messageType;
-    const messageTypes = coordParams.messageTypes;
-    const types = messageType
-      ? [messageType]
-      : messageTypes
-        ? messageTypes.split(",")
-        : null;
-
-    const contexts = types
-      ? store.contexts.filter((c) => types.includes(c.messageType))
-      : store.contexts;
-
-    return json(res, { contexts });
-  }
-
-  // GET /api/coordination/context/:taskId/stream — SSE coordination stream
-  // Real-time push when coordination contexts are posted (mirrors cloud Redis pub/sub)
-  const workerSseMatch = path.match(
-    /^\/api\/coordination\/context\/([a-zA-Z0-9_-]+)\/stream$/,
-  );
-  if (req.method === "GET" && workerSseMatch) {
-    const sseTaskId = workerSseMatch[1];
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
-    res.write("data: {\"type\":\"connected\"}\n\n");
-
-    // Register this client for coordination event push
-    if (!coordSseClients.has(sseTaskId)) {
-      coordSseClients.set(sseTaskId, new Set());
-    }
-    coordSseClients.get(sseTaskId)!.add(res);
-
-    // Keep alive every 30s
-    const keepAlive = setInterval(() => {
-      try {
-        res.write(": keepalive\n\n");
-      } catch {
-        clearInterval(keepAlive);
-      }
-    }, 30_000);
-    req.on("close", () => {
-      clearInterval(keepAlive);
-      coordSseClients.get(sseTaskId)?.delete(res);
-    });
-    return; // Keep connection open
-  }
-
-  // POST /api/coordination/context — post a coordination context message
-  if (req.method === "POST" && path === "/api/coordination/context") {
-    try {
-      const body = JSON.parse(await readBody(req));
-      const taskId = body.parentTaskId || "";
-      const store = getCoordStore(taskId);
-      const msg: CoordContext = {
-        id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        parentTaskId: taskId,
-        taskId: body.taskId || taskId,
-        persona: body.persona || "",
-        messageType: body.messageType || "context",
-        content: body.content || "",
-        metadata: body.metadata || {},
-        createdAt: new Date().toISOString(),
-      };
-      store.contexts.push(msg);
-      // Push to SSE subscribers (mirrors cloud Redis pub/sub)
-      pushCoordEvent(taskId, msg);
-      // Emit prominent blocker notification so VS Code can show a dialog
-      if (msg.messageType === "blocker_detected") {
-        broadcastSSE("tasks", "blocker:detected", {
-          taskId: msg.taskId,
-          parentTaskId: taskId,
-          persona: msg.persona,
-          content: msg.content,
-          metadata: msg.metadata,
-          createdAt: msg.createdAt,
-        });
-      }
-      return json(res, msg, 201);
-    } catch {
-      return json(res, { success: true });
-    }
-  }
-
-  // POST /api/coordination/claim — claim a story
-  if (req.method === "POST" && path === "/api/coordination/claim") {
-    try {
-      const body = JSON.parse(await readBody(req));
-      const parentTaskId = body.parentTaskId || "";
-      const store = getCoordStore(parentTaskId);
-      // Mark story as claimed
-      const claimed: CoordContext = {
-        id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        parentTaskId,
-        taskId: parentTaskId,
-        persona: body.claimedBy || "",
-        messageType: "story_claimed",
-        content: `Story claimed by ${body.claimedBy}`,
-        metadata: {
-          storyId: body.storyId,
-          claimedBy: body.claimedBy,
-          storyIndex: store.contexts.find(
-            (c) => c.id === body.storyId,
-          )?.metadata?.storyIndex ?? 0,
-        },
-        createdAt: new Date().toISOString(),
-      };
-      store.contexts.push(claimed);
-      // Push to SSE subscribers
-      pushCoordEvent(parentTaskId, claimed);
-      return json(res, { success: true, claimedBy: body.claimedBy });
-    } catch {
-      return json(res, { success: true });
-    }
-  }
-
-  // POST /api/coordination/answer — post an answer to a question
-  if (req.method === "POST" && path === "/api/coordination/answer") {
-    try {
-      const body = JSON.parse(await readBody(req));
-      return json(res, {
-        success: true,
-        context: {
-          id: `ctx-${Date.now()}`,
-          messageType: "answer",
-          content: body.answer || "",
-          persona: body.persona || "",
-          metadata: { questionId: body.messageId },
-          createdAt: new Date().toISOString(),
-        },
-      });
-    } catch {
-      return json(res, { success: true });
-    }
-  }
-
-  // POST /api/coordination/archive-claims — archive stale claims
-  if (
-    req.method === "POST" &&
-    path === "/api/coordination/archive-claims"
-  ) {
-    return json(res, { success: true });
-  }
-
-  // GET /api/coordination/commands/:taskId/pending — dashboard commands
-  const coordCmdMatch = path.match(
-    /^\/api\/coordination\/commands\/([a-zA-Z0-9_-]+)\/pending$/,
-  );
-  if (req.method === "GET" && coordCmdMatch) {
-    return json(res, { commands: [] });
-  }
-
-  // GET /api/coordination/blockers/:taskId — blocker contexts
-  const coordBlockerMatch = path.match(
-    /^\/api\/coordination\/blockers\/([a-zA-Z0-9_-]+)$/,
-  );
-  if (req.method === "GET" && coordBlockerMatch) {
-    return json(res, { contexts: [] });
-  }
-
-  // POST /api/tasks/:id/worker-complete — worker signals task completion
-  const workerCompleteMatch = path.match(
-    /^\/api\/tasks\/([a-f0-9-]+)\/worker-complete$/,
-  );
-  if (req.method === "POST" && workerCompleteMatch) {
-    return json(res, { success: true });
-  }
-
-  // POST /api/tasks/:id/manager-complete — manager review result
-  const managerCompleteMatch = path.match(
-    /^\/api\/tasks\/([a-f0-9-]+)\/manager-complete$/,
-  );
-  if (req.method === "POST" && managerCompleteMatch) {
-    return json(res, { success: true });
-  }
-
-  // POST /api/tasks/:id/worker-progress — mid-task status update (non-terminal)
-  const workerProgressMatch = path.match(
-    /^\/api\/tasks\/([a-f0-9-]+)\/worker-progress$/,
-  );
-  if (req.method === "POST" && workerProgressMatch) {
-    return json(res, { success: true });
-  }
-
   // POST /api/control-center/logs/:id/classify-errors — mark errors as fatal/recoverable
   const classifyMatch = path.match(
     /^\/api\/control-center\/logs\/([a-f0-9-]+)\/classify-errors$/,
@@ -1915,7 +1369,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (req.method === "POST") return json(res, { success: true });
   }
 
-  // POST /api/codebase/search — search code via cloud proxy (standalone returns empty)
+  // POST /api/codebase/search — search code via cloud proxy
   if (req.method === "POST" && path === "/api/codebase/search") {
     if (cloudProxy) {
       try {
@@ -1954,8 +1408,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
       }
     }
-    // Standalone: acknowledge the ingest but don't store (no local vector DB yet)
-    return json(res, { ingested: 0, message: "Codebase indexing not available in standalone mode" });
+    // No local vector DB — acknowledge but don't store
+    return json(res, { ingested: 0, message: "Codebase indexing requires cloud backend" });
   }
 
   // GET /api/codebase/status/* — indexing status
@@ -2596,13 +2050,6 @@ export function stopLocalApi(): Promise<void> {
     try { client.res.end(); } catch { /* ignore */ }
   }
   sseClients.clear();
-
-  // Close all coordination SSE connections and clear stores
-  for (const [, clients] of coordSseClients) {
-    for (const c of clients) { try { c.end(); } catch { /* ignore */ } }
-  }
-  coordSseClients.clear();
-  coordStores.clear();
 
   return new Promise((resolve) => {
     if (!server) { resolve(); return; }

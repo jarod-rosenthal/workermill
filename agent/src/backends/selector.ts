@@ -23,7 +23,7 @@ export async function getBackend(): Promise<AgentBackend> {
     activeBackend = new CloudBackend();
   } else {
     throw new Error(
-      "Standalone SQLite mode has been removed. Run `workermill-agent init --standalone` to set up self-hosted mode.",
+      "No valid configuration found. Run `workermill-agent setup` to connect to WorkerMill Cloud.",
     );
   }
 

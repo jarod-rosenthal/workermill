@@ -1230,73 +1230,6 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
-    vscode.commands.registerCommand("workermill.setupStandalone", async () => {
-      // Step 1: Install agent binary if needed (inline, no bail-out)
-      if (!isAgentInstalled()) {
-        log("Agent binary not installed — installing...");
-        const installed = await installAgent();
-        if (!installed) {
-          vscode.window.showErrorMessage("Agent installation failed. Try again or install manually.");
-          return;
-        }
-      }
-
-      // Step 2: Ensure prerequisites (Git, Claude CLI)
-      const hasGit = await promptInstallGit(log);
-      if (!hasGit) {
-        vscode.window.showWarningMessage("Git is required for WorkerMill. Install Git and try again.");
-        return;
-      }
-      const hasClaude = await promptInstallClaudeCli(log);
-      if (!hasClaude) {
-        vscode.window.showWarningMessage("Claude Code CLI is required for AI workers. Install it and try again.");
-        return;
-      }
-
-      // Step 3: Run init in a terminal
-      // On Windows, use PowerShell with & call operator for quoted paths
-      const binary = getAgentBinaryPath();
-      const isWindows = process.platform === "win32";
-      const terminalOpts: vscode.TerminalOptions = { name: "WorkerMill Setup" };
-      if (isWindows) {
-        terminalOpts.shellPath = "powershell.exe";
-      }
-      const terminal = vscode.window.createTerminal(terminalOpts);
-      terminal.show();
-      terminal.sendText(isWindows
-        ? `& "${binary}" init --standalone`
-        : `"${binary}" init --standalone`);
-
-      // Step 4: Poll for config file creation, then auto-start
-      const configPath = path.join(os.homedir(), ".workermill", "config.json");
-      const startTime = Date.now();
-      const checkInterval = setInterval(async () => {
-        if (fs.existsSync(configPath)) {
-          try {
-            const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-            if (config.mode !== "standalone" && config.mode !== "self-hosted" && !config.roles) return;
-          } catch { return; }
-
-          clearInterval(checkInterval);
-          treeProvider.agentConfigured = true;
-          vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
-          vscode.window.showInformationMessage("Setup complete! Starting agent...");
-          startAgentProcess(log);
-          const port = await waitForAgentReady(log, 180_000);
-          if (port) {
-            client.connect();
-          } else {
-            vscode.window.showInformationMessage(
-              "WorkerMill agent is still starting — this can take a few minutes on first run. Click 'Connect Agent' once it's ready.",
-            );
-          }
-        }
-        if (Date.now() - startTime > 300_000) clearInterval(checkInterval);
-      }, 2000);
-      // Ensure the polling interval is cleaned up when the extension deactivates
-      context.subscriptions.push({ dispose: () => clearInterval(checkInterval) });
-    }),
-
     vscode.commands.registerCommand("workermill.configureScm", async () => {
       // Read API key from keychain first, then fall back to config file
       let apiKey = await getApiKey();
@@ -1353,10 +1286,8 @@ export function activate(context: vscode.ExtensionContext): void {
         if (port) {
           client.connect();
         } else {
-          // Self-hosted mode can take several minutes on first start (image pulls,
-          // migrations, health checks). Don't alarm the user — just inform them.
           vscode.window.showInformationMessage(
-            "WorkerMill agent is still starting — this can take a few minutes on first run. Click 'Connect Agent' once it's ready.",
+            "WorkerMill agent is still starting. Click 'Connect Agent' once it's ready.",
           );
         }
       }
@@ -1427,10 +1358,6 @@ export function activate(context: vscode.ExtensionContext): void {
                 statusMsg = "API is ready, connecting...";
               } else if (/Waiting for API/i.test(recent)) {
                 statusMsg = `Waiting for API to be ready (${elapsed}s)...`;
-              } else if (/Starting self-hosted|Starting Docker|docker compose/i.test(recent)) {
-                statusMsg = `Starting Docker services (${elapsed}s)...`;
-              } else if (/Stack running/i.test(recent)) {
-                statusMsg = "Services running, connecting...";
               } else if (/Connected to/i.test(recent)) {
                 statusMsg = "Agent connected!";
               } else if (/Running migrations|migration/i.test(recent)) {

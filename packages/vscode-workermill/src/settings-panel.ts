@@ -36,14 +36,6 @@ function readAgentConfig(): {
     const configPath = path.join(os.homedir(), ".workermill", "config.json");
     const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 
-    // Self-hosted mode: API runs locally, no stored apiUrl/apiKey needed
-    if (raw.mode === "self-hosted") {
-      return {
-        apiUrl: "http://localhost:3001",
-        apiKey: "self-hosted",
-      };
-    }
-
     if (!raw.apiUrl) return null;
 
     // Try OS keychain first, fall back to config.json plaintext
@@ -64,33 +56,6 @@ function readAgentConfig(): {
     /* no config */
   }
   return null;
-}
-
-/** Check if the agent is running in standalone/self-hosted mode (not cloud). */
-function isStandaloneMode(): boolean {
-  try {
-    const configPath = path.join(os.homedir(), ".workermill", "config.json");
-    const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    return raw.mode === "standalone" || raw.mode === "self-hosted";
-  } catch {
-    return false;
-  }
-}
-
-/** Read the full standalone config from disk. */
-function readStandaloneConfigFile(): Record<string, unknown> {
-  try {
-    const configPath = path.join(os.homedir(), ".workermill", "config.json");
-    return JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  } catch {
-    return {};
-  }
-}
-
-/** Write updated standalone config to disk. */
-function writeStandaloneConfigFile(config: Record<string, unknown>): void {
-  const configPath = path.join(os.homedir(), ".workermill", "config.json");
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
 function apiRequest<T>(
@@ -194,9 +159,6 @@ export class SettingsPanel {
       } else if (msg.type === "pull-sandbox-image") {
         this.pullSandboxImage();
         return;
-      } else if (msg.type === "switch-mode") {
-        await this.switchMode(msg.mode);
-        return;
       } else if (msg.type === "sign-out") {
         vscode.commands.executeCommand("workermill.signOut");
         return;
@@ -217,44 +179,6 @@ export class SettingsPanel {
         return;
       }
 
-      // ── Standalone mode: handle settings locally ──
-      if (isStandaloneMode()) {
-        if (msg.type === "load-integrations") {
-          this.loadIntegrationsStandalone();
-        } else if (msg.type === "save-models") {
-          this.saveModelsStandalone(msg);
-        } else if (msg.type === "save-scm") {
-          this.saveScmStandalone(msg);
-        } else if (msg.type === "save-repo") {
-          this.saveRepoStandalone(msg.defaultRepo);
-        } else if (msg.type === "save-tracker") {
-          this.saveTrackerStandalone(msg.tracker);
-        } else if (msg.type === "save-worker-behavior") {
-          this.saveWorkerBehaviorStandalone(msg);
-        } else if (msg.type === "save-quality-gate") {
-          this.saveQualityGateStandalone(msg);
-        } else if (msg.type === "save-api-key") {
-          this.saveApiKeyStandalone(msg);
-        } else if (msg.type === "save-jira") {
-          this.saveJiraStandalone(msg);
-        } else if (msg.type === "test-jira") {
-          this.testJiraStandalone();
-        } else if (msg.type === "test-scm-bitbucket") {
-          this.testBitbucketStandalone();
-        } else if (msg.type === "test-scm-github") {
-          this.testScmStandalone("github");
-        } else if (msg.type === "test-scm-gitlab") {
-          this.testScmStandalone("gitlab");
-        } else if (msg.type === "save-linear") {
-          this.saveLinearStandalone(msg);
-        } else if (msg.type === "open-dashboard" || msg.type === "open-web-settings" || msg.type === "open-pricing") {
-          this.postMessage({ type: "error", message: "Not available in standalone mode" });
-        } else if (msg.type === "switch-org") {
-          this.postMessage({ type: "error", message: "Not available in standalone mode" });
-        }
-        return;
-      }
-
       // ── Cloud mode: requires API credentials ──
       const config = readAgentConfig();
       if (!config) {
@@ -271,8 +195,7 @@ export class SettingsPanel {
       } else if (msg.type === "save-tracker") {
         await this.saveTracker(config, msg.tracker);
       } else if (msg.type === "open-dashboard") {
-        // Self-hosted: API is localhost:3001 but frontend is localhost:5173
-        const dashboardBase = config.apiUrl.includes("localhost:3001") ? "http://localhost:5173" : config.apiUrl;
+        const dashboardBase = config.apiUrl;
         vscode.env.openExternal(vscode.Uri.parse(`${dashboardBase}/dashboard`));
       } else if (msg.type === "save-repo") {
         await this.saveRepo(config, msg.defaultRepo, msg.provider);
@@ -285,8 +208,7 @@ export class SettingsPanel {
       } else if (msg.type === "test-scm-gitlab") {
         await this.testScm(config, "gitlab");
       } else if (msg.type === "open-web-settings") {
-        // Self-hosted: API is localhost:3001 but frontend is localhost:5173
-        const settingsBase = config.apiUrl.includes("localhost:3001") ? "http://localhost:5173" : config.apiUrl;
+        const settingsBase = config.apiUrl;
         vscode.env.openExternal(vscode.Uri.parse(`${settingsBase}/settings`));
       } else if (msg.type === "open-pricing") {
         vscode.env.openExternal(vscode.Uri.parse(`${config.apiUrl}/pricing`));
@@ -304,51 +226,14 @@ export class SettingsPanel {
     });
 
     // Auto-load integrations on open
-    if (isStandaloneMode()) {
-      this.loadIntegrationsStandalone();
-    } else {
-      const config = readAgentConfig();
-      if (config) {
-        this.loadIntegrations(config);
-      }
+    const config = readAgentConfig();
+    if (config) {
+      this.loadIntegrations(config);
     }
   }
 
   private postMessage(msg: unknown): void {
     if (!this.disposed) this.panel.webview.postMessage(msg);
-  }
-
-  private async switchMode(mode: "cloud" | "standalone"): Promise<void> {
-    try {
-      const sc = readStandaloneConfigFile();
-
-      if (mode === "cloud" && !sc.apiUrl) {
-        this.postMessage({ type: "mode-switch-error", message: "Sign in first to use cloud mode." });
-        return;
-      }
-
-      // Write "self-hosted" (not "standalone") — the agent only recognizes
-      // "cloud" and "self-hosted" as valid modes.
-      sc.mode = mode === "standalone" ? "self-hosted" : mode;
-      writeStandaloneConfigFile(sc);
-
-      // Restart agent to pick up new mode
-      await stopAgentProcess();
-      startAgentProcess();
-      await waitForAgentReady(undefined, 20_000);
-
-      this.postMessage({ type: "mode-switched", message: `Switched to ${mode} mode` });
-
-      // Reload integrations for new mode
-      if (mode === "standalone") {
-        this.loadIntegrationsStandalone();
-      } else {
-        const config = readAgentConfig();
-        if (config) await this.loadIntegrations(config);
-      }
-    } catch (err) {
-      this.postMessage({ type: "mode-switch-error", message: err instanceof Error ? err.message : String(err) });
-    }
   }
 
   private async loadIntegrations(config: {
@@ -402,357 +287,6 @@ export class SettingsPanel {
       this.postMessage({
         type: "error",
         message: `Could not reach API: ${err instanceof Error ? err.message : String(err)}`,
-      });
-    }
-  }
-
-  // ── Standalone mode handlers (read/write ~/.workermill/config.json) ──
-
-  private loadIntegrationsStandalone(): void {
-    const sc = readStandaloneConfigFile();
-    const roles = (sc.roles || {}) as Record<string, { provider?: string; model?: string; apiKey?: string }>;
-    const scm = (sc.scm || {}) as { provider?: string; token?: string };
-
-    const settings = (sc.settings || {}) as Record<string, unknown>;
-
-    // Determine LLM provider and masked key status from worker role
-    const llmProvider = roles.worker?.provider || "anthropic";
-    const hasApiKey = !!(roles.worker?.apiKey);
-
-    this.postMessage({
-      type: "integrations-loaded",
-      data: {
-        // Models — map standalone roles to cloud field names
-        defaultWorkerModel: roles.worker?.model || "claude-sonnet-4-6",
-        managerModelId: roles.techLead?.model || "claude-opus-4-6",
-        planningAgentModel: roles.planner?.model || "claude-opus-4-6",
-        // LLM provider + key status for standalone API key section
-        llmProvider,
-        hasApiKey,
-        // SCM
-        scmProvider: scm.provider || "github",
-        github: { configured: scm.provider === "github" && !!scm.token, defaultRepo: sc.defaultRepo || "" },
-        bitbucket: { configured: scm.provider === "bitbucket" && !!scm.token, defaultRepo: sc.defaultRepo || "" },
-        gitlab: { configured: scm.provider === "gitlab" && !!scm.token, defaultRepo: sc.defaultRepo || "" },
-        // Tracker — standalone supports all providers
-        defaultIssueTracker: (sc.issueTracker as Record<string, unknown>)?.provider || "internal",
-        jira: {
-          configured: !!(sc.issueTracker as Record<string, unknown>)?.jira,
-          baseUrl: ((sc.issueTracker as Record<string, unknown>)?.jira as Record<string, string>)?.baseUrl,
-          email: ((sc.issueTracker as Record<string, unknown>)?.jira as Record<string, string>)?.email,
-        },
-        linear: { configured: !!(sc.issueTracker as Record<string, unknown>)?.linear },
-        // Worker behavior settings
-        maxPerStoryRevisions: settings.maxPerStoryRevisions ?? 1,
-        maxReviewRevisions: settings.maxReviewRevisions ?? 4,
-        maxFixRetries: settings.maxFixRetries ?? 5,
-        blockerWaitTimeoutMinutes: settings.blockerWaitTimeoutMinutes ?? 20,
-        pushAfterCommit: settings.pushAfterCommit ?? true,
-        // Quality gate settings
-        qualityGateEnabled: settings.qualityGateEnabled ?? true,
-        blockOnTypeErrors: settings.blockOnTypeErrors ?? true,
-        blockOnTestFailures: settings.blockOnTestFailures ?? false,
-        blockOnLintErrors: settings.blockOnLintErrors ?? true,
-        blockOnE2EFailures: settings.blockOnE2EFailures ?? false,
-        autoFixEnabled: settings.autoFixEnabled ?? true,
-        autoFixMaxIterations: settings.autoFixMaxIterations ?? 3,
-        // Planning settings
-        planningMode: settings.planningMode ?? "simplified",
-        criticApprovalThreshold: settings.criticApprovalThreshold ?? 90,
-        maxParallelExperts: settings.maxParallelExperts ?? 14,
-        maxStories: settings.maxStories ?? 10,
-        maxTargetFiles: settings.maxTargetFiles ?? 6,
-        // Resilience settings
-        selfReviewEnabled: settings.selfReviewEnabled ?? true,
-        blockerAutoRetryEnabled: settings.blockerAutoRetryEnabled ?? true,
-        gracefulShutdownEnabled: settings.gracefulShutdownEnabled ?? true,
-        // No plan restrictions in standalone — all providers available
-        plan: "max",
-        orgName: "Standalone",
-        organizations: [],
-      },
-    });
-  }
-
-  private saveModelsStandalone(msg: { workerModel: string; reviewerModel: string; plannerModel: string }): void {
-    try {
-      this.postMessage({ type: "models-saving" });
-      const sc = readStandaloneConfigFile();
-      const roles = ((sc.roles || {}) as Record<string, Record<string, string>>);
-
-      // Preserve existing apiKey fields, only update model
-      roles.worker = { ...roles.worker, model: msg.workerModel };
-      roles.techLead = { ...roles.techLead, model: msg.reviewerModel };
-      roles.planner = { ...roles.planner, model: msg.plannerModel };
-      sc.roles = roles;
-
-      writeStandaloneConfigFile(sc);
-      this.postMessage({ type: "models-saved" });
-    } catch (err) {
-      this.postMessage({ type: "models-save-error", message: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  private saveApiKeyStandalone(msg: { provider: string; apiKey: string }): void {
-    try {
-      this.postMessage({ type: "api-key-saving" });
-      const sc = readStandaloneConfigFile();
-      const roles = ((sc.roles || {}) as Record<string, Record<string, string>>);
-
-      // Set provider and API key on all three roles
-      roles.worker = { ...roles.worker, provider: msg.provider, apiKey: msg.apiKey };
-      roles.techLead = { ...roles.techLead, provider: msg.provider, apiKey: msg.apiKey };
-      roles.planner = { ...roles.planner, provider: msg.provider, apiKey: msg.apiKey };
-      sc.roles = roles;
-
-      writeStandaloneConfigFile(sc);
-      this.postMessage({ type: "api-key-saved" });
-      // Reload so model dropdowns update for the new provider
-      this.loadIntegrationsStandalone();
-    } catch (err) {
-      this.postMessage({ type: "api-key-save-error", message: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  private async saveScmStandalone(msg: { provider: string; token?: string; reviewerToken?: string; username?: string; appPassword?: string }): Promise<void> {
-    try {
-      this.postMessage({ type: "scm-saving" });
-      const sc = readStandaloneConfigFile();
-
-      let token = "";
-      if (msg.provider === "github") {
-        token = msg.token || "";
-      } else if (msg.provider === "bitbucket") {
-        token = msg.appPassword || "";
-      } else if (msg.provider === "gitlab") {
-        token = msg.token || "";
-      }
-
-      // For Bitbucket: the "username" field from the UI is the email (used for API auth).
-      // The actual git username is resolved on test connection and stored separately.
-      if (msg.provider === "bitbucket" && msg.username) {
-        const existingScm = (sc.scm || {}) as Record<string, string>;
-        sc.scm = { provider: msg.provider, token, email: msg.username, username: existingScm.username || "" };
-      } else {
-        sc.scm = { provider: msg.provider, token, ...(msg.username ? { username: msg.username } : {}) };
-      }
-      writeStandaloneConfigFile(sc);
-      // Clear bootstrap flag and restart agent so credentials re-sync to DB
-      try { fs.unlinkSync(path.join(os.homedir(), ".workermill", ".bootstrap-done")); } catch { /* may not exist */ }
-      this.postMessage({ type: "scm-saved", message: `${msg.provider} credentials saved — restarting agent...` });
-      await stopAgentProcess();
-      startAgentProcess();
-      await waitForAgentReady(undefined, 60_000);
-      this.loadIntegrationsStandalone();
-    } catch (err) {
-      this.postMessage({ type: "scm-save-error", message: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  private async saveRepoStandalone(defaultRepo: string): Promise<void> {
-    try {
-      const sc = readStandaloneConfigFile();
-      sc.defaultRepo = defaultRepo;
-      writeStandaloneConfigFile(sc);
-      // Clear bootstrap flag and restart agent so repo re-syncs to DB
-      try { fs.unlinkSync(path.join(os.homedir(), ".workermill", ".bootstrap-done")); } catch { /* may not exist */ }
-      this.postMessage({ type: "repo-saved", message: "Target repository saved — restarting agent..." });
-      await stopAgentProcess();
-      startAgentProcess();
-      await waitForAgentReady(undefined, 60_000);
-      this.loadIntegrationsStandalone();
-    } catch (err) {
-      this.postMessage({ type: "repo-save-error", message: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  private saveTrackerStandalone(tracker: string): void {
-    try {
-      const sc = readStandaloneConfigFile();
-      const existing = (sc.issueTracker || {}) as Record<string, unknown>;
-      existing.provider = tracker;
-      sc.issueTracker = existing;
-      writeStandaloneConfigFile(sc);
-      this.postMessage({ type: "tracker-saved", tracker });
-    } catch (err) {
-      this.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  private saveJiraStandalone(msg: { baseUrl: string; email: string; apiToken: string }): void {
-    try {
-      this.postMessage({ type: "saving" });
-      const sc = readStandaloneConfigFile();
-      const tracker = (sc.issueTracker || { provider: "jira" }) as Record<string, unknown>;
-      tracker.provider = "jira";
-      tracker.jira = { baseUrl: msg.baseUrl, email: msg.email, apiToken: msg.apiToken };
-      sc.issueTracker = tracker;
-      writeStandaloneConfigFile(sc);
-      this.postMessage({ type: "save-success", message: "Jira credentials saved" });
-      this.loadIntegrationsStandalone();
-    } catch (err) {
-      this.postMessage({ type: "save-error", message: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  private async testJiraStandalone(): Promise<void> {
-    try {
-      this.postMessage({ type: "testing" });
-      const sc = readStandaloneConfigFile();
-      const jira = (sc.issueTracker as Record<string, unknown>)?.jira as
-        | { baseUrl: string; email: string; apiToken: string }
-        | undefined;
-      if (!jira?.baseUrl || !jira.email || !jira.apiToken) {
-        this.postMessage({ type: "test-error", message: "Save Jira credentials first" });
-        return;
-      }
-      // Call Jira /myself endpoint directly
-      const url = `${jira.baseUrl}/rest/api/3/myself`;
-      const resp = await fetch(url, {
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${jira.email}:${jira.apiToken}`).toString("base64")}`,
-          Accept: "application/json",
-        },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!resp.ok) {
-        const msg = resp.status === 401
-          ? "Jira authentication failed. Check your credentials."
-          : `Jira connection failed (HTTP ${resp.status})`;
-        this.postMessage({ type: "test-error", message: msg });
-        return;
-      }
-      const data = (await resp.json()) as { displayName?: string };
-      this.postMessage({ type: "test-success", message: `Connected as ${data.displayName || "unknown"}` });
-    } catch (err) {
-      this.postMessage({ type: "test-error", message: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  private async testBitbucketStandalone(): Promise<void> {
-    try {
-      this.postMessage({ type: "scm-test-testing" });
-      const sc = readStandaloneConfigFile();
-      const scm = sc.scm as { provider?: string; token?: string; username?: string; email?: string } | undefined;
-      if (!scm?.token || scm.provider !== "bitbucket") {
-        this.postMessage({ type: "scm-test-error", message: "Save Bitbucket credentials first" });
-        return;
-      }
-      const token = scm.token;
-      // Bitbucket API requires email:appPassword for Basic auth (not username)
-      const email = scm.email || scm.username || "";
-      const authHeader = email
-        ? `Basic ${Buffer.from(`${email}:${token}`).toString("base64")}`
-        : `Bearer ${token}`;
-      const resp = await fetch("https://api.bitbucket.org/2.0/user", {
-        headers: { Authorization: authHeader, Accept: "application/json" },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!resp.ok) {
-        const msg = resp.status === 401
-          ? "Bitbucket authentication failed. Check your email and app password."
-          : `Bitbucket connection failed (HTTP ${resp.status})`;
-        this.postMessage({ type: "scm-test-error", message: msg });
-        return;
-      }
-      const data = (await resp.json()) as { display_name?: string; username?: string };
-
-      // Auto-resolve and save the Bitbucket username for git clone
-      if (data.username && data.username !== scm.username) {
-        sc.scm = { ...scm, username: data.username };
-        writeStandaloneConfigFile(sc);
-      }
-
-      this.postMessage({ type: "scm-test-success", message: `Connected as ${data.display_name || data.username || "unknown"}` });
-    } catch (err) {
-      this.postMessage({ type: "scm-test-error", message: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  private saveLinearStandalone(msg: { apiKey: string }): void {
-    try {
-      this.postMessage({ type: "saving" });
-      const sc = readStandaloneConfigFile();
-      const tracker = (sc.issueTracker || { provider: "linear" }) as Record<string, unknown>;
-      tracker.provider = "linear";
-      tracker.linear = { apiKey: msg.apiKey };
-      sc.issueTracker = tracker;
-      writeStandaloneConfigFile(sc);
-      this.postMessage({ type: "save-success", message: "Linear API key saved" });
-      this.loadIntegrationsStandalone();
-    } catch (err) {
-      this.postMessage({ type: "save-error", message: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  private saveWorkerBehaviorStandalone(msg: {
-    maxPerStoryRevisions: number;
-    maxReviewRevisions: number;
-    maxFixRetries: number;
-    blockerWaitTimeoutMinutes: number;
-    pushAfterCommit: boolean;
-    planningMode: string;
-    criticApprovalThreshold: number;
-    maxParallelExperts: number;
-    maxStories: number;
-    maxTargetFiles: number;
-    selfReviewEnabled: boolean;
-    blockerAutoRetryEnabled: boolean;
-    gracefulShutdownEnabled: boolean;
-  }): void {
-    try {
-      const sc = readStandaloneConfigFile();
-      const settings = (sc.settings || {}) as Record<string, unknown>;
-      settings.maxPerStoryRevisions = msg.maxPerStoryRevisions;
-      settings.maxReviewRevisions = msg.maxReviewRevisions;
-      settings.maxFixRetries = msg.maxFixRetries;
-      settings.blockerWaitTimeoutMinutes = msg.blockerWaitTimeoutMinutes;
-      settings.pushAfterCommit = msg.pushAfterCommit;
-      settings.planningMode = msg.planningMode;
-      settings.criticApprovalThreshold = msg.criticApprovalThreshold;
-      settings.maxParallelExperts = msg.maxParallelExperts;
-      settings.maxStories = msg.maxStories;
-      settings.maxTargetFiles = msg.maxTargetFiles;
-      settings.selfReviewEnabled = msg.selfReviewEnabled;
-      settings.blockerAutoRetryEnabled = msg.blockerAutoRetryEnabled;
-      settings.gracefulShutdownEnabled = msg.gracefulShutdownEnabled;
-      sc.settings = settings;
-      writeStandaloneConfigFile(sc);
-      this.postMessage({ type: "worker-behavior-saved" });
-    } catch (err) {
-      this.postMessage({
-        type: "worker-behavior-save-error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  private saveQualityGateStandalone(msg: {
-    qualityGateEnabled: boolean;
-    blockOnTypeErrors: boolean;
-    blockOnTestFailures: boolean;
-    blockOnLintErrors: boolean;
-    blockOnE2EFailures: boolean;
-    autoFixEnabled: boolean;
-    autoFixMaxIterations: number;
-  }): void {
-    try {
-      const sc = readStandaloneConfigFile();
-      const settings = (sc.settings || {}) as Record<string, unknown>;
-      settings.qualityGateEnabled = msg.qualityGateEnabled;
-      settings.blockOnTypeErrors = msg.blockOnTypeErrors;
-      settings.blockOnTestFailures = msg.blockOnTestFailures;
-      settings.blockOnLintErrors = msg.blockOnLintErrors;
-      settings.blockOnE2EFailures = msg.blockOnE2EFailures;
-      settings.autoFixEnabled = msg.autoFixEnabled;
-      settings.autoFixMaxIterations = msg.autoFixMaxIterations;
-      sc.settings = settings;
-      writeStandaloneConfigFile(sc);
-      this.postMessage({ type: "quality-gate-saved" });
-    } catch (err) {
-      this.postMessage({
-        type: "quality-gate-save-error",
-        message: err instanceof Error ? err.message : String(err),
       });
     }
   }
@@ -1506,10 +1040,6 @@ export class SettingsPanel {
     }
   }
 
-  private testScmStandalone(provider: "github" | "gitlab"): void {
-    this.postMessage({ type: "scm-test-error", provider, message: `${provider === "github" ? "GitHub" : "GitLab"} connection test is not available in standalone mode. Save credentials and try in cloud mode.` });
-  }
-
   private async switchOrg(
     config: { apiUrl: string; apiKey: string },
     orgId: string,
@@ -1813,15 +1343,10 @@ export class SettingsPanel {
   <div class="settings-layout">
   <nav class="settings-nav hidden" id="settings-nav">
     <div class="nav-group">
-      <div class="nav-group-label">General</div>
-      <a href="#section-mode" data-section="section-mode">Workspace Mode</a>
-    </div>
-    <div class="nav-group">
       <div class="nav-group-label">Setup</div>
       <a href="#section-repo" data-section="section-repo">Target Repository</a>
       <a href="#section-scm" data-section="section-scm">Source Control</a>
       <a href="#section-models" data-section="section-models">AI Models</a>
-      <a href="#section-api-key" data-section="section-api-key" id="nav-api-key" class="hidden">LLM API Key</a>
     </div>
     <div class="nav-group">
       <div class="nav-group-label">Integrations</div>
@@ -1842,17 +1367,6 @@ export class SettingsPanel {
 
   <div class="settings-content">
   <div id="content" class="hidden">
-    <!-- Workspace Mode -->
-    <div class="section" id="section-mode">
-      <h2>Workspace Mode</h2>
-      <div class="radio-group">
-        <label><input type="radio" name="workspace-mode" value="cloud" id="mode-cloud" /> Cloud</label>
-        <label><input type="radio" name="workspace-mode" value="standalone" id="mode-standalone" /> Standalone</label>
-      </div>
-      <div id="mode-hint" class="hint">Cloud: managed by WorkerMill. Standalone: runs locally with your own API keys.</div>
-      <div id="mode-status" class="status"></div>
-    </div>
-
     <!-- Target Repository -->
     <div class="section section-setup" id="section-repo">
       <h2>Target Repository</h2>
@@ -1949,29 +1463,6 @@ export class SettingsPanel {
       <div id="models-status" class="status"></div>
     </div>
 
-    <!-- LLM API Key (standalone mode only) -->
-    <div class="section section-setup hidden" id="section-api-key">
-      <h2>LLM API Key</h2>
-      <div class="field">
-        <label>Provider</label>
-        <select id="api-key-provider">
-          <option value="anthropic">Anthropic</option>
-          <option value="openai">OpenAI</option>
-          <option value="google">Google</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>API Key</label>
-        <input type="password" id="api-key-input" placeholder="Enter your API key" />
-        <div class="hint" id="api-key-hint">For Anthropic, you can skip this if Claude Code OAuth is configured (~/.claude/.credentials.json)</div>
-      </div>
-      <div id="api-key-status-label" class="hint" style="margin-bottom:8px;"></div>
-      <div class="btn-row">
-        <button class="btn-primary" id="btn-save-api-key">Save</button>
-      </div>
-      <div id="api-key-status" class="status"></div>
-    </div>
-
     <!-- Issue Tracker -->
     <div class="section section-integration" id="section-tracker">
       <h2>Issue Tracker</h2>
@@ -2014,17 +1505,6 @@ export class SettingsPanel {
           <p>Linear integration status: <span id="linear-badge"></span></p>
           <div class="hint">Configure Linear API key and webhook in <button class="btn-link" id="btn-web-settings-linear">web settings</button>.</div>
         </div>
-        <div id="linear-standalone-section" class="hidden">
-          <div class="field">
-            <label>Linear API Key</label>
-            <input type="password" id="linear-api-key" placeholder="lin_api_..." />
-            <div class="hint">Generate at <a href="https://linear.app/settings/api">linear.app/settings/api</a></div>
-          </div>
-          <div class="btn-row">
-            <button class="btn-primary" id="btn-save-linear">Save</button>
-          </div>
-          <div id="linear-status" class="status"></div>
-        </div>
       </div>
 
       <!-- GitHub Issues info -->
@@ -2033,10 +1513,6 @@ export class SettingsPanel {
           <p>GitHub Issues uses your GitHub token from sign-in. <span id="github-badge"></span></p>
           <div class="hint">No additional configuration needed — your SCM credentials were saved during onboarding.</div>
         </div>
-        <div id="github-standalone-section" class="hidden">
-          <p>Uses your GitHub token from Source Control settings above.</p>
-          <div class="hint">Issues from your default repository will appear in the sidebar backlog.</div>
-        </div>
       </div>
 
       <!-- Internal boards info -->
@@ -2044,10 +1520,6 @@ export class SettingsPanel {
         <div id="boards-cloud-section">
           <p>Using WorkerMill internal boards — no external issue tracker needed.</p>
           <div class="hint">Create and manage boards from the <button class="btn-link" id="btn-dashboard-boards">dashboard</button>.</div>
-        </div>
-        <div id="boards-standalone-section" class="hidden">
-          <p>Using local boards — no external issue tracker needed.</p>
-          <div class="hint">Create boards via Full Build or add cards manually.</div>
         </div>
       </div>
     </div>
@@ -2362,30 +1834,6 @@ export class SettingsPanel {
       }
     }
 
-    // Populate standalone model selects — only show models for the selected provider
-    let standaloneProvider = "anthropic";
-    function populateStandaloneModels(provider, defaults) {
-      const models = { anthropic: ANTHROPIC_MODELS, openai: OPENAI_MODELS, google: GOOGLE_MODELS };
-      const premiumModels = { anthropic: ANTHROPIC_PREMIUM, openai: OPENAI_PREMIUM, google: GOOGLE_PREMIUM };
-      const list = models[provider] || ANTHROPIC_MODELS;
-      const premList = premiumModels[provider] || ANTHROPIC_PREMIUM;
-      const defaultMap = defaults || {};
-      ["model-worker", "model-reviewer", "model-planner"].forEach(function(id) {
-        const sel = document.getElementById(id);
-        const cur = defaultMap[id] || sel.value;
-        const isPremium = id !== "model-worker";
-        const items = isPremium ? premList : list;
-        sel.innerHTML = "";
-        items.forEach(function(m) {
-          const o = document.createElement("option");
-          o.value = m.value;
-          o.textContent = m.label;
-          if (m.value === cur) o.selected = true;
-          sel.appendChild(o);
-        });
-      });
-    }
-
     // Sidebar nav: IntersectionObserver for active section highlighting
     const settingsNav = document.getElementById("settings-nav");
     const navLinks = settingsNav.querySelectorAll("a[data-section]");
@@ -2507,15 +1955,6 @@ export class SettingsPanel {
         vscode.postMessage({ type: "open-web-settings" });
       });
     }
-    const btnSaveLinear = document.getElementById("btn-save-linear");
-    if (btnSaveLinear) {
-      btnSaveLinear.addEventListener("click", () => {
-        vscode.postMessage({
-          type: "save-linear",
-          apiKey: document.getElementById("linear-api-key").value.trim(),
-        });
-      });
-    }
     // SCM save buttons
     document.getElementById("btn-save-scm-github").addEventListener("click", () => {
       vscode.postMessage({
@@ -2563,32 +2002,6 @@ export class SettingsPanel {
     document.getElementById("btn-sign-out").addEventListener("click", () => {
       vscode.postMessage({ type: "sign-out" });
     });
-    // API key save (credential — explicit button)
-    document.getElementById("btn-save-api-key").addEventListener("click", () => {
-      vscode.postMessage({
-        type: "save-api-key",
-        provider: document.getElementById("api-key-provider").value,
-        apiKey: document.getElementById("api-key-input").value.trim(),
-      });
-    });
-    document.getElementById("api-key-provider").addEventListener("change", function() {
-      standaloneProvider = this.value;
-      populateStandaloneModels(standaloneProvider);
-      const hint = document.getElementById("api-key-hint");
-      if (standaloneProvider === "anthropic") {
-        hint.textContent = "For Anthropic, you can skip this if Claude Code OAuth is configured (~/.claude/.credentials.json)";
-      } else if (standaloneProvider === "openai") {
-        hint.textContent = "OpenAI API key starting with sk-...";
-      } else {
-        hint.textContent = "Google AI API key";
-      }
-    });
-    document.querySelectorAll('input[name="workspace-mode"]').forEach(function(radio) {
-      radio.addEventListener("change", function() {
-        vscode.postMessage({ type: "switch-mode", mode: this.value });
-      });
-    });
-
     // ── Autosave: debounced save for non-credential fields ──
     let autosaveTimers = {};
     function autosave(key, delayMs, saveFn) {
@@ -2803,75 +2216,10 @@ export class SettingsPanel {
         // Apply plan restrictions before selecting radios
         applyPlanRestrictions(d.plan || "pro");
 
-        // Toggle standalone vs cloud sub-sections
-        const isStandalone = d.orgName === "Standalone";
-        const standaloneEls = ["linear-standalone-section", "github-standalone-section", "boards-standalone-section"];
-        const cloudEls = ["linear-cloud-section", "github-cloud-section", "boards-cloud-section"];
-        standaloneEls.forEach(function(id) {
-          const el = document.getElementById(id);
-          if (el) el.classList.toggle("hidden", !isStandalone);
-        });
-        cloudEls.forEach(function(id) {
-          const el = document.getElementById(id);
-          if (el) el.classList.toggle("hidden", isStandalone);
-        });
-
-        // Show/hide API key section and nav link for standalone mode
-        const apiKeySection = document.getElementById("section-api-key");
-        const navApiKey = document.getElementById("nav-api-key");
-        if (isStandalone) {
-          apiKeySection.classList.remove("hidden");
-          navApiKey.classList.remove("hidden");
-          // Set provider select + status
-          standaloneProvider = d.llmProvider || "anthropic";
-          document.getElementById("api-key-provider").value = standaloneProvider;
-          const statusLabel = document.getElementById("api-key-status-label");
-          statusLabel.textContent = d.hasApiKey ? "API key is configured" : "";
-          statusLabel.style.color = d.hasApiKey ? "var(--success)" : "";
-          // Populate models for the selected provider in standalone
-          populateStandaloneModels(standaloneProvider);
-        } else {
-          apiKeySection.classList.add("hidden");
-          navApiKey.classList.add("hidden");
-        }
-
-        // Set workspace mode radio to match current mode
-        // Hide the mode section entirely for self-hosted (Local org, not Standalone)
-        const isSelfHosted = d.orgName === "Local";
-        const modeSection = document.getElementById("section-mode");
-        const modeNav = document.querySelector('[data-section="section-mode"]');
-        if (isSelfHosted) {
-          if (modeSection) modeSection.classList.add("hidden");
-          if (modeNav) modeNav.classList.add("hidden");
-        }
-        const modeCloud = document.getElementById("mode-cloud");
-        const modeStandaloneRadio = document.getElementById("mode-standalone");
-        if (isStandalone) {
-          modeStandaloneRadio.checked = true;
-        } else {
-          modeCloud.checked = true;
-        }
-
-        // Hide cloud-only account buttons in standalone mode
-        const accountBtns = ["btn-dashboard", "btn-web-settings"];
-        accountBtns.forEach(function(id) {
-          const el = document.getElementById(id);
-          if (el) el.classList.toggle("hidden", isStandalone);
-        });
-        document.getElementById("plan-info").classList.toggle("hidden", isStandalone);
-
         // Populate model dropdowns
-        if (isStandalone) {
-          populateStandaloneModels(standaloneProvider, {
-            "model-worker": d.defaultWorkerModel || "claude-sonnet-4-6",
-            "model-reviewer": d.managerModelId || "claude-opus-4-6",
-            "model-planner": d.planningAgentModel || "claude-opus-4-6",
-          });
-        } else {
-          populateModelSelect("model-worker", d.defaultWorkerModel || "claude-sonnet-4-6", false);
-          populateModelSelect("model-reviewer", d.managerModelId || "claude-opus-4-6", true);
-          populateModelSelect("model-planner", d.planningAgentModel || "claude-opus-4-6", true);
-        }
+        populateModelSelect("model-worker", d.defaultWorkerModel || "claude-sonnet-4-6", false);
+        populateModelSelect("model-reviewer", d.managerModelId || "claude-opus-4-6", true);
+        populateModelSelect("model-planner", d.planningAgentModel || "claude-opus-4-6", true);
 
         // Select current tracker radio (fall back to "internal" if selected tracker is locked)
         let tracker = d.defaultIssueTracker || "internal";
@@ -2894,17 +2242,11 @@ export class SettingsPanel {
           if (d.jira.configured) showStatus(jiraStatus, "success", "Jira is configured");
         }
 
-        // Badges (issue tracker) — elements may not exist in standalone mode
+        // Badges (issue tracker)
         const ghBadge = document.getElementById("github-badge");
         if (ghBadge) ghBadge.innerHTML = badge(d.github?.configured);
         const lnBadge = document.getElementById("linear-badge");
         if (lnBadge) lnBadge.innerHTML = badge(d.linear?.configured);
-
-        // Show Linear configured status in standalone mode
-        if (isStandalone && d.linear?.configured) {
-          const linearStatus = document.getElementById("linear-status");
-          if (linearStatus) showStatus(linearStatus, "success", "Linear API key configured");
-        }
 
         // Populate SCM section
         document.getElementById("scm-github-badge").innerHTML = d.github?.configured ? badge(true) : "";
@@ -3017,21 +2359,6 @@ export class SettingsPanel {
         showStatus(ms, "error", msg.message || "Failed to save models");
       }
 
-      // API key messages (standalone mode)
-      if (msg.type === "api-key-saving") {
-        const ks = document.getElementById("api-key-status");
-        showStatus(ks, "info", "Saving...");
-      }
-      if (msg.type === "api-key-saved") {
-        const ks = document.getElementById("api-key-status");
-        showStatus(ks, "success", "API key saved");
-        setTimeout(() => ks.classList.remove("visible"), 3000);
-      }
-      if (msg.type === "api-key-save-error") {
-        const ks = document.getElementById("api-key-status");
-        showStatus(ks, "error", msg.message || "Failed to save API key");
-      }
-
       if (msg.type === "tracker-saved") {
         showStatus(trackerStatus, "success", "Issue tracker updated");
         setTimeout(() => trackerStatus.classList.remove("visible"), 3000);
@@ -3055,14 +2382,6 @@ export class SettingsPanel {
       if (msg.type === "quality-gate-save-error") {
         var qgs2 = document.getElementById("quality-gate-status");
         showStatus(qgs2, "error", msg.message || "Failed to save quality gate settings");
-      }
-
-      if (msg.type === "mode-switched") {
-        showStatus(document.getElementById("mode-status"), "success", msg.message);
-        setTimeout(function() { vscode.postMessage({ type: "load-integrations" }); }, 1500);
-      }
-      if (msg.type === "mode-switch-error") {
-        showStatus(document.getElementById("mode-status"), "error", msg.message);
       }
 
       if (msg.type === "error") {

@@ -812,36 +812,7 @@ export async function stopAgentProcess(): Promise<boolean> {
   startInFlight = false;
   startAttempts = 0;
 
-  // IMPORTANT: Spawn compose down FIRST, before any awaits. VS Code's
-  // deactivate() has a very short time budget — if we await the 2s SIGTERM
-  // wait, VS Code kills the extension host and compose down never fires.
-  const composeFile = path.join(os.homedir(), ".workermill", "docker-compose.yml");
-  if (fs.existsSync(composeFile)) {
-    try {
-      if (process.platform === "win32") {
-        const child = spawn("powershell.exe", [
-          "-WindowStyle", "Hidden", "-NoProfile", "-NonInteractive",
-          "-Command", `docker compose -f "${composeFile}" down`,
-        ], {
-          detached: true,
-          stdio: "ignore",
-          windowsHide: true,
-        });
-        child.unref();
-      } else {
-        const child = spawn("docker", ["compose", "-f", composeFile, "down"], {
-          detached: true,
-          stdio: "ignore",
-          windowsHide: true,
-        });
-        child.unref();
-      }
-    } catch {
-      // Best effort — Docker may not be running
-    }
-  }
-
-  // Now kill the agent process (non-blocking — don't await the sleep)
+  // Kill the agent process (non-blocking — don't await the sleep)
   const pid = readAgentPid();
   if (pid && isProcessAlive(pid)) {
     try {
@@ -932,7 +903,7 @@ export function readAgentStartupError(): string | null {
     if (tail.length > 0) {
       const last = tail[tail.length - 1].trim();
       // Don't report progress messages as errors
-      if (/Starting self-hosted|Waiting for API|Pulling|Image tag|Updating|Stack running|Connected|Polling|Agent is running|starting agent|Starting agent|Dashboard/i.test(last)) {
+      if (/Waiting for API|Pulling|Image tag|Updating|Connected|Polling|Agent is running|starting agent|Starting agent|Dashboard/i.test(last)) {
         return null;
       }
       return last;

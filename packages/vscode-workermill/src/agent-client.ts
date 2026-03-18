@@ -95,10 +95,6 @@ export interface IssueInfo {
   blockedByCount?: number;
   /** Total dependency count. Only set for board cards. */
   dependencyCount?: number;
-  /** Internal card ID (standalone mode board cards). */
-  _cardId?: string;
-  /** Internal board ID (standalone mode board cards). */
-  _boardId?: string;
 }
 
 export interface CodeEventRecord {

@@ -603,11 +603,26 @@ validate_migrations() {
 deploy_api() {
     echo -e "${GREEN}----------------------------------------${NC}"
     echo -e "${GREEN}Updating API Image (${ENVIRONMENT})${NC}"
+    echo -e "${GREEN}  (also updates self-hosted via GHCR :latest)${NC}"
     echo -e "${GREEN}----------------------------------------${NC}"
 
     # Pre-deployment safety checks
     run_pre_deploy_db_checks
     validate_migrations
+
+    # Wait for any in-progress Docker Images CI build so we deploy the latest code
+    echo -e "${YELLOW}Checking for in-progress Docker image builds...${NC}"
+    local MAX_WAIT=300
+    local WAITED=0
+    while [[ $WAITED -lt $MAX_WAIT ]]; do
+        local STATUS=$(gh run list --workflow="Docker Images" --limit 1 --json status --jq '.[0].status' 2>/dev/null || echo "unknown")
+        if [[ "$STATUS" == "completed" || "$STATUS" == "unknown" ]]; then
+            break
+        fi
+        echo -e "${YELLOW}  Docker image build in progress, waiting... (${WAITED}s)${NC}"
+        sleep 10
+        WAITED=$((WAITED + 10))
+    done
 
     local GHCR_IMAGE="ghcr.io/jarod-rosenthal/api"
     local FULL_IMAGE="${GHCR_IMAGE}:${API_VERSION}"
@@ -710,6 +725,7 @@ deploy_api() {
 deploy_worker() {
     echo -e "${GREEN}----------------------------------------${NC}"
     echo -e "${GREEN}Updating Worker Image (${ENVIRONMENT})${NC}"
+    echo -e "${GREEN}  (self-hosted pulls worker image on next task)${NC}"
     echo -e "${GREEN}----------------------------------------${NC}"
 
     local GHCR_IMAGE="ghcr.io/jarod-rosenthal/worker"
@@ -761,6 +777,7 @@ deploy_worker() {
 deploy_frontend() {
     echo -e "${GREEN}----------------------------------------${NC}"
     echo -e "${GREEN}Deploying Frontend to S3/CloudFront (${ENVIRONMENT})${NC}"
+    echo -e "${GREEN}  (self-hosted frontend updates via GHCR :latest on CI push)${NC}"
     echo -e "${GREEN}----------------------------------------${NC}"
 
     # Check if CloudFront distribution is set

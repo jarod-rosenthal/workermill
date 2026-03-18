@@ -329,6 +329,44 @@ export async function initSelfHostedCommand(): Promise<void> {
   const envPath = path.join(wmDir, ".env");
   fs.writeFileSync(envPath, `CLAUDE_CONFIG_DIR=${claudeConfigDir}\n`, { encoding: "utf-8" });
 
+  // Add agent binary directory to PATH so `workermill-agent` works from any terminal
+  const binDir = process.platform === "win32"
+    ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "workermill", "bin")
+    : path.join(os.homedir(), ".workermill", "bin");
+  const currentPath = process.env.PATH || "";
+  if (!currentPath.split(path.delimiter).includes(binDir)) {
+    try {
+      if (process.platform === "win32") {
+        // Add to user PATH via PowerShell registry append (safe — doesn't truncate like setx)
+        const psCmd = `$p = [Environment]::GetEnvironmentVariable('Path','User'); if ($p -notlike '*${binDir.replace(/\\/g, "\\\\")}*') { [Environment]::SetEnvironmentVariable('Path', "$p;${binDir.replace(/\\/g, "\\\\")}", 'User') }`;
+        execFileSync("powershell.exe", ["-NoProfile", "-Command", psCmd], {
+          stdio: "pipe",
+          timeout: 10_000,
+          windowsHide: true,
+        });
+      } else {
+        // Append to shell profile if not already there
+        const shell = process.env.SHELL || "/bin/bash";
+        const profileFile = shell.includes("zsh")
+          ? path.join(os.homedir(), ".zshrc")
+          : path.join(os.homedir(), ".bashrc");
+        const exportLine = `export PATH="$PATH:${binDir}"`;
+        try {
+          const existing = fs.readFileSync(profileFile, "utf-8");
+          if (!existing.includes(binDir)) {
+            fs.appendFileSync(profileFile, `\n# WorkerMill agent\n${exportLine}\n`);
+          }
+        } catch {
+          // Profile doesn't exist — create it
+          fs.writeFileSync(profileFile, `# WorkerMill agent\n${exportLine}\n`);
+        }
+      }
+      console.log(`  ${chalk.green("✓")} Added ${binDir} to PATH`);
+    } catch {
+      console.log(`  ${chalk.yellow("⚠")} Could not add to PATH — run commands with full path: ${path.join(binDir, process.platform === "win32" ? "workermill-agent.exe" : "workermill-agent")}`);
+    }
+  }
+
   console.log();
   console.log(`  ${chalk.green("✓")} Configuration saved to ~/.workermill/config.json`);
   console.log(`  ${chalk.green("✓")} Docker Compose file written to ~/.workermill/docker-compose.yml`);
@@ -339,13 +377,10 @@ export async function initSelfHostedCommand(): Promise<void> {
   }
   console.log(`  Dashboard will be at ${chalk.cyan("http://localhost:5173")}`);
   console.log();
-  console.log(chalk.dim("  Starting agent..."));
-
-  // Import and call startCommand with detach mode
-  const { startCommand } = await import("./start.js");
-  await startCommand({ detach: true });
+  console.log(chalk.green("  Setup complete! The VS Code extension will start the agent automatically."));
+  console.log();
 
   // Force exit — inquirer keeps stdin listeners open which prevents
-  // Node from exiting naturally after the detached child is spawned.
+  // Node from exiting naturally.
   process.exit(0);
 }

@@ -838,8 +838,11 @@ export async function stopAgentProcess(): Promise<boolean> {
   if (fs.existsSync(composeFile)) {
     try {
       if (process.platform === "win32") {
-        // Use cmd /c to avoid visible console window on Windows
-        const child = spawn("cmd.exe", ["/c", "docker", "compose", "-f", composeFile, "down"], {
+        // Use powershell with -WindowStyle Hidden to completely suppress console window
+        const child = spawn("powershell.exe", [
+          "-WindowStyle", "Hidden", "-NoProfile", "-NonInteractive",
+          "-Command", `docker compose -f '${composeFile}' down`,
+        ], {
           detached: true,
           stdio: "ignore",
           windowsHide: true,

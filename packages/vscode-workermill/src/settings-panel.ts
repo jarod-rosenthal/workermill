@@ -1026,13 +1026,11 @@ export class SettingsPanel {
 
   private async loadSandbox(): Promise<void> {
     const configPath = path.join(os.homedir(), ".workermill", "config.json");
-    let sandbox: string = "none";
     let dockerMemoryGb: number = 4;
     const totalRamGb = Math.round(os.totalmem() / (1024 * 1024 * 1024));
     const maxDockerMemoryGb = Math.max(4, totalRamGb - 4); // leave 4 GB for OS
     try {
       const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      if (raw.sandbox === "docker") sandbox = "docker";
       if (raw.dockerMemoryGb && raw.dockerMemoryGb >= 4 && raw.dockerMemoryGb <= maxDockerMemoryGb) {
         dockerMemoryGb = raw.dockerMemoryGb;
       }
@@ -1041,93 +1039,28 @@ export class SettingsPanel {
     }
 
     let dockerAvailable = false;
-    let dockerInstalled = false;
     try {
       execFileSync("docker", ["version"], { timeout: 5000, stdio: "pipe", windowsHide: true });
       dockerAvailable = true;
-      dockerInstalled = true;
     } catch {
-      // Docker daemon not running — check if CLI is installed
-      try {
-        execFileSync("docker", ["--version"], { timeout: 5000, stdio: "pipe", windowsHide: true });
-        dockerInstalled = true;
-      } catch {
-        /* Docker not installed */
-      }
+      /* Docker not available */
     }
 
     this.postMessage({
       type: "sandbox-loaded",
-      sandbox,
+      sandbox: "docker",
       dockerAvailable,
-      dockerInstalled,
+      dockerInstalled: dockerAvailable,
       dockerMemoryGb,
       maxDockerMemoryGb,
       totalRamGb,
     });
   }
 
-  private async toggleSandbox(enabled: boolean): Promise<void> {
-    if (enabled) {
-      try {
-        execFileSync("docker", ["version"], { timeout: 5000, stdio: "pipe", windowsHide: true });
-      } catch {
-        let dockerInstalled = false;
-        try {
-          execFileSync("docker", ["--version"], { timeout: 5000, stdio: "pipe", windowsHide: true });
-          dockerInstalled = true;
-        } catch { /* not installed */ }
-        this.postMessage({
-          type: "sandbox-updated",
-          sandbox: "none",
-          error: dockerInstalled
-            ? "Docker Desktop is not running. Please start Docker Desktop and try again."
-            : "Docker is not installed. Please install Docker Desktop and try again.",
-        });
-        return;
-      }
-    }
-
-    const configPath = path.join(os.homedir(), ".workermill", "config.json");
-    let config: Record<string, unknown> = {};
-    try {
-      config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    } catch {
-      /* no config */
-    }
-
-    if (enabled) {
-      config.sandbox = "docker";
-    } else {
-      delete config.sandbox;
-    }
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
-
-    this.postMessage({ type: "sandbox-restarting" });
-
-    try {
-      await stopAgentProcess();
-      startAgentProcess();
-      const port = await waitForAgentReady(undefined, 20_000);
-      if (port) {
-        this.postMessage({
-          type: "sandbox-updated",
-          sandbox: enabled ? "docker" : "none",
-        });
-      } else {
-        this.postMessage({
-          type: "sandbox-updated",
-          sandbox: enabled ? "docker" : "none",
-          error: "Agent restarted but did not become ready. Check agent logs.",
-        });
-      }
-    } catch (err) {
-      this.postMessage({
-        type: "sandbox-updated",
-        sandbox: enabled ? "docker" : "none",
-        error: `Agent restart failed: ${err instanceof Error ? err.message : String(err)}`,
-      });
-    }
+  // toggleSandbox kept for memory changes only — sandbox is always Docker
+  private async toggleSandbox(_enabled: boolean): Promise<void> {
+    // Sandbox cannot be disabled — Docker is required
+    this.postMessage({ type: "sandbox-updated", sandbox: "docker" });
   }
 
   private async setDockerMemory(gb: number): Promise<void> {
@@ -2225,17 +2158,12 @@ export class SettingsPanel {
     <!-- Docker Sandbox -->
     <div class="section section-advanced" id="section-docker">
       <h2>Docker Sandbox</h2>
-      <p>Run AI workers inside Docker containers for filesystem and network isolation.</p>
-      <div id="sandbox-warning" class="sandbox-warning hidden">
-        <strong>WARNING: Sandbox disabled.</strong> Workers run as native processes with unrestricted access to your filesystem, network, and shell. Any code the AI generates will execute directly on your machine. Enable sandbox mode to contain workers in isolated containers.
-      </div>
+      <p>AI workers run inside Docker containers for filesystem and network isolation. Docker is required.</p>
+      <div id="sandbox-warning" class="sandbox-warning hidden"></div>
       <div id="sandbox-status" class="status"></div>
-      <div class="field">
-        <label style="display:flex;align-items:center;gap:8px;">
-          <input type="checkbox" id="sandbox-toggle" disabled />
-          Enable Docker sandbox mode
-        </label>
-        <div class="hint">Requires Docker installed and running. Workers will run in containers instead of native processes.</div>
+      <div class="field" style="display:none;">
+        <input type="checkbox" id="sandbox-toggle" checked disabled />
+      </div>
       </div>
       <div class="field" id="docker-memory-field" style="display:none">
         <label>Container Memory Limit</label>

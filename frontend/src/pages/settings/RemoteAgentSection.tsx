@@ -12,6 +12,8 @@ import {
   Eye,
   EyeOff,
   Trash2,
+  Monitor,
+  WifiOff,
 } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -24,6 +26,7 @@ interface RemoteAgent {
   hostname: string | null;
   platform: string | null;
   nodeVersion: string | null;
+  apiKeyPrefix: string | null;
   lastHeartbeatAt: string;
 }
 
@@ -33,6 +36,8 @@ interface RemoteAgentSectionProps {
   orgPlan?: string;
   apiKeyPrefix?: string | null;
   onAgentRemoved?: () => void;
+  remoteAgentOnly?: boolean;
+  onToggleRemoteAgentOnly?: (enabled: boolean) => void;
 }
 
 function ApiKeySection({ apiKeyPrefix }: { apiKeyPrefix?: string | null }) {
@@ -242,8 +247,11 @@ export function RemoteAgentSection({
   orgPlan: _orgPlan,
   apiKeyPrefix,
   onAgentRemoved,
+  remoteAgentOnly,
+  onToggleRemoteAgentOnly,
 }: RemoteAgentSectionProps) {
   const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
+  const [disconnectingAgentId, setDisconnectingAgentId] = useState<string | null>(null);
 
   const handleRemoveAgent = async (agentId: string) => {
     if (!confirm(`Remove agent "${agentId}"? This will unregister it from your organization.`)) return;
@@ -266,11 +274,57 @@ export function RemoteAgentSection({
       setDeletingAgentId(null);
     }
   };
+
+  const handleDisconnectAgent = async (agentId: string) => {
+    if (!confirm(`Force-disconnect agent "${agentId}"? The agent will need to reconnect.`)) return;
+    setDisconnectingAgentId(agentId);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/settings/remote-agents/${encodeURIComponent(agentId)}/disconnect`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        onAgentRemoved?.();
+      } else {
+        const data = await response.json();
+        alert(data.error || "Failed to disconnect agent");
+      }
+    } catch {
+      alert("Failed to disconnect agent");
+    } finally {
+      setDisconnectingAgentId(null);
+    }
+  };
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold text-foreground mb-1">Remote Agent</h2>
         <p className="text-sm text-muted-foreground">Run AI workers on your own machine with your Anthropic API key</p>
+      </div>
+
+      {/* Local Mode Toggle */}
+      <div className="border border-border/50 rounded-xl p-6 bg-card">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+              <Monitor className="w-5 h-5 text-cyan-500" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-foreground">Local Mode</h3>
+              <p className="text-sm text-muted-foreground">Route all tasks to your remote agent instead of cloud workers</p>
+            </div>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={remoteAgentOnly ?? false}
+              onChange={(e) => onToggleRemoteAgentOnly?.(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+          </label>
+        </div>
       </div>
 
       {/* API Key — first thing users need */}
@@ -344,26 +398,41 @@ export function RemoteAgentSection({
                     <span className="text-xs text-muted-foreground">
                       {agent.activeTasks}/{agent.maxWorkers} workers
                     </span>
-                    {agent.status === "offline" && (
+                    {agent.status === "online" && (
                       <button
-                        onClick={() => handleRemoveAgent(agent.agentId)}
-                        disabled={deletingAgentId === agent.agentId}
-                        className="text-muted-foreground hover:text-red-500 transition-colors disabled:opacity-50"
-                        title="Remove agent"
+                        onClick={() => handleDisconnectAgent(agent.agentId)}
+                        disabled={disconnectingAgentId === agent.agentId}
+                        className="text-muted-foreground hover:text-amber-500 transition-colors disabled:opacity-50"
+                        title="Force disconnect"
                       >
-                        {deletingAgentId === agent.agentId ? (
+                        {disconnectingAgentId === agent.agentId ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         ) : (
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <WifiOff className="w-3.5 h-3.5" />
                         )}
                       </button>
                     )}
+                    <button
+                      onClick={() => handleRemoveAgent(agent.agentId)}
+                      disabled={deletingAgentId === agent.agentId}
+                      className="text-muted-foreground hover:text-red-500 transition-colors disabled:opacity-50"
+                      title="Remove agent"
+                    >
+                      {deletingAgentId === agent.agentId ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5" />
+                      )}
+                    </button>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   {agent.hostname && <span>Host: {agent.hostname}</span>}
                   {agent.platform && <span>Platform: {agent.platform}</span>}
                   {agent.nodeVersion && <span>Node: {agent.nodeVersion}</span>}
+                  {agent.apiKeyPrefix && (
+                    <span>Key: <code className="text-foreground">{agent.apiKeyPrefix}...</code></span>
+                  )}
                   <span>Last seen: {new Date(agent.lastHeartbeatAt).toLocaleString()}</span>
                 </div>
               </div>

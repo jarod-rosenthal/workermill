@@ -343,7 +343,7 @@ export default function Settings() {
   const [azureSlideOpen, setAzureSlideOpen] = useState(false);
 
   // Remote Agents state
-  const [remoteAgents, setRemoteAgents] = useState<{ agentId: string; hostname: string | null; platform: string | null; nodeVersion: string | null; dockerVersion: string | null; claudeVersion: string | null; maxWorkers: number; activeTasks: number; status: string; lastHeartbeatAt: string; createdAt: string }[]>([]);
+  const [remoteAgents, setRemoteAgents] = useState<{ agentId: string; hostname: string | null; platform: string | null; nodeVersion: string | null; dockerVersion: string | null; claudeVersion: string | null; maxWorkers: number; activeTasks: number; apiKeyPrefix: string | null; status: string; lastHeartbeatAt: string; createdAt: string }[]>([]);
   const [remoteAgentsLoading, setRemoteAgentsLoading] = useState(false);
 
   // Messages
@@ -2120,6 +2120,8 @@ export default function Settings() {
             remoteAgentsLoading={remoteAgentsLoading}
             orgPlan={organization?.plan}
             apiKeyPrefix={settings?.apiKeyPrefix}
+            remoteAgentOnly={settings?.remoteAgentOnly}
+            onToggleRemoteAgentOnly={(enabled) => updateSetting("remoteAgentOnly", enabled)}
             onAgentRemoved={() => {
               setRemoteAgentsLoading(true);
               fetch(`${API_BASE}/api/settings/remote-agents`, {

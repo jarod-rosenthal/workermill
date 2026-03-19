@@ -1215,6 +1215,10 @@ router.post(
 
     const agentRepo = AppDataSource.getRepository(RemoteAgent);
 
+    // Track which API key prefix the agent is using
+    const apiKeyHeader = req.headers["x-api-key"] as string | undefined;
+    const agentApiKeyPrefix = apiKeyHeader ? apiKeyHeader.substring(0, 12) : null;
+
     // Upsert: insert or update on (org_id, agent_id) unique constraint
     await agentRepo
       .createQueryBuilder()
@@ -1233,6 +1237,7 @@ router.post(
         gpuVendor: gpuVendor || null,
         localRagEnabled: localRagEnabled === true,
         ollamaRunning: ollamaRunning === true,
+        apiKeyPrefix: agentApiKeyPrefix,
         maxWorkers: maxWorkers || 2,
         activeTasks: 0,
         status: "online" as const,
@@ -1250,6 +1255,7 @@ router.post(
           "gpu_vendor",
           "local_rag_enabled",
           "ollama_running",
+          "api_key_prefix",
           "max_workers",
           "active_tasks",
           "status",

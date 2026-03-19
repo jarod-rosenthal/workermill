@@ -1,4 +1,5 @@
-import { Crown, Eye, FileText, Lock, Monitor, Rocket, Sparkles } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Crown, ExternalLink, FileText, Lock, Rocket, Sparkles } from "lucide-react";
 import type { Settings, ValidationErrors } from "./types";
 
 interface QualitySectionProps {
@@ -36,7 +37,7 @@ export function QualitySection({
   settings,
   updateSetting,
   validationErrors,
-  orgPlan,
+  orgPlan: _orgPlan,
 }: QualitySectionProps) {
   const isProPlan = false; // Plan-gating removed — all features available
   return (
@@ -54,73 +55,39 @@ export function QualitySection({
       </div>
 
       <div className="bg-card rounded-lg border border-border p-6 space-y-4">
-        {/* Local Mode */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Monitor className="w-4 h-4 text-cyan-400" />
-            <div>
-              <span className="text-sm text-foreground">Local Mode</span>
-              <p className="text-xs text-muted-foreground">Route tasks to your remote agent instead of cloud workers</p>
-            </div>
-          </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.remoteAgentOnly}
-              onChange={(e) => updateSetting("remoteAgentOnly", e.target.checked)}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-          </label>
-        </div>
-
-        {/* PR-Review toggle removed — controlled by maxReviewRevisions (0 = off, >0 = on) */}
-
-        {/* Auto-Deploy */}
-        <div className="flex items-center justify-between pt-4 border-t border-border">
+        {/* Auto-Deploy — Coming Soon */}
+        <div className="flex items-center justify-between pt-4 border-t border-border opacity-50">
           <div className="flex items-center gap-3">
             <Rocket className="w-4 h-4 text-green-400" />
             <div>
               <span className="text-sm text-foreground">
                 Auto-Deploy
-                {isProPlan && <span className="ml-2"><MaxBadge /></span>}
+                <span className="ml-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground rounded-full">Coming Soon</span>
               </span>
               <p className="text-xs text-muted-foreground">Automatically merge and deploy after successful review</p>
             </div>
           </div>
-          <label className={`relative inline-flex items-center ${isProPlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
-            <input
-              type="checkbox"
-              checked={settings.autoDeployEnabled}
-              onChange={(e) => { if (!isProPlan) updateSetting("autoDeployEnabled", e.target.checked); }}
-              disabled={isProPlan}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+          <label className="relative inline-flex items-center opacity-40 cursor-not-allowed">
+            <input type="checkbox" checked={false} disabled className="sr-only peer" />
+            <div className="w-11 h-6 bg-gray-200 rounded-full after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
           </label>
         </div>
 
-        {/* Anneal */}
-        <div className="flex items-center justify-between pt-4 border-t border-border">
+        {/* Anneal — Coming Soon */}
+        <div className="flex items-center justify-between pt-4 border-t border-border opacity-50">
           <div className="flex items-center gap-3">
             <Sparkles className="w-4 h-4 text-amber-400" />
             <div>
               <span className="text-sm text-foreground">
                 Anneal
-                {isProPlan && <span className="ml-2"><MaxBadge /></span>}
+                <span className="ml-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground rounded-full">Coming Soon</span>
               </span>
               <p className="text-xs text-muted-foreground">Analyze worker logs for environment issues (missing tools, broken deps) and auto-fix worker infrastructure</p>
             </div>
           </div>
-          <label className={`relative inline-flex items-center ${isProPlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
-            <input
-              type="checkbox"
-              checked={settings.autoImproveEnabled}
-              onChange={(e) => { if (!isProPlan) updateSetting("autoImproveEnabled", e.target.checked); }}
-              disabled={isProPlan}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+          <label className="relative inline-flex items-center opacity-40 cursor-not-allowed">
+            <input type="checkbox" checked={false} disabled className="sr-only peer" />
+            <div className="w-11 h-6 bg-gray-200 rounded-full after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
           </label>
         </div>
       </div>
@@ -604,7 +571,7 @@ export function QualitySection({
       )}
 
       {/* Spec Engineering */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold text-foreground mb-1 flex items-center gap-2">
             <FileText className="w-5 h-5 text-violet-400" />
@@ -614,6 +581,10 @@ export function QualitySection({
             Configure governance rules for spec quality before decomposition into boards
           </p>
         </div>
+        <Link to="/specs" className="flex items-center gap-1.5 text-sm text-primary hover:underline shrink-0">
+          <ExternalLink className="w-3.5 h-3.5" />
+          Open Specs
+        </Link>
       </div>
 
       <div className="bg-card rounded-lg border border-border p-6 space-y-6">

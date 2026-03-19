@@ -58,6 +58,9 @@ export class RemoteAgent {
   @Column({ name: "ollama_running", type: "boolean", default: false })
   ollamaRunning: boolean;
 
+  @Column({ name: "api_key_prefix", type: "varchar", length: 12, nullable: true })
+  apiKeyPrefix: string | null;
+
   @Column({ name: "last_heartbeat_at", type: "timestamptz" })
   lastHeartbeatAt: Date;
 

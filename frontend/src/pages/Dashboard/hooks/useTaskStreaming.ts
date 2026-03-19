@@ -555,7 +555,7 @@ export function useTaskStreaming({
       .filter((task) => !hiddenTerminals.has(task.id))
       .map((task) => task.id);
 
-    const terminalStatuses = ["failed", "completed", "deployed", "cancelled", "pr_approved", "review_approved", "review_requested", "blocked", "escalated"];
+    const terminalStatuses = ["failed", "completed", "deployed", "cancelled", "pr_approved", "review_approved", "blocked", "escalated"];
     activeTaskIds.forEach((taskId) => {
       const task = data.activeTasks.find((t) => t.id === taskId);
       if (task && terminalStatuses.includes(task.status)) return;

@@ -247,9 +247,16 @@ export function useTaskDataFetching() {
   const toggleSystem = async () => {
     // Confirmation dialog before entering maintenance mode
     if (systemEnabled) {
+      const runningStatuses = ["queued", "planning", "dispatching", "claimed", "environment_setup", "executing", "running", "consolidating", "integration_check"];
+      const hasActiveTasks = data?.activeTasks?.some((t) =>
+        runningStatuses.includes(t.status)
+      );
       const confirmed = window.confirm(
         "Enter maintenance mode?\n\n" +
           "- The orchestrator will stop processing tasks\n" +
+          (hasActiveTasks
+            ? "- All in-flight tasks will be cancelled\n"
+            : "") +
           "- New tasks will continue to queue\n" +
           "- Queued tasks will resume when you exit maintenance mode"
       );
@@ -277,6 +284,21 @@ export function useTaskDataFetching() {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
         }).catch(() => {});
+
+        // Cancel all actively running tasks when entering maintenance mode
+        if (!newState && data?.activeTasks) {
+          const runningStatuses = new Set(["queued", "planning", "dispatching", "claimed", "environment_setup", "executing", "running", "consolidating", "integration_check"]);
+          const inFlightTasks = data.activeTasks.filter((t) => runningStatuses.has(t.status));
+          await Promise.allSettled(
+            inFlightTasks.map((t) =>
+              fetch(`${API_BASE}/api/tasks/${t.id}/cancel`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
+              })
+            )
+          );
+          if (inFlightTasks.length > 0) fetchData();
+        }
       }
     } catch (err) {
       console.error("Failed to toggle system:", err);

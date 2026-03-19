@@ -109,7 +109,7 @@ Assign exactly one persona per card from this list:
 - security_engineer — Auth, encryption, vulnerability hardening
 - qa_engineer — Test suites, E2E tests, coverage
 - tech_writer — Documentation, guides, API docs
-- project_manager — Coordination, planning, process
+- architect — System decomposition, task planning, architecture design
 
 Choose the persona whose primary skillset best matches the card's dominant work.
 
@@ -800,7 +800,7 @@ export function validateDecomposedPrd(data: unknown): DecomposedPrd {
     "security_engineer",
     "qa_engineer",
     "tech_writer",
-    "project_manager",
+    "architect",
   ]);
 
   const validPriorities = new Set(["urgent", "high", "medium", "low"]);

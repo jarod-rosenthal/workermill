@@ -942,7 +942,7 @@ ${
 - \`data_ml_engineer\` — ETL/ELT, data pipelines, ML model training, MLOps
 - \`tech_writer\` — Documentation, API docs, technical guides
 - \`tech_lead\` — Code review, architecture review, quality gate
-- \`project_manager\` — Task breakdown, planning, coordination`
+- \`architect\` — System decomposition, task planning, architecture design, coordination`
 }
 
 Do NOT invent personas (e.g., "fullstack_developer" does not exist). For full-stack work, split into \`backend_developer\` and \`frontend_developer\` stories.

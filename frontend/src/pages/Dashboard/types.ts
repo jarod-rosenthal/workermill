@@ -6,7 +6,6 @@ export const TERMINAL_STATUSES = [
   "cancelled",
   "pr_approved",
   "review_approved",
-  "review_requested",
   "blocked",
   "escalated",
 ];

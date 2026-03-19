@@ -222,7 +222,7 @@ export function CreateTaskModal({
                 >
                   <option value="">{"\u{1F916}"} Auto (Dynamic Routing)</option>
                   {Object.entries(PERSONA_CONFIG)
-                    .filter(([key]) => key !== "manager")
+                    .filter(([key]) => key !== "manager" && key !== "project_manager")
                     .map(([key, config]) => (
                       <option key={key} value={key}>
                         {config.emoji} {config.title}
@@ -357,7 +357,7 @@ export function CreateTaskModal({
                 >
                   <option value="">{"\u{1F916}"} Auto (Dynamic Routing)</option>
                   {Object.entries(PERSONA_CONFIG)
-                    .filter(([key]) => key !== "manager")
+                    .filter(([key]) => key !== "manager" && key !== "project_manager")
                     .map(([key, config]) => (
                       <option key={key} value={key}>
                         {config.emoji} {config.title}

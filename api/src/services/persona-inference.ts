@@ -44,7 +44,7 @@ interface OrgInferenceRules {
  */
 const SYSTEM_PERSONA_KEYWORDS: Record<SystemPersona, RegExp> = {
   architect:
-    /\b(architecture|system design|decompose|plan|technical design|tradeoff|rfc)\b/gi,
+    /\b(architecture|system design|decompose|plan|technical design|tradeoff|rfc|roadmap|planning|coordination|milestone|sprint|epic|backlog|estimate|priorit)\b/gi,
   frontend_developer:
     /\b(react|component|ui|ux|frontend|css|tailwind|mobile|react native|expo|vite|tailwindcss|button|form|modal|page|screen)\b/gi,
   backend_developer:
@@ -58,7 +58,8 @@ const SYSTEM_PERSONA_KEYWORDS: Record<SystemPersona, RegExp> = {
   tech_writer:
     /\b(documentation|docs|readme|guide|tutorial|api docs|openapi|docusaurus|jsdoc)\b/gi,
   project_manager:
-    /\b(roadmap|planning|coordination|milestone|sprint|epic|backlog|estimate|priorit)\b/gi,
+    /(?!x)x/, // project_manager should never be inferred — use architect instead
+
   manager:
     /\b(manage|management|manager|oversee|delegate|strategy|stakeholder|resource allocation)\b/gi,
   tech_lead:
@@ -84,7 +85,8 @@ const SYSTEM_LABEL_TO_PERSONA: Record<string, SystemPersona> = {
   testing: "qa_engineer",
   docs: "tech_writer",
   documentation: "tech_writer",
-  pm: "project_manager",
+  pm: "architect",
+  project_manager: "architect",
   manager: "manager",
   lead: "tech_lead",
   techlead: "tech_lead",
@@ -110,7 +112,6 @@ export const SYSTEM_PERSONAS: SystemPersona[] = [
   "security_engineer",
   "qa_engineer",
   "tech_writer",
-  "project_manager",
   "manager",
   "tech_lead",
   "data_ml_engineer",

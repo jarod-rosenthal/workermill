@@ -124,6 +124,7 @@ export default function Dashboard() {
   const [unreadCommsCount, setUnreadCommsCount] = useState<Record<string, number>>({});
   const hasAutoExpandedCommsRef = useRef<Record<string, boolean>>({});
   const prevCommsCountsRef = useRef<Record<string, number>>({});
+  const autoCollapsedRef = useRef<Set<string>>(new Set());
 
   const {
     planningProgress, streamingLogs,
@@ -216,16 +217,18 @@ export default function Dashboard() {
     }
   }, [coordinationMessages, data?.activeTasks, setErrorPanelExpanded]);
 
-  // Auto-collapse terminals when tasks transition to terminal status
+  // Auto-collapse terminals once when tasks first transition to terminal status
   useEffect(() => {
     if (!data?.activeTasks) return;
-    const terminalTaskIds = data.activeTasks.filter((t) => TERMINAL_STATUSES.includes(t.status)).map((t) => t.id);
-    if (terminalTaskIds.length === 0) return;
+    const newlyTerminal = data.activeTasks
+      .filter((t) => TERMINAL_STATUSES.includes(t.status) && !autoCollapsedRef.current.has(t.id));
+    if (newlyTerminal.length === 0) return;
+    for (const t of newlyTerminal) autoCollapsedRef.current.add(t.id);
     setShownTerminals((prev) => {
-      const toRemove = terminalTaskIds.filter((id) => prev.has(id));
+      const toRemove = newlyTerminal.filter((t) => prev.has(t.id));
       if (toRemove.length === 0) return prev;
       const next = new Set(prev);
-      for (const id of toRemove) next.delete(id);
+      for (const t of toRemove) next.delete(t.id);
       return next;
     });
   }, [data?.activeTasks]);

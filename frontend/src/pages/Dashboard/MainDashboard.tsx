@@ -69,7 +69,6 @@ import { TalkToWorkerModal } from "./components/TalkToWorkerModal";
 
 export default function Dashboard() {
   const organization = useAuthStore((state) => state.organization);
-  const isProPlan = false; // Plan-gating removed — all features available
 
   // Coordination store for blocker alerts
   const coordinationMessages = useCoordinationStore((s) => s.messages);
@@ -110,6 +109,8 @@ export default function Dashboard() {
     ]),
   );
 
+  const isProPlan = false;
+
   // --- Hooks ---
   const {
     data, setData, loading, error, fetchData,
@@ -148,7 +149,7 @@ export default function Dashboard() {
     internalProjects, selectedProjectId, setSelectedProjectId,
     internalTasks, selectedTaskKey, setSelectedTaskKey,
     projectsLoading, tasksLoading, handleCreateTask, fetchCostEstimate,
-  } = useTaskCreation({ isProPlan, fetchData, setActionSuccess, setActionError });
+  } = useTaskCreation({ isProPlan: false, fetchData, setActionSuccess, setActionError });
 
   const {
     isTalkOpen, talkMessage, setTalkMessage, talkLoading,
@@ -286,7 +287,7 @@ export default function Dashboard() {
 
       <DashboardHeader
         data={data}
-        isProPlan={isProPlan}
+        isProPlan={false}
         systemEnabled={systemEnabled}
         systemToggleLoading={systemToggleLoading}
         toggleSystem={toggleSystem}

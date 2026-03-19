@@ -71,9 +71,9 @@ export function AuthCallback() {
               tosAccepted: true, // Auto-accept ToS for SSO flow
             });
             sessionStorage.removeItem("pendingInviteToken"); // Clean up
-          } catch (inviteErr: any) {
+          } catch (inviteErr: unknown) {
             // If already a member, that's fine - continue
-            if (!inviteErr.response?.data?.error?.includes("already")) {
+            if (!((inviteErr as { response?: { data?: { error?: string } } })?.response?.data?.error)?.includes("already")) {
               // Don't fail the whole flow, user is authenticated
             }
           }
@@ -91,8 +91,8 @@ export function AuthCallback() {
         } else {
           navigate("/dashboard");
         }
-      } catch (err: any) {
-        setError(err.response?.data?.error || "Authentication failed. Please try again.");
+      } catch (err: unknown) {
+        setError(((err as { response?: { data?: { error?: string } } })?.response?.data?.error) || "Authentication failed. Please try again.");
       }
     };
 

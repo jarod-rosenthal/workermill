@@ -263,8 +263,8 @@ export function Login() {
           navigate("/dashboard");
         }
       }
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.error || "Login failed. Please try again.";
+    } catch (err: unknown) {
+      const errorMessage = ((err as { response?: { data?: { error?: string } } })?.response?.data?.error) || "Login failed. Please try again.";
       setError(errorMessage);
       // Check if user needs to verify email
       if (errorMessage.toLowerCase().includes("confirm") || errorMessage.toLowerCase().includes("verify")) {
@@ -322,8 +322,8 @@ export function Login() {
       } else {
         navigate("/dashboard");
       }
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.error || "Verification failed. Please try again.";
+    } catch (err: unknown) {
+      const errorMessage = ((err as { response?: { data?: { error?: string } } })?.response?.data?.error) || "Verification failed. Please try again.";
       setError(errorMessage);
       setMfaCode("");
 

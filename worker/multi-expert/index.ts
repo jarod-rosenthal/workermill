@@ -285,6 +285,26 @@ export class MultiExpertCoordinator {
   private serverPromptTemplates?: import("../epic/decision-client.js").WorkerConfigResponse["promptTemplates"];
   // Track active worktrees for cleanup
   private activeWorktrees: Map<number, string> = new Map();
+
+  /**
+   * Get files modified by a story, using git diff against main.
+   * Uses worktree path if available (parallel mode), otherwise main repo.
+   */
+  private async getStoryFilesModified(storyIndex: number): Promise<string[]> {
+    if (!this.gitOps) return [];
+    try {
+      const worktreePath = this.activeWorktrees.get(storyIndex);
+      const files = worktreePath
+        ? await this.gitOps.getFilesChangedVsMainInWorktree(worktreePath)
+        : await this.gitOps.getFilesChangedVsMain();
+      const maxFiles = 100;
+      return files.length > maxFiles
+        ? [...files.slice(0, maxFiles), `... and ${files.length - maxFiles} more files`]
+        : files;
+    } catch {
+      return [];
+    }
+  }
   // Track story branch names for consolidated PR
   private storyBranchNames: Map<number, string> = new Map();
   // Track failed story indices
@@ -2346,7 +2366,7 @@ The repository is cloned at: **${promptRepoPath}**
               story.storyIndex,
               story.title,
               story.persona,
-              { filesModified: [] } // TODO: Extract from executor output
+              { filesModified: await this.getStoryFilesModified(story.storyIndex) }
             ).then(() => this.jira.storyCompleted(story.storyIndex, story.title, story.persona))
           : this.coordination.postBlocker(
               `Story ${story.storyIndex} failed: ${error}`,
@@ -2462,7 +2482,7 @@ The repository is cloned at: **${promptRepoPath}**
           story.storyIndex,
           story.title,
           story.persona,
-          { filesModified: [] }
+          { filesModified: await this.getStoryFilesModified(story.storyIndex) }
         );
         await this.jira.storyCompleted(story.storyIndex, story.title, story.persona);
         return { success: true };

@@ -71,9 +71,9 @@ export default function Onboarding() {
       setOrganization(result.organization);
       setNeedsSetup(false);
       setStep("guidelines");
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError(
-        err.response?.data?.error || "Failed to create organization. Please try again."
+        ((err as { response?: { data?: { error?: string } } })?.response?.data?.error) || "Failed to create organization. Please try again."
       );
     } finally {
       setIsLoading(false);
@@ -93,9 +93,9 @@ export default function Onboarding() {
       setOrganization(result.organization);
       setNeedsSetup(false);
       navigate("/dashboard");
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError(
-        err.response?.data?.error || "Failed to join organization. Please check your invite token."
+        ((err as { response?: { data?: { error?: string } } })?.response?.data?.error) || "Failed to join organization. Please check your invite token."
       );
     } finally {
       setIsLoading(false);

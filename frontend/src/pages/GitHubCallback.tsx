@@ -70,9 +70,9 @@ export function GitHubCallback() {
             setNeedsSetup(me.needsSetup);
             navigate("/dashboard");
             return;
-          } catch (err: any) {
+          } catch (err: unknown) {
             console.error("GitHub invite acceptance error:", err);
-            if (!err.response?.data?.error?.includes("already")) {
+            if (!((err as { response?: { data?: { error?: string } } })?.response?.data?.error)?.includes("already")) {
               navigate(`/invites/${pendingInviteToken}`);
               return;
             }
@@ -86,10 +86,10 @@ export function GitHubCallback() {
         } else {
           navigate("/dashboard");
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("GitHub callback error:", err);
         const errorMessage =
-          err.response?.data?.error || "Failed to complete GitHub sign-in. Please try again.";
+          ((err as { response?: { data?: { error?: string } } })?.response?.data?.error) || "Failed to complete GitHub sign-in. Please try again.";
         setError(errorMessage);
         setIsProcessing(false);
       }

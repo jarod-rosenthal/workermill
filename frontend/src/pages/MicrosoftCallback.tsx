@@ -74,10 +74,10 @@ export function MicrosoftCallback() {
             setNeedsSetup(me.needsSetup);
             navigate("/dashboard");
             return; // Early return to prevent further navigation
-          } catch (err: any) {
+          } catch (err: unknown) {
             console.error("Microsoft invite acceptance error:", err);
             // If already a member or other non-fatal error, continue to dashboard
-            if (!err.response?.data?.error?.includes("already")) {
+            if (!((err as { response?: { data?: { error?: string } } })?.response?.data?.error)?.includes("already")) {
               // Fall back to manual acceptance only for real errors
               navigate(`/invites/${pendingInviteToken}`);
               return;
@@ -92,10 +92,10 @@ export function MicrosoftCallback() {
           // Navigate to dashboard
           navigate("/dashboard");
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Microsoft callback error:", err);
         const errorMessage =
-          err.response?.data?.error || "Failed to complete Microsoft sign-in. Please try again.";
+          ((err as { response?: { data?: { error?: string } } })?.response?.data?.error) || "Failed to complete Microsoft sign-in. Please try again.";
         setError(errorMessage);
         setIsProcessing(false);
       }

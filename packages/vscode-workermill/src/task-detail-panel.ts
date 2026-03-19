@@ -61,14 +61,14 @@ export class TaskDetailPanel {
     this.panel.webview.onDidReceiveMessage(async (msg) => {
       if (msg.type === "cancel-task") {
         const confirm = await vscode.window.showWarningMessage(
-          "Cancel this task?",
+          "Stop this task? The running worker will be terminated.",
           { modal: true },
-          "Cancel Task",
+          "Stop Task",
         );
-        if (confirm === "Cancel Task") {
+        if (confirm === "Stop Task") {
           try {
             await this.client.cancelTask(this.taskId);
-            vscode.window.showInformationMessage("Task cancelled.");
+            vscode.window.showInformationMessage("Task stopped.");
           } catch (err) {
             vscode.window.showErrorMessage(
               `Failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -509,7 +509,7 @@ export class TaskDetailPanel {
 </div>
 
 <div class="actions-bar" id="actionsBar"${["failed","cancelled","completed","deployed","pr_approved","review_approved","pr_created","review_requested","escalated","review_rejected"].includes(task.status) ? ` style="display:none"` : ""}>
-  <button class="action-btn danger" onclick="cancelTask()">Cancel Task</button>
+  <button class="action-btn danger" onclick="cancelTask()">Stop Task</button>
 </div>
 <div class="actions-bar" id="retryBar"${["failed","cancelled","escalated","review_rejected"].includes(task.status) ? ` style="display:flex"` : ` style="display:none"`}>
   <button class="action-btn primary" id="retryBtn" onclick="retryTask()">Retry Task</button>

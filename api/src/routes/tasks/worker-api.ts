@@ -174,29 +174,13 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
         newStatus = "deployed";
         break;
       case "pr_created":
-        // If no auto-review or deploy is configured, this is terminal
-        if (task.skipManagerReview !== false && !org.autoReviewEnabled && !org.autoDeployEnabled) {
-          newStatus = "completed";
-        } else {
-          newStatus = "pr_created";
-        }
+        newStatus = "pr_created";
         break;
       case "review_requested":
-        // If no auto-review is configured and task isn't set for review,
-        // treat as terminal — PR is created, nothing more will happen
-        if (task.skipManagerReview !== false && !org.autoReviewEnabled) {
-          newStatus = "completed";
-        } else {
-          newStatus = "review_requested";
-        }
+        newStatus = "review_requested";
         break;
       case "pr_approved":
-        // Tech Lead approved. If no auto-deploy, this is terminal.
-        if (!org.autoDeployEnabled && !task.deploymentEnabled) {
-          newStatus = "completed";
-        } else {
-          newStatus = "pr_approved";
-        }
+        newStatus = "pr_approved";
         break;
       case "escalated":
         newStatus = "escalated";

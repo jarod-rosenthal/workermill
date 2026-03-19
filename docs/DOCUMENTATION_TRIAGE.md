@@ -72,11 +72,8 @@ A comprehensive audit of WorkerMill's documentation found 34 issues across publi
 
 ### P1 — Still Open (2 items)
 
-#### P1-2: local-dev.md has confusing database port info
-**Location:** `docs/agent/local-dev.md`
-**Problem:** Shows port 5433 for database, but `.env.local.example` shows 5432. Both are used (Docker host port vs container port) but the doc doesn't explain this.
-**Fix:** Add a note clarifying 5433 is the Docker-exposed port, 5432 is standard PostgreSQL.
-**Effort:** 10 min
+#### ~~P1-2: local-dev.md has confusing database port info~~ ✅ RESOLVED
+Local dev now uses standard port 5432. Bastion tunnel uses 5433. All docs updated.
 
 #### P1-4: testing.md missing configuration details
 **Location:** `docs/agent/testing.md`

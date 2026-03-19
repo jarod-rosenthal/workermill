@@ -2,7 +2,7 @@
 # Migrate data from production database to local database
 # Prerequisites:
 #   1. Bastion SSH tunnel running: ./bin/bastion ssh (in another terminal)
-#   2. Local PostgreSQL running on port 5433
+#   2. Local PostgreSQL running on port 5432
 #   3. Production database password
 
 set -e
@@ -17,12 +17,12 @@ echo -e "${YELLOW}=== WorkerMill Cloud to Local Data Migration ===${NC}"
 
 # Configuration
 PROD_HOST="localhost"
-PROD_PORT="5432"
+PROD_PORT="5433"
 PROD_DB="workermill"
 PROD_USER="workermill"
 
 LOCAL_HOST="localhost"
-LOCAL_PORT="5433"
+LOCAL_PORT="5432"
 LOCAL_DB="workermill"
 LOCAL_USER="workermill"
 LOCAL_PASS="localdev"
@@ -49,7 +49,7 @@ echo -e "${GREEN}✓ Production connection OK${NC}"
 echo "Testing local connection..."
 PGPASSWORD="$LOCAL_PASS" psql -h $LOCAL_HOST -p $LOCAL_PORT -U $LOCAL_USER -d $LOCAL_DB -c "SELECT 1" > /dev/null 2>&1 || {
     echo -e "${RED}ERROR: Cannot connect to local database.${NC}"
-    echo "Make sure local PostgreSQL is running on port 5433"
+    echo "Make sure local PostgreSQL is running on port 5432"
     exit 1
 }
 echo -e "${GREEN}✓ Local connection OK${NC}"

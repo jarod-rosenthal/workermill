@@ -14,7 +14,7 @@ WorkerMill: the open-source operations layer for AI coding agents. Deployed at h
 
 ## Quick Reference
 
-**Ports:** API: 3001, Frontend: 5173, Local dev DB: 5433, Redis: 6379
+**Ports:** API: 3001, Frontend: 5173, Local dev DB: 5432, Bastion tunnel: 5433, Redis: 6379
 
 | Task | Command |
 |------|---------|

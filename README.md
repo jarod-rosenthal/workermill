@@ -57,7 +57,7 @@ cd api && npm install && cd ../frontend && npm install && cd ..
 ./bin/local-workermill start
 ```
 
-This starts PostgreSQL (:5433), Redis (:6379), the API server (http://localhost:3001), and the web dashboard (http://localhost:5173). Create tasks, submit PRDs, and watch workers execute in real time.
+This starts PostgreSQL (:5432), Redis (:6379), the API server (http://localhost:3001), and the web dashboard (http://localhost:5173). Create tasks, submit PRDs, and watch workers execute in real time.
 
 Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=workermill.workermill) for a sidebar with task management, real-time log streaming, and live code diffs as workers write. Sign in with GitHub, Google, or email.
 

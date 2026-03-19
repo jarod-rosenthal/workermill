@@ -331,18 +331,18 @@ start_ssh_tunnel() {
         # Start SSH tunnel in background (|| true prevents set -e exit on failure)
         ssh -f -N -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
             -i ~/.ssh/workermill-bastion \
-            -L 5432:${rds_host}:5432 \
+            -L 5433:${rds_host}:5432 \
             ec2-user@${BASTION_IP} 2>/dev/null || true
 
         # Give it a moment to establish
         sleep 2
 
         # Find the SSH tunnel PID
-        SSH_TUNNEL_PID=$(pgrep -f "ssh.*-L 5432.*${BASTION_IP}" | head -1)
+        SSH_TUNNEL_PID=$(pgrep -f "ssh.*-L 5433.*${BASTION_IP}" | head -1)
 
         if [[ -n "$SSH_TUNNEL_PID" ]]; then
             # Verify tunnel is working
-            if command -v nc &> /dev/null && nc -z localhost 5432 2>/dev/null; then
+            if command -v nc &> /dev/null && nc -z localhost 5433 2>/dev/null; then
                 echo -e "${GREEN}SSH tunnel established (PID: $SSH_TUNNEL_PID)${NC}"
                 return 0
             fi

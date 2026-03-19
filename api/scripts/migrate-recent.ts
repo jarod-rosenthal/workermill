@@ -6,7 +6,7 @@
 import { DataSource } from "typeorm";
 
 const PROD_DB_URL = process.env.PROD_DATABASE_URL ?? (() => { throw new Error("PROD_DATABASE_URL env var required"); })();
-const LOCAL_DB_URL = "postgresql://workermill:localdev@localhost:5433/workermill";
+const LOCAL_DB_URL = "postgresql://workermill:localdev@localhost:5432/workermill";
 
 async function migrate() {
   console.log("=== Migrating Recent Tasks ===\n");

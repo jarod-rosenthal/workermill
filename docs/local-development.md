@@ -40,7 +40,7 @@ This stores your OAuth token in `~/.claude/.credentials.json`. WorkerMill reads 
 **macOS / Linux:**
 ```bash
 cat > .env.local << 'EOF'
-DATABASE_URL=postgresql://workermill:localdev@localhost:5433/workermill
+DATABASE_URL=postgresql://workermill:localdev@localhost:5432/workermill
 EXECUTION_MODE=local
 TARGET_REPO_PATH=../your-target-repo
 EOF
@@ -49,7 +49,7 @@ EOF
 **Windows (PowerShell, if not using WSL2):**
 ```powershell
 @"
-DATABASE_URL=postgresql://workermill:localdev@localhost:5433/workermill
+DATABASE_URL=postgresql://workermill:localdev@localhost:5432/workermill
 EXECUTION_MODE=local
 TARGET_REPO_PATH=..\your-target-repo
 "@ | Set-Content .env.local
@@ -72,7 +72,7 @@ This compiles the worker code and builds a Docker image (~2 GB). Only needed onc
 ```
 
 This starts:
-- **PostgreSQL** on port 5433
+- **PostgreSQL** on port 5432
 - **Redis** on port 6379
 - **API** on port 3001 (auto-reloads on code changes)
 - **Frontend dashboard** on port 5173 (auto-reloads on code changes)
@@ -122,7 +122,7 @@ cd workermill
 cd api && npm install && cd ../frontend && npm install && cd ..
 claude auth login
 cat > .env.local << 'EOF'
-DATABASE_URL=postgresql://workermill:localdev@localhost:5433/workermill
+DATABASE_URL=postgresql://workermill:localdev@localhost:5432/workermill
 EXECUTION_MODE=local
 TARGET_REPO_PATH=../your-target-repo
 EOF

@@ -233,7 +233,7 @@ run_migrations() {
 
   # Load environment for DATABASE_URL
   load_env
-  export DATABASE_URL="${DATABASE_URL:-postgresql://workermill:localdev@localhost:5433/workermill}"
+  export DATABASE_URL="${DATABASE_URL:-postgresql://workermill:localdev@localhost:5432/workermill}"
 
   npm run migrate 2>&1 | grep -v "^$" || true
   log "Migrations complete"
@@ -338,7 +338,7 @@ start_api() {
     export EXECUTION_MODE=development
   fi
   # Use DATABASE_URL from .env.local if set, otherwise default to local Docker
-  export DATABASE_URL="${DATABASE_URL:-postgresql://workermill:localdev@localhost:5433/workermill}"
+  export DATABASE_URL="${DATABASE_URL:-postgresql://workermill:localdev@localhost:5432/workermill}"
   export PORT="${PORT:-3001}"
   export NODE_ENV=development
   # Allow self-signed certs for local dev (RDS via bastion tunnel)

@@ -1259,16 +1259,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Single "Connect" action: install-if-needed → start-if-not-running → connect
     vscode.commands.registerCommand("workermill.connectAgent", async () => {
-      if (!isAgentInstalled()) {
-        log("Installing agent...");
-        const installed = await installAgent();
-        if (!installed) return;
-      }
       if (!isAgentConfigured()) {
-        // Agent binary exists but no config — guide to sign in
-        vscode.window.showInformationMessage(
-          "Agent installed but not configured. Sign in to get started.",
+        // Not configured — show setup warning with link to docs
+        const action = await vscode.window.showWarningMessage(
+          "Local development requires setup first. You'll need Docker, Node.js 20+, and Claude CLI installed, then clone the WorkerMill repo and run the setup commands.",
+          "View Setup Guide",
+          "Cancel",
         );
+        if (action === "View Setup Guide") {
+          vscode.env.openExternal(
+            vscode.Uri.parse("https://github.com/jarod-rosenthal/workermill/blob/main/docs/local-development.md"),
+          );
+        }
         return;
       }
       if (!client.isConnected()) {

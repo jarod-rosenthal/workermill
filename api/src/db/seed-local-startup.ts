@@ -72,16 +72,16 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
   let org = await orgRepo.findOne({ where: { name: LOCAL_ORG_NAME } });
   if (org) {
     // Org already exists — don't overwrite user's settings
-    const adminUser = await userRepo.findOne({ where: { role: "admin" } });
-    if (adminUser) return;
+    const localAdmin = await userRepo.findOne({ where: { email: LOCAL_ADMIN_EMAIL } });
+    if (localAdmin) return;
   } else {
     org = orgRepo.create({ name: LOCAL_ORG_NAME, ...DEFAULTS });
     await orgRepo.save(org);
     logger.info("Created local organization", { orgId: org.id });
   }
 
-  // Check if admin user exists
-  let adminUser = await userRepo.findOne({ where: { role: "admin" } });
+  // Check if the local admin user exists (look for our specific user, not any admin)
+  let adminUser = await userRepo.findOne({ where: { email: LOCAL_ADMIN_EMAIL } });
   if (adminUser) {
     return;
   }

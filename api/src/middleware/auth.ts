@@ -47,9 +47,9 @@ export async function authenticateUser(
     // LOCAL MODE: Auto-authenticate for local development
     if (process.env.EXECUTION_MODE === "local") {
       const userRepo = AppDataSource.getRepository(User);
-      // Find any admin user for local development
+      // Find the seeded local admin user (not any random admin from shared DB)
       const localUser = await userRepo.findOne({
-        where: { role: "admin" },
+        where: { email: "admin@localhost" },
       });
 
       if (localUser) {
@@ -140,7 +140,7 @@ export async function authenticateUserAllowNoOrg(
     if (process.env.EXECUTION_MODE === "local") {
       const userRepo = AppDataSource.getRepository(User);
       const localUser = await userRepo.findOne({
-        where: { role: "admin" },
+        where: { email: "admin@localhost" },
       });
 
       if (localUser) {
@@ -321,7 +321,7 @@ export async function authenticateRequest(
   if (process.env.EXECUTION_MODE === "local") {
     const userRepo = AppDataSource.getRepository(User);
     const localUser = await userRepo.findOne({
-      where: { role: "admin" },
+      where: { email: "admin@localhost" },
     });
 
     if (localUser) {
@@ -435,9 +435,9 @@ export async function authenticateSSE(
     // LOCAL MODE: Auto-authenticate for local development
     if (process.env.EXECUTION_MODE === "local") {
       const userRepo = AppDataSource.getRepository(User);
-      // Find any admin user for local development
+      // Find the seeded local admin user (not any random admin from shared DB)
       const localUser = await userRepo.findOne({
-        where: { role: "admin" },
+        where: { email: "admin@localhost" },
       });
 
       if (localUser) {

@@ -670,7 +670,7 @@ router.post(
           planStatus: "approved",
           currentStepIndex: 0,
           executionPlanV2: executionPlanV2 as unknown as ExecutionPlanV2,
-          planJson: executionPlanV2 as any,
+          planJson: executionPlanV2 as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- TypeORM _QueryDeepPartialEntity incompatibility
           contextSidecar: [],
           commitHistory: [],
         })
@@ -1143,8 +1143,8 @@ router.get(
     // Fetch available personas for dynamic planner prompt
     const experts = await getExpertRegistry(org.id);
     const availablePersonas = experts
-      .filter((e: any) => !e.reviewOnly)
-      .map((e: any) => ({
+      .filter((e) => !e.reviewOnly)
+      .map((e) => ({
         slug: e.slug,
         name: e.name,
         description: e.description,
@@ -1349,8 +1349,8 @@ router.get(
     // Fetch available personas so the critic knows which are valid
     const experts = await getExpertRegistry(org.id);
     const validPersonaSlugs = experts
-      .filter((e: any) => !e.reviewOnly)
-      .map((e: any) => e.slug);
+      .filter((e) => !e.reviewOnly)
+      .map((e) => e.slug);
 
     const CRITIC_PROMPT = `You are a Senior Architect reviewing an execution plan. Your job is to ensure the plan is appropriately sized for the task.
 

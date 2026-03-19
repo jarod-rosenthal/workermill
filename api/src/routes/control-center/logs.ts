@@ -4,7 +4,7 @@ import { authenticateRequest, authenticateSSE, authenticateApiKey } from "../../
 import { acquireSSESlot, releaseSSESlot } from "../../middleware/sse-limiter.js";
 import { asyncHandler } from "../../middleware/error-handler.js";
 import { AppDataSource } from "../../db/connection.js";
-import { Not } from "typeorm";
+import { Not, type FindOptionsWhere } from "typeorm";
 import { WorkerTask, WorkerTaskLog, WorkerTaskError } from "../../models/index.js";
 import type { WorkerLogType, WorkerLogSeverity } from "../../models/WorkerTaskLog.js";
 import { logger } from "../../utils/logger.js";
@@ -58,7 +58,7 @@ router.get(
     }
 
     // Parse cursor if provided (exclude code_event — has its own endpoint)
-    const whereClause: any = { taskId, type: Not("code_event") };
+    const whereClause: FindOptionsWhere<WorkerTaskLog> = { taskId, type: Not("code_event" as WorkerLogType) };
     if (since) {
       const cursor = parseCursor(since);
       if (cursor) {
@@ -686,7 +686,7 @@ router.post(
 
     // Get all error logs for this task, ordered by creation time
     const errorLogs = await logRepo.find({
-      where: { taskId, severity: "error" as any },
+      where: { taskId, severity: "error" as WorkerLogSeverity },
       order: { createdAt: "ASC" },
     });
 

@@ -279,6 +279,10 @@ export async function dispatchMultiStoryPlan(
       storyPoints?: number;
       targetFiles?: string[];
       referenceFiles?: string[];
+      interfaceContracts?: Array<{
+        targetStoryIndex: number;
+        description: string;
+      }>;
     }>;
   } | null;
 
@@ -321,15 +325,15 @@ export async function dispatchMultiStoryPlan(
   //
   // IMPORTANT: Deep clone the plan before validation because enforceFileDependencies
   // mutates the stories array in place. Without cloning, planJson would be modified.
-  const planClone = JSON.parse(JSON.stringify(planJson));
-  const validatedPlan = enforceFileDependencies(planClone);
+  const planClone = JSON.parse(JSON.stringify(planJson)) as typeof planJson;
+  const validatedPlan = enforceFileDependencies(planClone!);
 
   // Check if dependencies were added by comparing story dependencies
   const originalDeps =
     planJson.stories?.map((s) => s.dependencies?.length || 0) || [];
   const validatedDeps =
     validatedPlan.stories?.map(
-      (s: any) => s.dependencies?.length || 0,
+      (s) => s.dependencies?.length || 0,
     ) || [];
   const hasNewDependencies =
     JSON.stringify(originalDeps) !== JSON.stringify(validatedDeps);
@@ -711,8 +715,8 @@ export async function dispatchMultiStoryPlan(
     const contracts: string[] = [];
 
     // Contracts declared by THIS story (outgoing)
-    if ((story as any).interfaceContracts?.length) {
-      for (const contract of (story as any).interfaceContracts) {
+    if (story.interfaceContracts?.length) {
+      for (const contract of story.interfaceContracts) {
         contracts.push(`- **→ Story ${contract.targetStoryIndex}**: ${contract.description}`);
       }
     }
@@ -720,8 +724,8 @@ export async function dispatchMultiStoryPlan(
     // Contracts from OTHER stories targeting THIS story (incoming)
     for (const otherStory of executionPlan.stories!) {
       if (otherStory.index === story.index) continue;
-      const incomingContracts = (otherStory as any).interfaceContracts?.filter(
-        (c: any) => c.targetStoryIndex === story.index
+      const incomingContracts = otherStory.interfaceContracts?.filter(
+        (c) => c.targetStoryIndex === story.index
       ) || [];
       for (const contract of incomingContracts) {
         contracts.push(`- **← Story ${otherStory.index} (${otherStory.persona})**: ${contract.description}`);
@@ -1014,8 +1018,8 @@ export async function mergeStoryPRsInOrder(
   const sortedChildren = children
     .filter((c) => c.githubPrNumber && c.githubRepo)
     .sort((a, b) => {
-      const aIndex = (a.jiraFields as any)?.storyIndex || 0;
-      const bIndex = (b.jiraFields as any)?.storyIndex || 0;
+      const aIndex = (a.jiraFields as Record<string, unknown>)?.storyIndex as number || 0;
+      const bIndex = (b.jiraFields as Record<string, unknown>)?.storyIndex as number || 0;
       return aIndex - bIndex;
     });
 
@@ -1038,7 +1042,7 @@ export async function mergeStoryPRsInOrder(
   for (const child of sortedChildren) {
     try {
       const storyIndex =
-        (child.jiraFields as any)?.storyIndex || "?";
+        (child.jiraFields as Record<string, unknown>)?.storyIndex as number || "?";
       const repoId = scmProvider.parseRepoIdentifier(
         child.githubRepo!,
       );

@@ -264,7 +264,7 @@ async function runCriticWithAiSdk(
   provider: string,
   modelName: string
 ): Promise<CriticResult> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Vercel AI SDK providers return mixed LanguageModelV1/V2/V3
   let model: any;
   switch (provider) {
     case "openai": {

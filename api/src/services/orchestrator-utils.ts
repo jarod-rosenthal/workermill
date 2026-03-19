@@ -244,12 +244,19 @@ export function getStoryBranch(jiraKey: string, storyIndex: number): string {
 // File Dependency Enforcement
 // =============================================================================
 
+/** Minimal story shape used by enforceFileDependencies */
+export interface FileDependencyStory {
+  index: number;
+  targetFiles?: string[];
+  dependencies?: (string | number)[];
+}
+
 /**
  * Validate file-based dependencies between stories.
  * If two stories target the same file, add a synthetic dependency
  * to enforce sequential execution and prevent merge conflicts.
  */
-export function enforceFileDependencies(plan: any): any {
+export function enforceFileDependencies<T extends { stories?: S[] }, S extends FileDependencyStory>(plan: T): T {
   if (!plan.stories || plan.stories.length <= 1) {
     return plan;
   }
@@ -284,7 +291,7 @@ export function enforceFileDependencies(plan: any): any {
         const currentIndex = sorted[i];
         const previousIndex = sorted[i - 1];
         const currentStory = plan.stories.find(
-          (s: any) => s.index === currentIndex,
+          (s) => s.index === currentIndex,
         );
 
         if (currentStory) {

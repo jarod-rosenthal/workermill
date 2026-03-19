@@ -306,7 +306,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
             ...executionPlanV2,
             criticScore: 100, // Auto-approved
           },
-          planJson: executionPlanV2 as any,
+          planJson: executionPlanV2 as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- TypeORM _QueryDeepPartialEntity incompatibility
           contextSidecar: [],
           commitHistory: [],
         })
@@ -505,7 +505,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         planningNotes: null as unknown as string,
         currentStepIndex: 0,
         executionPlanV2,
-        planJson: executionPlanV2 as any,
+        planJson: executionPlanV2 as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- TypeORM _QueryDeepPartialEntity incompatibility
         contextSidecar: [],
         commitHistory: [],
       })
@@ -1106,10 +1106,10 @@ async function processLocalPlanningAgent(
       .createQueryBuilder()
       .update(WorkerTask)
       .set({
-        executionPlanV2: executionPlanV2 as any,
+        executionPlanV2: executionPlanV2 as unknown as WorkerTask["executionPlanV2"],
         status: "queued" as WorkerTask["status"],
         planStatus: "approved",
-        planJson: executionPlanV2 as unknown as Record<string, unknown>,
+        planJson: executionPlanV2 as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- TypeORM _QueryDeepPartialEntity incompatibility
         currentStepIndex: 0,
         contextSidecar: [],
         commitHistory: [],

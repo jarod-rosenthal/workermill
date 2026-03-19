@@ -610,8 +610,8 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   const validatedPlan = enforceFileDependencies(plan);
 
   // Log if dependencies were added
-  const originalDepCount = plan.stories?.reduce((sum: number, s: any) => sum + (s.dependencies?.length || 0), 0) || 0;
-  const validatedDepCount = validatedPlan.stories?.reduce((sum: number, s: any) => sum + (s.dependencies?.length || 0), 0) || 0;
+  const originalDepCount = plan.stories?.reduce((sum, s) => sum + (s.dependencies?.length || 0), 0) || 0;
+  const validatedDepCount = validatedPlan.stories?.reduce((sum, s) => sum + (s.dependencies?.length || 0), 0) || 0;
   if (validatedDepCount > originalDepCount) {
     await addPlanningLog(
       task.id,

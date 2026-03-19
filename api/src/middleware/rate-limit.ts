@@ -1,4 +1,5 @@
 import rateLimit, { type Options } from "express-rate-limit";
+import type { Request } from "express";
 import { RedisStore } from "rate-limit-redis";
 import Redis from "ioredis";
 import { config } from "../config/index.js";
@@ -8,8 +9,7 @@ import { logger } from "../utils/logger.js";
  * Extract a user/org-scoped key for rate limiting.
  * Falls back to IP when no auth context is available.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function userOrgKey(req: any): string {
+function userOrgKey(req: Request): string {
   if (req.user?.id) return `user:${req.user.id}`;
   if (req.organization?.id) return `org:${req.organization.id}`;
   return req.ip || "unknown";

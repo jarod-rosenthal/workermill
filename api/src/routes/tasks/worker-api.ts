@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { AppDataSource } from "../../db/connection.js";
-import { WorkerTask, WorkerTaskLog, WorkerContext, KbCard, Organization, InternalTask, BoardColumn, type BoardColumnType } from "../../models/index.js";
+import { WorkerTask, WorkerTaskLog, WorkerContext, KbCard, Organization, InternalTask, BoardColumn, type BoardColumnType, type WorkerLogType, type WorkerLogSeverity } from "../../models/index.js";
 import { authenticateRequest, authenticateApiKey } from "../../middleware/auth.js";
 import { requireCurrentTos } from "../../middleware/tos.js";
 import { getECSTaskRunner } from "../../services/ecs-task-runner.js";
@@ -855,9 +855,9 @@ router.post("/:id/logs", authenticateApiKey, async (req: Request, res: Response)
     const logEntities = logs.map((log) =>
       logRepo.create({
         taskId,
-        type: log.type as any,
+        type: log.type as WorkerLogType,
         message: log.message,
-        severity: (log.severity as any) || "info",
+        severity: (log.severity as WorkerLogSeverity) || "info",
         metadata: log.metadata || null,
         command: log.command || null,
         exitCode: log.exitCode ?? null,

@@ -467,8 +467,8 @@ export function sortTasksWithPrdGrouping<T extends { id: string; parentTaskId?: 
     // Sort children by their story index (from jiraFields) or createdAt
     children.sort((a, b) => {
       // Try to get storyIndex from jiraFields
-      const aFields = (a as any).jiraFields as { storyIndex?: number } | null;
-      const bFields = (b as any).jiraFields as { storyIndex?: number } | null;
+      const aFields = (a as T & { jiraFields?: Record<string, unknown> | null }).jiraFields as { storyIndex?: number } | null;
+      const bFields = (b as T & { jiraFields?: Record<string, unknown> | null }).jiraFields as { storyIndex?: number } | null;
       const aIndex = aFields?.storyIndex ?? 999;
       const bIndex = bFields?.storyIndex ?? 999;
       if (aIndex !== bIndex) return aIndex - bIndex;
@@ -636,7 +636,7 @@ export async function fetchEpicProgressForTask(
         const completedContexts = await contextRepo.count({
           where: {
             parentTaskId: task.id,
-            messageType: "completion" as any,
+            messageType: "completion",
           },
         });
         storiesCompleted = completedContexts;

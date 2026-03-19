@@ -13,6 +13,7 @@ import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask } from "../models/WorkerTask.js";
+import type { CreditTransactionType } from "../models/CreditTransaction.js";
 import { User } from "../models/User.js";
 import {
   BadRequestError,
@@ -749,7 +750,7 @@ router.get(
       {
         limit,
         offset,
-        type: type as any,
+        type: type as CreditTransactionType | undefined,
       }
     );
 

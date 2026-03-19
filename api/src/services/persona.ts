@@ -730,7 +730,7 @@ export async function getExpertRegistry(
       const readmeDirective = await directiveRepo.findOne({
         where: {
           personaId: persona.id,
-          type: "readme" as any,
+          type: "readme" as DirectiveType,
           isActive: true,
         },
       });

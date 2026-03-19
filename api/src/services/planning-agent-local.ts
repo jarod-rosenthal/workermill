@@ -824,7 +824,7 @@ async function runWithAiSdk(
   });
 
   // Create model based on provider
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Vercel AI SDK providers return mixed LanguageModelV1/V2/V3
   let model: any;
   switch (provider) {
     case "openai": {

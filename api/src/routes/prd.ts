@@ -17,6 +17,7 @@ import {
   KbCardDependency,
   KbSpec,
   Organization,
+  WorkerTask,
 } from "../models/index.js";
 import { authenticateUser, authenticateApiKey, authenticateSSE } from "../middleware/auth.js";
 import { requireCurrentTos } from "../middleware/tos.js";
@@ -614,6 +615,69 @@ router.post(
       emitDecomp?.({ phase: "creating_board", detail: "Creating board and cards" });
       const finalBoardName = boardNameOverride || decomposed.boardName;
 
+      // --- GitHub Issues path: create parent issue only, no board/cards ---
+      // Child sub-issues are created at dispatch time (task-dispatch.ts) when
+      // the planning agent has finalized the execution plan stories.
+      if (org.issueTrackerProvider === "github-issues") {
+        const targetRepo = githubRepo || org.getDefaultRepo();
+        if (!targetRepo) {
+          res.status(400).json({ error: "No repository configured" });
+          return;
+        }
+
+        const { createGithubParentIssue } = await import("../services/github-issues.js");
+        const parentIssue = await createGithubParentIssue(
+          org.id, targetRepo, finalBoardName, prdContent,
+        );
+        const parentIssueKey = `GH-${parentIssue.number}`;
+
+        const taskRepo = AppDataSource.getRepository(WorkerTask);
+        const parentTask = taskRepo.create({
+          orgId: org.id,
+          jiraIssueKey: parentIssueKey,
+          jiraIssueId: parentIssueKey,
+          summary: finalBoardName,
+          description: prdContent,
+          workerPersona: "project_manager",
+          workerModel: org.defaultWorkerModel || "",
+          workerProvider: org.primaryProvider || "anthropic",
+          ticketSystem: "github",
+          scmProvider: org.scmProvider || "github",
+          githubRepo: targetRepo,
+          status: "planning",
+          pipelineVersion: "v2",
+          executionMode: "parallel",
+          criticEnabled: false,
+          deploymentEnabled: org.autoDeployEnabled ?? false,
+          skipManagerReview: !org.autoReviewEnabled,
+          improvementEnabled: org.autoImproveEnabled ?? false,
+          standardSdkMode: false,
+          retryCount: 0,
+          maxRetries: 3,
+          jiraFields: {
+            qualityGates: decomposed.qualityGates || null,
+            ciWorkflowPath: decomposed.ciWorkflowPath || null,
+            githubParentIssueNumber: parentIssue.number,
+          },
+        });
+        await taskRepo.save(parentTask);
+
+        logger.info("Created GitHub Issues PRD parent task", {
+          parentIssueKey, parentTaskId: parentTask.id, orgId: org.id,
+        });
+
+        res.status(201).json({
+          boardId: null,
+          boardName: finalBoardName,
+          cardCount: decomposed.cards.length,
+          parentTaskId: parentTask.id,
+          parentIssueKey,
+          parentIssueUrl: parentIssue.html_url,
+        });
+        return;
+      }
+
+      // --- Internal/Jira/Linear: existing board/card creation (unchanged from here) ---
       const result = await AppDataSource.transaction(async (em) => {
         const boardRepo = em.getRepository(KbBoard);
         const colRepo = em.getRepository(KbColumn);

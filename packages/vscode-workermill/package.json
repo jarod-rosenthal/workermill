@@ -379,7 +379,7 @@
         },
         "workermill.maxParallelExperts": {
           "type": "number",
-          "default": 8,
+          "default": 10,
           "minimum": 1,
           "maximum": 16,
           "description": "Maximum parallel worker agents for epic execution (1-16)."
@@ -393,7 +393,7 @@
         },
         "workermill.maxTargetFiles": {
           "type": "number",
-          "default": 15,
+          "default": 20,
           "minimum": 3,
           "maximum": 50,
           "description": "Recommended max files per story. Soft guideline (3-50)."

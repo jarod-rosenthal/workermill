@@ -107,7 +107,7 @@ export default function Settings() {
     logRetentionDays: 7,
     taskRetentionDays: 7,
     maxConcurrentWorkers: 1,
-    maxParallelExperts: 3,
+    maxParallelExperts: 10,
     ralphMaxStories: 10,
     defaultMaxRetries: 3,
     taskCooldownSeconds: 0,
@@ -127,7 +127,7 @@ export default function Settings() {
     planningMode: "simplified",
     prdPlanningMode: "simplified",
     criticApprovalThreshold: 85,
-    maxTargetFiles: 15,
+    maxTargetFiles: 20,
     storyCalibrationMultiplier: 0.4,
     costAlertThresholdUsd: null,
     dailyBudgetLimitUsd: null,
@@ -450,7 +450,7 @@ export default function Settings() {
         logRetentionDays: data.logRetentionDays ?? 7,
         taskRetentionDays: data.taskRetentionDays ?? 7,
         maxConcurrentWorkers: data.maxConcurrentWorkers ?? 1,
-        maxParallelExperts: data.maxParallelExperts ?? 3,
+        maxParallelExperts: data.maxParallelExperts ?? 10,
         ralphMaxStories: data.ralphMaxStories ?? 10,
         defaultMaxRetries: Math.min(data.defaultMaxRetries ?? 3, 5),
         taskCooldownSeconds: data.taskCooldownSeconds ?? 0,
@@ -470,7 +470,7 @@ export default function Settings() {
         planningMode: data.planningMode || "simplified",
         prdPlanningMode: data.prdPlanningMode || data.planningMode || "simplified",
         criticApprovalThreshold: data.criticApprovalThreshold ?? 85,
-        maxTargetFiles: data.maxTargetFiles ?? 15,
+        maxTargetFiles: data.maxTargetFiles ?? 20,
         storyCalibrationMultiplier: data.storyCalibrationMultiplier ?? 0.4,
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
         dailyBudgetLimitUsd: data.dailyBudgetLimitUsd ?? null,
@@ -889,10 +889,10 @@ export default function Settings() {
       errors.taskRetentionDays = "Must be between 1 and 365 days";
     }
     if (settings.maxConcurrentWorkers < 1 || settings.maxConcurrentWorkers > 14) {
-      errors.maxConcurrentWorkers = "Must be between 1 and 14";
+      errors.maxConcurrentWorkers = "Must be between 1 and 16";
     }
-    if (settings.maxParallelExperts < 1 || settings.maxParallelExperts > 14) {
-      errors.maxParallelExperts = "Must be between 1 and 14";
+    if (settings.maxParallelExperts < 1 || settings.maxParallelExperts > 16) {
+      errors.maxParallelExperts = "Must be between 1 and 16";
     }
     if (settings.ralphMaxStories < 1 || settings.ralphMaxStories > 50) {
       errors.ralphMaxStories = "Must be between 1 and 50";

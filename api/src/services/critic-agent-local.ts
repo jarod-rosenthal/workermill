@@ -46,7 +46,7 @@ export interface CriticResult {
  * Format critic feedback as a refinement prompt for the planner.
  * Used when the critic APPROVED the plan but has suggestions worth incorporating.
  */
-export function formatLocalRefinementFeedback(critic: CriticResult, maxTargetFiles = 15, plan?: { summary: string; stories: unknown[]; risks: string[]; assumptions: string[] }): string {
+export function formatLocalRefinementFeedback(critic: CriticResult, maxTargetFiles = 20, plan?: { summary: string; stories: unknown[]; risks: string[]; assumptions: string[] }): string {
   const lines: string[] = [
     "",
   ];
@@ -322,7 +322,7 @@ async function runCriticWithAiSdk(
  * Build the critic prompt from input.
  */
 function buildCriticPrompt(input: CriticInput): string {
-  const { plan, originalRequirements, iteration, maxTargetFiles = 15 } = input;
+  const { plan, originalRequirements, iteration, maxTargetFiles = 20 } = input;
 
   return `You are a senior technical reviewer (Tech Lead / Critic Agent).
 

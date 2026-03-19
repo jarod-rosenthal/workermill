@@ -318,7 +318,7 @@ The main issues were [issues]. I'm improving the plan by [changes].
  * Build critic prompt for plan validation.
  * @param maxTargetFiles - Advisory guideline for files per step (not enforced).
  */
-function buildCloudCriticPrompt(maxTargetFiles = 15): string {
+function buildCloudCriticPrompt(maxTargetFiles = 20): string {
   return `You are a Senior Architect reviewing an execution plan. Your job is to ensure the plan is appropriately sized for the task.
 
 Review this execution plan against the task requirements:
@@ -659,7 +659,7 @@ export async function validatePlanWithCritic(
   prd: string,
   plan: ExecutionPlanV2,
   agentConfig: PlanningAgentConfig = DEFAULT_CONFIG,
-  maxTargetFiles = 15
+  maxTargetFiles = 20
 ): Promise<CriticResult> {
   const prompt = buildCloudCriticPrompt(maxTargetFiles)
     .replace("{{PRD}}", prd)
@@ -733,7 +733,7 @@ export async function generateValidatedPlan(
   onProgress?: PlanProgressCallback,
   skipCritic: boolean = false,
   onStreamProgress?: PlanStreamProgressCallback,
-  maxTargetFiles = 15,
+  maxTargetFiles = 20,
 ): Promise<ExecutionPlanV2> {
   const startTime = Date.now();
   let currentPlan: ExecutionPlanV2 | undefined;

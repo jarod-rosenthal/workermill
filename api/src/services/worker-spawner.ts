@@ -511,7 +511,7 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
       additionalEnv.GRACEFUL_SHUTDOWN_ENABLED = org.gracefulShutdownEnabled !== false ? "true" : "false";
       additionalEnv.MAX_REVIEW_REVISIONS = String(org.maxReviewRevisions ?? 4);
       additionalEnv.MAX_PER_STORY_REVISIONS = String(org.maxPerStoryRevisions ?? 0);
-      additionalEnv.MAX_PARALLEL_EXPERTS = String(org.maxParallelExperts ?? 14);
+      additionalEnv.MAX_PARALLEL_EXPERTS = String(org.maxParallelExperts ?? 10);
       additionalEnv.QUALITY_GATE_MAX_RETRIES = String(org.maxFixRetries ?? 5);
       additionalEnv.MAX_CI_FIX_RETRIES = String(org.maxFixRetries ?? 3);
       if (org.codebaseIndexingEnabled != null) {

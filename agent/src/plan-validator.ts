@@ -101,7 +101,7 @@ export interface CriticResult {
 // ============================================================================
 
 // Defaults — overridden by server config when available
-let MAX_TARGET_FILES = 15; // Advisory only — not enforced as a hard cap
+let MAX_TARGET_FILES = 20; // Advisory only — not enforced as a hard cap
 let AUTO_APPROVAL_THRESHOLD = 85;
 const SIMPLIFIED_FLOOR = 60;
 

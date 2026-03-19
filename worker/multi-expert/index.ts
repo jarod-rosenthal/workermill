@@ -280,7 +280,7 @@ export class MultiExpertCoordinator {
   // Expert state tracking for parallel execution (mirrors Epic coordinator pattern)
   private expertStates: Map<string, { persona: string; status: "idle" | "working" | "completed" | "blocked"; currentStoryIndex?: number }> = new Map();
   // Max parallel experts (from env or default)
-  private maxParallelExperts: number = parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10);
+  private maxParallelExperts: number = parseInt(process.env.MAX_PARALLEL_EXPERTS || "10", 10);
   // Server-side prompt templates (loaded from Decision API)
   private serverPromptTemplates?: import("../epic/decision-client.js").WorkerConfigResponse["promptTemplates"];
   // Track active worktrees for cleanup

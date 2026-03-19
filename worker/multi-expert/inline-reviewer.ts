@@ -616,7 +616,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 
     try {
       const response = await client.messages.create({
-        model: "claude-sonnet-4-5", // Fast, cheap model for extraction
+        model: process.env.MANAGER_MODEL || "claude-sonnet-4-5", // Use tech_lead model setting
         max_tokens: 256,
         messages: [{ role: "user", content: extractionPrompt }],
       });

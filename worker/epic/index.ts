@@ -86,7 +86,7 @@ function loadConfig(): EpicConfig {
     // CI workflow path for post-push gate (from board metadata)
     ciWorkflowPath: process.env.CI_WORKFLOW_PATH || undefined,
     // Max parallel experts cap
-    maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10),
+    maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "10", 10),
     maxFixRetries: process.env.MAX_FIX_RETRIES ? parseInt(process.env.MAX_FIX_RETRIES, 10) : undefined,
     maxAgentTurns: process.env.MAX_AGENT_TURNS ? parseInt(process.env.MAX_AGENT_TURNS, 10) : undefined,
     maxReviewRevisions: parseInt(process.env.MAX_REVIEW_REVISIONS || "0", 10),

@@ -2048,10 +2048,10 @@ export class SettingsPanel {
           blockerWaitTimeoutMinutes: parseInt(document.getElementById("wk-blocker-timeout").value) || 20,
           pushAfterCommit: document.getElementById("wk-push-after-commit").checked,
           planningMode: document.getElementById("wk-planning-mode").value,
-          criticApprovalThreshold: parseInt(document.getElementById("wk-critic-threshold").value) || 90,
-          maxParallelExperts: parseInt(document.getElementById("wk-max-parallel").value) || 14,
+          criticApprovalThreshold: parseInt(document.getElementById("wk-critic-threshold").value) || 85,
+          maxParallelExperts: parseInt(document.getElementById("wk-max-parallel").value) || 10,
           maxStories: parseInt(document.getElementById("wk-max-stories").value) || 10,
-          maxTargetFiles: parseInt(document.getElementById("wk-max-target-files").value) || 6,
+          maxTargetFiles: parseInt(document.getElementById("wk-max-target-files").value) || 20,
           selfReviewEnabled: document.getElementById("wk-self-review").checked,
           blockerAutoRetryEnabled: document.getElementById("wk-blocker-auto-retry").checked,
           gracefulShutdownEnabled: document.getElementById("wk-graceful-shutdown").checked,
@@ -2321,11 +2321,11 @@ export class SettingsPanel {
         var wkBlockerAutoRetry = document.getElementById("wk-blocker-auto-retry");
         var wkGracefulShutdown = document.getElementById("wk-graceful-shutdown");
         if (wkPlanningMode) wkPlanningMode.value = d.planningMode || "simplified";
-        if (wkCriticThreshold) wkCriticThreshold.value = String(d.criticApprovalThreshold ?? 90);
+        if (wkCriticThreshold) wkCriticThreshold.value = String(d.criticApprovalThreshold ?? 85);
         if (wkThresholdField) wkThresholdField.style.display = (d.planningMode || "simplified") === "strict" ? "" : "none";
-        if (wkMaxParallel) wkMaxParallel.value = String(d.maxParallelExperts ?? 14);
+        if (wkMaxParallel) wkMaxParallel.value = String(d.maxParallelExperts ?? 10);
         if (wkMaxStories) wkMaxStories.value = String(d.maxStories ?? 10);
-        if (wkMaxTargetFiles) wkMaxTargetFiles.value = String(d.maxTargetFiles ?? 6);
+        if (wkMaxTargetFiles) wkMaxTargetFiles.value = String(d.maxTargetFiles ?? 20);
         if (wkSelfReview) wkSelfReview.checked = d.selfReviewEnabled !== false;
         if (wkBlockerAutoRetry) wkBlockerAutoRetry.checked = d.blockerAutoRetryEnabled !== false;
         if (wkGracefulShutdown) wkGracefulShutdown.checked = d.gracefulShutdownEnabled !== false;

@@ -632,7 +632,7 @@ export function AIWorkersSection({
                       min="1"
                       max="14"
                       value={settings.maxParallelExperts}
-                      onChange={(e) => updateSetting("maxParallelExperts", parseInt(e.target.value) || 3)}
+                      onChange={(e) => updateSetting("maxParallelExperts", parseInt(e.target.value) || 10)}
                       className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
                     />
                   </div>

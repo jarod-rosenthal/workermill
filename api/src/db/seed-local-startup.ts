@@ -38,15 +38,15 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
     planningAgentProvider: "anthropic",
     managerProvider: "anthropic",
     // Capacity
-    maxParallelExperts: 14,
+    maxParallelExperts: 10,
     ralphMaxStories: 10,
     maxPerStoryRevisions: 0,
     maxReviewRevisions: 4,
     maxFixRetries: 5,
-    maxTargetFiles: 6,
+    maxTargetFiles: 20,
     // Planning
     // 90 matches production (workermill-examples org). CLAUDE.md mentions 85 but that's outdated.
-    criticApprovalThreshold: 90,
+    criticApprovalThreshold: 85,
     planningMode: "simplified",
     prdPlanningMode: "strict",
     taskPlanningMode: "simplified",

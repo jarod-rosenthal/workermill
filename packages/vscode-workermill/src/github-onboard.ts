@@ -538,8 +538,19 @@ async function finishSetup(
 
   // Write config.json WITHOUT apiKey (it's now in the keychain).
   // If keychain write failed, include apiKey in config as fallback.
+  // Preserve existing apiUrl if it points to localhost (local dev mode).
   log("Writing agent config...");
-  writeAgentConfig({ apiUrl: API_BASE, apiKey: keychainOk ? "" : apiKey, ...orgInfo });
+  let targetApiUrl = API_BASE;
+  try {
+    const existingConfig = JSON.parse(
+      fs.readFileSync(path.join(os.homedir(), ".workermill", "config.json"), "utf-8"),
+    );
+    if (existingConfig.apiUrl && existingConfig.apiUrl.includes("localhost")) {
+      targetApiUrl = existingConfig.apiUrl;
+      log(`Preserving local API URL: ${targetApiUrl}`);
+    }
+  } catch { /* no existing config */ }
+  writeAgentConfig({ apiUrl: targetApiUrl, apiKey: keychainOk ? "" : apiKey, ...orgInfo });
 
   // Set context key immediately so welcome view switches from "Create Account" to "Connect"
   // even if the install step below fails

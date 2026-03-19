@@ -1,7 +1,7 @@
 #!/usr/bin/env npx ts-node
 
 /**
- * Transition a ticket to a new status (supports Jira, GitHub Issues)
+ * Transition a ticket to a new status (supports Jira, GitHub Issues, Linear)
  *
  * Inputs (environment variables):
  * - TICKET_KEY: Required. The ticket key (e.g., "PROJ-123")
@@ -16,6 +16,9 @@
  * For GitHub:
  * - GITHUB_REPO: Required. "owner/repo" format
  * - GITHUB_TOKEN: Required. GitHub token
+ *
+ * For Linear:
+ * - LINEAR_API_KEY: Required. Linear API key
  *
  * Outputs (JSON to stdout):
  * - success: boolean
@@ -249,6 +252,101 @@ async function updateGithubIssueState(
   throw new Error(`Failed to update issue: ${updateResponse.body.slice(0, 200)}`);
 }
 
+async function transitionLinearIssue(
+  issueIdentifier: string,
+  statusName: string
+): Promise<Output> {
+  const linearApiKey = process.env.LINEAR_API_KEY;
+  if (!linearApiKey) throw new Error("LINEAR_API_KEY is required");
+
+  const headers = {
+    Authorization: linearApiKey,
+    "Content-Type": "application/json",
+  };
+
+  // Step 1: Resolve issue identifier to UUID and get current state + team states
+  const queryBody = JSON.stringify({
+    query: `query GetIssueAndStates($identifier: String!) {
+      issue(id: $identifier) {
+        id
+        state { id name }
+        team { states { nodes { id name } } }
+      }
+    }`,
+    variables: { identifier: issueIdentifier },
+  });
+
+  const queryResponse = await makeRequest(
+    "https://api.linear.app/graphql",
+    { method: "POST", headers: { ...headers, "Content-Length": Buffer.byteLength(queryBody) } },
+    queryBody
+  );
+
+  if (queryResponse.statusCode !== 200) {
+    throw new Error(`Linear API returned ${queryResponse.statusCode}: ${queryResponse.body.slice(0, 200)}`);
+  }
+
+  const queryData = JSON.parse(queryResponse.body);
+  const issue = queryData?.data?.issue;
+  if (!issue) throw new Error(`Linear issue not found: ${issueIdentifier}`);
+
+  const previousStatus = issue.state?.name || "unknown";
+  const teamStates: Array<{ id: string; name: string }> = issue.team?.states?.nodes || [];
+
+  // Find target state by name (case-insensitive)
+  const targetState = teamStates.find(
+    (s) => s.name.toLowerCase() === statusName.toLowerCase()
+  );
+
+  if (!targetState) {
+    // Soft failure for statuses that don't exist in Linear (like "Escalated")
+    const available = teamStates.map((s) => s.name);
+    console.error(`[transition_issue] Linear status "${statusName}" not found. Available: ${available.join(", ")}`);
+    return {
+      success: true,
+      previousStatus,
+      newStatus: previousStatus,
+      availableTransitions: available,
+    };
+  }
+
+  if (targetState.id === issue.state?.id) {
+    return { success: true, previousStatus, newStatus: previousStatus };
+  }
+
+  // Step 2: Update issue state
+  const mutationBody = JSON.stringify({
+    query: `mutation UpdateIssueState($issueId: String!, $stateId: String!) {
+      issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+        success
+        issue { state { name } }
+      }
+    }`,
+    variables: { issueId: issue.id, stateId: targetState.id },
+  });
+
+  const mutationResponse = await makeRequest(
+    "https://api.linear.app/graphql",
+    { method: "POST", headers: { ...headers, "Content-Length": Buffer.byteLength(mutationBody) } },
+    mutationBody
+  );
+
+  if (mutationResponse.statusCode !== 200) {
+    throw new Error(`Linear API returned ${mutationResponse.statusCode}: ${mutationResponse.body.slice(0, 200)}`);
+  }
+
+  const mutationData = JSON.parse(mutationResponse.body);
+  if (!mutationData?.data?.issueUpdate?.success) {
+    throw new Error(`Linear state update failed: ${mutationResponse.body.slice(0, 200)}`);
+  }
+
+  return {
+    success: true,
+    previousStatus,
+    newStatus: mutationData.data.issueUpdate.issue?.state?.name || statusName,
+  };
+}
+
 async function main(): Promise<void> {
   const output: Output = { success: false };
 
@@ -277,6 +375,9 @@ async function main(): Promise<void> {
       case "github":
         const issueNumber = ticketKey.replace(/^#/, "");
         result = await updateGithubIssueState(issueNumber, transitionName);
+        break;
+      case "linear":
+        result = await transitionLinearIssue(effectiveTicketKey, transitionName);
         break;
       default:
         throw new Error(`Unsupported ticket system: ${ticketSystem}`);

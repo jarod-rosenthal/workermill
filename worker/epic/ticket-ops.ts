@@ -88,9 +88,9 @@ export class TicketOps {
           await this.transitionInternal(statusName);
           break;
         case "linear":
-          // Linear transitions not yet implemented
-          console.log("[TicketOps] Linear transitions not yet supported — skipping");
-          return;
+          // Linear transitions via GraphQL issueUpdate
+          await this.transitionLinear(statusName);
+          break;
       }
       console.log(`[TicketOps] Transitioned to "${statusName}" (${this.ticketSystem})`);
     } catch (error) {
@@ -272,6 +272,59 @@ export class TicketOps {
   }
 
   // --- Linear ---
+
+  private async transitionLinear(statusName: string): Promise<void> {
+    const apiKey = process.env.LINEAR_API_KEY!;
+    const headers = {
+      Authorization: apiKey,
+      "Content-Type": "application/json",
+    };
+
+    const identifier = this.getEffectiveTicketKey();
+
+    // Resolve issue UUID, current state, and team states in one query
+    const queryRes = await axios.post(
+      "https://api.linear.app/graphql",
+      {
+        query: `query GetIssueAndStates($identifier: String!) {
+          issue(id: $identifier) {
+            id
+            state { id name }
+            team { states { nodes { id name } } }
+          }
+        }`,
+        variables: { identifier },
+      },
+      { headers },
+    );
+
+    const issue = queryRes.data?.data?.issue;
+    if (!issue) throw new Error(`Linear issue not found: ${identifier}`);
+
+    const teamStates: Array<{ id: string; name: string }> = issue.team?.states?.nodes || [];
+    const targetState = teamStates.find(
+      (s) => s.name.toLowerCase() === statusName.toLowerCase()
+    );
+
+    if (!targetState) {
+      // Soft failure — status may not exist in this team (e.g. "Escalated")
+      console.warn(`[TicketOps] Linear status "${statusName}" not found. Available: ${teamStates.map((s) => s.name).join(", ")}`);
+      return;
+    }
+
+    if (targetState.id === issue.state?.id) return; // Already in target state
+
+    await axios.post(
+      "https://api.linear.app/graphql",
+      {
+        query: `mutation UpdateIssueState($issueId: String!, $stateId: String!) {
+          issueUpdate(id: $issueId, input: { stateId: $stateId }) { success }
+        }`,
+        variables: { issueId: issue.id, stateId: targetState.id },
+      },
+      { headers },
+    );
+  }
 
   private async commentLinear(issueIdentifier: string, comment: string): Promise<void> {
     const apiKey = process.env.LINEAR_API_KEY!;

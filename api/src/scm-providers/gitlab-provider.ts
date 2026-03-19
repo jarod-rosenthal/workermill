@@ -52,6 +52,7 @@ interface GitLabMergeRequest {
   merged_at: string | null;
   sha: string;
   merge_status: string;
+  detailed_merge_status?: string;
   has_conflicts: boolean;
 }
 
@@ -420,7 +421,9 @@ export class GitLabProvider extends BaseScmProvider {
     return {
       state: mr.state === "opened" ? "open" : mr.state,
       merged: mr.state === "merged",
-      mergeable: !mr.has_conflicts && mr.merge_status === "can_be_merged",
+      mergeable: mr.detailed_merge_status
+        ? mr.detailed_merge_status === "mergeable"
+        : !mr.has_conflicts && mr.merge_status === "can_be_merged",
       mergedAt: mr.merged_at,
       headSha: mr.sha,
     };

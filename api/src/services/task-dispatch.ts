@@ -659,6 +659,32 @@ export async function dispatchMultiStoryPlan(
   const childTasks: WorkerTask[] = [];
   const childTaskIds: string[] = [];
 
+  // For GitHub Issues orgs: create all child issues up front, then assign to stories
+  let githubChildIssues: Array<{ number: number; id: number; html_url: string }> | null = null;
+  if (task.ticketSystem === "github" && task.githubRepo) {
+    const parentIssueNumber = (task.jiraFields as Record<string, unknown>)?.githubParentIssueNumber as number | undefined;
+    if (parentIssueNumber) {
+      try {
+        const { createGithubChildIssues } = await import("./github-issues.js");
+        const stories = executionPlan.stories!.map((s: { title: string; scope?: string }) => ({
+          title: s.title,
+          description: s.scope || s.title,
+        }));
+        githubChildIssues = await createGithubChildIssues(
+          task.orgId, task.githubRepo, parentIssueNumber, stories,
+        );
+        logger.info("Created GitHub child issues for PRD dispatch", {
+          parentTaskId: task.id, childCount: githubChildIssues.length,
+        });
+      } catch (err) {
+        logger.error("Failed to create GitHub child issues, using synthetic keys", {
+          parentTaskId: task.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
   for (let i = 0; i < executionPlan.stories!.length; i++) {
     const story = executionPlan.stories![i];
 
@@ -767,7 +793,20 @@ export async function dispatchMultiStoryPlan(
     let jiraStoryKey = `${task.jiraIssueKey}-S${i + 1}`; // Fallback synthetic key
     let jiraStoryId: string | null = null;
 
-    if (task.jiraIssueKey) {
+    if (task.ticketSystem === "github") {
+      // GitHub Issues: use the child issues created above
+      if (githubChildIssues && i < githubChildIssues.length) {
+        jiraStoryKey = `GH-${githubChildIssues[i].number}`;
+        logger.info("Linked child task to GitHub Issue", {
+          parentTaskId: task.id, storyIndex: i + 1,
+          issueNumber: githubChildIssues[i].number,
+        });
+      } else {
+        logger.warn("No GitHub Issue for story, using synthetic key", {
+          parentTaskId: task.id, storyIndex: i + 1,
+        });
+      }
+    } else if (task.jiraIssueKey) {
       // Try creating a Story linked to Epic first, fallback to sub-task
       if (useEpicWorkflow) {
         const story_result = await createJiraStory(
@@ -835,6 +874,8 @@ export async function dispatchMultiStoryPlan(
 
     childTask.parentTaskId = task.id;
     childTask.githubRepo = task.githubRepo; // Inherit repo from parent
+    childTask.ticketSystem = task.ticketSystem;
+    childTask.scmProvider = task.scmProvider;
     childTask.jiraIssueId = jiraStoryId || task.jiraIssueId; // Use story ID if created
     // Foundation story (index 0, storyIndex 1) should skip quality gates —
     // it creates the project from scratch and can't pass full-project gates.

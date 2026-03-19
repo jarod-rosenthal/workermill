@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.2.128",
+  "version": "0.2.129",
   "publisher": "workermill",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -152,6 +152,10 @@
       {
         "command": "workermill.signInWithGoogle",
         "title": "WorkerMill: Sign In with Google"
+      },
+      {
+        "command": "workermill.signInWithEmail",
+        "title": "WorkerMill: Sign In with Email"
       },
       {
         "command": "workermill.configureScm",
@@ -428,7 +432,7 @@
           {
             "id": "signIn",
             "title": "Sign in to WorkerMill Cloud",
-            "description": "Connect your account to use cloud-hosted workers at workermill.com.\n\n[Sign in with GitHub](command:workermill.signUpWithGitHub)\n[Sign in with Google](command:workermill.signInWithGoogle)",
+            "description": "Connect your account to use cloud-hosted workers at workermill.com.\n\n[Sign in with GitHub](command:workermill.signUpWithGitHub)\n[Sign in with Google](command:workermill.signInWithGoogle)\n[Sign in with Email](command:workermill.signInWithEmail)",
             "media": {
               "markdown": "media/walkthrough-signin.md"
             }
@@ -455,7 +459,7 @@
     "viewsWelcome": [
       {
         "view": "workermill.teamPanel",
-        "contents": "AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Connect to Local Instance](command:workermill.connectAgent)\n\n[Sign in with GitHub](command:workermill.signUpWithGitHub)\n[Sign in with Google](command:workermill.signInWithGoogle)\n\n[Local Development Guide](https://github.com/jarod-rosenthal/workermill/blob/main/docs/local-development.md) · [Documentation](https://github.com/jarod-rosenthal/workermill#readme)",
+        "contents": "AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Connect to Local Instance](command:workermill.connectAgent)\n\n[Sign in with GitHub](command:workermill.signUpWithGitHub)\n[Sign in with Google](command:workermill.signInWithGoogle)\n[Sign in with Email](command:workermill.signInWithEmail)\n\n[Local Development Guide](https://github.com/jarod-rosenthal/workermill/blob/main/docs/local-development.md) · [Documentation](https://github.com/jarod-rosenthal/workermill#readme)",
         "when": "!workermill.agentConfigured"
       },
       {

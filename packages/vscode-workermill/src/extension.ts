@@ -23,6 +23,7 @@ import { SettingsPanel } from "./settings-panel";
 import {
   isAgentInstalled,
   isAgentConfigured,
+  writeAgentConfig,
   getAgentBinaryPath,
   installAgent,
   startAgentProcess,
@@ -1260,9 +1261,10 @@ export function activate(context: vscode.ExtensionContext): void {
     // Single "Connect" action: install-if-needed → start-if-not-running → connect
     vscode.commands.registerCommand("workermill.connectAgent", async () => {
       if (!isAgentConfigured()) {
-        // Not configured — show setup warning with link to docs
-        const action = await vscode.window.showWarningMessage(
-          "Local development requires setup first. You'll need Docker, Node.js 20+, and Claude CLI installed, then clone the WorkerMill repo and run the setup commands.",
+        // Not configured — offer to set up local dev connection
+        const action = await vscode.window.showInformationMessage(
+          "Connect to a local WorkerMill instance running on this machine. Make sure you've followed the setup guide and started the local stack first.",
+          "Connect to localhost:3001",
           "View Setup Guide",
           "Cancel",
         );
@@ -1270,8 +1272,18 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.env.openExternal(
             vscode.Uri.parse("https://github.com/jarod-rosenthal/workermill/blob/main/docs/local-development.md"),
           );
+          return;
         }
-        return;
+        if (action !== "Connect to localhost:3001") {
+          return;
+        }
+        // Write a minimal local config — no sign-in needed
+        writeAgentConfig({
+          apiUrl: "http://localhost:3001",
+          apiKey: "self-hosted",
+        });
+        await vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
+        log("Wrote local dev config (localhost:3001, self-hosted key)");
       }
       if (!client.isConnected()) {
         const hasGit = await promptInstallGit(log);

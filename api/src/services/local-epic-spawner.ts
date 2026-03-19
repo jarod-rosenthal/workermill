@@ -800,10 +800,12 @@ class LocalEpicSpawner {
 
       // AI provider configuration
       WORKER_PROVIDER: task.workerProvider || "anthropic",
-      // Only pass an explicit API key from org credentials — local mode uses OAuth
-      // via mounted ~/.claude/.credentials.json. Falling back to process.env would
-      // override OAuth auth if the API process has a stale/low-balance key set.
-      ANTHROPIC_API_KEY: credentials?.anthropicApiKey || "",
+      // Only pass a real API key — never the LOCAL_OAUTH_MODE sentinel.
+      // Local mode uses OAuth via mounted ~/.claude/.credentials.json.
+      // Passing the sentinel causes Claude CLI to reject it as an invalid key.
+      ANTHROPIC_API_KEY: credentials?.anthropicApiKey && credentials.anthropicApiKey !== "LOCAL_OAUTH_MODE"
+        ? credentials.anthropicApiKey
+        : "",
       OPENAI_API_KEY: credentials?.openaiApiKey || process.env.OPENAI_API_KEY || "",
       GOOGLE_API_KEY: credentials?.googleApiKey || process.env.GOOGLE_API_KEY || "",
       GOOGLE_GENERATIVE_AI_API_KEY: credentials?.googleApiKey || process.env.GOOGLE_API_KEY || "",

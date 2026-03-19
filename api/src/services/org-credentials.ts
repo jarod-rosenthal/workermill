@@ -296,7 +296,7 @@ export async function getOrgCredentials(
     }
 
     const credentials: OrgCredentials = {
-      anthropicApiKey: anthropicKey || "",
+      anthropicApiKey: anthropicKey && anthropicKey !== "LOCAL_OAUTH_MODE" ? anthropicKey : "",
       githubToken:
         scmProvider === "github" ? scmToken || undefined : undefined,
       orgApiKey: undefined, // Plaintext api_key column deprecated — workers use PLATFORM_API_KEY from Secrets Manager

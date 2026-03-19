@@ -167,10 +167,10 @@ router.post(
       where: { jiraIssueKey: issueKey, orgId: org.id },
     });
 
-    // Workflow labels
+    // Workflow labels — default to org settings, labels can override
     const deploymentEnabled = labels.includes("deploy");
-    const skipManagerReview = !labels.includes("review");
-    const managerEnabled = labels.includes("manager");
+    const skipManagerReview = labels.includes("no-review") ? true : labels.includes("review") ? false : !org.autoReviewEnabled;
+    const managerEnabled = labels.includes("no-manager") ? false : labels.includes("manager") ? true : org.managerEnabled ?? false;
 
     if (existingTask && !existingTask.isTerminal()) {
       // Handle deploy label being added
@@ -465,8 +465,9 @@ router.post(
       });
 
       const deploymentEnabled = labels.includes("deploy");
-      const skipManagerReview = !labels.includes("review");
-      const managerEnabled = labels.includes("manager");
+      // Default to org settings; labels can override (review label forces review on, no-review forces off)
+      const skipManagerReview = labels.includes("no-review") ? true : labels.includes("review") ? false : !org.autoReviewEnabled;
+      const managerEnabled = labels.includes("no-manager") ? false : labels.includes("manager") ? true : org.managerEnabled ?? false;
 
       if (existingTask && !existingTask.isTerminal()) {
         if (existingTask.status === "pr_approved" && deploymentEnabled && !existingTask.deploymentEnabled) {

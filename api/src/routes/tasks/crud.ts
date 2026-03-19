@@ -557,6 +557,56 @@ router.post(
       const org = req.organization!;
       const { summary, description, githubRepo } = req.body;
 
+      if (org.issueTrackerProvider === "github-issues") {
+        // --- GitHub Issues path: create issue directly, no board/cards ---
+        const targetRepo = githubRepo || org.getDefaultRepo();
+        if (!targetRepo) {
+          res.status(400).json({ error: "No repository configured for organization" });
+          return;
+        }
+
+        const { createGithubIssueForTask } = await import("../../services/github-issues.js");
+        const ghIssue = await createGithubIssueForTask(org.id, targetRepo, summary, description);
+        const issueKey = `GH-${ghIssue.number}`;
+
+        const taskRepo = AppDataSource.getRepository(WorkerTask);
+        const task = taskRepo.create({
+          orgId: org.id,
+          jiraIssueKey: issueKey,
+          jiraIssueId: issueKey,
+          summary,
+          description,
+          workerPersona: "project_manager",
+          workerModel: org.defaultWorkerModel || "",
+          workerProvider: org.primaryProvider || "anthropic",
+          ticketSystem: "github",
+          scmProvider: org.scmProvider || "github",
+          githubRepo: targetRepo,
+          status: "planning",
+          pipelineVersion: "v2",
+          executionMode: "parallel",
+          criticEnabled: false,
+          deploymentEnabled: org.autoDeployEnabled ?? false,
+          skipManagerReview: !org.autoReviewEnabled,
+          improvementEnabled: org.autoImproveEnabled ?? false,
+          standardSdkMode: false,
+          retryCount: 0,
+          maxRetries: 3,
+        });
+        await taskRepo.save(task);
+
+        logger.info("Created GitHub Issues task from run-file", {
+          issueKey, ghIssueUrl: ghIssue.html_url, taskId: task.id, orgId: org.id,
+        });
+
+        res.status(201).json({
+          taskId: task.id,
+          issueKey,
+          githubIssueUrl: ghIssue.html_url,
+        });
+        return;
+      }
+
       const boardRepo = AppDataSource.getRepository(KbBoard);
       const colRepo = AppDataSource.getRepository(KbColumn);
       const cardRepo = AppDataSource.getRepository(KbCard);

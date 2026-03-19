@@ -158,7 +158,7 @@ function redactSecrets(text: string): string {
 
 /** Track when we last pulled the image to avoid re-pulling on every spawn. */
 let lastPullTimestamp = 0;
-const PULL_INTERVAL_MS = 4 * 60 * 60 * 1000; // Re-pull every 4 hours
+const PULL_INTERVAL_MS = 30 * 60 * 1000; // Re-pull every 30 minutes
 
 /**
  * Ensure the Docker worker image is available locally.

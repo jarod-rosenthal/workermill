@@ -89,7 +89,7 @@ export function CreateTaskModal({
                 }`}
               >
                 <Layers className="w-4 h-4" />
-                <span className="text-sm font-medium">Jira / Linear</span>
+                <span className="text-sm font-medium">Issue Key</span>
               </button>
               <button
                 type="button"
@@ -141,7 +141,7 @@ export function CreateTaskModal({
                   </button>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Jira or Linear issue key (e.g., ACME-123 or PROJECT-456)
+                  Jira, Linear, or GitHub issue key (e.g., ACME-123, PROJECT-456, or GH-12)
                 </p>
                 {costEstimate && (
                   <div className="mt-3 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">

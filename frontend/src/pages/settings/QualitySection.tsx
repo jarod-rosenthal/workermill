@@ -109,7 +109,7 @@ export function QualitySection({
                 Anneal
                 {isProPlan && <span className="ml-2"><MaxBadge /></span>}
               </span>
-              <p className="text-xs text-muted-foreground">Iteratively refine and improve code quality after completion</p>
+              <p className="text-xs text-muted-foreground">Analyze worker logs for environment issues (missing tools, broken deps) and auto-fix worker infrastructure</p>
             </div>
           </div>
           <label className={`relative inline-flex items-center ${isProPlan ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>

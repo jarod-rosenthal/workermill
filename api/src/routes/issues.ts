@@ -17,6 +17,7 @@ import { KbCard } from "../models/KbCard.js";
 import { KbBoard } from "../models/KbBoard.js";
 import { KbCardDependency } from "../models/KbCardDependency.js";
 import { getLinearTeams } from "../utils/linear.js";
+import { searchGithubIssues } from "../services/github-issues.js";
 import { logger } from "../utils/logger.js";
 
 const router = Router();
@@ -473,6 +474,29 @@ router.get(
           break;
         }
 
+        case "github-issues": {
+          const repo = req.organization!.getDefaultRepo();
+          if (!repo) {
+            res.status(400).json({
+              error: "No GitHub repository configured. Please configure a default repository in Settings.",
+            });
+            return;
+          }
+          const ghResults = await searchGithubIssues(orgId, repo, filters.q, filters.maxResults);
+          issues = ghResults.map((gh) => ({
+            key: `GH-${gh.number}`,
+            summary: gh.title,
+            description: gh.body,
+            status: gh.state,
+            assignee: gh.assignee ? { displayName: gh.assignee.login, accountId: gh.assignee.login } : null,
+            issueType: "Issue",
+            priority: null,
+            labels: gh.labels,
+            project: { key: repo.split("/")[1] || repo, name: repo },
+          }));
+          break;
+        }
+
         case "internal":
         default: {
           issues = await searchBoardCards(orgId, filters);
@@ -527,6 +551,14 @@ router.get("/projects", async (req: Request, res: Response) => {
           { jiraBaseUrl: creds.jiraBaseUrl, jiraEmail: creds.jiraEmail, jiraApiToken: creds.jiraApiToken },
           orgId,
         );
+        break;
+      }
+
+      case "github-issues": {
+        const defaultRepo = req.organization!.getDefaultRepo();
+        projects = defaultRepo
+          ? [{ key: defaultRepo.split("/")[1] || defaultRepo, name: defaultRepo }]
+          : [];
         break;
       }
 

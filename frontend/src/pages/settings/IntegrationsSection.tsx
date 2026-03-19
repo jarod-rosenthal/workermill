@@ -269,7 +269,7 @@ export function IntegrationsSection({
           <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground rounded">Optional</span>
           <span className="text-xs text-muted-foreground">Built-in board available as default</span>
         </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Jira Card */}
         <div className={`border rounded-xl p-6 bg-card transition-colors ${settings?.issueTrackerProvider === "jira" ? "border-blue-500 ring-1 ring-blue-500/30" : "border-border/50 hover:border-blue-500/50"}`}>
           <div className="flex items-center gap-3 mb-4">
@@ -347,6 +347,49 @@ export function IntegrationsSection({
             >
               Configure
             </button>
+          </div>
+        </div>
+
+        {/* GitHub Issues Card */}
+        <div className={`border rounded-xl p-6 bg-card transition-colors ${settings?.issueTrackerProvider === "github-issues" ? "border-gray-500 ring-1 ring-gray-500/30" : "border-border/50 hover:border-gray-500/50"}`}>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-12 h-12 rounded-lg bg-gray-500/10 flex items-center justify-center">
+              <Github className="w-7 h-7 text-gray-500" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-foreground">GitHub Issues</h3>
+                {settings?.issueTrackerProvider === "github-issues" && (
+                  <span className="px-2 py-0.5 text-xs font-medium bg-gray-500/10 text-gray-500 rounded-full">
+                    Default
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">Issue tracking via GitHub</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            {githubStatus.connected ? (
+              <span className="flex items-center gap-1 text-green-500 text-sm">
+                <CheckCircle className="w-4 h-4" /> Connected
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                <XCircle className="w-4 h-4" /> Not connected
+              </span>
+            )}
+            {settings?.issueTrackerProvider === "github-issues" ? (
+              <span className="text-sm text-gray-500 font-medium">Active</span>
+            ) : githubStatus.connected ? (
+              <button
+                onClick={() => handleSetDefaultIssueTracker?.("github-issues")}
+                disabled={settingsSaving}
+                className="text-sm text-primary hover:underline disabled:opacity-50"
+              >
+                {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin inline" /> : null}
+                Set as Default
+              </button>
+            ) : null}
           </div>
         </div>
 

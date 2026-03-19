@@ -118,6 +118,69 @@ export async function closeGithubIssue(
   }
 }
 
+export interface GitHubIssueInfo {
+  number: number;
+  title: string;
+  body: string | null;
+  state: string;
+  labels: string[];
+  assignee: { login: string } | null;
+  html_url: string;
+}
+
+export async function searchGithubIssues(
+  orgId: string,
+  repo: string,
+  query?: string,
+  maxResults = 20,
+): Promise<GitHubIssueInfo[]> {
+  const credentials = await getOrgCredentials(orgId);
+  const token = credentials.githubToken || credentials.scmToken;
+  if (!token) {
+    throw new Error("No GitHub token configured for organization");
+  }
+
+  // Use GitHub search API if query provided, otherwise list open issues
+  let url: string;
+  if (query) {
+    const q = encodeURIComponent(`repo:${repo} is:issue is:open ${query}`);
+    url = `https://api.github.com/search/issues?q=${q}&per_page=${maxResults}&sort=updated&order=desc`;
+  } else {
+    url = `https://api.github.com/repos/${repo}/issues?state=open&per_page=${maxResults}&sort=updated&direction=desc`;
+  }
+
+  const response = await fetch(url, {
+    headers: githubHeaders(token),
+    signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    logger.warn("GitHub issues search failed", { status: response.status, error: errorBody });
+    throw new Error(`GitHub API error ${response.status}`);
+  }
+
+  const data = await response.json() as
+    | GitHubIssueInfo[]
+    | { items: GitHubIssueInfo[] };
+
+  const items = Array.isArray(data) ? data : data.items || [];
+
+  return items
+    .filter((i) => !("pull_request" in i)) // exclude PRs from /issues endpoint
+    .map((issue) => ({
+      number: issue.number,
+      title: issue.title,
+      body: issue.body || null,
+      state: issue.state,
+      labels: ((issue.labels || []) as Array<string | { name: string }>).map(
+        (l) => (typeof l === "string" ? l : l.name),
+      ),
+      assignee: issue.assignee ? { login: (issue.assignee as { login: string }).login } : null,
+      html_url: issue.html_url,
+    }));
+}
+
 export async function createGithubIssueForTask(
   orgId: string,
   repo: string,

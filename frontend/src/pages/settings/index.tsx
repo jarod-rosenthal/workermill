@@ -1090,7 +1090,7 @@ export default function Settings() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "GitHub connection failed");
       setGithubStatus({ connected: true, lastChecked: new Date().toISOString() });
-      setMessage({ type: "success", text: `GitHub connection successful (${data.user})` });
+      setMessage({ type: "success", text: `GitHub connection successful (${data.workerToken?.user || "connected"})` });
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "GitHub connection failed" });
       setGithubStatus({ connected: false, lastChecked: new Date().toISOString() });

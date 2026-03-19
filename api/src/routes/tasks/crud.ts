@@ -592,6 +592,9 @@ router.post(
           standardSdkMode: false,
           retryCount: 0,
           maxRetries: 3,
+          jiraFields: {
+            githubParentIssueNumber: ghIssue.number,
+          },
         });
         await taskRepo.save(task);
 

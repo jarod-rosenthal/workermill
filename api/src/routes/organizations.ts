@@ -11,6 +11,8 @@ import bcrypt from "bcryptjs";
 import { sendInviteEmail, sendOrgAddedEmail, sendWelcomeEmail } from "../services/email/index.js";
 import { TOS_VERSION } from "../constants/tos.js";
 import { logTosAccepted } from "../services/audit.js";
+import { saveOrgSecretToDb } from "../utils/org-secret-store.js";
+import { invalidateOrgCredentialsCache } from "../services/org-credentials.js";
 
 const router = Router();
 
@@ -316,8 +318,11 @@ router.post(
       const rawKey = `org_${randomUUID().replace(/-/g, "")}`;
       org.apiKeyHash = await bcrypt.hash(rawKey, 10);
       org.apiKeyPrefix = rawKey.substring(0, 12);
-      // Do NOT store raw key — only the hash and prefix
       await orgRepo.update({ id: org.id }, { apiKeyHash: org.apiKeyHash, apiKeyPrefix: org.apiKeyPrefix });
+
+      // Store plaintext in org_credentials (encrypted at rest) so ECS workers can authenticate back
+      await saveOrgSecretToDb(org.id, "org-api-key", rawKey);
+      invalidateOrgCredentialsCache(org.id);
 
       logger.info("Organization API key rotated", { orgId: org.id });
       res.json({

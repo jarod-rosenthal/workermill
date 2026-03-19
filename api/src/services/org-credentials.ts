@@ -188,9 +188,10 @@ export async function getOrgCredentials(
     };
 
     // Fetch org-specific secrets (NO platform fallback for multi-tenancy security)
-    const [jiraSecretString, anthropicKey] = await Promise.all([
+    const [jiraSecretString, anthropicKey, orgApiKeyPlaintext] = await Promise.all([
       getOrgIntegrationSecret("jira-credentials"),
       getProviderCredentials(orgId, "anthropic").catch(() => null),
+      getOrgIntegrationSecret("org-api-key"),
     ]);
 
     // Get SCM provider token based on org settings (NO cross-provider fallback)
@@ -299,7 +300,7 @@ export async function getOrgCredentials(
       anthropicApiKey: anthropicKey && anthropicKey !== "LOCAL_OAUTH_MODE" ? anthropicKey : "",
       githubToken:
         scmProvider === "github" ? scmToken || undefined : undefined,
-      orgApiKey: undefined, // Plaintext api_key column deprecated — workers use PLATFORM_API_KEY from Secrets Manager
+      orgApiKey: orgApiKeyPlaintext || undefined,
       jiraBaseUrl,
       jiraEmail: jiraCredentials.email,
       jiraApiToken: jiraCredentials.api_token,

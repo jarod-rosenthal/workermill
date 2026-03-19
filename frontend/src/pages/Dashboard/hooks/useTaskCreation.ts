@@ -1,6 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
 import { API_BASE } from "../types";
 
+export interface BrowseIssueItem {
+  key: string;
+  summary: string;
+  status: string | null;
+  labels: string[];
+  assignee: { displayName: string; accountId: string } | null;
+  issueType: string | null;
+  priority: string | null;
+  project: { key: string; name: string } | null;
+}
+
 interface UseTaskCreationParams {
   isProPlan: boolean;
   fetchData: () => Promise<void>;
@@ -15,7 +26,7 @@ export function useTaskCreation({
   setActionError,
 }: UseTaskCreationParams) {
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
-  const [taskSource, setTaskSource] = useState<"external" | "internal">(isProPlan ? "internal" : "external");
+  const [taskSource, setTaskSource] = useState<"external" | "internal" | "browse">(isProPlan ? "internal" : "external");
   const [createTaskForm, setCreateTaskForm] = useState({
     jiraIssueKey: "",
     workerPersona: "",
@@ -38,6 +49,12 @@ export function useTaskCreation({
   const [selectedTaskKey, setSelectedTaskKey] = useState<string>("");
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [tasksLoading, setTasksLoading] = useState(false);
+
+  // Browse issues state (works with any configured issue tracker)
+  const [browseIssues, setBrowseIssues] = useState<BrowseIssueItem[]>([]);
+  const [browseIssuesLoading, setBrowseIssuesLoading] = useState(false);
+  const [browseSearch, setBrowseSearch] = useState("");
+  const [selectedBrowseIssueKey, setSelectedBrowseIssueKey] = useState("");
 
   // Fetch projects for internal task creation
   const fetchInternalProjects = useCallback(async () => {
@@ -96,12 +113,43 @@ export function useTaskCreation({
     }
   }, []);
 
+  // Fetch issues from the org's configured issue tracker (Jira, Linear, GitHub Issues, or internal boards)
+  const fetchBrowseIssues = useCallback(async (query?: string) => {
+    setBrowseIssuesLoading(true);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const params = new URLSearchParams({ maxResults: "20" });
+      if (query) params.set("q", query);
+      const response = await fetch(`${API_BASE}/api/issues?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setBrowseIssues(data.issues || []);
+      } else {
+        setBrowseIssues([]);
+      }
+    } catch (err) {
+      console.error("Failed to fetch issues:", err);
+      setBrowseIssues([]);
+    } finally {
+      setBrowseIssuesLoading(false);
+    }
+  }, []);
+
   // Load projects when switching to internal source
   useEffect(() => {
     if (taskSource === "internal" && internalProjects.length === 0) {
       fetchInternalProjects();
     }
   }, [taskSource, internalProjects.length, fetchInternalProjects]);
+
+  // Load issues when switching to browse source
+  useEffect(() => {
+    if (taskSource === "browse") {
+      fetchBrowseIssues();
+    }
+  }, [taskSource, fetchBrowseIssues]);
 
   // Load tasks when project is selected
   useEffect(() => {
@@ -116,7 +164,31 @@ export function useTaskCreation({
     try {
       const token = localStorage.getItem("accessToken");
 
-      if (taskSource === "internal") {
+      if (taskSource === "browse") {
+        // Submit the selected issue key as an external task
+        const response = await fetch(`${API_BASE}/api/tasks`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ jiraIssueKey: selectedBrowseIssueKey, workerPersona: createTaskForm.workerPersona }),
+        });
+        if (response.ok) {
+          setActionSuccess("Task created from issue");
+          setTimeout(() => setActionSuccess(null), 3000);
+          setShowCreateTaskModal(false);
+          setSelectedBrowseIssueKey("");
+          setBrowseSearch("");
+          setBrowseIssues([]);
+          setCostEstimate(null);
+          fetchData();
+        } else {
+          const err = await response.json();
+          setActionError(err.error || "Failed to create task");
+          setTimeout(() => setActionError(null), 5000);
+        }
+      } else if (taskSource === "internal") {
         const response = await fetch(`${API_BASE}/api/projects/${selectedProjectId}/tasks/${selectedTaskKey}/assign`, {
           method: "POST",
           headers: {
@@ -222,5 +294,13 @@ export function useTaskCreation({
     tasksLoading,
     handleCreateTask,
     fetchCostEstimate,
+    // Browse issues
+    browseIssues,
+    browseIssuesLoading,
+    browseSearch,
+    setBrowseSearch,
+    selectedBrowseIssueKey,
+    setSelectedBrowseIssueKey,
+    fetchBrowseIssues,
   };
 }

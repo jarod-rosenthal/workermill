@@ -2067,6 +2067,7 @@ export default function Settings() {
             settingsSaving={settingsSaving}
             orgPlan={organization?.plan}
             handleSetDefaultIssueTracker={handleSetDefaultIssueTracker}
+            handleSetDefaultScm={handleSetDefaultScm}
             jiraStatus={jiraStatus}
             githubStatus={githubStatus}
             gitlabStatus={gitlabStatus}
@@ -2119,6 +2120,16 @@ export default function Settings() {
             remoteAgentsLoading={remoteAgentsLoading}
             orgPlan={organization?.plan}
             apiKeyPrefix={settings?.apiKeyPrefix}
+            onAgentRemoved={() => {
+              setRemoteAgentsLoading(true);
+              fetch(`${API_BASE}/api/settings/remote-agents`, {
+                headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+              })
+                .then((res) => res.json())
+                .then((data) => setRemoteAgents(data.agents || []))
+                .catch(() => setRemoteAgents([]))
+                .finally(() => setRemoteAgentsLoading(false));
+            }}
           />
         );
       case "billing":

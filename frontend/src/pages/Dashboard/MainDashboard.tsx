@@ -149,6 +149,8 @@ export default function Dashboard() {
     internalProjects, selectedProjectId, setSelectedProjectId,
     internalTasks, selectedTaskKey, setSelectedTaskKey,
     projectsLoading, tasksLoading, handleCreateTask, fetchCostEstimate,
+    browseIssues, browseIssuesLoading, browseSearch, setBrowseSearch,
+    selectedBrowseIssueKey, setSelectedBrowseIssueKey, fetchBrowseIssues,
   } = useTaskCreation({ isProPlan: false, fetchData, setActionSuccess, setActionError });
 
   const {
@@ -646,7 +648,7 @@ export default function Dashboard() {
       </div>
 
       {showCreateTaskModal && (
-        <CreateTaskModal showCreateTaskModal={showCreateTaskModal} taskSource={taskSource} setTaskSource={setTaskSource} createTaskForm={createTaskForm} setCreateTaskForm={setCreateTaskForm} createLoading={createLoading} costEstimate={costEstimate} setCostEstimate={setCostEstimate} costEstimateLoading={costEstimateLoading} internalProjects={internalProjects} selectedProjectId={selectedProjectId} setSelectedProjectId={setSelectedProjectId} internalTasks={internalTasks} selectedTaskKey={selectedTaskKey} setSelectedTaskKey={setSelectedTaskKey} projectsLoading={projectsLoading} tasksLoading={tasksLoading} handleCreateTask={handleCreateTask} fetchCostEstimate={fetchCostEstimate} onClose={() => { setShowCreateTaskModal(false); setTaskSource("external"); setSelectedProjectId(""); setSelectedTaskKey(""); setCostEstimate(null); }} />
+        <CreateTaskModal showCreateTaskModal={showCreateTaskModal} taskSource={taskSource} setTaskSource={setTaskSource} createTaskForm={createTaskForm} setCreateTaskForm={setCreateTaskForm} createLoading={createLoading} costEstimate={costEstimate} setCostEstimate={setCostEstimate} costEstimateLoading={costEstimateLoading} internalProjects={internalProjects} selectedProjectId={selectedProjectId} setSelectedProjectId={setSelectedProjectId} internalTasks={internalTasks} selectedTaskKey={selectedTaskKey} setSelectedTaskKey={setSelectedTaskKey} projectsLoading={projectsLoading} tasksLoading={tasksLoading} handleCreateTask={handleCreateTask} fetchCostEstimate={fetchCostEstimate} browseIssues={browseIssues} browseIssuesLoading={browseIssuesLoading} browseSearch={browseSearch} setBrowseSearch={setBrowseSearch} selectedBrowseIssueKey={selectedBrowseIssueKey} setSelectedBrowseIssueKey={setSelectedBrowseIssueKey} fetchBrowseIssues={fetchBrowseIssues} onClose={() => { setShowCreateTaskModal(false); setTaskSource("external"); setSelectedProjectId(""); setSelectedTaskKey(""); setSelectedBrowseIssueKey(""); setBrowseSearch(""); setCostEstimate(null); }} />
       )}
 
       {selectedTask && (

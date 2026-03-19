@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Eye,
   EyeOff,
+  Trash2,
 } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -31,6 +32,7 @@ interface RemoteAgentSectionProps {
   remoteAgentsLoading: boolean;
   orgPlan?: string;
   apiKeyPrefix?: string | null;
+  onAgentRemoved?: () => void;
 }
 
 function ApiKeySection({ apiKeyPrefix }: { apiKeyPrefix?: string | null }) {
@@ -239,7 +241,31 @@ export function RemoteAgentSection({
   remoteAgentsLoading,
   orgPlan: _orgPlan,
   apiKeyPrefix,
+  onAgentRemoved,
 }: RemoteAgentSectionProps) {
+  const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
+
+  const handleRemoveAgent = async (agentId: string) => {
+    if (!confirm(`Remove agent "${agentId}"? This will unregister it from your organization.`)) return;
+    setDeletingAgentId(agentId);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/settings/remote-agents/${encodeURIComponent(agentId)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        onAgentRemoved?.();
+      } else {
+        const data = await response.json();
+        alert(data.error || "Failed to remove agent");
+      }
+    } catch {
+      alert("Failed to remove agent");
+    } finally {
+      setDeletingAgentId(null);
+    }
+  };
   return (
     <div className="space-y-6">
       <div>
@@ -314,9 +340,25 @@ export function RemoteAgentSection({
                       {agent.status}
                     </span>
                   </div>
-                  <span className="text-xs text-muted-foreground">
-                    {agent.activeTasks}/{agent.maxWorkers} workers
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {agent.activeTasks}/{agent.maxWorkers} workers
+                    </span>
+                    {agent.status === "offline" && (
+                      <button
+                        onClick={() => handleRemoveAgent(agent.agentId)}
+                        disabled={deletingAgentId === agent.agentId}
+                        className="text-muted-foreground hover:text-red-500 transition-colors disabled:opacity-50"
+                        title="Remove agent"
+                      >
+                        {deletingAgentId === agent.agentId ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   {agent.hostname && <span>Host: {agent.hostname}</span>}

@@ -683,4 +683,39 @@ router.get("/remote-agents", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * DELETE /api/settings/remote-agents/:agentId
+ * Remove (unregister) a remote agent from the organization
+ */
+router.delete("/remote-agents/:agentId", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const agentId = req.params.agentId as string;
+    const agentRepo = AppDataSource.getRepository(RemoteAgent);
+
+    const agent = await agentRepo.findOne({
+      where: { agentId, orgId: org.id },
+    });
+
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    // Don't allow deleting online agents
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+    if (agent.lastHeartbeatAt > twoMinutesAgo) {
+      res.status(409).json({ error: "Cannot remove an online agent. Stop the agent first." });
+      return;
+    }
+
+    await agentRepo.remove(agent);
+    logger.info("Remote agent removed", { agentId, orgId: org.id });
+    res.json({ success: true });
+  } catch (error) {
+    logger.error("Error removing remote agent", { error });
+    res.status(500).json({ error: "Failed to remove agent" });
+  }
+});
+
 export default router;

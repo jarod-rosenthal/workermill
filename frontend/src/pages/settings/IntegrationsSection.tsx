@@ -15,6 +15,7 @@ interface IntegrationsSectionProps {
   settingsSaving?: boolean;
   orgPlan?: string;
   handleSetDefaultIssueTracker?: (provider: "jira" | "linear" | "github-issues" | "internal") => Promise<void>;
+  handleSetDefaultScm?: (provider: "github" | "gitlab" | "bitbucket") => Promise<void>;
   jiraStatus: IntegrationStatus;
   githubStatus: IntegrationStatus;
   gitlabStatus: IntegrationStatus;
@@ -89,6 +90,7 @@ export function IntegrationsSection({
   settingsSaving,
   orgPlan,
   handleSetDefaultIssueTracker,
+  handleSetDefaultScm,
   jiraStatus,
   githubStatus,
   gitlabStatus,
@@ -175,12 +177,26 @@ export function IntegrationsSection({
                 <XCircle className="w-4 h-4" /> Not connected
               </span>
             )}
-            <button
-              onClick={() => setGithubSlideOpen(true)}
-              className="text-sm text-primary hover:underline"
-            >
-              Configure
-            </button>
+            <div className="flex items-center gap-3">
+              {settings.scmProvider === "github" ? (
+                <span className="text-sm text-primary font-medium">Active</span>
+              ) : githubStatus.connected ? (
+                <button
+                  onClick={() => handleSetDefaultScm?.("github")}
+                  disabled={settingsSaving}
+                  className="text-sm text-primary hover:underline disabled:opacity-50"
+                >
+                  {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin inline" /> : null}
+                  Set as Default
+                </button>
+              ) : null}
+              <button
+                onClick={() => setGithubSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
           </div>
         </div>
 
@@ -213,12 +229,26 @@ export function IntegrationsSection({
                 <XCircle className="w-4 h-4" /> Not connected
               </span>
             )}
-            <button
-              onClick={() => setGitlabSlideOpen(true)}
-              className="text-sm text-primary hover:underline"
-            >
-              Configure
-            </button>
+            <div className="flex items-center gap-3">
+              {settings.scmProvider === "gitlab" ? (
+                <span className="text-sm text-primary font-medium">Active</span>
+              ) : gitlabStatus.connected ? (
+                <button
+                  onClick={() => handleSetDefaultScm?.("gitlab")}
+                  disabled={settingsSaving}
+                  className="text-sm text-primary hover:underline disabled:opacity-50"
+                >
+                  {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin inline" /> : null}
+                  Set as Default
+                </button>
+              ) : null}
+              <button
+                onClick={() => setGitlabSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
           </div>
         </div>
 
@@ -251,12 +281,26 @@ export function IntegrationsSection({
                 <XCircle className="w-4 h-4" /> Not connected
               </span>
             )}
-            <button
-              onClick={() => setBitbucketSlideOpen(true)}
-              className="text-sm text-primary hover:underline"
-            >
-              Configure
-            </button>
+            <div className="flex items-center gap-3">
+              {settings.scmProvider === "bitbucket" ? (
+                <span className="text-sm text-primary font-medium">Active</span>
+              ) : bitbucketStatus.connected ? (
+                <button
+                  onClick={() => handleSetDefaultScm?.("bitbucket")}
+                  disabled={settingsSaving}
+                  className="text-sm text-primary hover:underline disabled:opacity-50"
+                >
+                  {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin inline" /> : null}
+                  Set as Default
+                </button>
+              ) : null}
+              <button
+                onClick={() => setBitbucketSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
           </div>
         </div>
         </div>
@@ -300,12 +344,26 @@ export function IntegrationsSection({
                 <XCircle className="w-4 h-4" /> Not connected
               </span>
             )}
-            <button
-              onClick={() => setJiraSlideOpen(true)}
-              className="text-sm text-primary hover:underline"
-            >
-              Configure
-            </button>
+            <div className="flex items-center gap-3">
+              {settings?.issueTrackerProvider === "jira" ? (
+                <span className="text-sm text-blue-500 font-medium">Active</span>
+              ) : jiraStatus.connected ? (
+                <button
+                  onClick={() => handleSetDefaultIssueTracker?.("jira")}
+                  disabled={settingsSaving}
+                  className="text-sm text-primary hover:underline disabled:opacity-50"
+                >
+                  {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin inline" /> : null}
+                  Set as Default
+                </button>
+              ) : null}
+              <button
+                onClick={() => setJiraSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
           </div>
         </div>
 
@@ -341,12 +399,26 @@ export function IntegrationsSection({
                 <XCircle className="w-4 h-4" /> Not connected
               </span>
             )}
-            <button
-              onClick={() => setLinearSlideOpen(true)}
-              className="text-sm text-primary hover:underline"
-            >
-              Configure
-            </button>
+            <div className="flex items-center gap-3">
+              {settings?.issueTrackerProvider === "linear" ? (
+                <span className="text-sm text-indigo-500 font-medium">Active</span>
+              ) : linearStatus.connected ? (
+                <button
+                  onClick={() => handleSetDefaultIssueTracker?.("linear")}
+                  disabled={settingsSaving}
+                  className="text-sm text-primary hover:underline disabled:opacity-50"
+                >
+                  {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin inline" /> : null}
+                  Set as Default
+                </button>
+              ) : null}
+              <button
+                onClick={() => setLinearSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
           </div>
         </div>
 

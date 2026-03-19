@@ -126,12 +126,11 @@ export function DataSection({
             icon={<SettingsIcon className="w-4 h-4" />}
             iconBgColor="bg-gray-500/20"
             iconColor="text-gray-400"
-            summary={`Completed: ${settings.completedTaskDisplayMinutes}m, In-progress: ${settings.intermediateTaskDisplayMinutes}m`}
+            summary={`Tasks visible for ${settings.completedTaskDisplayMinutes}m after completion`}
           >
             <div className="space-y-6">
-              {/* Completed Task Display */}
               <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">Completed Task Visibility</label>
+                <label className="block text-sm font-medium text-muted-foreground mb-2">Task Visibility</label>
                 <div className="flex items-center gap-4">
                   <input
                     type="range"
@@ -156,68 +155,7 @@ export function DataSection({
                 {validationErrors.completedTaskDisplayMinutes && (
                   <p className="text-xs text-red-500 mt-1">{validationErrors.completedTaskDisplayMinutes}</p>
                 )}
-                <p className="text-xs text-muted-foreground mt-1">How long completed tasks show on dashboard (1-60)</p>
-              </div>
-
-              {/* In-Progress Task Display */}
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">In-Progress Task Visibility</label>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="range"
-                    min="1"
-                    max="1440"
-                    step="15"
-                    value={settings.intermediateTaskDisplayMinutes}
-                    onChange={(e) => updateSetting("intermediateTaskDisplayMinutes", parseInt(e.target.value))}
-                    className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-gray-500"
-                  />
-                  <div className="w-24">
-                    <input
-                      type="number"
-                      min="1"
-                      max="1440"
-                      value={settings.intermediateTaskDisplayMinutes}
-                      onChange={(e) => updateSetting("intermediateTaskDisplayMinutes", parseInt(e.target.value) || 1)}
-                      className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
-                    />
-                  </div>
-                  <span className="text-sm text-muted-foreground w-12">min</span>
-                </div>
-                {validationErrors.intermediateTaskDisplayMinutes && (
-                  <p className="text-xs text-red-500 mt-1">{validationErrors.intermediateTaskDisplayMinutes}</p>
-                )}
-                <p className="text-xs text-muted-foreground mt-1">In-progress tasks (PR created, awaiting review) visibility (1-1440)</p>
-              </div>
-
-              {/* Dry Run Visibility */}
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">Dry-Run Task Visibility</label>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="range"
-                    min="1"
-                    max="60"
-                    value={settings.dryRunVisibilityMinutes}
-                    onChange={(e) => updateSetting("dryRunVisibilityMinutes", parseInt(e.target.value))}
-                    className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-gray-500"
-                  />
-                  <div className="w-24">
-                    <input
-                      type="number"
-                      min="1"
-                      max="60"
-                      value={settings.dryRunVisibilityMinutes}
-                      onChange={(e) => updateSetting("dryRunVisibilityMinutes", parseInt(e.target.value) || 1)}
-                      className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
-                    />
-                  </div>
-                  <span className="text-sm text-muted-foreground w-12">min</span>
-                </div>
-                {validationErrors.dryRunVisibilityMinutes && (
-                  <p className="text-xs text-red-500 mt-1">{validationErrors.dryRunVisibilityMinutes}</p>
-                )}
-                <p className="text-xs text-muted-foreground mt-1">Dry-run test tasks visibility after completion (1-60)</p>
+                <p className="text-xs text-muted-foreground mt-1">How long completed, failed, and waiting tasks remain visible on the dashboard before being hidden</p>
               </div>
             </div>
           </CollapsibleSection>

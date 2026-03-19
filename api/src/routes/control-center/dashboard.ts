@@ -52,12 +52,11 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
     );
 
     // Calculate stats
-    // Keep recently completed tasks visible based on org setting (default 10 minutes)
+    // Keep recently completed/waiting tasks visible based on org setting (default 10 minutes)
     const displayMinutes = org.completedTaskDisplayMinutes || 10;
     const displayCutoff = new Date(Date.now() - displayMinutes * 60 * 1000);
-    // Keep intermediate tasks visible based on org setting (default 60 minutes)
-    const intermediateDisplayMinutes = org.intermediateTaskDisplayMinutes || 15;
-    const intermediateCutoff = new Date(Date.now() - intermediateDisplayMinutes * 60 * 1000);
+    // Use same cutoff for intermediate (waiting) tasks — unified setting
+    const intermediateCutoff = displayCutoff;
     // Statuses that always indicate active work
     const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing", "planning", "pending_plan_approval", "dispatching", "reviewing", "consolidating", "integration_check"];
     // Intermediate statuses that should only show if recent (configurable, default 60 min)

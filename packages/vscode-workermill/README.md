@@ -27,28 +27,18 @@ All AI workers run inside Docker containers for filesystem and network isolation
 
 ## Getting Started
 
-### Standalone Mode (recommended)
-
-No account needed. Runs locally with your own AI provider API key.
-
 1. Install the extension
 2. Open the WorkerMill sidebar
-3. Click **Setup Standalone Mode**
-4. Follow the prompts — the extension handles Docker setup, Git/Claude CLI checks, and SCM configuration
+3. Click **Get Started with GitHub** or **Sign In** to connect to WorkerMill Cloud
+4. The extension downloads the agent binary, connects to the API, and you're ready
 
-### Cloud Mode
-
-For team workflows with Jira/Linear integration.
-
-1. Open the WorkerMill sidebar
-2. Click **Get Started with GitHub** or **Sign In**
-3. The extension downloads the agent, connects to the cloud API, and you're ready
+Cloud registration at [workermill.com](https://workermill.com) is coming soon. In the meantime, you can run the full platform locally for development — see [Local Dev Setup](https://github.com/jarod-rosenthal/workermill#getting-started).
 
 ## Supported Integrations
 
 | Category | Providers |
 |----------|-----------|
-| **AI Models** | Anthropic (Claude), OpenAI (GPT-4o, o1, o3), Google (Gemini), Ollama (self-hosted) |
+| **AI Models** | Anthropic (Claude), OpenAI (GPT-4o, o1, o3), Google (Gemini), Ollama (local models) |
 | **Source Control** | GitHub, GitLab, Bitbucket |
 | **Issue Trackers** | Jira, Linear, GitHub Issues, or built-in internal tracker |
 
@@ -68,7 +58,6 @@ For team workflows with Jira/Linear integration.
 | **Settings** | Configure models, SCM, trackers, quality gates, and worker behavior |
 | **Install/Update Agent** | Download the latest agent binary |
 | **Start/Stop/Restart Agent** | Control the agent process |
-| **Setup Standalone Mode** | Initialize local-only mode with your API key |
 
 ## Links
 

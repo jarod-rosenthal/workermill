@@ -34,58 +34,48 @@ Most AI coding tools are single-agent, single-file, one-shot. WorkerMill is an *
 - **12 worker personas** — Backend, frontend, devops, security, QA, and more. Auto-assigned based on task content, or manually selected.
 - **Two-phase quality gates** — Pre-commit (lint, typecheck, test, build) + post-push CI polling. Gate failures trigger automatic fix agents.
 - **Any provider, any SCM** — Anthropic, OpenAI, Google, Ollama. GitHub, GitLab, Bitbucket. Mix and match per role.
-- **Runs on your machine** — Single binary, your API keys, no cloud dependency. Or self-host the full stack with a web dashboard.
 
-## Quick Start
+## Getting Started
+
+### Try It Now — Local Dev Environment
+
+You can run the full WorkerMill platform locally right now. This gives you the API server, web dashboard, and worker execution — the same stack that powers the cloud platform.
+
+**Prerequisites:** Node.js 22+, Docker, a Claude OAuth token (run `claude auth login`)
 
 ```bash
-# Install the agent binary (Mac/Linux)
-curl -fsSL https://workermill.com/install.sh | bash
+git clone https://github.com/jarod-rosenthal/workermill.git
+cd workermill
 
-# Initialize self-hosted mode — auto-detects your repo, GitHub token, and API key
-workermill-agent init --standalone
+# Start PostgreSQL + Redis
+./bin/local-workermill start
 
-# Start the agent (launches Docker Compose stack + agent)
-workermill-agent start
+# API server (auto-reloads)
+cd api && npm install && npm run dev    # → http://localhost:3001
+
+# Web dashboard (auto-reloads)
+cd frontend && npm install && npm run dev    # → http://localhost:5173
 ```
 
-**Requires Docker.** The agent starts a Docker Compose stack (API, PostgreSQL, Redis, web dashboard) and connects to it automatically. Your dashboard is at `http://localhost:5173`.
+Your dashboard is at `http://localhost:5173`. Create tasks, submit PRDs, and watch workers execute in real time.
 
-Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=workermill.workermill) to get a sidebar for managing tasks, real-time log streaming, and live code diffs as workers write.
+Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=workermill.workermill) for a sidebar with task management, real-time log streaming, and live code diffs as workers write.
 
-### What Happens
+### WorkerMill Cloud (Coming Soon)
 
-1. You create a task (VS Code sidebar, or submit a PRD for a full product build)
+Cloud registration at [workermill.com](https://workermill.com) is coming soon. The cloud platform provides managed infrastructure, so you don't need to run the stack yourself — just install the VS Code extension and connect.
+
+## How It Works
+
+### What Happens When You Create a Task
+
+1. You create a task (VS Code sidebar, dashboard, or submit a PRD for a full product build)
 2. A planner agent decomposes the task into stories with target files
 3. A critic validates the plan (score threshold, up to 3 iterations)
 4. Persona-matched experts execute stories in parallel, each in an isolated git worktree
 5. Quality gates run before every commit (lint, typecheck, test, build)
 6. CI pipeline is polled after push to verify the branch passes
 7. A consolidated PR is created with optional tech lead review
-
-### Configuration
-
-After `init --standalone`, your config lives at `~/.workermill/config.json`:
-
-```jsonc
-{
-  "mode": "self-hosted",
-  "roles": {
-    "planner": { "provider": "anthropic", "model": "claude-opus-4-6" },
-    "worker": { "provider": "anthropic", "model": "claude-sonnet-4-6" },
-    "techLead": { "provider": "anthropic", "model": "claude-opus-4-6" }
-  },
-  "scm": { "provider": "github", "token": "ghp_..." },
-  "defaultRepo": "owner/repo",
-  "settings": { "maxStories": 8 }
-}
-```
-
-You can use any supported provider per role — mix Anthropic for planning with Ollama for workers, etc.
-
-## How It Works
-
-WorkerMill has two modes of operation built on the same execution engine.
 
 ### Run as Task
 
@@ -149,16 +139,6 @@ CASCADE EXECUTION ── Cards execute one at a time in dependency order.
 
 Full Product Build is not a separate system — it is an orchestration layer that creates and sequences Run as Task executions. The decomposer produces the board, the cascade engine orders the work, and each card uses the same planner, coordinator, experts, quality gates, and delivery pipeline.
 
-```
-Full Product Build
- └─ PRD → Board with N dependency-ordered cards
-     ├─ Card 0 (Setup)      → Run as Task → planning → experts → gates → PR
-     ├─ Card 1 (CI/CD)      → Run as Task → planning → experts → gates → PR
-     ├─ Card 2 (Feature A)  → Run as Task → planning → experts → gates → PR
-     ├─ Card 3 (Feature B)  → Run as Task → planning → experts → gates → PR
-     └─ Card N (Deploy)     → Run as Task → planning → experts → gates → PR
-```
-
 | Aspect | Run as Task | Full Product Build |
 |--------|-------------|-------------------|
 | **Input** | Single task description | Product requirements document (PRD) |
@@ -168,77 +148,6 @@ Full Product Build
 | **Dependencies** | Between stories within a task | Between cards on the board, then between stories within each card |
 | **Quality gates** | Pre-commit + post-push CI per task | Same gates, baked into the board at decomposition and applied to every card |
 | **Delivery** | One PR per task | One PR per card, each building on the previous card's merged work |
-
-## Deployment Options
-
-### Self-Hosted (Default)
-
-Run the complete platform on your machine with Docker Compose — API server, web dashboard, PostgreSQL, Redis. The agent binary manages the stack automatically. Docker is required.
-
-<details>
-<summary>Self-hosted architecture</summary>
-
-```
-┌───────────────────────────────────────────────────────────┐
-│                    VS Code Extension                       │
-└─────────────────────┬─────────────────────────────────────┘
-                      │ localhost
-┌─────────────────────▼─────────────────────────────────────┐
-│                    Agent Binary                             │
-│  Local API, planning, worker spawning, heartbeat           │
-└─────────────────────┬─────────────────────────────────────┘
-                      │ REST / SSE
-┌─────────────────────▼─────────────────────────────────────┐
-│                    API Server (Express + TypeScript)        │
-│                                                             │
-│  Task management    Log streaming (PostgreSQL + SSE)       │
-│  Board execution    Coordination (Redis pub/sub)           │
-│  Webhooks           Analytics, decision engine             │
-├───────────────────────────────────────────────────────────┤
-│   PostgreSQL        │  Redis              │  Static files  │
-└─────────────────────┴─────────────────────┴───────────────┘
-                      │
-┌─────────────────────▼─────────────────────────────────────┐
-│                    Web Dashboard (React)                    │
-│  Real-time monitoring, Kanban boards, live code view,     │
-│  cost tracking, orchestration controls, persona studio     │
-└───────────────────────────────────────────────────────────┘
-```
-
-```bash
-# Start local services (PostgreSQL, Redis)
-./bin/local-workermill start
-
-# API server (auto-reloads)
-cd api && npm install && npm run dev    # → http://localhost:3001
-
-# Web dashboard (auto-reloads)
-cd frontend && npm install && npm run dev    # → http://localhost:5173
-
-# Agent (connects to local API)
-workermill-agent start
-```
-
-You can deploy the full stack on any infrastructure that supports Node.js, PostgreSQL, and Redis.
-
-</details>
-
-### Hosted Instance
-
-A hosted instance is available at [workermill.com](https://workermill.com) for those who don't want to manage infrastructure. The agent binary on your machine connects to the hosted API, and you get the web dashboard at workermill.com.
-
-### Comparison
-
-| | Self-Hosted | Hosted |
-|---|---|---|
-| **Infrastructure** | Docker Compose (auto-managed) | Managed |
-| **Task storage** | PostgreSQL | PostgreSQL |
-| **Workers run on** | Your machine | Your machine or cloud containers |
-| **Web dashboard** | Yes (localhost:5173) | Yes |
-| **Webhook triggers** | Yes (Jira, GitHub, Linear) | Yes |
-| **API keys** | Your own (BYOK) | Your own or platform-provided |
-| **PRD decomposition** | Yes | Yes |
-| **Quality gates** | Yes | Yes |
 
 ## Features
 
@@ -272,7 +181,7 @@ Bring your own API keys. The execution pipeline is identical regardless of provi
 
 Personas are auto-assigned based on task content or manually selected.
 
-### Integrations (Self-Hosted / Hosted)
+### Integrations
 
 | Platform | Type |
 |----------|------|
@@ -295,10 +204,39 @@ Personas are auto-assigned based on task content or manually selected.
 - **Codebase RAG** — Vector search via Ollama embeddings for context-aware workers
 - **MCP servers** — Published to npm (`@workermill/mcp`)
 
+## Architecture
+
+```
+┌───────────────────────────────────────────────────────────┐
+│                    VS Code Extension                       │
+└─────────────────────┬─────────────────────────────────────┘
+                      │ localhost
+┌─────────────────────▼─────────────────────────────────────┐
+│                    Agent Binary                             │
+│  Worker spawning, heartbeat, cloud/local API proxy         │
+└─────────────────────┬─────────────────────────────────────┘
+                      │ REST / SSE
+┌─────────────────────▼─────────────────────────────────────┐
+│                    API Server (Express + TypeScript)        │
+│                                                             │
+│  Task management    Log streaming (PostgreSQL + SSE)       │
+│  Board execution    Coordination (Redis pub/sub)           │
+│  Webhooks           Analytics, decision engine             │
+├───────────────────────────────────────────────────────────┤
+│   PostgreSQL        │  Redis              │  Static files  │
+└─────────────────────┴─────────────────────┴───────────────┘
+                      │
+┌─────────────────────▼─────────────────────────────────────┐
+│                    Web Dashboard (React)                    │
+│  Real-time monitoring, Kanban boards, live code view,     │
+│  cost tracking, orchestration controls, persona studio     │
+└───────────────────────────────────────────────────────────┘
+```
+
 ## Project Structure
 
 ```
-agent/                      Agent binary — CLI, worker, manager (Bun compile)
+agent/                      Agent binary — CLI, worker spawning (Bun compile)
 api/                        API server — Express + TypeScript + TypeORM
 frontend/                   Web dashboard — React 19 + Vite + TailwindCSS + Zustand
 worker/                     Worker execution engine — planning, coordination, quality gates
@@ -306,7 +244,6 @@ packages/
   vscode-workermill/        VS Code extension
   workermill-mcp/           WorkerMill MCP server
 bin/                        CLI scripts (local-workermill, bastion)
-docker/                     Docker configs for local development
 ```
 
 ## Contributing
@@ -370,7 +307,7 @@ If you're diving into the codebase, these are the patterns that hold the system 
 - **Real-time coordination** between experts uses Redis pub/sub with database polling as fallback
 - **Code events (live code view)** are stateless on the API — clients reconstruct file state from raw immutable events
 - **Quality gates** are two-phase: pre-commit shell commands + post-push CI pipeline polling
-- **The worker execution engine** (`worker/epic/`) is shared across all deployment options — self-hosted and hosted run the same code
+- **The worker execution engine** (`worker/epic/`) is shared across all deployment options
 
 ## Releases
 

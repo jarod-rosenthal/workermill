@@ -28,8 +28,8 @@ import { rotateLogs } from "../log-rotation.js";
 import { startAgent } from "../index.js";
 import {
   isCloudMode,
-  loadStandaloneConfig,
-  saveStandaloneConfig,
+  loadAgentConfig,
+  saveAgentConfig,
 } from "../backends/local/config.js";
 
 /**
@@ -98,10 +98,10 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
   // ── Auto-migrate: old configs with apiUrl but no explicit mode ──
   // Existing cloud users have apiUrl but no mode field. Set mode: "cloud"
   // so isCloudMode() works without heuristics.
-  const rawConfig = loadStandaloneConfig();
+  const rawConfig = loadAgentConfig();
   if ((rawConfig as unknown as Record<string, unknown>).apiUrl && !rawConfig.mode) {
     rawConfig.mode = "cloud";
-    saveStandaloneConfig(rawConfig);
+    saveAgentConfig(rawConfig);
   }
 
   const config = loadConfigFromFile();

@@ -225,7 +225,10 @@ export async function getProviderCredentials(
   // LOCAL MODE: Use OAuth token for Anthropic, skip Secrets Manager
   if (process.env.EXECUTION_MODE === "local") {
     if (providerId === "anthropic" && process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-      // Return a sentinel value - actual OAuth token is used by Claude CLI directly
+      // ClaudeCliBackend handles OAuth directly via ~/.claude/.credentials.json.
+      // This sentinel is returned for backward compatibility — it's never used as
+      // an actual API key because createLLMBackend() selects ClaudeCliBackend
+      // before getProviderCredentials() is called in local mode.
       return "LOCAL_OAUTH_MODE";
     }
     // For other providers in local mode, allow continuing to check env vars

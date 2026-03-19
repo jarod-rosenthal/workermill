@@ -21,7 +21,7 @@ import { homedir } from "os";
 const CONFIG_DIR = join(homedir(), ".workermill");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
-export interface StandaloneConfig {
+export interface AgentConfig {
   mode: "cloud";
   apiUrl?: string;
   apiKey?: string;
@@ -69,22 +69,22 @@ export interface StandaloneConfig {
 }
 
 /** Load config from disk. Returns minimal cloud config if file doesn't exist. */
-export function loadStandaloneConfig(): StandaloneConfig {
+export function loadAgentConfig(): AgentConfig {
   if (!existsSync(CONFIG_FILE)) {
-    return { mode: "cloud" } as StandaloneConfig;
+    return { mode: "cloud" } as AgentConfig;
   }
 
   try {
     const raw = readFileSync(CONFIG_FILE, "utf-8");
-    const parsed = JSON.parse(raw) as StandaloneConfig;
+    const parsed = JSON.parse(raw) as AgentConfig;
     return parsed;
   } catch {
-    return { mode: "cloud" } as StandaloneConfig;
+    return { mode: "cloud" } as AgentConfig;
   }
 }
 
 /** Save config to disk with restricted permissions. */
-export function saveStandaloneConfig(config: StandaloneConfig): void {
+export function saveAgentConfig(config: AgentConfig): void {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
   }

@@ -804,6 +804,6 @@ export function createLLMBackend(config: LLMBackendConfig): LLMBackend {
  * Check if we're using the Claude CLI backend (local mode).
  * Useful for code that needs to know whether progress streaming is available.
  */
-export function isClaudeCliMode(): boolean {
+export function isLocalDevMode(): boolean {
   return process.env.EXECUTION_MODE === "local";
 }

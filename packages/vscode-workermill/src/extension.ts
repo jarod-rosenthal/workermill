@@ -1289,42 +1289,10 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       }
 
-      // Write config pointing at local API
+      // Write config pointing at local API with self-hosted key (auto-login, no SSO)
       writeAgentConfig({ apiUrl: "http://localhost:3001", apiKey: "self-hosted" });
       await vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
-      log("Wrote local dev config (localhost:3001)");
-
-      // Try self-hosted key — if the API rejects it (Cognito mode), prompt sign-in
-      try {
-        const http = await import("http");
-        const ok = await new Promise<boolean>((resolve) => {
-          const req = http.request(
-            { hostname: "127.0.0.1", port: 3001, path: "/api/auth/me", method: "GET",
-              headers: { "x-api-key": "self-hosted" } },
-            (res) => resolve(res.statusCode === 200),
-          );
-          req.on("error", () => resolve(false));
-          req.setTimeout(3000, () => { req.destroy(); resolve(false); });
-          req.end();
-        });
-
-        if (!ok) {
-          // Self-hosted key rejected — API is running with Cognito auth
-          log("Local API requires authentication — prompting sign-in");
-          vscode.window.showInformationMessage(
-            "Local API is running with Cognito authentication. Sign in to connect.",
-            "Sign in with GitHub", "Sign in with Google", "Sign in with Email",
-          ).then((choice) => {
-            if (choice === "Sign in with GitHub") vscode.commands.executeCommand("workermill.signUpWithGitHub");
-            else if (choice === "Sign in with Google") vscode.commands.executeCommand("workermill.signInWithGoogle");
-            else if (choice === "Sign in with Email") vscode.commands.executeCommand("workermill.signInWithEmail");
-          });
-          return;
-        }
-        log("Local API accepted self-hosted key (auto-login mode)");
-      } catch {
-        log("Could not reach local API — it may not be running yet");
-      }
+      log("Wrote local dev config (localhost:3001, self-hosted key)");
       if (!client.isConnected()) {
         const hasGit = await promptInstallGit(log);
         if (!hasGit) {

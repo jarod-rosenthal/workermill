@@ -1749,15 +1749,9 @@ export class EpicCoordinator {
       }
 
       if (jiraComment) {
-        if (process.env.TICKET_SYSTEM === "github") {
-          const prUrlForComment = prUrl || "";
-          const completedMsg = isPartialCompletion
-            ? `${completions.length} of ${readyStories.length} stories completed (partial).`
-            : "All stories completed successfully.";
-          await this.ticketOps.postComment(GitHubCommentFormat.completed(completedMsg, prUrlForComment));
-        } else {
-          await this.ticketOps.postComment(jiraComment);
-        }
+        // For GitHub Issues, use the detailed jiraComment directly (it already has markdown formatting)
+        // rather than replacing it with a generic message
+        await this.ticketOps.postComment(jiraComment);
       }
 
       const partialTag = isPartialCompletion ? " (partial)" : "";

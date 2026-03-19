@@ -315,8 +315,8 @@ $${totalCost.toFixed(2)}
       }
     }
 
-    // Post summary to Jira (only if this is a Jira-sourced task, skip in dry-run)
-    if (parentTask.jiraIssueKey && !parentIsDryRun) {
+    // Post summary to ticket (only for multi-story PRD tasks; single-story workers already post their own)
+    if (parentTask.jiraIssueKey && !parentIsDryRun && childTasks.length > 1) {
       try {
         const success = await postTicketComment(
           parentTask.orgId,

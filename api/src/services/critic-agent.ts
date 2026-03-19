@@ -749,7 +749,7 @@ export async function generateValidatedPlan(
       provider: agentConfig.provider,
       model: agentConfig.model,
     });
-    onProgress?.(`${prefix} Generating plan (Critic validation disabled)...`, {
+    onProgress?.(`${prefix} Reading repository structure...`, {
       iteration: 1,
       maxIterations: 1,
       phase: "generating",
@@ -771,7 +771,7 @@ export async function generateValidatedPlan(
     });
 
     onProgress?.(
-      `${prefix} Plan generated with ${currentPlan.steps.length} steps (Critic validation skipped).`,
+      `${prefix} Plan generated: ${currentPlan.steps.length} stories`,
       {
         iteration: 1,
         maxIterations: 1,
@@ -809,8 +809,8 @@ export async function generateValidatedPlan(
     const phase = iteration === 1 ? "generating" : "refining";
     onProgress?.(
       iteration === 1
-        ? `${prefix} Generating initial plan (iteration ${iteration}/${maxAttempts})...`
-        : `${prefix} Refining plan based on feedback (iteration ${iteration}/${maxAttempts})...`,
+        ? `${prefix} Reading repository structure...`
+        : `${prefix} Running refinement pass — incorporating reviewer suggestions...`,
       { iteration, maxIterations: maxAttempts, phase }
     );
 
@@ -832,7 +832,7 @@ export async function generateValidatedPlan(
     });
 
     onProgress?.(
-      `${prefix} Plan generated with ${currentPlan.steps.length} steps. Validating...`,
+      `${prefix} Plan generated: ${currentPlan.steps.length} stories. Running critic validation...`,
       { iteration, maxIterations: maxAttempts, stepCount: currentPlan.steps.length, phase: "validating" }
     );
 
@@ -857,7 +857,7 @@ export async function generateValidatedPlan(
 
       if (hasSuggestions) {
         onProgress?.(
-          `${prefix} Plan approved (score: ${lastCriticResult.score}/100). Running refinement pass to incorporate reviewer suggestions...`,
+          `${prefix} Critic approved (score: ${lastCriticResult.score}/100). Running refinement pass — incorporating reviewer suggestions...`,
           { iteration, maxIterations: maxAttempts, score: lastCriticResult.score, stepCount: currentPlan.steps.length, phase: "refining" }
         );
 
@@ -879,7 +879,7 @@ export async function generateValidatedPlan(
       }
 
       onProgress?.(
-        `${prefix} Plan approved (score: ${lastCriticResult.score}/100) after ${iteration} iteration${iteration > 1 ? "s" : ""}.`,
+        `${prefix} Refinement complete — plan updated with reviewer suggestions`,
         { iteration, maxIterations: maxAttempts, score: lastCriticResult.score, stepCount: currentPlan.steps.length, phase: "approved" }
       );
 

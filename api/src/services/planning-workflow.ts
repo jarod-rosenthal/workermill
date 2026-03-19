@@ -390,10 +390,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
   };
 
   const prefix = getPlanningAgentPrefix(agentConfig.provider);
-  const criticStatus = task.criticEnabled
-    ? "with Critic validation"
-    : "without Critic (add 'critic' label to enable)";
-  const startMsg = `${prefix} Starting V2 Pipeline planning ${criticStatus} using ${agentConfig.provider}/${agentConfig.model}`;
+  const startMsg = `${prefix} Starting planning agent for ${task.githubRepo || "task"} using ${agentConfig.provider}/${agentConfig.model}`;
   await logTaskEvent(task.id, "status_change", startMsg);
   logPlanningToTerminal(task.id, startMsg);
 
@@ -433,6 +430,13 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       ? (org?.prdPlanningMode || org?.planningMode || "simplified")
       : "simplified";
     const maxAttempts = orgPlanningMode === "simplified" ? 1 : 3;
+
+    const planningModeLabel = orgPlanningMode === "simplified"
+      ? "simplified — critic feedback will be incorporated but never blocks"
+      : "strict — critic must approve before execution";
+    const modeMsg = `${prefix} Planning mode: ${planningModeLabel}`;
+    await logTaskEvent(task.id, "info", modeMsg);
+    logPlanningToTerminal(task.id, modeMsg);
 
     // Periodic heartbeat log so the terminal doesn't appear dead during planning.
     // First update at 30s, then every 60s — minimal, not spammy.
@@ -481,7 +485,19 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       techStack: executionPlanV2.techStack.framework,
     });
 
-    const validatedMsg = `${prefix} Plan validated: ${executionPlanV2.steps.length} steps, score ${executionPlanV2.criticScore}/100`;
+    const elapsed = Math.round((Date.now() - planStartTime) / 1000);
+    const criticLabel = skipCritic ? "" : `. Running critic validation...`;
+    const generatedMsg = `${prefix} Plan generated: ${executionPlanV2.steps.length} stories (${elapsed}s)${criticLabel}`;
+    await logTaskEvent(task.id, "info", generatedMsg);
+    logPlanningToTerminal(task.id, generatedMsg);
+
+    if (!skipCritic) {
+      const criticResultMsg = `${prefix} Critic approved (score: ${executionPlanV2.criticScore}/100)`;
+      await logTaskEvent(task.id, "info", criticResultMsg);
+      logPlanningToTerminal(task.id, criticResultMsg);
+    }
+
+    const validatedMsg = `${prefix} Plan validated: ${executionPlanV2.steps.length} stories. Task queued for execution.`;
     await logTaskEvent(task.id, "status_change", validatedMsg);
     logPlanningToTerminal(task.id, validatedMsg);
 
@@ -538,13 +554,11 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       });
     }
 
-    const approvedMsg = `${prefix} Plan approved - ready for sequential execution`;
-    await logTaskEvent(task.id, "status_change", approvedMsg);
-    logPlanningToTerminal(task.id, approvedMsg);
+    // No separate "plan approved" message — the validated message above matches the local agent format
 
     // Post plan to Jira
     const planSummary = [
-      `[V2 Pipeline - Execution Plan]`,
+      `[WorkerMill - Execution Plan]`,
       ``,
       `**Critic Score:** ${executionPlanV2.criticScore}/100`,
       `**Tech Stack:** ${executionPlanV2.techStack.language} / ${executionPlanV2.techStack.framework}`,

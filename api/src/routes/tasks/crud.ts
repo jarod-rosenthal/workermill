@@ -308,7 +308,7 @@ router.post(
         );
       }
     } else {
-      issueSummary = summary || `Manual task for ${jiraIssueKey}`;
+      issueSummary = summary || jiraIssueKey;
     }
 
     // =========================================================================

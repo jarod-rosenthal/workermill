@@ -95,7 +95,7 @@ describe("processUnblockedCards", () => {
     expect(result).toEqual({ triggered: 0, stillBlocked: 0, alreadyComplete: 0 });
   });
 
-  it("triggers cards with no dependencies", async () => {
+  it("triggers first no-dep card when boardExecutionId provided (serial)", async () => {
     const cards = [
       makeCard({ id: "card-a", position: 0 }),
       makeCard({ id: "card-b", position: 1 }),
@@ -103,35 +103,46 @@ describe("processUnblockedCards", () => {
     mockCardFind.mockResolvedValue(cards);
     setupDepsQueryBuilder([]); // No dependencies
 
+    // boardExecutionId required for no-dep cards; serial execution triggers only first
+    const result = await processUnblockedCards("board-1", "org-1", "exec-1");
+
+    expect(result.triggered).toBe(1);
+    expect(result.alreadyComplete).toBe(0);
+    expect(mockRunCardAsWorkerTask).toHaveBeenCalledTimes(1);
+    expect(mockRunCardAsWorkerTask).toHaveBeenCalledWith("card-a", "org-1", "exec-1");
+  });
+
+  it("does NOT trigger no-dep cards without boardExecutionId", async () => {
+    const cards = [
+      makeCard({ id: "card-a", position: 0 }),
+    ];
+    mockCardFind.mockResolvedValue(cards);
+    setupDepsQueryBuilder([]);
+
     const result = await processUnblockedCards("board-1", "org-1");
 
-    expect(result.triggered).toBe(2);
-    expect(result.stillBlocked).toBe(0);
-    expect(result.alreadyComplete).toBe(0);
-    expect(mockRunCardAsWorkerTask).toHaveBeenCalledTimes(2);
-    expect(mockRunCardAsWorkerTask).toHaveBeenCalledWith("card-a", "org-1");
-    expect(mockRunCardAsWorkerTask).toHaveBeenCalledWith("card-b", "org-1");
+    expect(result.triggered).toBe(0);
+    expect(result.stillBlocked).toBe(1);
+    expect(mockRunCardAsWorkerTask).not.toHaveBeenCalled();
   });
 
   it("does NOT trigger cards with unmet dependencies", async () => {
-    // card-a has no deps, card-b depends on card-a
-    // card-a has no workerTask yet (not started) — so card-b is blocked
+    // card-a depends on card-b which has no workerTask — unmet
     const cards = [
       makeCard({ id: "card-a", position: 0 }),
       makeCard({ id: "card-b", position: 1 }),
     ];
     mockCardFind.mockResolvedValue(cards);
     setupDepsQueryBuilder([
-      { cardId: "card-b", dependsOnCardId: "card-a" },
+      { cardId: "card-a", dependsOnCardId: "card-b" },
     ]);
 
     const result = await processUnblockedCards("board-1", "org-1");
 
-    // card-a gets triggered (no deps), card-b is blocked (card-a not completed)
-    expect(result.triggered).toBe(1);
-    expect(result.stillBlocked).toBe(1);
-    expect(mockRunCardAsWorkerTask).toHaveBeenCalledTimes(1);
-    expect(mockRunCardAsWorkerTask).toHaveBeenCalledWith("card-a", "org-1");
+    // card-a blocked (dep card-b not done), card-b has no deps + no boardExecutionId → skipped
+    expect(result.triggered).toBe(0);
+    expect(result.stillBlocked).toBe(2);
+    expect(mockRunCardAsWorkerTask).not.toHaveBeenCalled();
   });
 
   it("triggers a card when all dependencies are completed", async () => {
@@ -152,7 +163,7 @@ describe("processUnblockedCards", () => {
     expect(result.triggered).toBe(1);
     expect(result.stillBlocked).toBe(0);
     expect(mockRunCardAsWorkerTask).toHaveBeenCalledTimes(1);
-    expect(mockRunCardAsWorkerTask).toHaveBeenCalledWith("card-b", "org-1");
+    expect(mockRunCardAsWorkerTask).toHaveBeenCalledWith("card-b", "org-1", undefined);
   });
 
   it("triggers a card when dependency has 'deployed' status", async () => {
@@ -195,10 +206,10 @@ describe("processUnblockedCards", () => {
 
     const result = await processUnblockedCards("board-1", "org-1");
 
-    // running is not a terminal status, so not counted as alreadyComplete
+    // hasActiveCard guard: running task → returns early, all cards counted as stillBlocked
     expect(result.alreadyComplete).toBe(0);
     expect(result.triggered).toBe(0);
-    expect(result.stillBlocked).toBe(0);
+    expect(result.stillBlocked).toBe(1);
     expect(mockRunCardAsWorkerTask).not.toHaveBeenCalled();
   });
 
@@ -229,13 +240,14 @@ describe("processUnblockedCards", () => {
 
     const result = await processUnblockedCards("board-1", "org-1");
 
-    // card-a has non-terminal workerTask (skipped), card-b is blocked
+    // hasActiveCard guard: card-a running → returns early, all cards stillBlocked
     expect(result.triggered).toBe(0);
-    expect(result.stillBlocked).toBe(1);
+    expect(result.stillBlocked).toBe(2);
   });
 
   it("handles multiple dependencies — all must be met", async () => {
     // card-c depends on both card-a and card-b
+    // card-b is running → hasActiveCard guard triggers early return
     const cards = [
       makeCard({ id: "card-a", position: 0, workerTask: { status: "completed" } }),
       makeCard({ id: "card-b", position: 1, workerTask: { status: "running" } }),
@@ -249,7 +261,29 @@ describe("processUnblockedCards", () => {
 
     const result = await processUnblockedCards("board-1", "org-1");
 
-    // card-a completed, card-b running (skip), card-c blocked (card-b not done)
+    // hasActiveCard guard: card-b running → returns early, all cards stillBlocked
+    expect(result.alreadyComplete).toBe(0);
+    expect(result.triggered).toBe(0);
+    expect(result.stillBlocked).toBe(3);
+  });
+
+  it("blocks card-c when card-b dep is not done (no active tasks)", async () => {
+    // card-c depends on both card-a (completed) and card-b (failed)
+    // No active tasks so the loop runs, but card-b is not done → card-c blocked
+    const cards = [
+      makeCard({ id: "card-a", position: 0, workerTask: { status: "completed" } }),
+      makeCard({ id: "card-b", position: 1, workerTask: { status: "failed" } }),
+      makeCard({ id: "card-c", position: 2 }),
+    ];
+    mockCardFind.mockResolvedValue(cards);
+    setupDepsQueryBuilder([
+      { cardId: "card-c", dependsOnCardId: "card-a" },
+      { cardId: "card-c", dependsOnCardId: "card-b" },
+    ]);
+
+    const result = await processUnblockedCards("board-1", "org-1");
+
+    // card-a completed, card-b failed (both skipped), card-c blocked (card-b not done)
     expect(result.alreadyComplete).toBe(1);
     expect(result.triggered).toBe(0);
     expect(result.stillBlocked).toBe(1);
@@ -268,7 +302,8 @@ describe("processUnblockedCards", () => {
       .mockRejectedValueOnce(new Error("Spawn failed"))
       .mockResolvedValueOnce(undefined);
 
-    const result = await processUnblockedCards("board-1", "org-1");
+    // boardExecutionId required for no-dep cards
+    const result = await processUnblockedCards("board-1", "org-1", "exec-1");
 
     // card-a trigger failed (not counted), card-b triggered
     expect(result.triggered).toBe(1);

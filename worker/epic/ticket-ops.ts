@@ -329,3 +329,93 @@ export class TicketOps {
     );
   }
 }
+
+/**
+ * Format helpers for rich GitHub Issue comments.
+ * Used by worker milestone events when ticketSystem === "github".
+ */
+export const GitHubCommentFormat = {
+  workStarted(model: string, branch: string): string {
+    return [
+      `## WorkerMill — Execution Started`,
+      `**Worker:** ${model} | **Branch:** \`${branch}\``,
+    ].join("\n");
+  },
+
+  prCreated(prNumber: number, prTitle: string, prUrl: string, filesChanged: string[]): string {
+    const fileList = filesChanged.map((f) => `- \`${f}\``).join("\n");
+    return [
+      `## Pull Request Created`,
+      `[#${prNumber} — ${prTitle}](${prUrl})`,
+      ``,
+      `<details>`,
+      `<summary>Files changed (${filesChanged.length})</summary>`,
+      ``,
+      fileList,
+      ``,
+      `</details>`,
+    ].join("\n");
+  },
+
+  qualityGatesPassed(results: Array<{ name: string; duration: string }>): string {
+    const lines = results.map((r) => `✓ ${r.name} (${r.duration})`).join("\n");
+    return [
+      `## Quality Gates Passed`,
+      ``,
+      `<details>`,
+      `<summary>Pre-commit checks (${results.length}/${results.length} passed)</summary>`,
+      ``,
+      "```",
+      lines,
+      "```",
+      ``,
+      `</details>`,
+    ].join("\n");
+  },
+
+  qualityGatesFailed(results: Array<{ name: string; output: string; passed: boolean }>): string {
+    const passed = results.filter((r) => r.passed).length;
+    const lines = results.map((r) => `${r.passed ? "✓" : "✗"} ${r.name}`).join("\n");
+    const failedDetails = results
+      .filter((r) => !r.passed)
+      .map((r) => `### ${r.name}\n\`\`\`\n${r.output.substring(0, 3000)}\n\`\`\``)
+      .join("\n\n");
+    return [
+      `## Quality Gates Failed`,
+      ``,
+      `<details>`,
+      `<summary>Pre-commit checks (${passed}/${results.length} passed)</summary>`,
+      ``,
+      "```",
+      lines,
+      "```",
+      ``,
+      failedDetails,
+      ``,
+      `</details>`,
+    ].join("\n");
+  },
+
+  completed(summary: string, prUrl?: string): string {
+    const parts = [`## Task Completed`, ``, summary];
+    if (prUrl) parts.push(``, `**PR:** ${prUrl}`);
+    return parts.join("\n");
+  },
+
+  failed(error: string, retriesRemaining: number): string {
+    return [
+      `## Task Failed`,
+      ``,
+      `<details>`,
+      `<summary>Error details</summary>`,
+      ``,
+      "```",
+      error.substring(0, 5000),
+      "```",
+      ``,
+      `</details>`,
+      ``,
+      `**Retries remaining:** ${retriesRemaining}`,
+    ].join("\n");
+  },
+};

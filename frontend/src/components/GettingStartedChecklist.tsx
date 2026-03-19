@@ -26,11 +26,21 @@ export function GettingStartedChecklist() {
   const [status, setStatus] = useState<ChecklistStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [dismissed, setDismissed] = useState(() => {
+    // Check localStorage first for instant hide, server-side flag synced on load
     return localStorage.getItem("workermill-onboarding-dismissed") === "true";
   });
   const navigate = useNavigate();
   const organization = useAuthStore((state) => state.organization);
+  const user = useAuthStore((state) => state.user);
   const isProPlan = !organization?.plan || organization.plan === "pro";
+
+  // Sync server-side dismiss flag on mount
+  useEffect(() => {
+    if ((user as unknown as { onboardingDismissed?: boolean })?.onboardingDismissed) {
+      setDismissed(true);
+      localStorage.setItem("workermill-onboarding-dismissed", "true");
+    }
+  }, [user]);
 
   useEffect(() => {
     if (dismissed) return;
@@ -116,6 +126,12 @@ export function GettingStartedChecklist() {
   const handleDismiss = () => {
     setDismissed(true);
     localStorage.setItem("workermill-onboarding-dismissed", "true");
+    // Persist server-side so it stays dismissed across browsers/devices
+    const token = localStorage.getItem("accessToken");
+    fetch(`${API_BASE}/api/auth/dismiss-onboarding`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {}); // Best effort
   };
 
   if (dismissed || loading || !status) return null;

@@ -24,6 +24,7 @@ export interface EmailPreferences {
 
 export interface UserPreferences {
   theme?: "system" | "dark" | "light";
+  onboardingDismissed?: boolean;
   notifications?: {
     taskCompleted?: boolean;
     taskFailed?: boolean;

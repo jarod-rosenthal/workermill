@@ -982,6 +982,7 @@ router.get("/me", authenticateUserAllowNoOrg, async (req: Request, res: Response
         isPlatformAdmin,
         tosAcceptedAt: user.tosAcceptedAt,
         tosVersion: user.tosVersion,
+        onboardingDismissed: user.preferences?.onboardingDismissed || false,
       },
       currentTosVersion: TOS_VERSION,
       organization: org ? {
@@ -996,6 +997,24 @@ router.get("/me", authenticateUserAllowNoOrg, async (req: Request, res: Response
   } catch (error) {
     logger.error("Error getting user info", { error });
     res.status(500).json({ error: "Failed to get user info" });
+  }
+});
+
+/**
+ * POST /api/auth/dismiss-onboarding
+ * Dismiss the getting started checklist permanently for this user.
+ */
+router.post("/dismiss-onboarding", authenticateUser, async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const userRepo = AppDataSource.getRepository(User);
+    const prefs = user.preferences || {};
+    prefs.onboardingDismissed = true;
+    await userRepo.update(user.id, { preferences: prefs });
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error("Error dismissing onboarding", { error });
+    res.status(500).json({ error: "Failed to dismiss onboarding" });
   }
 });
 

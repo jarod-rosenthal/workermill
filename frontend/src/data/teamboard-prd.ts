@@ -417,7 +417,7 @@ GET /api/workspaces/[slug]/stream
 ### Seed Endpoint
 
 \`\`\`
-POST /api/seed — Protected by Authorization: Bearer \$SEED_TOKEN
+POST /api/seed — Protected by Authorization: Bearer $SEED_TOKEN
 \`\`\`
 
 Returns 200 on success, 409 if already seeded. Idempotent.
@@ -910,13 +910,13 @@ jobs:
 
       - name: Seed demo data
         run: |
-          response=\$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+          response=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
             https://teamboard.workermill.com/api/seed \
             -H "Authorization: Bearer \${{ secrets.SEED_TOKEN }}")
-          if [ "\$response" = "200" ] || [ "\$response" = "409" ]; then
-            echo "Seed successful (HTTP \$response)"
+          if [ "$response" = "200" ] || [ "$response" = "409" ]; then
+            echo "Seed successful (HTTP $response)"
           else
-            echo "Seed failed with HTTP \$response"
+            echo "Seed failed with HTTP $response"
             exit 1
           fi
 
@@ -1070,18 +1070,18 @@ Run after Vercel deployment completes (~30s after push to main):
 URL="https://teamboard.workermill.com"
 
 # 1. Health check
-curl -sf "\$URL/api/health" | grep -q '"status":"ok"' || { echo "FAIL: Health"; exit 1; }
+curl -sf "$URL/api/health" | grep -q '"status":"ok"' || { echo "FAIL: Health"; exit 1; }
 
 # 2. Landing page loads
-curl -sf "\$URL/" | grep -q "TeamBoard" || { echo "FAIL: Landing page"; exit 1; }
+curl -sf "$URL/" | grep -q "TeamBoard" || { echo "FAIL: Landing page"; exit 1; }
 
 # 3. Login page loads
-curl -sf "\$URL/login" | grep -q "Sign" || { echo "FAIL: Login page"; exit 1; }
+curl -sf "$URL/login" | grep -q "Sign" || { echo "FAIL: Login page"; exit 1; }
 
 # 4. Seed endpoint (idempotent)
-SEED_RESP=\$(curl -s -o /dev/null -w "%{http_code}" -X POST "\$URL/api/seed" \
-  -H "Authorization: Bearer \$SEED_TOKEN")
-[ "\$SEED_RESP" = "200" ] || [ "\$SEED_RESP" = "409" ] || { echo "FAIL: Seed (HTTP \$SEED_RESP)"; exit 1; }
+SEED_RESP=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$URL/api/seed" \
+  -H "Authorization: Bearer $SEED_TOKEN")
+[ "$SEED_RESP" = "200" ] || [ "$SEED_RESP" = "409" ] || { echo "FAIL: Seed (HTTP $SEED_RESP)"; exit 1; }
 
 echo "PASS: All smoke tests passed"
 \`\`\`

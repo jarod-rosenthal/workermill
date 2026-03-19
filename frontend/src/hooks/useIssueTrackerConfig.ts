@@ -14,6 +14,7 @@ export function useIssueTrackerConfig(): IssueTrackerConfig | null {
   useEffect(() => {
     // If we already have cached config, use it
     if (cachedConfig) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronizing with module cache
       setConfig(cachedConfig);
       return;
     }

@@ -22,6 +22,7 @@ export function GitHubCallback() {
     const state = searchParams.get("state");
 
     if (errorParam) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- setting error from URL params on mount
       setError(errorDescription || errorParam || "GitHub authentication failed");
       setIsProcessing(false);
       return;

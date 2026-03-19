@@ -22,6 +22,7 @@ export function MicrosoftCallback() {
     const state = searchParams.get("state");
 
     if (error) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- setting error from URL params on mount
       setError(errorDescription || error || "Microsoft authentication failed");
       setIsProcessing(false);
       return;

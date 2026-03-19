@@ -49,7 +49,7 @@ export function OrgSwitcher({ className = "" }: OrgSwitcherProps) {
     setIsSwitching(true);
     try {
       const result = await organizationsAPI.switchOrg(org.id);
-      setOrganization({ id: org.id, name: org.name, plan: (result.organization as any).plan || "pro", trialExpiresAt: null, stripeSubscriptionStatus: null });
+      setOrganization({ id: org.id, name: org.name, plan: (result.organization as Record<string, unknown>).plan as string || "pro", trialExpiresAt: null, stripeSubscriptionStatus: null });
       setIsOpen(false);
       // Reload to refresh all data with new org context
       window.location.reload();

@@ -286,6 +286,7 @@ export function ImmersiveBackground() {
 
   useEffect(() => {
     const mql = window.matchMedia("(max-width: 1023px)")
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronizing with matchMedia on mount
     setIsMobile(mql.matches)
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
     mql.addEventListener("change", handler)

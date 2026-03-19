@@ -540,7 +540,7 @@ main()
     console.error(e);
     process.exit(1);
   })
-  .finally(() => prisma.\$disconnect());
+  .finally(() => prisma.$disconnect());
 \`\`\`
 
 > **The email is \`demo@workermill.com\` — NOT \`demo@taskpulse.com\` or any other domain.**
@@ -845,14 +845,14 @@ jobs:
 
       - name: Seed demo data
         run: |
-          response=\$(curl -s -o /dev/null -w "%{http_code}" -X POST \\
+          response=$(curl -s -o /dev/null -w "%{http_code}" -X POST \\
             https://taskpulse.workermill.com/api/seed \\
             -H "Authorization: Bearer \${{ secrets.SEED_TOKEN }}")
 
-          if [ "\$response" = "200" ] || [ "\$response" = "409" ]; then
-            echo "Seed successful (HTTP \$response)"
+          if [ "$response" = "200" ] || [ "$response" = "409" ]; then
+            echo "Seed successful (HTTP $response)"
           else
-            echo "Seed failed with HTTP \$response"
+            echo "Seed failed with HTTP $response"
             exit 1
           fi
 

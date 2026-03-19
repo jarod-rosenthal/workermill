@@ -28,6 +28,7 @@ export function Navbar({ transparent = true }: NavbarProps) {
 
   useEffect(() => {
     if (!transparent) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronizing with prop
       setIsScrolled(true);
       return;
     }
@@ -44,6 +45,7 @@ export function Navbar({ transparent = true }: NavbarProps) {
 
   // Close mobile menu on route change
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronizing with route
     setIsMobileMenuOpen(false);
   }, [location]);
 

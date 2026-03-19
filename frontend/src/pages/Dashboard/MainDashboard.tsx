@@ -68,7 +68,7 @@ import { TaskDetailsModal } from "./components/TaskDetailsModal";
 import { TalkToWorkerModal } from "./components/TalkToWorkerModal";
 
 export default function Dashboard() {
-  const organization = useAuthStore((state) => state.organization);
+  const _organization = useAuthStore((state) => state.organization);
 
   // Coordination store for blocker alerts
   const coordinationMessages = useCoordinationStore((s) => s.messages);
@@ -109,7 +109,7 @@ export default function Dashboard() {
     ]),
   );
 
-  const isProPlan = false;
+  const _isProPlan = false;
 
   // --- Hooks ---
   const {
@@ -202,6 +202,7 @@ export default function Dashboard() {
       const prevCount = prevCommsCountsRef.current[taskId] || 0;
       if (count > prevCount && prevCount > 0) {
         if (hasAutoExpandedCommsRef.current[taskId]) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect -- accumulating unread counts from SSE
           setUnreadCommsCount((prev) => ({ ...prev, [taskId]: (prev[taskId] || 0) + (count - prevCount) }));
         }
       }

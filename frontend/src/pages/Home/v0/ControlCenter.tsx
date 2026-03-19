@@ -165,6 +165,7 @@ export function ControlCenter() {
   useEffect(() => {
     const currentScript = terminalScripts[scriptIndex]
     if (!currentScript) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting index when scripts exhausted
       setScriptIndex(0)
       return
     }

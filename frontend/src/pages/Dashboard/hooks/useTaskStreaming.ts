@@ -147,6 +147,7 @@ export function useTaskStreaming({
       prevErrorCountsRef.current[taskId] = errors.length;
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- batch update from SSE stream processing
     setParsedErrors(newParsedErrors);
 
     // Auto-expand error panels for tasks with new errors
@@ -578,6 +579,7 @@ export function useTaskStreaming({
 
     // Clean up streamingLogs and parsedErrors for tasks no longer active
     const activeTaskIdSet = new Set(data.activeTasks.map((t) => t.id));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- cleanup stale task data
     setStreamingLogs((prev) => {
       const cleaned: Record<string, StreamingLog[]> = {};
       for (const taskId of Object.keys(prev)) {

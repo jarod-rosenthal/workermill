@@ -55,11 +55,11 @@ type TabType = "personas" | "inference";
 
 export default function PersonaStudio() {
   const tokens = useAuthStore((state) => state.tokens);
-  const organization = useAuthStore((state) => state.organization);
+  const _organization = useAuthStore((state) => state.organization);
   const isInitialized = useAuthStore((state) => state.isInitialized);
   const initialize = useAuthStore((state) => state.initialize);
   const navigate = useNavigate();
-  const isProPlan = false;
+  const _isProPlan = false;
 
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [loading, setLoading] = useState(true);

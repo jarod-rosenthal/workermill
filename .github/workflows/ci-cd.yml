@@ -107,11 +107,31 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: npm run lint
-        continue-on-error: true  # Pre-existing React hook and any-type issues need refactoring
 
       - name: Build
         working-directory: frontend
         run: npm run build
+
+  agent-ci:
+    name: Agent - Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Install dependencies
+        working-directory: agent
+        run: npm ci
+
+      - name: Type Check
+        working-directory: agent
+        run: npm run typecheck
 
   # ============================================================================
   # E2E TESTS - Run on self-hosted runner in VPC for database access
@@ -453,6 +473,7 @@ jobs:
     needs:
       - api-ci
       - frontend-ci
+      - agent-ci
       - e2e-tests
       - integration-tests
       - deploy-api
@@ -467,6 +488,7 @@ jobs:
           echo "CI Results:"
           echo "  API CI: ${{ needs.api-ci.result }}"
           echo "  Frontend CI: ${{ needs.frontend-ci.result }}"
+          echo "  Agent CI: ${{ needs.agent-ci.result }}"
           echo ""
           echo "Test Results:"
           echo "  E2E Tests: ${{ needs.e2e-tests.result }}"

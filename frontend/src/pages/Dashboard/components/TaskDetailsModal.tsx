@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import {
   ExternalLink,
   AlertCircle,
@@ -35,6 +36,8 @@ export function TaskDetailsModal({
   handleRetryTask,
   onClose,
 }: TaskDetailsModalProps) {
+  // eslint-disable-next-line react-hooks/purity -- ref initialization needs current time
+  const nowRef = useRef(Date.now());
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
       <div className="bg-card border border-border rounded-xl w-full max-w-5xl mx-4 shadow-2xl max-h-[90vh] flex flex-col">
@@ -124,7 +127,7 @@ export function TaskDetailsModal({
                         return `${Math.floor(mins / 60)}h ${mins % 60}m`;
                       }
                       if (selectedTask.startedAt && !selectedTask.completedAt) {
-                        const mins = Math.round((Date.now() - new Date(selectedTask.startedAt).getTime()) / 60000);
+                        const mins = Math.round((nowRef.current - new Date(selectedTask.startedAt).getTime()) / 60000);
                         return `${mins}m (running)`;
                       }
                       return "N/A";

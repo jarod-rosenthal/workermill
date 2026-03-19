@@ -67,7 +67,7 @@ export function AIWorkersSection({
   getManagerSummary,
   getExecutionSummary,
   getRoutingSummary,
-  orgPlan,
+  orgPlan: _orgPlan,
 }: AIWorkersSectionProps) {
   const isProPlan = false; // Plan-gating removed — all features available
   return (

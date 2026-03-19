@@ -108,7 +108,7 @@ function ProtectedRoute({ children, allowSetup = false }: { children: React.Reac
 function DarkRoute({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const root = document.documentElement;
-    const previous = root.getAttribute("data-theme");
+    const _previous = root.getAttribute("data-theme");
     root.setAttribute("data-theme", "dark");
     return () => {
       // Restore user's theme preference when leaving
@@ -153,7 +153,7 @@ function App() {
   const setOrganization = useAuthStore((state) => state.setOrganization);
   const setNeedsSetup = useAuthStore((state) => state.setNeedsSetup);
   const setTosRequired = useAuthStore((state) => state.setTosRequired);
-  const tosRequired = useAuthStore((state) => state.tosRequired);
+  const _tosRequired = useAuthStore((state) => state.tosRequired);
   const organization = useAuthStore((state) => state.organization);
 
   useEffect(() => {

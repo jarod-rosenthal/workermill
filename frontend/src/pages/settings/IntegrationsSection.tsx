@@ -88,7 +88,7 @@ function LockedOverlay() {
 export function IntegrationsSection({
   settings,
   settingsSaving,
-  orgPlan,
+  orgPlan: _orgPlan,
   handleSetDefaultIssueTracker,
   handleSetDefaultScm,
   jiraStatus,

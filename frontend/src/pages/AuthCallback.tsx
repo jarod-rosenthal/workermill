@@ -61,7 +61,7 @@ export function AuthCallback() {
         setTokens(response.tokens);
 
         // Check for invite token - from sessionStorage, URL state, OR SSO response (backend detected pending invite)
-        const effectiveInviteToken = inviteToken || (response as any).inviteToken;
+        const effectiveInviteToken = inviteToken || (response as Record<string, unknown>).inviteToken as string | undefined;
 
         // If there's an invite token, accept the invite first
         if (effectiveInviteToken) {

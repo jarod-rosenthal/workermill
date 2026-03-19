@@ -1172,11 +1172,11 @@ Build the complete SvelteKit 2 frontend application with Tailwind v4 styling, co
 9. \`web/src/lib/auth.ts\` — Auth store/helpers: login, logout, register, isAuthenticated check, token refresh logic, localStorage management
 10. \`web/src/routes/+layout.svelte\` — Root layout with sidebar navigation (Dashboard, Flags, Environments, Segments, Experiments, Audit Log, Settings), auth guard redirecting to /login if not authenticated, user info display
 11. \`web/src/routes/+layout.ts\` — Disable SSR globally with \`export const ssr = false\` for adapter-static compatibility
-12. \`web/src/routes/login/+page.svelte\` — Login form with email/password inputs, error display, calls POST /auth/login, stores tokens, redirects to / on success. Svelte 5 runes (\$state, \$derived)
-13. \`web/src/routes/+page.svelte\` — Dashboard: stat cards (total flags, active flags, total environments, total experiments, running experiments), recent audit log entries, quick flag status overview. Fetches from multiple API endpoints on mount via \$effect
+12. \`web/src/routes/login/+page.svelte\` — Login form with email/password inputs, error display, calls POST /auth/login, stores tokens, redirects to / on success. Svelte 5 runes ($state, $derived)
+13. \`web/src/routes/+page.svelte\` — Dashboard: stat cards (total flags, active flags, total environments, total experiments, running experiments), recent audit log entries, quick flag status overview. Fetches from multiple API endpoints on mount via $effect
 14. \`web/src/routes/flags/+page.svelte\` — Flag list page: table/card view of all flags, shows key, name, type, is_active status, environment toggles, tags. Search/filter capability
 15. \`web/src/routes/flags/create/+page.svelte\` — Create flag form: key (auto-generated from name), name, description, type selector (boolean/string/number/json), default value input (adapts to type), tags input. POST /api/v1/flags, redirect to flag detail on success
-16. \`web/src/routes/flags/[id]/+page.svelte\` — Flag detail page: displays flag info, per-environment toggle switches (FlagToggle component), rollout percentage sliders (RolloutSlider), targeting rules builder (TargetingRuleBuilder), save/update functionality. Uses \$effect for client-side data fetching (NOT +page.server.ts). Route param [id] is the flag key
+16. \`web/src/routes/flags/[id]/+page.svelte\` — Flag detail page: displays flag info, per-environment toggle switches (FlagToggle component), rollout percentage sliders (RolloutSlider), targeting rules builder (TargetingRuleBuilder), save/update functionality. Uses $effect for client-side data fetching (NOT +page.server.ts). Route param [id] is the flag key
 17. \`web/src/routes/flags/[id]/+page.ts\` — Exports \`export const ssr = false\` for adapter-static dynamic route compatibility
 18. \`web/src/routes/environments/+page.svelte\` — Environment list and management: shows all environments with color indicators, sort order, active status. Inline create/edit forms, delete with confirmation
 19. \`web/src/routes/segments/+page.svelte\` — Segment list and detail: shows segments with rule summaries, expandable detail view showing segment rules with conditions. Create/edit/delete functionality
@@ -1201,13 +1201,13 @@ Build the complete SvelteKit 2 frontend application with Tailwind v4 styling, co
 
 ### Technical Specification
 - SvelteKit 2 with adapter-static — NO +page.server.ts on dynamic routes
-- Svelte 5 runes syntax: \$state, \$derived, \$effect — NOT legacy \$: reactive syntax
+- Svelte 5 runes syntax: $state, $derived, $effect — NOT legacy $: reactive syntax
 - Tailwind v4 via @tailwindcss/vite plugin — inline utility classes only, NO @apply in <style> blocks
 - TypeScript strict mode, no \`any\` types
-- All API calls use PUBLIC_API_URL env var (available at build time via SvelteKit's \$env/static/public)
+- All API calls use PUBLIC_API_URL env var (available at build time via SvelteKit's $env/static/public)
 - Auth tokens stored in localStorage, attached as Bearer header
 - 401 responses trigger token refresh; failed refresh redirects to /login
-- All dynamic routes use client-side fetching via \$effect, with \`export const ssr = false\`
+- All dynamic routes use client-side fetching via $effect, with \`export const ssr = false\`
 - Dashboard computes stats client-side from fetched data per PRD formulas
 - Error states and loading states should be handled gracefully
 - The UI must look polished and production-ready — this is a showcase demo app
@@ -1242,7 +1242,7 @@ I've successfully implemented the Docker and Nginx configuration as specified:
    - Nginx Alpine serving stage that serves from \`/usr/share/nginx/html\`
 
 2. **\`/workspace/worktrees/story-4/web/nginx.conf\`** - Nginx configuration with:
-   - SPA routing using \`try_files \$uri \$uri/ /index.html\`
+   - SPA routing using \`try_files $uri $uri/ /index.html\`
    - Aggressive static asset caching (1 year) for JS, CSS, images, fonts
    - Proper server configuration listening on port 80
 
@@ -1333,7 +1333,7 @@ The FlagDeck frontend implementation shows good progress, but critical issues fr
    - **Required Fix**: Replace with proper types or \`unknown\`
 
 ### ✅ What Works Well:
-- Proper use of Svelte 5 runes (\`\$state\`, \`\$derived\`, \`\$effect\`)
+- Proper use of Svelte 5 runes (\`$state\`, \`$derived\`, \`$effect\`)
 - Well-structured TypeScript interfaces in types.ts
 - API client implementation is architecturally sound
 - Component structure follows best practices
@@ -1486,7 +1486,7 @@ I have successfully addressed all the critical issues from the revision feedback
 3. **Build and Quality Gates** - ✅ **ALL PASSING**
    - \`npm run build\` completes successfully
    - \`npm run lint\` passes with no errors
-   - All Svelte 5 runes syntax properly implemented (\`\$state\`, \`\$derived\`, \`\$effect\`)
+   - All Svelte 5 runes syntax properly implemented (\`$state\`, \`$derived\`, \`$effect\`)
    - No deprecated \`<slot />\` or \`on:\` syntax found
    - Zero \`any\` types remaining in source code
 

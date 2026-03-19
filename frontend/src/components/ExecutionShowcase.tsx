@@ -840,6 +840,7 @@ export default function ExecutionShowcase() {
   const [frameIndex, setFrameIndex] = useState(0);
   const [transitioning, setTransitioning] = useState(false);
   const [progress, setProgress] = useState(0);
+  // eslint-disable-next-line react-hooks/purity -- ref initialization needs current time
   const startTimeRef = useRef(Date.now());
 
   const goToFrame = useCallback(

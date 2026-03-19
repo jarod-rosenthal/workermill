@@ -8,7 +8,7 @@
 import axios from "axios";
 import { runAgent } from "./agent-sdk.js";
 import { createDecisionClient, type DecisionClient } from "../epic/dist/decision-client.js";
-import { getTicketLabel } from "../epic/types.js";
+import { getTicketLabel } from "../epic/dist/types.js";
 import type {
   ManagerConfig,
   ManagerResult,

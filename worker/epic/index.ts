@@ -89,8 +89,8 @@ function loadConfig(): EpicConfig {
     maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10),
     maxFixRetries: process.env.MAX_FIX_RETRIES ? parseInt(process.env.MAX_FIX_RETRIES, 10) : undefined,
     maxAgentTurns: process.env.MAX_AGENT_TURNS ? parseInt(process.env.MAX_AGENT_TURNS, 10) : undefined,
-    maxReviewRevisions: parseInt(process.env.MAX_REVIEW_REVISIONS, 10),
-    maxPerStoryRevisions: parseInt(process.env.MAX_PER_STORY_REVISIONS, 10),
+    maxReviewRevisions: parseInt(process.env.MAX_REVIEW_REVISIONS || "0", 10),
+    maxPerStoryRevisions: parseInt(process.env.MAX_PER_STORY_REVISIONS || "0", 10),
     // Intent Engineering — org guidelines from settings
     orgGuidelines: process.env.ORG_GUIDELINES || undefined,
     // Unified AIClient — routes through AIClient interface for multi-provider support
@@ -117,7 +117,7 @@ function loadResilienceConfig(): ResilienceConfig {
     fileOverlapGatingEnabled: process.env.FILE_OVERLAP_GATING_ENABLED !== "false",
     incrementalRebaseEnabled: process.env.INCREMENTAL_REBASE_ENABLED !== "false",
     mergeAgentEnabled: process.env.MERGE_AGENT_ENABLED !== "false",
-    blockerWaitTimeoutMs: parseInt(process.env.BLOCKER_WAIT_TIMEOUT_MINUTES, 10) * 60_000,
+    blockerWaitTimeoutMs: parseInt(process.env.BLOCKER_WAIT_TIMEOUT_MINUTES || "20", 10) * 60_000,
   };
 }
 

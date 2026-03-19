@@ -39,6 +39,7 @@ export interface InlineReviewerConfig {
   githubToken: string;
   githubReviewerToken?: string;
   jiraIssueKey?: string;
+  ticketSystem?: "jira" | "linear" | "github" | "internal";
   // Jira issue requirements (summary + description) for reviewing against
   jiraRequirements?: string;
   // Provider routing for tech_lead

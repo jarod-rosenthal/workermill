@@ -203,7 +203,7 @@ export interface EpicConfig {
   /** Pre-commit quality gate commands from board metadata (extracted from PRD) */
   qualityGateCommands?: {
     name: string;
-    trigger: string;
+    trigger?: string;
     commands: string[];
   }[];
   /** CI workflow path for post-push verification (from board metadata) */

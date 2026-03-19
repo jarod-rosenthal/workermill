@@ -55,6 +55,7 @@ interface MultiExpertConfig {
   model?: string;
   managerModel?: string;  // Manager model - used as default for experts when no routing
   jiraIssueKey?: string;
+  ticketSystem?: "jira" | "linear" | "github" | "internal";
   providerRouting?: ProviderRouting;
   googleApiKey?: string;
   openaiApiKey?: string;
@@ -145,12 +146,13 @@ function loadConfig(): MultiExpertConfig {
     model: process.env.WORKER_MODEL || process.env.MODEL,  // Worker model for story execution
     managerModel: process.env.MANAGER_MODEL,  // Manager model - used as default for experts when no routing
     jiraIssueKey: process.env.JIRA_ISSUE_KEY || process.env.TICKET_KEY || "",
+    ticketSystem: (process.env.TICKET_SYSTEM as "jira" | "linear" | "github" | "internal") || "jira",
     providerRouting,
     googleApiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_API_KEY,
     openaiApiKey: process.env.OPENAI_API_KEY,
     ollamaHost: process.env.OLLAMA_HOST,
     skipManagerReview: process.env.SKIP_MANAGER_REVIEW === "true",
-    maxReviewRevisions: parseInt(process.env.MAX_REVIEW_REVISIONS, 10),
+    maxReviewRevisions: parseInt(process.env.MAX_REVIEW_REVISIONS || "0", 10),
   };
 }
 
@@ -3171,6 +3173,7 @@ The repository is cloned at: **${promptRepoPath}**
       githubToken: this.config.githubToken,
       githubReviewerToken: this.config.githubReviewerToken,
       jiraIssueKey: this.config.jiraIssueKey,
+      ticketSystem: this.config.ticketSystem,
       jiraRequirements: this.jiraRequirements,
       provider,
       model,

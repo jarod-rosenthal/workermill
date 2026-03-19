@@ -402,8 +402,8 @@ function loadConfig(repoDir: string, mainBranch: string): EpicConfig {
     maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "3", 10),
     maxFixRetries: process.env.MAX_FIX_RETRIES ? parseInt(process.env.MAX_FIX_RETRIES, 10) : undefined,
     maxAgentTurns: process.env.MAX_AGENT_TURNS ? parseInt(process.env.MAX_AGENT_TURNS, 10) : undefined,
-    maxReviewRevisions: parseInt(process.env.MAX_REVIEW_REVISIONS, 10),
-    maxPerStoryRevisions: parseInt(process.env.MAX_PER_STORY_REVISIONS, 10),
+    maxReviewRevisions: parseInt(process.env.MAX_REVIEW_REVISIONS || "0", 10),
+    maxPerStoryRevisions: parseInt(process.env.MAX_PER_STORY_REVISIONS || "0", 10),
     qualityThresholds: process.env.QUALITY_THRESHOLDS
       ? JSON.parse(process.env.QUALITY_THRESHOLDS)
       : undefined,
@@ -450,6 +450,7 @@ function loadMultiExpertConfig(repoDir: string) {
     model: process.env.WORKER_MODEL || process.env.MODEL,
     managerModel: process.env.MANAGER_MODEL,
     jiraIssueKey: process.env.JIRA_ISSUE_KEY || process.env.TICKET_KEY || "",
+    ticketSystem: (process.env.TICKET_SYSTEM as "jira" | "linear" | "github" | "internal") || "jira",
     providerRouting,
     googleApiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_API_KEY,
     openaiApiKey: process.env.OPENAI_API_KEY,

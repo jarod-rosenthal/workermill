@@ -76,7 +76,10 @@ __pycache__/
 # Playwright MCP
 .playwright-mcp/
 
-# Internal plans and notes (covered by docs/ above)
+# Internal docs and plans (not public)
+/docs/
+.plan
+CLAUDE.md
 
 # Operations scripts (local only)
 bin/bastion

@@ -23,6 +23,10 @@ import {
   Zap,
   HelpCircle,
   FileText,
+  GitBranch,
+  Search,
+  Hammer,
+  MessageSquare,
 } from "lucide-react";
 
 const autopilotStages = [
@@ -784,6 +788,289 @@ export default function TaskLifecycle() {
             Workers iterate within a task until success. If the task itself fails (e.g., fundamentally impossible),
             it can retry up to 3 times with a fresh context.
           </p>
+        </div>
+      </section>
+
+      {/* Worker Execution Flow */}
+      <section className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-semibold text-foreground flex items-center gap-2">
+            <Cpu className="w-6 h-6 text-purple-500" />
+            Inside Worker Execution
+          </h2>
+          <p className="text-muted-foreground mt-2">
+            When a task enters the <strong className="text-foreground">executing</strong> state, here is what happens
+            behind the scenes. WorkerMill breaks your task into sub-tasks (stories), assigns specialized AI workers,
+            and runs them in parallel.
+          </p>
+        </div>
+
+        {/* Step-by-step execution flow */}
+        <div className="space-y-0">
+          {/* Step 1: Persona Matching */}
+          <div>
+            <div className="bg-card border border-purple-500/30 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-purple-500/10 flex-shrink-0">
+                  <Users className="w-5 h-5 text-purple-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <h4 className="font-medium text-foreground text-sm">1. Expert Assignment</h4>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Each sub-task is assigned to a <strong className="text-foreground">persona-matched expert</strong>.
+                    WorkerMill maintains a registry of specialized personas (e.g., backend, frontend, devops, database)
+                    and matches each sub-task to the best-fit expert based on the work required.
+                  </p>
+                  <ul className="space-y-0.5">
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>Sub-tasks specify which persona they need (e.g., "backend-engineer")</span>
+                    </li>
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>The coordinator matches each sub-task to an available expert with the right skills</span>
+                    </li>
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>Dependency order is respected -- sub-tasks wait for their prerequisites</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-center py-1">
+              <ArrowDown className="w-4 h-4 text-muted-foreground/50" />
+            </div>
+          </div>
+
+          {/* Step 2: Parallel Execution in Worktrees */}
+          <div>
+            <div className="bg-card border border-blue-500/30 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-blue-500/10 flex-shrink-0">
+                  <GitBranch className="w-5 h-5 text-blue-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <h4 className="font-medium text-foreground text-sm">2. Parallel Execution in Isolated Worktrees</h4>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Each expert works in its own <strong className="text-foreground">isolated git worktree</strong> on a
+                    dedicated branch. Multiple experts run <strong className="text-foreground">simultaneously</strong> without
+                    interfering with each other.
+                  </p>
+                  <ul className="space-y-0.5">
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>Each sub-task gets its own branch and worktree (e.g., story/PROJ-123/0, story/PROJ-123/1)</span>
+                    </li>
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>File-overlap detection prevents two experts from editing the same files at once</span>
+                    </li>
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>Experts can ask each other questions across worktrees via a coordination channel</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-center py-1">
+              <ArrowDown className="w-4 h-4 text-muted-foreground/50" />
+            </div>
+          </div>
+
+          {/* Step 3: Inline Review */}
+          <div>
+            <div className="bg-card border border-amber-500/30 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-amber-500/10 flex-shrink-0">
+                  <Search className="w-5 h-5 text-amber-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <h4 className="font-medium text-foreground text-sm">3. Inline Review Cycle</h4>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    As each expert completes its sub-task, a <strong className="text-foreground">Tech Lead reviewer</strong> (AI)
+                    inspects the changes on that branch. If the review finds issues, the expert revises its work
+                    before moving on.
+                  </p>
+                  <ul className="space-y-0.5">
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>Tech Lead reviews each sub-task's diff and scores code quality</span>
+                    </li>
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>If revisions are needed, the expert applies fixes in the same worktree</span>
+                    </li>
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>Review-fix cycles repeat until approved (or max revisions reached)</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-center py-1">
+              <ArrowDown className="w-4 h-4 text-muted-foreground/50" />
+            </div>
+          </div>
+
+          {/* Step 4: Quality Gates */}
+          <div>
+            <div className="bg-card border border-green-500/30 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-green-500/10 flex-shrink-0">
+                  <Shield className="w-5 h-5 text-green-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <h4 className="font-medium text-foreground text-sm">4. Quality Gates</h4>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Before code is finalized, it passes through <strong className="text-foreground">two quality gates</strong> to
+                    catch issues early.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <div className="bg-background rounded p-2 border border-border">
+                      <h5 className="text-[11px] font-medium text-foreground mb-1">Gate 1: Pre-Commit</h5>
+                      <p className="text-[10px] text-muted-foreground">
+                        Runs your configured shell commands (type checks, linting, tests) before committing.
+                        Configurable per board column.
+                      </p>
+                    </div>
+                    <div className="bg-background rounded p-2 border border-border">
+                      <h5 className="text-[11px] font-medium text-foreground mb-1">Gate 2: Post-Push CI</h5>
+                      <p className="text-[10px] text-muted-foreground">
+                        After pushing, polls your CI pipeline (GitHub Actions, GitLab CI, Bitbucket Pipelines)
+                        and waits for it to pass.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-center py-1">
+              <ArrowDown className="w-4 h-4 text-muted-foreground/50" />
+            </div>
+          </div>
+
+          {/* Step 5: Auto-Fix */}
+          <div>
+            <div className="bg-card border border-orange-500/30 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-orange-500/10 flex-shrink-0">
+                  <Hammer className="w-5 h-5 text-orange-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <h4 className="font-medium text-foreground text-sm">5. Auto-Fix on Failures</h4>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    When a quality gate fails, WorkerMill does not give up. It automatically analyzes the failure
+                    and attempts to fix it.
+                  </p>
+                  <ul className="space-y-0.5">
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>First attempts shell-based auto-fix (e.g., running lint --fix)</span>
+                    </li>
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>If that fails, spawns a dedicated AI fix agent to resolve the issues</span>
+                    </li>
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>Retries up to 3 iterations (configurable) before escalating</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-center py-1">
+              <ArrowDown className="w-4 h-4 text-muted-foreground/50" />
+            </div>
+          </div>
+
+          {/* Step 6: Consolidation */}
+          <div>
+            <div className="bg-card border border-indigo-500/30 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-indigo-500/10 flex-shrink-0">
+                  <GitMerge className="w-5 h-5 text-indigo-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <h4 className="font-medium text-foreground text-sm">6. Consolidation into a Single PR</h4>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Once all sub-tasks are complete, their individual branches are merged into a
+                    single <strong className="text-foreground">consolidated feature branch</strong> and a PR is created.
+                  </p>
+                  <ul className="space-y-0.5">
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>All story branches are merged into one feature branch</span>
+                    </li>
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>Quality checks run again on the consolidated branch</span>
+                    </li>
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>A single PR is opened with a summary of all changes across sub-tasks</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-center py-1">
+              <ArrowDown className="w-4 h-4 text-muted-foreground/50" />
+            </div>
+          </div>
+
+          {/* Step 7: Blockers */}
+          <div>
+            <div className="bg-card border border-red-500/30 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-red-500/10 flex-shrink-0">
+                  <MessageSquare className="w-5 h-5 text-red-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <h4 className="font-medium text-foreground text-sm">Blockers and Escalations</h4>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    If an expert encounters something it cannot resolve, the coordinator handles it automatically
+                    before escalating to a human.
+                  </p>
+                  <ul className="space-y-0.5">
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>Auto-retry: the expert retries up to 3 times with a fresh approach</span>
+                    </li>
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>If retries are exhausted, the sub-task is skipped and the rest continue</span>
+                    </li>
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>The final PR includes all completed work, with failed sub-tasks noted</span>
+                    </li>
+                    <li className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                      <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                      <span>Fundamental blockers (unclear requirements, security decisions) escalate to humans</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 

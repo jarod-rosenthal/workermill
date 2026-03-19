@@ -11,16 +11,32 @@ import {
   BarChart3,
   FileText,
   Eye,
+  Search,
+  MessageSquare,
+  Globe,
 } from "lucide-react";
 import { useState } from "react";
 
-const mcpConfig = `{
+const sseConfig = `{
   "mcpServers": {
     "workermill": {
       "type": "sse",
       "url": "https://workermill.com/api/mcp/sse",
       "headers": {
         "x-api-key": "YOUR_API_KEY"
+      }
+    }
+  }
+}`;
+
+const stdioConfig = `{
+  "mcpServers": {
+    "workermill": {
+      "command": "npx",
+      "args": ["-y", "@workermill/mcp-server"],
+      "env": {
+        "WORKERMILL_API_KEY": "YOUR_API_KEY",
+        "WORKERMILL_API_URL": "https://workermill.com"
       }
     }
   }
@@ -80,6 +96,42 @@ const toolCategories = [
       { name: "workermill_get_providers", description: "Get AI provider status", params: "(none)" },
     ],
   },
+  {
+    title: "Codebase RAG",
+    icon: Search,
+    tools: [
+      { name: "workermill_codebase_search", description: "Semantic code search across indexed repositories using vector embeddings. Finds code by meaning, not just keywords.", params: "repository, query, limit?, minSimilarity?, language?, chunkTypes?, symbolType?, branch?, multiQuery?" },
+      { name: "workermill_codebase_symbol", description: "Find code by exact symbol name (function, class, interface, type, enum). Case-insensitive lookup.", params: "repository, name, branch?, limit?" },
+      { name: "workermill_codebase_file", description: "Get all indexed code chunks for a specific file, broken into semantic chunks with line ranges.", params: "repository, path, branch?" },
+      { name: "workermill_codebase_index", description: "Trigger indexing for a repository. Indexes source code into vector embeddings for semantic search.", params: "repository, branch?, forceReindex?, maxFiles?" },
+      { name: "workermill_codebase_status", description: "Get indexing status for a repository (pending, indexing, ready, failed) with chunk and file counts.", params: "repository, branch?" },
+      { name: "workermill_codebase_stats", description: "Get org-wide codebase indexing statistics with per-repo breakdown.", params: "(none)" },
+      { name: "workermill_codebase_repositories", description: "List all indexed repositories for the organization with status and chunk counts.", params: "(none)" },
+    ],
+  },
+];
+
+const guidedPrompts = [
+  {
+    name: "troubleshoot_task",
+    description: "Debug a failed WorkerMill task step-by-step. Analyzes logs, identifies failure reasons, and suggests fixes.",
+    args: "task_id (required)",
+  },
+  {
+    name: "create_and_monitor_task",
+    description: "Create a task from a Jira issue and monitor it through completion. Guides through the full lifecycle.",
+    args: "jira_key (required)",
+  },
+  {
+    name: "review_epic_progress",
+    description: "Review the progress of an Epic/PRD task with multiple stories. Shows expert collaboration and completion status.",
+    args: "task_id (required)",
+  },
+  {
+    name: "optimize_worker_settings",
+    description: "Review current settings and suggest optimizations for cost, performance, and reliability.",
+    args: "(none)",
+  },
 ];
 
 const usageExamples = [
@@ -108,15 +160,33 @@ const usageExamples = [
     description: "Get overview of task counts and costs",
     command: "workermill_dashboard_stats()",
   },
+  {
+    title: "Search codebase",
+    description: "Find code by meaning across indexed repos",
+    command: 'workermill_codebase_search(repository: "org/repo", query: "authentication middleware")',
+  },
+  {
+    title: "Index a repository",
+    description: "Trigger vector indexing for semantic search",
+    command: 'workermill_codebase_index(repository: "org/repo")',
+  },
 ];
 
 export default function MCP() {
-  const [copied, setCopied] = useState(false);
+  const [copiedSse, setCopiedSse] = useState(false);
+  const [copiedStdio, setCopiedStdio] = useState(false);
+  const [configTab, setConfigTab] = useState<"sse" | "stdio">("sse");
 
-  const copyConfig = () => {
-    navigator.clipboard.writeText(mcpConfig);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copySseConfig = () => {
+    navigator.clipboard.writeText(sseConfig);
+    setCopiedSse(true);
+    setTimeout(() => setCopiedSse(false), 2000);
+  };
+
+  const copyStdioConfig = () => {
+    navigator.clipboard.writeText(stdioConfig);
+    setCopiedStdio(true);
+    setTimeout(() => setCopiedStdio(false), 2000);
   };
 
   return (
@@ -189,24 +259,68 @@ export default function MCP() {
             <div className="flex-1">
               <h3 className="font-semibold text-foreground mb-2">Add to Claude Code Configuration</h3>
               <p className="text-sm text-muted-foreground mb-3">
-                Add this to your <code className="bg-muted px-1.5 py-0.5 rounded">~/.claude/settings.json</code>:
+                Add this to your <code className="bg-muted px-1.5 py-0.5 rounded">~/.claude/settings.json</code>. Choose SSE (remote) or stdio (local npx) transport:
               </p>
-              <div className="relative">
-                <pre className="text-xs bg-muted/50 p-4 rounded-lg overflow-x-auto border border-border">
-                  {mcpConfig}
-                </pre>
+
+              {/* Tab switcher */}
+              <div className="flex gap-2 mb-3">
                 <button
-                  onClick={copyConfig}
-                  className="absolute top-2 right-2 p-2 bg-background/80 rounded hover:bg-background transition-colors"
-                  title="Copy to clipboard"
+                  onClick={() => setConfigTab("sse")}
+                  className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                    configTab === "sse"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:text-foreground"
+                  }`}
                 >
-                  {copied ? (
-                    <CheckCircle className="w-4 h-4 text-green-500" />
-                  ) : (
-                    <Copy className="w-4 h-4 text-muted-foreground" />
-                  )}
+                  SSE (Remote)
+                </button>
+                <button
+                  onClick={() => setConfigTab("stdio")}
+                  className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                    configTab === "stdio"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  stdio (Local npx)
                 </button>
               </div>
+
+              {configTab === "sse" ? (
+                <div className="relative">
+                  <pre className="text-xs bg-muted/50 p-4 rounded-lg overflow-x-auto border border-border">
+                    {sseConfig}
+                  </pre>
+                  <button
+                    onClick={copySseConfig}
+                    className="absolute top-2 right-2 p-2 bg-background/80 rounded hover:bg-background transition-colors"
+                    title="Copy to clipboard"
+                  >
+                    {copiedSse ? (
+                      <CheckCircle className="w-4 h-4 text-green-500" />
+                    ) : (
+                      <Copy className="w-4 h-4 text-muted-foreground" />
+                    )}
+                  </button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <pre className="text-xs bg-muted/50 p-4 rounded-lg overflow-x-auto border border-border">
+                    {stdioConfig}
+                  </pre>
+                  <button
+                    onClick={copyStdioConfig}
+                    className="absolute top-2 right-2 p-2 bg-background/80 rounded hover:bg-background transition-colors"
+                    title="Copy to clipboard"
+                  >
+                    {copiedStdio ? (
+                      <CheckCircle className="w-4 h-4 text-green-500" />
+                    ) : (
+                      <Copy className="w-4 h-4 text-muted-foreground" />
+                    )}
+                  </button>
+                </div>
+              )}
               <p className="text-xs text-muted-foreground mt-2">
                 Replace <code className="bg-muted px-1 rounded">YOUR_API_KEY</code> with the key you generated.
               </p>
@@ -221,6 +335,44 @@ export default function MCP() {
               <p className="text-sm text-muted-foreground">
                 Restart Claude Code to load the new MCP server. You should see WorkerMill tools available.
               </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Environment Variables */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+          <Globe className="w-5 h-5 text-primary" />
+          Environment Variables
+        </h2>
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="divide-y divide-border">
+            <div className="px-4 py-3">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <code className="text-sm font-mono text-primary">WORKERMILL_API_KEY</code>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    Your WorkerMill API key. Required for authentication. Generate one from Settings → API Access.
+                  </p>
+                </div>
+                <span className="text-xs text-red-400 bg-red-500/10 px-2 py-1 rounded whitespace-nowrap">
+                  required
+                </span>
+              </div>
+            </div>
+            <div className="px-4 py-3">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <code className="text-sm font-mono text-primary">WORKERMILL_API_URL</code>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    Base URL for the WorkerMill API. Defaults to <code className="bg-muted px-1 rounded text-xs">https://workermill.com</code>. Set this for self-hosted or local dev instances.
+                  </p>
+                </div>
+                <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded whitespace-nowrap">
+                  optional
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -253,6 +405,35 @@ export default function MCP() {
               </div>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Guided Prompts */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+          <MessageSquare className="w-5 h-5 text-primary" />
+          Guided Prompts
+        </h2>
+        <p className="text-muted-foreground text-sm">
+          MCP prompts are pre-built workflows that guide AI assistants through multi-step tasks.
+          Your MCP client can invoke these to get step-by-step instructions for common operations.
+        </p>
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="divide-y divide-border">
+            {guidedPrompts.map((prompt) => (
+              <div key={prompt.name} className="px-4 py-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <code className="text-sm font-mono text-primary">{prompt.name}</code>
+                    <p className="text-sm text-muted-foreground mt-0.5">{prompt.description}</p>
+                  </div>
+                  <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded whitespace-nowrap">
+                    {prompt.args}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -321,12 +502,12 @@ export default function MCP() {
             </ol>
           </div>
           <div className="bg-card border border-border rounded-xl p-5">
-            <h3 className="font-semibold text-foreground mb-3">Manage Epics & Plans</h3>
+            <h3 className="font-semibold text-foreground mb-3">Codebase Search</h3>
             <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
-              <li>Get execution plan</li>
-              <li>Review child tasks</li>
-              <li>Approve or request changes</li>
-              <li>Monitor coordination feed</li>
+              <li>Index a repository</li>
+              <li>Check indexing status</li>
+              <li>Search code by meaning</li>
+              <li>Look up symbols and files</li>
             </ol>
           </div>
         </div>
@@ -352,6 +533,10 @@ export default function MCP() {
             <li className="flex items-start gap-2">
               <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
               <span>SSE connection encrypted via HTTPS</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+              <span>stdio transport runs locally — API key never leaves your machine</span>
             </li>
           </ul>
         </div>

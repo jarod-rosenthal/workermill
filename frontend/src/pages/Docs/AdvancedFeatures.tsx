@@ -41,6 +41,7 @@ import {
   Box,
   Gauge,
 } from "lucide-react";
+import { PROVIDER_MODELS, formatTokenPrice } from "../../lib/model-pricing";
 
 // Task Planning stages
 const teamPlanningStages = [
@@ -196,45 +197,24 @@ const coordinationEndpoints = [
   },
 ];
 
-// AI Provider models
-const providerModels = {
-  anthropic: {
-    name: "Anthropic",
-    icon: "🤖",
-    models: [
-      { id: "claude-opus-4-6", name: "Claude Opus 4.6", tier: "Powerful", input: "$5.00/M", output: "$25.00/M", context: "200K" },
-      { id: "claude-sonnet-4-5-20250929", name: "Claude Sonnet 4.5", tier: "Balanced", input: "$3.00/M", output: "$15.00/M", context: "200K" },
-      { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", tier: "Fast", input: "$0.80/M", output: "$4.00/M", context: "200K" },
-    ],
-  },
-  openai: {
-    name: "OpenAI",
-    icon: "🔷",
-    models: [
-      { id: "o3-mini", name: "o3 Mini", tier: "Powerful", input: "$1.10/M", output: "$4.40/M", context: "200K" },
-      { id: "gpt-4o", name: "GPT-4o", tier: "Balanced", input: "$2.50/M", output: "$10.00/M", context: "128K" },
-      { id: "o1", name: "o1 (Reasoning)", tier: "Powerful", input: "$15.00/M", output: "$60.00/M", context: "200K" },
-      { id: "o1-mini", name: "o1 Mini", tier: "Balanced", input: "$3.00/M", output: "$12.00/M", context: "128K" },
-    ],
-  },
-  google: {
-    name: "Google",
-    icon: "🔵",
-    models: [
-      { id: "gemini-3-pro-preview", name: "Gemini 3 Pro", tier: "Powerful", input: "$1.25/M", output: "$5.00/M", context: "1M" },
-      { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", tier: "Balanced", input: "$0.075/M", output: "$0.30/M", context: "1M" },
-    ],
-  },
-  ollama: {
-    name: "Ollama (Local)",
-    icon: "🏠",
-    models: [
-      { id: "qwen2.5-coder:32b", name: "Qwen 2.5 Coder 32B", tier: "Balanced", input: "Free", output: "Free", context: "128K" },
-      { id: "deepseek-r1:70b", name: "DeepSeek R1 70B", tier: "Powerful", input: "Free", output: "Free", context: "128K" },
-      { id: "llama3.1:70b", name: "Llama 3.1 70B", tier: "Balanced", input: "Free", output: "Free", context: "128K" },
-    ],
-  },
-};
+// AI Provider models - sourced from shared pricing config
+const providerModels = Object.fromEntries(
+  Object.entries(PROVIDER_MODELS).map(([key, provider]) => [
+    key,
+    {
+      name: provider.name,
+      icon: provider.icon,
+      models: provider.models.map((m) => ({
+        id: m.id,
+        name: m.name,
+        tier: m.tier,
+        input: formatTokenPrice(m.inputPricePerMillion),
+        output: formatTokenPrice(m.outputPricePerMillion),
+        context: m.context,
+      })),
+    },
+  ])
+);
 
 // Provider label reference
 const providerLabels = [

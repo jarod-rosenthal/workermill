@@ -29,7 +29,7 @@ const swaggerDefinition = {
       description: "Production server",
     },
     {
-      url: "http://localhost:4000",
+      url: "http://localhost:3001",
       description: "Development server",
     },
   ],
@@ -303,26 +303,46 @@ const swaggerDefinition = {
     },
   ],
   tags: [
-    {
-      name: "Health",
-      description: "Health check endpoints",
-    },
-    {
-      name: "Billing",
-      description: "Subscription and billing management",
-    },
-    {
-      name: "Tasks",
-      description: "Worker task management and execution",
-    },
-    {
-      name: "Control Center",
-      description: "Dashboard data and real-time monitoring",
-    },
-    {
-      name: "Logs",
-      description: "Task log streaming and retrieval",
-    },
+    { name: "Health", description: "Health check and system status endpoints" },
+    { name: "Auth", description: "Authentication, SSO, and OAuth flows" },
+    { name: "Profile", description: "User profile and preferences management" },
+    { name: "Organizations", description: "Organization CRUD and membership" },
+    { name: "Settings", description: "Organization settings, integrations, models, and webhooks" },
+    { name: "Tasks", description: "Task CRUD, lifecycle, plans, subtasks, and worker API" },
+    { name: "Tasks V2", description: "V2 pipeline tasks (vertical slice sequential execution)" },
+    { name: "Boards", description: "Kanban boards and card management" },
+    { name: "Projects", description: "Internal project and task management" },
+    { name: "Billing", description: "Subscription plans, credits, and payment management" },
+    { name: "Analytics", description: "Task, cost, quality, efficiency, and complexity analytics" },
+    { name: "Audit", description: "Audit trail and activity logs" },
+    { name: "Personas", description: "Worker persona configuration and management" },
+    { name: "Memory", description: "Organizational memory and knowledge base" },
+    { name: "Coordination", description: "Worker coordination and SSE event streaming" },
+    { name: "Control Center", description: "Dashboard data, logs, search, and real-time monitoring" },
+    { name: "Webhooks", description: "SCM webhooks (GitHub, GitLab, Bitbucket, Jira, Linear)" },
+    { name: "Worker Decisions", description: "Worker decision engine (error classification, CI status, quality gates)" },
+    { name: "Agent", description: "Remote agent polling, heartbeat, and task management" },
+    { name: "Compliance", description: "Compliance policies, audit trails, and reporting" },
+    { name: "Codebase", description: "Codebase RAG indexing and search" },
+    { name: "PRD", description: "PRD decomposition into tasks" },
+    { name: "Issues", description: "Issue tracking integration" },
+    { name: "Manager", description: "Manager agent review and coordination" },
+    { name: "Support", description: "Support ticket submission" },
+    { name: "Directives", description: "System persona directives and scripts" },
+    { name: "Worker API", description: "Local CLI worker communication endpoints" },
+    { name: "Build", description: "Build page plan preview and execution" },
+    { name: "Specs", description: "Specification management" },
+    { name: "Attachments", description: "File attachment management" },
+    { name: "Showcase", description: "Public showcase and demo endpoints" },
+    { name: "Management", description: "Platform admin dashboard" },
+    { name: "Marketing", description: "Marketing content management" },
+    { name: "Email", description: "Email management and CAN-SPAM unsubscribe" },
+    { name: "Referrals", description: "Referral program management" },
+    { name: "Warm Pool", description: "Worker warm pool management" },
+    { name: "Status", description: "Public system status" },
+    { name: "Orchestrator", description: "Orchestrator control and monitoring" },
+    { name: "System", description: "System administration endpoints" },
+    { name: "Watcher", description: "File watcher configuration" },
   ],
 };
 
@@ -331,8 +351,11 @@ const options: swaggerJsdoc.Options = {
   // Path to the API route files with JSDoc comments
   apis: [
     "./src/routes/*.ts",
+    "./src/routes/**/*.ts",
     "./src/routes/*.js",
-    "./dist/routes/*.js", // Include compiled files for production
+    "./src/routes/**/*.js",
+    "./dist/routes/*.js",
+    "./dist/routes/**/*.js",
   ],
 };
 

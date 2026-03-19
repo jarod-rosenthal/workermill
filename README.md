@@ -59,7 +59,7 @@ cd frontend && npm install && npm run dev    # → http://localhost:5173
 
 Your dashboard is at `http://localhost:5173`. Create tasks, submit PRDs, and watch workers execute in real time.
 
-Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=workermill.workermill) for a sidebar with task management, real-time log streaming, and live code diffs as workers write.
+Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=workermill.workermill) for a sidebar with task management, real-time log streaming, and live code diffs as workers write. Sign in with GitHub, Google, or email.
 
 ### WorkerMill Cloud (Coming Soon)
 

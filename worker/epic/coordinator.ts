@@ -24,7 +24,7 @@ import { CoordinationClient } from "./coordination-client.js";
 import { StoryExecutor } from "./executor.js";
 import { GitOps } from "./git-ops.js";
 import { BlockerManager } from "./blocker-manager.js";
-import { TicketOps } from "./ticket-ops.js";
+import { TicketOps, GitHubCommentFormat } from "./ticket-ops.js";
 import { InlineReviewer, type InlineReviewResult } from "./inline-reviewer.js";
 import { InlineDeployer } from "./inline-deployer.js";
 import { InlineImprover } from "./inline-improver.js";
@@ -764,6 +764,14 @@ export class EpicCoordinator {
       // Transition Jira to "In Progress"
       await this.ticketOps.transitionTo("In Progress");
 
+      if (process.env.TICKET_SYSTEM === "github") {
+        const model = process.env.CLAUDE_MODEL || process.env.WORKER_MODEL || "unknown";
+        const branch = `feature/${this.config.jiraIssueKey?.toLowerCase() || "unknown"}`;
+        await this.ticketOps.postComment(
+          GitHubCommentFormat.workStarted(model, branch),
+        );
+      }
+
       // Connect SSE for real-time push (falls back to polling if unavailable)
       this.coordination.connectSse();
 
@@ -846,11 +854,12 @@ export class EpicCoordinator {
 
       // Post failure comment to Jira
       try {
-        await this.ticketOps.postComment(
-          this.hasAnyCommittedCode
+        const failureComment = process.env.TICKET_SYSTEM === "github"
+          ? GitHubCommentFormat.failed(errorMessage, 0)
+          : this.hasAnyCommittedCode
             ? `Epic failed: ${errorMessage} — committed code is on remote branches`
-            : `Epic failed: ${errorMessage}`
-        );
+            : `Epic failed: ${errorMessage}`;
+        await this.ticketOps.postComment(failureComment);
       } catch {
         // Don't let comment failure mask the real error
       }
@@ -3347,9 +3356,19 @@ export class EpicCoordinator {
         jiraComment = `✅ **${completions.length} stories completed.**\n\n${storyList}\n\n*No ticket key was provided, so no PR was created. Story branches have been pushed.*`;
       }
 
-      // Post comment to Jira (skip if already posted by deployer)
+      // Post comment to ticket (skip if already posted by deployer)
       if (jiraComment) {
-        await this.ticketOps.postComment(jiraComment);
+        if (process.env.TICKET_SYSTEM === "github") {
+          const prUrlForComment = prUrl || "";
+          const completedMsg = isPartialCompletion
+            ? `${completions.length} of ${readyStories.length} stories completed (partial).`
+            : "All stories completed successfully.";
+          await this.ticketOps.postComment(
+            GitHubCommentFormat.completed(completedMsg, prUrlForComment),
+          );
+        } else {
+          await this.ticketOps.postComment(jiraComment);
+        }
       }
 
       // Build result summary based on status
@@ -3605,7 +3624,10 @@ export class EpicCoordinator {
           if (mergeResult.merged) {
             console.log(`[Epic] PR #${prNumber} merged successfully`);
             await this.postLog(`PR #${prNumber} merged successfully`);
-            await this.ticketOps.postComment(`🔀 PR #${prNumber} auto-merged (${mergeLabel})`);
+            const mergeComment = process.env.TICKET_SYSTEM === "github"
+              ? GitHubCommentFormat.completed(`PR #${prNumber} auto-merged (${mergeLabel}).`, prUrl)
+              : `🔀 PR #${prNumber} auto-merged (${mergeLabel})`;
+            await this.ticketOps.postComment(mergeComment);
             if (this.config.jiraIssueKey) {
               await this.gitOps.postMergeCleanup(this.config.jiraIssueKey);
             }
@@ -4604,7 +4626,10 @@ Begin your review now. Start by fetching the code changes.`;
           const mergeResult = await this.mergeWithCIVerification(prUrl, prNumber, "PRD auto-run");
           if (mergeResult.merged) {
             await this.postLog(`PR #${prNumber} merged successfully`);
-            await this.ticketOps.postComment(`🔀 PR #${prNumber} auto-merged (PRD workflow)`);
+            const prdMergeComment = process.env.TICKET_SYSTEM === "github"
+              ? GitHubCommentFormat.completed(`PR #${prNumber} auto-merged (PRD workflow).`, prUrl)
+              : `🔀 PR #${prNumber} auto-merged (PRD workflow)`;
+            await this.ticketOps.postComment(prdMergeComment);
             if (this.config.jiraIssueKey) {
               await this.gitOps.postMergeCleanup(this.config.jiraIssueKey);
             }

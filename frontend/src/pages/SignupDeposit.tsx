@@ -275,7 +275,7 @@ function SignupDepositForm() {
           <p className="mt-6 text-xs text-gray-500 dark:text-gray-400 text-center">
             Your card details are securely processed by Stripe. We charge a 15%
             fee on AI usage costs.{" "}
-            <a href="/#pricing" className="text-blue-600 hover:underline">
+            <a href="/" className="text-blue-600 hover:underline">
               Learn more
             </a>
           </p>

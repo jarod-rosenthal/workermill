@@ -695,7 +695,7 @@ export default function Billing() {
                     ) : (
                       <CreditCard className="w-4 h-4" />
                     )}
-                    Subscribe — $19/mo
+                    Subscribe
                   </button>
                 </div>
               </div>
@@ -710,7 +710,7 @@ export default function Billing() {
                     className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 inline-flex items-center gap-2 text-sm font-medium"
                   >
                     <CreditCard className="w-4 h-4" />
-                    Subscribe — $19/mo
+                    Subscribe
                   </button>
                 )}
                 {creditStatus.stripeConfigured && stripeSubscriptionStatus === "active" && (

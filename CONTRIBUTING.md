@@ -23,12 +23,11 @@ Open an issue describing the feature and its use case.
 7. Open a PR against `main`
 
 ### Development Setup
-See the [Quick Start](#quick-start) section in README.md.
+See the [Getting Started](README.md#getting-started) section in README.md and [docs/agent/local-dev.md](docs/agent/local-dev.md).
 
 ## Code Style
 - TypeScript throughout (API, frontend, agent, worker)
-- Prettier for formatting (runs automatically via hooks)
-- ESLint for linting (`npm run lint` in api/ and frontend/)
+- ESLint for linting and formatting (`npm run lint` in api/ and frontend/)
 
 ## Architecture Overview
 See [docs/agent/architecture.md](docs/agent/architecture.md) for the full architecture guide.

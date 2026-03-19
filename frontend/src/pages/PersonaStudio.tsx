@@ -58,7 +58,7 @@ export default function PersonaStudio() {
   const organization = useAuthStore((state) => state.organization);
   const isInitialized = useAuthStore((state) => state.isInitialized);
   const initialize = useAuthStore((state) => state.initialize);
-  const isProPlan = !organization?.plan || organization.plan === "pro";
+  const isProPlan = false; // Plan-gating removed — all features available
   const navigate = useNavigate();
 
   const [personas, setPersonas] = useState<Persona[]>([]);

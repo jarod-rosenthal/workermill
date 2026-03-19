@@ -44,17 +44,16 @@ function MaxBadge() {
 
 function LockedOverlay() {
   return (
-    <Link
-      to="/pricing"
-      className="absolute inset-0 bg-card/60 backdrop-blur-[1px] rounded-xl flex items-center justify-center z-10 group cursor-pointer"
+    <div
+      className="absolute inset-0 bg-card/60 backdrop-blur-[1px] rounded-xl flex items-center justify-center z-10 group"
     >
       <div className="flex flex-col items-center gap-1.5">
-        <Lock className="w-5 h-5 text-muted-foreground/60 group-hover:text-amber-400 transition-colors" />
-        <span className="text-xs text-muted-foreground/80 font-medium group-hover:text-amber-400 transition-colors">
-          Upgrade to Max
+        <Lock className="w-5 h-5 text-muted-foreground/60" />
+        <span className="text-xs text-muted-foreground/80 font-medium">
+          Coming soon
         </span>
       </div>
-    </Link>
+    </div>
   );
 }
 
@@ -70,7 +69,7 @@ export function AIWorkersSection({
   getRoutingSummary,
   orgPlan,
 }: AIWorkersSectionProps) {
-  const isProPlan = !orgPlan || orgPlan === "pro";
+  const isProPlan = false; // Plan-gating removed — all features available
   return (
     <div className="space-y-6">
       <div>

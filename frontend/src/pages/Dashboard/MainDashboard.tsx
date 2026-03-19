@@ -69,7 +69,7 @@ import { TalkToWorkerModal } from "./components/TalkToWorkerModal";
 
 export default function Dashboard() {
   const organization = useAuthStore((state) => state.organization);
-  const isProPlan = !organization?.plan || organization.plan === "pro";
+  const isProPlan = false; // Plan-gating removed — all features available
 
   // Coordination store for blocker alerts
   const coordinationMessages = useCoordinationStore((s) => s.messages);

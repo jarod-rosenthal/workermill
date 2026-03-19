@@ -70,7 +70,7 @@ export function TrialBanner() {
               onClick={() => navigate("/billing")}
               className="inline-flex items-center gap-2 px-4 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors whitespace-nowrap"
             >
-              Subscribe Now — $19/mo
+              Subscribe Now
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>

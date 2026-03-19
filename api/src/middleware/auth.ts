@@ -230,8 +230,8 @@ export async function authenticateApiKey(
       return;
     }
 
-    // LOCAL MODE: accept "self-hosted" key and auto-authenticate
-    if (process.env.EXECUTION_MODE === "local" && apiKey === "self-hosted") {
+    // LOCAL MODE: accept any key and auto-authenticate (self-hosted, local-dev, etc.)
+    if (process.env.EXECUTION_MODE === "local") {
       const userRepo = AppDataSource.getRepository(User);
       const localUser = await userRepo.findOne({
         where: { email: "admin@localhost" },

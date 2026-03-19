@@ -76,10 +76,11 @@ __pycache__/
 # Playwright MCP
 .playwright-mcp/
 
-# Internal docs and plans (not public)
+# Internal docs, plans, and Claude config (not public)
 /docs/
 .plan
 CLAUDE.md
+.claude/
 
 # Operations scripts (local only)
 bin/bastion

@@ -2,7 +2,7 @@
   "name": "workermill",
   "displayName": "WorkerMill",
   "description": "Watch AI experts build your project — real-time monitoring and control for your WorkerMill AI engineering team",
-  "version": "0.2.125",
+  "version": "0.2.126",
   "publisher": "workermill",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -29,7 +29,8 @@
     "workspace"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onWalkthrough:workermill.getStarted"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -148,7 +149,11 @@
         "command": "workermill.signInWithGitHub",
         "title": "WorkerMill: Sign In with GitHub"
       },
-{
+      {
+        "command": "workermill.signInWithGoogle",
+        "title": "WorkerMill: Sign In with Google"
+      },
+      {
         "command": "workermill.configureScm",
         "title": "Configure Repository Access",
         "category": "WorkerMill"
@@ -442,7 +447,7 @@
     "viewsWelcome": [
       {
         "view": "workermill.teamPanel",
-        "contents": "AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Sign in with GitHub](command:workermill.signUpWithGitHub)\n[Sign in with Google](command:workermill.signInWithGoogle)",
+        "contents": "AI coding agents that plan, code, and open pull requests — right from your editor.\n\n[Get Started](command:workbench.action.openWalkthrough?%22workermill.workermill%2Fworkermill.getStarted%22)\n\n[Sign in with GitHub](command:workermill.signUpWithGitHub)\n[Sign in with Google](command:workermill.signInWithGoogle)",
         "when": "!workermill.agentConfigured"
       },
       {
@@ -462,6 +467,6 @@
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.27.3",
-    "typescript": "^5.5.0"
+    "typescript": "^5.9.3"
   }
 }

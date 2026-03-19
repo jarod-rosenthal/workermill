@@ -467,7 +467,7 @@ router.post(
       const deploymentEnabled = labels.includes("deploy");
       // Default to org settings; labels can override (review label forces review on, no-review forces off)
       const skipManagerReview = labels.includes("no-review") ? true : labels.includes("review") ? false : !org.autoReviewEnabled;
-      const managerEnabled = labels.includes("no-manager") ? false : labels.includes("manager") ? true : org.managerEnabled ?? false;
+      const managerEnabled = labels.includes("no-manager") ? false : labels.includes("manager") ? true : org.autoImproveEnabled ?? false;
 
       if (existingTask && !existingTask.isTerminal()) {
         if (existingTask.status === "pr_approved" && deploymentEnabled && !existingTask.deploymentEnabled) {

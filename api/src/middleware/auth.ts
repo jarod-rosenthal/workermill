@@ -230,6 +230,24 @@ export async function authenticateApiKey(
       return;
     }
 
+    // LOCAL MODE: accept "self-hosted" key and auto-authenticate
+    if (process.env.EXECUTION_MODE === "local" && apiKey === "self-hosted") {
+      const userRepo = AppDataSource.getRepository(User);
+      const localUser = await userRepo.findOne({
+        where: { email: "admin@localhost" },
+      });
+      if (localUser) {
+        const orgWithRole = await getDefaultOrganizationWithRole(localUser.id);
+        if (orgWithRole) {
+          req.user = localUser;
+          req.organization = orgWithRole.organization;
+          req.orgRole = orgWithRole.role;
+          next();
+          return;
+        }
+      }
+    }
+
     // First, try Organization API key (prefix + bcrypt verification)
     const orgRepo = AppDataSource.getRepository(Organization);
     const orgKeyPrefix = apiKey.substring(0, 12);

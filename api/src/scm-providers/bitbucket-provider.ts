@@ -535,17 +535,14 @@ export class BitBucketProvider extends BaseScmProvider {
       SUPERSEDED: "closed",
     };
 
-    // Check for merge conflicts via diffstat (Bitbucket's only conflict API)
-    let mergeable = true;
-    if (pr.state === "OPEN") {
-      const conflicts = await this.getPullRequestConflicts(repo, prNumber);
-      mergeable = !conflicts.hasConflicts;
-    }
-
+    // Bitbucket Cloud has no reliable API to check merge conflicts without
+    // actually merging (verified 2026-03-18: diffstat returns "modified"
+    // not "merge conflict" for conflicting files). Return null to indicate
+    // unknown rather than hardcoded true which masked real conflicts.
     return {
       state: stateMap[pr.state] || "open",
       merged: pr.state === "MERGED",
-      mergeable,
+      mergeable: null,
       mergedAt: pr.merge_commit ? new Date().toISOString() : null,
       headSha: pr.source.commit.hash,
     };

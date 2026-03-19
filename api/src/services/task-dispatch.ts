@@ -10,6 +10,7 @@
  * - mergeStoryPRsInOrder(): Phase 3 — merge child PRs in dependency order
  */
 
+import { In } from "typeorm";
 import { AppDataSource } from "../db/connection.js";
 import {
   WorkerTask,
@@ -664,22 +665,50 @@ export async function dispatchMultiStoryPlan(
   const childTaskIds: string[] = [];
 
   // For GitHub Issues orgs: create all child issues up front, then assign to stories
+  // On retry: reuse existing child GitHub Issues from previous run
   let githubChildIssues: Array<{ number: number; id: number; html_url: string }> | null = null;
   if (task.ticketSystem === "github" && task.githubRepo) {
     const parentIssueNumber = (task.jiraFields as Record<string, unknown>)?.githubParentIssueNumber as number | undefined;
     if (parentIssueNumber) {
       try {
-        const { createGithubChildIssues } = await import("./github-issues.js");
-        const stories = executionPlan.stories!.map((s: { title: string; scope?: string }) => ({
-          title: s.title,
-          description: s.scope || s.title,
-        }));
-        githubChildIssues = await createGithubChildIssues(
-          task.orgId, task.githubRepo, parentIssueNumber, stories,
-        );
-        logger.info("Created GitHub child issues for PRD dispatch", {
-          parentTaskId: task.id, childCount: githubChildIssues.length,
-        });
+        // Check if previous child tasks already have GitHub Issues we can reuse
+        if (task.retryCount > 0 && task.childTaskIds?.length) {
+          const oldChildren = await taskRepo.find({
+            where: { id: In(task.childTaskIds) },
+            select: ["id", "jiraIssueKey"],
+            order: { createdAt: "ASC" },
+          });
+          const existingIssues = oldChildren
+            .filter((c) => c.jiraIssueKey?.startsWith("GH-"))
+            .map((c) => {
+              const num = parseInt(c.jiraIssueKey!.replace("GH-", ""), 10);
+              return { number: num, id: 0, html_url: `https://github.com/${task.githubRepo}/issues/${num}` };
+            })
+            .filter((i) => !isNaN(i.number));
+
+          if (existingIssues.length > 0) {
+            // Reuse existing issues — map by index to new stories
+            githubChildIssues = existingIssues;
+            logger.info("Reusing existing child GitHub Issues from previous run", {
+              parentTaskId: task.id, issueCount: existingIssues.length,
+              retryCount: task.retryCount,
+            });
+          }
+        }
+        // Only create new issues if we don't have existing ones from a previous run
+        if (!githubChildIssues) {
+          const { createGithubChildIssues } = await import("./github-issues.js");
+          const stories = executionPlan.stories!.map((s: { title: string; scope?: string }) => ({
+            title: s.title,
+            description: s.scope || s.title,
+          }));
+          githubChildIssues = await createGithubChildIssues(
+            task.orgId, task.githubRepo, parentIssueNumber, stories,
+          );
+          logger.info("Created GitHub child issues for PRD dispatch", {
+            parentTaskId: task.id, childCount: githubChildIssues.length,
+          });
+        }
       } catch (err) {
         logger.error("Failed to create GitHub child issues, using synthetic keys", {
           parentTaskId: task.id,

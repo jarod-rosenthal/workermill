@@ -1,7 +1,10 @@
 name: CI/CD Pipeline
 
 on:
-  # Manual trigger only - gradually enable automatic triggers as testing proves stable
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       deploy_api:
@@ -139,12 +142,13 @@ jobs:
 
       - name: Run Playwright E2E tests
         working-directory: frontend
-        run: npx playwright test
+        run: npx playwright test --reporter=list,junit
         env:
           BASE_URL: https://workermill.com
           E2E_TEST_USER_EMAIL: ${{ secrets.E2E_TEST_USER_EMAIL }}
           E2E_TEST_USER_PASSWORD: ${{ secrets.E2E_TEST_USER_PASSWORD }}
           E2E_API_KEY: ${{ secrets.E2E_API_KEY }}
+          PLAYWRIGHT_JUNIT_OUTPUT_NAME: results.xml
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
@@ -162,6 +166,14 @@ jobs:
           path: frontend/e2e/test-results/
           retention-days: 7
 
+      - name: Upload JUnit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-results
+          path: frontend/results.xml
+          retention-days: 7
+
   # ============================================================================
   # INTEGRATION TESTS - Run on self-hosted runner in VPC for database access
   # Triggered manually via workflow_dispatch only
@@ -171,8 +183,10 @@ jobs:
     name: API Integration Tests
     runs-on: [self-hosted, linux, x64, ecs]
     needs: [api-ci]
-    # Manual trigger only
-    if: github.event_name == 'workflow_dispatch' && inputs.run_integration == true
+    # Run on push to main (catch regressions) or manual trigger
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.run_integration == true)
     steps:
       - uses: actions/checkout@v4
 
@@ -211,6 +225,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       always() &&
+      github.event_name == 'workflow_dispatch' &&
       inputs.deploy_api == true &&
       needs.api-ci.result == 'success' &&
       (needs.integration-tests.result == 'success' || needs.integration-tests.result == 'skipped')
@@ -299,6 +314,7 @@ jobs:
     # Only deploy if explicitly requested and tests passed (or were skipped)
     if: |
       always() &&
+      github.event_name == 'workflow_dispatch' &&
       inputs.deploy_frontend == true &&
       needs.frontend-ci.result == 'success' &&
       (needs.e2e-tests.result == 'success' || needs.e2e-tests.result == 'skipped')
@@ -374,7 +390,7 @@ jobs:
   deploy-worker:
     name: Update Worker Image from GHCR
     runs-on: ubuntu-latest
-    if: inputs.deploy_worker == true
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy_worker == true
     environment:
       name: production
     steps:
@@ -433,7 +449,7 @@ jobs:
   deployment-summary:
     name: Deployment Summary
     runs-on: ubuntu-latest
-    if: always() && (inputs.deploy_api == true || inputs.deploy_frontend == true || inputs.deploy_worker == true)
+    if: always() && github.event_name == 'workflow_dispatch' && (inputs.deploy_api == true || inputs.deploy_frontend == true || inputs.deploy_worker == true)
     needs:
       - api-ci
       - frontend-ci

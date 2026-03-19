@@ -233,30 +233,21 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
 
     // Token usage and cost are handled by the /usage endpoint (called by log-parser.cjs)
     // Only calculate cost here if usage wasn't already reported
+    // Use atomic SQL increments (COALESCE + addition) to prevent lost updates
+    // when parallel story workers call worker-complete concurrently
     if (!task.usageReportedAt) {
       if (inputTokens !== undefined) {
-        const newInput = (task.inputTokens || 0) + Number(inputTokens);
-        updates.inputTokens = newInput;
-        task.inputTokens = newInput; // for calculateCost below
+        (updates as Record<string, unknown>).inputTokens = () => `COALESCE(input_tokens, 0) + ${Number(inputTokens) || 0}`;
       }
       if (outputTokens !== undefined) {
-        const newOutput = (task.outputTokens || 0) + Number(outputTokens);
-        updates.outputTokens = newOutput;
-        task.outputTokens = newOutput;
+        (updates as Record<string, unknown>).outputTokens = () => `COALESCE(output_tokens, 0) + ${Number(outputTokens) || 0}`;
       }
       if (cacheCreationTokens !== undefined) {
-        const newCC = (task.cacheCreationTokens || 0) + Number(cacheCreationTokens);
-        updates.cacheCreationTokens = newCC;
-        task.cacheCreationTokens = newCC;
+        (updates as Record<string, unknown>).cacheCreationTokens = () => `COALESCE(cache_creation_tokens, 0) + ${Number(cacheCreationTokens) || 0}`;
       }
       if (cacheReadTokens !== undefined) {
-        const newCR = (task.cacheReadTokens || 0) + Number(cacheReadTokens);
-        updates.cacheReadTokens = newCR;
-        task.cacheReadTokens = newCR;
+        (updates as Record<string, unknown>).cacheReadTokens = () => `COALESCE(cache_read_tokens, 0) + ${Number(cacheReadTokens) || 0}`;
       }
-      // Calculate cost from accumulated token values
-      task.status = newStatus; // needed for calculateCost
-      updates.estimatedCostUsd = task.calculateCost();
     }
 
     // Atomic update — only writes the fields we changed, won't clobber concurrent updates
@@ -267,6 +258,27 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
       .set(updates)
       .where("id = :id AND (org_id = :orgId OR billing_org_id = :orgId)", { id: taskId, orgId: org.id })
       .execute();
+
+    // Calculate cost AFTER atomic token update — re-read to get final values
+    // Same pattern as the /usage endpoint (usage.ts lines 207-226)
+    if (!task.usageReportedAt && (inputTokens !== undefined || outputTokens !== undefined)) {
+      const updatedTask = await taskRepo.findOne({
+        where: [
+          { id: taskId, orgId: org.id },
+          { id: taskId, billingOrgId: org.id },
+        ],
+      });
+      if (updatedTask) {
+        updatedTask.status = newStatus;
+        const estimatedCostUsd = updatedTask.calculateCost();
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({ estimatedCostUsd })
+          .where("id = :taskId", { taskId })
+          .execute();
+      }
+    }
 
     // Sync InternalTask status and board column when worker completes
     if (task.internalTaskId && ["review_requested", "pr_created", "pr_approved", "completed", "deployed", "failed", "escalated"].includes(newStatus)) {

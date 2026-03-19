@@ -885,12 +885,13 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       console.error("[👑 tech_lead 🤖] LLM extraction failed:", error);
     }
 
-    // Ultimate fallback — default to "approved" with a warning instead of "revision_needed".
-    // Defaulting to revision_needed wastes up to MAX_REVIEW_REVISIONS cycles when the
-    // reviewer consistently produces unparseable output, with no useful feedback for the worker.
-    // Better to let the code through with a warning than burn revision budget on nothing.
-    console.warn("[👑 tech_lead 🤖] Both text parsing and LLM extraction failed — defaulting to approved with warning");
-    return { decision: "approved", feedback: "Review parse failure — approved by default. Manual review recommended.", score: 5 };
+    // Ultimate fallback — default to "revision_needed" when both parsers fail.
+    // This triggers the revision loop which is bounded by MAX_REVIEW_REVISIONS.
+    // If parsing consistently fails, the loop hits the max and escalates for human
+    // review — safer than auto-approving unreviewed code. Score 0 signals parse
+    // failure vs genuine review feedback.
+    console.warn("[👑 tech_lead 🤖] Both text parsing and LLM extraction failed — requesting revision (bounded by max revisions, will escalate if persistent)");
+    return { decision: "revision_needed", feedback: "Review output could not be parsed by text matching or LLM extraction. Requesting revision — if this persists, the task will escalate for human review.", score: 0 };
   }
 
   /**

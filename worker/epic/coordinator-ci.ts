@@ -140,11 +140,19 @@ async function pollPrCIGitHub(
     await postLog(config.apiBaseUrl, config.orgApiKey, config.parentTaskId, `[CI Gate] Polling CI checks on PR #${prNumber} (SHA: ${headSha.substring(0, 7)})...`);
 
     while (Date.now() - startTime < maxWaitMs) {
-      const checksJson = execSync(
-        `gh api repos/${owner}/${repo}/commits/${headSha}/check-runs --jq '{total: .total_count, runs: [.check_runs[] | {name: .name, status: .status, conclusion: .conclusion, url: .html_url}]}'`,
-        { env: { ...process.env, GH_TOKEN: token }, encoding: "utf-8", timeout: 15000 }
-      ).trim();
-      const checks = JSON.parse(checksJson);
+      let checks: { total: number; runs: Array<{ name: string; status: string; conclusion: string; url: string }> };
+      try {
+        const checksJson = execSync(
+          `gh api repos/${owner}/${repo}/commits/${headSha}/check-runs --jq '{total: .total_count, runs: [.check_runs[] | {name: .name, status: .status, conclusion: .conclusion, url: .html_url}]}'`,
+          { env: { ...process.env, GH_TOKEN: token }, encoding: "utf-8", timeout: 15000 }
+        ).trim();
+        checks = JSON.parse(checksJson);
+      } catch (parseError) {
+        const msg = parseError instanceof Error ? parseError.message : String(parseError);
+        await postLog(config.apiBaseUrl, config.orgApiKey, config.parentTaskId, `[CI Gate] Failed to fetch/parse CI checks: ${msg.slice(0, 200)} — retrying...`);
+        await new Promise(r => setTimeout(r, pollIntervalMs));
+        continue;
+      }
 
       if (checks.total === 0) {
         if (Date.now() - startTime > noChecksGraceMs) {

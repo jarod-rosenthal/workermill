@@ -65,7 +65,7 @@ ${CYAN}Start Options:${NC}
   --skip-fe        Don't start frontend
   --no-critic      Disable critic agent review
   --no-tech-lead   Disable tech lead review
-  --local-auth     Skip Cognito, auto-login as local user (old behavior)
+  --cognito-auth   Use real Cognito SSO instead of auto-login (requires AWS setup)
   --mock-workers   Use fast mock workers instead of Claude CLI (for E2E tests)
 
 ${CYAN}Examples:${NC}
@@ -464,7 +464,7 @@ cmd_start() {
   local max_experts=4
   local enable_critic=true
   local enable_tech_lead=true
-  local local_auth=false
+  local local_auth=true
   local mock_workers=false
 
   # Parse options
@@ -477,6 +477,7 @@ cmd_start() {
       --no-critic) enable_critic=false; shift ;;
       --no-tech-lead) enable_tech_lead=false; shift ;;
       --local-auth) local_auth=true; shift ;;
+      --cognito-auth) local_auth=false; shift ;;
       --mock-workers) mock_workers=true; shift ;;
       *) shift ;;
     esac

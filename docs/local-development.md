@@ -77,7 +77,9 @@ This starts:
 - **API** on port 3001 (auto-reloads on code changes)
 - **Frontend dashboard** on port 5173 (auto-reloads on code changes)
 
-Open **http://localhost:5173** to access the dashboard. In local mode, authentication is bypassed — you're automatically signed in.
+Open **http://localhost:5173** to access the dashboard. By default, authentication is bypassed — you're automatically signed in as a local admin user. No AWS or Cognito setup needed.
+
+> **Cognito SSO (optional):** If you need to test real authentication flows, start with `--cognito-auth`. This requires `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in your `.env.local` (available from AWS Secrets Manager for WorkerMill contributors).
 
 ### 7. Connect VS Code (optional)
 
@@ -105,6 +107,7 @@ Install the [WorkerMill extension](https://marketplace.visualstudio.com/items?it
 | `--skip-fe` | false | Don't start frontend |
 | `--no-critic` | false | Disable critic review |
 | `--no-tech-lead` | false | Disable tech lead review |
+| `--cognito-auth` | false | Use real Cognito SSO instead of auto-login |
 | `--mock-workers` | false | Use mock workers for testing |
 
 ## Platform Notes

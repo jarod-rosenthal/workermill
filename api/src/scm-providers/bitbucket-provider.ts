@@ -54,7 +54,11 @@ interface BitBucketPullRequest {
 }
 
 interface BitBucketDiffStat {
-  values: Array<{ new?: { path: string }; old?: { path: string } }>;
+  values: Array<{
+    status: string;
+    new?: { path: string };
+    old?: { path: string };
+  }>;
 }
 
 interface BitBucketTree {
@@ -531,11 +535,18 @@ export class BitBucketProvider extends BaseScmProvider {
       SUPERSEDED: "closed",
     };
 
+    // Check for merge conflicts via diffstat (Bitbucket's only conflict API)
+    let mergeable = true;
+    if (pr.state === "OPEN") {
+      const conflicts = await this.getPullRequestConflicts(repo, prNumber);
+      mergeable = !conflicts.hasConflicts;
+    }
+
     return {
       state: stateMap[pr.state] || "open",
       merged: pr.state === "MERGED",
-      mergeable: true, // BitBucket doesn't expose this easily
-      mergedAt: pr.merge_commit ? new Date().toISOString() : null, // BitBucket doesn't include merge timestamp
+      mergeable,
+      mergedAt: pr.merge_commit ? new Date().toISOString() : null,
       headSha: pr.source.commit.hash,
     };
   }
@@ -628,15 +639,25 @@ export class BitBucketProvider extends BaseScmProvider {
       return { hasConflicts: false, conflictingFiles: [] };
     }
 
-    // BitBucket API doesn't directly expose conflict status
-    // We return the changed files as potentially conflicting
-    const files = result.data.values.map(
-      (d) => d.new?.path || d.old?.path || ""
-    );
+    const conflictStatuses = new Set([
+      "merge conflict",
+      "rename conflict",
+      "rename/delete conflict",
+      "subrepo conflict",
+      "local deleted",
+      "remote deleted",
+    ]);
+
+    const conflictingFiles: string[] = [];
+    for (const d of result.data.values) {
+      if (conflictStatuses.has(d.status)) {
+        conflictingFiles.push(d.new?.path || d.old?.path || "");
+      }
+    }
 
     return {
-      hasConflicts: false, // Can't determine from API
-      conflictingFiles: files.filter(Boolean),
+      hasConflicts: conflictingFiles.length > 0,
+      conflictingFiles: conflictingFiles.filter(Boolean),
     };
   }
 

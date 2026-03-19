@@ -6,7 +6,8 @@
  * Part of REQ-19: Memory Retrieval in Epic Coordinator.
  */
 
-import axios, { type AxiosInstance } from "axios";
+import type { AxiosInstance } from "axios";
+import { createCoordinationApi } from "../lib/api-client.js";
 
 /**
  * Skill formatted for injection into worker context
@@ -171,14 +172,7 @@ export class MemoryClient {
 
   constructor(apiBaseUrl: string, orgApiKey: string) {
     this.orgApiKey = orgApiKey;
-    this.api = axios.create({
-      baseURL: apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": orgApiKey,
-      },
-      timeout: 300_000,
-    });
+    this.api = createCoordinationApi({ apiBaseUrl, orgApiKey });
   }
 
   /**

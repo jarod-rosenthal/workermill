@@ -26,6 +26,7 @@ import type { DecisionClient } from "./decision-client.js";
 import { createRetryableApi } from "./api-retry.js";
 import { isDockerDaemonReachable } from "./gate-utils.js";
 import axios from "axios";
+import { createLogsApi } from "../lib/api-client.js";
 import * as fs from "fs/promises";
 import { existsSync } from "fs";
 import { execSync, execFileSync, spawn } from "child_process";
@@ -110,14 +111,7 @@ export class StoryExecutor {
     };
 
     // Create axios instance for posting logs to the dashboard (with retry for transient 5xx)
-    const rawApi = axios.create({
-      baseURL: config.apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.orgApiKey,
-      },
-      timeout: 5000,
-    });
+    const rawApi = createLogsApi(config);
     this.logsApi = createRetryableApi(rawApi, {
       maxRetries: 5,
       initialDelayMs: 500,

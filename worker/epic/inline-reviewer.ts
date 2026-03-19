@@ -5,7 +5,8 @@
  * Eliminates the need for a separate manager container.
  */
 
-import axios from "axios";
+import type { AxiosInstance } from "axios";
+import { createLogsApi } from "../lib/api-client.js";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { getTicketLabel, type EpicConfig, type StreamMessage } from "./types.js";
 import type { QualityMetrics } from "./quality-runner.js";
@@ -205,7 +206,7 @@ Write in a professional, direct tone. Do NOT open messages with filler words or 
 export class InlineReviewer {
   private config: EpicConfig;
   private repoPath: string;
-  private logsApi: ReturnType<typeof axios.create>;
+  private logsApi: AxiosInstance;
   private allOutput: string = "";
   private aiClient: AIClient | null = null;
 
@@ -223,14 +224,7 @@ export class InlineReviewer {
     this.techLeadPrompt = reviewerPrompt;
 
     // Create axios instance for posting logs
-    this.logsApi = axios.create({
-      baseURL: config.apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.orgApiKey,
-      },
-      timeout: 5000,
-    });
+    this.logsApi = createLogsApi(config);
 
     // Initialize AIClient if unified client is enabled
     if (config.useUnifiedClient) {

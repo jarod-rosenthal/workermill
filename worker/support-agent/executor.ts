@@ -9,7 +9,8 @@
  * This executor does NOT require git operations or PR creation.
  */
 
-import axios, { AxiosInstance } from "axios";
+import type { AxiosInstance } from "axios";
+import { createCoordinationApi } from "../lib/api-client.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 import Anthropic from "@anthropic-ai/sdk";
@@ -67,14 +68,7 @@ export class SupportAgentExecutor {
     this.config = config;
 
     // Create axios instance for API calls
-    this.api = axios.create({
-      baseURL: config.apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.orgApiKey,
-      },
-      timeout: 300_000,
-    });
+    this.api = createCoordinationApi(config);
 
     // Create Anthropic client
     this.anthropic = new Anthropic({

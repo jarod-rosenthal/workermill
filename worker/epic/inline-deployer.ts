@@ -5,7 +5,8 @@
  * Merges the PR and triggers/monitors GitHub Actions deployment.
  */
 
-import axios from "axios";
+import type { AxiosInstance } from "axios";
+import { createLogsApi } from "../lib/api-client.js";
 import * as fs from "fs";
 import * as path from "path";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
@@ -495,7 +496,7 @@ DEPLOYMENT_SUMMARY: Created workflow, PR merged, deployment succeeded
 export class InlineDeployer {
   private config: EpicConfig;
   private repoPath: string;
-  private logsApi: ReturnType<typeof axios.create>;
+  private logsApi: AxiosInstance;
   private coordination: CoordinationClient;
   private allOutput: string = "";
   private aiClient: AIClient | null = null;
@@ -520,14 +521,7 @@ export class InlineDeployer {
     };
 
     // Create axios instance for posting logs
-    this.logsApi = axios.create({
-      baseURL: config.apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.orgApiKey,
-      },
-      timeout: 5000,
-    });
+    this.logsApi = createLogsApi(config);
 
     // Initialize coordination client for approval questions
     this.coordination = new CoordinationClient(config);

@@ -8,6 +8,7 @@
 import { spawn } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
 import axios, { AxiosInstance } from "axios";
+import { createLogsApi } from "../lib/api-client.js";
 import { getTicketLabel } from "../epic/types.js";
 
 // Tech Lead persona prefix for consistent logging
@@ -148,14 +149,7 @@ export class InlineReviewerAiSdk {
     this.techLeadPrompt = serverReviewPrompt ?? TECH_LEAD_SYSTEM_PROMPT;
 
     // Create axios instance for posting logs
-    this.logsApi = axios.create({
-      baseURL: config.apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.orgApiKey,
-      },
-      timeout: 5000,
-    });
+    this.logsApi = createLogsApi(config);
   }
 
   /**

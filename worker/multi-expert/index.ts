@@ -13,6 +13,7 @@ import { spawn } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
 import * as https from "https";
 import axios, { AxiosInstance } from "axios";
+import { createCoordinationApi } from "../lib/api-client.js";
 import { getTicketLabel } from "../epic/types.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { JiraClient } from "./jira-client.js";
@@ -293,14 +294,7 @@ export class MultiExpertCoordinator {
     this.config = config;
     this.maxRevisions = config.maxReviewRevisions;
     this.repoPath = config.repoPath || process.env.REPO_PATH || "/workspace/repo";
-    this.api = axios.create({
-      baseURL: config.apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.orgApiKey,
-      },
-      timeout: 300_000,
-    });
+    this.api = createCoordinationApi(config);
 
     // Initialize coordination client for real-time communication
     this.coordination = new CoordinationClient({

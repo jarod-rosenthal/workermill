@@ -5,7 +5,8 @@
  * Runs the agent, extracts decisions, and reports to API.
  */
 
-import axios from "axios";
+import axios, { type AxiosInstance } from "axios";
+import { createLogsApi } from "../lib/api-client.js";
 import { runAgent } from "./agent-sdk.js";
 import { createDecisionClient, type DecisionClient } from "../epic/dist/decision-client.js";
 import { getTicketLabel } from "../epic/dist/types.js";
@@ -122,7 +123,7 @@ FEEDBACK: Your detailed feedback explaining your decision
 export class PRReviewer {
   private config: ManagerConfig;
   private repoPath: string;
-  private logsApi: ReturnType<typeof axios.create>;
+  private logsApi: AxiosInstance;
   private allOutput: string = "";
   private decisionClient: DecisionClient;
 
@@ -131,14 +132,7 @@ export class PRReviewer {
     this.repoPath = repoPath;
 
     // Create axios instance for posting logs
-    this.logsApi = axios.create({
-      baseURL: config.apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.orgApiKey,
-      },
-      timeout: 5000,
-    });
+    this.logsApi = createLogsApi(config);
 
     // Decision client for server-side review parsing
     this.decisionClient = createDecisionClient({

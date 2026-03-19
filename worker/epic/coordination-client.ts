@@ -15,6 +15,7 @@
 
 import { EventEmitter } from "events";
 import axios, { AxiosInstance } from "axios";
+import { createCoordinationApi } from "../lib/api-client.js";
 import { withRetry } from "../lib/dist/api-retry.js";
 import { RequestCoalescer, createCoordinationCoalescer } from "./request-coalescer.js";
 import { SseSubscriber } from "./sse-subscriber.js";
@@ -50,14 +51,7 @@ export class CoordinationClient extends EventEmitter {
     this.apiBaseUrl = config.apiBaseUrl;
     this.coalescer = createCoordinationCoalescer();
 
-    this.api = axios.create({
-      baseURL: config.apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.orgApiKey,
-      },
-      timeout: 300_000,
-    });
+    this.api = createCoordinationApi(config);
   }
 
   /**

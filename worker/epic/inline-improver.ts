@@ -8,7 +8,8 @@
  * Assumes an IAM role for elevated permissions before performing operations.
  */
 
-import axios from "axios";
+import type { AxiosInstance } from "axios";
+import { createLogsApi } from "../lib/api-client.js";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { getTicketLabel, type EpicConfig, type StreamMessage } from "./types.js";
@@ -117,7 +118,7 @@ CHANGED_FILES: none
  */
 export class InlineImprover {
   private config: EpicConfig;
-  private logsApi: ReturnType<typeof axios.create>;
+  private logsApi: AxiosInstance;
   private allOutput: string = "";
   private aiClient: AIClient | null = null;
 
@@ -128,14 +129,7 @@ export class InlineImprover {
     this.improverPrompt = serverImproverPrompt ?? IMPROVER_SYSTEM_PROMPT;
 
     // Create axios instance for posting logs
-    this.logsApi = axios.create({
-      baseURL: config.apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.orgApiKey,
-      },
-      timeout: 5000,
-    });
+    this.logsApi = createLogsApi(config);
 
     // Initialize AIClient if unified client is enabled
     if (config.useUnifiedClient) {

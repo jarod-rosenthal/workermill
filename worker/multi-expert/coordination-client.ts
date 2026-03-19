@@ -11,7 +11,8 @@
  * - Cache invalidated after mutations (POST operations)
  */
 
-import axios, { AxiosInstance } from "axios";
+import type { AxiosInstance } from "axios";
+import { createCoordinationApi } from "../lib/api-client.js";
 import { withRetry } from "../lib/dist/api-retry.js";
 import { RequestCoalescer, createCoordinationCoalescer } from "./request-coalescer.js";
 
@@ -71,14 +72,7 @@ export class CoordinationClient {
     this.parentTaskId = config.parentTaskId;
     this.coalescer = createCoordinationCoalescer();
 
-    this.api = axios.create({
-      baseURL: config.apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.orgApiKey,
-      },
-      timeout: 300_000,
-    });
+    this.api = createCoordinationApi(config);
   }
 
   /**

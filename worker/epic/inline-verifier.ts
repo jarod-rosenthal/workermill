@@ -7,7 +7,8 @@
  * from the workers who wrote the code.
  */
 
-import axios from "axios";
+import type { AxiosInstance } from "axios";
+import { createLogsApi } from "../lib/api-client.js";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
@@ -68,7 +69,7 @@ Write in a professional, direct tone. Do NOT open messages with filler words or 
 export class InlineVerifier {
   private config: EpicConfig;
   private repoPath: string;
-  private logsApi: ReturnType<typeof axios.create>;
+  private logsApi: AxiosInstance;
   private allOutput: string = "";
   private aiClient: AIClient | null = null;
   private model: string;
@@ -78,14 +79,7 @@ export class InlineVerifier {
     this.repoPath = repoPath;
     this.model = process.env.MANAGER_MODEL || config.model || "";
 
-    this.logsApi = axios.create({
-      baseURL: config.apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.orgApiKey,
-      },
-      timeout: 5000,
-    });
+    this.logsApi = createLogsApi(config);
 
     if (config.useUnifiedClient) {
       this.aiClient = createAIClient({

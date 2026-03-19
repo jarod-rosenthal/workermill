@@ -7,7 +7,8 @@
  * Mirrors Epic mode functionality but for single-task execution.
  */
 
-import axios from "axios";
+import type { AxiosInstance } from "axios";
+import { createLogsApi } from "../lib/api-client.js";
 import * as fs from "fs/promises";
 import { simpleGit, SimpleGit } from "simple-git";
 import { withRetry } from "../lib/dist/api-retry.js";
@@ -24,7 +25,7 @@ import type { StandardConfig, StandardResult, StandardExpertConfig } from "./typ
 export class StandardExecutor {
   private config: StandardConfig;
   private epicConfig: EpicConfig;
-  private logsApi: ReturnType<typeof axios.create>;
+  private logsApi: AxiosInstance;
   private git: SimpleGit;
   private repoPath: string = "/workspace";
   private allOutput: string = "";
@@ -53,14 +54,7 @@ export class StandardExecutor {
     };
 
     // Create axios instance for posting logs
-    this.logsApi = axios.create({
-      baseURL: config.apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.orgApiKey,
-      },
-      timeout: 5000,
-    });
+    this.logsApi = createLogsApi(config);
 
     this.git = simpleGit();
   }

@@ -120,7 +120,7 @@ export function GettingStartedChecklist() {
 
   if (dismissed || loading || !status) return null;
 
-  // Pro users don't need AI provider keys (they use Claude Max, not cloud execution)
+  // Pro users don't need AI provider keys (they use Claude CLI auth, not cloud execution)
   const showAiProviderStep = !isProPlan;
 
   // Count completed steps

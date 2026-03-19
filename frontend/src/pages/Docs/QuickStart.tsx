@@ -82,7 +82,7 @@ export default function QuickStart() {
           Get Started in 5 Minutes
         </h1>
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-          Two ways to build: run workers locally with Claude Max, or use the cloud.
+          Two ways to build: run workers locally with your API key, or use the cloud.
         </p>
       </div>
 
@@ -101,14 +101,14 @@ export default function QuickStart() {
             </div>
             <div>
               <h2 className="text-lg font-semibold text-foreground">Option A: Local Mode</h2>
-              <p className="text-sm text-green-500 font-medium">$0 execution cost</p>
+              <p className="text-sm text-green-500 font-medium">BYOK — bring your own key</p>
             </div>
           </div>
           <p className="text-sm text-muted-foreground mb-4">
-            Workers run on your machine using your Claude Max subscription. Code never leaves your computer.
+            Workers run on your machine using your Anthropic API key. Code never leaves your computer.
           </p>
           <div className="text-sm text-muted-foreground">
-            <strong className="text-foreground">Requires:</strong> Claude Max subscription
+            <strong className="text-foreground">Requires:</strong> Anthropic API key (or existing Claude CLI login)
           </div>
         </div>
 

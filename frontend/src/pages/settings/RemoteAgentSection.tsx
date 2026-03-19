@@ -244,7 +244,7 @@ export function RemoteAgentSection({
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold text-foreground mb-1">Remote Agent</h2>
-        <p className="text-sm text-muted-foreground">Run AI workers on your own machine with your Claude Max subscription</p>
+        <p className="text-sm text-muted-foreground">Run AI workers on your own machine with your Anthropic API key</p>
       </div>
 
       {/* API Key — first thing users need */}
@@ -267,7 +267,7 @@ export function RemoteAgentSection({
         <div className="space-y-2">
           {[
             { name: "Claude CLI", detail: "Installed automatically by the VS Code extension or install.sh" },
-            { name: "Claude Max subscription", detail: "Authenticated via 'claude auth login'" },
+            { name: "Anthropic API key", detail: "Or existing Claude CLI authentication" },
             { name: "SCM token", detail: "Configure in Settings > Integrations" },
           ].map((item) => (
             <div key={item.name} className="flex items-start gap-3 py-1.5">
@@ -345,13 +345,13 @@ export function RemoteAgentSection({
           <p>The remote agent runs on your machine and connects to the WorkerMill cloud dashboard:</p>
           <ol className="list-decimal list-inside space-y-1 ml-2">
             <li>Agent polls the cloud API for tasks assigned to your organization</li>
-            <li>Planning runs locally via Claude CLI (using your Claude Max subscription)</li>
+            <li>Planning runs locally via Claude CLI using your Anthropic API key</li>
             <li>Worker containers spawn locally via Docker, executing code changes</li>
             <li>Logs and status stream back to the cloud dashboard in real-time</li>
             <li>PRs are created on your SCM provider (GitHub/GitLab/Bitbucket)</li>
           </ol>
           <p className="mt-3">
-            <span className="font-medium text-foreground">Cost:</span> Only your Claude Max subscription. No per-token API charges.
+            <span className="font-medium text-foreground">Cost:</span> BYOK — you pay your AI provider directly at their rates.
           </p>
         </div>
       </div>

@@ -1,6 +1,6 @@
 # @workermill/agent
 
-Run WorkerMill AI workers locally using your Claude Max subscription. The agent polls the WorkerMill cloud dashboard for tasks, runs planning via Claude CLI, and spawns Docker worker containers on your machine.
+Run WorkerMill AI workers locally. The agent polls the WorkerMill cloud dashboard for tasks, runs planning via Claude CLI, and spawns Docker worker containers on your machine.
 
 ## Prerequisites
 
@@ -8,7 +8,7 @@ Run WorkerMill AI workers locally using your Claude Max subscription. The agent 
 - **Claude Code CLI** — The setup wizard auto-installs this, or install manually:
   - macOS/Linux/WSL: `curl -fsSL https://claude.ai/install.sh | bash`
   - Windows PowerShell: `irm https://claude.ai/install.ps1 | iex`
-- **Claude Max subscription** — Run `claude` and sign in with your Claude account
+- **Anthropic API key** — Or, if already signed into Claude CLI, that works too
 - **Node.js >= 20** — [Install Node.js](https://nodejs.org/)
 - **WorkerMill account** — Sign up at [workermill.com](https://workermill.com)
 
@@ -55,7 +55,7 @@ workermill-agent update
 ## How It Works
 
 1. **Agent polls** the cloud API for tasks assigned to your organization
-2. **Planning runs locally** via Claude CLI (using your Claude Max subscription — no per-token API charges)
+2. **Planning runs locally** via Claude CLI using your Anthropic API key
 3. **Worker containers** spawn locally via Docker, executing code changes
 4. **Logs and status** stream back to the cloud dashboard in real-time
 5. **PRs are created** on your SCM provider (GitHub/GitLab/Bitbucket)

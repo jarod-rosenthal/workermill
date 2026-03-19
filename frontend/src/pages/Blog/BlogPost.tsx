@@ -401,7 +401,7 @@ const postContent: Record<string, React.ReactNode> = {
         </li>
         <li>
           <strong>Extensible worker personas:</strong> WorkerMill ships with
-          12 expert personas — frontend, backend, DevOps, database, security,
+          13 expert personas — frontend, backend, DevOps, database, security,
           and more. These are configurable, not locked. Teams can modify
           existing personas or create new ones matched to their stack and
           conventions.

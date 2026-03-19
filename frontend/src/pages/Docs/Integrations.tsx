@@ -501,7 +501,7 @@ export default function Integrations() {
             </div>
             <p className="text-sm text-muted-foreground mb-4">
               Workers run as native processes on your machine. Code never leaves your computer.
-              $0 execution cost with Claude Max subscription.
+              BYOK — bring your own API key, pay your provider directly.
             </p>
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2 text-muted-foreground">

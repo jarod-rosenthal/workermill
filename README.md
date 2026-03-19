@@ -41,7 +41,7 @@ Most AI coding tools are single-agent, single-file, one-shot. WorkerMill is an *
 
 You can run the full WorkerMill platform locally right now. This gives you the API server, web dashboard, and worker execution — the same stack that powers the cloud platform.
 
-**Prerequisites:** Node.js 22+, Docker, a Claude OAuth token (run `claude auth login`), worker image built (`./bin/local-workermill build-worker`)
+**Prerequisites:** Node.js 22+, Docker, an Anthropic API key (or existing Claude CLI login), worker image built (`./bin/local-workermill build-worker`)
 
 ```bash
 git clone https://github.com/jarod-rosenthal/workermill.git

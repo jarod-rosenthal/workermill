@@ -118,7 +118,7 @@ export function DashboardHeader({
           </div>
           <div
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/20"
-            title="Estimated API token cost — actual billing depends on your authentication method (e.g., Claude Max subscription has no per-token charges)"
+            title="Estimated API token cost based on provider rates"
           >
             <DollarSign className="w-4 h-4 text-accent" />
             <span className="text-sm font-semibold text-accent">~${formatCost(data?.stats.cumulativeCost)}</span>

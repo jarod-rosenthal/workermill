@@ -73,7 +73,7 @@ const comparisonRows = [
   {
     aspect: "AI Cost",
     cloud: "Your API key",
-    remote: "Claude Max subscription ($0)",
+    remote: "Anthropic API key (BYOK)",
   },
   {
     aspect: "Log Streaming",
@@ -100,8 +100,8 @@ export default function RemoteAgent() {
         </h1>
         <p className="text-muted-foreground">
           Run AI workers on your own machine while using the WorkerMill cloud
-          dashboard. Your code stays local, execution uses your Claude Max
-          subscription, and all progress streams to workermill.com in real time.
+          dashboard. Your code stays local, execution uses your Anthropic API
+          key, and all progress streams to workermill.com in real time.
         </p>
       </div>
 
@@ -125,11 +125,11 @@ export default function RemoteAgent() {
               <div className="p-2 rounded-lg bg-blue-500/10">
                 <HardDrive className="w-5 h-5 text-blue-500" />
               </div>
-              <h3 className="font-semibold text-foreground">$0 AI Cost</h3>
+              <h3 className="font-semibold text-foreground">BYOK</h3>
             </div>
             <p className="text-sm text-muted-foreground">
-              Uses your Claude Max subscription for execution. No per-token
-              charges — unlimited usage within your subscription.
+              Uses your Anthropic API key for execution. Bring your own key and
+              pay your provider directly.
             </p>
           </div>
           <div className="bg-card border border-border rounded-xl p-5 space-y-3">
@@ -450,9 +450,9 @@ export default function RemoteAgent() {
               <span className="text-amber-500">•</span>
               <span>
                 <strong className="text-foreground">
-                  Claude Max subscription
+                  Anthropic API key
                 </strong>{" "}
-                — provides OAuth token for AI execution
+                — or existing Claude CLI authentication
               </span>
             </li>
             <li className="flex items-start gap-2">

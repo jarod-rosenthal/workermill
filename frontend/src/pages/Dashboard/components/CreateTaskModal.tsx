@@ -165,7 +165,7 @@ export function CreateTaskModal({
                       {costEstimate.tierDescription}
                     </p>
                     <p className="text-xs text-muted-foreground/70 mt-2 text-center italic">
-                      Based on API token pricing. If using Claude Max or a subscription plan, your actual cost may differ.
+                      Estimated based on API token pricing. Actual cost depends on your provider and plan.
                     </p>
                   </div>
                 )}

@@ -131,7 +131,7 @@ export async function setupCommand(): Promise<void> {
   console.log(chalk.bold.cyan("  WorkerMill Remote Agent Setup"));
   console.log(chalk.dim("  ─────────────────────────────────────"));
   console.log();
-  console.log("  Run AI workers locally with your Claude Max subscription.");
+  console.log("  Run AI workers locally with your Anthropic API key.");
   console.log("  Workers execute on your machine, logs stream to the cloud dashboard.");
   console.log();
 
@@ -239,7 +239,7 @@ export async function setupCommand(): Promise<void> {
     authSpinner.warn("Not authenticated — launching Claude...");
     console.log();
     console.log(chalk.dim("  Claude will open and prompt you to authenticate."));
-    console.log(chalk.dim("  Sign in with your Claude Max account, then exit Claude (Ctrl+C)."));
+    console.log(chalk.dim("  Sign in with your Anthropic account, then exit Claude (Ctrl+C)."));
     console.log();
 
     // Pass Git Bash path on Windows so Claude can find it

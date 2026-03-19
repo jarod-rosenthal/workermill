@@ -107,7 +107,7 @@ export default function AgentSetup() {
         </h1>
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
           A standalone binary that executes AI coding tasks on your machine
-          using your Claude Max subscription. No Docker or Node.js required.
+          using your Anthropic API key. No Docker or Node.js required.
         </p>
       </div>
 
@@ -137,9 +137,9 @@ export default function AgentSetup() {
           <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
             <Cpu className="w-5 h-5 text-purple-500" />
           </div>
-          <h3 className="font-semibold text-foreground">$0 Execution Cost</h3>
+          <h3 className="font-semibold text-foreground">Bring Your Own Key</h3>
           <p className="text-sm text-muted-foreground">
-            Uses your existing Claude Max subscription. No per-token charges —
+            Uses your Anthropic API key. Pay your provider directly and
             run as many tasks as your machine can handle.
           </p>
         </div>
@@ -223,7 +223,7 @@ export default function AgentSetup() {
               <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
               <div>
                 <span className="text-sm font-medium text-foreground">
-                  Claude Max subscription
+                  Anthropic API key (or existing Claude CLI login)
                 </span>
                 <p className="text-xs text-muted-foreground">
                   Powers the AI workers and planning agent
@@ -607,7 +607,7 @@ export default function AgentSetup() {
   │                                                     │
   │  ┌──────────────┐    ┌──────────────────────────┐   │
   │  │  Agent CLI   │───▶│  Claude CLI (planning)   │   │
-  │  │  polls API   │    │  uses Claude Max auth    │   │
+  │  │  polls API   │    │  uses Anthropic API key   │   │
   │  └──────┬───────┘    └──────────────────────────┘   │
   │         │                                           │
   │         │ spawns                                    │

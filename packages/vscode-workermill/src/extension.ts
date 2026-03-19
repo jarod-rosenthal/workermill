@@ -1284,6 +1284,21 @@ export function activate(context: vscode.ExtensionContext): void {
         });
         await vscode.commands.executeCommand("setContext", "workermill.agentConfigured", true);
         log("Wrote local dev config (localhost:3001, self-hosted key)");
+      } else {
+        // Already configured — check if they want to switch to local
+        const action = await vscode.window.showWarningMessage(
+          "You already have a WorkerMill configuration. Connecting to a local instance will replace your current connection. Continue?",
+          "Switch to Local",
+          "Cancel",
+        );
+        if (action !== "Switch to Local") {
+          return;
+        }
+        writeAgentConfig({
+          apiUrl: "http://localhost:3001",
+          apiKey: "self-hosted",
+        });
+        log("Switched to local dev config (localhost:3001)");
       }
       if (!client.isConnected()) {
         const hasGit = await promptInstallGit(log);

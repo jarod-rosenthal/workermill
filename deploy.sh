@@ -4,10 +4,9 @@ set -e
 # WorkerMill Deployment Script
 # This script handles deploying both the API (ECS) and Frontend (S3/CloudFront)
 
-# Source private env vars (AWS creds, resource names) if not already set.
-# .bashrc sources this for interactive shells, but non-interactive shells
-# (CI, IDE tool calls, cron) need it loaded explicitly.
-[ -f "$HOME/.workermill/env" ] && . "$HOME/.workermill/env"
+# Source login profile for non-interactive shells (CI, IDE tool calls).
+# Infrastructure vars (WM_PROD_ECS_CLUSTER, etc.) are exported in ~/.profile.
+[ -f "$HOME/.profile" ] && . "$HOME/.profile"
 # Supports multiple environments via --env flag
 
 # Colors for output
@@ -24,18 +23,18 @@ AWS_REGION="us-east-1"
 declare -A ENV_CONFIG
 
 # Production environment (default) - resource names from ~/.workermill/env
-ENV_CONFIG[prod_ecs_cluster]="${WM_PROD_ECS_CLUSTER:?Set WM_PROD_ECS_CLUSTER in ~/.workermill/env}"
-ENV_CONFIG[prod_ecs_service]="${WM_PROD_ECS_SERVICE:?Set WM_PROD_ECS_SERVICE in ~/.workermill/env}"
-ENV_CONFIG[prod_s3_bucket]="${WM_PROD_S3_BUCKET:?Set WM_PROD_S3_BUCKET in ~/.workermill/env}"
-ENV_CONFIG[prod_cloudfront]="${PROD_CLOUDFRONT_ID:?Set PROD_CLOUDFRONT_ID in ~/.workermill/env}"
+ENV_CONFIG[prod_ecs_cluster]="${WM_PROD_ECS_CLUSTER:?Set WM_PROD_ECS_CLUSTER in ~/.profile}"
+ENV_CONFIG[prod_ecs_service]="${WM_PROD_ECS_SERVICE:?Set WM_PROD_ECS_SERVICE in ~/.profile}"
+ENV_CONFIG[prod_s3_bucket]="${WM_PROD_S3_BUCKET:?Set WM_PROD_S3_BUCKET in ~/.profile}"
+ENV_CONFIG[prod_cloudfront]="${PROD_CLOUDFRONT_ID:?Set PROD_CLOUDFRONT_ID in ~/.profile}"
 ENV_CONFIG[prod_url]="https://workermill.com"
 ENV_CONFIG[prod_tf_dir]="infrastructure/terraform/environments/prod"
 
 # Development environment - resource names from ~/.workermill/env
-ENV_CONFIG[dev_ecs_cluster]="${WM_DEV_ECS_CLUSTER:?Set WM_DEV_ECS_CLUSTER in ~/.workermill/env}"
-ENV_CONFIG[dev_ecs_service]="${WM_DEV_ECS_SERVICE:?Set WM_DEV_ECS_SERVICE in ~/.workermill/env}"
-ENV_CONFIG[dev_s3_bucket]="${WM_DEV_S3_BUCKET:?Set WM_DEV_S3_BUCKET in ~/.workermill/env}"
-ENV_CONFIG[dev_cloudfront]="${DEV_CLOUDFRONT_ID:?Set DEV_CLOUDFRONT_ID in ~/.workermill/env}"
+ENV_CONFIG[dev_ecs_cluster]="${WM_DEV_ECS_CLUSTER:?Set WM_DEV_ECS_CLUSTER in ~/.profile}"
+ENV_CONFIG[dev_ecs_service]="${WM_DEV_ECS_SERVICE:?Set WM_DEV_ECS_SERVICE in ~/.profile}"
+ENV_CONFIG[dev_s3_bucket]="${WM_DEV_S3_BUCKET:?Set WM_DEV_S3_BUCKET in ~/.profile}"
+ENV_CONFIG[dev_cloudfront]="${DEV_CLOUDFRONT_ID:?Set DEV_CLOUDFRONT_ID in ~/.profile}"
 ENV_CONFIG[dev_url]="https://dev.workermill.com"
 ENV_CONFIG[dev_tf_dir]="infrastructure/terraform/environments/dev"
 
@@ -239,7 +238,7 @@ invoke_bastion() {
     local response_file=$(mktemp)
     local payload="{\"action\":\"$action\"${extra_payload:+,$extra_payload}}"
 
-    MSYS_NO_PATHCONV=1 aws lambda invoke --function-name "${WM_BASTION_LAMBDA:?Set WM_BASTION_LAMBDA in ~/.workermill/env}" --payload "$payload" --cli-binary-format raw-in-base64-out --region "$AWS_REGION" "$response_file" > /dev/null 2>&1
+    MSYS_NO_PATHCONV=1 aws lambda invoke --function-name "${WM_BASTION_LAMBDA:?Set WM_BASTION_LAMBDA in ~/.profile}" --payload "$payload" --cli-binary-format raw-in-base64-out --region "$AWS_REGION" "$response_file" > /dev/null 2>&1
 
     cat "$response_file"
     rm -f "$response_file"

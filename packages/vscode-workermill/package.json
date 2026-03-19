@@ -406,6 +406,39 @@
         }
       }
     },
+    "walkthroughs": [
+      {
+        "id": "workermill.getStarted",
+        "title": "Get Started with WorkerMill",
+        "description": "Set up AI coding agents that plan, code, and open pull requests from your editor.",
+        "steps": [
+          {
+            "id": "signIn",
+            "title": "Sign in to WorkerMill",
+            "description": "Connect your account to start running AI workers.\n\n[Sign in with GitHub](command:workermill.signUpWithGitHub)\n[Sign in with Google](command:workermill.signInWithGoogle)",
+            "media": {
+              "markdown": "media/walkthrough-signin.md"
+            }
+          },
+          {
+            "id": "connectRepo",
+            "title": "Connect a repository",
+            "description": "Install the GitHub App or paste a personal access token so workers can read code and open pull requests.\n\n[Open Settings](command:workermill.openSettings)",
+            "media": {
+              "markdown": "media/walkthrough-repo.md"
+            }
+          },
+          {
+            "id": "runTask",
+            "title": "Run your first task",
+            "description": "Right-click any `.md` file and choose **WorkerMill: Run as Task** to send it to an AI worker.\n\n[Open Documentation](https://github.com/jarod-rosenthal/workermill#readme)",
+            "media": {
+              "markdown": "media/walkthrough-task.md"
+            }
+          }
+        ]
+      }
+    ],
     "viewsWelcome": [
       {
         "view": "workermill.teamPanel",

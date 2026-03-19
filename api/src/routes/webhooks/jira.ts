@@ -354,8 +354,8 @@ router.post(
         initialStatus,
       });
 
-      // Fire-and-forget: sync issue relationships (blocks/depends_on) from Jira
-      syncIssueRelationships(task, org, "jira", issueKey);
+      // Sync issue relationships (blocks/depends_on) from Jira
+      await syncIssueRelationships(task, org, "jira", issueKey);
 
       res.status(201).json({
         status: "created",

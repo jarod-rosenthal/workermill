@@ -29,7 +29,7 @@ export interface ClassifyErrorRequest {
 export interface ClassifyErrorResponse {
   category: string;
   fixable: boolean;
-  action: "retry" | "escalate" | "skip" | "abort";
+  action: "auto_retry" | "escalate" | "skip";
   affectedFiles: string[];
   summary: string;
   fixStrategy: string | null;

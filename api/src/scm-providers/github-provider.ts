@@ -802,40 +802,43 @@ export class GitHubProvider extends BaseScmProvider {
       }
     }
 
-    // 2. Commit Status API (legacy status checks)
-    // Only fetch if no check runs found — many repos use one or the other
-    if (statuses.length === 0) {
-      const statusResult = await this.httpRequest<{
+    // 2. Commit Status API (legacy status checks from third-party CI tools)
+    // Always fetch both — repos commonly use GitHub Actions (check runs) AND
+    // third-party tools like CodeCov/Snyk/SonarQube (commit statuses).
+    const checkRunNames = new Set(statuses.map((s) => s.name));
+    const statusResult = await this.httpRequest<{
+      state: string;
+      statuses: Array<{
         state: string;
-        statuses: Array<{
-          state: string;
-          context: string;
-          target_url: string | null;
-        }>;
-      }>(
-        `${this.getApiBaseUrl()}/repos/${repo.fullPath}/commits/${commitSha}/status`,
-        { headers: this.buildHeaders(token) },
-        "Get commit status"
-      );
+        context: string;
+        target_url: string | null;
+      }>;
+    }>(
+      `${this.getApiBaseUrl()}/repos/${repo.fullPath}/commits/${commitSha}/status`,
+      { headers: this.buildHeaders(token) },
+      "Get commit status"
+    );
 
-      if (statusResult.ok && statusResult.data) {
-        for (const s of statusResult.data.statuses) {
-          let state: CommitStatus["state"];
-          if (s.state === "success") {
-            state = "passed";
-          } else if (s.state === "pending") {
-            state = "pending";
-          } else {
-            state = "failed";
-          }
+    if (statusResult.ok && statusResult.data) {
+      for (const s of statusResult.data.statuses) {
+        // Skip if already reported by check runs (dedup by name)
+        if (checkRunNames.has(s.context)) continue;
 
-          statuses.push({
-            state,
-            name: s.context,
-            url: s.target_url || undefined,
-            rawState: s.state,
-          });
+        let state: CommitStatus["state"];
+        if (s.state === "success") {
+          state = "passed";
+        } else if (s.state === "pending") {
+          state = "pending";
+        } else {
+          state = "failed";
         }
+
+        statuses.push({
+          state,
+          name: s.context,
+          url: s.target_url || undefined,
+          rawState: s.state,
+        });
       }
     }
 

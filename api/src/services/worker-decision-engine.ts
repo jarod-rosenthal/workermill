@@ -1070,8 +1070,8 @@ export async function getWorkerConfig(): Promise<WorkerConfig> {
       "# Project\n\nThis project uses TypeScript and follows standard patterns.\n",
     defaults: {
       blockerMaxAutoRetries: 3,
-      maxReviewRevisions: 3,
-      maxPerStoryRevisions: 2,
+      maxReviewRevisions: 4,
+      maxPerStoryRevisions: 0,
     },
     promptTemplates: {
       coordinationInstructions: COORDINATION_INSTRUCTIONS,

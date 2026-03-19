@@ -371,20 +371,34 @@ export class BitBucketProvider extends BaseScmProvider {
     const token = await this.getToken();
     if (!token) return false;
 
-    // Get the branch tip
-    const branchResult = await this.httpRequest<BitBucketRef>(
-      `${this.getApiBaseUrl()}/repositories/${repo.fullPath}/refs/branches/${branchName}`,
-      { headers: this.buildHeaders(token) },
-      "Get branch"
-    );
+    // Bitbucket doesn't have a compare API like GitHub/GitLab.
+    // Walk the commit history on the branch to check if the commit is reachable.
+    const pageSize = 50;
+    const maxPages = 10; // Limit to 500 commits
 
-    if (!branchResult.ok || !branchResult.data) return false;
+    for (let page = 1; page <= maxPages; page++) {
+      const result = await this.httpRequest<{
+        values: Array<{ hash: string }>;
+        next?: string;
+      }>(
+        `${this.getApiBaseUrl()}/repositories/${repo.fullPath}/commits/${encodeURIComponent(branchName)}?pagelen=${pageSize}&page=${page}`,
+        { headers: this.buildHeaders(token) },
+        `Get commits on branch page ${page}`
+      );
 
-    // Check if commit is an ancestor using the commits endpoint
-    // BitBucket doesn't have a direct compare API like GitHub
-    // For now, just check if the commit matches the tip
-    // A proper implementation would walk the commit history
-    return branchResult.data.target.hash.startsWith(commitSha);
+      if (!result.ok || !result.data) return false;
+
+      for (const commit of result.data.values) {
+        if (commit.hash === commitSha || commit.hash.startsWith(commitSha)) {
+          return true;
+        }
+      }
+
+      // No more pages — commit not found in branch history
+      if (!result.data.next) return false;
+    }
+
+    return false;
   }
 
   // =========================================================================

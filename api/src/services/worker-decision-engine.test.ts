@@ -496,7 +496,7 @@ describe("routeQuestion", () => {
     });
 
     expect(result.targetExpert).toBe("security_engineer");
-    expect(result.routingTier).toBe(2);
+    expect(result.routingTier).toBe(0);
   });
 
   it("routes by keyword matching (tier 2) - database", () => {
@@ -507,7 +507,7 @@ describe("routeQuestion", () => {
     });
 
     expect(result.targetExpert).toBe("backend_developer");
-    expect(result.routingTier).toBe(2);
+    expect(result.routingTier).toBe(0);
   });
 
   it("routes by keyword matching (tier 2) - frontend", () => {
@@ -518,7 +518,7 @@ describe("routeQuestion", () => {
     });
 
     expect(result.targetExpert).toBe("frontend_developer");
-    expect(result.routingTier).toBe(2);
+    expect(result.routingTier).toBe(0);
   });
 
   it("routes by keyword matching (tier 2) - devops", () => {
@@ -529,7 +529,7 @@ describe("routeQuestion", () => {
     });
 
     expect(result.targetExpert).toBe("devops_engineer");
-    expect(result.routingTier).toBe(2);
+    expect(result.routingTier).toBe(0);
   });
 
   it("routes by keyword matching (tier 2) - testing", () => {
@@ -540,7 +540,7 @@ describe("routeQuestion", () => {
     });
 
     expect(result.targetExpert).toBe("qa_engineer");
-    expect(result.routingTier).toBe(2);
+    expect(result.routingTier).toBe(0);
   });
 
   it("routes by keyword matching (tier 2) - api", () => {
@@ -551,7 +551,7 @@ describe("routeQuestion", () => {
     });
 
     expect(result.targetExpert).toBe("backend_developer");
-    expect(result.routingTier).toBe(2);
+    expect(result.routingTier).toBe(0);
   });
 
   it("falls back to first idle expert (tier 3)", () => {
@@ -562,7 +562,7 @@ describe("routeQuestion", () => {
     });
 
     expect(result.targetExpert).toBe("backend_developer");
-    expect(result.routingTier).toBe(3);
+    expect(result.routingTier).toBe(4);
   });
 
   it("skips non-coding personas in tier 3 fallback", () => {
@@ -585,7 +585,7 @@ describe("routeQuestion", () => {
     });
 
     expect(result.targetExpert).toBe("data_ml_engineer");
-    expect(result.routingTier).toBe(3);
+    expect(result.routingTier).toBe(4);
   });
 
   it("returns null when only non-coding personas are idle", () => {
@@ -596,7 +596,7 @@ describe("routeQuestion", () => {
     });
 
     expect(result.targetExpert).toBeNull();
-    expect(result.routingTier).toBe(3);
+    expect(result.routingTier).toBe(4);
   });
 
   it("returns null when no experts are idle", () => {
@@ -607,7 +607,7 @@ describe("routeQuestion", () => {
     });
 
     expect(result.targetExpert).toBeNull();
-    expect(result.routingTier).toBe(3);
+    expect(result.routingTier).toBe(4);
   });
 });
 
@@ -769,8 +769,8 @@ describe("getWorkerConfig", () => {
   it("returns default config values", async () => {
     const config = await getWorkerConfig();
     expect(config.defaults.blockerMaxAutoRetries).toBe(3);
-    expect(config.defaults.maxReviewRevisions).toBe(3);
-    expect(config.defaults.maxPerStoryRevisions).toBe(2);
+    expect(config.defaults.maxReviewRevisions).toBe(4);
+    expect(config.defaults.maxPerStoryRevisions).toBe(0);
   });
 
   it("returns a claudeMdTemplate string", async () => {

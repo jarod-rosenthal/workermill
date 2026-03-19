@@ -232,7 +232,7 @@ router.post(
 
         if (task.skipManagerReview === false) {
           // Atomic update — guard against concurrent webhook deliveries
-          await taskRepo
+          const approveResult = await taskRepo
             .createQueryBuilder()
             .update(WorkerTask)
             .set({
@@ -244,6 +244,11 @@ router.post(
               statuses: ["pr_created", "review_requested"],
             })
             .execute();
+
+          if (approveResult.affected === 0) {
+            res.json({ status: "ignored", reason: "Task status already changed" });
+            return;
+          }
 
           // Sync KbCard column to "Approved"
           syncKbCardColumn(task.id, "pr_approved").catch((err) => {
@@ -271,7 +276,7 @@ router.post(
         }
 
         // No review label - re-queue for deployment — atomic update
-        await taskRepo
+        const requeueResult = await taskRepo
           .createQueryBuilder()
           .update(WorkerTask)
           .set({
@@ -288,6 +293,11 @@ router.post(
             statuses: ["pr_created", "review_requested", "pr_approved"],
           })
           .execute();
+
+        if (requeueResult.affected === 0) {
+          res.json({ status: "ignored", reason: "Task status already changed" });
+          return;
+        }
 
         logger.info(
           "BitBucket PR approved, task re-queued for deployment",
@@ -439,7 +449,7 @@ router.post(
 
         if (task.skipManagerReview === false) {
           // Atomic update — guard against concurrent webhook deliveries
-          await taskRepo
+          const approveResult2 = await taskRepo
             .createQueryBuilder()
             .update(WorkerTask)
             .set({
@@ -451,6 +461,12 @@ router.post(
               statuses: ["pr_created", "review_requested"],
             })
             .execute();
+
+          if (approveResult2.affected === 0) {
+            res.json({ status: "ignored", reason: "Task status already changed" });
+            return;
+          }
+
           // Sync KbCard column to "Approved"
           syncKbCardColumn(task.id, "pr_approved").catch((err) => {
             logger.warn("Failed to sync KbCard column from BitBucket webhook", { taskId: task.id, error: err instanceof Error ? err.message : String(err) });
@@ -464,7 +480,7 @@ router.post(
         }
 
         // Atomic update — guard against concurrent webhook deliveries
-        await taskRepo
+        const requeueResult = await taskRepo
           .createQueryBuilder()
           .update(WorkerTask)
           .set({
@@ -481,6 +497,12 @@ router.post(
             statuses: ["pr_created", "review_requested", "pr_approved"],
           })
           .execute();
+
+        if (requeueResult.affected === 0) {
+          res.json({ status: "ignored", reason: "Task status already changed" });
+          return;
+        }
+
         res.json({
           status: "processed",
           taskId: task.id,

@@ -285,17 +285,19 @@ export class GitLabProvider extends BaseScmProvider {
 
     const projectPath = this.encodeProjectPath(repo.fullPath);
 
-    // Use compare API to check if commit is in branch
+    // Compare from branch→commit: if result has 0 commits, the commit is
+    // reachable from the branch (i.e., the branch contains the commit).
+    // Reversing the direction (branch as "from") means commits returned are
+    // those reachable from commitSha but NOT from branchName — empty = contained.
     const result = await this.httpRequest<GitLabCompare>(
-      `${this.getApiBaseUrl()}/projects/${projectPath}/repository/compare?from=${commitSha}&to=${encodeURIComponent(branchName)}`,
+      `${this.getApiBaseUrl()}/projects/${projectPath}/repository/compare?from=${encodeURIComponent(branchName)}&to=${commitSha}`,
       { headers: this.buildHeaders(token) },
       "Compare commits"
     );
 
     if (!result.ok || !result.data) return false;
 
-    // If commits array is empty or has commits, the branch is ahead or at the commit
-    return result.data.commits.length >= 0;
+    return result.data.commits.length === 0;
   }
 
   // =========================================================================

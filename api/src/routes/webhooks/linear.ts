@@ -377,8 +377,8 @@ router.post(
       orgId: org.id,
     });
 
-    // Fire-and-forget: sync issue relationships (blocks/depends_on) from Linear
-    syncIssueRelationships(task, org, "linear", issueId);
+    // Sync issue relationships (blocks/depends_on) from Linear
+    await syncIssueRelationships(task, org, "linear", issueId);
 
     res.status(201).json({
       status: "created",
@@ -528,7 +528,7 @@ router.post(
 
       let model = org.defaultWorkerModel || "";
       if (labelNames.includes("opus")) model = "claude-opus-4-6";
-      else if (labelNames.includes("sonnet")) model = "claude-sonnet-4-5-20250929";
+      else if (labelNames.includes("sonnet")) model = "claude-sonnet-4-6";
       else if (labelNames.includes("haiku")) model = "claude-haiku-4-5-20251001";
 
       // Epic mode is now the DEFAULT (standard workflow deprecated)
@@ -590,8 +590,8 @@ router.post(
         initialStatus,
       });
 
-      // Fire-and-forget: sync issue relationships (blocks/depends_on) from Linear
-      syncIssueRelationships(task, org, "linear", issue.id);
+      // Sync issue relationships (blocks/depends_on) from Linear
+      await syncIssueRelationships(task, org, "linear", issue.id);
 
       res.status(201).json({
         status: "created",

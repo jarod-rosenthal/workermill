@@ -17,13 +17,13 @@ const valueProps = [
   },
   {
     icon: Wallet,
-    title: "Start building today. From $19/mo.",
+    title: "Open source. Run it yourself.",
     description:
-      "Already have an Anthropic account? WorkerMill turns it into an AI engineering team. Start with Pro for local execution, upgrade to Max for parallel experts and cloud features.",
+      "WorkerMill is open source and free to run locally. Bring your own API keys from any supported provider. Cloud-hosted services are coming soon.",
     bullets: [
-      "Pro: Local execution + your Anthropic account from $19/mo",
-      "Tech lead review included on every plan",
-      "Upgrade to Max for parallel execution and cloud",
+      "Run the full platform locally with your own API keys",
+      "Tech lead review and quality gates included",
+      "Cloud services coming soon",
       "BYOK: Bring your own API key, zero markup",
     ],
     visual: "subscription",
@@ -93,30 +93,30 @@ function SubscriptionVisual() {
   return (
     <div className="bg-card border border-border rounded-xl p-6 space-y-4">
       <div className="flex items-center justify-between pb-4 border-b border-border">
-        <span className="font-medium text-sm">Plans</span>
-        <span className="text-xs text-muted-foreground">Start free</span>
+        <span className="font-medium text-sm">How to Run</span>
+        <span className="text-xs text-muted-foreground">Open source</span>
       </div>
       <div className="space-y-3">
         <div className="flex items-center justify-between p-3 rounded-lg bg-green-500/10 border border-green-500/20">
           <div>
-            <div className="text-sm font-medium">Free</div>
-            <div className="text-xs text-muted-foreground">Local + your Anthropic account, unlimited tasks</div>
+            <div className="text-sm font-medium">Self-Hosted</div>
+            <div className="text-xs text-muted-foreground">Run locally with your own API keys</div>
           </div>
-          <span className="text-lg font-bold text-green-500">$0</span>
+          <span className="text-lg font-bold text-green-500">Free</span>
         </div>
         <div className="flex items-center justify-between p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
           <div>
-            <div className="text-sm font-medium">Pro</div>
-            <div className="text-xs text-muted-foreground">5 concurrent tasks, local or cloud, 15 seats</div>
+            <div className="text-sm font-medium">Cloud</div>
+            <div className="text-xs text-muted-foreground">Managed infrastructure, team features</div>
           </div>
-          <span className="text-lg font-bold text-blue-500">$14.50<span className="text-xs font-normal">/mo</span></span>
+          <span className="text-sm font-medium text-blue-500">Coming Soon</span>
         </div>
         <div className="flex items-center justify-between p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
           <div>
             <div className="text-sm font-medium">Enterprise</div>
-            <div className="text-xs text-muted-foreground">SSO, compliance, dedicated pool</div>
+            <div className="text-xs text-muted-foreground">SSO, compliance, dedicated support</div>
           </div>
-          <span className="text-lg font-bold text-purple-500">Custom</span>
+          <span className="text-sm font-medium text-purple-500">Coming Soon</span>
         </div>
       </div>
     </div>

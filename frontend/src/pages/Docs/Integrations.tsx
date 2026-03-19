@@ -82,7 +82,7 @@ export default function Integrations() {
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
-              { name: "Anthropic Claude", models: "Opus 4.6, Sonnet 5, Sonnet 4.5, Haiku 4.5", color: "text-orange-400", desc: "Best for complex coding tasks" },
+              { name: "Anthropic Claude", models: "Opus 4.6, Sonnet 4.6, Haiku 4.5", color: "text-orange-400", desc: "Best for complex coding tasks" },
               { name: "OpenAI", models: "GPT-4o, o3-mini, o1", color: "text-green-400", desc: "Strong general purpose" },
               { name: "Google Gemini", models: "Gemini 3 Pro, Gemini 2.0 Flash", color: "text-blue-400", desc: "Fast and efficient" },
               { name: "Ollama", models: "Llama, Qwen, DeepSeek", color: "text-purple-400", desc: "Self-hosted models" },

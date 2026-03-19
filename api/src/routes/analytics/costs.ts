@@ -711,7 +711,9 @@ router.post("/cost-simulation", async (req: Request, res: Response) => {
       // Claude Haiku 4.5 - $1.00/$5.00 per MTok
       "claude-haiku-4-5": { input: 1.0, output: 5.0 },
       "claude-haiku-4-5-20251001": { input: 1.0, output: 5.0 },
-      // Claude Sonnet 4.5 - $3.00/$15.00 per MTok
+      // Claude Sonnet 4.6 - $3.00/$15.00 per MTok
+      "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
+      // Claude Sonnet 4.5 (legacy) - $3.00/$15.00 per MTok
       "claude-sonnet-4-5": { input: 3.0, output: 15.0 },
       "claude-sonnet-4-5-20250929": { input: 3.0, output: 15.0 },
       // Claude Opus 4.6 - $5.00/$25.00 per MTok

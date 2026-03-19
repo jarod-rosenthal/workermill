@@ -10,7 +10,7 @@ const faqItems: FAQItem[] = [
   {
     question: "How does pricing work?",
     answer:
-      "WorkerMill offers three plans: Pro, Max, and Enterprise. Pro ($19/mo) starts with a 90-day free trial — run Anthropic Claude models locally on your hardware with GitHub Issues integration, up to 3 parallel experts, and simplified planning. No credit card required. Max ($39/mo, coming soon) unlocks all integrations (Jira, Linear, GitLab, Bitbucket), all AI providers, cloud execution, advanced planning with critic review, CI/CD deployments, and Codebase RAG. Enterprise offers unlimited everything with SSO, compliance, and dedicated support.",
+      "WorkerMill is open source and free to run locally — you bring your own API keys and run the full platform on your own infrastructure. Cloud-hosted services with managed infrastructure and team features are coming soon. For enterprise needs including SSO, compliance, and dedicated support, contact us at sales@workermill.com.",
   },
   {
     question: "What is Epic Mode and why is it the default?",
@@ -35,17 +35,17 @@ const faqItems: FAQItem[] = [
   {
     question: "What AI models power the workers?",
     answer:
-      "The Pro plan uses Anthropic Claude models (Opus, Sonnet, Haiku) — the best coding models available. Max and Enterprise unlock all major providers: OpenAI (GPT-4o, o1), Google Gemini, and self-hosted Ollama. Choose the model that fits your needs — from high-capability frontier models for complex tasks to faster, cost-effective options for routine work. Use labels like 'haiku', 'sonnet', or 'opus' to select specific models.",
+      "WorkerMill supports all major AI providers: Anthropic Claude (Opus, Sonnet, Haiku), OpenAI, Google Gemini, and self-hosted Ollama. Choose the provider and model that fits your needs — from high-capability frontier models for complex tasks to faster, cost-effective options for routine work. Use labels like 'haiku', 'sonnet', or 'opus' to select specific models.",
   },
   {
     question: "Can I create custom personas?",
     answer:
-      "Yes — Max and Enterprise plans include Persona Studio, where you can create custom expert personas with your own directives, scripts, and domain knowledge. Define personas like 'unity_game_dev' or 'shopify_expert' tailored to your stack. Pro plan includes all default personas.",
+      "Yes — Persona Studio lets you create custom expert personas with your own directives, scripts, and domain knowledge. Define personas like 'unity_game_dev' or 'shopify_expert' tailored to your stack. All default personas are included out of the box.",
   },
   {
     question: "What are the 'improve' and 'critic' labels?",
     answer:
-      "The 'improve' label enables self-improvement mode, where the worker analyzes its completed work and generates insights for future tasks. The 'critic' label adds a Planner-Critic validation step before execution, where an AI critic reviews and improves the execution plan. Both are optional. Basic planning is available on all plans; the advanced critic review loop is available on Max and Enterprise.",
+      "The 'improve' label enables self-improvement mode, where the worker analyzes its completed work and generates insights for future tasks. The 'critic' label adds a Planner-Critic validation step before execution, where an AI critic reviews and improves the execution plan. Both are optional and available to all users.",
   },
   {
     question: "How do workers interact with my production environment?",

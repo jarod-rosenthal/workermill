@@ -19,7 +19,7 @@ export function formatModelName(
   // Fallback parsing for any model ID format
   const lower = modelId.toLowerCase();
   // Anthropic models
-  if (lower.includes("opus") && lower.includes("4-5")) return "Opus 4.5";
+  if (lower.includes("opus") && lower.includes("4-6")) return "Opus 4.6";
   if (lower.includes("opus")) return "Opus 4";
   if (lower.includes("haiku")) return "Haiku 4.5";
   if (lower.includes("sonnet") && lower.includes("3-5"))

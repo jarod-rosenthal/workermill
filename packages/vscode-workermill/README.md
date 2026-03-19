@@ -29,7 +29,7 @@ All AI workers run inside Docker containers for filesystem and network isolation
 
 1. Install the extension
 2. Open the WorkerMill sidebar
-3. Sign in with **GitHub**, **Google**, or **email** to connect to WorkerMill Cloud
+3. Sign in with **GitHub** or **Google** to connect to WorkerMill Cloud
 4. The extension downloads the agent binary, connects to the API, and you're ready
 
 Cloud registration at [workermill.com](https://workermill.com) is coming soon. In the meantime, you can run the full platform locally for development — see [Local Dev Setup](https://github.com/jarod-rosenthal/workermill#getting-started).

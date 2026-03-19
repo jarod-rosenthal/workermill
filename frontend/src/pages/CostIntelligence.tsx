@@ -706,7 +706,7 @@ export default function CostIntelligence() {
                 className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-sm"
               >
                 <option value="claude-haiku-4-5">Claude Haiku 4.5 ($1/$5)</option>
-                <option value="claude-sonnet-4-5">Claude Sonnet 4.5 ($3/$15)</option>
+                <option value="claude-sonnet-4-6">Claude Sonnet 4.6 ($3/$15)</option>
                 <option value="claude-opus-4-6">Claude Opus 4.6 ($5/$25)</option>
                 <option value="gpt-4o">GPT-4o ($2.5/$10)</option>
                 <option value="gpt-4o-mini">GPT-4o Mini ($0.15/$0.6)</option>

@@ -83,9 +83,9 @@ const scmProviders = [
 
 // AI Providers
 const aiProviders = [
-  { name: "Anthropic Claude", models: "Opus 4.5, Sonnet 4.5, Haiku 4.5", color: "text-orange-400" },
-  { name: "OpenAI", models: "GPT-4o, o1, o1-mini", color: "text-green-400" },
-  { name: "Google", models: "Gemini 2.0, Gemini Pro", color: "text-blue-400" },
+  { name: "Anthropic Claude", models: "Opus 4.6, Sonnet 4.6, Haiku 4.5", color: "text-orange-400" },
+  { name: "OpenAI", models: "GPT-4o, o3-mini, o1", color: "text-green-400" },
+  { name: "Google", models: "Gemini 2.0 Flash, Gemini Pro", color: "text-blue-400" },
   { name: "Ollama", models: "Self-hosted (Llama, Qwen, etc.)", color: "text-purple-400" },
 ];
 

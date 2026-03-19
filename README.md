@@ -31,7 +31,7 @@
 Most AI coding tools are single-agent, single-file, one-shot. WorkerMill is an **orchestration layer** — it coordinates multiple AI experts working in parallel on your codebase, with real quality enforcement.
 
 - **Full pipeline, not a chatbot** — Planning, decomposition, parallel expert execution, quality gates, and PR delivery. Submit a task or an entire product spec.
-- **12 worker personas** — Backend, frontend, devops, security, QA, and more. Auto-assigned based on task content, or manually selected.
+- **13 worker personas** — Backend, frontend, devops, security, QA, and more. Auto-assigned based on task content, or manually selected.
 - **Two-phase quality gates** — Pre-commit (lint, typecheck, test, build) + post-push CI polling. Gate failures trigger automatic fix agents.
 - **Any provider, any SCM** — Anthropic, OpenAI, Google, Ollama. GitHub, GitLab, Bitbucket. Mix and match per role.
 
@@ -41,23 +41,23 @@ Most AI coding tools are single-agent, single-file, one-shot. WorkerMill is an *
 
 You can run the full WorkerMill platform locally right now. This gives you the API server, web dashboard, and worker execution — the same stack that powers the cloud platform.
 
-**Prerequisites:** Node.js 22+, Docker, a Claude OAuth token (run `claude auth login`)
+**Prerequisites:** Node.js 22+, Docker, a Claude OAuth token (run `claude auth login`), worker image built (`./bin/local-workermill build-worker`)
 
 ```bash
 git clone https://github.com/jarod-rosenthal/workermill.git
 cd workermill
 
-# Start PostgreSQL + Redis
+# Install dependencies
+cd api && npm install && cd ../frontend && npm install && cd ..
+
+# Build the worker Docker image (first time only)
+./bin/local-workermill build-worker
+
+# Start everything: PostgreSQL, Redis, API server, and web dashboard
 ./bin/local-workermill start
-
-# API server (auto-reloads)
-cd api && npm install && npm run dev    # → http://localhost:3001
-
-# Web dashboard (auto-reloads)
-cd frontend && npm install && npm run dev    # → http://localhost:5173
 ```
 
-Your dashboard is at `http://localhost:5173`. Create tasks, submit PRDs, and watch workers execute in real time.
+This starts PostgreSQL (:5433), Redis (:6379), the API server (http://localhost:3001), and the web dashboard (http://localhost:5173). Create tasks, submit PRDs, and watch workers execute in real time.
 
 Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=workermill.workermill) for a sidebar with task management, real-time log streaming, and live code diffs as workers write. Sign in with GitHub, Google, or email.
 
@@ -162,7 +162,7 @@ Bring your own API keys. The execution pipeline is identical regardless of provi
 | **Google** | Gemini 3.1 Pro, Gemini Flash | Vercel AI SDK |
 | **Ollama** | Local/self-hosted models | Vercel AI SDK + codebase RAG |
 
-### Worker Personas (12 roles)
+### Worker Personas (13 roles)
 
 | Persona | Best For |
 |---------|----------|
@@ -178,6 +178,7 @@ Bring your own API keys. The execution pipeline is identical regardless of provi
 | **Tech Lead** | Code review, standards enforcement |
 | **Project Manager** | Task triage, planning, reports |
 | **Support Agent** | Customer-facing issue resolution |
+| **Manager** | PR review, log analysis, quality oversight |
 
 Personas are auto-assigned based on task content or manually selected.
 
@@ -254,15 +255,17 @@ bin/                        CLI scripts (local-workermill, bastion)
 git clone https://github.com/jarod-rosenthal/workermill.git
 cd workermill
 
-# Start local services (PostgreSQL on :5433, Redis on :6379)
+# Install dependencies
+cd api && npm install && cd ../frontend && npm install && cd ..
+
+# Build the worker Docker image (first time only)
+./bin/local-workermill build-worker
+
+# Start everything: PostgreSQL, Redis, API (tsx watch), and frontend (Vite HMR)
 ./bin/local-workermill start
-
-# API server (auto-reloads via tsx watch)
-cd api && npm install && npm run dev    # → http://localhost:3001
-
-# Web dashboard (auto-reloads via Vite HMR)
-cd frontend && npm install && npm run dev    # → http://localhost:5173
 ```
+
+Use `--skip-fe` to start without the frontend, or `--skip-db` if you already have PostgreSQL running. See `./bin/local-workermill --help` for all options.
 
 ### Running Tests
 

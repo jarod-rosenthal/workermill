@@ -8,7 +8,6 @@ import Features from "./Features";
 import { UseCases } from "./UseCases";
 import { Metrics } from "./Metrics";
 import { Integrations } from "./Integrations";
-import { Pricing } from "./Pricing";
 import { FAQ } from "./FAQ";
 
 export default function Home() {
@@ -31,9 +30,6 @@ export default function Home() {
             </a>
             <a href="#workers" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Workers
-            </a>
-            <a href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Pricing
             </a>
             <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Features
@@ -85,10 +81,6 @@ export default function Home() {
           <Integrations />
         </div>
 
-        <div id="pricing">
-          <Pricing />
-        </div>
-
         <div id="faq">
           <FAQ />
         </div>
@@ -102,13 +94,13 @@ export default function Home() {
 
           <div className="relative max-w-3xl mx-auto px-6 text-center">
             <h2 className="text-3xl lg:text-5xl font-bold mb-6">
-              <span className="text-foreground">Stop overpaying </span>
+              <span className="text-foreground">AI coding agents, </span>
               <span className="text-gradient-animated">
-                for AI coding.
+                orchestrated.
               </span>
             </h2>
             <p className="text-lg text-muted-foreground mb-8 max-w-xl mx-auto">
-              Get Opus-quality results at Haiku prices. Feedback loops make cheap models smart.
+              Multi-expert execution, quality gates, and real PR delivery. Open source and free to run locally.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
@@ -119,14 +111,16 @@ export default function Home() {
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </Link>
               <a
-                href="#pricing"
+                href="https://github.com/jarod-rosenthal/workermill"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="inline-flex items-center justify-center gap-2 px-8 py-4 text-foreground font-medium rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300"
               >
-                View Pricing
+                View on GitHub
               </a>
             </div>
             <p className="mt-8 text-sm text-muted-foreground">
-              Starting at $29/month. Bring your own API keys.
+              Cloud services coming soon. Bring your own API keys.
             </p>
           </div>
         </section>
@@ -141,7 +135,7 @@ export default function Home() {
                 WorkerMill
               </span>
               <span className="text-sm text-muted-foreground">
-                Premium AI coding at budget prices
+                Open-source AI coding orchestration
               </span>
             </div>
             <div className="flex items-center gap-6 text-sm text-muted-foreground">

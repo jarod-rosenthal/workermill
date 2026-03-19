@@ -22,7 +22,7 @@ The setup wizard launches automatically after install. It will:
 1. Check all prerequisites (auto-installs Claude CLI if missing)
 2. Prompt for your API key (from Settings > Integrations on the dashboard)
 3. Validate connectivity to the WorkerMill API
-4. Authenticate to private ECR and pull the worker Docker image
+4. Pull the worker Docker image
 5. Save configuration to `~/.workermill/config.json`
 
 SCM tokens (GitHub/GitLab/Bitbucket) are managed via **Settings > Integrations** on the dashboard — no local token setup needed.
@@ -30,17 +30,26 @@ SCM tokens (GitHub/GitLab/Bitbucket) are managed via **Settings > Integrations**
 ## Usage
 
 ```bash
-# Start the agent (foreground)
+# Start the agent (background daemon mode, default)
 workermill-agent start
 
-# Start in background (daemon mode)
-workermill-agent start --detach
+# Start in foreground (show logs in terminal)
+workermill-agent start --foreground
 
 # Check status
 workermill-agent status
 
-# Stop a background agent
+# View logs
+workermill-agent logs
+
+# Stop the agent
 workermill-agent stop
+
+# Pull/update the Docker sandbox image
+workermill-agent pull
+
+# Update the agent binary
+workermill-agent update
 ```
 
 ## How It Works
@@ -61,7 +70,7 @@ Config is stored at `~/.workermill/config.json` (created by `workermill-agent se
 | `apiKey` | — | Organization API key |
 | `agentId` | `agent-<hostname>` | Unique agent identifier |
 | `maxWorkers` | `2` | Max concurrent worker containers |
-| `workerImage` | Private ECR image | Docker image for workers (requires AWS credentials) |
+| `dockerImage` | GHCR image | Docker image for workers |
 
 ## Troubleshooting
 
@@ -71,4 +80,4 @@ Config is stored at `~/.workermill/config.json` (created by `workermill-agent se
 | Auth failure | Check API key in Settings > Integrations |
 | Docker not found | Install Docker Desktop and ensure it's running |
 | Claude CLI not found | See install instructions above |
-| Image pull fails | Ensure AWS CLI is configured (`aws configure`) with ECR read access |
+| Image pull fails | Ensure Docker is running. Run `workermill-agent pull` to retry |

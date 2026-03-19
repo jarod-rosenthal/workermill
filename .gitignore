@@ -1,8 +1,3 @@
-# Working docs (local only)
-docs/
-.plan
-CLAUDE.md
-
 # Compiled TypeScript output in source directories
 api/src/**/*.js
 api/src/**/*.d.ts

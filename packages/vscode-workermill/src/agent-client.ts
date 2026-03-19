@@ -274,7 +274,7 @@ export class AgentClient extends EventEmitter {
       boardName?: string;
     },
     onProgress: (message: string) => void,
-  ): Promise<{ boardId: string; boardName: string; cardCount: number }> {
+  ): Promise<{ boardId: string | null; boardName: string; cardCount: number; parentIssueUrl?: string }> {
     return new Promise((resolve, reject) => {
       if (!this.port) return reject(new Error("Not connected"));
       const body = JSON.stringify(payload);

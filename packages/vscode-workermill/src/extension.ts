@@ -970,11 +970,15 @@ export function activate(context: vscode.ExtensionContext): void {
           );
 
           if (action === "Open in Dashboard") {
-            vscode.env.openExternal(
-              vscode.Uri.parse(
-                `https://workermill.com/boards/${result.boardId}`,
-              ),
-            );
+            if (result.parentIssueUrl) {
+              vscode.env.openExternal(vscode.Uri.parse(result.parentIssueUrl));
+            } else if (result.boardId) {
+              vscode.env.openExternal(
+                vscode.Uri.parse(
+                  `https://workermill.com/boards/${result.boardId}`,
+                ),
+              );
+            }
           }
         } catch (err) {
           const msg =

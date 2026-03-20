@@ -97,9 +97,9 @@ export class User {
   @Column({
     name: "notification_preferences",
     type: "jsonb",
-    default: () => "'{}'"
+    default: () => `'{"push_completions": true, "push_failures": true, "push_blockers": true, "push_plan_approvals": true}'`
   })
-  notificationPreferences: NotificationPreferences | null;
+  notificationPreferences: NotificationPreferences;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;

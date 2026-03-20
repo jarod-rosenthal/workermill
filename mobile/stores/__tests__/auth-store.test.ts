@@ -227,7 +227,15 @@ describe('AuthStore', () => {
       };
       mockedApiClient.post.mockRejectedValue(error);
 
-      await expect(store.signIn('test@example.com', 'wrong-password')).rejects.toThrow();
+      let threwError = false;
+      try {
+        await store.signIn('test@example.com', 'wrong-password');
+      } catch (err) {
+        threwError = true;
+        expect(err).toEqual(error);
+      }
+
+      expect(threwError).toBe(true);
 
       expect(useAuthStore.getState().isAuthenticated).toBe(false);
       expect(useAuthStore.getState().user).toBe(null);

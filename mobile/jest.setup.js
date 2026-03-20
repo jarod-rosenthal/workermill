@@ -2,10 +2,7 @@
 /* eslint-env jest */
 import '@testing-library/jest-native/extend-expect';
 
-// Mock Expo modules - disable individual module mocking to use the ones from the test file
-// jest.mock('expo-notifications');
-// jest.mock('expo-device');
-// jest.mock('expo-secure-store');
+// Expo modules will be mocked in individual test files as needed
 
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () => ({

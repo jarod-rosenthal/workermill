@@ -1,60 +1,93 @@
-import React from 'react';
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import apiClient from '@/lib/api-client';
-import { connectToTaskStream, disconnectSSE, ConnectionState, subscribeToSSEState } from '@/lib/sse-client';
 import { WorkerTask, WorkerTaskStatus } from '@/types/tasks';
+import { apiClient } from '@/lib/api-client';
+import { createDashboardSSE, SSEClient, SSEEvent } from '@/lib/sse-client';
 import { STORAGE_KEYS } from '@/constants/config';
 
-// Task stats interface
 export interface TaskStats {
-  activeWorkers: number;
+  activeWorkersCount: number;
   queueDepth: number;
   periodCostCents: number;
   periodCompleted: number;
 }
 
-// Tasks store state interface
-interface TasksState {
+export interface TasksState {
   // Data
   tasks: WorkerTask[];
   stats: TaskStats | null;
+  lastUpdated: string | null;
 
-  // UI state
+  // Connection state
+  isSSEConnected: boolean;
+  sseError: string | null;
   isLoading: boolean;
   error: string | null;
-  lastUpdated: string | null;
-  sseConnected: boolean;
+
+  // SSE client instance
+  sseClient: SSEClient | null;
 
   // Actions
-  setTasks: (tasks: WorkerTask[]) => void;
-  updateTask: (taskId: string, updates: Partial<WorkerTask>) => void;
-  removeTask: (taskId: string) => void;
-  setStats: (stats: TaskStats) => void;
-  setLoading: (loading: boolean) => void;
-  setError: (error: string | null) => void;
-  setSseConnected: (connected: boolean) => void;
-
-  // API methods
-  fetchTasks: () => Promise<void>;
-  connectSSE: () => void;
+  loadTasks: (token?: string) => Promise<void>;
+  connectSSE: (token: string) => void;
   disconnectSSE: () => void;
-  refreshData: () => Promise<void>; // For pull-to-refresh
+  updateTask: (task: WorkerTask) => void;
+  updateStats: (stats: TaskStats) => void;
 
-  // Task actions
-  cancelTask: (taskId: string) => Promise<void>;
-  retryTask: (taskId: string) => Promise<void>;
-
-  // Computed getters
-  getTasksByStatus: (status: WorkerTaskStatus[]) => WorkerTask[];
+  // Convenience getters
   getActiveTasks: () => WorkerTask[];
   getQueuedTasks: () => WorkerTask[];
   getRecentTasks: () => WorkerTask[];
+  getTaskById: (id: string) => WorkerTask | null;
 }
 
-// SSE connection cleanup function
-let sseStateUnsubscribe: (() => void) | null = null;
+// Helper functions for task categorization
+const getActiveTasks = (tasks: WorkerTask[]): WorkerTask[] => {
+  const activeStatuses: WorkerTaskStatus[] = [
+    'executing',
+    'consolidating',
+    'deploying',
+    'running',
+    'integration_check'
+  ];
+  return tasks.filter(task => activeStatuses.includes(task.status));
+};
+
+const getQueuedTasks = (tasks: WorkerTask[]): WorkerTask[] => {
+  const queuedStatuses: WorkerTaskStatus[] = [
+    'queued',
+    'claimed',
+    'environment_setup',
+    'dispatching'
+  ];
+  return tasks.filter(task => queuedStatuses.includes(task.status));
+};
+
+const getRecentTasks = (tasks: WorkerTask[]): WorkerTask[] => {
+  const recentStatuses: WorkerTaskStatus[] = [
+    'completed',
+    'failed',
+    'cancelled'
+  ];
+
+  const oneDayAgo = new Date();
+  oneDayAgo.setHours(oneDayAgo.getHours() - 24);
+
+  return tasks.filter(task => {
+    if (!recentStatuses.includes(task.status)) return false;
+
+    const completionTime = task.completed_at || task.failed_at;
+    if (!completionTime) return false;
+
+    return new Date(completionTime) > oneDayAgo;
+  }).sort((a, b) => {
+    // Sort by completion time descending (most recent first)
+    const aTime = a.completed_at || a.failed_at || '';
+    const bTime = b.completed_at || b.failed_at || '';
+    return bTime.localeCompare(aTime);
+  });
+};
 
 export const useTasksStore = create<TasksState>()(
   persist(
@@ -62,232 +95,134 @@ export const useTasksStore = create<TasksState>()(
       // Initial state
       tasks: [],
       stats: null,
+      lastUpdated: null,
+      isSSEConnected: false,
+      sseError: null,
       isLoading: false,
       error: null,
-      lastUpdated: null,
-      sseConnected: false,
+      sseClient: null,
 
-      // Basic setters
-      setTasks: (tasks) => set({ tasks, lastUpdated: new Date().toISOString() }),
+      // Actions
+      loadTasks: async (token?: string) => {
+        set({ isLoading: true, error: null });
 
-      updateTask: (taskId, updates) =>
-        set((state) => ({
-          tasks: state.tasks.map((task) =>
-            task.id === taskId ? { ...task, ...updates } : task
-          ),
-          lastUpdated: new Date().toISOString(),
-        })),
-
-      removeTask: (taskId) =>
-        set((state) => ({
-          tasks: state.tasks.filter((task) => task.id !== taskId),
-          lastUpdated: new Date().toISOString(),
-        })),
-
-      setStats: (stats) => set({ stats }),
-      setLoading: (isLoading) => set({ isLoading }),
-      setError: (error) => set({ error }),
-      setSseConnected: (sseConnected) => set({ sseConnected }),
-
-      // Fetch tasks from REST API
-      fetchTasks: async () => {
         try {
-          set({ isLoading: true, error: null });
-
-          const response = await apiClient.get('/control-center');
-          const data = response.data;
+          const data = await apiClient.get<{
+            tasks: WorkerTask[];
+            stats: TaskStats;
+          }>('/control-center');
 
           set({
-            tasks: data.tasks || [],
-            stats: data.stats || null,
-            isLoading: false,
-            error: null,
+            tasks: data.tasks,
+            stats: data.stats,
             lastUpdated: new Date().toISOString(),
+            isLoading: false,
+            error: null
           });
-        } catch (error) {
-          console.error('Failed to fetch tasks:', error);
+
+          // If token provided, also connect SSE
+          if (token) {
+            get().connectSSE(token);
+          }
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to load tasks';
           set({
             isLoading: false,
-            error: error instanceof Error ? error.message : 'Failed to load tasks',
+            error: errorMessage
           });
+          throw error;
         }
       },
 
-      // Connect to SSE stream
-      connectSSE: () => {
-        const state = get();
+      connectSSE: (token: string) => {
+        // Disconnect existing connection
+        get().disconnectSSE();
 
-        // Set up SSE state monitoring
-        if (sseStateUnsubscribe) {
-          sseStateUnsubscribe();
-        }
-
-        sseStateUnsubscribe = subscribeToSSEState((connectionState) => {
-          const isConnected = connectionState === ConnectionState.CONNECTED;
-          get().setSseConnected(isConnected);
-        });
-
-        // Connect to task stream
-        connectToTaskStream(
-          (event) => {
-            try {
-              const data = JSON.parse(event.data);
-
-              // Handle different SSE event types
-              switch (data.type) {
-                case 'task_update':
-                  if (data.task) {
-                    state.updateTask(data.task.id, data.task);
-                  }
-                  break;
-
-                case 'task_created':
-                  if (data.task) {
-                    set((currentState) => ({
-                      tasks: [...currentState.tasks, data.task],
-                      lastUpdated: new Date().toISOString(),
-                    }));
-                  }
-                  break;
-
-                case 'task_removed':
-                  if (data.taskId) {
-                    state.removeTask(data.taskId);
-                  }
-                  break;
-
-                case 'stats_update':
-                  if (data.stats) {
-                    state.setStats(data.stats);
-                  }
-                  break;
-
-                case 'full_refresh':
-                  // Full data refresh from server
-                  if (data.tasks) {
-                    state.setTasks(data.tasks);
-                  }
-                  if (data.stats) {
-                    state.setStats(data.stats);
-                  }
-                  break;
-
-                default:
-                  console.log('Unknown SSE event type:', data.type);
-              }
-            } catch (error) {
-              console.error('Error parsing SSE message:', error);
+        const sseClient = createDashboardSSE(token, {
+          onEvent: (event: SSEEvent) => {
+            switch (event.type) {
+              case 'task_update':
+                if (event.data.type === 'stats') {
+                  get().updateStats(event.data.stats);
+                } else if (event.data.type === 'task') {
+                  get().updateTask(event.data.task);
+                }
+                break;
+              default:
+                // Ignore other event types on dashboard SSE
+                break;
             }
           },
-          (error) => {
-            console.error('SSE connection error:', error);
-            // Error state is handled by SSE client's state changes
+          onStateChange: (state) => {
+            set({
+              isSSEConnected: state === 'connected',
+              sseError: state === 'error' ? 'Connection failed' : null
+            });
+          },
+          onError: (error) => {
+            set({
+              sseError: error.message,
+              isSSEConnected: false
+            });
           }
-        );
-      },
-
-      // Disconnect from SSE
-      disconnectSSE: () => {
-        disconnectSSE();
-        if (sseStateUnsubscribe) {
-          sseStateUnsubscribe();
-          sseStateUnsubscribe = null;
-        }
-        set({ sseConnected: false });
-      },
-
-      // Refresh data (for pull-to-refresh) - fires both REST and SSE in parallel
-      refreshData: async () => {
-        const state = get();
-
-        // Start both operations in parallel
-        const restPromise = state.fetchTasks();
-        const ssePromise = Promise.resolve(state.connectSSE());
-
-        try {
-          // Wait only for REST to complete (SSE connection may still be establishing)
-          await restPromise;
-        } catch (error) {
-          // fetchTasks already handles error state
-          throw error;
-        }
-
-        // SSE connection continues in background
-        await ssePromise;
-      },
-
-      // Cancel a task
-      cancelTask: async (taskId: string) => {
-        try {
-          await apiClient.post(`/tasks/${taskId}/cancel`);
-          // Task update will come through SSE
-        } catch (error) {
-          console.error('Failed to cancel task:', error);
-          throw error;
-        }
-      },
-
-      // Retry a task
-      retryTask: async (taskId: string) => {
-        try {
-          await apiClient.post(`/tasks/${taskId}/retry`);
-          // Task update will come through SSE
-        } catch (error) {
-          console.error('Failed to retry task:', error);
-          throw error;
-        }
-      },
-
-      // Computed getters
-      getTasksByStatus: (statuses: WorkerTaskStatus[]) => {
-        return get().tasks.filter((task) => statuses.includes(task.status));
-      },
-
-      getActiveTasks: () => {
-        const activeStatuses: WorkerTaskStatus[] = [
-          'executing',
-          'consolidating',
-          'deploying',
-          'running',
-          'integration_check',
-        ];
-        return get().getTasksByStatus(activeStatuses);
-      },
-
-      getQueuedTasks: () => {
-        const queuedStatuses: WorkerTaskStatus[] = [
-          'queued',
-          'claimed',
-          'environment_setup',
-          'dispatching',
-        ];
-        return get().getTasksByStatus(queuedStatuses);
-      },
-
-      getRecentTasks: () => {
-        const recentStatuses: WorkerTaskStatus[] = [
-          'completed',
-          'deployed',
-          'failed',
-          'cancelled',
-          'review_rejected',
-        ];
-        const recentTasks = get().getTasksByStatus(recentStatuses);
-
-        // Filter to tasks from last 24 hours
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-
-        return recentTasks.filter((task) => {
-          const taskDate = new Date(task.completed_at || task.failed_at || task.created_at);
-          return taskDate > yesterday;
         });
+
+        set({ sseClient });
+        sseClient.connect();
+      },
+
+      disconnectSSE: () => {
+        const { sseClient } = get();
+        if (sseClient) {
+          sseClient.destroy();
+          set({
+            sseClient: null,
+            isSSEConnected: false,
+            sseError: null
+          });
+        }
+      },
+
+      updateTask: (updatedTask: WorkerTask) => {
+        set(state => {
+          const existingIndex = state.tasks.findIndex(t => t.id === updatedTask.id);
+
+          let newTasks;
+          if (existingIndex >= 0) {
+            // Update existing task
+            newTasks = [...state.tasks];
+            newTasks[existingIndex] = updatedTask;
+          } else {
+            // Add new task
+            newTasks = [updatedTask, ...state.tasks];
+          }
+
+          return {
+            tasks: newTasks,
+            lastUpdated: new Date().toISOString()
+          };
+        });
+      },
+
+      updateStats: (stats: TaskStats) => {
+        set({
+          stats,
+          lastUpdated: new Date().toISOString()
+        });
+      },
+
+      // Convenience getters
+      getActiveTasks: () => getActiveTasks(get().tasks),
+      getQueuedTasks: () => getQueuedTasks(get().tasks),
+      getRecentTasks: () => getRecentTasks(get().tasks),
+      getTaskById: (id: string) => {
+        return get().tasks.find(task => task.id === id) || null;
       },
     }),
     {
       name: STORAGE_KEYS.TASKS,
       storage: createJSONStorage(() => AsyncStorage),
-      // Only persist data, not loading/error states
+      // Only persist data, not connection state or clients
       partialize: (state) => ({
         tasks: state.tasks,
         stats: state.stats,
@@ -296,24 +231,3 @@ export const useTasksStore = create<TasksState>()(
     }
   )
 );
-
-// Helper hook to automatically connect SSE on mount
-export const useTasksSSE = () => {
-  const { connectSSE, disconnectSSE: disconnect } = useTasksStore();
-
-  // Connect on mount, disconnect on unmount
-  React.useEffect(() => {
-    connectSSE();
-    return () => disconnect();
-  }, [connectSSE, disconnect]);
-};
-
-// Export store actions for external use
-export const tasksActions = {
-  fetchTasks: () => useTasksStore.getState().fetchTasks(),
-  connectSSE: () => useTasksStore.getState().connectSSE(),
-  disconnectSSE: () => useTasksStore.getState().disconnectSSE(),
-  refreshData: () => useTasksStore.getState().refreshData(),
-  cancelTask: (taskId: string) => useTasksStore.getState().cancelTask(taskId),
-  retryTask: (taskId: string) => useTasksStore.getState().retryTask(taskId),
-};

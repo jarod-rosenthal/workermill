@@ -1,438 +1,391 @@
-import {
-  isPushNotificationSupported,
-  requestPushPermissions,
-  getExpoPushToken,
-  registerPushToken,
-  unregisterPushToken,
-  getNotificationPreferences,
-  updateNotificationPreferences,
-  setupNotificationListeners,
-} from '../push';
-import { tokenManager } from '../api-client';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
+import { PushNotificationManager } from '../push';
+import { apiClient } from '../api-client';
 
-// Mock expo-notifications
-const mockNotifications = {
-  setNotificationHandler: jest.fn(),
-  getPermissionsAsync: jest.fn(),
-  requestPermissionsAsync: jest.fn(),
-  setNotificationChannelAsync: jest.fn(),
-  getExpoPushTokenAsync: jest.fn(),
-  addNotificationReceivedListener: jest.fn(),
-  addNotificationResponseReceivedListener: jest.fn(),
-};
-
-jest.mock('expo-notifications', () => mockNotifications);
-
-// Mock expo-device
-const mockDevice = {
-  isDevice: true,
-  deviceName: 'Test Device',
-  brand: 'Test Brand',
-  modelName: 'Test Model',
-};
-
-jest.mock('expo-device', () => mockDevice);
-
-// Mock expo-secure-store
-const mockSecureStore = {
-  setItemAsync: jest.fn(),
-  getItemAsync: jest.fn(),
-  deleteItemAsync: jest.fn(),
-};
-
-jest.mock('expo-secure-store', () => mockSecureStore);
-
-// Mock react-native Platform
+// Mock dependencies
+jest.mock('expo-notifications');
+jest.mock('expo-device');
+jest.mock('expo-secure-store');
+jest.mock('../api-client');
 jest.mock('react-native', () => ({
   Platform: {
-    OS: 'android',
+    OS: 'ios',
   },
 }));
 
-// Mock api-client tokenManager
-jest.mock('../api-client', () => ({
-  tokenManager: {
-    getAccessToken: jest.fn(),
-  },
-}));
+const mockedNotifications = Notifications as jest.Mocked<typeof Notifications>;
+const mockedDevice = Device as jest.Mocked<typeof Device>;
+const mockedSecureStore = SecureStore as jest.Mocked<typeof SecureStore>;
+const mockedApiClient = apiClient as jest.Mocked<typeof apiClient>;
 
-// Mock global fetch
-const mockFetch = jest.fn();
-global.fetch = mockFetch;
-
-const mockTokenManager = tokenManager as jest.Mocked<typeof tokenManager>;
-
-describe('Push Notifications', () => {
+describe('PushNotificationManager', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    // Default mock implementations
-    mockNotifications.getPermissionsAsync.mockResolvedValue({ status: 'granted' });
-    mockNotifications.requestPermissionsAsync.mockResolvedValue({ status: 'granted' });
-    mockNotifications.getExpoPushTokenAsync.mockResolvedValue({ data: 'ExponentPushToken[test-token]' });
-    mockTokenManager.getAccessToken.mockResolvedValue('test-access-token');
-    mockSecureStore.setItemAsync.mockResolvedValue(undefined);
-    mockSecureStore.getItemAsync.mockResolvedValue('ExponentPushToken[stored-token]');
-    mockSecureStore.deleteItemAsync.mockResolvedValue(undefined);
+    // Default mocks using mockImplementation
+    Object.defineProperty(mockedDevice, 'isDevice', { value: true, writable: true });
+    Object.defineProperty(mockedDevice, 'deviceName', { value: 'iPhone 14', writable: true });
+    Object.defineProperty(mockedDevice, 'brand', { value: 'Apple', writable: true });
+    Object.defineProperty(mockedDevice, 'modelName', { value: 'iPhone', writable: true });
   });
 
-  describe('isPushNotificationSupported', () => {
-    it('returns true on physical device', () => {
-      mockDevice.isDevice = true;
-      expect(isPushNotificationSupported()).toBe(true);
+  describe('isSupported', () => {
+    it('should return true for physical iOS device', async () => {
+      Object.defineProperty(mockedDevice, 'isDevice', { value: true, writable: true });
+      (Platform.OS as any) = 'ios';
+
+      const isSupported = await PushNotificationManager.isSupported();
+      expect(isSupported).toBe(true);
     });
 
-    it('returns false on simulator', () => {
-      mockDevice.isDevice = false;
-      expect(isPushNotificationSupported()).toBe(false);
-    });
-  });
+    it('should return true for physical Android device', async () => {
+      Object.defineProperty(mockedDevice, 'isDevice', { value: true, writable: true });
+      (Platform.OS as any) = 'android';
 
-  describe('requestPushPermissions', () => {
-    it('returns true when permissions are already granted', async () => {
-      mockNotifications.getPermissionsAsync.mockResolvedValue({ status: 'granted' });
-
-      const result = await requestPushPermissions();
-
-      expect(result).toBe(true);
-      expect(mockNotifications.requestPermissionsAsync).not.toHaveBeenCalled();
+      const isSupported = await PushNotificationManager.isSupported();
+      expect(isSupported).toBe(true);
     });
 
-    it('requests permissions when not granted and returns true on success', async () => {
-      mockNotifications.getPermissionsAsync.mockResolvedValue({ status: 'denied' });
-      mockNotifications.requestPermissionsAsync.mockResolvedValue({ status: 'granted' });
+    it('should return false for simulator/emulator', async () => {
+      Object.defineProperty(mockedDevice, 'isDevice', { value: false, writable: true });
 
-      const result = await requestPushPermissions();
-
-      expect(result).toBe(true);
-      expect(mockNotifications.requestPermissionsAsync).toHaveBeenCalled();
+      const isSupported = await PushNotificationManager.isSupported();
+      expect(isSupported).toBe(false);
     });
 
-    it('returns false when permission is denied', async () => {
-      mockNotifications.getPermissionsAsync.mockResolvedValue({ status: 'denied' });
-      mockNotifications.requestPermissionsAsync.mockResolvedValue({ status: 'denied' });
+    it('should return false for unsupported platform', async () => {
+      Object.defineProperty(mockedDevice, 'isDevice', { value: true, writable: true });
+      (Platform.OS as any) = 'web';
 
-      const result = await requestPushPermissions();
-
-      expect(result).toBe(false);
-    });
-
-    it('returns false on simulator', async () => {
-      mockDevice.isDevice = false;
-
-      const result = await requestPushPermissions();
-
-      expect(result).toBe(false);
-      expect(mockNotifications.getPermissionsAsync).not.toHaveBeenCalled();
-    });
-
-    it('sets up Android notification channel', async () => {
-      const { Platform } = require('react-native');
-      Platform.OS = 'android';
-
-      mockNotifications.getPermissionsAsync.mockResolvedValue({ status: 'granted' });
-
-      await requestPushPermissions();
-
-      expect(mockNotifications.setNotificationChannelAsync).toHaveBeenCalledWith('default', {
-        name: 'WorkerMill',
-        importance: mockNotifications.AndroidImportance?.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#6366f1',
-        sound: 'default',
-      });
+      const isSupported = await PushNotificationManager.isSupported();
+      expect(isSupported).toBe(false);
     });
   });
 
-  describe('getExpoPushToken', () => {
-    it('returns token when permissions are granted', async () => {
-      mockNotifications.getPermissionsAsync.mockResolvedValue({ status: 'granted' });
-      mockNotifications.getExpoPushTokenAsync.mockResolvedValue({ data: 'ExponentPushToken[test]' });
+  describe('requestPermissionsAndGetToken', () => {
+    it('should request permissions and return push token when granted', async () => {
+      const mockToken = 'ExponentPushToken[test-token]';
 
-      const token = await getExpoPushToken();
+      mockedNotifications.getPermissionsAsync.mockResolvedValue({
+        status: 'undetermined',
+      } as any);
 
-      expect(token).toBe('ExponentPushToken[test]');
-      expect(mockNotifications.getExpoPushTokenAsync).toHaveBeenCalledWith({
-        projectId: '98e60e26-13c4-421e-b114-96a7b2523f35',
-      });
+      mockedNotifications.requestPermissionsAsync.mockResolvedValue({
+        status: 'granted',
+      } as any);
+
+      mockedNotifications.getExpoPushTokenAsync.mockResolvedValue({
+        data: mockToken,
+      } as any);
+
+      const result = await PushNotificationManager.requestPermissionsAndGetToken();
+
+      expect(mockedNotifications.getPermissionsAsync).toHaveBeenCalled();
+      expect(mockedNotifications.requestPermissionsAsync).toHaveBeenCalled();
+      expect(mockedNotifications.getExpoPushTokenAsync).toHaveBeenCalled();
+      expect(result).toBe(mockToken);
     });
 
-    it('returns null when permissions are denied', async () => {
-      mockNotifications.getPermissionsAsync.mockResolvedValue({ status: 'denied' });
-      mockNotifications.requestPermissionsAsync.mockResolvedValue({ status: 'denied' });
+    it('should return token without requesting if already granted', async () => {
+      const mockToken = 'ExponentPushToken[test-token]';
 
-      const token = await getExpoPushToken();
+      mockedNotifications.getPermissionsAsync.mockResolvedValue({
+        status: 'granted',
+      } as any);
 
-      expect(token).toBe(null);
-      expect(mockNotifications.getExpoPushTokenAsync).not.toHaveBeenCalled();
+      mockedNotifications.getExpoPushTokenAsync.mockResolvedValue({
+        data: mockToken,
+      } as any);
+
+      const result = await PushNotificationManager.requestPermissionsAndGetToken();
+
+      expect(mockedNotifications.getPermissionsAsync).toHaveBeenCalled();
+      expect(mockedNotifications.requestPermissionsAsync).not.toHaveBeenCalled();
+      expect(result).toBe(mockToken);
     });
 
-    it('returns null on simulator', async () => {
-      mockDevice.isDevice = false;
+    it('should return null when permission is denied', async () => {
+      mockedNotifications.getPermissionsAsync.mockResolvedValue({
+        status: 'undetermined',
+      } as any);
 
-      const token = await getExpoPushToken();
+      mockedNotifications.requestPermissionsAsync.mockResolvedValue({
+        status: 'denied',
+      } as any);
 
-      expect(token).toBe(null);
+      const result = await PushNotificationManager.requestPermissionsAndGetToken();
+
+      expect(result).toBe(null);
+      expect(mockedNotifications.getExpoPushTokenAsync).not.toHaveBeenCalled();
+    });
+
+    it('should return null for unsupported device', async () => {
+      Object.defineProperty(mockedDevice, 'isDevice', { value: false, writable: true });
+
+      const result = await PushNotificationManager.requestPermissionsAndGetToken();
+
+      expect(result).toBe(null);
     });
   });
 
   describe('registerPushToken', () => {
-    it('registers token successfully', async () => {
-      const mockResponse = {
-        id: 'sub-123',
-        expoPushToken: 'ExponentPushToken[test]',
-        platform: 'android',
-      };
+    it('should register push token successfully', async () => {
+      const mockToken = 'ExponentPushToken[test-token]';
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
+      // Mock permission and token retrieval
+      mockedNotifications.getPermissionsAsync.mockResolvedValue({ status: 'granted' } as any);
+      mockedNotifications.getExpoPushTokenAsync.mockResolvedValue({ data: mockToken } as any);
+
+      // Mock API response
+      mockedApiClient.post.mockResolvedValue({ id: 'subscription-id' });
+
+      const result = await PushNotificationManager.registerPushToken();
+
+      expect(mockedApiClient.post).toHaveBeenCalledWith('/push/register', {
+        expoPushToken: mockToken,
+        platform: 'ios',
+        deviceName: 'iPhone 14',
       });
 
-      const result = await registerPushToken();
-
-      expect(result).toEqual(mockResponse);
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/push/register'),
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer test-access-token',
-          },
-          body: JSON.stringify({
-            expoPushToken: 'ExponentPushToken[test-token]',
-            platform: 'android',
-            deviceName: 'Test Device',
-          }),
-        }
-      );
-      expect(mockSecureStore.setItemAsync).toHaveBeenCalledWith(
+      expect(mockedSecureStore.setItemAsync).toHaveBeenCalledWith(
         'expo_push_token',
-        'ExponentPushToken[test-token]'
+        mockToken
       );
+
+      expect(result).toBe(true);
     });
 
-    it('returns null when no push token available', async () => {
-      mockNotifications.getExpoPushTokenAsync.mockResolvedValue({ data: null });
+    it('should return false when token retrieval fails', async () => {
+      mockedNotifications.getPermissionsAsync.mockResolvedValue({ status: 'denied' } as any);
 
-      const result = await registerPushToken();
+      const result = await PushNotificationManager.registerPushToken();
 
-      expect(result).toBe(null);
-      expect(mockFetch).not.toHaveBeenCalled();
+      expect(result).toBe(false);
+      expect(mockedApiClient.post).not.toHaveBeenCalled();
     });
 
-    it('returns null when no auth token available', async () => {
-      mockTokenManager.getAccessToken.mockResolvedValue(null);
+    it('should return false when API registration fails', async () => {
+      const mockToken = 'ExponentPushToken[test-token]';
 
-      const result = await registerPushToken();
+      mockedNotifications.getPermissionsAsync.mockResolvedValue({ status: 'granted' } as any);
+      mockedNotifications.getExpoPushTokenAsync.mockResolvedValue({ data: mockToken } as any);
 
-      expect(result).toBe(null);
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
+      mockedApiClient.post.mockRejectedValue(new Error('API error'));
 
-    it('returns null when registration fails', async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 400,
-        text: () => Promise.resolve('Bad request'),
-      });
+      const result = await PushNotificationManager.registerPushToken();
 
-      const result = await registerPushToken();
-
-      expect(result).toBe(null);
-    });
-
-    it('uses fallback device name when device name is not available', async () => {
-      mockDevice.deviceName = null;
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({}),
-      });
-
-      await registerPushToken();
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          body: JSON.stringify({
-            expoPushToken: 'ExponentPushToken[test-token]',
-            platform: 'android',
-            deviceName: 'Test Brand Test Model',
-          }),
-        })
-      );
+      expect(result).toBe(false);
     });
   });
 
   describe('unregisterPushToken', () => {
-    it('unregisters token successfully', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ success: true }),
+    it('should unregister stored push token successfully', async () => {
+      const mockToken = 'ExponentPushToken[test-token]';
+
+      mockedSecureStore.getItemAsync.mockResolvedValue(mockToken);
+      mockedApiClient.delete.mockResolvedValue({ success: true });
+
+      const result = await PushNotificationManager.unregisterPushToken();
+
+      expect(mockedApiClient.delete).toHaveBeenCalledWith('/push/register', {
+        data: { expoPushToken: mockToken },
       });
 
-      const result = await unregisterPushToken();
+      expect(mockedSecureStore.deleteItemAsync).toHaveBeenCalledWith('expo_push_token');
+      expect(result).toBe(true);
+    });
+
+    it('should return true when no token is stored', async () => {
+      mockedSecureStore.getItemAsync.mockResolvedValue(null);
+
+      const result = await PushNotificationManager.unregisterPushToken();
 
       expect(result).toBe(true);
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/push/register'),
-        {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer test-access-token',
-          },
-          body: JSON.stringify({
-            expoPushToken: 'ExponentPushToken[stored-token]',
-          }),
-        }
-      );
-      expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('expo_push_token');
+      expect(mockedApiClient.delete).not.toHaveBeenCalled();
     });
 
-    it('returns true when no stored token exists', async () => {
-      mockSecureStore.getItemAsync.mockResolvedValue(null);
+    it('should return false when API unregistration fails', async () => {
+      const mockToken = 'ExponentPushToken[test-token]';
 
-      const result = await unregisterPushToken();
+      mockedSecureStore.getItemAsync.mockResolvedValue(mockToken);
+      mockedApiClient.delete.mockRejectedValue(new Error('API error'));
 
-      expect(result).toBe(true);
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
-
-    it('clears local token even when backend call fails', async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 500,
-        text: () => Promise.resolve('Server error'),
-      });
-
-      const result = await unregisterPushToken();
-
-      expect(result).toBe(true); // Still returns true after clearing local token
-      expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('expo_push_token');
-    });
-
-    it('handles missing auth token gracefully', async () => {
-      mockTokenManager.getAccessToken.mockResolvedValue(null);
-
-      const result = await unregisterPushToken();
+      const result = await PushNotificationManager.unregisterPushToken();
 
       expect(result).toBe(false);
-      expect(mockFetch).not.toHaveBeenCalled();
-      expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('expo_push_token');
     });
   });
 
-  describe('getNotificationPreferences', () => {
-    it('fetches preferences successfully', async () => {
-      const mockPrefs = {
+  describe('notification preferences', () => {
+    it('should get notification preferences successfully', async () => {
+      const mockPreferences = {
         push_completions: true,
         push_failures: true,
         push_blockers: false,
         push_plan_approvals: true,
       };
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockPrefs),
+      mockedApiClient.get.mockResolvedValue(mockPreferences);
+
+      const result = await PushNotificationManager.getNotificationPreferences();
+
+      expect(mockedApiClient.get).toHaveBeenCalledWith('/push/prefs');
+      expect(result).toEqual(mockPreferences);
+    });
+
+    it('should return default preferences when API call fails', async () => {
+      mockedApiClient.get.mockRejectedValue(new Error('API error'));
+
+      const result = await PushNotificationManager.getNotificationPreferences();
+
+      expect(result).toEqual({
+        push_completions: true,
+        push_failures: true,
+        push_blockers: true,
+        push_plan_approvals: true,
       });
-
-      const result = await getNotificationPreferences();
-
-      expect(result).toEqual(mockPrefs);
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/push/prefs'),
-        {
-          method: 'GET',
-          headers: {
-            Authorization: 'Bearer test-access-token',
-          },
-        }
-      );
     });
 
-    it('returns null when no auth token available', async () => {
-      mockTokenManager.getAccessToken.mockResolvedValue(null);
-
-      const result = await getNotificationPreferences();
-
-      expect(result).toBe(null);
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
-
-    it('returns null when fetch fails', async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 500,
-        text: () => Promise.resolve('Server error'),
-      });
-
-      const result = await getNotificationPreferences();
-
-      expect(result).toBe(null);
-    });
-  });
-
-  describe('updateNotificationPreferences', () => {
-    it('updates preferences successfully', async () => {
-      const inputPrefs = { push_completions: false };
-      const mockResponse = {
+    it('should update notification preferences successfully', async () => {
+      const updatedPreferences = {
         push_completions: false,
+        push_failures: true,
+        push_blockers: false,
+        push_plan_approvals: true,
+      };
+
+      const partialUpdate = { push_completions: false };
+
+      mockedApiClient.put.mockResolvedValue(updatedPreferences);
+
+      const result = await PushNotificationManager.updateNotificationPreferences(partialUpdate);
+
+      expect(mockedApiClient.put).toHaveBeenCalledWith('/push/prefs', partialUpdate);
+      expect(result).toEqual(updatedPreferences);
+    });
+
+    it('should filter preferences by category', async () => {
+      const allPreferences = {
+        push_completions: true,
         push_failures: true,
         push_blockers: true,
         push_plan_approvals: true,
       };
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
+      mockedApiClient.get.mockResolvedValue(allPreferences);
 
-      const result = await updateNotificationPreferences(inputPrefs);
+      const result = await PushNotificationManager.getNotificationPreferences();
 
-      expect(result).toEqual(mockResponse);
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/push/prefs'),
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer test-access-token',
-          },
-          body: JSON.stringify(inputPrefs),
-        }
-      );
-    });
-
-    it('returns null when no auth token available', async () => {
-      mockTokenManager.getAccessToken.mockResolvedValue(null);
-
-      const result = await updateNotificationPreferences({});
-
-      expect(result).toBe(null);
-      expect(mockFetch).not.toHaveBeenCalled();
+      // Verify all expected categories are present
+      expect(result).toHaveProperty('push_completions');
+      expect(result).toHaveProperty('push_failures');
+      expect(result).toHaveProperty('push_blockers');
+      expect(result).toHaveProperty('push_plan_approvals');
     });
   });
 
-  describe('setupNotificationListeners', () => {
-    it('sets up foreground and response listeners', () => {
-      const mockRemove1 = jest.fn();
-      const mockRemove2 = jest.fn();
+  describe('isPushEnabled', () => {
+    it('should return true when permissions granted and token stored', async () => {
+      mockedNotifications.getPermissionsAsync.mockResolvedValue({
+        status: 'granted',
+      } as any);
 
-      mockNotifications.addNotificationReceivedListener.mockReturnValue({ remove: mockRemove1 });
-      mockNotifications.addNotificationResponseReceivedListener.mockReturnValue({ remove: mockRemove2 });
+      mockedSecureStore.getItemAsync.mockResolvedValue('ExponentPushToken[test-token]');
 
-      const listeners = setupNotificationListeners();
+      const result = await PushNotificationManager.isPushEnabled();
 
-      expect(mockNotifications.addNotificationReceivedListener).toHaveBeenCalled();
-      expect(mockNotifications.addNotificationResponseReceivedListener).toHaveBeenCalled();
+      expect(result).toBe(true);
+    });
 
-      // Test remove functionality
-      listeners.remove();
-      expect(mockRemove1).toHaveBeenCalled();
-      expect(mockRemove2).toHaveBeenCalled();
+    it('should return false when permissions denied', async () => {
+      mockedNotifications.getPermissionsAsync.mockResolvedValue({
+        status: 'denied',
+      } as any);
+
+      mockedSecureStore.getItemAsync.mockResolvedValue('ExponentPushToken[test-token]');
+
+      const result = await PushNotificationManager.isPushEnabled();
+
+      expect(result).toBe(false);
+    });
+
+    it('should return false when no token stored', async () => {
+      mockedNotifications.getPermissionsAsync.mockResolvedValue({
+        status: 'granted',
+      } as any);
+
+      mockedSecureStore.getItemAsync.mockResolvedValue(null);
+
+      const result = await PushNotificationManager.isPushEnabled();
+
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('notification listeners', () => {
+    it('should add notification response listener', () => {
+      const mockSubscription = { remove: jest.fn() };
+      const mockListener = jest.fn();
+
+      mockedNotifications.addNotificationResponseReceivedListener.mockReturnValue(
+        mockSubscription as any
+      );
+
+      const subscription = PushNotificationManager.addNotificationResponseListener(mockListener);
+
+      expect(mockedNotifications.addNotificationResponseReceivedListener).toHaveBeenCalledWith(
+        mockListener
+      );
+      expect(subscription).toBe(mockSubscription);
+    });
+
+    it('should add notification received listener', () => {
+      const mockSubscription = { remove: jest.fn() };
+      const mockListener = jest.fn();
+
+      mockedNotifications.addNotificationReceivedListener.mockReturnValue(
+        mockSubscription as any
+      );
+
+      const subscription = PushNotificationManager.addNotificationReceivedListener(mockListener);
+
+      expect(mockedNotifications.addNotificationReceivedListener).toHaveBeenCalledWith(
+        mockListener
+      );
+      expect(subscription).toBe(mockSubscription);
+    });
+
+    it('should remove all notification listeners', () => {
+      // Mock the method since it might not exist in all versions
+      (mockedNotifications as any).removeAllNotificationListeners = jest.fn();
+
+      PushNotificationManager.removeAllNotificationListeners();
+
+      expect((mockedNotifications as any).removeAllNotificationListeners).toHaveBeenCalled();
+    });
+  });
+
+  describe('permission management', () => {
+    it('should get permission status', async () => {
+      const mockStatus = { status: 'granted' };
+      mockedNotifications.getPermissionsAsync.mockResolvedValue(mockStatus as any);
+
+      const result = await PushNotificationManager.getPermissionStatus();
+
+      expect(mockedNotifications.getPermissionsAsync).toHaveBeenCalled();
+      expect(result).toBe(mockStatus);
+    });
+
+    it('should open notification settings', async () => {
+      // Mock the method since it might not exist in all versions
+      (mockedNotifications as any).openSettingsAsync = jest.fn();
+
+      await PushNotificationManager.openNotificationSettings();
+
+      expect((mockedNotifications as any).openSettingsAsync).toHaveBeenCalled();
     });
   });
 });

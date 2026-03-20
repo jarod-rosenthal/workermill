@@ -3,75 +3,35 @@ import {
   View,
   Text,
   TextInput,
-  TouchableOpacity,
-  ScrollView,
   Alert,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
+import { router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 
-import { useAuthStore } from '@/stores/auth-store';
-import { getSsoConfig, signInWithProvider } from '@/lib/sso-auth';
-import { Spinner } from '@/components/ui/Spinner';
 import { Button } from '@/components/ui/Button';
+import { useAuthStore } from '@/stores/auth-store';
+import { registerPushToken } from '@/lib/push';
+import { getSsoConfig, signInWithProvider, type SsoConfig, getProviderIconName } from '@/lib/sso-auth';
 
 interface SsoProvider {
   name: string;
   displayName: string;
-  icon: string; // Emoji or icon name
-  color: string; // Button color
+  iconName: string;
 }
 
-const SSO_PROVIDER_CONFIG: Record<string, SsoProvider> = {
-  GitHub: {
-    name: 'GitHub',
-    displayName: 'GitHub',
-    icon: '🐙',
-    color: 'bg-slate-800',
-  },
-  Google: {
-    name: 'Google',
-    displayName: 'Google',
-    icon: '🟡',
-    color: 'bg-blue-600',
-  },
-  Microsoft: {
-    name: 'Microsoft',
-    displayName: 'Microsoft',
-    icon: '🔷',
-    color: 'bg-blue-500',
-  },
-  Apple: {
-    name: 'Apple',
-    displayName: 'Apple',
-    icon: '🍎',
-    color: 'bg-slate-900',
-  },
-  Facebook: {
-    name: 'Facebook',
-    displayName: 'Facebook',
-    icon: '📘',
-    color: 'bg-blue-700',
-  },
-};
-
 export default function SignInScreen() {
-  const router = useRouter();
-  const { signIn, setLoading, isLoading } = useAuthStore();
-
-  // Form state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [mfaCode, setMfaCode] = useState('');
-  const [showMfaInput, setShowMfaInput] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [ssoConfig, setSsoConfig] = useState<SsoConfig | null>(null);
+  const [ssoProviders, setSsoProviders] = useState<SsoProvider[]>([]);
+  const [ssoLoading, setSsoLoading] = useState<string | null>(null);
 
-  // SSO state
-  const [ssoConfig, setSsoConfig] = useState<any>(null);
-  const [loadingSsoConfig, setLoadingSsoConfig] = useState(true);
-  const [availableProviders, setAvailableProviders] = useState<SsoProvider[]>([]);
-
-  // Loading states for individual SSO providers
-  const [loadingProvider, setLoadingProvider] = useState<string | null>(null);
+  const { signIn, signInWithSSO, isLoading, error, setError } = useAuthStore();
 
   // Load SSO configuration on mount
   useEffect(() => {
@@ -83,252 +43,234 @@ export default function SignInScreen() {
       const config = await getSsoConfig();
       setSsoConfig(config);
 
-      // Map configured providers to UI config
-      const providers = config.providers
-        .map((p: any) => SSO_PROVIDER_CONFIG[p.name])
-        .filter(Boolean);
-
-      setAvailableProviders(providers);
+      // Transform providers for UI
+      const providers = config.providers.map(provider => ({
+        name: provider.name,
+        displayName: provider.displayName,
+        iconName: getProviderIconName(provider.name),
+      }));
+      setSsoProviders(providers);
     } catch (error) {
-      console.warn('Failed to load SSO config:', error);
-      // Continue without SSO options
-    } finally {
-      setLoadingSsoConfig(false);
+      console.error('Failed to load SSO config:', error);
+      // Continue without SSO - email/password will still work
     }
   };
 
   const handleEmailSignIn = async () => {
     if (!email.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please enter your email and password');
+      setError('Please enter both email and password');
       return;
     }
 
     try {
-      setLoading(true);
-      // TODO: Implement email/password authentication via API client
-      const result = { accessToken: '', refreshToken: '', idToken: '', user: null };
+      await signIn(email.trim(), password);
 
-      // Sign in successful
-      await signIn(
-        {
-          accessToken: result.accessToken,
-          refreshToken: result.refreshToken,
-          idToken: result.idToken,
-        },
-        result.user
-      );
+      // Register push token after successful sign-in
+      registerPushToken();
 
       // Navigate to main app
       router.replace('/(tabs)');
     } catch (error: any) {
-      console.error('Email sign-in failed:', error);
-
-      // Check if MFA is required
-      if (error.message?.includes('MFA') || error.message?.includes('TOTP')) {
-        setShowMfaInput(true);
-        Alert.alert('MFA Required', 'Please enter your MFA code to continue');
-        return;
+      // Error is handled by the auth store
+      if (error.response?.data?.requiresMfa) {
+        // TODO: Navigate to MFA challenge screen when implemented
+        Alert.alert('MFA Required', 'Multi-factor authentication is not yet supported in the mobile app.');
       }
-
-      Alert.alert('Sign In Failed', error.message || 'Please check your credentials and try again');
-    } finally {
-      setLoading(false);
     }
   };
 
-  const handleSsoSignIn = async (provider: SsoProvider) => {
+  const handleSsoSignIn = async (providerName: string) => {
     if (!ssoConfig) {
-      Alert.alert('Error', 'SSO configuration not available');
+      Alert.alert('Error', 'SSO configuration not loaded. Please try again.');
       return;
     }
 
+    setSsoLoading(providerName);
+
     try {
-      setLoadingProvider(provider.name);
-      const result = await signInWithProvider(provider.name, ssoConfig);
+      const result = await signInWithProvider(providerName, ssoConfig);
 
-      // Sign in successful
-      await signIn(
-        {
-          accessToken: result.accessToken,
-          refreshToken: result.refreshToken,
-          idToken: result.idToken,
-        },
-        result.user
-      );
+      if (result.success && result.data) {
+        await signInWithSSO(
+          {
+            accessToken: result.data.accessToken,
+            refreshToken: result.data.refreshToken,
+            idToken: result.data.idToken,
+          },
+          result.data.user
+        );
 
-      // Navigate to main app
-      router.replace('/(tabs)');
-    } catch (error: any) {
-      console.error(`${provider.name} sign-in failed:`, error);
+        // Register push token after successful sign-in
+        registerPushToken();
 
-      if (error.message?.includes('cancelled')) {
-        // User cancelled - no need to show error
-        return;
+        // Navigate to main app
+        router.replace('/(tabs)');
+      } else {
+        if (!result.cancelled) {
+          Alert.alert(
+            'Sign In Failed',
+            result.error || 'An error occurred during sign-in'
+          );
+        }
       }
-
+    } catch (error: any) {
       Alert.alert(
-        'Sign In Failed',
-        `Failed to sign in with ${provider.displayName}. Please try again.`
+        'Sign In Error',
+        error.message || 'An unexpected error occurred'
       );
     } finally {
-      setLoadingProvider(null);
+      setSsoLoading(null);
     }
   };
 
-  if (loadingSsoConfig) {
-    return (
-      <View className="flex-1 bg-slate-950 items-center justify-center">
-        <Spinner />
-        <Text className="text-white mt-4">Loading...</Text>
-        <StatusBar style="light" />
-      </View>
-    );
-  }
+  const getSsoButtonVariant = (providerName: string) => {
+    switch (providerName) {
+      case 'GitHub':
+        return 'secondary';
+      case 'Google':
+        return 'outline';
+      case 'Microsoft':
+        return 'outline';
+      case 'Apple':
+        return 'secondary';
+      default:
+        return 'outline';
+    }
+  };
 
   return (
-    <View className="flex-1 bg-slate-950">
-      <StatusBar style="light" />
-
-      <ScrollView
+    <SafeAreaView className="flex-1 bg-white dark:bg-slate-950">
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         className="flex-1"
-        contentContainerStyle={{ flexGrow: 1 }}
-        keyboardShouldPersistTaps="handled"
       >
-        <View className="flex-1 px-6 pt-20 pb-8">
-          {/* Logo and title */}
-          <View className="items-center mb-12">
-            <View className="w-20 h-20 bg-brand-600 rounded-2xl items-center justify-center mb-6">
-              <Text className="text-3xl font-bold text-white">WM</Text>
-            </View>
-            <Text className="text-3xl font-bold text-white mb-2">WorkerMill</Text>
-            <Text className="text-slate-400 text-center text-base">
-              Sign in to monitor your AI workers
+        <ScrollView
+          contentContainerClassName="flex-1 justify-center px-6"
+          keyboardShouldPersistTaps="handled"
+        >
+          <View className="mb-8">
+            <Text className="text-3xl font-bold text-center text-slate-900 dark:text-white mb-2">
+              Welcome to WorkerMill
+            </Text>
+            <Text className="text-center text-slate-600 dark:text-slate-400">
+              Sign in to monitor and manage your AI workers
             </Text>
           </View>
 
           {/* SSO Buttons */}
-          {availableProviders.length > 0 && (
-            <View className="mb-8">
-              <Text className="text-slate-400 text-sm mb-4 text-center">
-                Continue with
-              </Text>
+          {ssoProviders.length > 0 && (
+            <View className="mb-6 space-y-3">
+              {ssoProviders.map((provider) => (
+                <Button
+                  key={provider.name}
+                  variant={getSsoButtonVariant(provider.name)}
+                  onPress={() => handleSsoSignIn(provider.name)}
+                  loading={ssoLoading === provider.name}
+                  disabled={!!ssoLoading}
+                  className="w-full"
+                >
+                  <View className="flex-row items-center">
+                    <Ionicons
+                      name={provider.iconName as any}
+                      size={20}
+                      color={getSsoButtonVariant(provider.name) === 'outline' ? '#6366f1' : '#ffffff'}
+                      style={{ marginRight: 8 }}
+                    />
+                    <Text>Continue with {provider.displayName}</Text>
+                  </View>
+                </Button>
+              ))}
 
-              <View className="space-y-3">
-                {availableProviders.map((provider) => (
-                  <TouchableOpacity
-                    key={provider.name}
-                    onPress={() => handleSsoSignIn(provider)}
-                    disabled={loadingProvider !== null || isLoading}
-                    className={`${provider.color} ${
-                      loadingProvider === provider.name || isLoading
-                        ? 'opacity-50'
-                        : 'opacity-100'
-                    } p-4 rounded-xl flex-row items-center justify-center`}
-                    style={{ minHeight: 48 }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Sign in with ${provider.displayName}`}
-                  >
-                    {loadingProvider === provider.name ? (
-                      <View className="w-5 h-5 mr-3">
-                        <Spinner />
-                      </View>
-                    ) : (
-                      <Text className="text-xl mr-3">{provider.icon}</Text>
-                    )}
-                    <Text className="text-white font-semibold text-base">
-                      Continue with {provider.displayName}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              <View className="flex-row items-center my-6">
+                <View className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
+                <Text className="mx-4 text-sm text-slate-500 dark:text-slate-400">
+                  or
+                </Text>
+                <View className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
               </View>
             </View>
           )}
-
-          {/* Divider */}
-          <View className="flex-row items-center mb-8">
-            <View className="flex-1 h-px bg-slate-700" />
-            <Text className="text-slate-400 px-4 text-sm">or</Text>
-            <View className="flex-1 h-px bg-slate-700" />
-          </View>
 
           {/* Email/Password Form */}
           <View className="space-y-4">
             <View>
-              <Text className="text-slate-300 text-sm font-medium mb-2">Email</Text>
+              <Text className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                Email
+              </Text>
               <TextInput
                 value={email}
                 onChangeText={setEmail}
                 placeholder="Enter your email"
-                placeholderTextColor="#64748b"
+                placeholderTextColor="#9ca3af"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoComplete="email"
-                className="bg-slate-800 text-white p-4 rounded-xl text-base"
-                editable={!isLoading && !loadingProvider}
+                autoCorrect={false}
+                className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                style={{ minHeight: 48 }}
+                accessibilityLabel="Email address"
+                accessibilityRole="none"
               />
             </View>
 
             <View>
-              <Text className="text-slate-300 text-sm font-medium mb-2">Password</Text>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Enter your password"
-                placeholderTextColor="#64748b"
-                secureTextEntry
-                autoComplete="current-password"
-                className="bg-slate-800 text-white p-4 rounded-xl text-base"
-                editable={!isLoading && !loadingProvider}
-              />
+              <Text className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                Password
+              </Text>
+              <View className="relative">
+                <TextInput
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Enter your password"
+                  placeholderTextColor="#9ca3af"
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  autoComplete="current-password"
+                  autoCorrect={false}
+                  className="w-full px-4 py-3 pr-12 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                  style={{ minHeight: 48 }}
+                  accessibilityLabel="Password"
+                  accessibilityRole="none"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onPress={() => setShowPassword(!showPassword)}
+                  className="absolute right-1 top-1 w-10 h-10"
+                  accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+                >
+                  <Ionicons
+                    name={showPassword ? 'eye-off' : 'eye'}
+                    size={20}
+                    color="#6b7280"
+                  />
+                </Button>
+              </View>
             </View>
 
-            {showMfaInput && (
-              <View>
-                <Text className="text-slate-300 text-sm font-medium mb-2">
-                  MFA Code
+            {error && (
+              <View className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-3">
+                <Text className="text-sm text-red-600 dark:text-red-400 text-center">
+                  {error}
                 </Text>
-                <TextInput
-                  value={mfaCode}
-                  onChangeText={setMfaCode}
-                  placeholder="Enter your 6-digit code"
-                  placeholderTextColor="#64748b"
-                  keyboardType="numeric"
-                  maxLength={6}
-                  autoComplete="one-time-code"
-                  className="bg-slate-800 text-white p-4 rounded-xl text-base text-center tracking-widest"
-                  editable={!isLoading && !loadingProvider}
-                />
               </View>
             )}
 
             <Button
-              variant="primary"
               onPress={handleEmailSignIn}
-              disabled={isLoading || loadingProvider !== null}
               loading={isLoading}
-              style={{ marginTop: 24 }}
+              disabled={isLoading || !!ssoLoading}
+              className="w-full mt-6"
             >
-              {showMfaInput ? 'Verify & Sign In' : 'Sign In'}
+              Sign In
             </Button>
           </View>
 
-          {/* Reset MFA form */}
-          {showMfaInput && (
-            <TouchableOpacity
-              onPress={() => {
-                setShowMfaInput(false);
-                setMfaCode('');
-              }}
-              className="mt-4 items-center"
-              disabled={isLoading}
-            >
-              <Text className="text-brand-400 text-sm">
-                Back to password sign-in
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </ScrollView>
-    </View>
+          <Text className="text-xs text-slate-500 dark:text-slate-400 text-center mt-8">
+            By signing in, you agree to our Terms of Service and Privacy Policy
+          </Text>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }

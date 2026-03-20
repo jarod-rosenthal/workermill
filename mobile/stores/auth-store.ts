@@ -1,251 +1,324 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
-import { tokenManager } from '@/lib/api-client';
+import { apiClient } from '@/lib/api-client';
 
-// Storage keys for biometric attempts
-const BIOMETRIC_STORAGE_KEYS = {
-  FAILED_ATTEMPTS: 'biometric_failed_attempts',
-  LAST_FAILURE_TIME: 'biometric_last_failure_time',
+// Secure store keys
+const SECURE_STORE_KEYS = {
+  ACCESS_TOKEN: 'access_token',
+  REFRESH_TOKEN: 'refresh_token',
+  ID_TOKEN: 'id_token',
+  BIOMETRIC_FAIL_COUNT: 'biometric_fail_count',
+  BIOMETRIC_ENABLED: 'biometric_enabled',
 } as const;
 
-// Types
-interface User {
+export interface User {
   id: string;
   email: string;
   name: string;
-  organizationId: string;
-  organizationName: string;
-  role: string;
-  mfaEnabled: boolean;
+  role: 'admin' | 'member';
+  organizations: {
+    id: string;
+    name: string;
+    role: string;
+  }[];
+  current_organization: {
+    id: string;
+    name: string;
+    plan: string;
+  };
 }
 
 interface AuthState {
-  // Auth state
+  // Authentication state
   isAuthenticated: boolean;
-  isLoading: boolean;
   user: User | null;
+  isLoading: boolean;
+  error: string | null;
 
-  // Biometric state
-  biometricFailedAttempts: number;
+  // Biometric settings
+  isBiometricEnabled: boolean;
+  biometricFailCount: number;
   shouldShowBiometric: boolean;
 
   // Actions
-  signIn: (tokens: { accessToken: string; refreshToken: string; idToken: string }, user: User) => Promise<void>;
-  signOut: () => Promise<void>;
-  checkAuthState: () => Promise<boolean>;
-
-  // Biometric actions
-  recordBiometricFailure: () => Promise<void>;
-  resetBiometricAttempts: () => Promise<void>;
-  checkBiometricFailures: () => Promise<void>;
-  setShouldShowBiometric: (show: boolean) => void;
-
-  // Loading state
+  setAuthenticated: (user: User) => void;
   setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+
+  // Token management
+  storeTokens: (tokens: {
+    accessToken: string;
+    refreshToken: string;
+    idToken: string;
+  }) => Promise<void>;
+  clearTokens: () => Promise<void>;
+  hasStoredTokens: () => Promise<boolean>;
+
+  // Biometric management
+  enableBiometric: () => Promise<void>;
+  disableBiometric: () => Promise<void>;
+  incrementBiometricFailCount: () => Promise<void>;
+  resetBiometricFailCount: () => Promise<void>;
+  loadBiometricSettings: () => Promise<void>;
+
+  // Auth operations
+  signIn: (email: string, password: string) => Promise<void>;
+  signInWithSSO: (tokens: {
+    accessToken: string;
+    refreshToken: string;
+    idToken: string;
+  }, user: User) => Promise<void>;
+  signOut: () => Promise<void>;
+  checkAuthStatus: () => Promise<void>;
+  refreshUserProfile: () => Promise<void>;
 }
 
-// Parse user from ID token (JWT payload)
-const parseUserFromIdToken = (idToken: string): User | null => {
-  try {
-    // JWT format: header.payload.signature
-    const payload = idToken.split('.')[1];
-    if (!payload) return null;
-
-    // Decode base64 payload (React Native compatible)
-    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const decodedPayload = JSON.parse(atob(base64));
-
-    return {
-      id: decodedPayload.sub || decodedPayload['cognito:username'],
-      email: decodedPayload.email,
-      name: decodedPayload.name || decodedPayload.given_name || decodedPayload.email,
-      organizationId: decodedPayload['custom:org_id'],
-      organizationName: decodedPayload['custom:org_name'],
-      role: decodedPayload['custom:role'] || 'member',
-      mfaEnabled: decodedPayload['custom:mfa_enabled'] === 'true',
-    };
-  } catch (error) {
-    console.warn('Failed to parse user from ID token:', error);
-    return null;
-  }
-};
-
-// Store implementation
 export const useAuthStore = create<AuthState>((set, get) => ({
   // Initial state
   isAuthenticated: false,
-  isLoading: false,
   user: null,
-  biometricFailedAttempts: 0,
+  isLoading: false,
+  error: null,
+  isBiometricEnabled: false,
+  biometricFailCount: 0,
   shouldShowBiometric: false,
 
-  // Sign in action
-  signIn: async (tokens, user) => {
-    try {
-      // Store tokens securely
-      await tokenManager.setTokens(tokens);
+  // Basic setters
+  setAuthenticated: (user: User) => set({
+    isAuthenticated: true,
+    user,
+    error: null
+  }),
 
-      // Reset biometric failures on successful sign-in
-      await get().resetBiometricAttempts();
+  setLoading: (isLoading: boolean) => set({ isLoading }),
 
-      // Update store state
-      set({
-        isAuthenticated: true,
-        user,
-        shouldShowBiometric: true, // Enable biometric for next launch
-        isLoading: false,
-      });
-    } catch (error) {
-      console.error('Failed to sign in:', error);
-      throw error;
-    }
+  setError: (error: string | null) => set({ error }),
+
+  // Token management
+  storeTokens: async (tokens) => {
+    await apiClient.storeTokens(tokens);
   },
 
-  // Sign out action
-  signOut: async () => {
-    try {
-      // Clear stored tokens
-      await tokenManager.clearTokens();
-
-      // Clear biometric settings
-      await SecureStore.deleteItemAsync(BIOMETRIC_STORAGE_KEYS.FAILED_ATTEMPTS);
-      await SecureStore.deleteItemAsync(BIOMETRIC_STORAGE_KEYS.LAST_FAILURE_TIME);
-
-      // Reset store state
-      set({
-        isAuthenticated: false,
-        user: null,
-        biometricFailedAttempts: 0,
-        shouldShowBiometric: false,
-        isLoading: false,
-      });
-    } catch (error) {
-      console.error('Failed to sign out:', error);
-      // Still reset state even if cleanup fails
-      set({
-        isAuthenticated: false,
-        user: null,
-        biometricFailedAttempts: 0,
-        shouldShowBiometric: false,
-        isLoading: false,
-      });
-    }
+  clearTokens: async () => {
+    await Promise.all([
+      SecureStore.deleteItemAsync(SECURE_STORE_KEYS.ACCESS_TOKEN).catch(() => {}),
+      SecureStore.deleteItemAsync(SECURE_STORE_KEYS.REFRESH_TOKEN).catch(() => {}),
+      SecureStore.deleteItemAsync(SECURE_STORE_KEYS.ID_TOKEN).catch(() => {}),
+    ]);
   },
 
-  // Check current auth state from stored tokens
-  checkAuthState: async () => {
+  hasStoredTokens: async (): Promise<boolean> => {
     try {
-      set({ isLoading: true });
-
-      // Check if tokens exist
-      const hasTokens = await tokenManager.hasValidTokens();
-      if (!hasTokens) {
-        set({ isAuthenticated: false, user: null, isLoading: false });
-        return false;
-      }
-
-      // Try to get user info from stored ID token
-      const idToken = await tokenManager.getIdToken();
-      if (!idToken) {
-        set({ isAuthenticated: false, user: null, isLoading: false });
-        return false;
-      }
-
-      // Parse user from ID token
-      const user = parseUserFromIdToken(idToken);
-      if (!user) {
-        // If we can't parse user, clear tokens and sign out
-        await get().signOut();
-        return false;
-      }
-
-      // Check biometric failure count
-      await get().checkBiometricFailures();
-
-      set({
-        isAuthenticated: true,
-        user,
-        shouldShowBiometric: true, // Show biometric if user has valid tokens
-        isLoading: false,
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Failed to check auth state:', error);
-      set({ isAuthenticated: false, user: null, isLoading: false });
+      const tokens = await apiClient.getStoredTokens();
+      return !!(tokens.accessToken && tokens.refreshToken);
+    } catch {
       return false;
     }
   },
 
-  // Record biometric failure
-  recordBiometricFailure: async () => {
-    try {
-      const currentAttempts = get().biometricFailedAttempts;
-      const newAttempts = currentAttempts + 1;
-
-      // Store failure count and timestamp
-      await SecureStore.setItemAsync(
-        BIOMETRIC_STORAGE_KEYS.FAILED_ATTEMPTS,
-        newAttempts.toString()
-      );
-      await SecureStore.setItemAsync(
-        BIOMETRIC_STORAGE_KEYS.LAST_FAILURE_TIME,
-        Date.now().toString()
-      );
-
-      set({
-        biometricFailedAttempts: newAttempts,
-        // After 3 failures, disable biometric and require full sign-in
-        shouldShowBiometric: newAttempts < 3,
-      });
-    } catch (error) {
-      console.error('Failed to record biometric failure:', error);
-    }
+  // Biometric management
+  enableBiometric: async () => {
+    await SecureStore.setItemAsync(SECURE_STORE_KEYS.BIOMETRIC_ENABLED, 'true');
+    set({ isBiometricEnabled: true });
   },
 
-  // Reset biometric attempts (called on successful authentication)
-  resetBiometricAttempts: async () => {
-    try {
-      await SecureStore.deleteItemAsync(BIOMETRIC_STORAGE_KEYS.FAILED_ATTEMPTS);
-      await SecureStore.deleteItemAsync(BIOMETRIC_STORAGE_KEYS.LAST_FAILURE_TIME);
-
-      set({
-        biometricFailedAttempts: 0,
-        shouldShowBiometric: true,
-      });
-    } catch (error) {
-      console.error('Failed to reset biometric attempts:', error);
-    }
+  disableBiometric: async () => {
+    await SecureStore.setItemAsync(SECURE_STORE_KEYS.BIOMETRIC_ENABLED, 'false');
+    set({ isBiometricEnabled: false });
   },
 
-  // Check biometric failures (persisted across app restarts)
-  checkBiometricFailures: async () => {
+  incrementBiometricFailCount: async () => {
+    const currentCount = get().biometricFailCount;
+    const newCount = currentCount + 1;
+
+    await SecureStore.setItemAsync(SECURE_STORE_KEYS.BIOMETRIC_FAIL_COUNT, newCount.toString());
+    set({
+      biometricFailCount: newCount,
+      shouldShowBiometric: newCount < 3
+    });
+  },
+
+  resetBiometricFailCount: async () => {
+    await SecureStore.setItemAsync(SECURE_STORE_KEYS.BIOMETRIC_FAIL_COUNT, '0');
+    set({
+      biometricFailCount: 0,
+      shouldShowBiometric: true
+    });
+  },
+
+  loadBiometricSettings: async () => {
     try {
-      const failedAttemptsStr = await SecureStore.getItemAsync(BIOMETRIC_STORAGE_KEYS.FAILED_ATTEMPTS);
-      const failedAttempts = failedAttemptsStr ? parseInt(failedAttemptsStr, 10) : 0;
+      const [enabledStr, countStr] = await Promise.all([
+        SecureStore.getItemAsync(SECURE_STORE_KEYS.BIOMETRIC_ENABLED),
+        SecureStore.getItemAsync(SECURE_STORE_KEYS.BIOMETRIC_FAIL_COUNT),
+      ]);
+
+      const isBiometricEnabled = enabledStr === 'true';
+      const biometricFailCount = countStr ? parseInt(countStr, 10) : 0;
+      const shouldShowBiometric = isBiometricEnabled && biometricFailCount < 3;
 
       set({
-        biometricFailedAttempts: failedAttempts,
-        // If 3 or more failures, require full sign-in
-        shouldShowBiometric: failedAttempts < 3,
+        isBiometricEnabled,
+        biometricFailCount,
+        shouldShowBiometric,
       });
     } catch (error) {
-      console.error('Failed to check biometric failures:', error);
-      // On error, allow biometric attempts
+      console.error('Failed to load biometric settings:', error);
       set({
-        biometricFailedAttempts: 0,
-        shouldShowBiometric: true,
+        isBiometricEnabled: false,
+        biometricFailCount: 0,
+        shouldShowBiometric: false,
       });
     }
   },
 
-  // Set biometric preference
-  setShouldShowBiometric: (show: boolean) => {
-    set({ shouldShowBiometric: show });
+  // Auth operations
+  signIn: async (email: string, password: string) => {
+    set({ isLoading: true, error: null });
+
+    try {
+      const response = await apiClient.post<{
+        user: User;
+        tokens: {
+          accessToken: string;
+          refreshToken: string;
+          idToken: string;
+        };
+      }>('/auth/login', { email, password });
+
+      // Store tokens
+      await get().storeTokens(response.tokens);
+
+      // Reset biometric fail count on successful sign-in
+      await get().resetBiometricFailCount();
+
+      set({
+        isAuthenticated: true,
+        user: response.user,
+        isLoading: false,
+        error: null
+      });
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.message || 'Sign in failed';
+      set({
+        isLoading: false,
+        error: errorMessage,
+        isAuthenticated: false,
+        user: null
+      });
+      throw error;
+    }
   },
 
-  // Set loading state
-  setLoading: (loading: boolean) => {
-    set({ isLoading: loading });
+  signInWithSSO: async (tokens, user) => {
+    set({ isLoading: true, error: null });
+
+    try {
+      // Store tokens
+      await get().storeTokens(tokens);
+
+      // Reset biometric fail count on successful sign-in
+      await get().resetBiometricFailCount();
+
+      set({
+        isAuthenticated: true,
+        user,
+        isLoading: false,
+        error: null
+      });
+    } catch (error: any) {
+      const errorMessage = error.message || 'SSO sign in failed';
+      set({
+        isLoading: false,
+        error: errorMessage,
+        isAuthenticated: false,
+        user: null
+      });
+      throw error;
+    }
+  },
+
+  signOut: async () => {
+    set({ isLoading: true });
+
+    try {
+      // Clear tokens from secure store
+      await get().clearTokens();
+      await apiClient.signOut();
+
+      // Reset all auth state
+      set({
+        isAuthenticated: false,
+        user: null,
+        isLoading: false,
+        error: null,
+        // Keep biometric settings but reset fail count
+        biometricFailCount: 0,
+        shouldShowBiometric: get().isBiometricEnabled,
+      });
+    } catch (error) {
+      console.error('Sign out error:', error);
+      // Force reset state even if sign out fails
+      set({
+        isAuthenticated: false,
+        user: null,
+        isLoading: false,
+        error: null,
+        biometricFailCount: 0,
+        shouldShowBiometric: get().isBiometricEnabled,
+      });
+    }
+  },
+
+  checkAuthStatus: async () => {
+    set({ isLoading: true });
+
+    try {
+      const hasTokens = await get().hasStoredTokens();
+
+      if (hasTokens) {
+        // Try to fetch user profile to validate tokens
+        await get().refreshUserProfile();
+      } else {
+        set({
+          isAuthenticated: false,
+          user: null,
+          isLoading: false
+        });
+      }
+    } catch (error) {
+      console.error('Auth check failed:', error);
+      // Clear invalid tokens
+      await get().clearTokens();
+      set({
+        isAuthenticated: false,
+        user: null,
+        isLoading: false,
+        error: null
+      });
+    }
+  },
+
+  refreshUserProfile: async () => {
+    try {
+      const user = await apiClient.get<User>('/auth/me');
+      set({
+        isAuthenticated: true,
+        user,
+        isLoading: false,
+        error: null
+      });
+    } catch (error: any) {
+      // If user profile fetch fails, tokens might be invalid
+      console.error('User profile refresh failed:', error);
+      await get().clearTokens();
+      set({
+        isAuthenticated: false,
+        user: null,
+        isLoading: false,
+        error: 'Session expired'
+      });
+      throw error;
+    }
   },
 }));

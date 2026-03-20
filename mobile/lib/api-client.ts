@@ -1,224 +1,204 @@
-import axios, { AxiosError, AxiosRequestConfig } from 'axios';
+import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
-import { router } from 'expo-router';
 import { API_BASE_URL, COGNITO_REGION, COGNITO_CLIENT_ID } from '@/constants/config';
 
-// Keys for secure storage
-const STORAGE_KEYS = {
+// Secure store keys for tokens
+const TOKEN_KEYS = {
   ACCESS_TOKEN: 'access_token',
   REFRESH_TOKEN: 'refresh_token',
   ID_TOKEN: 'id_token',
 } as const;
 
-// Create axios instance with base configuration
-const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+interface CognitoRefreshResponse {
+  AuthenticationResult: {
+    AccessToken: string;
+    IdToken: string;
+    ExpiresIn: number;
+    TokenType: string;
+  };
+}
 
-// Flag to prevent multiple concurrent refresh attempts
-let isRefreshingToken = false;
-let failedRequestsQueue: {
-  resolve: (token: string) => void;
-  reject: (error: any) => void;
-}[] = [];
+class ApiClient {
+  private axiosInstance: AxiosInstance;
+  private isRefreshing = false;
+  private refreshPromise: Promise<string> | null = null;
 
-// Request interceptor to add auth header
-apiClient.interceptors.request.use(
-  async (config) => {
-    try {
-      const accessToken = await SecureStore.getItemAsync(STORAGE_KEYS.ACCESS_TOKEN);
-      if (accessToken) {
-        config.headers.Authorization = `Bearer ${accessToken}`;
-      }
-    } catch (error) {
-      console.warn('Failed to read access token from secure store:', error);
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
+  constructor() {
+    this.axiosInstance = axios.create({
+      baseURL: API_BASE_URL,
+      timeout: 30000,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    this.setupInterceptors();
   }
-);
 
-// Response interceptor to handle 401 errors and refresh tokens
-apiClient.interceptors.response.use(
-  (response) => {
-    return response;
-  },
-  async (error: AxiosError) => {
-    const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
+  private setupInterceptors() {
+    // Request interceptor - add auth header
+    this.axiosInstance.interceptors.request.use(
+      async (config: InternalAxiosRequestConfig) => {
+        const accessToken = await SecureStore.getItemAsync(TOKEN_KEYS.ACCESS_TOKEN);
+        if (accessToken) {
+          config.headers.Authorization = `Bearer ${accessToken}`;
+        }
+        return config;
+      },
+      (error) => Promise.reject(error)
+    );
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      if (isRefreshingToken) {
-        // If already refreshing, queue this request
-        return new Promise((resolve, reject) => {
-          failedRequestsQueue.push({
-            resolve: (token: string) => {
-              if (originalRequest.headers) {
-                originalRequest.headers.Authorization = `Bearer ${token}`;
-              }
-              resolve(apiClient(originalRequest));
-            },
-            reject,
-          });
-        });
+    // Response interceptor - handle 401 with token refresh
+    this.axiosInstance.interceptors.response.use(
+      (response) => response,
+      async (error: AxiosError) => {
+        const originalRequest = error.config;
+
+        if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+          originalRequest._retry = true;
+
+          try {
+            const newAccessToken = await this.refreshToken();
+            originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+            return this.axiosInstance(originalRequest);
+          } catch (refreshError) {
+            // Refresh failed, clear tokens and redirect to sign-in
+            await this.clearTokens();
+            // Navigate to sign-in screen would be handled by the navigation logic
+            // For now, we'll let the caller handle this by checking the error
+            throw refreshError;
+          }
+        }
+
+        return Promise.reject(error);
       }
+    );
+  }
 
-      originalRequest._retry = true;
-      isRefreshingToken = true;
+  private async refreshToken(): Promise<string> {
+    // If already refreshing, return the existing promise
+    if (this.isRefreshing && this.refreshPromise) {
+      return this.refreshPromise;
+    }
 
+    this.isRefreshing = true;
+
+    this.refreshPromise = (async () => {
       try {
-        const refreshToken = await SecureStore.getItemAsync(STORAGE_KEYS.REFRESH_TOKEN);
-
+        const refreshToken = await SecureStore.getItemAsync(TOKEN_KEYS.REFRESH_TOKEN);
         if (!refreshToken) {
           throw new Error('No refresh token available');
         }
 
-        // Call Cognito refresh endpoint
-        const refreshResponse = await fetch(
-          `https://cognito-idp.${COGNITO_REGION}.amazonaws.com/`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/x-amz-json-1.1',
-              'X-Amz-Target': 'AWSCognitoIdentityProviderService.InitiateAuth',
+        const response = await fetch(`https://cognito-idp.${COGNITO_REGION}.amazonaws.com/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-amz-json-1.1',
+            'X-Amz-Target': 'AWSCognitoIdentityProviderService.InitiateAuth',
+          },
+          body: JSON.stringify({
+            AuthFlow: 'REFRESH_TOKEN_AUTH',
+            ClientId: COGNITO_CLIENT_ID,
+            AuthParameters: {
+              REFRESH_TOKEN: refreshToken,
             },
-            body: JSON.stringify({
-              AuthFlow: 'REFRESH_TOKEN_AUTH',
-              ClientId: COGNITO_CLIENT_ID,
-              AuthParameters: {
-                REFRESH_TOKEN: refreshToken,
-              },
-            }),
-          }
-        );
-
-        if (!refreshResponse.ok) {
-          throw new Error(`Token refresh failed: ${refreshResponse.status}`);
-        }
-
-        const refreshData = await refreshResponse.json();
-
-        if (!refreshData.AuthenticationResult) {
-          throw new Error('Invalid refresh response format');
-        }
-
-        const { AccessToken, IdToken } = refreshData.AuthenticationResult;
-
-        // Store new tokens (RefreshToken is not returned on refresh - keep the existing one)
-        await SecureStore.setItemAsync(STORAGE_KEYS.ACCESS_TOKEN, AccessToken);
-        await SecureStore.setItemAsync(STORAGE_KEYS.ID_TOKEN, IdToken);
-
-        // Process queued requests
-        failedRequestsQueue.forEach(({ resolve }) => {
-          resolve(AccessToken);
+          }),
         });
-        failedRequestsQueue = [];
 
-        // Retry the original request with new token
-        if (originalRequest.headers) {
-          originalRequest.headers.Authorization = `Bearer ${AccessToken}`;
+        if (!response.ok) {
+          throw new Error(`Cognito refresh failed: ${response.status}`);
         }
-        return apiClient(originalRequest);
-      } catch (refreshError) {
-        // Clear stored tokens and redirect to sign-in
-        await Promise.all([
-          SecureStore.deleteItemAsync(STORAGE_KEYS.ACCESS_TOKEN),
-          SecureStore.deleteItemAsync(STORAGE_KEYS.REFRESH_TOKEN),
-          SecureStore.deleteItemAsync(STORAGE_KEYS.ID_TOKEN),
-        ]);
 
-        // Process queued requests with error
-        failedRequestsQueue.forEach(({ reject }) => {
-          reject(refreshError);
-        });
-        failedRequestsQueue = [];
+        const data: CognitoRefreshResponse = await response.json();
+        const { AccessToken, IdToken } = data.AuthenticationResult;
 
-        // Navigate to sign-in screen
-        router.replace('/(auth)/sign-in');
+        // Store new tokens (refresh token is NOT returned, keep existing one)
+        await SecureStore.setItemAsync(TOKEN_KEYS.ACCESS_TOKEN, AccessToken);
+        await SecureStore.setItemAsync(TOKEN_KEYS.ID_TOKEN, IdToken);
 
-        return Promise.reject(refreshError);
+        return AccessToken;
       } finally {
-        isRefreshingToken = false;
+        this.isRefreshing = false;
+        this.refreshPromise = null;
       }
-    }
+    })();
 
-    return Promise.reject(error);
+    return this.refreshPromise;
   }
-);
 
-// Helper functions for token management
-export const tokenManager = {
-  async getAccessToken(): Promise<string | null> {
-    try {
-      return await SecureStore.getItemAsync(STORAGE_KEYS.ACCESS_TOKEN);
-    } catch (error) {
-      console.warn('Failed to read access token:', error);
-      return null;
-    }
-  },
+  private async clearTokens(): Promise<void> {
+    await Promise.all([
+      SecureStore.deleteItemAsync(TOKEN_KEYS.ACCESS_TOKEN).catch(() => {}),
+      SecureStore.deleteItemAsync(TOKEN_KEYS.REFRESH_TOKEN).catch(() => {}),
+      SecureStore.deleteItemAsync(TOKEN_KEYS.ID_TOKEN).catch(() => {}),
+    ]);
+  }
 
-  async getRefreshToken(): Promise<string | null> {
-    try {
-      return await SecureStore.getItemAsync(STORAGE_KEYS.REFRESH_TOKEN);
-    } catch (error) {
-      console.warn('Failed to read refresh token:', error);
-      return null;
-    }
-  },
-
-  async getIdToken(): Promise<string | null> {
-    try {
-      return await SecureStore.getItemAsync(STORAGE_KEYS.ID_TOKEN);
-    } catch (error) {
-      console.warn('Failed to read ID token:', error);
-      return null;
-    }
-  },
-
-  async setTokens(tokens: {
+  // Public methods
+  async storeTokens(tokens: {
     accessToken: string;
     refreshToken: string;
     idToken: string;
   }): Promise<void> {
-    try {
-      await Promise.all([
-        SecureStore.setItemAsync(STORAGE_KEYS.ACCESS_TOKEN, tokens.accessToken),
-        SecureStore.setItemAsync(STORAGE_KEYS.REFRESH_TOKEN, tokens.refreshToken),
-        SecureStore.setItemAsync(STORAGE_KEYS.ID_TOKEN, tokens.idToken),
-      ]);
-    } catch (error) {
-      console.error('Failed to store tokens:', error);
-      throw error;
-    }
-  },
+    await Promise.all([
+      SecureStore.setItemAsync(TOKEN_KEYS.ACCESS_TOKEN, tokens.accessToken),
+      SecureStore.setItemAsync(TOKEN_KEYS.REFRESH_TOKEN, tokens.refreshToken),
+      SecureStore.setItemAsync(TOKEN_KEYS.ID_TOKEN, tokens.idToken),
+    ]);
+  }
 
-  async clearTokens(): Promise<void> {
-    try {
-      await Promise.all([
-        SecureStore.deleteItemAsync(STORAGE_KEYS.ACCESS_TOKEN),
-        SecureStore.deleteItemAsync(STORAGE_KEYS.REFRESH_TOKEN),
-        SecureStore.deleteItemAsync(STORAGE_KEYS.ID_TOKEN),
-      ]);
-    } catch (error) {
-      console.warn('Failed to clear tokens:', error);
-    }
-  },
+  async getStoredTokens(): Promise<{
+    accessToken: string | null;
+    refreshToken: string | null;
+    idToken: string | null;
+  }> {
+    const [accessToken, refreshToken, idToken] = await Promise.all([
+      SecureStore.getItemAsync(TOKEN_KEYS.ACCESS_TOKEN),
+      SecureStore.getItemAsync(TOKEN_KEYS.REFRESH_TOKEN),
+      SecureStore.getItemAsync(TOKEN_KEYS.ID_TOKEN),
+    ]);
 
-  async hasValidTokens(): Promise<boolean> {
-    try {
-      const accessToken = await SecureStore.getItemAsync(STORAGE_KEYS.ACCESS_TOKEN);
-      const refreshToken = await SecureStore.getItemAsync(STORAGE_KEYS.REFRESH_TOKEN);
-      return !!(accessToken && refreshToken);
-    } catch (error) {
-      console.warn('Failed to check token validity:', error);
-      return false;
-    }
-  },
-};
+    return { accessToken, refreshToken, idToken };
+  }
 
+  async signOut(): Promise<void> {
+    await this.clearTokens();
+  }
+
+  // Expose the axios instance for making requests
+  get instance(): AxiosInstance {
+    return this.axiosInstance;
+  }
+
+  // Common HTTP methods
+  async get<T>(url: string, config?: any): Promise<T> {
+    const response = await this.axiosInstance.get(url, config);
+    return response.data;
+  }
+
+  async post<T>(url: string, data?: any, config?: any): Promise<T> {
+    const response = await this.axiosInstance.post(url, data, config);
+    return response.data;
+  }
+
+  async put<T>(url: string, data?: any, config?: any): Promise<T> {
+    const response = await this.axiosInstance.put(url, data, config);
+    return response.data;
+  }
+
+  async delete<T>(url: string, config?: any): Promise<T> {
+    const response = await this.axiosInstance.delete(url, config);
+    return response.data;
+  }
+}
+
+// Create a singleton instance
+export const apiClient = new ApiClient();
 export default apiClient;
+
+// Add the _retry property to the AxiosRequestConfig type
+declare module 'axios' {
+  interface InternalAxiosRequestConfig {
+    _retry?: boolean;
+  }
+}

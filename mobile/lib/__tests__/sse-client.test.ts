@@ -1,409 +1,472 @@
-import { SSEClient, ConnectionState, connectToTaskStream, disconnectSSE, getSSEState } from '../sse-client';
-import { tokenManager } from '../api-client';
+import { AppState } from 'react-native';
+import EventSource from 'react-native-sse';
+import { SSEClient, createDashboardSSE } from '../sse-client';
 
-// Mock react-native-sse
-const mockEventSource = {
-  onopen: null as (() => void) | null,
-  onmessage: null as ((event: MessageEvent) => void) | null,
-  onerror: null as ((error: Event | Error) => void) | null,
-  onclose: null as (() => void) | null,
-  close: jest.fn(),
-};
-
-jest.mock('react-native-sse', () => ({
-  EventSource: jest.fn().mockImplementation(() => mockEventSource),
-}));
-
-// Mock api-client tokenManager
-jest.mock('../api-client', () => ({
-  tokenManager: {
-    getAccessToken: jest.fn(),
-  },
-}));
-
-// Mock React Native AppState
+// Mock dependencies
+jest.mock('react-native-sse');
 jest.mock('react-native', () => ({
   AppState: {
-    addEventListener: jest.fn().mockReturnValue({ remove: jest.fn() }),
+    currentState: 'active',
+    addEventListener: jest.fn(),
   },
 }));
 
-const mockTokenManager = tokenManager as jest.Mocked<typeof tokenManager>;
+const MockedEventSource = EventSource as jest.MockedClass<typeof EventSource>;
+const mockAppState = AppState as jest.Mocked<typeof AppState>;
 
 describe('SSEClient', () => {
-  let client: SSEClient;
+  let mockEventSource: jest.Mocked<EventSource>;
+  let mockOnEvent: jest.Mock;
+  let mockOnStateChange: jest.Mock;
+  let mockOnError: jest.Mock;
 
   beforeEach(() => {
     jest.useFakeTimers();
     jest.clearAllMocks();
 
-    // Reset the mock EventSource
-    mockEventSource.onopen = null;
-    mockEventSource.onmessage = null;
-    mockEventSource.onerror = null;
-    mockEventSource.onclose = null;
-    mockEventSource.close.mockClear();
+    // Mock EventSource instance
+    mockEventSource = {
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      close: jest.fn(),
+      readyState: 0,
+    } as any;
 
-    client = new SSEClient();
+    MockedEventSource.mockImplementation(() => mockEventSource);
 
-    // Mock successful token retrieval
-    mockTokenManager.getAccessToken.mockResolvedValue('test-token');
+    // Mock callback functions
+    mockOnEvent = jest.fn();
+    mockOnStateChange = jest.fn();
+    mockOnError = jest.fn();
+
+    // Mock AppState
+    mockAppState.currentState = 'active';
+    mockAppState.addEventListener.mockReturnValue({ remove: jest.fn() });
   });
 
   afterEach(() => {
     jest.useRealTimers();
-    client.destroy();
   });
 
-  describe('connection lifecycle', () => {
-    it('starts in disconnected state', () => {
-      expect(client.getState()).toBe(ConnectionState.DISCONNECTED);
-      expect(client.isConnected()).toBe(false);
-    });
-
-    it('transitions to connecting then connected on successful connection', async () => {
-      const onMessage = jest.fn();
-      const onOpen = jest.fn();
-      const stateHandler = jest.fn();
-
-      client.onStateChange(stateHandler);
-
-      const connectPromise = client.connect({
-        endpoint: '/test-stream',
-        onMessage,
-        onOpen,
+  describe('Connection Management', () => {
+    it('should initialize with disconnected state', () => {
+      const client = new SSEClient({
+        url: '/test',
+        onStateChange: mockOnStateChange,
       });
 
-      // Should be in connecting state
-      expect(client.getState()).toBe(ConnectionState.CONNECTING);
-      expect(stateHandler).toHaveBeenCalledWith(ConnectionState.CONNECTING);
+      expect(client.getState()).toBe('disconnected');
+      // Note: onStateChange is not called during initialization since the state doesn't change
+      expect(mockOnStateChange).not.toHaveBeenCalled();
+    });
 
-      await connectPromise;
+    it('should connect and set up event listeners', () => {
+      const client = new SSEClient({
+        url: '/test',
+        token: 'test-token',
+        onEvent: mockOnEvent,
+        onStateChange: mockOnStateChange,
+      });
+
+      client.connect();
+
+      expect(MockedEventSource).toHaveBeenCalledWith(
+        'https://workermill.com/api/test?token=test-token',
+        { headers: {} }
+      );
+
+      expect(mockEventSource.addEventListener).toHaveBeenCalledWith('open', expect.any(Function));
+      expect(mockEventSource.addEventListener).toHaveBeenCalledWith('error', expect.any(Function));
+      expect(mockEventSource.addEventListener).toHaveBeenCalledWith('message', expect.any(Function));
+      expect(mockEventSource.addEventListener).toHaveBeenCalledWith('task_update', expect.any(Function));
+
+      expect(mockOnStateChange).toHaveBeenCalledWith('connecting');
+    });
+
+    it('should handle successful connection', () => {
+      const client = new SSEClient({
+        url: '/test',
+        onStateChange: mockOnStateChange,
+      });
+
+      client.connect();
 
       // Simulate successful connection
-      if (mockEventSource.onopen) {
-        mockEventSource.onopen();
-      }
+      const openHandler = mockEventSource.addEventListener.mock.calls.find(
+        call => call[0] === 'open'
+      )?.[1] as Function;
 
-      expect(client.getState()).toBe(ConnectionState.CONNECTED);
+      openHandler();
+
+      expect(mockOnStateChange).toHaveBeenCalledWith('connected');
       expect(client.isConnected()).toBe(true);
-      expect(stateHandler).toHaveBeenCalledWith(ConnectionState.CONNECTED);
-      expect(onOpen).toHaveBeenCalled();
     });
 
-    it('includes auth token as query parameter in SSE URL', async () => {
-      const { EventSource } = require('react-native-sse');
-
-      await client.connect({
-        endpoint: '/test-stream',
-        onMessage: jest.fn(),
+    it('should disconnect and clean up properly', () => {
+      const client = new SSEClient({
+        url: '/test',
+        onStateChange: mockOnStateChange,
       });
 
-      expect(EventSource).toHaveBeenCalledWith(
-        expect.stringContaining('token=test-token')
-      );
-      expect(EventSource).toHaveBeenCalledWith(
-        expect.stringContaining('/test-stream')
-      );
-    });
+      client.connect();
+      client.disconnect();
 
-    it('handles missing auth token gracefully', async () => {
-      mockTokenManager.getAccessToken.mockResolvedValue(null);
-
-      const onError = jest.fn();
-
-      await client.connect({
-        endpoint: '/test-stream',
-        onMessage: jest.fn(),
-        onError,
-      });
-
-      expect(client.getState()).toBe(ConnectionState.ERROR);
-      expect(onError).toHaveBeenCalledWith(
-        expect.objectContaining({ message: 'No access token available for SSE connection' })
-      );
+      expect(mockEventSource.removeEventListener).toHaveBeenCalledWith('open', expect.any(Function));
+      expect(mockEventSource.close).toHaveBeenCalled();
+      expect(mockOnStateChange).toHaveBeenCalledWith('disconnected');
+      expect(client.getState()).toBe('disconnected');
     });
   });
 
-  describe('reconnection with exponential backoff', () => {
-    beforeEach(async () => {
-      // Establish initial connection
-      await client.connect({
-        endpoint: '/test-stream',
-        onMessage: jest.fn(),
+  describe('Exponential Backoff Reconnect', () => {
+    it('should reconnect with exponential backoff sequence', () => {
+      const client = new SSEClient({
+        url: '/test',
+        onStateChange: mockOnStateChange,
+        onError: mockOnError,
       });
 
-      // Simulate successful connection
-      if (mockEventSource.onopen) {
-        mockEventSource.onopen();
-      }
-    });
+      // Start connection
+      client.connect();
 
-    it('reconnects with exponential backoff sequence: 1s, 2s, 4s, 8s, 30s cap', async () => {
-      const { EventSource } = require('react-native-sse');
-      EventSource.mockClear();
+      // Simulate connection failure
+      const errorHandler = mockEventSource.addEventListener.mock.calls.find(
+        call => call[0] === 'error'
+      )?.[1] as Function;
 
-      // Simulate connection error
-      if (mockEventSource.onerror) {
-        mockEventSource.onerror(new Error('Connection failed'));
-      }
+      // First failure
+      errorHandler({ type: 'error' });
+      expect(mockOnStateChange).toHaveBeenCalledWith('error');
 
-      expect(client.getState()).toBe(ConnectionState.RECONNECTING);
+      // Clear previous calls
+      MockedEventSource.mockClear();
 
-      // First reconnect: after 1000ms
+      // First reconnect after exactly 1000ms
       jest.advanceTimersByTime(1000);
-      expect(EventSource).toHaveBeenCalledTimes(1);
+      expect(MockedEventSource).toHaveBeenCalledTimes(1);
 
-      // Simulate another error
-      if (mockEventSource.onerror) {
-        mockEventSource.onerror(new Error('Connection failed'));
-      }
+      // Simulate another failure
+      errorHandler({ type: 'error' });
+      MockedEventSource.mockClear();
 
-      // Second reconnect: after additional 2000ms
+      // Second reconnect after additional 2000ms
       jest.advanceTimersByTime(2000);
-      expect(EventSource).toHaveBeenCalledTimes(2);
+      expect(MockedEventSource).toHaveBeenCalledTimes(1);
 
-      // Simulate another error
-      if (mockEventSource.onerror) {
-        mockEventSource.onerror(new Error('Connection failed'));
-      }
+      // Simulate another failure
+      errorHandler({ type: 'error' });
+      MockedEventSource.mockClear();
 
-      // Third reconnect: after additional 4000ms
+      // Third reconnect after additional 4000ms
       jest.advanceTimersByTime(4000);
-      expect(EventSource).toHaveBeenCalledTimes(3);
+      expect(MockedEventSource).toHaveBeenCalledTimes(1);
 
-      // Simulate another error
-      if (mockEventSource.onerror) {
-        mockEventSource.onerror(new Error('Connection failed'));
-      }
+      // Simulate another failure
+      errorHandler({ type: 'error' });
+      MockedEventSource.mockClear();
 
-      // Fourth reconnect: after additional 8000ms
+      // Fourth reconnect after additional 8000ms
       jest.advanceTimersByTime(8000);
-      expect(EventSource).toHaveBeenCalledTimes(4);
+      expect(MockedEventSource).toHaveBeenCalledTimes(1);
 
-      // Simulate another error
-      if (mockEventSource.onerror) {
-        mockEventSource.onerror(new Error('Connection failed'));
-      }
+      // Simulate another failure
+      errorHandler({ type: 'error' });
+      MockedEventSource.mockClear();
 
-      // Fifth reconnect: after 30000ms (capped)
+      // Fifth reconnect after 30000ms (cap reached)
       jest.advanceTimersByTime(30000);
-      expect(EventSource).toHaveBeenCalledTimes(5);
+      expect(MockedEventSource).toHaveBeenCalledTimes(1);
 
-      // Simulate another error
-      if (mockEventSource.onerror) {
-        mockEventSource.onerror(new Error('Connection failed'));
-      }
+      // Simulate another failure
+      errorHandler({ type: 'error' });
+      MockedEventSource.mockClear();
 
-      // Sixth reconnect: still 30000ms (not increasing)
+      // Sixth reconnect after another 30000ms (still at cap)
       jest.advanceTimersByTime(30000);
-      expect(EventSource).toHaveBeenCalledTimes(6);
+      expect(MockedEventSource).toHaveBeenCalledTimes(1);
     });
 
-    it('resets backoff on successful reconnection', async () => {
-      const { EventSource } = require('react-native-sse');
-      EventSource.mockClear();
+    it('should reset reconnect attempts on successful connection', () => {
+      const client = new SSEClient({
+        url: '/test',
+        onStateChange: mockOnStateChange,
+        onError: mockOnError,
+      });
 
-      // Simulate connection error
-      if (mockEventSource.onerror) {
-        mockEventSource.onerror(new Error('Connection failed'));
-      }
+      client.connect();
 
-      // First reconnect after 1000ms
+      // Simulate connection failure
+      const errorHandler = mockEventSource.addEventListener.mock.calls.find(
+        call => call[0] === 'error'
+      )?.[1] as Function;
+
+      errorHandler({ type: 'error' });
+      MockedEventSource.mockClear();
+
+      // First reconnect at 1000ms
       jest.advanceTimersByTime(1000);
-      expect(EventSource).toHaveBeenCalledTimes(1);
-
-      // Simulate successful reconnection
-      if (mockEventSource.onopen) {
-        mockEventSource.onopen();
-      }
-
-      expect(client.getState()).toBe(ConnectionState.CONNECTED);
-
-      // Another error should restart from 1000ms delay
-      if (mockEventSource.onerror) {
-        mockEventSource.onerror(new Error('Connection failed'));
-      }
-
-      EventSource.mockClear();
-
-      // Should retry after 1000ms (not 2000ms)
-      jest.advanceTimersByTime(1000);
-      expect(EventSource).toHaveBeenCalledTimes(1);
-    });
-
-    it('stops reconnecting when manually disconnected', async () => {
-      const { EventSource } = require('react-native-sse');
-      EventSource.mockClear();
-
-      // Simulate connection error
-      if (mockEventSource.onerror) {
-        mockEventSource.onerror(new Error('Connection failed'));
-      }
-
-      expect(client.getState()).toBe(ConnectionState.RECONNECTING);
-
-      // Manually disconnect before timer fires
-      client.disconnect();
-
-      // Advance timer - should not reconnect
-      jest.advanceTimersByTime(5000);
-      expect(EventSource).not.toHaveBeenCalled();
-      expect(client.getState()).toBe(ConnectionState.DISCONNECTED);
-    });
-  });
-
-  describe('message handling', () => {
-    it('forwards messages to handler', async () => {
-      const onMessage = jest.fn();
-
-      await client.connect({
-        endpoint: '/test-stream',
-        onMessage,
-      });
-
-      const testEvent = { data: 'test message' } as MessageEvent;
-
-      if (mockEventSource.onmessage) {
-        mockEventSource.onmessage(testEvent);
-      }
-
-      expect(onMessage).toHaveBeenCalledWith(testEvent);
-    });
-
-    it('forwards errors to handler', async () => {
-      const onError = jest.fn();
-
-      await client.connect({
-        endpoint: '/test-stream',
-        onMessage: jest.fn(),
-        onError,
-      });
-
-      const testError = new Error('Test error');
-
-      if (mockEventSource.onerror) {
-        mockEventSource.onerror(testError);
-      }
-
-      expect(onError).toHaveBeenCalledWith(testError);
-    });
-  });
-
-  describe('state management', () => {
-    it('emits state change events', async () => {
-      const stateHandler = jest.fn();
-      const unsubscribe = client.onStateChange(stateHandler);
-
-      await client.connect({
-        endpoint: '/test-stream',
-        onMessage: jest.fn(),
-      });
-
-      expect(stateHandler).toHaveBeenCalledWith(ConnectionState.CONNECTING);
+      expect(MockedEventSource).toHaveBeenCalledTimes(1);
 
       // Simulate successful connection
-      if (mockEventSource.onopen) {
-        mockEventSource.onopen();
-      }
+      const openHandler = mockEventSource.addEventListener.mock.calls.find(
+        call => call[0] === 'open'
+      )?.[1] as Function;
 
-      expect(stateHandler).toHaveBeenCalledWith(ConnectionState.CONNECTED);
+      openHandler();
+      expect(client.getReconnectAttempts()).toBe(0); // Should reset
 
-      // Test unsubscribe
-      unsubscribe();
-      client.disconnect();
+      // If we fail again, should start from 1s again
+      errorHandler({ type: 'error' });
+      MockedEventSource.mockClear();
 
-      const previousCallCount = stateHandler.mock.calls.length;
-
-      // Should not receive further state changes
-      expect(stateHandler).toHaveBeenCalledTimes(previousCallCount);
+      jest.advanceTimersByTime(1000);
+      expect(MockedEventSource).toHaveBeenCalledTimes(1);
     });
 
-    it('transitions to error state after max retries', async () => {
-      const stateHandler = jest.fn();
-      client.onStateChange(stateHandler);
-
-      await client.connect({
-        endpoint: '/test-stream',
-        onMessage: jest.fn(),
+    it('should emit error state after connection failures', () => {
+      const client = new SSEClient({
+        url: '/test',
+        onStateChange: mockOnStateChange,
+        onError: mockOnError,
       });
 
-      // Simulate connection establishment
-      if (mockEventSource.onopen) {
-        mockEventSource.onopen();
-      }
+      client.connect();
 
-      expect(client.getState()).toBe(ConnectionState.CONNECTED);
+      // Simulate connection failure
+      const errorHandler = mockEventSource.addEventListener.mock.calls.find(
+        call => call[0] === 'error'
+      )?.[1] as Function;
 
-      // Simulate persistent connection failure
-      if (mockEventSource.onerror) {
-        mockEventSource.onerror(new Error('Persistent error'));
-      }
+      errorHandler({ type: 'error' });
 
-      expect(client.getState()).toBe(ConnectionState.RECONNECTING);
-      expect(stateHandler).toHaveBeenCalledWith(ConnectionState.RECONNECTING);
+      expect(mockOnStateChange).toHaveBeenCalledWith('error');
+      expect(mockOnError).toHaveBeenCalledWith(expect.any(Error));
+      expect(client.isErrored()).toBe(true);
     });
   });
 
-  describe('cleanup', () => {
-    it('closes connection and clears timers on destroy', async () => {
-      await client.connect({
-        endpoint: '/test-stream',
-        onMessage: jest.fn(),
+  describe('App State Handling', () => {
+    it('should disconnect when app goes to background', () => {
+      const client = new SSEClient({
+        url: '/test',
+        onStateChange: mockOnStateChange,
       });
 
-      // Simulate error to start reconnect timer
-      if (mockEventSource.onerror) {
-        mockEventSource.onerror(new Error('Test error'));
-      }
+      client.connect();
+
+      // Simulate app going to background
+      const appStateHandler = mockAppState.addEventListener.mock.calls.find(
+        call => call[0] === 'change'
+      )?.[1] as Function;
+
+      appStateHandler('background');
+
+      expect(mockEventSource.close).toHaveBeenCalled();
+      expect(mockOnStateChange).toHaveBeenCalledWith('disconnected');
+    });
+
+    it('should reconnect when app becomes active after backgrounding', () => {
+      const client = new SSEClient({
+        url: '/test',
+        onStateChange: mockOnStateChange,
+      });
+
+      client.connect();
+
+      const appStateHandler = mockAppState.addEventListener.mock.calls.find(
+        call => call[0] === 'change'
+      )?.[1] as Function;
+
+      // Background the app
+      appStateHandler('background');
+      MockedEventSource.mockClear();
+
+      // Bring app to foreground
+      appStateHandler('active');
+
+      expect(MockedEventSource).toHaveBeenCalled();
+    });
+
+    it('should not reconnect on app active if manually disconnected', () => {
+      const client = new SSEClient({
+        url: '/test',
+      });
+
+      // Manually disconnect (not due to backgrounding)
+      client.disconnect();
+      MockedEventSource.mockClear();
+
+      const appStateHandler = mockAppState.addEventListener.mock.calls.find(
+        call => call[0] === 'change'
+      )?.[1] as Function;
+
+      // App becomes active
+      appStateHandler('active');
+
+      expect(MockedEventSource).not.toHaveBeenCalled();
+    });
+
+    it('should only reconnect when app is active', () => {
+      mockAppState.currentState = 'background';
+
+      const client = new SSEClient({
+        url: '/test',
+        onError: mockOnError,
+      });
+
+      client.connect();
+
+      // Simulate failure
+      const errorHandler = mockEventSource.addEventListener.mock.calls.find(
+        call => call[0] === 'error'
+      )?.[1] as Function;
+
+      errorHandler({ type: 'error' });
+      MockedEventSource.mockClear();
+
+      // Should not reconnect while app is in background
+      jest.advanceTimersByTime(1000);
+      expect(MockedEventSource).not.toHaveBeenCalled();
+
+      // Set app to active and advance timer again
+      mockAppState.currentState = 'active';
+      jest.advanceTimersByTime(0); // Timer already fired, need new failure
+
+      errorHandler({ type: 'error' });
+      MockedEventSource.mockClear();
+
+      jest.advanceTimersByTime(1000);
+      expect(MockedEventSource).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Event Handling', () => {
+    it('should handle task update events', () => {
+      const client = new SSEClient({
+        url: '/test',
+        onEvent: mockOnEvent,
+      });
+
+      client.connect();
+
+      const taskUpdateHandler = mockEventSource.addEventListener.mock.calls.find(
+        call => call[0] === ('task_update' as any)
+      )?.[1] as Function;
+
+      const testData = { id: 'task-1', status: 'completed' };
+      taskUpdateHandler({ data: JSON.stringify(testData) });
+
+      expect(mockOnEvent).toHaveBeenCalledWith({
+        type: 'task_update',
+        data: testData,
+        timestamp: expect.any(String),
+      });
+    });
+
+    it('should handle coordination messages', () => {
+      const client = new SSEClient({
+        url: '/test',
+        onEvent: mockOnEvent,
+      });
+
+      client.connect();
+
+      const coordinationHandler = mockEventSource.addEventListener.mock.calls.find(
+        call => call[0] === ('coordination_message' as any)
+      )?.[1] as Function;
+
+      const testData = { persona: 'backend', message_type: 'decision', content: 'test' };
+      coordinationHandler({ data: JSON.stringify(testData) });
+
+      expect(mockOnEvent).toHaveBeenCalledWith({
+        type: 'coordination_message',
+        data: testData,
+        timestamp: expect.any(String),
+      });
+    });
+
+    it('should handle malformed event data gracefully', () => {
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      const client = new SSEClient({
+        url: '/test',
+        onEvent: mockOnEvent,
+      });
+
+      client.connect();
+
+      const messageHandler = mockEventSource.addEventListener.mock.calls.find(
+        call => call[0] === 'message'
+      )?.[1] as Function;
+
+      messageHandler({ data: 'invalid-json' });
+
+      expect(consoleSpy).toHaveBeenCalledWith('Error parsing SSE message:', expect.any(Error));
+      expect(mockOnEvent).not.toHaveBeenCalled();
+
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe('Token Management', () => {
+    it('should update token and reconnect if connected', () => {
+      const client = new SSEClient({
+        url: '/test',
+        token: 'old-token',
+        onStateChange: mockOnStateChange,
+      });
+
+      client.connect();
+
+      // Simulate successful connection
+      const openHandler = mockEventSource.addEventListener.mock.calls.find(
+        call => call[0] === 'open'
+      )?.[1] as Function;
+      openHandler();
+
+      MockedEventSource.mockClear();
+      mockEventSource.close.mockClear();
+
+      client.updateToken('new-token');
+
+      expect(mockEventSource.close).toHaveBeenCalled();
+      expect(MockedEventSource).toHaveBeenCalledWith(
+        'https://workermill.com/api/test?token=new-token',
+        { headers: {} }
+      );
+    });
+  });
+
+  describe('Factory Functions', () => {
+    it('should create dashboard SSE with correct URL', () => {
+      const options = {
+        onEvent: mockOnEvent,
+        onStateChange: mockOnStateChange,
+      };
+
+      const client = createDashboardSSE('test-token', options);
+
+      client.connect();
+
+      expect(MockedEventSource).toHaveBeenCalledWith(
+        'https://workermill.com/api/control-center/stream?token=test-token',
+        { headers: {} }
+      );
+    });
+  });
+
+  describe('Cleanup', () => {
+    it('should clean up app state listener on destroy', () => {
+      const removeListener = jest.fn();
+      mockAppState.addEventListener.mockReturnValue({ remove: removeListener });
+
+      const client = new SSEClient({
+        url: '/test',
+      });
 
       client.destroy();
 
-      expect(mockEventSource.close).toHaveBeenCalled();
-      expect(client.getState()).toBe(ConnectionState.DISCONNECTED);
-
-      // Timer should be cleared - advancing time shouldn't trigger reconnect
-      const { EventSource } = require('react-native-sse');
-      EventSource.mockClear();
-
-      jest.advanceTimersByTime(10000);
-      expect(EventSource).not.toHaveBeenCalled();
+      expect(removeListener).toHaveBeenCalled();
     });
-  });
-});
-
-describe('utility functions', () => {
-  beforeEach(() => {
-    jest.useFakeTimers();
-    mockTokenManager.getAccessToken.mockResolvedValue('test-token');
-  });
-
-  afterEach(() => {
-    jest.useRealTimers();
-    disconnectSSE();
-  });
-
-  it('connectToTaskStream connects to correct endpoint', async () => {
-    const { EventSource } = require('react-native-sse');
-    const onMessage = jest.fn();
-
-    connectToTaskStream(onMessage);
-
-    expect(EventSource).toHaveBeenCalledWith(
-      expect.stringContaining('/control-center/stream')
-    );
-  });
-
-  it('getSSEState returns current state', () => {
-    expect(getSSEState()).toBe(ConnectionState.DISCONNECTED);
-  });
-
-  it('disconnectSSE calls client disconnect', () => {
-    const client = require('../sse-client').sseClient;
-    const disconnectSpy = jest.spyOn(client, 'disconnect');
-
-    disconnectSSE();
-
-    expect(disconnectSpy).toHaveBeenCalled();
   });
 });

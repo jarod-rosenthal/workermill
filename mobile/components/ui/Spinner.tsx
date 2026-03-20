@@ -1,17 +1,18 @@
 import React from 'react';
-import { ActivityIndicator, View, ViewStyle } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
 
 interface SpinnerProps {
   size?: 'small' | 'large';
   color?: string;
-  style?: ViewStyle;
+  className?: string;
 }
 
-export function Spinner({ size = 'large', color = '#6366f1', style }: SpinnerProps) {
+export function Spinner({ size = 'large', color = '#6366f1', className }: SpinnerProps) {
   return (
     <View
-      className="flex-1 justify-center items-center"
-      style={style}
+      className={`justify-center items-center ${className || ''}`}
+      accessibilityRole="progressbar"
+      accessibilityLabel="Loading"
     >
       <ActivityIndicator size={size} color={color} />
     </View>

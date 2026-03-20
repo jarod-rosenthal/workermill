@@ -2,334 +2,262 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { API_BASE_URL } from '@/constants/config';
-import { tokenManager } from './api-client';
+import { apiClient } from './api-client';
 
-// Storage key for push token
+// Secure store key for push token
 const PUSH_TOKEN_KEY = 'expo_push_token';
 
-// Types
-export interface PushSubscription {
-  id: string;
-  expoPushToken: string;
-  platform: 'ios' | 'android';
-  deviceName?: string;
-}
-
-export interface NotificationPreferences {
+export interface PushNotificationPreferences {
   push_completions: boolean;
   push_failures: boolean;
   push_blockers: boolean;
   push_plan_approvals: boolean;
 }
 
-// Configure notification behavior
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+export interface PushRegistrationData {
+  expoPushToken: string;
+  platform: 'ios' | 'android';
+  deviceName?: string;
+}
 
-/**
- * Check if device supports push notifications
- */
-export const isPushNotificationSupported = (): boolean => {
-  return Device.isDevice; // Must be physical device, not simulator
-};
-
-/**
- * Request push notification permissions
- */
-export const requestPushPermissions = async (): Promise<boolean> => {
-  if (!isPushNotificationSupported()) {
-    console.warn('Push notifications are not supported on this device (simulator)');
-    return false;
-  }
-
-  try {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-
-    let finalStatus = existingStatus;
-
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-
-    if (finalStatus !== 'granted') {
-      console.warn('Push notification permission denied');
-      return false;
-    }
-
-    // Configure notification channel for Android
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'WorkerMill',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#6366f1',
-        sound: 'default',
-      });
-    }
-
-    return true;
-  } catch (error) {
-    console.error('Failed to request push permissions:', error);
-    return false;
-  }
-};
-
-/**
- * Get Expo push token for this device
- */
-export const getExpoPushToken = async (): Promise<string | null> => {
-  try {
-    if (!isPushNotificationSupported()) {
-      return null;
-    }
-
-    // Check if we have permissions
-    const hasPermissions = await requestPushPermissions();
-    if (!hasPermissions) {
-      return null;
-    }
-
-    // Get the token
-    const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId: '98e60e26-13c4-421e-b114-96a7b2523f35', // From app.json
+export class PushNotificationManager {
+  /**
+   * Configure notification handling
+   */
+  static configure(): void {
+    // Set the notification handler for when the app is in foreground
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
     });
-
-    return tokenData.data;
-  } catch (error) {
-    console.error('Failed to get Expo push token:', error);
-    return null;
   }
-};
 
-/**
- * Register push token with backend
- */
-export const registerPushToken = async (): Promise<PushSubscription | null> => {
-  try {
-    // Get push token
-    const expoPushToken = await getExpoPushToken();
-    if (!expoPushToken) {
-      console.warn('No push token available for registration');
-      return null;
-    }
+  /**
+   * Check if push notifications are supported on this device
+   */
+  static async isSupported(): Promise<boolean> {
+    return Device.isDevice && (Platform.OS === 'ios' || Platform.OS === 'android');
+  }
 
-    // Get auth token
-    const accessToken = await tokenManager.getAccessToken();
-    if (!accessToken) {
-      console.warn('No auth token available for push registration');
-      return null;
-    }
-
-    // Get device info
+  /**
+   * Get device information for registration
+   */
+  private static async getDeviceInfo(): Promise<{ platform: 'ios' | 'android'; deviceName?: string }> {
     const platform = Platform.OS as 'ios' | 'android';
-    const deviceName = Device.deviceName || `${Device.brand} ${Device.modelName}`.trim();
+    let deviceName: string | undefined;
 
-    // Register with backend
-    const response = await fetch(`${API_BASE_URL}/push/register`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        expoPushToken,
-        platform,
-        deviceName: deviceName || undefined,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error');
-      throw new Error(`Failed to register push token: ${response.status} ${errorText}`);
+    try {
+      deviceName = Device.deviceName || `${Device.brand} ${Device.modelName}` || undefined;
+    } catch (error) {
+      console.warn('Could not get device name:', error);
     }
 
-    const subscription = await response.json();
-
-    // Store token securely for later unregistration
-    await SecureStore.setItemAsync(PUSH_TOKEN_KEY, expoPushToken);
-
-    console.log('Push token registered successfully:', subscription.id);
-    return subscription;
-  } catch (error) {
-    console.error('Failed to register push token:', error);
-    return null;
+    return { platform, deviceName };
   }
-};
 
-/**
- * Unregister push token from backend
- */
-export const unregisterPushToken = async (): Promise<boolean> => {
-  try {
-    // Get stored push token
-    const expoPushToken = await SecureStore.getItemAsync(PUSH_TOKEN_KEY);
-    if (!expoPushToken) {
-      console.warn('No push token found to unregister');
-      return true; // Consider this success - nothing to unregister
+  /**
+   * Request notification permissions and get Expo push token
+   */
+  static async requestPermissionsAndGetToken(): Promise<string | null> {
+    try {
+      if (!await this.isSupported()) {
+        throw new Error('Push notifications are not supported on this device');
+      }
+
+      // Request permissions
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+
+      if (finalStatus !== 'granted') {
+        throw new Error('Push notification permission denied');
+      }
+
+      // Get Expo push token
+      const tokenData = await Notifications.getExpoPushTokenAsync();
+      return tokenData.data;
+    } catch (error) {
+      console.error('Error getting push token:', error);
+      return null;
     }
+  }
 
-    // Get auth token
-    const accessToken = await tokenManager.getAccessToken();
-    if (!accessToken) {
-      console.warn('No auth token available for push unregistration');
-      // Still clear local token even if we can't notify backend
-      await SecureStore.deleteItemAsync(PUSH_TOKEN_KEY);
+  /**
+   * Register push token with the API
+   */
+  static async registerPushToken(): Promise<boolean> {
+    try {
+      const expoPushToken = await this.requestPermissionsAndGetToken();
+      if (!expoPushToken) {
+        throw new Error('Failed to get push token');
+      }
+
+      const deviceInfo = await this.getDeviceInfo();
+
+      const registrationData: PushRegistrationData = {
+        expoPushToken,
+        ...deviceInfo,
+      };
+
+      await apiClient.post('/push/register', registrationData);
+
+      // Store token locally for unregistration later
+      await SecureStore.setItemAsync(PUSH_TOKEN_KEY, expoPushToken);
+
+      console.log('Push token registered successfully');
+      return true;
+    } catch (error) {
+      console.error('Failed to register push token:', error);
       return false;
     }
+  }
 
-    // Unregister from backend
-    const response = await fetch(`${API_BASE_URL}/push/register`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        expoPushToken,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error');
-      console.warn(`Failed to unregister push token: ${response.status} ${errorText}`);
-      // Continue to clear local token even if backend call failed
-    }
-
-    // Clear stored token
-    await SecureStore.deleteItemAsync(PUSH_TOKEN_KEY);
-
-    console.log('Push token unregistered successfully');
-    return true;
-  } catch (error) {
-    console.error('Failed to unregister push token:', error);
-
-    // Try to clear local token anyway
+  /**
+   * Unregister push token from the API
+   */
+  static async unregisterPushToken(): Promise<boolean> {
     try {
+      const storedToken = await SecureStore.getItemAsync(PUSH_TOKEN_KEY);
+      if (!storedToken) {
+        console.log('No push token to unregister');
+        return true;
+      }
+
+      await apiClient.delete('/push/register', {
+        data: { expoPushToken: storedToken },
+      });
+
+      // Remove stored token
       await SecureStore.deleteItemAsync(PUSH_TOKEN_KEY);
-    } catch (clearError) {
-      console.error('Failed to clear stored push token:', clearError);
+
+      console.log('Push token unregistered successfully');
+      return true;
+    } catch (error) {
+      console.error('Failed to unregister push token:', error);
+      return false;
     }
-
-    return false;
   }
-};
 
-/**
- * Get current notification preferences
- */
-export const getNotificationPreferences = async (): Promise<NotificationPreferences | null> => {
-  try {
-    const accessToken = await tokenManager.getAccessToken();
-    if (!accessToken) {
-      console.warn('No auth token available for preferences fetch');
+  /**
+   * Get current notification preferences
+   */
+  static async getNotificationPreferences(): Promise<PushNotificationPreferences> {
+    try {
+      const preferences = await apiClient.get<PushNotificationPreferences>('/push/prefs');
+      return preferences;
+    } catch (error) {
+      console.error('Failed to get notification preferences:', error);
+      // Return default preferences on error
+      return {
+        push_completions: true,
+        push_failures: true,
+        push_blockers: true,
+        push_plan_approvals: true,
+      };
+    }
+  }
+
+  /**
+   * Update notification preferences
+   */
+  static async updateNotificationPreferences(
+    preferences: Partial<PushNotificationPreferences>
+  ): Promise<PushNotificationPreferences> {
+    try {
+      const updatedPreferences = await apiClient.put<PushNotificationPreferences>(
+        '/push/prefs',
+        preferences
+      );
+      return updatedPreferences;
+    } catch (error) {
+      console.error('Failed to update notification preferences:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the stored push token
+   */
+  static async getStoredPushToken(): Promise<string | null> {
+    try {
+      return await SecureStore.getItemAsync(PUSH_TOKEN_KEY);
+    } catch (error) {
+      console.error('Failed to get stored push token:', error);
       return null;
     }
-
-    const response = await fetch(`${API_BASE_URL}/push/prefs`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error');
-      throw new Error(`Failed to get preferences: ${response.status} ${errorText}`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Failed to get notification preferences:', error);
-    return null;
   }
-};
 
-/**
- * Update notification preferences
- */
-export const updateNotificationPreferences = async (
-  preferences: Partial<NotificationPreferences>
-): Promise<NotificationPreferences | null> => {
-  try {
-    const accessToken = await tokenManager.getAccessToken();
-    if (!accessToken) {
-      console.warn('No auth token available for preferences update');
-      return null;
+  /**
+   * Check if push notifications are currently enabled (permissions + token registered)
+   */
+  static async isPushEnabled(): Promise<boolean> {
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      const hasStoredToken = !!(await this.getStoredPushToken());
+
+      return status === 'granted' && hasStoredToken;
+    } catch (error) {
+      console.error('Error checking push status:', error);
+      return false;
     }
-
-    const response = await fetch(`${API_BASE_URL}/push/prefs`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify(preferences),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error');
-      throw new Error(`Failed to update preferences: ${response.status} ${errorText}`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Failed to update notification preferences:', error);
-    return null;
   }
-};
 
-/**
- * Get the stored push token (for debugging/display)
- */
-export const getStoredPushToken = async (): Promise<string | null> => {
-  try {
-    return await SecureStore.getItemAsync(PUSH_TOKEN_KEY);
-  } catch (error) {
-    console.error('Failed to get stored push token:', error);
-    return null;
+  /**
+   * Add notification response listener for handling taps
+   */
+  static addNotificationResponseListener(
+    listener: (response: Notifications.NotificationResponse) => void
+  ): Notifications.Subscription {
+    return Notifications.addNotificationResponseReceivedListener(listener);
   }
-};
 
-/**
- * Set up notification listeners
- */
-export const setupNotificationListeners = () => {
-  // Handle notifications received while app is foregrounded
-  const foregroundSubscription = Notifications.addNotificationReceivedListener(notification => {
-    console.log('Notification received in foreground:', notification);
-  });
+  /**
+   * Add notification received listener for foreground notifications
+   */
+  static addNotificationReceivedListener(
+    listener: (notification: Notifications.Notification) => void
+  ): Notifications.Subscription {
+    return Notifications.addNotificationReceivedListener(listener);
+  }
 
-  // Handle user tapping on notifications
-  const responseSubscription = Notifications.addNotificationResponseReceivedListener(response => {
-    console.log('Notification response received:', response);
-
-    // Extract deep link data
-    const data = response.notification.request.content.data;
-    if (data && typeof data === 'object') {
-      handleNotificationTap(data);
+  /**
+   * Remove all notification listeners
+   */
+  static removeAllNotificationListeners(): void {
+    // Note: removeAllNotificationListeners may not be available in all versions
+    if ('removeAllNotificationListeners' in Notifications) {
+      (Notifications as any).removeAllNotificationListeners();
     }
-  });
+  }
 
-  return {
-    remove: () => {
-      foregroundSubscription.remove();
-      responseSubscription.remove();
-    },
-  };
-};
+  /**
+   * Get current notification permission status
+   */
+  static async getPermissionStatus(): Promise<Notifications.NotificationPermissionsStatus> {
+    return await Notifications.getPermissionsAsync();
+  }
 
-/**
- * Handle notification tap - navigate to appropriate screen
- */
-const handleNotificationTap = (data: Record<string, any>) => {
-  // This will be implemented in the deep-linking.ts file
-  // For now, just log the data
-  console.log('Notification tap data:', data);
-};
+  /**
+   * Open device notification settings
+   */
+  static async openNotificationSettings(): Promise<void> {
+    // Note: openSettingsAsync may not be available in all versions
+    if ('openSettingsAsync' in Notifications) {
+      await (Notifications as any).openSettingsAsync();
+    }
+  }
+}
+
+// Export convenience functions for common usage patterns
+export const registerPushToken = PushNotificationManager.registerPushToken;
+export const unregisterPushToken = PushNotificationManager.unregisterPushToken;
+export const getNotificationPreferences = PushNotificationManager.getNotificationPreferences;
+export const updateNotificationPreferences = PushNotificationManager.updateNotificationPreferences;
+export const isPushEnabled = PushNotificationManager.isPushEnabled;

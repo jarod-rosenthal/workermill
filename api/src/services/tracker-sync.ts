@@ -179,6 +179,9 @@ async function syncToJira(
       result.synced++;
       result.issueKeys.push(created.key);
 
+      // Save the external issue key on the card so workers can post comments
+      await AppDataSource.getRepository(KbCard).update(card.id, { ticketKey: created.key });
+
       logger.info("Created Jira issue from card", {
         cardId: card.id,
         issueKey: created.key,
@@ -329,8 +332,12 @@ async function syncToGitHub(
       result.synced++;
       result.issueKeys.push(issueKey);
 
+      // Save the external issue key on the card so workers can post comments
+      await AppDataSource.getRepository(KbCard).update(card.id, { ticketKey: issueKey });
+
       logger.info("Created GitHub issue from card", {
         cardId: card.id,
+        issueKey,
         issueNumber: created.number,
         repo,
         boardId: board.id,
@@ -473,6 +480,9 @@ async function syncToLinear(
 
       result.synced++;
       result.issueKeys.push(issueResult.issue.identifier);
+
+      // Save the external issue key on the card so workers can post comments
+      await AppDataSource.getRepository(KbCard).update(card.id, { ticketKey: issueResult.issue.identifier });
 
       logger.info("Created Linear issue from card", {
         cardId: card.id,

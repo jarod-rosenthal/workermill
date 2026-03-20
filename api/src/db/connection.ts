@@ -278,6 +278,7 @@ import { AddMaxAgentTurns1742600000000 } from "./migrations/1742600000000-AddMax
 import { AddBlockOnLintErrors1742700000000 } from "./migrations/1742700000000-AddBlockOnLintErrors.js";
 import { AddBlockOnE2EFailures1742800000000 } from "./migrations/1742800000000-AddBlockOnE2EFailures.js";
 import { AddApiKeyPrefixToRemoteAgents1742900000000 } from "./migrations/1742900000000-AddApiKeyPrefixToRemoteAgents.js";
+import { AddTicketKeyToKbCards1743000000000 } from "./migrations/1743000000000-AddTicketKeyToKbCards.js";
 import { logger } from "../utils/logger.js";
 import { OrganizationEncryptionSubscriber } from "./subscribers/OrganizationEncryptionSubscriber.js";
 import { WebhookEndpointEncryptionSubscriber } from "./subscribers/WebhookEndpointEncryptionSubscriber.js";
@@ -595,6 +596,7 @@ export const AppDataSource = new DataSource({
     AddBlockOnLintErrors1742700000000,
     AddBlockOnE2EFailures1742800000000,
     AddApiKeyPrefixToRemoteAgents1742900000000,
+    AddTicketKeyToKbCards1743000000000,
   ],
   subscribers: [
     OrganizationEncryptionSubscriber,

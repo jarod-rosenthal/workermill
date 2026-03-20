@@ -325,13 +325,20 @@ export async function runCardAsWorkerTask(
   // the Tech Lead reviewer can run them, but the integration fixer skips execution.
   const isFoundationCard = card.position === 0;
 
+  // Use external ticket key if synced, otherwise internal board prefix
+  const internalKey = card.board?.prefix && card.cardNumber
+    ? `${card.board.prefix}-${card.cardNumber}`
+    : `${card.board?.name?.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "BOARD"}-${card.id.slice(0, 8)}`;
+  const issueKey = card.ticketKey || internalKey;
+
+  // Resolve ticket system from org's issue tracker provider
+  const trackerProvider = org.issueTrackerProvider || "internal";
+  const ticketSystem = trackerProvider === "github-issues" ? "github" : trackerProvider;
+
   // Create WorkerTask
   const workerTask = workerTaskRepo.create({
     orgId: org.id,
-    jiraIssueKey:
-      card.board?.prefix && card.cardNumber
-        ? `${card.board.prefix}-${card.cardNumber}`
-        : `${card.board?.name?.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "BOARD"}-${card.id.slice(0, 8)}`,
+    jiraIssueKey: issueKey,
     jiraIssueId: null,
     summary: card.title,
     description,
@@ -352,7 +359,7 @@ export async function runCardAsWorkerTask(
     pipelineVersion,
     executionMode,
     criticEnabled: hasCriticLabel,
-    ticketSystem: "internal",
+    ticketSystem,
     boardExecutionId: boardExecutionId || null,
     jiraFields: {
       ...(card.board?.prdContent ? { buildPage: true } : {}),

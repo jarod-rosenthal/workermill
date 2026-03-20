@@ -98,10 +98,10 @@ describe("Push Routes", () => {
 
   beforeEach(async () => {
     // Clean up existing test data
-    await pushRepo.delete({});
-    await userOrgRepo.delete({});
-    await userRepo.delete({});
-    await orgRepo.delete({});
+    await pushRepo.clear();
+    await userOrgRepo.clear();
+    await userRepo.clear();
+    await orgRepo.clear();
 
     // Create test organization
     const org = orgRepo.create(mockOrg);
@@ -124,10 +124,10 @@ describe("Push Routes", () => {
 
   afterEach(async () => {
     // Clean up test data
-    await pushRepo.delete({});
-    await userOrgRepo.delete({});
-    await userRepo.delete({});
-    await orgRepo.delete({});
+    await pushRepo.clear();
+    await userOrgRepo.clear();
+    await userRepo.clear();
+    await orgRepo.clear();
   });
 
   describe("POST /api/push/register", () => {

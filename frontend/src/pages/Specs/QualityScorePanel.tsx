@@ -122,8 +122,8 @@ export default function QualityScorePanel({ spec, onImprove, isImproving }: Qual
         </div>
       )}
 
-      {/* Improve button */}
-      {onImprove && (
+      {/* Improve button — only visible after scoring */}
+      {onImprove && feedback && (
         <div className="mt-4 pt-4 border-t border-border/50">
           <button
             onClick={onImprove}
@@ -146,7 +146,7 @@ export default function QualityScorePanel({ spec, onImprove, isImproving }: Qual
             )}
           </button>
           <p className="text-xs text-muted-foreground mt-2 text-center">
-            AI rewrites your spec using critic feedback and current knowledge
+            Rewrites your spec based on the feedback above
           </p>
         </div>
       )}

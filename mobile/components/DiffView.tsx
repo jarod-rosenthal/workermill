@@ -172,7 +172,7 @@ function FileTab({
   );
 }
 
-function CodeContent({ content, language }: { content: string; language: string }) {
+function CodeContent({ content, language: _language }: { content: string; language: string }) {
   // Simple syntax highlighting for basic cases
   // In a real implementation, would use a proper syntax highlighting library
   return (

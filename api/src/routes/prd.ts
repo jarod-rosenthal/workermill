@@ -615,22 +615,32 @@ router.post(
       emitDecomp?.({ phase: "creating_board", detail: "Creating board and cards" });
       const finalBoardName = boardNameOverride || decomposed.boardName;
 
-      // --- GitHub Issues path: create parent issue only, no board/cards ---
-      // Child sub-issues are created at dispatch time (task-dispatch.ts) when
-      // the planning agent has finalized the execution plan stories.
+      // --- GitHub Issues path: create parent issue + child sub-issues + worker tasks ---
       if (org.issueTrackerProvider === "github-issues") {
         const targetRepo = githubRepo || org.getDefaultRepo();
         if (!targetRepo) {
-          res.status(400).json({ error: "No repository configured" });
+          if (!isStreaming) res.status(400).json({ error: "No repository configured" });
           return;
         }
 
-        const { createGithubParentIssue } = await import("../services/github-issues.js");
+        const { createGithubParentIssue, createGithubChildIssues } = await import("../services/github-issues.js");
+
+        // Create parent GitHub Issue with PRD content
         const parentIssue = await createGithubParentIssue(
           org.id, targetRepo, finalBoardName, prdContent,
         );
         const parentIssueKey = `GH-${parentIssue.number}`;
 
+        // Create child sub-issues from decomposed cards
+        const childStories = decomposed.cards.map((card: { title: string; description: string }) => ({
+          title: card.title,
+          description: card.description,
+        }));
+        const childIssues = await createGithubChildIssues(
+          org.id, targetRepo, parentIssue.number, childStories,
+        );
+
+        // Create parent task
         const taskRepo = AppDataSource.getRepository(WorkerTask);
         const parentTask = taskRepo.create({
           orgId: org.id,
@@ -644,14 +654,16 @@ router.post(
           ticketSystem: "github",
           scmProvider: org.scmProvider || "github",
           githubRepo: targetRepo,
-          status: "planning",
+          status: "dispatching",
           pipelineVersion: "v2",
           executionMode: "parallel",
           criticEnabled: false,
           deploymentEnabled: org.autoDeployEnabled ?? false,
           skipManagerReview: !org.autoReviewEnabled,
+          managerEnabled: org.autoImproveEnabled ?? false,
           improvementEnabled: org.autoImproveEnabled ?? false,
           standardSdkMode: false,
+          githubBranch: `feature/${parentIssueKey.toLowerCase()}`,
           retryCount: 0,
           maxRetries: 3,
           jiraFields: {
@@ -659,21 +671,86 @@ router.post(
             ciWorkflowPath: decomposed.ciWorkflowPath || null,
             githubParentIssueNumber: parentIssue.number,
           },
+          childTaskIds: [],
         });
         await taskRepo.save(parentTask);
 
-        logger.info("Created GitHub Issues PRD parent task", {
-          parentIssueKey, parentTaskId: parentTask.id, orgId: org.id,
+        // Create child worker tasks — one per sub-issue
+        const childTaskIds: string[] = [];
+        for (let i = 0; i < childIssues.length; i++) {
+          const card = decomposed.cards[i];
+          const childIssue = childIssues[i];
+          const childIssueKey = `GH-${childIssue.number}`;
+
+          // Build description with precomputed stories if available
+          let childDescription = card.description;
+          if (card.stories && card.stories.length > 0) {
+            childDescription += `\n\n<!-- PRECOMPUTED_STORIES_JSON\n${JSON.stringify(card.stories)}\nEND_PRECOMPUTED_STORIES -->`;
+          }
+
+          const childTask = taskRepo.create({
+            orgId: org.id,
+            jiraIssueKey: childIssueKey,
+            jiraIssueId: childIssueKey,
+            summary: card.title,
+            description: childDescription,
+            workerPersona: card.persona || "backend_developer",
+            workerModel: org.defaultWorkerModel || "",
+            workerProvider: org.primaryProvider || "anthropic",
+            ticketSystem: "github",
+            scmProvider: org.scmProvider || "github",
+            githubRepo: targetRepo,
+            status: "planning",
+            pipelineVersion: "v2",
+            executionMode: "parallel",
+            criticEnabled: false,
+            deploymentEnabled: true, // PRD children auto-deploy to feature branch
+            skipManagerReview: !org.autoReviewEnabled,
+            managerEnabled: org.autoImproveEnabled ?? false,
+            improvementEnabled: org.autoImproveEnabled ?? false,
+            standardSdkMode: false,
+            parentTaskId: parentTask.id,
+            storyIndex: i,
+            storyTitle: card.title,
+            retryCount: 0,
+            maxRetries: 3,
+            jiraFields: {
+              qualityGates: decomposed.qualityGates || null,
+              ciWorkflowPath: decomposed.ciWorkflowPath || null,
+              preComputedStories: card.stories || null,
+            },
+          });
+          await taskRepo.save(childTask);
+          childTaskIds.push(childTask.id);
+        }
+
+        // Update parent with child task IDs
+        parentTask.childTaskIds = childTaskIds;
+        await taskRepo.save(parentTask);
+
+        logger.info("Created GitHub Issues PRD with child tasks", {
+          parentIssueKey,
+          parentTaskId: parentTask.id,
+          childCount: childTaskIds.length,
+          orgId: org.id,
         });
 
-        res.status(201).json({
-          boardId: null,
-          boardName: finalBoardName,
-          cardCount: decomposed.cards.length,
-          parentTaskId: parentTask.id,
-          parentIssueKey,
-          parentIssueUrl: parentIssue.html_url,
+        emitDecomp?.({
+          phase: "complete",
+          detail: `Created ${childIssues.length} GitHub Issues linked to ${parentIssueKey}`,
         });
+
+        if (!isStreaming) {
+          res.status(201).json({
+            boardId: null,
+            boardName: finalBoardName,
+            cardCount: childIssues.length,
+            parentTaskId: parentTask.id,
+            parentIssueKey,
+            parentIssueUrl: parentIssue.html_url,
+            childIssueKeys: childIssues.map((ci) => `GH-${ci.number}`),
+          });
+        }
         return;
       }
 

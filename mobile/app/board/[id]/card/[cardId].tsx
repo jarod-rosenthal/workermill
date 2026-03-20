@@ -253,7 +253,7 @@ function ChecklistSection({ items, onToggleItem, onAddItem, onDeleteItem }: Chec
 
       {items.length === 0 && !isAddingItem ? (
         <EmptyState
-          icon="check-box-outline-blank"
+          icon="list"
           message="No checklist items."
         />
       ) : (
@@ -434,7 +434,7 @@ function ActivitySection({ activities, isLoading, onRefresh }: ActivitySectionPr
 
       {activities.length === 0 ? (
         <EmptyState
-          icon="access-time"
+          icon="timer"
           message="No activity yet."
         />
       ) : (

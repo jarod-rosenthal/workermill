@@ -1,12 +1,11 @@
-import React, { useEffect, useCallback, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
-  RefreshControl,
   SectionList,
   TouchableOpacity,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -48,7 +47,7 @@ export default function DashboardScreen() {
     getRecentTasks,
   } = useTasksStore();
 
-  const { isAuthenticated, user } = useAuthStore();
+  const { isAuthenticated } = useAuthStore();
 
   // Load tasks when screen comes into focus
   useFocusEffect(
@@ -72,7 +71,7 @@ export default function DashboardScreen() {
       return () => {
         disconnectSSE();
       };
-    }, [isAuthenticated])
+    }, [isAuthenticated, loadTasks, disconnectSSE])
   );
 
   // Pull to refresh handler

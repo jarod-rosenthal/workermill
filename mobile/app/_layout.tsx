@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -48,7 +48,7 @@ function useProtectedRoute() {
         }
       }
     }
-  }, [isAuthenticated, isLoading, shouldShowBiometric, segments]);
+  }, [isAuthenticated, isLoading, shouldShowBiometric, segments, router]);
 }
 
 function AuthGate({ children }: { children: React.ReactNode }) {
@@ -84,7 +84,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     };
 
     initializeApp();
-  }, []);
+  }, [checkAuthStatus, loadBiometricSettings, loadPreferences]);
 
   // Set up notification listeners
   useEffect(() => {

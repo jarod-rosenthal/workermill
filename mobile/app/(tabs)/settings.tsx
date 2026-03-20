@@ -11,11 +11,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/stores/auth-store';
-import { useNotificationsStore } from '@/stores/notifications-store';
+import { useNotificationsStore, type NotificationPreferences } from '@/stores/notifications-store';
 import { Spinner } from '@/components/ui/Spinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Button } from '@/components/ui/Button';
-import { biometricAuth } from '@/lib/biometric';
+import { BiometricAuth } from '@/lib/biometric';
 import { registerPushToken, unregisterPushToken } from '@/lib/push';
 import { apiClient } from '@/lib/api-client';
 
@@ -140,8 +140,8 @@ export default function SettingsScreen() {
   // Check biometric availability
   useEffect(() => {
     const checkBiometric = async () => {
-      const available = await biometricAuth.isAvailable();
-      setBiometricAvailable(available);
+      const capabilities = await BiometricAuth.checkAvailability();
+      setBiometricAvailable(capabilities.isAvailable);
     };
 
     checkBiometric();
@@ -168,7 +168,7 @@ export default function SettingsScreen() {
     try {
       if (enabled) {
         // Test biometric authentication before enabling
-        const result = await biometricAuth.authenticate();
+        const result = await BiometricAuth.authenticate();
         if (result.success) {
           await enableBiometric();
           Alert.alert(
@@ -203,7 +203,7 @@ export default function SettingsScreen() {
 
   // Handle notification preference toggle
   const handleNotificationToggle = useCallback(async (
-    category: keyof typeof preferences,
+    category: keyof NotificationPreferences,
     enabled: boolean
   ) => {
     if (!preferences) return;

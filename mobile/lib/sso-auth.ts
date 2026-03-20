@@ -2,14 +2,13 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Crypto from 'expo-crypto';
 import { API_BASE_URL } from '@/constants/config';
 
-// Types
 export interface SsoConfig {
   providers: { name: string; displayName: string }[];
   clientId: string;
   hostedUiBaseUrl: string;
 }
 
-export interface AuthResult {
+export interface SsoTokenResult {
   accessToken: string;
   refreshToken: string;
   idToken: string;
@@ -17,285 +16,247 @@ export interface AuthResult {
     id: string;
     email: string;
     name: string;
-    organizationId: string;
-    organizationName: string;
-    role: string;
-    mfaEnabled: boolean;
+    role: 'admin' | 'member';
+    organizations: {
+      id: string;
+      name: string;
+      role: string;
+    }[];
+    current_organization: {
+      id: string;
+      name: string;
+      plan: string;
+    };
   };
 }
 
-export interface SignInError extends Error {
-  code: 'CANCELLED' | 'NO_CODE' | 'EXCHANGE_FAILED' | 'NETWORK_ERROR';
+export interface SsoAuthResult {
+  success: boolean;
+  data?: SsoTokenResult;
+  error?: string;
+  cancelled?: boolean;
 }
 
-// Configure WebBrowser for better UX
-WebBrowser.maybeCompleteAuthSession();
-
-/**
- * Fetch SSO configuration from the server
- */
-export async function getSsoConfig(): Promise<SsoConfig> {
-  try {
+export class SsoAuthManager {
+  /**
+   * Get available SSO providers configuration from the API
+   */
+  static async getSsoConfig(): Promise<SsoConfig> {
     const response = await fetch(`${API_BASE_URL}/auth/sso-config`);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch SSO config: ${response.status}`);
     }
 
-    return await response.json();
-  } catch (error) {
-    console.error('Failed to get SSO config:', error);
-    throw error;
+    return response.json();
   }
-}
 
-/**
- * Sign in with any SSO provider
- */
-export async function signInWithProvider(
-  providerName: string,
-  ssoConfig: SsoConfig
-): Promise<AuthResult> {
-  try {
-    let authorizeUrl: string;
-    let callbackEndpoint: string;
-    let redirectUri: string;
-
-    if (providerName === 'GitHub') {
-      // GitHub uses direct OAuth, not Cognito Hosted UI
-      const authResult = await initializeGitHubAuth();
-      authorizeUrl = injectMobileState(authResult.authorizeUrl, authResult.state);
-      callbackEndpoint = `${API_BASE_URL}/auth/github/callback`;
-      redirectUri = 'https://workermill.com/auth/github/callback';
-    } else {
-      // Cognito providers (Google, Microsoft, Apple, Facebook)
+  /**
+   * Sign in with any SSO provider (GitHub, Google, Microsoft, Apple, Facebook)
+   */
+  static async signInWithProvider(
+    providerName: string,
+    ssoConfig: SsoConfig,
+  ): Promise<SsoAuthResult> {
+    try {
       const state = `mobile_${Crypto.randomUUID()}`;
-      redirectUri = 'https://workermill.com/auth/callback';
-      const encodedRedirectUri = encodeURIComponent(redirectUri);
 
-      authorizeUrl = `${ssoConfig.hostedUiBaseUrl}/oauth2/authorize` +
-        `?identity_provider=${providerName}` +
-        `&client_id=${ssoConfig.clientId}` +
-        `&response_type=code` +
-        `&scope=openid+email+profile` +
-        `&redirect_uri=${encodedRedirectUri}` +
-        `&state=${state}`;
+      let authorizeUrl: string;
+      let callbackEndpoint: string;
 
-      callbackEndpoint = `${API_BASE_URL}/auth/sso-callback`;
+      if (providerName === "GitHub") {
+        // GitHub uses direct OAuth, not Cognito Hosted UI
+        const response = await fetch(`${API_BASE_URL}/auth/github/authorize`);
+
+        if (!response.ok) {
+          throw new Error(`GitHub authorize failed: ${response.status}`);
+        }
+
+        const { authorizeUrl: ghUrl, state: ghState } = await response.json();
+
+        // Replace the server-generated state with our mobile-prefixed state
+        authorizeUrl = ghUrl.replace(`state=${ghState}`, `state=${state}`);
+        callbackEndpoint = `${API_BASE_URL}/auth/github/callback`;
+      } else {
+        // Cognito providers (Google, Microsoft, Apple, Facebook)
+        const redirectUri = encodeURIComponent("https://workermill.com/auth/callback");
+        authorizeUrl = `${ssoConfig.hostedUiBaseUrl}/oauth2/authorize` +
+          `?identity_provider=${providerName}` +
+          `&client_id=${ssoConfig.clientId}` +
+          `&response_type=code` +
+          `&scope=openid+email+profile` +
+          `&redirect_uri=${redirectUri}` +
+          `&state=${state}`;
+        callbackEndpoint = `${API_BASE_URL}/auth/sso-callback`;
+      }
+
+      // Open browser and wait for workermill:// redirect
+      const result = await WebBrowser.openAuthSessionAsync(
+        authorizeUrl,
+        'workermill://auth/callback'
+      );
+
+      if (result.type !== 'success') {
+        return {
+          success: false,
+          cancelled: result.type === 'cancel',
+          error: result.type === 'cancel' ? 'Sign-in was cancelled' : 'Authentication failed',
+        };
+      }
+
+      // Extract code from redirect URL
+      const url = new URL(result.url);
+      const code = url.searchParams.get('code');
+
+      if (!code) {
+        return {
+          success: false,
+          error: 'No authorization code received from provider',
+        };
+      }
+
+      // Exchange code for tokens
+      const tokenResponse = await fetch(callbackEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          code,
+          redirectUri: providerName === "GitHub"
+            ? "https://workermill.com/auth/github/callback"
+            : "https://workermill.com/auth/callback",
+        }),
+      });
+
+      if (!tokenResponse.ok) {
+        const errorData = await tokenResponse.json().catch(() => ({}));
+        return {
+          success: false,
+          error: errorData.message || `Authentication failed: ${tokenResponse.status}`,
+        };
+      }
+
+      const tokenData = await tokenResponse.json();
+
+      return {
+        success: true,
+        data: tokenData,
+      };
+    } catch (error) {
+      console.error('SSO authentication error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'An unexpected error occurred',
+      };
     }
-
-    console.log('Opening SSO auth URL:', authorizeUrl);
-
-    // Open browser and wait for workermill:// redirect
-    const result = await WebBrowser.openAuthSessionAsync(
-      authorizeUrl,
-      'workermill://auth/callback'
-    );
-
-    if (result.type === 'cancel') {
-      const error = new Error('Sign-in was cancelled by user') as SignInError;
-      error.code = 'CANCELLED';
-      throw error;
-    }
-
-    if (result.type !== 'success') {
-      const error = new Error(`Auth session failed: ${result.type}`) as SignInError;
-      error.code = 'NETWORK_ERROR';
-      throw error;
-    }
-
-    // Extract code from redirect URL
-    const code = extractCodeFromUrl(result.url);
-    if (!code) {
-      const error = new Error('No authorization code received') as SignInError;
-      error.code = 'NO_CODE';
-      throw error;
-    }
-
-    // Exchange code for tokens
-    console.log('Exchanging authorization code for tokens...');
-    const tokenResult = await exchangeCodeForTokens(callbackEndpoint, code, redirectUri);
-
-    return tokenResult;
-
-  } catch (error) {
-    console.error('SSO sign-in failed:', error);
-
-    if ((error as SignInError).code) {
-      throw error;
-    }
-
-    const authError = new Error(`Authentication failed: ${error instanceof Error ? error.message : String(error)}`) as SignInError;
-    authError.code = 'EXCHANGE_FAILED';
-    throw authError;
   }
-}
 
-/**
- * Initialize GitHub OAuth flow
- */
-async function initializeGitHubAuth(): Promise<{ authorizeUrl: string; state: string }> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/auth/github/authorize`);
-
-    if (!response.ok) {
-      throw new Error(`Failed to initialize GitHub auth: ${response.status}`);
+  /**
+   * Sign in with GitHub (convenience method)
+   */
+  static async signInWithGitHub(): Promise<SsoAuthResult> {
+    try {
+      const ssoConfig = await this.getSsoConfig();
+      return await this.signInWithProvider("GitHub", ssoConfig);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to initialize GitHub sign-in',
+      };
     }
+  }
 
-    const data = await response.json();
-    return {
-      authorizeUrl: data.authorizeUrl,
-      state: data.state,
+  /**
+   * Sign in with Google (convenience method)
+   */
+  static async signInWithGoogle(): Promise<SsoAuthResult> {
+    try {
+      const ssoConfig = await this.getSsoConfig();
+      return await this.signInWithProvider("Google", ssoConfig);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to initialize Google sign-in',
+      };
+    }
+  }
+
+  /**
+   * Sign in with Microsoft (convenience method)
+   */
+  static async signInWithMicrosoft(): Promise<SsoAuthResult> {
+    try {
+      const ssoConfig = await this.getSsoConfig();
+      return await this.signInWithProvider("Microsoft", ssoConfig);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to initialize Microsoft sign-in',
+      };
+    }
+  }
+
+  /**
+   * Sign in with Apple (convenience method)
+   */
+  static async signInWithApple(): Promise<SsoAuthResult> {
+    try {
+      const ssoConfig = await this.getSsoConfig();
+      return await this.signInWithProvider("Apple", ssoConfig);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to initialize Apple sign-in',
+      };
+    }
+  }
+
+  /**
+   * Get display name for a provider
+   */
+  static getProviderDisplayName(providerName: string): string {
+    const displayNames: Record<string, string> = {
+      'GitHub': 'GitHub',
+      'Google': 'Google',
+      'Microsoft': 'Microsoft',
+      'Apple': 'Apple',
+      'Facebook': 'Facebook',
     };
-  } catch (error) {
-    console.error('Failed to initialize GitHub auth:', error);
-    throw error;
+
+    return displayNames[providerName] || providerName;
+  }
+
+  /**
+   * Get icon name for a provider (for use with @expo/vector-icons)
+   */
+  static getProviderIconName(providerName: string): string {
+    const iconNames: Record<string, string> = {
+      'GitHub': 'logo-github',
+      'Google': 'logo-google',
+      'Microsoft': 'logo-microsoft',
+      'Apple': 'logo-apple',
+      'Facebook': 'logo-facebook',
+    };
+
+    return iconNames[providerName] || 'log-in';
+  }
+
+  /**
+   * Check if a provider is available in the SSO config
+   */
+  static isProviderAvailable(providerName: string, ssoConfig: SsoConfig): boolean {
+    return ssoConfig.providers.some(provider => provider.name === providerName);
   }
 }
 
-/**
- * Inject mobile_ prefix into OAuth state parameter
- */
-function injectMobileState(url: string, originalState: string): string {
-  try {
-    const urlObj = new URL(url);
-    const mobileState = `mobile_${originalState}`;
-    urlObj.searchParams.set('state', mobileState);
-    return urlObj.toString();
-  } catch (error) {
-    console.error('Failed to inject mobile state:', error);
-    // Fallback: simple string replacement
-    return url.replace(`state=${originalState}`, `state=mobile_${originalState}`);
-  }
-}
-
-/**
- * Extract authorization code from callback URL
- */
-function extractCodeFromUrl(url: string): string | null {
-  try {
-    const urlObj = new URL(url);
-    return urlObj.searchParams.get('code');
-  } catch (error) {
-    console.error('Failed to extract code from URL:', error);
-
-    // Fallback: regex parsing
-    const codeMatch = url.match(/[?&]code=([^&]+)/);
-    return codeMatch ? decodeURIComponent(codeMatch[1]) : null;
-  }
-}
-
-/**
- * Exchange authorization code for JWT tokens
- */
-async function exchangeCodeForTokens(
-  endpoint: string,
-  code: string,
-  redirectUri: string
-): Promise<AuthResult> {
-  try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        code,
-        redirectUri,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error');
-      throw new Error(`Token exchange failed: ${response.status} ${errorText}`);
-    }
-
-    const result = await response.json();
-
-    // Validate response structure
-    if (!result.accessToken || !result.refreshToken || !result.idToken || !result.user) {
-      throw new Error('Invalid token exchange response: missing required fields');
-    }
-
-    return result;
-  } catch (error) {
-    console.error('Token exchange failed:', error);
-    throw error;
-  }
-}
-
-/**
- * Check if provider is GitHub (for special handling)
- */
-export function isGitHubProvider(providerName: string): boolean {
-  return providerName.toLowerCase() === 'github';
-}
-
-/**
- * Check if provider is Cognito-based (Google, Microsoft, Apple, Facebook)
- */
-export function isCognitoProvider(providerName: string): boolean {
-  const cognitoProviders = ['google', 'microsoft', 'apple', 'facebook'];
-  return cognitoProviders.includes(providerName.toLowerCase());
-}
-
-/**
- * Get provider display information
- */
-export function getProviderInfo(providerName: string): {
-  displayName: string;
-  icon: string;
-  color: string;
-} {
-  const providers: Record<string, { displayName: string; icon: string; color: string }> = {
-    github: { displayName: 'GitHub', icon: 'github', color: '#24292e' },
-    google: { displayName: 'Google', icon: 'google', color: '#4285f4' },
-    microsoft: { displayName: 'Microsoft', icon: 'microsoft', color: '#00a1f1' },
-    apple: { displayName: 'Apple', icon: 'apple', color: '#000000' },
-    facebook: { displayName: 'Facebook', icon: 'facebook', color: '#1877f2' },
-  };
-
-  return providers[providerName.toLowerCase()] || {
-    displayName: providerName,
-    icon: 'account',
-    color: '#666666',
-  };
-}
-
-/**
- * Validate SSO configuration
- */
-export function validateSsoConfig(config: any): config is SsoConfig {
-  return (
-    config &&
-    typeof config === 'object' &&
-    Array.isArray(config.providers) &&
-    typeof config.clientId === 'string' &&
-    typeof config.hostedUiBaseUrl === 'string' &&
-    config.providers.every((p: any) =>
-      p &&
-      typeof p === 'object' &&
-      typeof p.name === 'string' &&
-      typeof p.displayName === 'string'
-    )
-  );
-}
-
-/**
- * Get available provider names from config
- */
-export function getAvailableProviders(config: SsoConfig): string[] {
-  return config.providers.map(p => p.name);
-}
-
-/**
- * Find provider by name in config
- */
-export function findProvider(
-  config: SsoConfig,
-  name: string
-): { name: string; displayName: string } | null {
-  return config.providers.find(p =>
-    p.name.toLowerCase() === name.toLowerCase()
-  ) || null;
-}
+// Export convenience functions for common usage patterns
+export const getSsoConfig = SsoAuthManager.getSsoConfig;
+export const signInWithProvider = SsoAuthManager.signInWithProvider;
+export const signInWithGitHub = SsoAuthManager.signInWithGitHub;
+export const signInWithGoogle = SsoAuthManager.signInWithGoogle;
+export const signInWithMicrosoft = SsoAuthManager.signInWithMicrosoft;
+export const signInWithApple = SsoAuthManager.signInWithApple;
+export const getProviderDisplayName = SsoAuthManager.getProviderDisplayName;
+export const getProviderIconName = SsoAuthManager.getProviderIconName;
+export const isProviderAvailable = SsoAuthManager.isProviderAvailable;

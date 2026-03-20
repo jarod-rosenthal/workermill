@@ -1,321 +1,335 @@
 import * as Linking from 'expo-linking';
-import { router } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 
-// Types
-export interface DeepLinkData {
-  screen: string;
-  params?: Record<string, string>;
+export type DeepLinkRoute = 'task' | 'board' | 'card' | 'auth';
+
+export interface DeepLinkParams {
+  taskId?: string;
+  boardId?: string;
+  cardId?: string;
+  code?: string;
+  state?: string;
 }
 
-export interface NotificationData {
-  type: 'task_completed' | 'task_failed' | 'blocker' | 'plan_ready';
-  taskId: string;
-  issueKey?: string;
-  summary?: string;
+export interface ParsedDeepLink {
+  route: DeepLinkRoute | null;
+  params: DeepLinkParams;
+  isValid: boolean;
 }
 
-// Deep link URL scheme configuration
-const DEEP_LINK_SCHEME = 'workermill';
+export interface NotificationDeepLink {
+  route: DeepLinkRoute;
+  params: DeepLinkParams;
+  notificationData: any;
+}
 
-/**
- * Initialize deep linking for the app
- */
-export function initializeDeepLinking(): () => void {
-  // Handle app opening from deep link when app was closed
-  const handleInitialURL = async () => {
+export class DeepLinkManager {
+  private static listeners: ((link: ParsedDeepLink) => void)[] = [];
+
+  /**
+   * Initialize deep linking system
+   */
+  static initialize() {
+    // Listen for incoming links when app is already running
+    const linkSubscription = Linking.addEventListener('url', this.handleIncomingLink);
+
+    // Handle notification taps that trigger deep links
+    const notificationSubscription = Notifications.addNotificationResponseReceivedListener(
+      this.handleNotificationResponse
+    );
+
+    return () => {
+      linkSubscription.remove();
+      notificationSubscription.remove();
+    };
+  }
+
+  /**
+   * Parse a deep link URL
+   */
+  static parseDeepLink(url: string): ParsedDeepLink {
+    try {
+      const parsed = Linking.parse(url);
+      const { hostname, path, queryParams } = parsed;
+
+      // Handle auth callback URLs (workermill://auth/callback)
+      if (hostname === 'auth' && path === '/callback') {
+        return {
+          route: 'auth',
+          params: {
+            code: queryParams?.code as string,
+            state: queryParams?.state as string,
+          },
+          isValid: !!(queryParams?.code),
+        };
+      }
+
+      // Handle task deep links (workermill://task/123)
+      if (hostname === 'task') {
+        const taskId = path?.replace('/', '') || queryParams?.id as string;
+        return {
+          route: 'task',
+          params: { taskId },
+          isValid: !!taskId,
+        };
+      }
+
+      // Handle board deep links (workermill://board/456)
+      if (hostname === 'board') {
+        const pathParts = path?.split('/').filter(Boolean) || [];
+        const boardId = pathParts[0] || queryParams?.id as string;
+
+        // Check for card deep link (workermill://board/456/card/789)
+        if (pathParts[1] === 'card' && pathParts[2]) {
+          return {
+            route: 'card',
+            params: {
+              boardId,
+              cardId: pathParts[2],
+            },
+            isValid: !!(boardId && pathParts[2]),
+          };
+        }
+
+        return {
+          route: 'board',
+          params: { boardId },
+          isValid: !!boardId,
+        };
+      }
+
+      // Handle card deep links (workermill://card/789?boardId=456)
+      if (hostname === 'card') {
+        const cardId = path?.replace('/', '') || queryParams?.id as string;
+        const boardId = queryParams?.boardId as string;
+
+        return {
+          route: 'card',
+          params: { cardId, boardId },
+          isValid: !!(cardId && boardId),
+        };
+      }
+
+      // Unknown route
+      return {
+        route: null,
+        params: {},
+        isValid: false,
+      };
+    } catch (error) {
+      console.error('Error parsing deep link:', error);
+      return {
+        route: null,
+        params: {},
+        isValid: false,
+      };
+    }
+  }
+
+  /**
+   * Handle incoming link when app is already running
+   */
+  private static handleIncomingLink = (event: { url: string }) => {
+    const parsed = this.parseDeepLink(event.url);
+    console.log('Incoming deep link:', parsed);
+
+    // Notify all listeners
+    this.listeners.forEach(listener => {
+      try {
+        listener(parsed);
+      } catch (error) {
+        console.error('Error in deep link listener:', error);
+      }
+    });
+  };
+
+  /**
+   * Handle notification response (tap)
+   */
+  private static handleNotificationResponse = (
+    response: Notifications.NotificationResponse
+  ) => {
+    const notification = response.notification;
+    const data = notification.request.content.data;
+
+    // Extract deep link information from notification data
+    const notificationDeepLink = this.parseNotificationData(data);
+
+    if (notificationDeepLink) {
+      console.log('Notification deep link:', notificationDeepLink);
+
+      // Convert to regular deep link format for consistency
+      const parsed: ParsedDeepLink = {
+        route: notificationDeepLink.route,
+        params: notificationDeepLink.params,
+        isValid: true,
+      };
+
+      // Notify listeners
+      this.listeners.forEach(listener => {
+        try {
+          listener(parsed);
+        } catch (error) {
+          console.error('Error in notification deep link listener:', error);
+        }
+      });
+    }
+  };
+
+  /**
+   * Parse notification data to extract deep link information
+   */
+  private static parseNotificationData(data: any): NotificationDeepLink | null {
+    try {
+      // Expected notification data structure:
+      // {
+      //   type: "task_completed" | "task_failed" | "blocker" | "plan_ready",
+      //   taskId: "task-id",
+      //   boardId?: "board-id",
+      //   cardId?: "card-id"
+      // }
+
+      if (!data || typeof data !== 'object') {
+        return null;
+      }
+
+      // Task notifications
+      if (data.taskId) {
+        return {
+          route: 'task',
+          params: { taskId: data.taskId },
+          notificationData: data,
+        };
+      }
+
+      // Card notifications (if we add card-specific notifications in the future)
+      if (data.cardId && data.boardId) {
+        return {
+          route: 'card',
+          params: { cardId: data.cardId, boardId: data.boardId },
+          notificationData: data,
+        };
+      }
+
+      // Board notifications
+      if (data.boardId) {
+        return {
+          route: 'board',
+          params: { boardId: data.boardId },
+          notificationData: data,
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error parsing notification data:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Add a listener for deep link events
+   */
+  static addListener(listener: (link: ParsedDeepLink) => void): () => void {
+    this.listeners.push(listener);
+
+    // Return a function to remove the listener
+    return () => {
+      const index = this.listeners.indexOf(listener);
+      if (index > -1) {
+        this.listeners.splice(index, 1);
+      }
+    };
+  }
+
+  /**
+   * Remove all listeners
+   */
+  static removeAllListeners(): void {
+    this.listeners = [];
+  }
+
+  /**
+   * Get the initial deep link URL (when app was opened from link)
+   */
+  static async getInitialURL(): Promise<ParsedDeepLink | null> {
     try {
       const url = await Linking.getInitialURL();
       if (url) {
-        console.log('App opened with initial URL:', url);
-        handleDeepLink(url);
+        return this.parseDeepLink(url);
       }
+      return null;
     } catch (error) {
-      console.error('Failed to get initial URL:', error);
-    }
-  };
-
-  // Handle deep links when app is already running
-  const subscription = Linking.addEventListener('url', (event) => {
-    console.log('Deep link received:', event.url);
-    handleDeepLink(event.url);
-  });
-
-  // Check for initial URL
-  handleInitialURL();
-
-  // Return cleanup function
-  return () => {
-    subscription?.remove();
-  };
-}
-
-/**
- * Handle incoming deep link URLs
- */
-export function handleDeepLink(url: string): void {
-  try {
-    const linkData = parseDeepLink(url);
-    if (!linkData) {
-      console.warn('Invalid deep link format:', url);
-      return;
-    }
-
-    console.log('Parsed deep link:', linkData);
-    navigateToScreen(linkData);
-  } catch (error) {
-    console.error('Failed to handle deep link:', error);
-  }
-}
-
-/**
- * Parse deep link URL and extract navigation data
- */
-export function parseDeepLink(url: string): DeepLinkData | null {
-  try {
-    const parsed = Linking.parse(url);
-
-    // Handle auth callback URLs
-    if (parsed.path === 'auth/callback') {
-      // This is handled by the SSO auth flow, not navigation
-      console.log('Auth callback deep link received');
+      console.error('Error getting initial URL:', error);
       return null;
     }
-
-    // Handle task detail URLs: workermill://task/123
-    if (parsed.path === 'task' && parsed.queryParams?.id) {
-      return {
-        screen: 'task',
-        params: {
-          id: String(parsed.queryParams.id),
-          tab: parsed.queryParams.tab ? String(parsed.queryParams.tab) : undefined,
-        },
-      };
-    }
-
-    // Handle task URLs with task ID as path: workermill://task/123
-    const taskMatch = parsed.path?.match(/^task\/(.+)$/);
-    if (taskMatch) {
-      return {
-        screen: 'task',
-        params: {
-          id: taskMatch[1],
-          tab: parsed.queryParams?.tab ? String(parsed.queryParams.tab) : undefined,
-        },
-      };
-    }
-
-    // Handle board detail URLs: workermill://board/123
-    const boardMatch = parsed.path?.match(/^board\/(.+)$/);
-    if (boardMatch) {
-      return {
-        screen: 'board',
-        params: {
-          id: boardMatch[1],
-        },
-      };
-    }
-
-    // Handle card detail URLs: workermill://board/123/card/456
-    const cardMatch = parsed.path?.match(/^board\/(.+)\/card\/(.+)$/);
-    if (cardMatch) {
-      return {
-        screen: 'card',
-        params: {
-          id: cardMatch[1],
-          cardId: cardMatch[2],
-        },
-      };
-    }
-
-    // Handle root/dashboard: workermill:// or workermill://dashboard
-    if (!parsed.path || parsed.path === 'dashboard' || parsed.path === '') {
-      return {
-        screen: 'dashboard',
-      };
-    }
-
-    // Handle boards list: workermill://boards
-    if (parsed.path === 'boards') {
-      return {
-        screen: 'boards',
-      };
-    }
-
-    // Handle settings: workermill://settings
-    if (parsed.path === 'settings') {
-      return {
-        screen: 'settings',
-      };
-    }
-
-    console.warn('Unhandled deep link path:', parsed.path);
-    return null;
-  } catch (error) {
-    console.error('Failed to parse deep link:', error);
-    return null;
   }
-}
 
-/**
- * Navigate to screen based on deep link data
- */
-export function navigateToScreen(linkData: DeepLinkData): void {
-  try {
-    switch (linkData.screen) {
+  /**
+   * Build a deep link URL for the app
+   */
+  static buildDeepLink(route: DeepLinkRoute, params: DeepLinkParams = {}): string {
+    const scheme = 'workermill://';
+
+    switch (route) {
       case 'task':
-        if (linkData.params?.id) {
-          const taskPath = `/task/${linkData.params.id}`;
-          router.push(taskPath as any);
-        }
-        break;
+        return `${scheme}task/${params.taskId}`;
 
       case 'board':
-        if (linkData.params?.id) {
-          const boardPath = `/board/${linkData.params.id}`;
-          router.push(boardPath as any);
-        }
-        break;
+        return `${scheme}board/${params.boardId}`;
 
       case 'card':
-        if (linkData.params?.id && linkData.params?.cardId) {
-          const cardPath = `/board/${linkData.params.id}/card/${linkData.params.cardId}`;
-          router.push(cardPath as any);
-        }
-        break;
+        return `${scheme}board/${params.boardId}/card/${params.cardId}`;
 
-      case 'dashboard':
-        router.push('/(tabs)/' as any);
-        break;
-
-      case 'boards':
-        router.push('/(tabs)/boards' as any);
-        break;
-
-      case 'settings':
-        router.push('/(tabs)/settings' as any);
-        break;
+      case 'auth':
+        const queryString = new URLSearchParams({
+          ...(params.code && { code: params.code }),
+          ...(params.state && { state: params.state }),
+        }).toString();
+        return `${scheme}auth/callback${queryString ? `?${queryString}` : ''}`;
 
       default:
-        console.warn('Unknown screen for navigation:', linkData.screen);
-        // Fallback to dashboard
-        router.push('/(tabs)/' as any);
+        return scheme;
     }
-  } catch (error) {
-    console.error('Failed to navigate to screen:', error);
+  }
+
+  /**
+   * Check if the app can handle a given URL
+   */
+  static async canOpenURL(url: string): Promise<boolean> {
+    try {
+      return await Linking.canOpenURL(url);
+    } catch (error) {
+      console.error('Error checking if URL can be opened:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Open an external URL
+   */
+  static async openURL(url: string): Promise<boolean> {
+    try {
+      const canOpen = await this.canOpenURL(url);
+      if (canOpen) {
+        await Linking.openURL(url);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error opening URL:', error);
+      return false;
+    }
   }
 }
 
-/**
- * Handle push notification tap - extract data and navigate
- */
-export function handleNotificationTap(notificationData: Record<string, any>): void {
-  try {
-    console.log('Handling notification tap:', notificationData);
+// Export convenience functions
+export const parseDeepLink = DeepLinkManager.parseDeepLink;
+export const buildDeepLink = DeepLinkManager.buildDeepLink;
+export const addDeepLinkListener = DeepLinkManager.addListener;
+export const getInitialDeepLink = DeepLinkManager.getInitialURL;
 
-    // Extract task ID from notification data
-    const taskId = notificationData.taskId || notificationData.task_id;
-    if (!taskId) {
-      console.warn('No task ID in notification data');
-      return;
-    }
-
-    // Determine which tab to open based on notification type
-    let targetTab: string | undefined;
-    const notificationType = notificationData.type;
-
-    switch (notificationType) {
-      case 'blocker':
-        // Open coordination tab for blocker notifications
-        targetTab = 'coordination';
-        break;
-      case 'plan_ready':
-        // Open main tab for plan approval
-        targetTab = 'logs';
-        break;
-      default:
-        // For task_completed, task_failed - open main/logs tab
-        targetTab = 'logs';
-    }
-
-    // Navigate to task detail screen
-    const taskPath = `/task/${taskId}`;
-    router.push(taskPath as any);
-
-    console.log(`Navigated to task ${taskId} from notification`);
-  } catch (error) {
-    console.error('Failed to handle notification tap:', error);
-  }
-}
-
-/**
- * Generate deep link URL for sharing
- */
-export function generateDeepLink(screen: string, params?: Record<string, string>): string {
-  try {
-    switch (screen) {
-      case 'task':
-        if (params?.id) {
-          return `${DEEP_LINK_SCHEME}://task/${params.id}`;
-        }
-        break;
-
-      case 'board':
-        if (params?.id) {
-          return `${DEEP_LINK_SCHEME}://board/${params.id}`;
-        }
-        break;
-
-      case 'card':
-        if (params?.id && params?.cardId) {
-          return `${DEEP_LINK_SCHEME}://board/${params.id}/card/${params.cardId}`;
-        }
-        break;
-
-      case 'dashboard':
-        return `${DEEP_LINK_SCHEME}://dashboard`;
-
-      case 'boards':
-        return `${DEEP_LINK_SCHEME}://boards`;
-
-      case 'settings':
-        return `${DEEP_LINK_SCHEME}://settings`;
-    }
-
-    // Fallback to dashboard
-    return `${DEEP_LINK_SCHEME}://dashboard`;
-  } catch (error) {
-    console.error('Failed to generate deep link:', error);
-    return `${DEEP_LINK_SCHEME}://dashboard`;
-  }
-}
-
-/**
- * Check if a URL is a valid WorkerMill deep link
- */
-export function isValidDeepLink(url: string): boolean {
-  try {
-    const parsed = Linking.parse(url);
-    return parsed.scheme === DEEP_LINK_SCHEME;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Get the current URL that can be used to deep link to this screen
- */
-export function getCurrentDeepLink(): string {
-  // This would typically use router state to determine current screen
-  // For now, return dashboard link as fallback
-  return generateDeepLink('dashboard');
-}
-
-/**
- * Test deep link functionality (for debugging)
- */
-export function testDeepLink(url: string): DeepLinkData | null {
-  console.log('Testing deep link:', url);
-  const result = parseDeepLink(url);
-  console.log('Parse result:', result);
-  return result;
-}
+// Export notification data handler
+export const handleNotificationData = (data: any): NotificationDeepLink | null => {
+  return DeepLinkManager['parseNotificationData'](data);
+};

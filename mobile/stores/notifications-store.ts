@@ -1,10 +1,9 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import apiClient from '@/lib/api-client';
+import { apiClient } from '@/lib/api-client';
 import { STORAGE_KEYS } from '@/constants/config';
 
-// Push notification preferences interface
 export interface NotificationPreferences {
   push_completions: boolean;
   push_failures: boolean;
@@ -12,33 +11,26 @@ export interface NotificationPreferences {
   push_plan_approvals: boolean;
 }
 
-// Notifications store state interface
-interface NotificationsState {
+export interface NotificationsState {
   // Data
   preferences: NotificationPreferences | null;
-
-  // UI state
-  isLoading: boolean;
-  error: string | null;
   lastUpdated: string | null;
 
+  // Loading state
+  isLoading: boolean;
+  error: string | null;
+
   // Actions
-  setPreferences: (preferences: NotificationPreferences) => void;
-  updatePreference: (key: keyof NotificationPreferences, value: boolean) => void;
-  setLoading: (loading: boolean) => void;
-  setError: (error: string | null) => void;
+  loadPreferences: () => Promise<void>;
+  updatePreferences: (preferences: Partial<NotificationPreferences>) => Promise<void>;
+  resetPreferences: () => void;
 
-  // API methods
-  fetchPreferences: () => Promise<void>;
-  savePreferences: (preferences: Partial<NotificationPreferences>) => Promise<void>;
-  togglePreference: (key: keyof NotificationPreferences) => Promise<void>;
-
-  // Helper methods
-  getPreference: (key: keyof NotificationPreferences) => boolean;
-  hasPreferences: () => boolean;
+  // Convenience getters
+  isEnabled: (category: keyof NotificationPreferences) => boolean;
+  getEnabledCategories: () => (keyof NotificationPreferences)[];
 }
 
-// Default notification preferences
+// Default preferences
 const DEFAULT_PREFERENCES: NotificationPreferences = {
   push_completions: true,
   push_failures: true,
@@ -50,134 +42,86 @@ export const useNotificationsStore = create<NotificationsState>()(
   persist(
     (set, get) => ({
       // Initial state
-      preferences: null,
+      preferences: DEFAULT_PREFERENCES,
+      lastUpdated: null,
       isLoading: false,
       error: null,
-      lastUpdated: null,
 
-      // Basic setters
-      setPreferences: (preferences) =>
-        set({
-          preferences,
-          lastUpdated: new Date().toISOString(),
-          error: null,
-        }),
+      // Actions
+      loadPreferences: async () => {
+        set({ isLoading: true, error: null });
 
-      updatePreference: (key, value) =>
-        set((state) => {
-          if (!state.preferences) return state;
-
-          return {
-            preferences: {
-              ...state.preferences,
-              [key]: value,
-            },
-            lastUpdated: new Date().toISOString(),
-          };
-        }),
-
-      setLoading: (isLoading) => set({ isLoading }),
-      setError: (error) => set({ error }),
-
-      // Fetch preferences from server
-      fetchPreferences: async () => {
         try {
-          set({ isLoading: true, error: null });
-
-          const response = await apiClient.get('/push/prefs');
-          const preferences = response.data;
+          const preferences = await apiClient.get<NotificationPreferences>('/push/prefs');
 
           set({
             preferences,
-            isLoading: false,
-            error: null,
             lastUpdated: new Date().toISOString(),
-          });
-        } catch (error) {
-          console.error('Failed to fetch notification preferences:', error);
-
-          // Use default preferences if fetch fails
-          set({
-            preferences: DEFAULT_PREFERENCES,
             isLoading: false,
-            error: error instanceof Error ? error.message : 'Failed to load preferences',
-            lastUpdated: new Date().toISOString(),
+            error: null
           });
-        }
-      },
-
-      // Save preferences to server
-      savePreferences: async (updates: Partial<NotificationPreferences>) => {
-        const currentPrefs = get().preferences;
-
-        if (!currentPrefs) {
-          throw new Error('No current preferences to update');
-        }
-
-        try {
-          set({ isLoading: true, error: null });
-
-          const updatedPrefs = { ...currentPrefs, ...updates };
-
-          await apiClient.put('/push/prefs', updatedPrefs);
-
-          set({
-            preferences: updatedPrefs,
-            isLoading: false,
-            error: null,
-            lastUpdated: new Date().toISOString(),
-          });
-        } catch (error) {
-          console.error('Failed to save notification preferences:', error);
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to load notification preferences';
           set({
             isLoading: false,
-            error: error instanceof Error ? error.message : 'Failed to save preferences',
+            error: errorMessage
           });
           throw error;
         }
       },
 
-      // Toggle a specific preference
-      togglePreference: async (key: keyof NotificationPreferences) => {
-        const currentPrefs = get().preferences;
+      updatePreferences: async (updates: Partial<NotificationPreferences>) => {
+        const currentPrefs = get().preferences || DEFAULT_PREFERENCES;
 
-        if (!currentPrefs) {
-          throw new Error('No preferences loaded');
-        }
-
-        const currentValue = currentPrefs[key];
-        const newValue = !currentValue;
+        set({ isLoading: true, error: null });
 
         try {
-          // Update locally first for immediate UI feedback
-          get().updatePreference(key, newValue);
+          const preferences = await apiClient.put<NotificationPreferences>('/push/prefs', updates);
 
-          // Then save to server
-          await get().savePreferences({ [key]: newValue });
-        } catch (error) {
-          // Revert local change on server error
-          get().updatePreference(key, currentValue);
+          set({
+            preferences,
+            lastUpdated: new Date().toISOString(),
+            isLoading: false,
+            error: null
+          });
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to update notification preferences';
+          set({
+            isLoading: false,
+            error: errorMessage
+          });
+
+          // Revert optimistic update on error
+          set({ preferences: currentPrefs });
           throw error;
         }
       },
 
-      // Helper methods
-      getPreference: (key: keyof NotificationPreferences) => {
-        const preferences = get().preferences;
-        if (!preferences) {
-          return DEFAULT_PREFERENCES[key];
-        }
-        return preferences[key];
+      resetPreferences: () => {
+        set({
+          preferences: DEFAULT_PREFERENCES,
+          lastUpdated: new Date().toISOString(),
+          error: null
+        });
       },
 
-      hasPreferences: () => {
-        return get().preferences !== null;
+      // Convenience getters
+      isEnabled: (category: keyof NotificationPreferences) => {
+        const preferences = get().preferences || DEFAULT_PREFERENCES;
+        return preferences[category];
+      },
+
+      getEnabledCategories: () => {
+        const preferences = get().preferences || DEFAULT_PREFERENCES;
+        return Object.entries(preferences)
+          .filter(([_, enabled]) => enabled)
+          .map(([category]) => category as keyof NotificationPreferences);
       },
     }),
     {
       name: STORAGE_KEYS.NOTIFICATIONS,
       storage: createJSONStorage(() => AsyncStorage),
-      // Only persist data, not loading/error states
+      // Only persist data, not loading states
       partialize: (state) => ({
         preferences: state.preferences,
         lastUpdated: state.lastUpdated,
@@ -185,22 +129,3 @@ export const useNotificationsStore = create<NotificationsState>()(
     }
   )
 );
-
-// Convenience selectors
-export const useNotificationPreference = (key: keyof NotificationPreferences) => {
-  return useNotificationsStore((state) => state.getPreference(key));
-};
-
-export const useNotificationPreferences = () => {
-  return useNotificationsStore((state) => state.preferences);
-};
-
-// Export store actions for external use
-export const notificationsActions = {
-  fetchPreferences: () => useNotificationsStore.getState().fetchPreferences(),
-  savePreferences: (preferences: Partial<NotificationPreferences>) =>
-    useNotificationsStore.getState().savePreferences(preferences),
-  togglePreference: (key: keyof NotificationPreferences) =>
-    useNotificationsStore.getState().togglePreference(key),
-};
-

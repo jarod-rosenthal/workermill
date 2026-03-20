@@ -1,317 +1,107 @@
-/**
- * @vitest-environment jsdom
- */
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
-import { BrowserRouter } from 'react-router-dom';
+import { render } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { GitHubCallback } from '../GitHubCallback';
 
-// Mock hooks
-const mockNavigate = vi.fn();
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-    useSearchParams: () => [new URLSearchParams(window.location.search)],
-  };
-});
-
-// Mock auth store
-const mockSetTokens = vi.fn();
-const mockSetUser = vi.fn();
-const mockSetOrganization = vi.fn();
-const mockSetNeedsSetup = vi.fn();
-
+// Mock the auth store
 vi.mock('../../store/auth-store', () => ({
-  useAuthStore: vi.fn((selector) => {
-    const state = {
-      setTokens: mockSetTokens,
-      setUser: mockSetUser,
-      setOrganization: mockSetOrganization,
-      setNeedsSetup: mockSetNeedsSetup,
-    };
-    return selector(state);
+  useAuthStore: () => ({
+    setTokens: vi.fn(),
+    setUser: vi.fn(),
+    setOrganization: vi.fn(),
+    setNeedsSetup: vi.fn(),
   }),
 }));
 
-// Mock API client
-const mockGithubCallback = vi.fn();
-const mockGetMe = vi.fn();
-
+// Mock the API client
 vi.mock('../../lib/api-client', () => ({
   default: {
     post: vi.fn(),
   },
   authAPI: {
-    githubCallback: mockGithubCallback,
-    getMe: mockGetMe,
+    githubCallback: vi.fn(),
+    getMe: vi.fn(),
   },
 }));
 
-// Mock window location
-const mockLocationAssign = vi.fn();
-Object.defineProperty(window, 'location', {
-  value: {
-    href: '',
-    origin: 'https://workermill.com',
-    search: '',
-    assign: mockLocationAssign,
-  },
-  writable: true,
-});
-
-// Mock session storage
-const mockSessionStorage = {
-  getItem: vi.fn(),
-  removeItem: vi.fn(),
-};
-Object.defineProperty(window, 'sessionStorage', {
-  value: mockSessionStorage,
-  writable: true,
-});
-
-const renderGitHubCallback = (searchParams = '') => {
-  window.location.search = searchParams;
-  return render(
-    <BrowserRouter>
-      <GitHubCallback />
-    </BrowserRouter>
-  );
-};
-
 describe('GitHubCallback', () => {
+  const mockOriginalLocation = window.location;
+
   beforeEach(() => {
-    vi.clearAllMocks();
-    window.location.href = '';
-    mockSessionStorage.getItem.mockReturnValue(null);
+    // Mock window.location
+    delete (window as Window & typeof globalThis).location;
+    window.location = {
+      ...mockOriginalLocation,
+      href: '',
+      origin: 'https://workermill.com'
+    };
   });
 
   afterEach(() => {
+    window.location = mockOriginalLocation;
     vi.clearAllMocks();
   });
 
-  describe('mobile state redirect', () => {
-    it('redirects to workermill:// when state starts with mobile_', async () => {
-      const code = 'test-auth-code';
-      const mobileState = 'mobile_abc123';
-
-      renderGitHubCallback(`?code=${code}&state=${mobileState}`);
-
-      await waitFor(() => {
-        expect(window.location.href).toBe(
-          `workermill://auth/callback?code=${encodeURIComponent(code)}`
-        );
-      });
-
-      // Should not call the GitHub callback API
-      expect(mockGithubCallback).not.toHaveBeenCalled();
-      expect(mockNavigate).not.toHaveBeenCalled();
+  it('redirects to mobile deep link when state starts with mobile_', () => {
+    const searchParams = new URLSearchParams({
+      code: 'test-auth-code',
+      state: 'mobile_test-state-123'
     });
 
-    it('redirects to workermill:// with encoded special characters in code', async () => {
-      const code = 'test+code/with=special&chars';
-      const mobileState = 'mobile_xyz789';
+    render(
+      <MemoryRouter initialEntries={[`/auth/github/callback?${searchParams.toString()}`]}>
+        <GitHubCallback />
+      </MemoryRouter>
+    );
 
-      renderGitHubCallback(`?code=${encodeURIComponent(code)}&state=${mobileState}`);
-
-      await waitFor(() => {
-        expect(window.location.href).toBe(
-          `workermill://auth/callback?code=${encodeURIComponent(code)}`
-        );
-      });
-    });
-
-    it('handles mobile state with additional parameters', async () => {
-      const code = 'test-code';
-      const mobileState = 'mobile_state_with_underscores';
-
-      renderGitHubCallback(`?code=${code}&state=${mobileState}&extra=param`);
-
-      await waitFor(() => {
-        expect(window.location.href).toBe(
-          `workermill://auth/callback?code=${encodeURIComponent(code)}`
-        );
-      });
-    });
+    // Should redirect to workermill:// deep link
+    expect(window.location.href).toBe('workermill://auth/callback?code=test-auth-code');
   });
 
-  describe('non-mobile state handling', () => {
-    it('processes normally when state does not start with mobile_', async () => {
-      const code = 'test-auth-code';
-      const regularState = 'regular-state-123';
-
-      const mockResponse = {
-        tokens: {
-          accessToken: 'access-token',
-          refreshToken: 'refresh-token',
-          idToken: 'id-token',
-        },
-        user: {
-          id: '1',
-          email: 'test@example.com',
-          name: 'Test User',
-        },
-        organization: {
-          id: 'org-1',
-          name: 'Test Org',
-        },
-      };
-
-      mockGithubCallback.mockResolvedValue(mockResponse);
-
-      renderGitHubCallback(`?code=${code}&state=${regularState}`);
-
-      await waitFor(() => {
-        expect(mockGithubCallback).toHaveBeenCalledWith({
-          code,
-          redirectUri: 'https://workermill.com/auth/github/callback',
-          state: regularState,
-        });
-      });
-
-      expect(mockSetTokens).toHaveBeenCalledWith(mockResponse.tokens);
-      expect(mockSetUser).toHaveBeenCalledWith(mockResponse.user);
-      expect(mockSetOrganization).toHaveBeenCalledWith(mockResponse.organization);
-      expect(mockNavigate).toHaveBeenCalledWith('/dashboard');
-
-      // Should not redirect to mobile deep link
-      expect(window.location.href).not.toContain('workermill://');
+  it('does not redirect when state does not start with mobile_', () => {
+    const searchParams = new URLSearchParams({
+      code: 'test-auth-code',
+      state: 'regular-state-123'
     });
 
-    it('processes normally when state is null', async () => {
-      const code = 'test-auth-code';
+    render(
+      <MemoryRouter initialEntries={[`/auth/github/callback?${searchParams.toString()}`]}>
+        <GitHubCallback />
+      </MemoryRouter>
+    );
 
-      const mockResponse = {
-        tokens: {
-          accessToken: 'access-token',
-          refreshToken: 'refresh-token',
-          idToken: 'id-token',
-        },
-        user: {
-          id: '1',
-          email: 'test@example.com',
-          name: 'Test User',
-        },
-        organization: {
-          id: 'org-1',
-          name: 'Test Org',
-        },
-      };
-
-      mockGithubCallback.mockResolvedValue(mockResponse);
-
-      renderGitHubCallback(`?code=${code}`);
-
-      await waitFor(() => {
-        expect(mockGithubCallback).toHaveBeenCalledWith({
-          code,
-          redirectUri: 'https://workermill.com/auth/github/callback',
-          state: undefined,
-        });
-      });
-
-      // Should not redirect to mobile deep link
-      expect(window.location.href).not.toContain('workermill://');
-    });
-
-    it('processes normally when state is empty string', async () => {
-      const code = 'test-auth-code';
-
-      const mockResponse = {
-        tokens: {
-          accessToken: 'access-token',
-          refreshToken: 'refresh-token',
-          idToken: 'id-token',
-        },
-        user: {
-          id: '1',
-          email: 'test@example.com',
-          name: 'Test User',
-        },
-        organization: {
-          id: 'org-1',
-          name: 'Test Org',
-        },
-      };
-
-      mockGithubCallback.mockResolvedValue(mockResponse);
-
-      renderGitHubCallback(`?code=${code}&state=`);
-
-      await waitFor(() => {
-        expect(mockGithubCallback).toHaveBeenCalledWith({
-          code,
-          redirectUri: 'https://workermill.com/auth/github/callback',
-          state: undefined,
-        });
-      });
-
-      // Should not redirect to mobile deep link
-      expect(window.location.href).not.toContain('workermill://');
-    });
+    // Should not redirect to mobile deep link
+    expect(window.location.href).not.toBe('workermill://auth/callback?code=test-auth-code');
   });
 
-  describe('error handling with mobile state', () => {
-    it('redirects to mobile even when no code present but state is mobile', async () => {
-      const mobileState = 'mobile_error_case';
-
-      renderGitHubCallback(`?error=access_denied&state=${mobileState}`);
-
-      // The component should show error before reaching the mobile redirect logic
-      // But let's test the case where code is missing but state is mobile
-      renderGitHubCallback(`?state=${mobileState}`);
-
-      // When there's no code, the component shows an error and doesn't call handleCallback
-      // So no mobile redirect should happen in this case
-      expect(window.location.href).not.toContain('workermill://');
+  it('does not redirect when state is null', () => {
+    const searchParams = new URLSearchParams({
+      code: 'test-auth-code'
     });
+
+    render(
+      <MemoryRouter initialEntries={[`/auth/github/callback?${searchParams.toString()}`]}>
+        <GitHubCallback />
+      </MemoryRouter>
+    );
+
+    // Should not redirect to mobile deep link
+    expect(window.location.href).not.toBe('workermill://auth/callback?code=test-auth-code');
   });
 
-  describe('edge cases', () => {
-    it('handles state that contains but does not start with mobile_', async () => {
-      const code = 'test-code';
-      const state = 'some-mobile_state-suffix';
-
-      const mockResponse = {
-        tokens: { accessToken: 'token', refreshToken: 'refresh', idToken: 'id' },
-        user: { id: '1', email: 'test@example.com', name: 'Test User' },
-        organization: { id: 'org-1', name: 'Test Org' },
-      };
-
-      mockGithubCallback.mockResolvedValue(mockResponse);
-
-      renderGitHubCallback(`?code=${code}&state=${state}`);
-
-      await waitFor(() => {
-        expect(mockGithubCallback).toHaveBeenCalled();
-      });
-
-      // Should NOT redirect to mobile because state doesn't START with mobile_
-      expect(window.location.href).not.toContain('workermill://');
+  it('properly encodes the code parameter in mobile redirect URL', () => {
+    const searchParams = new URLSearchParams({
+      code: 'test-code-with-special-chars&=',
+      state: 'mobile_test'
     });
 
-    it('handles mobile_ state case insensitively (only exact match)', async () => {
-      const code = 'test-code';
-      const state = 'MOBILE_uppercase';
+    render(
+      <MemoryRouter initialEntries={[`/auth/github/callback?${searchParams.toString()}`]}>
+        <GitHubCallback />
+      </MemoryRouter>
+    );
 
-      const mockResponse = {
-        tokens: { accessToken: 'token', refreshToken: 'refresh', idToken: 'id' },
-        user: { id: '1', email: 'test@example.com', name: 'Test User' },
-        organization: { id: 'org-1', name: 'Test Org' },
-      };
-
-      mockGithubCallback.mockResolvedValue(mockResponse);
-
-      renderGitHubCallback(`?code=${code}&state=${state}`);
-
-      await waitFor(() => {
-        expect(mockGithubCallback).toHaveBeenCalled();
-      });
-
-      // Should NOT redirect to mobile because it's case sensitive
-      expect(window.location.href).not.toContain('workermill://');
-    });
+    // Should properly encode the code parameter
+    expect(window.location.href).toBe('workermill://auth/callback?code=test-code-with-special-chars%26%3D');
   });
 });

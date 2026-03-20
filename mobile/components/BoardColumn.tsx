@@ -1,80 +1,86 @@
 import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { Column, Card } from '../types/boards';
 import { BoardCard } from './BoardCard';
 import { EmptyState } from './ui/EmptyState';
 
 interface BoardColumnProps {
   column: Column;
-  onCardPress: (cardId: string) => void;
-  onCardLongPress?: (cardId: string) => void;
+  onCardPress?: (card: Card) => void;
+  onCardLongPress?: (card: Card) => void;
   onAddCard?: (columnId: string) => void;
 }
 
-export function BoardColumn({ column, onCardPress, onCardLongPress, onAddCard }: BoardColumnProps) {
+export function BoardColumn({
+  column,
+  onCardPress,
+  onCardLongPress,
+  onAddCard
+}: BoardColumnProps) {
   return (
-    <View className="w-72 bg-slate-50 dark:bg-slate-800 rounded-lg mr-4">
+    <View className="w-80 mr-4 bg-slate-50 dark:bg-slate-900 rounded-lg">
       {/* Column header */}
-      <View className="flex-row items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
-        <View className="flex-1">
-          <Text className="text-lg font-semibold text-slate-900 dark:text-white">
+      <View className="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+        <View className="flex-row items-center justify-between">
+          <Text
+            className="text-base font-semibold text-slate-900 dark:text-slate-100"
+            accessibilityRole="text"
+          >
             {column.name}
           </Text>
-          <Text className="text-sm text-slate-500 dark:text-slate-400">
-            {column.cards.length} {column.cards.length === 1 ? 'card' : 'cards'}
-          </Text>
+          <View className="bg-slate-200 dark:bg-slate-700 px-2 py-1 rounded-full">
+            <Text
+              className="text-xs font-medium text-slate-600 dark:text-slate-400"
+              accessibilityRole="text"
+            >
+              {column.cards.length}
+            </Text>
+          </View>
         </View>
+      </View>
 
+      {/* Column content */}
+      <ScrollView
+        className="flex-1 px-4"
+        contentContainerStyle={{ paddingVertical: 12 }}
+        showsVerticalScrollIndicator={false}
+        accessibilityRole="scrollbar"
+        accessibilityLabel={`${column.name} column cards`}
+      >
+        {column.cards.length === 0 ? (
+          <View className="py-8">
+            <EmptyState
+              icon="folder-open"
+              message="No cards"
+            />
+          </View>
+        ) : (
+          column.cards.map((card) => (
+            <BoardCard
+              key={card.id}
+              card={card}
+              onPress={() => onCardPress?.(card)}
+              onLongPress={() => onCardLongPress?.(card)}
+            />
+          ))
+        )}
+
+        {/* Add card button */}
         {onAddCard && (
           <TouchableOpacity
             onPress={() => onAddCard(column.id)}
-            className="p-2"
-            style={{ minHeight: 44, minWidth: 44 }}
+            className="mt-2 py-3 px-4 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg"
+            style={{ minHeight: 48, minWidth: 48 }} // Minimum touch target
             accessibilityRole="button"
-            accessibilityLabel={`Add card to ${column.name}`}
+            accessibilityLabel={`Add card to ${column.name} column`}
           >
-            <Ionicons name="add" size={24} className="text-slate-600 dark:text-slate-400" />
+            <View className="flex-row items-center justify-center">
+              <Text className="text-lg text-slate-400 dark:text-slate-500 mr-2">+</Text>
+              <Text className="text-sm text-slate-600 dark:text-slate-400">
+                Add card
+              </Text>
+            </View>
           </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Cards list */}
-      <ScrollView
-        className="flex-1 p-3"
-        showsVerticalScrollIndicator={true}
-        contentContainerStyle={{ flexGrow: 1 }}
-      >
-        {column.cards.length === 0 ? (
-          <View className="flex-1 justify-center items-center py-8">
-            <Text className="text-slate-400 dark:text-slate-500 text-center">
-              No cards
-            </Text>
-            {onAddCard && (
-              <TouchableOpacity
-                onPress={() => onAddCard(column.id)}
-                className="mt-4 bg-brand-500 px-4 py-2 rounded-lg"
-                style={{ minHeight: 44 }}
-                accessibilityRole="button"
-                accessibilityLabel="Add first card"
-              >
-                <Text className="text-white font-medium">
-                  Add Card
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        ) : (
-          column.cards
-            .sort((a, b) => a.position - b.position)
-            .map((card) => (
-              <BoardCard
-                key={card.id}
-                card={card}
-                onPress={onCardPress}
-                onLongPress={onCardLongPress}
-              />
-            ))
         )}
       </ScrollView>
     </View>

@@ -1,99 +1,122 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
-import { Card } from '../types/boards';
+import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { Card as CardType, Label } from '../types/boards';
 import { StatusBadge } from './StatusBadge';
-import { WorkerTaskStatus } from '../types/tasks';
 
 interface BoardCardProps {
-  card: Card;
-  onPress: (cardId: string) => void;
-  onLongPress?: (cardId: string) => void;
+  card: CardType;
+  onPress?: () => void;
+  onLongPress?: () => void;
 }
 
-function getPriorityColor(priority: Card['priority']): string {
-  switch (priority) {
-    case 'urgent':
-      return 'bg-red-500';
-    case 'high':
-      return 'bg-orange-500';
-    case 'medium':
-      return 'bg-yellow-500';
-    case 'low':
-      return 'bg-green-500';
-    default:
-      return 'bg-slate-500';
-  }
+// Priority color mappings (left border indicator)
+const priorityColors = {
+  urgent: 'border-l-red-500',
+  high: 'border-l-orange-500',
+  medium: 'border-l-yellow-500',
+  low: 'border-l-green-500',
+};
+
+function LabelChip({ label }: { label: Label }) {
+  return (
+    <View
+      className="px-2 py-1 rounded-full mr-1 mb-1"
+      style={{ backgroundColor: label.color }}
+      accessibilityRole="text"
+      accessibilityLabel={`Label: ${label.name}`}
+    >
+      <Text
+        className="text-xs font-medium text-white"
+        numberOfLines={1}
+      >
+        {label.name}
+      </Text>
+    </View>
+  );
 }
 
 export function BoardCard({ card, onPress, onLongPress }: BoardCardProps) {
-  const completedChecklist = card.checklist_items.filter(item => item.completed).length;
-  const totalChecklist = card.checklist_items.length;
+  const priorityColor = priorityColors[card.priority];
 
   return (
     <TouchableOpacity
-      onPress={() => onPress(card.id)}
-      onLongPress={() => onLongPress?.(card.id)}
-      className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 mb-3 shadow-sm"
-      style={{ minHeight: 48 }}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      className="mb-3"
+      style={{ minHeight: 48, minWidth: 48 }} // Minimum touch target
       accessibilityRole="button"
       accessibilityLabel={`Card ${card.issue_key}: ${card.title}`}
+      accessibilityHint="Double tap to open card details, long press for options"
     >
-      {/* Priority color bar */}
-      <View className={`absolute left-0 top-0 bottom-0 w-1 ${getPriorityColor(card.priority)} rounded-l-lg`} />
+      <View
+        className={`
+          bg-white dark:bg-slate-850
+          border border-slate-200 dark:border-slate-700
+          rounded-lg shadow-sm
+          border-l-4 ${priorityColor}
+        `}
+      >
+        {/* Header with issue key and worker status */}
+        <View className="px-3 pt-3 pb-2">
+          <View className="flex-row items-center justify-between mb-2">
+            <Text
+              className="text-xs font-mono text-slate-600 dark:text-slate-400"
+              accessibilityRole="text"
+            >
+              {card.issue_key}
+            </Text>
+            {card.linked_task_status && (
+              <StatusBadge status={card.linked_task_status as any} />
+            )}
+          </View>
 
-      {/* Card header */}
-      <View className="flex-row justify-between items-start mb-2 ml-2">
-        <View className="flex-1">
-          <Text className="text-xs font-medium text-slate-500 dark:text-slate-400">
-            {card.issue_key}
-          </Text>
+          {/* Card title */}
           <Text
-            className="text-sm font-semibold text-slate-900 dark:text-white mt-1"
+            className="text-sm font-medium text-slate-900 dark:text-slate-100 leading-5"
             numberOfLines={2}
+            accessibilityRole="text"
           >
             {card.title}
           </Text>
         </View>
 
-        {/* Worker status indicator */}
-        {card.linked_task_status && (
-          <View className="ml-2">
-            <StatusBadge status={card.linked_task_status as WorkerTaskStatus} />
+        {/* Labels section */}
+        {card.labels.length > 0 && (
+          <View className="px-3 pb-2">
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              className="flex-row"
+            >
+              {card.labels.map((label) => (
+                <LabelChip key={label.id} label={label} />
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Checklist progress indicator */}
+        {card.checklist_items.length > 0 && (
+          <View className="px-3 pb-3">
+            <View className="flex-row items-center">
+              <View className="flex-1 bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mr-2">
+                <View
+                  className="bg-green-500 h-1.5 rounded-full"
+                  style={{
+                    width: `${(card.checklist_items.filter(item => item.completed).length / card.checklist_items.length) * 100}%`
+                  }}
+                />
+              </View>
+              <Text
+                className="text-xs text-slate-600 dark:text-slate-400"
+                accessibilityRole="text"
+              >
+                {card.checklist_items.filter(item => item.completed).length}/{card.checklist_items.length}
+              </Text>
+            </View>
           </View>
         )}
       </View>
-
-      {/* Labels */}
-      {card.labels.length > 0 && (
-        <View className="flex-row flex-wrap gap-1 mb-2 ml-2">
-          {card.labels.map((label) => (
-            <View
-              key={label.id}
-              className="px-2 py-1 rounded-full"
-              style={{ backgroundColor: label.color }}
-            >
-              <Text className="text-xs font-medium text-white">
-                {label.name}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Checklist progress */}
-      {totalChecklist > 0 && (
-        <View className="flex-row items-center ml-2">
-          <View className="flex-1 bg-slate-200 dark:bg-slate-600 rounded-full h-1 mr-2">
-            <View
-              className="bg-green-500 h-1 rounded-full"
-              style={{ width: `${(completedChecklist / totalChecklist) * 100}%` }}
-            />
-          </View>
-          <Text className="text-xs text-slate-500 dark:text-slate-400">
-            {completedChecklist}/{totalChecklist}
-          </Text>
-        </View>
-      )}
     </TouchableOpacity>
   );
 }

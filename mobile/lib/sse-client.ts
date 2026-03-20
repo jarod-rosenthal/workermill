@@ -1,333 +1,364 @@
 import EventSource from 'react-native-sse';
 import { AppState, AppStateStatus } from 'react-native';
-import { tokenManager } from './api-client';
 import { SSE_BASE_URL } from '@/constants/config';
 
-// Types
-export type SSEEventHandler = (event: MessageEvent) => void;
-export type SSEErrorHandler = (error: Event | Error) => void;
+export type SSEEventType = 'task_update' | 'coordination_message' | 'log_entry' | 'code_event';
 
-export interface SSEConnectionConfig {
-  endpoint: string;
-  onMessage?: SSEEventHandler;
-  onError?: SSEErrorHandler;
-  onOpen?: () => void;
-  onClose?: () => void;
+export interface SSEEvent {
+  type: SSEEventType;
+  data: any;
+  timestamp: string;
 }
 
-// SSE Connection State
-export enum ConnectionState {
-  DISCONNECTED = 'disconnected',
-  CONNECTING = 'connecting',
-  CONNECTED = 'connected',
-  RECONNECTING = 'reconnecting',
-  ERROR = 'error',
+export type SSEConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+interface SSEClientOptions {
+  url: string;
+  token?: string;
+  onEvent?: (event: SSEEvent) => void;
+  onStateChange?: (state: SSEConnectionState) => void;
+  onError?: (error: Error) => void;
 }
 
-// Exponential backoff configuration
-const BACKOFF_DELAYS = [1000, 2000, 4000, 8000, 30000]; // 1s, 2s, 4s, 8s, 30s cap
-const MAX_BACKOFF_INDEX = BACKOFF_DELAYS.length - 1;
-
-// SSE Client Manager
 export class SSEClient {
   private eventSource: EventSource | null = null;
-  private connectionConfig: SSEConnectionConfig | null = null;
+  private options: SSEClientOptions;
   private reconnectTimer: NodeJS.Timeout | null = null;
-  private backoffIndex = 0;
-  private isManuallyDisconnected = false;
+  private reconnectAttempt = 0;
+  private readonly maxReconnectAttempts = Infinity; // Keep trying
+  private readonly reconnectDelays = [1000, 2000, 4000, 8000, 30000]; // 1s, 2s, 4s, 8s, 30s (cap)
+  private state: SSEConnectionState = 'disconnected';
   private appStateSubscription: any = null;
-  private state: ConnectionState = ConnectionState.DISCONNECTED;
+  private manuallyDisconnected = false;
 
-  // Event handlers
-  private stateChangeHandlers: ((state: ConnectionState) => void)[] = [];
-
-  constructor() {
-    this.setupAppStateListener();
+  constructor(options: SSEClientOptions) {
+    this.options = options;
+    this.setupAppStateHandling();
   }
 
-  /**
-   * Setup app state listener to connect/disconnect based on app focus
-   */
-  private setupAppStateListener() {
+  private setupAppStateHandling() {
+    // Listen to app state changes
     this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange);
   }
 
-  /**
-   * Handle app state changes - connect on active, disconnect on background/inactive
-   */
   private handleAppStateChange = (nextAppState: AppStateStatus) => {
-    if (nextAppState === 'active' && this.connectionConfig && !this.isManuallyDisconnected) {
-      // App came to foreground - reconnect if we have a config and weren't manually disconnected
-      this.connect(this.connectionConfig);
-    } else if ((nextAppState === 'background' || nextAppState === 'inactive') && this.eventSource) {
-      // App went to background/inactive - disconnect but keep config for reconnect
-      this.disconnect(false); // don't mark as manually disconnected
+    if (nextAppState === 'background' || nextAppState === 'inactive') {
+      // App is backgrounding, disconnect SSE (but not manually)
+      this.disconnectDueToAppState();
+    } else if (nextAppState === 'active') {
+      // App is coming to foreground, reconnect only if not manually disconnected
+      if (this.state === 'disconnected' && this.reconnectTimer === null && !this.manuallyDisconnected) {
+        this.connect();
+      }
     }
   };
 
-  /**
-   * Connect to SSE endpoint with authentication token
-   */
-  async connect(config: SSEConnectionConfig): Promise<void> {
-    // Store config for reconnect scenarios
-    this.connectionConfig = config;
-    this.isManuallyDisconnected = false;
+  private setState(newState: SSEConnectionState) {
+    if (this.state !== newState) {
+      this.state = newState;
+      this.options.onStateChange?.(newState);
+    }
+  }
+
+  private getReconnectDelay(): number {
+    const delayIndex = Math.min(this.reconnectAttempt, this.reconnectDelays.length - 1);
+    return this.reconnectDelays[delayIndex];
+  }
+
+  private buildUrl(): string {
+    // Ensure URL starts with / and remove leading slash for proper concatenation
+    const path = this.options.url.startsWith('/') ? this.options.url.substring(1) : this.options.url;
+    const baseUrl = SSE_BASE_URL.endsWith('/') ? SSE_BASE_URL : `${SSE_BASE_URL}/`;
+    const url = new URL(path, baseUrl);
+
+    if (this.options.token) {
+      url.searchParams.set('token', this.options.token);
+    }
+    return url.toString();
+  }
+
+  connect(): void {
+    if (this.state === 'connected' || this.state === 'connecting') {
+      return; // Already connected or connecting
+    }
+
+    // Reset manual disconnect flag when explicitly connecting
+    this.manuallyDisconnected = false;
+
+    this.setState('connecting');
+    this.clearReconnectTimer();
 
     try {
-      // Get authentication token
-      const token = await tokenManager.getAccessToken();
-      if (!token) {
-        const error = new Error('No access token available for SSE connection');
-        this.setState(ConnectionState.ERROR);
-        config.onError?.(error);
-        return;
-      }
+      const url = this.buildUrl();
+      this.eventSource = new EventSource(url, {
+        headers: {},
+      });
 
-      // Close existing connection
-      this.closeConnection();
+      this.eventSource.addEventListener('open', this.handleOpen);
+      this.eventSource.addEventListener('error', this.handleError);
+      this.eventSource.addEventListener('message', this.handleMessage);
 
-      // Build URL with auth token as query parameter
-      const url = new URL(config.endpoint, SSE_BASE_URL);
-      url.searchParams.set('token', token);
-
-      this.setState(ConnectionState.CONNECTING);
-
-      // Create new EventSource connection
-      this.eventSource = new EventSource(url.toString());
-
-      this.eventSource.onopen = () => {
-        this.setState(ConnectionState.CONNECTED);
-        this.backoffIndex = 0; // Reset backoff on successful connection
-        config.onOpen?.();
-      };
-
-      this.eventSource.onmessage = (event) => {
-        config.onMessage?.(event);
-      };
-
-      this.eventSource.onerror = (error) => {
-        console.warn('SSE connection error:', error);
-
-        if (this.state === ConnectionState.CONNECTED || this.state === ConnectionState.CONNECTING) {
-          // Connection was established but now failed, or failed during connection
-          this.setState(ConnectionState.RECONNECTING);
-          this.scheduleReconnect();
-        } else {
-          // Already in error/reconnecting state
-          this.setState(ConnectionState.ERROR);
-        }
-
-        config.onError?.(error);
-      };
-
-      this.eventSource.onclose = () => {
-        config.onClose?.();
-
-        if (!this.isManuallyDisconnected) {
-          // Unexpected close - attempt reconnect
-          this.setState(ConnectionState.RECONNECTING);
-          this.scheduleReconnect();
-        } else {
-          this.setState(ConnectionState.DISCONNECTED);
-        }
-      };
+      // Listen for specific event types
+      this.eventSource.addEventListener('task_update' as any, this.handleTaskUpdate);
+      this.eventSource.addEventListener('coordination_message' as any, this.handleCoordinationMessage);
+      this.eventSource.addEventListener('log_entry' as any, this.handleLogEntry);
+      this.eventSource.addEventListener('code_event' as any, this.handleCodeEvent);
 
     } catch (error) {
-      console.error('Failed to establish SSE connection:', error);
-      this.setState(ConnectionState.ERROR);
-      config.onError?.(error instanceof Error ? error : new Error(String(error)));
+      console.error('SSE connection failed:', error);
+      this.handleConnectionFailure(error as Error);
     }
   }
 
-  /**
-   * Schedule reconnect with exponential backoff
-   */
-  private scheduleReconnect(): void {
-    // Clear any existing timer
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-
-    // Don't reconnect if manually disconnected or no config
-    if (this.isManuallyDisconnected || !this.connectionConfig) {
-      return;
-    }
-
-    // Get current backoff delay
-    const delay = BACKOFF_DELAYS[this.backoffIndex];
-
-    // Increment backoff index but cap at max
-    if (this.backoffIndex < MAX_BACKOFF_INDEX) {
-      this.backoffIndex++;
-    }
-
-    console.log(`Scheduling SSE reconnect in ${delay}ms (attempt ${this.backoffIndex})`);
-
-    this.reconnectTimer = setTimeout(() => {
-      if (!this.isManuallyDisconnected && this.connectionConfig) {
-        this.connect(this.connectionConfig);
-      }
-    }, delay);
+  disconnect(): void {
+    this.manuallyDisconnected = true;
+    this.performDisconnect();
   }
 
-  /**
-   * Manually disconnect from SSE
-   */
-  disconnect(manual = true): void {
-    this.isManuallyDisconnected = manual;
-
-    // Clear reconnect timer
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-
-    this.closeConnection();
-
-    if (manual) {
-      // Only clear config on manual disconnect
-      this.connectionConfig = null;
-      this.backoffIndex = 0;
-    }
-
-    this.setState(ConnectionState.DISCONNECTED);
+  private disconnectDueToAppState(): void {
+    // Don't set manually disconnected flag for app state changes
+    this.performDisconnect();
   }
 
-  /**
-   * Close the actual EventSource connection
-   */
-  private closeConnection(): void {
+  private performDisconnect(): void {
+    this.clearReconnectTimer();
+
+    if (this.eventSource) {
+      this.eventSource.removeEventListener('open', this.handleOpen);
+      this.eventSource.removeEventListener('error', this.handleError);
+      this.eventSource.removeEventListener('message', this.handleMessage);
+      this.eventSource.removeEventListener('task_update' as any, this.handleTaskUpdate);
+      this.eventSource.removeEventListener('coordination_message' as any, this.handleCoordinationMessage);
+      this.eventSource.removeEventListener('log_entry' as any, this.handleLogEntry);
+      this.eventSource.removeEventListener('code_event' as any, this.handleCodeEvent);
+
+      this.eventSource.close();
+      this.eventSource = null;
+    }
+
+    this.setState('disconnected');
+    this.reconnectAttempt = 0;
+  }
+
+  updateToken(token: string): void {
+    this.options.token = token;
+
+    // Reconnect with new token if currently connected
+    if (this.state === 'connected') {
+      this.performDisconnect(); // Don't mark as manually disconnected
+      this.connect();
+    }
+  }
+
+  private handleOpen = () => {
+    console.log('SSE connected');
+    this.setState('connected');
+    this.reconnectAttempt = 0; // Reset on successful connection
+  };
+
+  private handleError = (event: any) => {
+    console.error('SSE error:', event);
+    this.handleConnectionFailure(new Error(`SSE error: ${event.type}`));
+  };
+
+  private handleMessage = (event: any) => {
+    try {
+      const data = JSON.parse(event.data);
+      this.options.onEvent?.({
+        type: 'task_update', // Default type
+        data,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Error parsing SSE message:', error);
+    }
+  };
+
+  private handleTaskUpdate = (event: any) => {
+    try {
+      const data = JSON.parse(event.data);
+      this.options.onEvent?.({
+        type: 'task_update',
+        data,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Error parsing task update:', error);
+    }
+  };
+
+  private handleCoordinationMessage = (event: any) => {
+    try {
+      const data = JSON.parse(event.data);
+      this.options.onEvent?.({
+        type: 'coordination_message',
+        data,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Error parsing coordination message:', error);
+    }
+  };
+
+  private handleLogEntry = (event: any) => {
+    try {
+      const data = JSON.parse(event.data);
+      this.options.onEvent?.({
+        type: 'log_entry',
+        data,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Error parsing log entry:', error);
+    }
+  };
+
+  private handleCodeEvent = (event: any) => {
+    try {
+      const data = JSON.parse(event.data);
+      this.options.onEvent?.({
+        type: 'code_event',
+        data,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Error parsing code event:', error);
+    }
+  };
+
+  private handleConnectionFailure(error: Error): void {
+    console.error('SSE connection failure:', error);
+
+    this.setState('error');
+    this.options.onError?.(error);
+
+    // Close current connection
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
     }
+
+    // Schedule reconnect with exponential backoff
+    this.scheduleReconnect();
   }
 
-  /**
-   * Set connection state and notify handlers
-   */
-  private setState(state: ConnectionState): void {
-    if (this.state !== state) {
-      this.state = state;
-      this.stateChangeHandlers.forEach(handler => handler(state));
+  private scheduleReconnect(): void {
+    this.clearReconnectTimer();
+
+    const delay = this.getReconnectDelay();
+    console.log(`Scheduling SSE reconnect in ${delay}ms (attempt ${this.reconnectAttempt + 1})`);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectAttempt++;
+      this.reconnectTimer = null;
+
+      // Only reconnect if app is active
+      if (AppState.currentState === 'active') {
+        this.connect();
+      }
+    }, delay);
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
   }
 
-  /**
-   * Get current connection state
-   */
-  getState(): ConnectionState {
+  // Getters
+  getState(): SSEConnectionState {
     return this.state;
   }
 
-  /**
-   * Check if currently connected
-   */
   isConnected(): boolean {
-    return this.state === ConnectionState.CONNECTED;
+    return this.state === 'connected';
   }
 
-  /**
-   * Subscribe to state changes
-   */
-  onStateChange(handler: (state: ConnectionState) => void): () => void {
-    this.stateChangeHandlers.push(handler);
-
-    // Return unsubscribe function
-    return () => {
-      const index = this.stateChangeHandlers.indexOf(handler);
-      if (index > -1) {
-        this.stateChangeHandlers.splice(index, 1);
-      }
-    };
+  isConnecting(): boolean {
+    return this.state === 'connecting';
   }
 
-  /**
-   * Cleanup - call when component unmounts or app shuts down
-   */
+  isErrored(): boolean {
+    return this.state === 'error';
+  }
+
+  getReconnectAttempts(): number {
+    return this.reconnectAttempt;
+  }
+
+  // Cleanup
   destroy(): void {
-    this.disconnect(true);
+    this.performDisconnect();
 
-    // Clean up app state listener
     if (this.appStateSubscription) {
       this.appStateSubscription.remove();
       this.appStateSubscription = null;
     }
-
-    // Clear all handlers
-    this.stateChangeHandlers = [];
   }
 }
 
-// Shared SSE client instance
-export const sseClient = new SSEClient();
+// Singleton instances for different SSE channels
+let dashboardSSE: SSEClient | null = null;
+let coordinationSSE: SSEClient | null = null;
+let logsSSE: SSEClient | null = null;
 
-// Utility functions for common SSE endpoints
+export const createDashboardSSE = (token: string, options: Omit<SSEClientOptions, 'url' | 'token'>): SSEClient => {
+  if (dashboardSSE) {
+    dashboardSSE.destroy();
+  }
 
-/**
- * Connect to dashboard task updates stream
- */
-export const connectToTaskStream = (
-  onMessage: SSEEventHandler,
-  onError?: SSEErrorHandler
-): void => {
-  sseClient.connect({
-    endpoint: '/control-center/stream',
-    onMessage,
-    onError,
+  dashboardSSE = new SSEClient({
+    url: '/control-center/stream',
+    token,
+    ...options,
   });
+
+  return dashboardSSE;
 };
 
-/**
- * Connect to coordination messages stream for a specific task
- */
-export const connectToCoordinationStream = (
-  parentTaskId: string,
-  onMessage: SSEEventHandler,
-  onError?: SSEErrorHandler
-): void => {
-  sseClient.connect({
-    endpoint: `/coordination/context/${parentTaskId}/stream`,
-    onMessage,
-    onError,
+export const createCoordinationSSE = (parentTaskId: string, token: string, options: Omit<SSEClientOptions, 'url' | 'token'>): SSEClient => {
+  if (coordinationSSE) {
+    coordinationSSE.destroy();
+  }
+
+  coordinationSSE = new SSEClient({
+    url: `/coordination/context/${parentTaskId}/stream`,
+    token,
+    ...options,
   });
+
+  return coordinationSSE;
 };
 
-/**
- * Connect to task logs stream
- */
-export const connectToLogsStream = (
-  taskId: string,
-  onMessage: SSEEventHandler,
-  onError?: SSEErrorHandler
-): void => {
-  sseClient.connect({
-    endpoint: `/control-center/logs/${taskId}`,
-    onMessage,
-    onError,
+export const createLogsSSE = (taskId: string, token: string, options: Omit<SSEClientOptions, 'url' | 'token'>): SSEClient => {
+  if (logsSSE) {
+    logsSSE.destroy();
+  }
+
+  logsSSE = new SSEClient({
+    url: `/control-center/logs/${taskId}`,
+    token,
+    ...options,
   });
+
+  return logsSSE;
 };
 
-/**
- * Disconnect from any active SSE stream
- */
-export const disconnectSSE = (): void => {
-  sseClient.disconnect();
-};
+// Helper to get current instances
+export const getDashboardSSE = (): SSEClient | null => dashboardSSE;
+export const getCoordinationSSE = (): SSEClient | null => coordinationSSE;
+export const getLogsSSE = (): SSEClient | null => logsSSE;
 
-/**
- * Get current SSE connection state
- */
-export const getSSEState = (): ConnectionState => {
-  return sseClient.getState();
-};
+// Cleanup all instances
+export const destroyAllSSE = (): void => {
+  [dashboardSSE, coordinationSSE, logsSSE].forEach(sse => {
+    if (sse) {
+      sse.destroy();
+    }
+  });
 
-/**
- * Subscribe to SSE connection state changes
- */
-export const subscribeToSSEState = (
-  handler: (state: ConnectionState) => void
-): (() => void) => {
-  return sseClient.onStateChange(handler);
+  dashboardSSE = null;
+  coordinationSSE = null;
+  logsSSE = null;
 };

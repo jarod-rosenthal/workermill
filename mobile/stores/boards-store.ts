@@ -1,90 +1,51 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import apiClient from '@/lib/api-client';
-import { Board, Card, Column, Label, ChecklistItem, CardActivity } from '@/types/boards';
+import { Board, Card, ChecklistItem, CardActivity } from '@/types/boards';
+import { apiClient } from '@/lib/api-client';
 import { STORAGE_KEYS } from '@/constants/config';
 
-// Board creation interface
-export interface CreateBoardInput {
-  name: string;
-  description?: string;
-}
-
-// Card creation interface
-export interface CreateCardInput {
-  title: string;
-  description?: string;
-  priority?: 'urgent' | 'high' | 'medium' | 'low';
-  columnId: string;
-}
-
-// Card update interface
-export interface UpdateCardInput {
-  title?: string;
-  description?: string;
-  priority?: 'urgent' | 'high' | 'medium' | 'low';
-  columnId?: string;
-}
-
-// Boards store state interface
-interface BoardsState {
+export interface BoardsState {
   // Data
   boards: Board[];
   currentBoard: Board | null;
-  currentCard: Card | null;
-  cardActivity: CardActivity[];
-
-  // UI state
-  isLoading: boolean;
-  error: string | null;
   lastUpdated: string | null;
 
-  // Actions
-  setBoards: (boards: Board[]) => void;
-  setCurrentBoard: (board: Board | null) => void;
-  setCurrentCard: (card: Card | null) => void;
-  setCardActivity: (activity: CardActivity[]) => void;
-  setLoading: (loading: boolean) => void;
-  setError: (error: string | null) => void;
-  updateBoard: (boardId: string, updates: Partial<Board>) => void;
-  updateCard: (cardId: string, updates: Partial<Card>) => void;
-  removeCard: (cardId: string) => void;
-  addCard: (card: Card) => void;
+  // Loading states
+  isLoading: boolean;
+  isBoardLoading: boolean;
+  isCardLoading: boolean;
+  error: string | null;
 
-  // API methods
-  fetchBoards: () => Promise<void>;
-  fetchBoard: (boardId: string) => Promise<Board>;
-  fetchCard: (boardId: string, cardId: string) => Promise<Card>;
-  fetchCardActivity: (boardId: string, cardId: string) => Promise<void>;
+  // Actions - Board operations
+  loadBoards: () => Promise<void>;
+  loadBoard: (boardId: string) => Promise<void>;
+  createBoard: (data: { name: string; description?: string; prefix: string }) => Promise<Board>;
+  updateBoard: (boardId: string, data: Partial<Board>) => Promise<Board>;
+  deleteBoard: (boardId: string) => Promise<void>;
+  toggleBoardStar: (boardId: string, isStarred: boolean) => Promise<void>;
 
-  // Board operations
-  createBoard: (input: CreateBoardInput) => Promise<Board>;
-  starBoard: (boardId: string, isStarred: boolean) => Promise<void>;
-
-  // Card operations
-  createCard: (boardId: string, input: CreateCardInput) => Promise<Card>;
-  updateCardData: (boardId: string, cardId: string, input: UpdateCardInput) => Promise<Card>;
+  // Actions - Card operations
+  createCard: (boardId: string, columnId: string, data: { title: string; description?: string; priority?: 'urgent' | 'high' | 'medium' | 'low' }) => Promise<Card>;
+  updateCard: (boardId: string, cardId: string, data: Partial<Card>) => Promise<Card>;
+  moveCard: (boardId: string, cardId: string, columnId: string, position?: number) => Promise<Card>;
   deleteCard: (boardId: string, cardId: string) => Promise<void>;
-  moveCard: (boardId: string, cardId: string, columnId: string) => Promise<void>;
-
-  // Task operations
   runCardAsTask: (boardId: string, cardId: string) => Promise<void>;
   cancelCardTask: (boardId: string, cardId: string) => Promise<void>;
 
-  // Label operations
+  // Actions - Card components
   addCardLabel: (boardId: string, cardId: string, labelId: string) => Promise<void>;
   removeCardLabel: (boardId: string, cardId: string, labelId: string) => Promise<void>;
-
-  // Checklist operations
   addChecklistItem: (boardId: string, cardId: string, text: string) => Promise<ChecklistItem>;
-  toggleChecklistItem: (boardId: string, cardId: string, itemId: string, completed: boolean) => Promise<void>;
+  updateChecklistItem: (boardId: string, cardId: string, itemId: string, data: { text?: string; completed?: boolean }) => Promise<ChecklistItem>;
+  deleteChecklistItem: (boardId: string, cardId: string, itemId: string) => Promise<void>;
+  getCardActivity: (boardId: string, cardId: string) => Promise<CardActivity[]>;
 
-  // Computed getters
+  // Convenience getters
+  getBoardById: (id: string) => Board | null;
   getStarredBoards: () => Board[];
-  getBoard: (boardId: string) => Board | undefined;
-  getColumn: (columnId: string) => Column | undefined;
-  getCard: (cardId: string) => Card | undefined;
+  getCardById: (boardId: string, cardId: string) => Card | null;
+  getColumnCards: (boardId: string, columnId: string) => Card[];
 }
 
 export const useBoardsStore = create<BoardsState>()(
@@ -93,454 +54,533 @@ export const useBoardsStore = create<BoardsState>()(
       // Initial state
       boards: [],
       currentBoard: null,
-      currentCard: null,
-      cardActivity: [],
-      isLoading: false,
-      error: null,
       lastUpdated: null,
+      isLoading: false,
+      isBoardLoading: false,
+      isCardLoading: false,
+      error: null,
 
-      // Basic setters
-      setBoards: (boards) => set({ boards, lastUpdated: new Date().toISOString() }),
-      setCurrentBoard: (currentBoard) => set({ currentBoard }),
-      setCurrentCard: (currentCard) => set({ currentCard }),
-      setCardActivity: (cardActivity) => set({ cardActivity }),
-      setLoading: (isLoading) => set({ isLoading }),
-      setError: (error) => set({ error }),
+      // Board operations
+      loadBoards: async () => {
+        set({ isLoading: true, error: null });
 
-      updateBoard: (boardId, updates) =>
-        set((state) => ({
-          boards: state.boards.map((board) =>
-            board.id === boardId ? { ...board, ...updates } : board
-          ),
-          currentBoard: state.currentBoard?.id === boardId
-            ? { ...state.currentBoard, ...updates }
-            : state.currentBoard,
-          lastUpdated: new Date().toISOString(),
-        })),
-
-      updateCard: (cardId, updates) =>
-        set((state) => {
-          const updatedBoards = state.boards.map((board) => ({
-            ...board,
-            columns: board.columns.map((column) => ({
-              ...column,
-              cards: column.cards.map((card) =>
-                card.id === cardId ? { ...card, ...updates } : card
-              ),
-            })),
-          }));
-
-          const updatedCurrentBoard = state.currentBoard ? {
-            ...state.currentBoard,
-            columns: state.currentBoard.columns.map((column) => ({
-              ...column,
-              cards: column.cards.map((card) =>
-                card.id === cardId ? { ...card, ...updates } : card
-              ),
-            })),
-          } : null;
-
-          return {
-            boards: updatedBoards,
-            currentBoard: updatedCurrentBoard,
-            currentCard: state.currentCard?.id === cardId
-              ? { ...state.currentCard, ...updates }
-              : state.currentCard,
-            lastUpdated: new Date().toISOString(),
-          };
-        }),
-
-      removeCard: (cardId) =>
-        set((state) => {
-          const updatedBoards = state.boards.map((board) => ({
-            ...board,
-            columns: board.columns.map((column) => ({
-              ...column,
-              cards: column.cards.filter((card) => card.id !== cardId),
-            })),
-          }));
-
-          const updatedCurrentBoard = state.currentBoard ? {
-            ...state.currentBoard,
-            columns: state.currentBoard.columns.map((column) => ({
-              ...column,
-              cards: column.cards.filter((card) => card.id !== cardId),
-            })),
-          } : null;
-
-          return {
-            boards: updatedBoards,
-            currentBoard: updatedCurrentBoard,
-            currentCard: state.currentCard?.id === cardId ? null : state.currentCard,
-            lastUpdated: new Date().toISOString(),
-          };
-        }),
-
-      addCard: (card) =>
-        set((state) => {
-          const updatedBoards = state.boards.map((board) => {
-            if (board.id !== card.board_id) return board;
-
-            return {
-              ...board,
-              columns: board.columns.map((column) => {
-                if (column.id !== card.column_id) return column;
-
-                return {
-                  ...column,
-                  cards: [...column.cards, card],
-                };
-              }),
-            };
-          });
-
-          const updatedCurrentBoard = state.currentBoard?.id === card.board_id ? {
-            ...state.currentBoard,
-            columns: state.currentBoard.columns.map((column) => {
-              if (column.id !== card.column_id) return column;
-
-              return {
-                ...column,
-                cards: [...column.cards, card],
-              };
-            }),
-          } : state.currentBoard;
-
-          return {
-            boards: updatedBoards,
-            currentBoard: updatedCurrentBoard,
-            lastUpdated: new Date().toISOString(),
-          };
-        }),
-
-      // Fetch all boards
-      fetchBoards: async () => {
         try {
-          set({ isLoading: true, error: null });
-
-          const response = await apiClient.get('/boards');
-          const boards = response.data;
+          const boards = await apiClient.get<Board[]>('/boards');
 
           set({
             boards,
-            isLoading: false,
-            error: null,
             lastUpdated: new Date().toISOString(),
+            isLoading: false,
+            error: null
           });
-        } catch (error) {
-          console.error('Failed to fetch boards:', error);
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to load boards';
           set({
             isLoading: false,
-            error: error instanceof Error ? error.message : 'Failed to load boards',
+            error: errorMessage
           });
+          throw error;
         }
       },
 
-      // Fetch single board with columns and cards
-      fetchBoard: async (boardId: string) => {
+      loadBoard: async (boardId: string) => {
+        set({ isBoardLoading: true, error: null });
+
         try {
-          set({ isLoading: true, error: null });
+          const board = await apiClient.get<Board>(`/boards/${boardId}`);
 
-          const response = await apiClient.get(`/boards/${boardId}`);
-          const board = response.data;
-
-          // Update the board in the boards list and set as current
-          set((state) => ({
-            boards: state.boards.map((b) => (b.id === boardId ? board : b)),
+          set(state => ({
             currentBoard: board,
-            isLoading: false,
-            error: null,
+            // Update the board in the boards list if it exists
+            boards: state.boards.map(b => b.id === boardId ? board : b),
             lastUpdated: new Date().toISOString(),
+            isBoardLoading: false,
+            error: null
+          }));
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to load board';
+          set({
+            isBoardLoading: false,
+            error: errorMessage
+          });
+          throw error;
+        }
+      },
+
+      createBoard: async (data) => {
+        set({ isLoading: true, error: null });
+
+        try {
+          const board = await apiClient.post<Board>('/boards', data);
+
+          set(state => ({
+            boards: [board, ...state.boards],
+            lastUpdated: new Date().toISOString(),
+            isLoading: false,
+            error: null
           }));
 
           return board;
-        } catch (error) {
-          console.error('Failed to fetch board:', error);
-          const errorMessage = error instanceof Error ? error.message : 'Failed to load board';
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to create board';
           set({
             isLoading: false,
-            error: errorMessage,
+            error: errorMessage
           });
           throw error;
         }
       },
 
-      // Fetch single card
-      fetchCard: async (boardId: string, cardId: string) => {
+      updateBoard: async (boardId: string, data: Partial<Board>) => {
         try {
-          set({ isLoading: true, error: null });
+          const board = await apiClient.put<Board>(`/boards/${boardId}`, data);
 
-          const response = await apiClient.get(`/boards/${boardId}/cards/${cardId}`);
-          const card = response.data;
-
-          set({
-            currentCard: card,
-            isLoading: false,
-            error: null,
-          });
-
-          // Update the card in boards state as well
-          get().updateCard(cardId, card);
-
-          return card;
-        } catch (error) {
-          console.error('Failed to fetch card:', error);
-          const errorMessage = error instanceof Error ? error.message : 'Failed to load card';
-          set({
-            isLoading: false,
-            error: errorMessage,
-          });
-          throw error;
-        }
-      },
-
-      // Fetch card activity
-      fetchCardActivity: async (boardId: string, cardId: string) => {
-        try {
-          const response = await apiClient.get(`/boards/${boardId}/cards/${cardId}/activity`);
-          const activity = response.data;
-
-          set({ cardActivity: activity });
-        } catch (error) {
-          console.error('Failed to fetch card activity:', error);
-          // Non-fatal error, just log it
-        }
-      },
-
-      // Create new board
-      createBoard: async (input: CreateBoardInput) => {
-        try {
-          const response = await apiClient.post('/boards', input);
-          const board = response.data;
-
-          // Add to boards list
-          set((state) => ({
-            boards: [...state.boards, board],
-            lastUpdated: new Date().toISOString(),
+          set(state => ({
+            boards: state.boards.map(b => b.id === boardId ? board : b),
+            currentBoard: state.currentBoard?.id === boardId ? board : state.currentBoard,
+            lastUpdated: new Date().toISOString()
           }));
 
           return board;
-        } catch (error) {
-          console.error('Failed to create board:', error);
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to update board';
+          set({ error: errorMessage });
           throw error;
         }
       },
 
-      // Star/unstar board
-      starBoard: async (boardId: string, isStarred: boolean) => {
+      deleteBoard: async (boardId: string) => {
         try {
-          await apiClient.put(`/boards/${boardId}`, { isStarred });
+          await apiClient.delete(`/boards/${boardId}`);
 
-          // Update local state
-          get().updateBoard(boardId, { is_starred: isStarred });
-        } catch (error) {
-          console.error('Failed to star board:', error);
+          set(state => ({
+            boards: state.boards.filter(b => b.id !== boardId),
+            currentBoard: state.currentBoard?.id === boardId ? null : state.currentBoard,
+            lastUpdated: new Date().toISOString()
+          }));
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to delete board';
+          set({ error: errorMessage });
           throw error;
         }
       },
 
-      // Create new card
-      createCard: async (boardId: string, input: CreateCardInput) => {
+      toggleBoardStar: async (boardId: string, isStarred: boolean) => {
         try {
-          const response = await apiClient.post(`/boards/${boardId}/cards`, input);
-          const card = response.data;
+          const board = await apiClient.put<Board>(`/boards/${boardId}`, { is_starred: isStarred });
 
-          // Add to local state
-          get().addCard(card);
+          set(state => ({
+            boards: state.boards.map(b => b.id === boardId ? board : b),
+            currentBoard: state.currentBoard?.id === boardId ? board : state.currentBoard,
+            lastUpdated: new Date().toISOString()
+          }));
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to update board';
+          set({ error: errorMessage });
+          throw error;
+        }
+      },
+
+      // Card operations
+      createCard: async (boardId: string, columnId: string, data) => {
+        set({ isCardLoading: true, error: null });
+
+        try {
+          const card = await apiClient.post<Card>(`/boards/${boardId}/cards`, {
+            ...data,
+            column_id: columnId
+          });
+
+          // Update current board if it matches
+          set(state => {
+            if (state.currentBoard?.id === boardId) {
+              const updatedBoard = {
+                ...state.currentBoard,
+                columns: state.currentBoard.columns.map(col =>
+                  col.id === columnId
+                    ? { ...col, cards: [card, ...col.cards] }
+                    : col
+                ),
+                card_count: state.currentBoard.card_count + 1
+              };
+
+              return {
+                currentBoard: updatedBoard,
+                boards: state.boards.map(b => b.id === boardId ? updatedBoard : b),
+                lastUpdated: new Date().toISOString(),
+                isCardLoading: false,
+                error: null
+              };
+            }
+
+            return {
+              lastUpdated: new Date().toISOString(),
+              isCardLoading: false,
+              error: null
+            };
+          });
 
           return card;
-        } catch (error) {
-          console.error('Failed to create card:', error);
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to create card';
+          set({
+            isCardLoading: false,
+            error: errorMessage
+          });
           throw error;
         }
       },
 
-      // Update card
-      updateCardData: async (boardId: string, cardId: string, input: UpdateCardInput) => {
+      updateCard: async (boardId: string, cardId: string, data: Partial<Card>) => {
         try {
-          const response = await apiClient.put(`/boards/${boardId}/cards/${cardId}`, input);
-          const card = response.data;
+          const card = await apiClient.put<Card>(`/boards/${boardId}/cards/${cardId}`, data);
 
-          // Update local state
-          get().updateCard(cardId, card);
+          // Update current board if it matches
+          set(state => {
+            if (state.currentBoard?.id === boardId) {
+              const updatedBoard = {
+                ...state.currentBoard,
+                columns: state.currentBoard.columns.map(col => ({
+                  ...col,
+                  cards: col.cards.map(c => c.id === cardId ? card : c)
+                }))
+              };
+
+              return {
+                currentBoard: updatedBoard,
+                boards: state.boards.map(b => b.id === boardId ? updatedBoard : b),
+                lastUpdated: new Date().toISOString()
+              };
+            }
+
+            return {
+              lastUpdated: new Date().toISOString()
+            };
+          });
 
           return card;
-        } catch (error) {
-          console.error('Failed to update card:', error);
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to update card';
+          set({ error: errorMessage });
           throw error;
         }
       },
 
-      // Delete card
+      moveCard: async (boardId: string, cardId: string, columnId: string, position) => {
+        try {
+          const card = await apiClient.put<Card>(`/boards/${boardId}/cards/${cardId}`, {
+            column_id: columnId,
+            position
+          });
+
+          // Update current board if it matches
+          set(state => {
+            if (state.currentBoard?.id === boardId) {
+              // Remove card from old column and add to new column
+              const oldCard = get().getCardById(boardId, cardId);
+              if (!oldCard) return state;
+
+              const updatedBoard = {
+                ...state.currentBoard,
+                columns: state.currentBoard.columns.map(col => {
+                  if (col.id === oldCard.column_id && col.id !== columnId) {
+                    // Remove from old column
+                    return {
+                      ...col,
+                      cards: col.cards.filter(c => c.id !== cardId)
+                    };
+                  } else if (col.id === columnId) {
+                    // Add to new column
+                    const filteredCards = col.cards.filter(c => c.id !== cardId);
+                    return {
+                      ...col,
+                      cards: [...filteredCards, card].sort((a, b) => a.position - b.position)
+                    };
+                  }
+                  return col;
+                })
+              };
+
+              return {
+                currentBoard: updatedBoard,
+                boards: state.boards.map(b => b.id === boardId ? updatedBoard : b),
+                lastUpdated: new Date().toISOString()
+              };
+            }
+
+            return {
+              lastUpdated: new Date().toISOString()
+            };
+          });
+
+          return card;
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to move card';
+          set({ error: errorMessage });
+          throw error;
+        }
+      },
+
       deleteCard: async (boardId: string, cardId: string) => {
         try {
           await apiClient.delete(`/boards/${boardId}/cards/${cardId}`);
 
-          // Remove from local state
-          get().removeCard(cardId);
-        } catch (error) {
-          console.error('Failed to delete card:', error);
+          // Update current board if it matches
+          set(state => {
+            if (state.currentBoard?.id === boardId) {
+              const updatedBoard = {
+                ...state.currentBoard,
+                columns: state.currentBoard.columns.map(col => ({
+                  ...col,
+                  cards: col.cards.filter(c => c.id !== cardId)
+                })),
+                card_count: state.currentBoard.card_count - 1
+              };
+
+              return {
+                currentBoard: updatedBoard,
+                boards: state.boards.map(b => b.id === boardId ? updatedBoard : b),
+                lastUpdated: new Date().toISOString()
+              };
+            }
+
+            return {
+              lastUpdated: new Date().toISOString()
+            };
+          });
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to delete card';
+          set({ error: errorMessage });
           throw error;
         }
       },
 
-      // Move card to different column
-      moveCard: async (boardId: string, cardId: string, columnId: string) => {
-        try {
-          await apiClient.put(`/boards/${boardId}/cards/${cardId}`, { columnId });
-
-          // Update local state
-          get().updateCard(cardId, { column_id: columnId });
-        } catch (error) {
-          console.error('Failed to move card:', error);
-          throw error;
-        }
-      },
-
-      // Run card as AI task
       runCardAsTask: async (boardId: string, cardId: string) => {
         try {
           await apiClient.post(`/boards/${boardId}/cards/${cardId}/run`);
-          // Task creation will be reflected in card updates via API
-        } catch (error) {
-          console.error('Failed to run card as task:', error);
+
+          // The task creation will be reflected in the card's linked_task_id
+          // via a subsequent loadBoard call or real-time update
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to run card as task';
+          set({ error: errorMessage });
           throw error;
         }
       },
 
-      // Cancel card task
       cancelCardTask: async (boardId: string, cardId: string) => {
         try {
           await apiClient.post(`/boards/${boardId}/cards/${cardId}/cancel-run`);
-          // Task cancellation will be reflected in card updates via API
-        } catch (error) {
-          console.error('Failed to cancel card task:', error);
+
+          // The task cancellation will be reflected in the card status
+          // via a subsequent loadBoard call or real-time update
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to cancel card task';
+          set({ error: errorMessage });
           throw error;
         }
       },
 
-      // Add label to card
+      // Card component operations
       addCardLabel: async (boardId: string, cardId: string, labelId: string) => {
         try {
-          await apiClient.post(`/boards/${boardId}/cards/${cardId}/labels`, { labelId });
-          // Refetch card to get updated labels
-          await get().fetchCard(boardId, cardId);
-        } catch (error) {
-          console.error('Failed to add card label:', error);
+          await apiClient.post(`/boards/${boardId}/cards/${cardId}/labels`, { label_id: labelId });
+
+          // Reload the card to get updated labels
+          await get().loadBoard(boardId);
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to add label';
+          set({ error: errorMessage });
           throw error;
         }
       },
 
-      // Remove label from card
       removeCardLabel: async (boardId: string, cardId: string, labelId: string) => {
         try {
           await apiClient.delete(`/boards/${boardId}/cards/${cardId}/labels/${labelId}`);
-          // Refetch card to get updated labels
-          await get().fetchCard(boardId, cardId);
-        } catch (error) {
-          console.error('Failed to remove card label:', error);
+
+          // Reload the card to get updated labels
+          await get().loadBoard(boardId);
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to remove label';
+          set({ error: errorMessage });
           throw error;
         }
       },
 
-      // Add checklist item
       addChecklistItem: async (boardId: string, cardId: string, text: string) => {
         try {
-          const response = await apiClient.post(`/boards/${boardId}/cards/${cardId}/checklist`, { text });
-          const item = response.data;
+          const item = await apiClient.post<ChecklistItem>(`/boards/${boardId}/cards/${cardId}/checklist`, { text });
 
-          // Update local state
-          const currentCard = get().currentCard;
-          if (currentCard && currentCard.id === cardId) {
-            get().setCurrentCard({
-              ...currentCard,
-              checklist_items: [...currentCard.checklist_items, item],
-            });
-          }
+          // Update current board if it matches
+          set(state => {
+            if (state.currentBoard?.id === boardId) {
+              const updatedBoard = {
+                ...state.currentBoard,
+                columns: state.currentBoard.columns.map(col => ({
+                  ...col,
+                  cards: col.cards.map(card => {
+                    if (card.id === cardId) {
+                      return {
+                        ...card,
+                        checklist_items: [...card.checklist_items, item]
+                      };
+                    }
+                    return card;
+                  })
+                }))
+              };
+
+              return {
+                currentBoard: updatedBoard,
+                boards: state.boards.map(b => b.id === boardId ? updatedBoard : b),
+                lastUpdated: new Date().toISOString()
+              };
+            }
+
+            return {
+              lastUpdated: new Date().toISOString()
+            };
+          });
 
           return item;
-        } catch (error) {
-          console.error('Failed to add checklist item:', error);
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to add checklist item';
+          set({ error: errorMessage });
           throw error;
         }
       },
 
-      // Toggle checklist item
-      toggleChecklistItem: async (boardId: string, cardId: string, itemId: string, completed: boolean) => {
+      updateChecklistItem: async (boardId: string, cardId: string, itemId: string, data) => {
         try {
-          await apiClient.put(`/boards/${boardId}/cards/${cardId}/checklist/${itemId}`, { completed });
+          const item = await apiClient.put<ChecklistItem>(`/boards/${boardId}/cards/${cardId}/checklist/${itemId}`, data);
 
-          // Update local state
-          const currentCard = get().currentCard;
-          if (currentCard && currentCard.id === cardId) {
-            get().setCurrentCard({
-              ...currentCard,
-              checklist_items: currentCard.checklist_items.map((item) =>
-                item.id === itemId ? { ...item, completed } : item
-              ),
-            });
-          }
-        } catch (error) {
-          console.error('Failed to toggle checklist item:', error);
+          // Update current board if it matches
+          set(state => {
+            if (state.currentBoard?.id === boardId) {
+              const updatedBoard = {
+                ...state.currentBoard,
+                columns: state.currentBoard.columns.map(col => ({
+                  ...col,
+                  cards: col.cards.map(card => {
+                    if (card.id === cardId) {
+                      return {
+                        ...card,
+                        checklist_items: card.checklist_items.map(ci => ci.id === itemId ? item : ci)
+                      };
+                    }
+                    return card;
+                  })
+                }))
+              };
+
+              return {
+                currentBoard: updatedBoard,
+                boards: state.boards.map(b => b.id === boardId ? updatedBoard : b),
+                lastUpdated: new Date().toISOString()
+              };
+            }
+
+            return {
+              lastUpdated: new Date().toISOString()
+            };
+          });
+
+          return item;
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to update checklist item';
+          set({ error: errorMessage });
           throw error;
         }
       },
 
-      // Computed getters
+      deleteChecklistItem: async (boardId: string, cardId: string, itemId: string) => {
+        try {
+          await apiClient.delete(`/boards/${boardId}/cards/${cardId}/checklist/${itemId}`);
+
+          // Update current board if it matches
+          set(state => {
+            if (state.currentBoard?.id === boardId) {
+              const updatedBoard = {
+                ...state.currentBoard,
+                columns: state.currentBoard.columns.map(col => ({
+                  ...col,
+                  cards: col.cards.map(card => {
+                    if (card.id === cardId) {
+                      return {
+                        ...card,
+                        checklist_items: card.checklist_items.filter(ci => ci.id !== itemId)
+                      };
+                    }
+                    return card;
+                  })
+                }))
+              };
+
+              return {
+                currentBoard: updatedBoard,
+                boards: state.boards.map(b => b.id === boardId ? updatedBoard : b),
+                lastUpdated: new Date().toISOString()
+              };
+            }
+
+            return {
+              lastUpdated: new Date().toISOString()
+            };
+          });
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to delete checklist item';
+          set({ error: errorMessage });
+          throw error;
+        }
+      },
+
+      getCardActivity: async (boardId: string, cardId: string) => {
+        try {
+          const activity = await apiClient.get<CardActivity[]>(`/boards/${boardId}/cards/${cardId}/activity`);
+          return activity;
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || 'Failed to load card activity';
+          set({ error: errorMessage });
+          throw error;
+        }
+      },
+
+      // Convenience getters
+      getBoardById: (id: string) => {
+        return get().boards.find(board => board.id === id) || null;
+      },
+
       getStarredBoards: () => {
-        return get().boards
-          .filter((board) => board.is_starred)
-          .sort((a, b) => a.name.localeCompare(b.name));
+        return get().boards.filter(board => board.is_starred).sort((a, b) => a.name.localeCompare(b.name));
       },
 
-      getBoard: (boardId: string) => {
-        return get().boards.find((board) => board.id === boardId);
+      getCardById: (boardId: string, cardId: string) => {
+        const board = get().currentBoard?.id === boardId ? get().currentBoard : get().getBoardById(boardId);
+
+        if (!board) return null;
+
+        for (const column of board.columns) {
+          const card = column.cards.find(c => c.id === cardId);
+          if (card) return card;
+        }
+
+        return null;
       },
 
-      getColumn: (columnId: string) => {
-        const { boards, currentBoard } = get();
+      getColumnCards: (boardId: string, columnId: string) => {
+        const board = get().currentBoard?.id === boardId ? get().currentBoard : get().getBoardById(boardId);
 
-        // Search in current board first
-        if (currentBoard) {
-          const column = currentBoard.columns.find((col) => col.id === columnId);
-          if (column) return column;
-        }
+        if (!board) return [];
 
-        // Search in all boards
-        for (const board of boards) {
-          const column = board.columns.find((col) => col.id === columnId);
-          if (column) return column;
-        }
-
-        return undefined;
-      },
-
-      getCard: (cardId: string) => {
-        const { boards, currentBoard } = get();
-
-        // Search in current board first
-        if (currentBoard) {
-          for (const column of currentBoard.columns) {
-            const card = column.cards.find((c) => c.id === cardId);
-            if (card) return card;
-          }
-        }
-
-        // Search in all boards
-        for (const board of boards) {
-          for (const column of board.columns) {
-            const card = column.cards.find((c) => c.id === cardId);
-            if (card) return card;
-          }
-        }
-
-        return undefined;
+        const column = board.columns.find(col => col.id === columnId);
+        return column ? column.cards.sort((a, b) => a.position - b.position) : [];
       },
     }),
     {
       name: STORAGE_KEYS.BOARDS,
       storage: createJSONStorage(() => AsyncStorage),
-      // Only persist data, not loading/error states
+      // Persist all data except loading states and errors
       partialize: (state) => ({
         boards: state.boards,
         currentBoard: state.currentBoard,
@@ -549,12 +589,3 @@ export const useBoardsStore = create<BoardsState>()(
     }
   )
 );
-
-// Export store actions for external use
-export const boardsActions = {
-  fetchBoards: () => useBoardsStore.getState().fetchBoards(),
-  fetchBoard: (boardId: string) => useBoardsStore.getState().fetchBoard(boardId),
-  createBoard: (input: CreateBoardInput) => useBoardsStore.getState().createBoard(input),
-  starBoard: (boardId: string, isStarred: boolean) => useBoardsStore.getState().starBoard(boardId, isStarred),
-  createCard: (boardId: string, input: CreateCardInput) => useBoardsStore.getState().createCard(boardId, input),
-};

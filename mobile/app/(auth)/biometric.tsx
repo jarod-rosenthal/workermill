@@ -1,171 +1,145 @@
-import React, { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Alert,
-  BackHandler,
-} from 'react-native';
-import { useRouter } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, Alert } from 'react-native';
+import { router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 
-import { useAuthStore } from '@/stores/auth-store';
-import {
-  authenticateWithBiometric,
-  checkBiometricAvailability,
-  getBiometricTypeName,
-} from '@/lib/biometric';
 import { Button } from '@/components/ui/Button';
-import { Spinner } from '@/components/ui/Spinner';
+import { useAuthStore } from '@/stores/auth-store';
+import { BiometricAuth, getBiometricTypeName } from '@/lib/biometric';
 
 export default function BiometricScreen() {
-  const router = useRouter();
+  const [biometricTypeName, setBiometricTypeName] = useState('Biometric authentication');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [canRetry, setCanRetry] = useState(true);
+
   const {
-    user,
-    recordBiometricFailure,
-    resetBiometricAttempts,
-    biometricFailedAttempts,
-    signOut,
+    biometricFailCount,
+    shouldShowBiometric,
+    incrementBiometricFailCount,
+    refreshUserProfile,
+    checkAuthStatus,
   } = useAuthStore();
 
-  const [isAuthenticating, setIsAuthenticating] = useState(false);
-  const [biometricTypeName, setBiometricTypeName] = useState('Biometric');
-  const [isLoading, setIsLoading] = useState(true);
-  const [biometricAvailable, setBiometricAvailable] = useState(false);
-
-  // Initialize biometric info
-  useEffect(() => {
-    initializeBiometric();
-  }, []);
-
-  // Disable hardware back button on Android
-  useEffect(() => {
-    const backAction = () => {
-      // Don't allow back navigation from biometric screen
-      return true;
-    };
-
-    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
-
-    return () => backHandler.remove();
-  }, []);
-
-  // Auto-prompt biometric on load
-  useEffect(() => {
-    if (biometricAvailable && !isLoading) {
-      // Auto-prompt after a brief delay to ensure UI is ready
-      const timer = setTimeout(() => {
-        handleBiometricAuth();
-      }, 500);
-
-      return () => clearTimeout(timer);
-    }
-  }, [biometricAvailable, isLoading]);
-
-  const initializeBiometric = async () => {
+  const initializeBiometric = useCallback(async () => {
     try {
-      const biometricInfo = await checkBiometricAvailability();
-
-      if (biometricInfo.isAvailable && biometricInfo.hasEnrolledCredentials) {
-        setBiometricAvailable(true);
-        const typeName = getBiometricTypeName(biometricInfo.supportedTypes);
-        setBiometricTypeName(typeName);
-      } else {
-        // If biometric isn't available, proceed to main app
-        router.replace('/(tabs)');
-        return;
-      }
+      const typeName = await getBiometricTypeName();
+      setBiometricTypeName(typeName);
     } catch (error) {
       console.error('Failed to initialize biometric:', error);
-      // Proceed to main app if there's an error
-      router.replace('/(tabs)');
+      // Fall back to sign-in screen if biometric setup fails
+      router.replace('/(auth)/sign-in');
+    }
+  }, []);
+
+  useEffect(() => {
+    initializeBiometric();
+  }, [initializeBiometric]);
+
+  useEffect(() => {
+    // If user has reached fail limit, redirect to sign-in
+    if (!shouldShowBiometric || biometricFailCount >= 3) {
+      router.replace('/(auth)/sign-in');
+    }
+  }, [shouldShowBiometric, biometricFailCount]);
+
+  const promptBiometric = useCallback(async () => {
+    if (!canRetry || isAuthenticating) {
       return;
     }
 
-    setIsLoading(false);
-  };
-
-  const handleBiometricAuth = async () => {
-    if (!biometricAvailable) return;
+    setIsAuthenticating(true);
 
     try {
-      setIsAuthenticating(true);
-
-      const result = await authenticateWithBiometric(
-        `Use ${biometricTypeName} to unlock WorkerMill`
-      );
+      const result = await BiometricAuth.authenticate({
+        promptMessage: `Use ${biometricTypeName} to unlock WorkerMill`,
+        cancelLabel: 'Cancel',
+        fallbackLabel: 'Use Sign In',
+      });
 
       if (result.success) {
-        // Reset attempt counter on success
-        await resetBiometricAttempts();
-
-        // Navigate to main app
-        router.replace('/(tabs)');
-      } else {
-        // Record the failure
-        await recordBiometricFailure();
-
-        if (result.error?.includes('cancelled')) {
-          // User cancelled - show options
-          return;
+        // Biometric auth successful - validate stored tokens and navigate
+        try {
+          await checkAuthStatus();
+          await refreshUserProfile();
+          router.replace('/(tabs)');
+        } catch {
+          // Stored tokens might be invalid - redirect to sign-in
+          router.replace('/(auth)/sign-in');
         }
+      } else {
+        // Biometric auth failed
+        if (result.errorCode === 'USER_CANCEL' || result.errorCode === 'USER_FALLBACK') {
+          // User cancelled or chose fallback - go to sign-in
+          router.replace('/(auth)/sign-in');
+        } else if (result.errorCode === 'AUTH_FAILED') {
+          // Authentication failed - increment fail count
+          await incrementBiometricFailCount();
 
-        if (result.error?.includes('lockout') || result.error?.includes('too many')) {
-          // Biometric is locked out, force sign-in
+          const newFailCount = biometricFailCount + 1;
+          if (newFailCount >= 3) {
+            Alert.alert(
+              'Too Many Attempts',
+              'Please sign in with your email and password.',
+              [
+                {
+                  text: 'OK',
+                  onPress: () => router.replace('/(auth)/sign-in'),
+                },
+              ]
+            );
+          } else {
+            const remainingAttempts = 3 - newFailCount;
+            Alert.alert(
+              'Authentication Failed',
+              `${remainingAttempts} attempt${remainingAttempts === 1 ? '' : 's'} remaining before requiring password sign-in.`,
+              [
+                {
+                  text: 'Try Again',
+                  onPress: () => setCanRetry(true),
+                },
+                {
+                  text: 'Use Password',
+                  onPress: () => router.replace('/(auth)/sign-in'),
+                  style: 'cancel',
+                },
+              ]
+            );
+            setCanRetry(false);
+          }
+        } else if (result.errorCode === 'TOO_MANY_ATTEMPTS') {
           Alert.alert(
             'Biometric Locked',
-            'Biometric authentication is temporarily disabled. Please sign in with your credentials.',
+            'Too many failed attempts. Please try again later or sign in with your password.',
             [
               {
-                text: 'Sign In',
+                text: 'Use Password',
                 onPress: () => router.replace('/(auth)/sign-in'),
               },
             ]
           );
-          return;
-        }
-
-        // Check if we've hit the 3-attempt limit
-        if (biometricFailedAttempts >= 2) {
-          // This will be the 3rd failure, force sign-in
+        } else {
+          // Other errors - show generic message
           Alert.alert(
-            'Too Many Failed Attempts',
-            'Biometric authentication has failed too many times. Please sign in with your credentials.',
+            'Authentication Error',
+            result.error || 'An error occurred during authentication. Please try signing in with your password.',
             [
               {
-                text: 'Sign In',
+                text: 'Use Password',
                 onPress: () => router.replace('/(auth)/sign-in'),
               },
             ]
           );
-          return;
         }
-
-        // Show error and allow retry
-        Alert.alert(
-          'Authentication Failed',
-          result.error || 'Biometric authentication failed. Please try again.',
-          [
-            {
-              text: 'Try Again',
-              onPress: () => handleBiometricAuth(),
-            },
-            {
-              text: 'Use Password',
-              onPress: () => router.replace('/(auth)/sign-in'),
-              style: 'cancel',
-            },
-          ]
-        );
       }
     } catch (error) {
       console.error('Biometric authentication error:', error);
       Alert.alert(
-        'Authentication Error',
-        'An error occurred during biometric authentication. Please sign in with your credentials.',
+        'Error',
+        'An unexpected error occurred. Please sign in with your password.',
         [
           {
-            text: 'Sign In',
+            text: 'OK',
             onPress: () => router.replace('/(auth)/sign-in'),
           },
         ]
@@ -173,124 +147,95 @@ export default function BiometricScreen() {
     } finally {
       setIsAuthenticating(false);
     }
+  }, [biometricTypeName, canRetry, isAuthenticating, biometricFailCount, incrementBiometricFailCount, checkAuthStatus, refreshUserProfile]);
+
+  useEffect(() => {
+    // Auto-prompt for biometric auth after initialization (with slight delay for better UX)
+    if (biometricTypeName !== 'Biometric authentication') {
+      const timer = setTimeout(() => {
+        promptBiometric();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [biometricTypeName, promptBiometric]);
+
+  const getBiometricIcon = () => {
+    if (biometricTypeName.includes('Face ID')) {
+      return 'scan';
+    } else if (biometricTypeName.includes('Touch ID') || biometricTypeName.includes('fingerprint')) {
+      return 'finger-print';
+    }
+    return 'lock-closed';
   };
 
-  const handleUsePassword = () => {
-    router.replace('/(auth)/sign-in');
+  const getFailCountMessage = () => {
+    if (biometricFailCount === 0) {
+      return null;
+    }
+
+    const remaining = 3 - biometricFailCount;
+    if (remaining > 0) {
+      return `${remaining} attempt${remaining === 1 ? '' : 's'} remaining`;
+    }
+
+    return 'Maximum attempts reached';
   };
-
-  const handleSignOut = async () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: async () => {
-            await signOut();
-            router.replace('/(auth)/sign-in');
-          },
-        },
-      ]
-    );
-  };
-
-  if (isLoading) {
-    return (
-      <View className="flex-1 bg-slate-950 items-center justify-center">
-        <Spinner />
-        <Text className="text-white mt-4">Initializing...</Text>
-        <StatusBar style="light" />
-      </View>
-    );
-  }
-
-  const remainingAttempts = Math.max(0, 3 - biometricFailedAttempts);
 
   return (
-    <View className="flex-1 bg-slate-950 px-6 pt-20 pb-8">
-      <StatusBar style="light" />
-
-      <View className="flex-1 items-center justify-center">
-        {/* Logo */}
-        <View className="w-24 h-24 bg-brand-600 rounded-3xl items-center justify-center mb-8">
-          <Text className="text-4xl font-bold text-white">WM</Text>
+    <SafeAreaView className="flex-1 bg-white dark:bg-slate-950">
+      <View className="flex-1 justify-center items-center px-6">
+        {/* Biometric Icon */}
+        <View className="w-24 h-24 bg-brand-100 dark:bg-brand-900 rounded-full justify-center items-center mb-8">
+          <Ionicons
+            name={getBiometricIcon()}
+            size={48}
+            color="#6366f1"
+          />
         </View>
 
-        {/* Welcome back message */}
-        <Text className="text-2xl font-bold text-white text-center mb-2">
-          Welcome back
+        {/* Title and Description */}
+        <Text className="text-2xl font-bold text-slate-900 dark:text-white text-center mb-2">
+          Unlock WorkerMill
         </Text>
-        {user?.name && (
-          <Text className="text-slate-400 text-lg text-center mb-8">
-            {user.name}
-          </Text>
-        )}
+        <Text className="text-center text-slate-600 dark:text-slate-400 mb-8">
+          Use {biometricTypeName} to quickly access your account
+        </Text>
 
-        {/* Biometric icon and prompt */}
-        <View className="items-center mb-12">
-          <View className="w-16 h-16 bg-slate-800 rounded-2xl items-center justify-center mb-6">
-            <Text className="text-3xl">
-              {biometricTypeName.includes('Face') ? '🔐' : '👆'}
+        {/* Fail Count Warning */}
+        {getFailCountMessage() && (
+          <View className="bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-6">
+            <Text className="text-sm text-amber-600 dark:text-amber-400 text-center">
+              {getFailCountMessage()}
             </Text>
           </View>
+        )}
 
-          <Text className="text-white text-xl font-semibold text-center mb-2">
-            Unlock with {biometricTypeName}
-          </Text>
-
-          <Text className="text-slate-400 text-center text-base max-w-sm">
-            Use {biometricTypeName.toLowerCase()} to securely access your WorkerMill account
-          </Text>
-
-          {remainingAttempts < 3 && remainingAttempts > 0 && (
-            <Text className="text-yellow-500 text-sm mt-4">
-              {remainingAttempts} attempt{remainingAttempts !== 1 ? 's' : ''} remaining
-            </Text>
-          )}
-        </View>
-
-        {/* Action buttons */}
-        <View className="w-full space-y-4">
+        {/* Action Buttons */}
+        <View className="w-full space-y-3">
           <Button
-            variant="primary"
-            size="lg"
-            onPress={handleBiometricAuth}
+            onPress={promptBiometric}
             loading={isAuthenticating}
-            disabled={!biometricAvailable || remainingAttempts === 0}
-            style={{ width: '100%' }}
+            disabled={isAuthenticating || !canRetry}
+            className="w-full"
           >
             {isAuthenticating ? 'Authenticating...' : `Use ${biometricTypeName}`}
           </Button>
 
           <Button
-            variant="secondary"
-            size="lg"
-            onPress={handleUsePassword}
+            variant="outline"
+            onPress={() => router.replace('/(auth)/sign-in')}
             disabled={isAuthenticating}
-            style={{ width: '100%' }}
+            className="w-full"
           >
-            Use Password Instead
+            Use Email & Password
           </Button>
         </View>
-      </View>
 
-      {/* Sign out option */}
-      <View className="items-center pt-8">
-        <TouchableOpacity
-          onPress={handleSignOut}
-          disabled={isAuthenticating}
-          className="p-2"
-          accessibilityRole="button"
-          accessibilityLabel="Sign out"
-        >
-          <Text className="text-slate-400 text-sm">
-            Not {user?.name?.split(' ')[0] || 'you'}? Sign out
-          </Text>
-        </TouchableOpacity>
+        {/* Footer */}
+        <Text className="text-xs text-slate-500 dark:text-slate-400 text-center mt-12">
+          After 3 failed attempts, you'll need to sign in with your password
+        </Text>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }

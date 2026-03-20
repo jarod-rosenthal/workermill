@@ -1,16 +1,39 @@
 import React from 'react';
 import { View, Text } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
 
 interface OfflineBannerProps {
+  visible: boolean;
   message?: string;
+  className?: string;
 }
 
-export function OfflineBanner({ message = 'Offline — reconnecting...' }: OfflineBannerProps) {
+export function OfflineBanner({
+  visible,
+  message = 'Offline — reconnecting...',
+  className
+}: OfflineBannerProps) {
+  if (!visible) {
+    return null;
+  }
+
   return (
-    <View className="bg-amber-500 px-4 py-3 flex-row items-center">
-      <Ionicons name="warning-outline" size={20} color="white" className="mr-2" />
-      <Text className="text-white font-medium flex-1">
+    <View
+      className={`
+        bg-amber-500 px-4 py-3 flex-row items-center
+        ${className || ''}
+      `}
+      accessibilityRole="alert"
+      accessibilityLabel={message}
+    >
+      <MaterialIcons
+        name="wifi-off"
+        size={16}
+        color="#ffffff"
+        className="mr-2"
+        accessibilityHidden={true}
+      />
+      <Text className="text-white text-sm font-medium flex-1">
         {message}
       </Text>
     </View>

@@ -1,28 +1,39 @@
 import React from 'react';
-import { render } from '@testing-library/react-native';
+import { render, screen } from '@testing-library/react-native';
 import { EmptyState } from '../EmptyState';
 
 describe('EmptyState', () => {
-  it('renders message prop', () => {
-    const testMessage = 'No items found';
-    const { getByText } = render(<EmptyState message={testMessage} />);
+  it('renders the provided message', () => {
+    const message = 'No items found';
+    render(<EmptyState icon="inbox" message={message} />);
 
-    expect(getByText(testMessage)).toBeTruthy();
+    expect(screen.getByText(message)).toBeTruthy();
+    expect(screen.getByLabelText(message)).toBeTruthy();
   });
 
-  it('renders with default icon', () => {
-    const { getByTestId } = render(<EmptyState message="Test message" />);
+  it('renders with the specified icon', () => {
+    const message = 'Empty state message';
+    render(<EmptyState icon="folder-open" message={message} />);
 
-    // The Ionicons component should render with the default icon
-    // We can't directly test the icon name, but we can ensure the component renders
-    expect(getByTestId).toBeDefined();
+    expect(screen.getByText(message)).toBeTruthy();
   });
 
-  it('renders with custom icon', () => {
-    const { getByTestId } = render(
-      <EmptyState icon="folder-outline" message="No folders" />
+  it('applies custom className', () => {
+    const message = 'Custom styled empty state';
+    const customClass = 'custom-class';
+
+    const { getByLabelText } = render(
+      <EmptyState icon="search" message={message} className={customClass} />
     );
 
-    expect(getByTestId).toBeDefined();
+    expect(getByLabelText(message)).toBeTruthy();
+  });
+
+  it('has correct accessibility properties', () => {
+    const message = 'Accessible empty state';
+    render(<EmptyState icon="info" message={message} />);
+
+    const element = screen.getByLabelText(message);
+    expect(element.props.accessibilityRole).toBe('text');
   });
 });

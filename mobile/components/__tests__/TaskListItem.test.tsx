@@ -1,121 +1,158 @@
 import React from 'react';
-import { render, act } from '@testing-library/react-native';
+import { render, screen, fireEvent } from '@testing-library/react-native';
 import { TaskListItem } from '../TaskListItem';
 import { WorkerTask } from '../../types/tasks';
 
-// Mock the StatusBadge component since we're testing it separately
-jest.mock('../StatusBadge', () => ({
-  StatusBadge: ({ status }: { status: string }) => {
-    const React = require('react');
-    const { Text } = require('react-native');
-    return React.createElement(Text, { testID: 'status-badge' }, status);
-  }
-}));
+const mockTask: WorkerTask = {
+  id: 'test-task-1',
+  issue_key: 'WM-123',
+  summary: 'Implement user authentication system',
+  status: 'executing',
+  persona: 'Backend Developer',
+  persona_emoji: '🔧',
+  created_at: '2024-01-15T10:00:00Z',
+  started_at: '2024-01-15T10:05:00Z',
+  elapsed_time_ms: 125000, // 2 minutes 5 seconds
+  cost_cents: 250, // $2.50
+  retry_count: 0,
+  workflow_mode: 'auto' as const,
+};
 
 describe('TaskListItem', () => {
-  const mockTask: WorkerTask = {
-    id: 'task-1',
-    issue_key: 'WM-42',
-    summary: 'Test task summary',
-    status: 'executing',
-    persona: 'Frontend Developer',
-    persona_emoji: '🎨',
-    created_at: '2024-01-01T10:00:00Z',
-    started_at: '2024-01-01T10:00:00Z',
-    elapsed_time_ms: 120000,
-    cost_cents: 250,
-    retry_count: 0,
-    workflow_mode: 'auto',
-  };
+  it('renders task issue key and summary', () => {
+    render(<TaskListItem task={mockTask} />);
 
-  const mockOnPress = jest.fn();
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-    jest.useFakeTimers();
-  });
-
-  afterEach(() => {
-    jest.useRealTimers();
+    expect(screen.getByText('WM-123')).toBeTruthy();
+    expect(screen.getByText('Implement user authentication system')).toBeTruthy();
   });
 
   it('renders status badge', () => {
-    const { getByTestId } = render(
-      <TaskListItem task={mockTask} onPress={mockOnPress} />
-    );
+    render(<TaskListItem task={mockTask} />);
 
-    expect(getByTestId('status-badge')).toBeTruthy();
+    // StatusBadge should render the status
+    expect(screen.getByText('Executing')).toBeTruthy();
   });
 
-  it('renders persona emoji', () => {
-    const { getByText } = render(
-      <TaskListItem task={mockTask} onPress={mockOnPress} />
-    );
+  it('renders persona emoji and name', () => {
+    render(<TaskListItem task={mockTask} />);
 
-    expect(getByText('🎨')).toBeTruthy();
-    expect(getByText('Frontend Developer')).toBeTruthy();
+    const personaText = screen.getByLabelText('Worker: Backend Developer');
+    expect(personaText).toBeTruthy();
+    expect(screen.getByText('🔧 Backend Developer')).toBeTruthy();
   });
 
-  it('renders elapsed time', () => {
-    const { getByText } = render(
-      <TaskListItem task={mockTask} onPress={mockOnPress} />
-    );
+  it('renders elapsed time when provided', () => {
+    render(<TaskListItem task={mockTask} />);
 
-    expect(getByText('2m 0s')).toBeTruthy();
+    const elapsedTimeElement = screen.getByLabelText('Duration: 2m 5s');
+    expect(elapsedTimeElement).toBeTruthy();
+    expect(screen.getByText('2m 5s')).toBeTruthy();
   });
 
-  it('renders cost', () => {
-    const { getByText } = render(
-      <TaskListItem task={mockTask} onPress={mockOnPress} />
-    );
+  it('renders cost when provided', () => {
+    render(<TaskListItem task={mockTask} />);
 
-    expect(getByText('$2.50')).toBeTruthy();
+    const costElement = screen.getByLabelText('Cost: $2.50');
+    expect(costElement).toBeTruthy();
+    expect(screen.getByText('$2.50')).toBeTruthy();
   });
 
-  it('renders task details', () => {
-    const { getByText } = render(
-      <TaskListItem task={mockTask} onPress={mockOnPress} />
-    );
+  it('handles task without elapsed time', () => {
+    const taskWithoutTime = { ...mockTask, elapsed_time_ms: undefined };
+    render(<TaskListItem task={taskWithoutTime} />);
 
-    expect(getByText('WM-42')).toBeTruthy();
-    expect(getByText('Test task summary')).toBeTruthy();
+    expect(screen.getByText('WM-123')).toBeTruthy();
+    expect(screen.queryByLabelText(/Duration:/)).toBeNull();
   });
 
-  it('handles fallback persona emoji', () => {
+  it('handles task without cost', () => {
+    const taskWithoutCost = { ...mockTask, cost_cents: undefined };
+    render(<TaskListItem task={taskWithoutCost} />);
+
+    expect(screen.getByText('WM-123')).toBeTruthy();
+    expect(screen.queryByLabelText(/Cost:/)).toBeNull();
+  });
+
+  it('handles task without persona emoji', () => {
     const taskWithoutEmoji = { ...mockTask, persona_emoji: undefined };
-    const { getByText } = render(
-      <TaskListItem task={taskWithoutEmoji} onPress={mockOnPress} />
-    );
+    render(<TaskListItem task={taskWithoutEmoji} />);
 
-    expect(getByText('🤖')).toBeTruthy();
+    expect(screen.getByText('🤖 Backend Developer')).toBeTruthy();
   });
 
-  it('handles zero cost', () => {
-    const taskWithNoCost = { ...mockTask, cost_cents: undefined };
-    const { getByText } = render(
-      <TaskListItem task={taskWithNoCost} onPress={mockOnPress} />
-    );
+  it('calls onPress when tapped', () => {
+    const mockOnPress = jest.fn();
+    render(<TaskListItem task={mockTask} onPress={mockOnPress} />);
 
-    expect(getByText('$0.00')).toBeTruthy();
+    const taskItem = screen.getByLabelText('Task WM-123: Implement user authentication system');
+    fireEvent.press(taskItem);
+
+    expect(mockOnPress).toHaveBeenCalledTimes(1);
+    expect(mockOnPress).toHaveBeenCalledWith(mockTask);
   });
 
-  it('updates elapsed time for active tasks', () => {
-    const activeTask = {
-      ...mockTask,
-      status: 'executing' as const,
-      started_at: new Date(Date.now() - 60000).toISOString(), // 1 minute ago
-    };
+  it('has correct accessibility properties', () => {
+    render(<TaskListItem task={mockTask} />);
 
-    const { getByText } = render(
-      <TaskListItem task={activeTask} onPress={mockOnPress} />
-    );
+    const taskItem = screen.getByLabelText('Task WM-123: Implement user authentication system');
+    expect(taskItem.props.accessibilityRole).toBe('button');
+  });
 
-    // Fast forward time by 1 second
-    act(() => {
-      jest.advanceTimersByTime(1000);
+  describe('elapsed time formatting', () => {
+    it('formats hours and minutes correctly', () => {
+      const taskWithHours = {
+        ...mockTask,
+        elapsed_time_ms: 3665000, // 1 hour, 1 minute, 5 seconds
+      };
+      render(<TaskListItem task={taskWithHours} />);
+
+      expect(screen.getByLabelText('Duration: 1h 1m')).toBeTruthy();
+      expect(screen.getByText('1h 1m')).toBeTruthy();
     });
 
-    // Should show approximately 1 minute elapsed time
-    expect(getByText(/1m/)).toBeTruthy();
+    it('formats minutes and seconds correctly', () => {
+      const taskWithMinutes = {
+        ...mockTask,
+        elapsed_time_ms: 65000, // 1 minute, 5 seconds
+      };
+      render(<TaskListItem task={taskWithMinutes} />);
+
+      expect(screen.getByLabelText('Duration: 1m 5s')).toBeTruthy();
+      expect(screen.getByText('1m 5s')).toBeTruthy();
+    });
+
+    it('formats seconds correctly', () => {
+      const taskWithSeconds = {
+        ...mockTask,
+        elapsed_time_ms: 30000, // 30 seconds
+      };
+      render(<TaskListItem task={taskWithSeconds} />);
+
+      expect(screen.getByLabelText('Duration: 30s')).toBeTruthy();
+      expect(screen.getByText('30s')).toBeTruthy();
+    });
+  });
+
+  describe('cost formatting', () => {
+    it('formats dollars and cents correctly', () => {
+      const taskWithHighCost = {
+        ...mockTask,
+        cost_cents: 12345, // $123.45
+      };
+      render(<TaskListItem task={taskWithHighCost} />);
+
+      expect(screen.getByLabelText('Cost: $123.45')).toBeTruthy();
+      expect(screen.getByText('$123.45')).toBeTruthy();
+    });
+
+    it('formats zero cost correctly', () => {
+      const taskWithZeroCost = {
+        ...mockTask,
+        cost_cents: 0,
+      };
+      render(<TaskListItem task={taskWithZeroCost} />);
+
+      expect(screen.queryByLabelText(/Cost:/)).toBeNull();
+    });
   });
 });

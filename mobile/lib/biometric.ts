@@ -1,227 +1,191 @@
 import * as LocalAuthentication from 'expo-local-authentication';
-import { Platform } from 'react-native';
 
-// Types for biometric authentication
-export interface BiometricInfo {
+export interface BiometricCapabilities {
   isAvailable: boolean;
   supportedTypes: LocalAuthentication.AuthenticationType[];
-  hasEnrolledCredentials: boolean;
+  hasHardware: boolean;
+  isEnrolled: boolean;
 }
 
 export interface BiometricAuthResult {
   success: boolean;
   error?: string;
-  warning?: string;
+  errorCode?: string;
 }
 
-/**
- * Check if biometric authentication is available on the device
- * and if the user has enrolled biometric credentials.
- */
-export const checkBiometricAvailability = async (): Promise<BiometricInfo> => {
-  try {
-    // Check if hardware supports biometric authentication
-    const isAvailable = await LocalAuthentication.hasHardwareAsync();
-    if (!isAvailable) {
+export class BiometricAuth {
+  /**
+   * Check if biometric authentication is available on the device
+   */
+  static async checkAvailability(): Promise<BiometricCapabilities> {
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      const supportedTypes = await LocalAuthentication.supportedAuthenticationTypesAsync();
+
+      const isAvailable = hasHardware && isEnrolled && supportedTypes.length > 0;
+
+      return {
+        isAvailable,
+        supportedTypes,
+        hasHardware,
+        isEnrolled,
+      };
+    } catch (error) {
+      console.error('Error checking biometric availability:', error);
       return {
         isAvailable: false,
         supportedTypes: [],
-        hasEnrolledCredentials: false,
+        hasHardware: false,
+        isEnrolled: false,
       };
     }
-
-    // Get supported authentication types
-    const supportedTypes = await LocalAuthentication.supportedAuthenticationTypesAsync();
-
-    // Check if user has enrolled biometric credentials
-    const hasEnrolledCredentials = await LocalAuthentication.isEnrolledAsync();
-
-    return {
-      isAvailable: true,
-      supportedTypes,
-      hasEnrolledCredentials,
-    };
-  } catch (error) {
-    console.warn('Failed to check biometric availability:', error);
-    return {
-      isAvailable: false,
-      supportedTypes: [],
-      hasEnrolledCredentials: false,
-    };
-  }
-};
-
-/**
- * Get a user-friendly name for the biometric authentication type.
- */
-export const getBiometricTypeName = (types: LocalAuthentication.AuthenticationType[]): string => {
-  if (types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)) {
-    return Platform.OS === 'ios' ? 'Face ID' : 'Face Unlock';
   }
 
-  if (types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)) {
-    return Platform.OS === 'ios' ? 'Touch ID' : 'Fingerprint';
+  /**
+   * Get user-friendly name for the primary biometric type available
+   */
+  static async getBiometricTypeName(): Promise<string> {
+    const capabilities = await this.checkAvailability();
+
+    if (!capabilities.isAvailable) {
+      return 'Biometric authentication';
+    }
+
+    const { supportedTypes } = capabilities;
+
+    // Prioritize Face ID and Touch ID (iOS)
+    if (supportedTypes.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)) {
+      return 'Face ID';
+    }
+
+    if (supportedTypes.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)) {
+      return 'Touch ID';
+    }
+
+    // Android or other types
+    if (supportedTypes.length > 0) {
+      return 'Biometric authentication';
+    }
+
+    return 'Biometric authentication';
   }
 
-  if (types.includes(LocalAuthentication.AuthenticationType.IRIS)) {
-    return 'Iris Scan';
+  /**
+   * Prompt user for biometric authentication
+   */
+  static async authenticate(options?: {
+    promptMessage?: string;
+    cancelLabel?: string;
+    fallbackLabel?: string;
+  }): Promise<BiometricAuthResult> {
+    try {
+      const capabilities = await this.checkAvailability();
+
+      if (!capabilities.isAvailable) {
+        return {
+          success: false,
+          error: 'Biometric authentication is not available',
+          errorCode: 'NOT_AVAILABLE',
+        };
+      }
+
+      const biometricName = await this.getBiometricTypeName();
+
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: options?.promptMessage || `Use ${biometricName} to unlock WorkerMill`,
+        cancelLabel: options?.cancelLabel || 'Cancel',
+        fallbackLabel: options?.fallbackLabel || 'Use Passcode',
+        requireConfirmation: false,
+        disableDeviceFallback: false,
+      });
+
+      if (result.success) {
+        return {
+          success: true,
+        };
+      } else {
+        let errorMessage = 'Authentication failed';
+        let errorCode = 'UNKNOWN';
+
+        const errorType = (result as any).error;
+        if (errorType === 'user_cancel') {
+          errorMessage = 'Authentication was cancelled';
+          errorCode = 'USER_CANCEL';
+        } else if (errorType === 'user_fallback') {
+          errorMessage = 'User chose to use device passcode';
+          errorCode = 'USER_FALLBACK';
+        } else if (errorType === 'system_cancel') {
+          errorMessage = 'Authentication was cancelled by system';
+          errorCode = 'SYSTEM_CANCEL';
+        } else if (errorType === 'authentication_failed') {
+          errorMessage = 'Authentication failed';
+          errorCode = 'AUTH_FAILED';
+        } else if (errorType === 'too_many_attempts') {
+          errorMessage = 'Too many failed attempts';
+          errorCode = 'TOO_MANY_ATTEMPTS';
+        }
+
+        return {
+          success: false,
+          error: errorMessage,
+          errorCode,
+        };
+      }
+    } catch (error) {
+      console.error('Biometric authentication error:', error);
+      return {
+        success: false,
+        error: 'An unexpected error occurred during authentication',
+        errorCode: 'UNEXPECTED_ERROR',
+      };
+    }
   }
 
-  // Fallback for any other types
-  return 'Biometric Authentication';
-};
-
-/**
- * Prompt the user for biometric authentication.
- */
-export const authenticateWithBiometric = async (
-  promptMessage?: string
-): Promise<BiometricAuthResult> => {
-  try {
-    // First check if biometrics are available
-    const biometricInfo = await checkBiometricAvailability();
-
-    if (!biometricInfo.isAvailable) {
-      return {
-        success: false,
-        error: 'Biometric authentication is not available on this device',
-      };
-    }
-
-    if (!biometricInfo.hasEnrolledCredentials) {
-      return {
-        success: false,
-        error: 'No biometric credentials are enrolled. Please set up biometric authentication in your device settings.',
-      };
-    }
-
-    // Get biometric type name for prompt
-    const biometricTypeName = getBiometricTypeName(biometricInfo.supportedTypes);
-    const defaultPrompt = `Use ${biometricTypeName} to unlock WorkerMill`;
-
-    // Attempt biometric authentication
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: promptMessage || defaultPrompt,
-      cancelLabel: 'Cancel',
-      fallbackLabel: 'Use Password', // For iOS, allows fallback to device passcode
-      disableDeviceFallback: false, // Allow fallback to device passcode
-    });
-
-    if (result.success) {
-      return {
-        success: true,
-      };
-    }
-
-    // Handle different failure reasons
-    if (result.error === 'user_cancel') {
-      return {
-        success: false,
-        error: 'Authentication was cancelled by the user',
-      };
-    }
-
-    if (result.error === 'system_cancel') {
-      return {
-        success: false,
-        error: 'Authentication was cancelled by the system',
-      };
-    }
-
-    if (result.error === 'app_cancel') {
-      return {
-        success: false,
-        error: 'Authentication was cancelled by the app',
-      };
-    }
-
-    if (result.error === 'lockout') {
-      return {
-        success: false,
-        error: 'Biometric authentication is temporarily disabled due to too many failed attempts',
-        warning: 'Please wait a moment and try again, or use your device passcode',
-      };
-    }
-
-    if (result.error === 'lockout_permanent') {
-      return {
-        success: false,
-        error: 'Biometric authentication is permanently disabled',
-        warning: 'Please use your device passcode or re-enable biometrics in Settings',
-      };
-    }
-
-    if (result.error === 'too_many_attempts') {
-      return {
-        success: false,
-        error: 'Too many failed biometric attempts',
-        warning: 'Please try again later or use your device passcode',
-      };
-    }
-
-    if (result.error === 'not_available') {
-      return {
-        success: false,
-        error: 'Biometric authentication is not currently available',
-      };
-    }
-
-    if (result.error === 'not_enrolled') {
-      return {
-        success: false,
-        error: 'No biometric credentials are enrolled',
-        warning: 'Please set up biometric authentication in your device settings',
-      };
-    }
-
-    // Generic fallback for unknown errors
-    return {
-      success: false,
-      error: 'Biometric authentication failed',
-    };
-  } catch (error) {
-    console.error('Biometric authentication error:', error);
-    return {
-      success: false,
-      error: 'Biometric authentication is currently unavailable',
-    };
+  /**
+   * Check if biometric authentication should be offered to the user
+   * (combines availability check with user preferences)
+   */
+  static async shouldOfferBiometric(): Promise<boolean> {
+    const capabilities = await this.checkAvailability();
+    return capabilities.isAvailable;
   }
-};
 
-/**
- * Check if the device supports and has biometric authentication set up.
- * This is a convenience function that combines availability and enrollment checks.
- */
-export const isBiometricReady = async (): Promise<boolean> => {
-  try {
-    const info = await checkBiometricAvailability();
-    return info.isAvailable && info.hasEnrolledCredentials;
-  } catch (error) {
-    console.warn('Failed to check biometric readiness:', error);
-    return false;
-  }
-};
-
-/**
- * Get a description of the current biometric setup status for display in settings.
- */
-export const getBiometricStatusDescription = async (): Promise<string> => {
-  try {
-    const info = await checkBiometricAvailability();
-
-    if (!info.isAvailable) {
-      return 'Biometric authentication is not supported on this device';
+  /**
+   * Get security level information for biometric authentication
+   */
+  static async getSecurityLevel(): Promise<LocalAuthentication.SecurityLevel> {
+    try {
+      return await LocalAuthentication.getEnrolledLevelAsync();
+    } catch (error) {
+      console.error('Error getting security level:', error);
+      return LocalAuthentication.SecurityLevel.NONE;
     }
-
-    if (!info.hasEnrolledCredentials) {
-      const typeName = getBiometricTypeName(info.supportedTypes);
-      return `${typeName} is supported but not set up. Enable it in your device settings.`;
-    }
-
-    const typeName = getBiometricTypeName(info.supportedTypes);
-    return `${typeName} is available and ready to use`;
-  } catch (error) {
-    console.warn('Failed to get biometric status:', error);
-    return 'Biometric authentication status unknown';
   }
-};
+
+  /**
+   * Check if biometric authentication is currently locked out due to too many attempts
+   */
+  static async isLockedOut(): Promise<boolean> {
+    try {
+      // This is an indirect way to check - try a quick authentication
+      // If it fails with too_many_attempts, we know it's locked out
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Checking availability...',
+        cancelLabel: 'Cancel',
+        disableDeviceFallback: true,
+      });
+
+      return (result as any).error === 'too_many_attempts';
+    } catch {
+      // If there's an error, assume not locked out
+      return false;
+    }
+  }
+}
+
+// Export convenience functions for common usage patterns
+export const checkBiometricAvailability = BiometricAuth.checkAvailability;
+export const authenticateWithBiometric = BiometricAuth.authenticate;
+export const getBiometricTypeName = BiometricAuth.getBiometricTypeName;
+export const shouldOfferBiometric = BiometricAuth.shouldOfferBiometric;

@@ -29,6 +29,7 @@ export class SSEClient {
   private readonly reconnectDelays = [1000, 2000, 4000, 8000, 30000]; // 1s, 2s, 4s, 8s, 30s (cap)
   private state: SSEConnectionState = 'disconnected';
   private appStateSubscription: any = null;
+  private manuallyDisconnected = false;
 
   constructor(options: SSEClientOptions) {
     this.options = options;
@@ -42,11 +43,11 @@ export class SSEClient {
 
   private handleAppStateChange = (nextAppState: AppStateStatus) => {
     if (nextAppState === 'background' || nextAppState === 'inactive') {
-      // App is backgrounding, disconnect SSE
-      this.disconnect();
+      // App is backgrounding, disconnect SSE (but not manually)
+      this.disconnectDueToAppState();
     } else if (nextAppState === 'active') {
-      // App is coming to foreground, reconnect if we should be connected
-      if (this.state === 'disconnected' && this.reconnectTimer === null) {
+      // App is coming to foreground, reconnect only if not manually disconnected
+      if (this.state === 'disconnected' && this.reconnectTimer === null && !this.manuallyDisconnected) {
         this.connect();
       }
     }
@@ -65,7 +66,11 @@ export class SSEClient {
   }
 
   private buildUrl(): string {
-    const url = new URL(this.options.url, SSE_BASE_URL);
+    // Ensure URL starts with / and remove leading slash for proper concatenation
+    const path = this.options.url.startsWith('/') ? this.options.url.substring(1) : this.options.url;
+    const baseUrl = SSE_BASE_URL.endsWith('/') ? SSE_BASE_URL : `${SSE_BASE_URL}/`;
+    const url = new URL(path, baseUrl);
+
     if (this.options.token) {
       url.searchParams.set('token', this.options.token);
     }
@@ -76,6 +81,9 @@ export class SSEClient {
     if (this.state === 'connected' || this.state === 'connecting') {
       return; // Already connected or connecting
     }
+
+    // Reset manual disconnect flag when explicitly connecting
+    this.manuallyDisconnected = false;
 
     this.setState('connecting');
     this.clearReconnectTimer();
@@ -103,6 +111,16 @@ export class SSEClient {
   }
 
   disconnect(): void {
+    this.manuallyDisconnected = true;
+    this.performDisconnect();
+  }
+
+  private disconnectDueToAppState(): void {
+    // Don't set manually disconnected flag for app state changes
+    this.performDisconnect();
+  }
+
+  private performDisconnect(): void {
     this.clearReconnectTimer();
 
     if (this.eventSource) {
@@ -127,7 +145,7 @@ export class SSEClient {
 
     // Reconnect with new token if currently connected
     if (this.state === 'connected') {
-      this.disconnect();
+      this.performDisconnect(); // Don't mark as manually disconnected
       this.connect();
     }
   }
@@ -271,7 +289,7 @@ export class SSEClient {
 
   // Cleanup
   destroy(): void {
-    this.disconnect();
+    this.performDisconnect();
 
     if (this.appStateSubscription) {
       this.appStateSubscription.remove();

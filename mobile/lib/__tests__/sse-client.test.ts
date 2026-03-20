@@ -56,7 +56,8 @@ describe('SSEClient', () => {
       });
 
       expect(client.getState()).toBe('disconnected');
-      expect(mockOnStateChange).toHaveBeenCalledWith('disconnected');
+      // Note: onStateChange is not called during initialization since the state doesn't change
+      expect(mockOnStateChange).not.toHaveBeenCalled();
     });
 
     it('should connect and set up event listeners', () => {

@@ -1,11 +1,39 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
-import { apiClient } from '../api-client';
 import { COGNITO_REGION, COGNITO_CLIENT_ID } from '@/constants/config';
 
 // Mock dependencies
 jest.mock('expo-secure-store');
-jest.mock('axios');
+
+// Mock axios with proper instance structure
+const mockAxiosInstance = jest.fn();
+Object.assign(mockAxiosInstance, {
+  interceptors: {
+    request: {
+      use: jest.fn(),
+    },
+    response: {
+      use: jest.fn(),
+    },
+  },
+  get: jest.fn(),
+  post: jest.fn(),
+  put: jest.fn(),
+  delete: jest.fn(),
+  request: jest.fn(),
+});
+
+jest.mock('axios', () => {
+  const mockAxios = {
+    create: jest.fn(() => mockAxiosInstance),
+  };
+  // Mock both default and named exports
+  return {
+    __esModule: true,
+    default: mockAxios,
+    ...mockAxios,
+  };
+});
 
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 const mockedSecureStore = SecureStore as jest.Mocked<typeof SecureStore>;
@@ -13,41 +41,35 @@ const mockedSecureStore = SecureStore as jest.Mocked<typeof SecureStore>;
 // Mock fetch globally
 global.fetch = jest.fn();
 
+// Store references to interceptor functions before they get cleared by jest.clearAllMocks
+let requestInterceptor: any;
+let responseInterceptor: any;
+
+// Import apiClient after mocks are set up
+import { apiClient } from '../api-client';
+
+// Capture the interceptor functions after the api client is constructed
+requestInterceptor = mockAxiosInstance.interceptors.request.use.mock.calls[0][0];
+responseInterceptor = mockAxiosInstance.interceptors.response.use.mock.calls[0][1];
+
 describe('ApiClient', () => {
-  const mockAxiosInstance = {
-    create: jest.fn().mockReturnThis(),
-    interceptors: {
-      request: {
-        use: jest.fn(),
-      },
-      response: {
-        use: jest.fn(),
-      },
-    },
-    get: jest.fn(),
-    post: jest.fn(),
-    put: jest.fn(),
-    delete: jest.fn(),
-    request: jest.fn(),
-  };
-
   beforeEach(() => {
-    jest.clearAllMocks();
-    mockedAxios.create.mockReturnValue(mockAxiosInstance as any);
+    // Clear only specific mocks, not the interceptor registration calls
+    mockedSecureStore.deleteItemAsync.mockClear();
+    mockedSecureStore.setItemAsync.mockClear();
+    mockedSecureStore.getItemAsync.mockClear();
+    global.fetch = jest.fn();
 
-    // Clear the singleton by reimporting
-    jest.isolateModules(() => {
-      require('../api-client');
-    });
+    // Ensure SecureStore methods return promises
+    mockedSecureStore.deleteItemAsync.mockImplementation(() => Promise.resolve());
+    mockedSecureStore.setItemAsync.mockImplementation(() => Promise.resolve());
+    mockedSecureStore.getItemAsync.mockImplementation(() => Promise.resolve(null));
   });
 
   describe('Request Interceptor', () => {
     it('should add Authorization header when access token exists', async () => {
       const accessToken = 'test-access-token';
       mockedSecureStore.getItemAsync.mockResolvedValue(accessToken);
-
-      // Get the request interceptor function
-      const requestInterceptor = (mockedAxios.create().interceptors.request.use as jest.Mock).mock.calls[0][0];
 
       const config = {
         headers: {} as any,
@@ -62,8 +84,6 @@ describe('ApiClient', () => {
     it('should not add Authorization header when access token does not exist', async () => {
       mockedSecureStore.getItemAsync.mockResolvedValue(null);
 
-      const requestInterceptor = (mockedAxios.create().interceptors.request.use as jest.Mock).mock.calls[0][0];
-
       const config = {
         headers: {} as any,
       };
@@ -76,14 +96,10 @@ describe('ApiClient', () => {
   });
 
   describe('Response Interceptor - 401 Handling', () => {
-    let responseInterceptor: any;
     let mockAxiosCall: jest.Mock;
 
     beforeEach(() => {
-      // Get the response interceptor error handler
-      responseInterceptor = (mockedAxios.create().interceptors.response.use as jest.Mock).mock.calls[0][1];
       mockAxiosCall = jest.fn();
-      (mockAxiosInstance as any) = mockAxiosCall;
     });
 
     it('should trigger Cognito refresh on 401 with correct request shape', async () => {
@@ -119,8 +135,8 @@ describe('ApiClient', () => {
         }),
       });
 
-      // Mock successful retry request
-      mockAxiosCall.mockResolvedValueOnce({ data: 'success' });
+      // Mock successful retry request (the interceptor calls this.axiosInstance(originalRequest))
+      mockAxiosInstance.mockResolvedValueOnce({ data: 'success' });
 
       await responseInterceptor(error);
 

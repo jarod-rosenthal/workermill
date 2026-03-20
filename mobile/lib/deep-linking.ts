@@ -328,3 +328,8 @@ export const parseDeepLink = DeepLinkManager.parseDeepLink;
 export const buildDeepLink = DeepLinkManager.buildDeepLink;
 export const addDeepLinkListener = DeepLinkManager.addListener;
 export const getInitialDeepLink = DeepLinkManager.getInitialURL;
+
+// Export notification data handler
+export const handleNotificationData = (data: any): NotificationDeepLink | null => {
+  return DeepLinkManager['parseNotificationData'](data);
+};

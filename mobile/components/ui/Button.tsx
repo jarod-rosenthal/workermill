@@ -9,6 +9,8 @@ interface ButtonProps {
   onPress?: () => void;
   children: React.ReactNode;
   className?: string;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
 }
 
 const variants = {
@@ -44,7 +46,9 @@ export function Button({
   disabled,
   onPress,
   children,
-  className
+  className,
+  accessibilityLabel,
+  accessibilityHint,
 }: ButtonProps) {
   const isDisabled = loading || disabled;
 
@@ -61,6 +65,8 @@ export function Button({
       `}
       style={{ minWidth: 48, minHeight: size === 'sm' ? 44 : size === 'md' ? 48 : 52 }}
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled: isDisabled }}
     >
       {loading ? (

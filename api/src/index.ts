@@ -52,7 +52,6 @@ import {
   managementRouter,
   marketingRouter,
   statusRouter,
-  workerApiRouter,
   workerDecisionsRouter,
   buildRouter,
   showcaseRouter,
@@ -309,9 +308,6 @@ app.use("/api/marketing", authenticatedLimiter, marketingRouter);
 
 // Email routes (unsubscribe is public for CAN-SPAM compliance)
 app.use("/api/email", webhookLimiter, emailRouter);
-
-// Worker API routes (local CLI workers, API key auth, high volume)
-app.use("/api/worker", workerLogLimiter, workerApiRouter);
 
 // Worker decision engine routes (API key auth, high volume from workers)
 app.use("/api/worker-decisions", workerLogLimiter, workerDecisionsRouter);

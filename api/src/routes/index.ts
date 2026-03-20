@@ -28,7 +28,6 @@ export { default as codebaseRouter } from "./codebase.js";
 export { default as directivesRouter } from "./directives.js";
 export { default as managementRouter } from "./management.js";
 export { default as statusRouter } from "./status.js";
-export { default as workerApiRouter } from "./worker-api.js";
 export { default as workerDecisionsRouter } from "./worker-decisions.js";
 export { default as buildRouter } from "./build.js";
 export { default as showcaseRouter } from "./showcase.js";

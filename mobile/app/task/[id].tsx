@@ -23,7 +23,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Button } from '@/components/ui/Button';
 import { apiClient } from '@/lib/api-client';
-import { createLogSSE, createCoordinationSSE } from '@/lib/sse-client';
+import { createLogsSSE, createCoordinationSSE } from '@/lib/sse-client';
 import type { WorkerTask } from '@/types/tasks';
 
 type TabType = 'logs' | 'coordination' | 'code';
@@ -337,7 +337,7 @@ export default function TaskDetailScreen() {
             )}
 
             <TaskLogStream
-              taskId={taskId || ''}
+              logs={[]}
               className="flex-1"
             />
           </View>
@@ -371,7 +371,7 @@ export default function TaskDetailScreen() {
         return (
           <View className="flex-1">
             <DiffView
-              taskId={taskId || ''}
+              files={[]}
               className="flex-1"
             />
           </View>

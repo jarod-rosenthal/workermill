@@ -42,6 +42,30 @@ import type { ExecutionPlanV2 } from "../services/pipeline-v2-types.js";
 import { planningProgressEmitter } from "../services/planning-progress-events.js";
 import { getOrgCredentials } from "../services/org-credentials.js";
 import { CRITIC_FEEDBACK_TEMPLATE, REFINEMENT_FEEDBACK_TEMPLATE } from "../services/prompt-templates.js";
+import { sendPushNotification } from "../services/push-notifications.js";
+import { User } from "../models/User.js";
+
+/**
+ * Get the first active user in an organization for push notifications.
+ * Since tasks don't have a specific owner, we send notifications to any active user in the org.
+ */
+async function getOrgNotificationUser(orgId: string): Promise<string | null> {
+  try {
+    const userRepo = AppDataSource.getRepository(User);
+    const user = await userRepo.findOne({
+      where: { orgId },
+      select: ["id"],
+      order: { createdAt: "ASC" }, // Get the first user (typically the admin/owner)
+    });
+    return user?.id || null;
+  } catch (error) {
+    logger.warn("Failed to find notification user for org", {
+      orgId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
 
 const router = Router();
 
@@ -697,6 +721,27 @@ router.post(
         taskId,
         orgId: org.id,
         storyCount: rawPlan.stories.length,
+      });
+
+      // Send push notification for plan ready (fire-and-forget)
+      getOrgNotificationUser(task.orgId).then(userId => {
+        if (userId) {
+          sendPushNotification(userId, task.orgId, {
+            title: "Plan ready",
+            body: `Plan ready for ${task.jiraIssueKey || 'task'} — review and approve`,
+            data: {
+              taskId: task.id,
+              issueKey: task.jiraIssueKey || '',
+              type: 'plan_ready'
+            },
+            category: "plan_approvals"
+          });
+        }
+      }).catch(error => {
+        logger.warn("Failed to send push notification for plan ready", {
+          taskId: task.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
       });
 
       res.json({

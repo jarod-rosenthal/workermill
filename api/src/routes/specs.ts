@@ -458,6 +458,19 @@ router.post(
         webResults,
       );
 
+      // Snapshot current version before overwriting
+      if (spec.content) {
+        const versionRepo = AppDataSource.getRepository(KbSpecVersion);
+        await versionRepo.save(
+          versionRepo.create({
+            specId: spec.id,
+            content: spec.content,
+            qualityScore: spec.qualityScore,
+            version: spec.version,
+          }),
+        );
+      }
+
       // Save improved content with version bump
       const previousVersion = spec.version || 1;
       await specRepo.update(specId, {
@@ -479,7 +492,7 @@ router.post(
         webResultsCount: webResults.length,
       });
 
-      res.json(updated);
+      res.json({ spec: updated });
     } catch (error) {
       logger.error("Error improving spec", { error });
       res.status(500).json({ error: "Failed to improve spec" });

@@ -1031,7 +1031,10 @@ export class SettingsPanel {
         config.apiKey,
       );
       if (status >= 200 && status < 300 && (data as { success?: boolean }).success) {
-        this.postMessage({ type: "scm-test-success", provider, message: `Connected as ${(data as { user?: string }).user || "unknown"}` });
+        // GitHub returns user in workerToken.user, GitLab returns in user directly
+        const d = data as { workerToken?: { user?: string }; user?: string };
+        const user = (provider === "github" ? d.workerToken?.user : d.user) || "connected";
+        this.postMessage({ type: "scm-test-success", provider, message: `Connected as ${user}` });
       } else {
         this.postMessage({ type: "scm-test-error", provider, message: (data as { error?: string }).error || `HTTP ${status}` });
       }

@@ -6,7 +6,14 @@
  */
 
 import axios, { type AxiosInstance } from "axios";
-import { createLogsApi } from "../lib/api-client.js";
+
+function createLogsApi(config: { apiBaseUrl: string; orgApiKey: string }): AxiosInstance {
+  return axios.create({
+    baseURL: config.apiBaseUrl,
+    headers: { "Content-Type": "application/json", "x-api-key": config.orgApiKey },
+    timeout: 5000,
+  });
+}
 import { runAgent } from "./agent-sdk.js";
 import { createDecisionClient, type DecisionClient } from "../epic/dist/decision-client.js";
 import { getTicketLabel } from "../epic/dist/types.js";

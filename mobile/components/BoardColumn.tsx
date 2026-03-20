@@ -50,7 +50,7 @@ export function BoardColumn({
         {column.cards.length === 0 ? (
           <View className="py-8">
             <EmptyState
-              icon="folder-open"
+              icon="folder"
               message="No cards"
             />
           </View>

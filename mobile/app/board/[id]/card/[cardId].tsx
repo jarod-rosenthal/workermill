@@ -20,7 +20,6 @@ import { Card, ChecklistItem, CardActivity } from '@/types/boards';
 import { Spinner } from '@/components/ui/Spinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/StatusBadge';
 
 interface EditableFieldProps {
@@ -137,13 +136,14 @@ interface PrioritySelectorProps {
   onSelect: (priority: 'urgent' | 'high' | 'medium' | 'low') => void;
 }
 
+const priorityOptions = [
+  { key: 'urgent', label: 'Urgent', color: '#ef4444' },
+  { key: 'high', label: 'High', color: '#f97316' },
+  { key: 'medium', label: 'Medium', color: '#eab308' },
+  { key: 'low', label: 'Low', color: '#22c55e' },
+] as const;
+
 function PrioritySelector({ value, onSelect }: PrioritySelectorProps) {
-  const priorityOptions = [
-    { key: 'urgent', label: 'Urgent', color: '#ef4444' },
-    { key: 'high', label: 'High', color: '#f97316' },
-    { key: 'medium', label: 'Medium', color: '#eab308' },
-    { key: 'low', label: 'Low', color: '#22c55e' },
-  ] as const;
 
   const currentPriority = priorityOptions.find(p => p.key === value)!;
 
@@ -253,7 +253,7 @@ function ChecklistSection({ items, onToggleItem, onAddItem, onDeleteItem }: Chec
 
       {items.length === 0 && !isAddingItem ? (
         <EmptyState
-          icon="check-box-outline-blank"
+          icon="list"
           message="No checklist items."
         />
       ) : (
@@ -434,7 +434,7 @@ function ActivitySection({ activities, isLoading, onRefresh }: ActivitySectionPr
 
       {activities.length === 0 ? (
         <EmptyState
-          icon="access-time"
+          icon="timer"
           message="No activity yet."
         />
       ) : (
@@ -512,13 +512,6 @@ export default function CardDetailScreen() {
     }, [boardId, loadBoard])
   );
 
-  // Load activity data when card is available
-  useEffect(() => {
-    if (boardId && cardId && card) {
-      loadActivity();
-    }
-  }, [boardId, cardId, card]);
-
   const loadActivity = useCallback(async () => {
     if (!boardId || !cardId) return;
 
@@ -532,6 +525,13 @@ export default function CardDetailScreen() {
       setIsLoadingActivity(false);
     }
   }, [boardId, cardId, getCardActivity]);
+
+  // Load activity data when card is available
+  useEffect(() => {
+    if (boardId && cardId && card) {
+      loadActivity();
+    }
+  }, [boardId, cardId, card, loadActivity]);
 
   const handleRefresh = useCallback(async () => {
     if (!boardId) return;
@@ -724,7 +724,7 @@ export default function CardDetailScreen() {
       <View className="flex-1 justify-center items-center bg-white dark:bg-slate-950 px-4">
         <ErrorState
           message="Could not load card"
-          onRetry={() => window.location.reload()}
+          onRetry={() => router.back()}
         />
       </View>
     );
@@ -735,7 +735,7 @@ export default function CardDetailScreen() {
       <View className="flex-1 justify-center items-center bg-white dark:bg-slate-950 px-4">
         <ErrorState
           message="Card not found"
-          onRetry={() => window.location.reload()}
+          onRetry={() => router.back()}
         />
       </View>
     );

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,6 @@ import {
   Alert,
   RefreshControl,
   Modal,
-  Keyboard,
 } from 'react-native';
 import { useFocusEffect, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -271,7 +270,6 @@ export default function BoardsScreen() {
     loadBoards,
     createBoard,
     toggleBoardStar,
-    getStarredBoards,
   } = useBoardsStore();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -371,7 +369,7 @@ export default function BoardsScreen() {
     return (
       <View className="flex-1 justify-center items-center px-4">
         <EmptyState
-          icon="grid-view"
+          icon="apps"
           message="No boards yet. Create your first board."
         />
         <Button

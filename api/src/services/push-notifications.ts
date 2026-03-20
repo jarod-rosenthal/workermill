@@ -117,8 +117,8 @@ export async function sendPushNotification(
       return;
     }
 
-    const result = await response.json();
-    const receipts = result.data as ExpoReceipt[];
+    const result = await response.json() as { data: ExpoReceipt[] };
+    const receipts = result.data;
 
     if (!Array.isArray(receipts)) {
       logger.error("Unexpected Expo Push API response format", {

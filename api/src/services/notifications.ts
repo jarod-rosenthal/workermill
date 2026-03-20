@@ -18,6 +18,29 @@ import {
   sendPrCreatedEmail,
 } from "./email/index.js";
 import { skillExtractor } from "./skill-extractor.js";
+import { sendPushNotification } from "./push-notifications.js";
+
+/**
+ * Get the first active user in an organization for push notifications.
+ * Since tasks don't have a specific owner, we send notifications to any active user in the org.
+ */
+async function getOrgNotificationUser(orgId: string): Promise<string | null> {
+  try {
+    const userRepo = AppDataSource.getRepository(User);
+    const user = await userRepo.findOne({
+      where: { orgId },
+      select: ["id"],
+      order: { createdAt: "ASC" }, // Get the first user (typically the admin/owner)
+    });
+    return user?.id || null;
+  } catch (error) {
+    logger.warn("Failed to find notification user for org", {
+      orgId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
 
 interface SlackMessage {
   text: string;
@@ -127,6 +150,27 @@ export async function notifyTaskCompleted(task: WorkerTask): Promise<void> {
 
   logger.info("Sent task completed notification", { taskId: task.id, orgId: org.id });
 
+  // Send push notification for task completion (fire-and-forget)
+  getOrgNotificationUser(task.orgId).then(userId => {
+    if (userId) {
+      sendPushNotification(userId, task.orgId, {
+        title: "Task completed",
+        body: `Task completed — ${task.summary || task.jiraIssueKey || 'Unknown task'}`,
+        data: {
+          taskId: task.id,
+          issueKey: task.jiraIssueKey || '',
+          type: 'task_completed'
+        },
+        category: "completions"
+      });
+    }
+  }).catch(error => {
+    logger.warn("Failed to send push notification for task completion", {
+      taskId: task.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+
   // Auto-extract skills and create episodic memory if enabled
   // Include all success terminal states, not just "completed"
   const successStatuses = ["completed", "deployed", "pr_approved", "review_requested"];
@@ -218,6 +262,27 @@ export async function notifyTaskFailed(task: WorkerTask): Promise<void> {
   }
 
   logger.info("Sent task failed notification", { taskId: task.id, orgId: org.id });
+
+  // Send push notification for task failure (fire-and-forget)
+  getOrgNotificationUser(task.orgId).then(userId => {
+    if (userId) {
+      sendPushNotification(userId, task.orgId, {
+        title: "Task failed",
+        body: `Task failed — ${task.errorMessage || task.summary || task.jiraIssueKey || 'Unknown reason'}`,
+        data: {
+          taskId: task.id,
+          issueKey: task.jiraIssueKey || '',
+          type: 'task_failed'
+        },
+        category: "failures"
+      });
+    }
+  }).catch(error => {
+    logger.warn("Failed to send push notification for task failure", {
+      taskId: task.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
 
   // Create episodic memory for failed task (learning from failures)
   if (org.autoSkillExtraction) {

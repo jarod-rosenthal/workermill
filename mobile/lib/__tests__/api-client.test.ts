@@ -35,7 +35,8 @@ jest.mock('axios', () => {
   };
 });
 
-const mockedAxios = axios as jest.Mocked<typeof axios>;
+// mockedAxios is intentionally unused as we use mockAxiosInstance directly
+// const mockedAxios = axios as jest.Mocked<typeof axios>;
 const mockedSecureStore = SecureStore as jest.Mocked<typeof SecureStore>;
 
 // Mock fetch globally
@@ -96,10 +97,11 @@ describe('ApiClient', () => {
   });
 
   describe('Response Interceptor - 401 Handling', () => {
-    let mockAxiosCall: jest.Mock;
+    // mockAxiosCall is intentionally unused - keeping for future test expansion
+    // let mockAxiosCall: jest.Mock;
 
     beforeEach(() => {
-      mockAxiosCall = jest.fn();
+      // mockAxiosCall = jest.fn();
     });
 
     it('should trigger Cognito refresh on 401 with correct request shape', async () => {

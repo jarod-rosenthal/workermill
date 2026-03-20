@@ -9,6 +9,25 @@ jest.mock('@/lib/api-client');
 const mockedSecureStore = SecureStore as jest.Mocked<typeof SecureStore>;
 const mockedApiClient = apiClient as jest.Mocked<typeof apiClient>;
 
+// Setup default mock implementations
+beforeAll(() => {
+  // Mock SecureStore methods to return promises
+  mockedSecureStore.setItemAsync.mockImplementation(() => Promise.resolve());
+  mockedSecureStore.deleteItemAsync.mockImplementation(() => Promise.resolve());
+  mockedSecureStore.getItemAsync.mockImplementation(() => Promise.resolve(null));
+
+  // Mock API client methods to return promises
+  mockedApiClient.storeTokens.mockImplementation(() => Promise.resolve());
+  mockedApiClient.signOut.mockImplementation(() => Promise.resolve());
+  mockedApiClient.get.mockImplementation(() => Promise.resolve({}));
+  mockedApiClient.post.mockImplementation(() => Promise.resolve({}));
+  mockedApiClient.getStoredTokens.mockImplementation(() => Promise.resolve({
+    accessToken: null,
+    refreshToken: null,
+    idToken: null,
+  }));
+});
+
 const mockUser = {
   id: 'user-1',
   email: 'test@example.com',

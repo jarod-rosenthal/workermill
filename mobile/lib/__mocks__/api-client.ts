@@ -1,14 +1,18 @@
 export const apiClient = {
-  get: jest.fn(),
-  post: jest.fn(),
-  put: jest.fn(),
-  delete: jest.fn(),
-  storeTokens: jest.fn(),
-  clearTokens: jest.fn(),
-  signOut: jest.fn(),
-  refreshToken: jest.fn(),
-  getStoredTokens: jest.fn(),
-  clearStoredTokens: jest.fn(),
+  get: jest.fn(() => Promise.resolve({})),
+  post: jest.fn(() => Promise.resolve({})),
+  put: jest.fn(() => Promise.resolve({})),
+  delete: jest.fn(() => Promise.resolve({})),
+  storeTokens: jest.fn(() => Promise.resolve()),
+  clearTokens: jest.fn(() => Promise.resolve()),
+  signOut: jest.fn(() => Promise.resolve()),
+  refreshToken: jest.fn(() => Promise.resolve('')),
+  getStoredTokens: jest.fn(() => Promise.resolve({
+    accessToken: null,
+    refreshToken: null,
+    idToken: null,
+  })),
+  clearStoredTokens: jest.fn(() => Promise.resolve()),
 };
 
 export default apiClient;

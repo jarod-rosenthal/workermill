@@ -7,7 +7,7 @@ export const SSE_BASE_URL = "https://workermill.com/api";
 // COGNITO_CLIENT_ID: AWS Console → Cognito → User Pools → App clients → App client ID.
 // Replace the placeholder below with the real value before committing.
 export const COGNITO_REGION = "us-east-1";
-export const COGNITO_CLIENT_ID = "<REPLACE_WITH_CLIENT_ID>"; // ← MUST be replaced before Story 2
+export const COGNITO_CLIENT_ID = process.env.EXPO_PUBLIC_COGNITO_CLIENT_ID || 'LOCAL_DEV_PLACEHOLDER';
 
 // AsyncStorage keys for Zustand persist middleware
 // IMPORTANT: versioned — increment suffix when store shape changes

@@ -25,6 +25,7 @@ import { AppDataSource } from "../db/connection.js";
 import { WorkerTask } from "../models/WorkerTask.js";
 import { WorkerTaskLog } from "../models/WorkerTaskLog.js";
 import { RemoteAgent } from "../models/RemoteAgent.js";
+import { User } from "../models/User.js";
 import { In, Not } from "typeorm";
 import { KbCard } from "../models/KbCard.js";
 import { logger } from "../utils/logger.js";
@@ -41,6 +42,7 @@ import type { WorkerPersona } from "../models/WorkerTask.js";
 import type { ExecutionPlanV2 } from "../services/pipeline-v2-types.js";
 import { planningProgressEmitter } from "../services/planning-progress-events.js";
 import { getOrgCredentials } from "../services/org-credentials.js";
+import { sendPushNotification } from "../services/push-notifications.js";
 import { CRITIC_FEEDBACK_TEMPLATE, REFINEMENT_FEEDBACK_TEMPLATE } from "../services/prompt-templates.js";
 
 const router = Router();
@@ -697,6 +699,32 @@ router.post(
         taskId,
         orgId: org.id,
         storyCount: rawPlan.stories.length,
+      });
+
+      // Send push notifications to all org members about the ready plan
+      const userRepo = AppDataSource.getRepository(User);
+      userRepo.find({ where: { orgId: org.id } }).then((orgMembers) => {
+        for (const member of orgMembers) {
+          // Fire-and-forget push notification
+          sendPushNotification(member.id, org.id, {
+            title: "Plan ready",
+            body: `Plan ready for ${task.jiraIssueKey || task.summary || "task"} - review and approve`,
+            category: "plan_approvals",
+            data: {
+              taskId: task.id,
+              type: "plan_ready",
+              issueKey: task.jiraIssueKey || "",
+              storyCount: String(rawPlan.stories.length),
+            },
+          }).catch((error) => {
+            // Already logged in sendPushNotification, no need to log again
+          });
+        }
+      }).catch((error) => {
+        logger.error("Failed to fetch org members for push notification", {
+          taskId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       });
 
       res.json({

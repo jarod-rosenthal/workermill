@@ -30,7 +30,7 @@ import {
   releaseResource,
 } from "../services/coordination.js";
 import { AppDataSource } from "../db/connection.js";
-import { WorkerContext, WorkerCommand, WorkerTask, type ContextMessageType } from "../models/index.js";
+import { WorkerContext, WorkerCommand, WorkerTask, User, type ContextMessageType } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import {
   BadRequestError,
@@ -38,6 +38,7 @@ import {
   ConflictError,
 } from "../utils/errors.js";
 import { notifyBlockerDetected, type BlockerDetails } from "../services/notifications.js";
+import { sendPushNotification } from "../services/push-notifications.js";
 import { redis } from "../services/redis-client.js";
 
 const router = Router();
@@ -965,6 +966,33 @@ router.post(
         // Send notifications asynchronously (don't block response)
         notifyBlockerDetected(parentTask, blockerDetails).catch((error) => {
           logger.error("Failed to send blocker notification", {
+            parentTaskId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+        // Send push notifications to all org members
+        const userRepo = AppDataSource.getRepository(User);
+        userRepo.find({ where: { orgId: parentTask.orgId } }).then((orgMembers) => {
+          for (const member of orgMembers) {
+            // Fire-and-forget push notification
+            sendPushNotification(member.id, parentTask.orgId, {
+              title: "Blocker detected",
+              body: `Blocker on ${parentTask.jiraIssueKey || parentTask.summary || "task"} - ${blockerDetails.storyTitle}`,
+              category: "blockers",
+              data: {
+                taskId: parentTask.id,
+                type: "blocker_detected",
+                issueKey: parentTask.jiraIssueKey || "",
+                storyIndex: String(blockerDetails.storyIndex),
+                errorCategory: blockerDetails.errorCategory,
+              },
+            }).catch((error) => {
+              // Already logged in sendPushNotification, no need to log again
+            });
+          }
+        }).catch((error) => {
+          logger.error("Failed to fetch org members for push notification", {
             parentTaskId,
             error: error instanceof Error ? error.message : String(error),
           });

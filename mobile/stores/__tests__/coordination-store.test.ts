@@ -460,8 +460,8 @@ describe('CoordinationStore', () => {
       const store = useCoordinationStore.getState();
 
       // Add some messages first
-      store.addMessage(createMockMessage({ id: 'msg-1' }));
-      store.addMessage(createMockMessage({ id: 'msg-2' }));
+      store.addMessage(createMockMessage({ id: 'msg-1', content: 'First message' }));
+      store.addMessage(createMockMessage({ id: 'msg-2', content: 'Second message' }));
       expect(useCoordinationStore.getState().messages).toHaveLength(2);
 
       // Clear messages

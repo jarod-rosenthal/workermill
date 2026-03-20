@@ -111,7 +111,15 @@ describe('TasksStore', () => {
 
       const store = useTasksStore.getState();
 
-      await expect(store.loadTasks()).rejects.toThrow();
+      let threwError = false;
+      try {
+        await store.loadTasks();
+      } catch (error) {
+        threwError = true;
+        expect(error).toEqual(errorResponse);
+      }
+
+      expect(threwError).toBe(true);
       expect(useTasksStore.getState().error).toBe('API error');
       expect(useTasksStore.getState().isLoading).toBe(false);
     });
@@ -304,14 +312,14 @@ describe('TasksStore', () => {
   describe('task categorization', () => {
     beforeEach(() => {
       const now = new Date();
-      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const halfDayAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000); // 12 hours ago instead of 24
       const twoDaysAgo = new Date(now.getTime() - 48 * 60 * 60 * 1000);
 
       useTasksStore.setState({
         tasks: [
           { ...mockTask, id: 'task-1', status: 'executing' },
           { ...mockTask, id: 'task-2', status: 'queued' },
-          { ...mockTask, id: 'task-3', status: 'completed', completed_at: oneDayAgo.toISOString() },
+          { ...mockTask, id: 'task-3', status: 'completed', completed_at: halfDayAgo.toISOString() },
           { ...mockTask, id: 'task-4', status: 'failed', failed_at: twoDaysAgo.toISOString() },
           { ...mockTask, id: 'task-5', status: 'planning' },
         ] as WorkerTask[]

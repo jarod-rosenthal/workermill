@@ -115,7 +115,15 @@ describe('BoardsStore', () => {
 
       const store = useBoardsStore.getState();
 
-      await expect(store.loadBoards()).rejects.toThrow();
+      let threwError = false;
+      try {
+        await store.loadBoards();
+      } catch (error) {
+        threwError = true;
+        expect(error).toEqual(errorResponse);
+      }
+
+      expect(threwError).toBe(true);
       expect(useBoardsStore.getState().error).toBe('API error');
       expect(useBoardsStore.getState().isLoading).toBe(false);
     });
@@ -169,7 +177,15 @@ describe('BoardsStore', () => {
 
       const store = useBoardsStore.getState();
 
-      await expect(store.loadBoard('non-existent')).rejects.toThrow();
+      let threwError = false;
+      try {
+        await store.loadBoard('non-existent');
+      } catch (error) {
+        threwError = true;
+        expect(error).toEqual(errorResponse);
+      }
+
+      expect(threwError).toBe(true);
       expect(useBoardsStore.getState().error).toBe('Board not found');
       expect(useBoardsStore.getState().isBoardLoading).toBe(false);
     });

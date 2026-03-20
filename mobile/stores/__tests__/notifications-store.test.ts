@@ -34,6 +34,12 @@ describe('NotificationsStore', () => {
       error: null,
     });
 
+    // Reset API client mocks explicitly
+    mockedApiClient.get.mockClear();
+    mockedApiClient.put.mockClear();
+    mockedApiClient.post.mockClear();
+    mockedApiClient.delete.mockClear();
+
     // Mock AsyncStorage
     mockedAsyncStorage.getItem.mockResolvedValue(null);
     mockedAsyncStorage.setItem.mockResolvedValue(undefined);
@@ -58,11 +64,20 @@ describe('NotificationsStore', () => {
       const errorResponse = {
         response: { data: { message: 'API error' } }
       };
+
       mockedApiClient.get.mockRejectedValue(errorResponse);
 
       const store = useNotificationsStore.getState();
 
-      await expect(store.loadPreferences()).rejects.toThrow();
+      let threwError = false;
+      try {
+        await store.loadPreferences();
+      } catch (error) {
+        threwError = true;
+        expect(error).toEqual(errorResponse);
+      }
+
+      expect(threwError).toBe(true);
       expect(useNotificationsStore.getState().error).toBe('API error');
       expect(useNotificationsStore.getState().isLoading).toBe(false);
     });
@@ -73,7 +88,15 @@ describe('NotificationsStore', () => {
 
       const store = useNotificationsStore.getState();
 
-      await expect(store.loadPreferences()).rejects.toThrow();
+      let threwError = false;
+      try {
+        await store.loadPreferences();
+      } catch (error) {
+        threwError = true;
+        expect(error).toEqual(networkError);
+      }
+
+      expect(threwError).toBe(true);
       expect(useNotificationsStore.getState().error).toBe('Failed to load notification preferences');
       expect(useNotificationsStore.getState().isLoading).toBe(false);
     });
@@ -121,7 +144,15 @@ describe('NotificationsStore', () => {
 
       const store = useNotificationsStore.getState();
 
-      await expect(store.updatePreferences(updates)).rejects.toThrow();
+      let threwError = false;
+      try {
+        await store.updatePreferences(updates);
+      } catch (error) {
+        threwError = true;
+        expect(error).toEqual(errorResponse);
+      }
+
+      expect(threwError).toBe(true);
       expect(useNotificationsStore.getState().error).toBe('Update failed');
       expect(useNotificationsStore.getState().preferences).toEqual(currentPrefs); // Reverted
       expect(useNotificationsStore.getState().isLoading).toBe(false);

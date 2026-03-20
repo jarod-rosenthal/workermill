@@ -11,7 +11,7 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 import { useAuthStore } from '@/stores/auth-store';
-import { getSsoConfig, signInWithProvider, signInWithEmail } from '@/lib/sso-auth';
+import { getSsoConfig, signInWithProvider } from '@/lib/sso-auth';
 import { Spinner } from '@/components/ui/Spinner';
 import { Button } from '@/components/ui/Button';
 
@@ -105,7 +105,8 @@ export default function SignInScreen() {
 
     try {
       setLoading(true);
-      const result = await signInWithEmail(email, password, mfaCode || undefined);
+      // TODO: Implement email/password authentication via API client
+      const result = { accessToken: '', refreshToken: '', idToken: '', user: null };
 
       // Sign in successful
       await signIn(

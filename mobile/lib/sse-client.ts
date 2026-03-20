@@ -1,4 +1,4 @@
-import { EventSource } from 'react-native-sse';
+import EventSource from 'react-native-sse';
 import { AppState, AppStateStatus } from 'react-native';
 import { tokenManager } from './api-client';
 import { SSE_BASE_URL } from '@/constants/config';

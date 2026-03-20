@@ -56,7 +56,7 @@ export function CoordinationFeed({
     return (
       <View className={`flex-1 ${className || ''}`}>
         <EmptyState
-          icon="forum"
+          icon="chat"
           message="No coordination messages yet."
         />
       </View>

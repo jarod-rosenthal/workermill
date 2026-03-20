@@ -238,6 +238,7 @@ class ClaudeCliBackend implements LLMBackend {
         "--output-format", "stream-json",
         "--model", options.model,
         "--permission-mode", "bypassPermissions",
+        "--strict-mcp-config",
       ];
       if (options.maxOutputTokens) {
         args.push("--max-output-tokens", String(options.maxOutputTokens));

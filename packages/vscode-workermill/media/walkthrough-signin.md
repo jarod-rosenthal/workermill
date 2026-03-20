@@ -1,9 +1,19 @@
-# Sign in to WorkerMill
+# Sign In
 
-Connect your GitHub or Google account to get started. WorkerMill uses your account to:
+Connect your account to start using WorkerMill. Choose one:
 
-- **Manage your AI workers** — assign tasks, monitor progress, review results
-- **Install the agent** — a lightweight binary that runs on your machine and spawns workers
-- **Sync settings** — team configuration, issue tracker, and SCM integrations
+### GitHub (recommended)
+One click — uses your existing GitHub identity. WorkerMill will:
+- Create your workspace and install the agent binary
+- Link your GitHub repos for pull request delivery
+- Sync your team settings across devices
 
-After signing in, the WorkerMill agent will be automatically installed and started.
+### Google
+Sign in with your Google account. You'll configure repository access separately in the next step.
+
+### Self-hosted / Local Development
+Running your own instance? Click **Connect to Local Instance** to point the extension at your local API (default: `localhost:3001`). No cloud account needed.
+
+---
+
+After signing in, the agent binary is automatically downloaded and started. You'll see a green indicator in the sidebar when it's connected.

@@ -254,6 +254,7 @@ export async function runAgent(
     "--output-format", "stream-json", // Streaming JSON output
     "--model", mapModel(model),
     "--permission-mode", "bypassPermissions", // Allow all tool execution
+    "--strict-mcp-config", // Prevent loading user's MCP/plugins (e.g. Playwright)
   ];
 
   // Set max turns if specified

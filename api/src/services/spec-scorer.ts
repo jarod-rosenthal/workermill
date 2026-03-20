@@ -146,6 +146,7 @@ async function callClaudeCli(
         "claude-sonnet-4-6",
         "--permission-mode",
         "bypassPermissions",
+        "--strict-mcp-config",
       ],
       { env: cleanEnv, stdio: ["pipe", "pipe", "pipe"] },
     );

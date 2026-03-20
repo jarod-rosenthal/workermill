@@ -508,6 +508,7 @@ async function runWithClaudeCli(
         "--output-format", "stream-json",
         "--model", model,
         "--permission-mode", "bypassPermissions",
+        "--strict-mcp-config",
       ],
       {
         env: cleanEnv,

@@ -194,6 +194,7 @@ async function runCriticWithClaudeCli(
         "--print",
         "--output-format", "text",
         "--model", model,
+        "--strict-mcp-config",
       ],
       {
         env: cleanEnv,

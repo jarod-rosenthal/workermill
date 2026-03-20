@@ -340,6 +340,7 @@ function runClaudeCli(
         "--output-format", "stream-json",
         "--model", model,
         "--permission-mode", "bypassPermissions",
+        "--strict-mcp-config",
         ...(extraArgs || []),
       ];
 

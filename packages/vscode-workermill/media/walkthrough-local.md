@@ -1,16 +1,41 @@
-# Connect to Local Development Instance
+# Local Development
 
-Run WorkerMill entirely on your machine for development and testing.
+Run the full WorkerMill platform on your own machine — no cloud account required.
 
-## What you get
+### What you get
 
-- Full WorkerMill stack: API, dashboard, PostgreSQL, Redis
+- Complete stack: API server, web dashboard, PostgreSQL, Redis
 - AI workers running as local Docker containers
-- Hot-reload on API and frontend code changes
-- No cloud account required
+- Hot-reload on code changes (Linux/macOS/WSL2)
+- Full control over AI provider keys and configuration
 
-## Setup
+### Quick start
 
-Follow the [Local Development Guide](https://github.com/jarod-rosenthal/workermill/blob/main/docs/local-development.md) to clone the repo, configure your environment, and start the stack.
+```
+git clone https://github.com/jarod-rosenthal/workermill.git
+cd workermill
+npm install && ./bin/local-workermill build-worker
+./bin/local-workermill start
+```
 
-Once the local stack is running, click **Connect to Local Instance** in the WorkerMill sidebar. The extension auto-discovers the local API.
+Your dashboard is at `http://localhost:5173`. The API runs on port `3001`.
+
+### Connect from VS Code
+
+Once the local stack is running:
+
+1. Click **Connect to Local Instance** below
+2. The extension discovers the local API automatically
+3. You're ready to create tasks from the sidebar
+
+### AI Provider Setup
+
+Set your Anthropic API key in `.env.local`:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Or, if you're already signed into Claude CLI, that authentication is used automatically.
+
+See the [setup guide](https://github.com/jarod-rosenthal/workermill#getting-started) for full details.

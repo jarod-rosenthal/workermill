@@ -2362,12 +2362,14 @@ The repository is cloned at: **${promptRepoPath}**
 
         // Chain async work properly to ensure resolve() is always called
         const postCompletionWork = success
-          ? this.coordination.postCompletion(
-              story.storyIndex,
-              story.title,
-              story.persona,
-              { filesModified: await this.getStoryFilesModified(story.storyIndex) }
-            ).then(() => this.jira.storyCompleted(story.storyIndex, story.title, story.persona))
+          ? this.getStoryFilesModified(story.storyIndex)
+              .then((filesModified) => this.coordination.postCompletion(
+                story.storyIndex,
+                story.title,
+                story.persona,
+                { filesModified }
+              ))
+              .then(() => this.jira.storyCompleted(story.storyIndex, story.title, story.persona))
           : this.coordination.postBlocker(
               `Story ${story.storyIndex} failed: ${error}`,
               story.persona,

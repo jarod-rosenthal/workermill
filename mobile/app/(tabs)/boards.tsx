@@ -371,7 +371,7 @@ export default function BoardsScreen() {
     return (
       <View className="flex-1 justify-center items-center px-4">
         <EmptyState
-          icon="grid-view"
+          icon="apps"
           message="No boards yet. Create your first board."
         />
         <Button

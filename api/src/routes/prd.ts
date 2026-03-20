@@ -691,8 +691,13 @@ router.post(
           }
 
           // First card (no deps) starts planning; others blocked until deps complete
-          const hasDependencies = card.dependencyIndices && card.dependencyIndices.length > 0;
+          // Card 0 is always Foundation with no dependencies; all others depend on it
+          const hasDependencies = i > 0 || (card.dependencyIndices && card.dependencyIndices.length > 0);
           const initialStatus = hasDependencies ? "blocked" : "planning";
+          logger.info("Creating GitHub Issues child task", {
+            index: i, issueKey: childIssueKey, initialStatus,
+            dependencyIndices: card.dependencyIndices,
+          });
 
           const childTask = taskRepo.create({
             orgId: org.id,

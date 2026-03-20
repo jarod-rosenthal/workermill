@@ -333,7 +333,7 @@ export default function TaskDetailScreen() {
           <View className="flex-1">
             {/* Offline indicator for logs SSE */}
             {!logSSEConnected && logSSEError && (
-              <OfflineBanner />
+              <OfflineBanner visible={true} />
             )}
 
             <TaskLogStream
@@ -348,7 +348,7 @@ export default function TaskDetailScreen() {
           <View className="flex-1">
             {/* Offline indicator for coordination SSE */}
             {!isConnected(taskId || '') && coordinationSSEError && (
-              <OfflineBanner />
+              <OfflineBanner visible={true} />
             )}
 
             {coordinationMessages.length === 0 ? (

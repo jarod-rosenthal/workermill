@@ -205,7 +205,7 @@ export default function DashboardScreen() {
     <SafeAreaView className="flex-1 bg-slate-50 dark:bg-slate-950">
       {/* Offline Banner */}
       {!isSSEConnected && sseError && (
-        <OfflineBanner />
+        <OfflineBanner visible={true} />
       )}
 
       {/* Stats Bar */}

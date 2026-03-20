@@ -398,7 +398,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     }
 
     if (maxParallelExperts !== undefined) {
-      let max = parseInt(maxParallelExperts, 10);
+      const max = parseInt(maxParallelExperts, 10);
       if (isNaN(max) || max < 1 || max > 14) {
         res.status(400).json({ error: "maxParallelExperts must be between 1 and 16" });
         return;

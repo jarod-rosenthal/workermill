@@ -29,26 +29,31 @@ describe('AuthCallback', () => {
 
   beforeEach(() => {
     // Mock window.location
-    delete (window as Window & typeof globalThis).location;
-    window.location = {
-      ...mockOriginalLocation,
-      href: '',
-      origin: 'https://workermill.com'
-    };
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: {
+        ...mockOriginalLocation,
+        href: '',
+        origin: 'https://workermill.com'
+      },
+    });
 
     // Mock sessionStorage
-    global.sessionStorage = {
-      getItem: vi.fn(),
-      setItem: vi.fn(),
-      removeItem: vi.fn(),
-      clear: vi.fn(),
-      key: vi.fn(),
-      length: 0
-    };
+    Object.defineProperty(globalThis, 'sessionStorage', {
+      writable: true,
+      value: {
+        getItem: vi.fn(),
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+        clear: vi.fn(),
+        key: vi.fn(),
+        length: 0
+      },
+    });
   });
 
   afterEach(() => {
-    window.location = mockOriginalLocation;
+    Object.defineProperty(window, 'location', { writable: true, value: mockOriginalLocation });
     vi.clearAllMocks();
   });
 

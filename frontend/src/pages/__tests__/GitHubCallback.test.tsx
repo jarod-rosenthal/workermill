@@ -29,16 +29,18 @@ describe('GitHubCallback', () => {
 
   beforeEach(() => {
     // Mock window.location
-    delete (window as Window & typeof globalThis).location;
-    window.location = {
-      ...mockOriginalLocation,
-      href: '',
-      origin: 'https://workermill.com'
-    };
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: {
+        ...mockOriginalLocation,
+        href: '',
+        origin: 'https://workermill.com'
+      },
+    });
   });
 
   afterEach(() => {
-    window.location = mockOriginalLocation;
+    Object.defineProperty(window, 'location', { writable: true, value: mockOriginalLocation });
     vi.clearAllMocks();
   });
 

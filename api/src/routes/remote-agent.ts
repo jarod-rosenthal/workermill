@@ -313,7 +313,7 @@ router.post(
 
     // Inject quality gate commands from board if task was created from a board card
     // The PRD decomposition flow stores gates on the board, not on the task's jiraFields
-    let boardQualityGates: Record<string, unknown> = {};
+    const boardQualityGates: Record<string, unknown> = {};
     if (task) {
       try {
         const card = await AppDataSource.getRepository(KbCard).findOne({

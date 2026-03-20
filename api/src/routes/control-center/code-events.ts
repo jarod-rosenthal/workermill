@@ -71,17 +71,19 @@ router.post(
     const logRepo = AppDataSource.getRepository(WorkerTaskLog);
     const action = toolName === "Write" ? "Wrote" : "Edited";
     // For Write events, persist `content` as `newStr` so the Live Diff viewer can show it
+    // Match the SSE transmission limit (100KB) so VS Code polling gets the same data as the dashboard SSE
+    const PERSIST_LIMIT = 100_000;
     const persistedNewStr = newStr
-      ? newStr.substring(0, 50_000)
+      ? newStr.substring(0, PERSIST_LIMIT)
       : content
-        ? content.substring(0, 50_000)
+        ? content.substring(0, PERSIST_LIMIT)
         : null;
     const logData = WorkerTaskLog.create(taskId, "code_event", `${action} ${filePath}`, {
       filePath,
       metadata: {
         toolName,
         expert: expert || null,
-        oldStr: oldStr ? oldStr.substring(0, 50_000) : null,
+        oldStr: oldStr ? oldStr.substring(0, PERSIST_LIMIT) : null,
         newStr: persistedNewStr,
         isWrite: toolName === "Write",
       },

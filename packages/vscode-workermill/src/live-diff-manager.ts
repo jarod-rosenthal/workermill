@@ -21,6 +21,7 @@ interface FileState {
   before: string;
   after: string;
   expert: string | null;
+  toolName: "Write" | "Edit" | null;
   lastUpdated: number;
 }
 
@@ -299,9 +300,11 @@ export class LiveDiffManager {
 
       if (isEdit) {
         if (existing) {
-          // Cumulative edit: freeze before on first edit, update after on subsequent
+          // Cumulative edit: freeze before on first event, update after on subsequent
+          // Matches dashboard behavior (useTaskStreaming.ts)
           existing.after = meta.newStr ?? "";
           existing.expert = meta.expert ?? existing.expert;
+          existing.toolName = "Edit";
           existing.lastUpdated = Date.now();
           fileStates.set(key, existing);
         } else {
@@ -309,6 +312,7 @@ export class LiveDiffManager {
             before: meta.oldStr ?? "",
             after: meta.newStr ?? "",
             expert: meta.expert ?? null,
+            toolName: "Edit",
             lastUpdated: Date.now(),
           };
           this.files.set(fp, state);
@@ -321,6 +325,7 @@ export class LiveDiffManager {
           before: "",
           after: meta.newStr ?? ev.message,
           expert: meta.expert ?? null,
+          toolName: "Write",
           lastUpdated: Date.now(),
         };
         this.files.set(fp, state);
@@ -384,10 +389,15 @@ export class LiveDiffManager {
 
     const state = this.files.get(fp);
     const expert = state?.expert;
+    const tool = state?.toolName;
     const fileName = fp.split("/").pop() || fp;
-    const title = expert
-      ? `${fileName} (${expert}) \u2014 Live Diff`
-      : `${fileName} \u2014 Live Diff`;
+    const parts = [fileName];
+    if (expert || tool) {
+      const meta = [tool, expert].filter(Boolean).join(" \u2014 ");
+      parts.push(`(${meta})`);
+    }
+    parts.push("\u2014 Live Diff");
+    const title = parts.join(" ");
 
     vscode.commands.executeCommand(
       "vscode.diff",
@@ -416,10 +426,12 @@ export class LiveDiffManager {
         ? fp.substring(0, fp.lastIndexOf("/"))
         : "";
       const expert = state?.expert ?? "";
+      const tool = state?.toolName ?? "";
+      const toolIcon = tool === "Write" ? "$(new-file)" : tool === "Edit" ? "$(edit)" : "";
       const ago = state ? relativeTime(now - state.lastUpdated) : "";
 
       return {
-        label: fileName,
+        label: `${toolIcon} ${fileName}`.trim(),
         description: [dir, expert].filter(Boolean).join(" \u2014 "),
         detail: ago,
         filePath: fp,

@@ -5,30 +5,55 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
+    "scheme": "workermill",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0f172a"
     },
+    "assetBundlePatterns": ["**/*"],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.workermill.mobile",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Use Face ID to unlock WorkerMill",
+        "NSCameraUsageDescription": "Not used"
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f172a"
       },
-      "predictiveBackGestureEnabled": false
+      "package": "com.workermill.mobile",
+      "permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT"]
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
+    "notification": {
+      "icon": "./assets/notification-icon.png",
+      "color": "#6366f1",
+      "androidMode": "default"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-notifications",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Use Face ID to unlock WorkerMill"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
     },
     "extra": {
       "eas": {
         "projectId": "98e60e26-13c4-421e-b114-96a7b2523f35"
+      },
+      "router": {
+        "origin": "https://workermill.com"
       }
     }
   }

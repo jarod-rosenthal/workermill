@@ -18,6 +18,7 @@ import {
   sendPrCreatedEmail,
 } from "./email/index.js";
 import { skillExtractor } from "./skill-extractor.js";
+import { sendPushNotification } from "./push-notifications.js";
 
 interface SlackMessage {
   text: string;
@@ -125,6 +126,28 @@ export async function notifyTaskCompleted(task: WorkerTask): Promise<void> {
     }
   }
 
+  // Send push notifications to all org members
+  const userRepo = AppDataSource.getRepository(User);
+  const orgMembers = await userRepo.find({
+    where: { orgId: org.id },
+  });
+
+  for (const member of orgMembers) {
+    // Fire-and-forget push notification
+    sendPushNotification(member.id, org.id, {
+      title: "Task completed",
+      body: `${task.jiraIssueKey || task.summary || "Task"} has been completed`,
+      category: "completions",
+      data: {
+        taskId: task.id,
+        type: "task_completed",
+        issueKey: task.jiraIssueKey || "",
+      },
+    }).catch((error) => {
+      // Already logged in sendPushNotification, no need to log again
+    });
+  }
+
   logger.info("Sent task completed notification", { taskId: task.id, orgId: org.id });
 
   // Auto-extract skills and create episodic memory if enabled
@@ -215,6 +238,29 @@ export async function notifyTaskFailed(task: WorkerTask): Promise<void> {
         });
       }
     }
+  }
+
+  // Send push notifications to all org members
+  const userRepo = AppDataSource.getRepository(User);
+  const orgMembers = await userRepo.find({
+    where: { orgId: org.id },
+  });
+
+  for (const member of orgMembers) {
+    // Fire-and-forget push notification
+    sendPushNotification(member.id, org.id, {
+      title: "Task failed",
+      body: `${task.jiraIssueKey || task.summary || "Task"} has failed`,
+      category: "failures",
+      data: {
+        taskId: task.id,
+        type: "task_failed",
+        issueKey: task.jiraIssueKey || "",
+        error: task.errorMessage || "",
+      },
+    }).catch((error) => {
+      // Already logged in sendPushNotification, no need to log again
+    });
   }
 
   logger.info("Sent task failed notification", { taskId: task.id, orgId: org.id });

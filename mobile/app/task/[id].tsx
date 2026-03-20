@@ -16,7 +16,6 @@ import { TaskLogStream } from '@/components/TaskLogStream';
 import { CoordinationFeed } from '@/components/CoordinationFeed';
 import { DiffView } from '@/components/DiffView';
 import { OfflineBanner } from '@/components/OfflineBanner';
-import { Spinner } from '@/components/ui/Spinner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Button } from '@/components/ui/Button';

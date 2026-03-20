@@ -1,64 +1,13 @@
 import { useRef, useEffect, useState } from "react";
-import { Lock, Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock, Github, Star, ExternalLink, Play } from "lucide-react";
+import { Lock, Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock, Github, Star, ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
 import ShowcaseGallery from "../components/ShowcaseGallery";
+import ExecutionShowcase from "../components/ExecutionShowcase";
 import TrustCallout from "../components/TrustCallout";
 
 import { getFeaturedPost } from "../content/blog/posts";
-
-// ─── Demo Video ─────────────────────────────────────────────────────────────
-
-const YOUTUBE_VIDEO_ID = "sa0lug-G-cg";
-
-function DemoVideo() {
-  const [playing, setPlaying] = useState(false);
-
-  return (
-    <section className="pb-20">
-      <div className="container mx-auto px-6 lg:px-8">
-        <div className="max-w-6xl mx-auto">
-          <div
-            className="relative w-full rounded-2xl overflow-hidden border border-white/10 shadow-2xl shadow-black/50 bg-black"
-            style={{ aspectRatio: "16 / 9" }}
-          >
-            {playing ? (
-              <iframe
-                src={`https://www.youtube.com/embed/${YOUTUBE_VIDEO_ID}?autoplay=1&rel=0&modestbranding=1`}
-                title="WorkerMill Demo"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                className="absolute inset-0 w-full h-full"
-              />
-            ) : (
-              <button
-                onClick={() => setPlaying(true)}
-                className="absolute inset-0 w-full h-full group cursor-pointer"
-                aria-label="Play demo video"
-              >
-                {/* YouTube max-res thumbnail */}
-                <img
-                  src={`https://img.youtube.com/vi/${YOUTUBE_VIDEO_ID}/maxresdefault.jpg`}
-                  alt="WorkerMill Demo"
-                  className="w-full h-full object-cover"
-                />
-                {/* Dark overlay that lightens on hover */}
-                <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-all duration-300" />
-                {/* Play button */}
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-20 h-20 rounded-full bg-white/90 group-hover:bg-white group-hover:scale-110 transition-all duration-300 flex items-center justify-center shadow-2xl shadow-black/50">
-                    <Play className="w-8 h-8 text-slate-900 ml-1" fill="currentColor" />
-                  </div>
-                </div>
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
 
 // ─── Featured Article ────────────────────────────────────────────────────────
 
@@ -430,8 +379,8 @@ export default function LandingV0() {
             </div>
           </section>
 
-          {/* Product demo video */}
-          <DemoVideo />
+          {/* Interactive execution showcase */}
+          <ExecutionShowcase />
 
           {/* Proof — live projects with real metrics */}
           <div id="showcase" ref={showcaseRef}>

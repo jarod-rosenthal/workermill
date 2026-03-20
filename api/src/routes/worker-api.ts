@@ -153,31 +153,30 @@ router.get(
       return;
     }
 
-    // Atomically claim the next queued story (prevents two workers claiming the same one)
-    // Subquery finds the oldest queued story; UPDATE...WHERE ensures only one worker wins.
-    const claimResult = await contextRepo
-      .createQueryBuilder()
-      .update(WorkerContext)
-      .set({ messageType: "story_claimed" as WorkerContext["messageType"] })
-      .where(
-        "id = (SELECT id FROM worker_context WHERE parent_task_id = :taskId AND message_type = :queued ORDER BY created_at ASC LIMIT 1)",
-        { taskId, queued: "story_queued" },
-      )
-      .returning("*")
-      .execute();
+    // Look for next unclaimed story in coordination context
+    const nextStory = await contextRepo.findOne({
+      where: {
+        parentTaskId: taskId,
+        messageType: "story_queued" as WorkerContext["messageType"],
+      },
+      order: { createdAt: "ASC" },
+    });
 
-    const claimed = claimResult.raw[0];
-    if (!claimed) {
+    if (!nextStory) {
       res.json(null); // No stories available
       return;
     }
 
-    const metadata = (claimed.metadata ?? {}) as Record<string, unknown>;
+    // Mark as claimed
+    nextStory.messageType = "story_claimed" as WorkerContext["messageType"];
+    await contextRepo.save(nextStory);
+
+    const metadata = (nextStory.metadata ?? {}) as Record<string, unknown>;
     res.json({
-      storyId: claimed.id,
+      storyId: nextStory.id,
       storyIndex: metadata.storyIndex ?? 0,
-      persona: claimed.persona ?? "backend_developer",
-      prompt: metadata.prompt ?? claimed.content,
+      persona: nextStory.persona ?? "backend_developer",
+      prompt: metadata.prompt ?? nextStory.content,
       branch: (metadata.branch as string) ?? "main",
       taskId,
       repoUrl: task.githubRepo,

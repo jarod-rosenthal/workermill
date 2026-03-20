@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,17 +10,15 @@ import {
   TextInput,
   ActionSheetIOS,
   Platform,
-  Share,
 } from 'react-native';
 import { Stack, useLocalSearchParams, router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useBoardsStore } from '@/stores/boards-store';
-import { Card, Column } from '@/types/boards';
+import { Card } from '@/types/boards';
 import { Spinner } from '@/components/ui/Spinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { BoardColumn } from '@/components/BoardColumn';
-import { Button } from '@/components/ui/Button';
 
 interface NewCardModalProps {
   visible: boolean;
@@ -303,6 +301,7 @@ export default function BoardDetailScreen() {
         ]
       );
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleRunCardAsTask = useCallback(async (card: Card) => {

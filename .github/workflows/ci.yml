@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - 'api/src/routes/push.ts'
+      - 'api/src/routes/push.test.ts'
+      - 'api/src/services/push-notifications.ts'
+      - 'api/src/services/push-notifications.test.ts'
+      - 'api/src/models/PushSubscription.ts'
+      - 'api/src/db/migrations/*-AddPushSubscriptions.ts'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - 'api/src/routes/push.ts'
+      - 'api/src/routes/push.test.ts'
+      - 'api/src/services/push-notifications.ts'
+      - 'api/src/services/push-notifications.test.ts'
+      - 'api/src/models/PushSubscription.ts'
+      - 'api/src/db/migrations/*-AddPushSubscriptions.ts'
+
+jobs:
+  mobile-typecheck:
+    name: Mobile - Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Type Check
+        working-directory: mobile
+        run: npx tsc --noEmit
+
+  mobile-lint:
+    name: Mobile - Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Lint
+        working-directory: mobile
+        run: npx expo lint
+
+  mobile-test:
+    name: Mobile - Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Run Tests
+        working-directory: mobile
+        run: npx jest --passWithNoTests
+
+  mobile-placeholder-guard:
+    name: Mobile - Placeholder Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for COGNITO_CLIENT_ID placeholder
+        run: |
+          if grep -r "<REPLACE_WITH_CLIENT_ID>" mobile/; then
+            echo "ERROR: COGNITO_CLIENT_ID placeholder not replaced"
+            exit 1
+          fi
+
+  api-typecheck:
+    name: API - Type Check
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.changed_files, 'api/') || contains(github.event.commits[0].modified, 'api/') || github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Type Check
+        working-directory: api
+        run: npm run typecheck
+
+  api-push-routes-test:
+    name: API - Push Routes Tests
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.changed_files, 'api/src/routes/push.ts') || contains(github.event.commits[0].modified, 'api/src/routes/push.ts') || github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Run Push Routes Tests
+        working-directory: api
+        run: npx vitest run src/routes/push.test.ts
+
+  api-push-service-test:
+    name: API - Push Service Tests
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.changed_files, 'api/src/services/push-notifications.ts') || contains(github.event.commits[0].modified, 'api/src/services/push-notifications.ts') || github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Run Push Service Tests
+        working-directory: api
+        run: npx vitest run src/services/push-notifications.test.ts

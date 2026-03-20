@@ -89,3 +89,10 @@ scripts/diagnose-tenant.ts
 # Misc artifacts
 *.png
 swebench_predictions.jsonl
+
+.workermill-message.md
+.workermill-response.md
+.workermill-answer.md
+.nuxt
+.output
+.svelte-kit

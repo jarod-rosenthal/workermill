@@ -676,6 +676,8 @@ router.post(
         await taskRepo.save(parentTask);
 
         // Create child worker tasks — one per sub-issue
+        // Only the first card (no dependencies) starts in "planning".
+        // Cards with dependencies start "blocked" and cascade via task-dispatch.
         const childTaskIds: string[] = [];
         for (let i = 0; i < childIssues.length; i++) {
           const card = decomposed.cards[i];
@@ -687,6 +689,10 @@ router.post(
           if (card.stories && card.stories.length > 0) {
             childDescription += `\n\n<!-- PRECOMPUTED_STORIES_JSON\n${JSON.stringify(card.stories)}\nEND_PRECOMPUTED_STORIES -->`;
           }
+
+          // First card (no deps) starts planning; others blocked until deps complete
+          const hasDependencies = card.dependencyIndices && card.dependencyIndices.length > 0;
+          const initialStatus = hasDependencies ? "blocked" : "planning";
 
           const childTask = taskRepo.create({
             orgId: org.id,
@@ -700,7 +706,7 @@ router.post(
             ticketSystem: "github",
             scmProvider: org.scmProvider || "github",
             githubRepo: targetRepo,
-            status: "planning",
+            status: initialStatus,
             pipelineVersion: "v2",
             executionMode: "parallel",
             criticEnabled: false,
@@ -712,6 +718,7 @@ router.post(
             parentTaskId: parentTask.id,
             storyIndex: i,
             storyTitle: card.title,
+            storyDependencies: card.dependencyIndices || [],
             retryCount: 0,
             maxRetries: 3,
             jiraFields: {

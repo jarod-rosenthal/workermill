@@ -47,6 +47,7 @@
     "@testing-library/jest-native": "^5.4.0",
     "@testing-library/react-native": "^12.4.0",
     "@types/jest": "^29.5.0",
+    "@types/node": "^25.5.0",
     "@types/react": "~18.2.0",
     "@types/react-syntax-highlighter": "^15.5.0",
     "eslint": "^8.57.0",

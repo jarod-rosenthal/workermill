@@ -316,7 +316,7 @@ describe('SSEClient', () => {
 
       client.connect();
 
-      // Simulate failure
+      // Simulate failure while app is in background
       const errorHandler = mockEventSource.addEventListener.mock.calls.find(
         call => call[0] === 'error'
       )?.[1] as Function;
@@ -328,10 +328,14 @@ describe('SSEClient', () => {
       jest.advanceTimersByTime(1000);
       expect(MockedEventSource).not.toHaveBeenCalled();
 
-      // Set app to active and advance timer again
+      // Set app to active and trigger a new failure to start a new timer
       mockAppState.currentState = 'active';
-      jest.advanceTimersByTime(0); // Timer already fired, need new failure
 
+      // Clear the previous timer completely by advancing past it
+      jest.advanceTimersByTime(30000); // Advance past the max delay
+      MockedEventSource.mockClear();
+
+      // Now trigger a new failure when app is active
       errorHandler({ type: 'error' });
       MockedEventSource.mockClear();
 

@@ -2,7 +2,23 @@
 /* eslint-env jest */
 import '@testing-library/jest-native/extend-expect';
 
-// Expo modules will be mocked in individual test files as needed
+// Expo modules global mocks
+jest.mock('expo-notifications', () => ({
+  getPermissionsAsync: jest.fn(),
+  requestPermissionsAsync: jest.fn(),
+  getExpoPushTokenAsync: jest.fn(),
+  setNotificationHandler: jest.fn(),
+  addNotificationReceivedListener: jest.fn(),
+  addNotificationResponseReceivedListener: jest.fn(),
+  removeNotificationSubscription: jest.fn(),
+}));
+
+jest.mock('expo-device', () => ({
+  isDevice: true,
+  deviceName: 'Test Device',
+  brand: 'Test Brand',
+  modelName: 'Test Model',
+}));
 
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () => ({

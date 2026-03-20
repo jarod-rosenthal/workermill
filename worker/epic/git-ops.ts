@@ -2031,7 +2031,23 @@ git rm --cached --quiet .env 2>/dev/null || true
       `[GitOps] Deleting ${storyBranches.length} story branches: ${storyBranches.join(", ")}`,
     );
 
-    // Prune worktrees first (story branches may be checked out in worktrees)
+    // Force-remove worktrees that have story branches checked out.
+    // Without this, `git branch -D` fails silently because the branch
+    // is still "checked out" in the worktree from the previous execution.
+    for (const branch of storyBranches) {
+      const worktreePath = this.activeWorktrees.get(branch);
+      if (worktreePath) {
+        try {
+          await this.forceRemoveWorktree(worktreePath);
+          this.activeWorktrees.delete(branch);
+          console.log(`[GitOps] Removed worktree for branch ${branch}`);
+        } catch (e) {
+          console.warn(`[GitOps] Could not remove worktree for ${branch}: ${e}`);
+        }
+      }
+    }
+
+    // Prune any remaining stale worktree references
     try {
       execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe", timeout: 120_000 });
     } catch {}

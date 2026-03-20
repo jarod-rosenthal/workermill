@@ -27,6 +27,7 @@ import {
   decomposePrdStreaming,
   decomposePrdWithStories,
   decomposePrdWithStoriesStreaming,
+  condensePrd,
 } from "../services/prd-decomposer.js";
 import { decompositionEmitter } from "../services/decomposition-events.js";
 import { getOrgCredentials } from "../services/org-credentials.js";
@@ -649,6 +650,19 @@ router.post(
           prdSource: source || "text",
         });
         await boardRepo.save(board);
+
+        // Fire-and-forget: condense the PRD for worker prompts (reduces token usage)
+        const condenseKey = (await getOrgCredentials(org.id).catch(() => null))?.anthropicApiKey || undefined;
+        condensePrd(prdContent, condenseKey).then(async (condensed) => {
+          if (condensed !== prdContent) {
+            try {
+              await boardRepo.update({ id: board.id, orgId: org.id }, { prdContent: condensed });
+              logger.info(`[PRD] Board ${board.id} PRD condensed in background`);
+            } catch (err) {
+              logger.warn(`[PRD] Failed to save condensed PRD: ${err instanceof Error ? err.message : err}`);
+            }
+          }
+        }).catch(() => { /* non-fatal */ });
 
         // Create default columns
         const columns: KbColumn[] = [];

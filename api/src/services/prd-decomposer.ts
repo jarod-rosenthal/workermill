@@ -993,3 +993,78 @@ export function validateDecomposedPrd(data: unknown): DecomposedPrd {
     ciWorkflowPath,
   };
 }
+
+// ============================================================================
+// PRD CONDENSATION
+// ============================================================================
+
+const CONDENSE_SYSTEM_PROMPT = `You are a technical editor. Your job is to condense a Product Requirements Document (PRD) to be as short as possible WITHOUT losing any actionable specifications.
+
+Rules:
+- KEEP ALL: constraints, code examples, API signatures, database schemas, acceptance criteria, quality gates, test setup, config files, data tables, type definitions, exact commands, file paths, dependency graphs, security requirements
+- REMOVE: redundant explanations that repeat the same point, verbose prose that can be bullet points, "why" explanations that don't prevent mistakes, filler words, unnecessary transitions
+- COMPRESS: combine related paragraphs into concise bullets, collapse wordy descriptions into single sentences
+- DO NOT add any new content, commentary, or opinions
+- DO NOT change the meaning of any requirement
+- DO NOT remove code blocks, JSON examples, or technical specifications
+- Output the condensed PRD in markdown format, preserving all headings and structure
+
+Target: reduce length by 25-40% while preserving 100% of actionable content.`;
+
+/**
+ * Condense a PRD to reduce token usage when it's sent to workers.
+ * Uses a fast model (Haiku) to keep cost and latency low.
+ * Returns the condensed text, or the original if condensation fails.
+ */
+export async function condensePrd(
+  prdContent: string,
+  apiKey?: string,
+  oauthToken?: string,
+): Promise<string> {
+  // Only condense if the PRD is long enough to benefit
+  if (prdContent.length < 10_000) {
+    return prdContent;
+  }
+
+  const clientOptions: Record<string, unknown> = {};
+  if (oauthToken) {
+    clientOptions.authToken = oauthToken;
+  } else {
+    const key = apiKey || process.env.ANTHROPIC_API_KEY;
+    if (!key) return prdContent;
+    clientOptions.apiKey = key;
+  }
+
+  try {
+    const client = new Anthropic(clientOptions as ConstructorParameters<typeof Anthropic>[0]);
+    const response = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 16000,
+      system: CONDENSE_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: `Condense this PRD:\n\n${prdContent}`,
+        },
+      ],
+    });
+
+    const condensed = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+
+    if (!condensed || condensed.length < prdContent.length * 0.3) {
+      // Condensation removed too much — keep original
+      logger.warn("[PRD] Condensation removed >70% of content, keeping original");
+      return prdContent;
+    }
+
+    const reduction = Math.round((1 - condensed.length / prdContent.length) * 100);
+    logger.info(`[PRD] Condensed PRD: ${prdContent.length} -> ${condensed.length} chars (${reduction}% reduction)`);
+    return condensed;
+  } catch (err) {
+    logger.warn(`[PRD] Condensation failed, keeping original: ${err instanceof Error ? err.message : err}`);
+    return prdContent;
+  }
+}

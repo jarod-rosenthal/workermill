@@ -37,6 +37,13 @@ export interface UserPreferences {
   email?: EmailPreferences;
 }
 
+export interface NotificationPreferences {
+  push_completions: boolean;
+  push_failures: boolean;
+  push_blockers: boolean;
+  push_plan_approvals: boolean;
+}
+
 @Entity("users")
 export class User {
   @PrimaryGeneratedColumn("uuid")
@@ -85,6 +92,14 @@ export class User {
   // Support admin flag - grants access to support admin dashboard
   @Column({ name: "support_admin", type: "boolean", default: false })
   supportAdmin: boolean;
+
+  // Push notification preferences
+  @Column({
+    name: "notification_preferences",
+    type: "jsonb",
+    default: () => `'{"push_completions": true, "push_failures": true, "push_blockers": true, "push_plan_approvals": true}'`
+  })
+  notificationPreferences: NotificationPreferences;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;

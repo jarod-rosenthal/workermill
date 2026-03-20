@@ -1,5 +1,5 @@
 export { Organization, type OrganizationPlan, PLAN_USER_LIMITS, PLAN_PRICES, PLAN_MAX_WORKERS, PLAN_MAX_EXPERTS, PLAN_LOG_RETENTION, PLAN_FEATURES } from "./Organization.js";
-export { User, type UserRole, type UserPreferences, type EmailPreferences } from "./User.js";
+export { User, type UserRole, type UserPreferences, type EmailPreferences, type NotificationPreferences } from "./User.js";
 export { UserOrganization, type OrgMemberRole } from "./UserOrganization.js";
 export { UserApiKey } from "./UserApiKey.js";
 export { WorkerTask, type WorkerPersona, type SystemPersona, type WorkerTaskStatus, type WorkflowMode, type SubtaskDefinition, type SubtaskResult } from "./WorkerTask.js";
@@ -118,3 +118,4 @@ export { MarketingCampaign, type CampaignPlatform, type CampaignStatus } from ".
 export { MarketingContent, type ContentPlatform, type ContentType, type ContentStatus } from "./MarketingContent.js";
 export { MarketingAction, type MarketingActionType } from "./MarketingAction.js";
 export { OrgCredential } from "./OrgCredential.js";
+export { PushSubscription, type PushPlatform } from "./PushSubscription.js";

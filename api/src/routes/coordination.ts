@@ -38,7 +38,31 @@ import {
   ConflictError,
 } from "../utils/errors.js";
 import { notifyBlockerDetected, type BlockerDetails } from "../services/notifications.js";
+import { sendPushNotification } from "../services/push-notifications.js";
+import { User } from "../models/User.js";
 import { redis } from "../services/redis-client.js";
+
+/**
+ * Get the first active user in an organization for push notifications.
+ * Since tasks don't have a specific owner, we send notifications to any active user in the org.
+ */
+async function getOrgNotificationUser(orgId: string): Promise<string | null> {
+  try {
+    const userRepo = AppDataSource.getRepository(User);
+    const user = await userRepo.findOne({
+      where: { orgId },
+      select: ["id"],
+      order: { createdAt: "ASC" }, // Get the first user (typically the admin/owner)
+    });
+    return user?.id || null;
+  } catch (error) {
+    logger.warn("Failed to find notification user for org", {
+      orgId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
 
 const router = Router();
 
@@ -966,6 +990,27 @@ router.post(
         notifyBlockerDetected(parentTask, blockerDetails).catch((error) => {
           logger.error("Failed to send blocker notification", {
             parentTaskId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+        // Send push notification for blocker escalation (fire-and-forget)
+        getOrgNotificationUser(parentTask.orgId).then(userId => {
+          if (userId) {
+            sendPushNotification(userId, parentTask.orgId, {
+              title: "Blocker escalated",
+              body: `Blocker on ${parentTask.jiraIssueKey || 'task'} — ${blockerDetails.errorMessage.slice(0, 100)}`,
+              data: {
+                taskId: parentTask.id,
+                issueKey: parentTask.jiraIssueKey || '',
+                type: 'blocker_escalated'
+              },
+              category: "blockers"
+            });
+          }
+        }).catch(error => {
+          logger.warn("Failed to send push notification for blocker escalation", {
+            taskId: parentTask.id,
             error: error instanceof Error ? error.message : String(error),
           });
         });

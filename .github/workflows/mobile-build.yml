@@ -1,0 +1,32 @@
+name: Mobile Build
+
+on:
+  workflow_dispatch:  # MANUAL ONLY — DO NOT add push: triggers
+
+jobs:
+  build-android:
+    name: Build Android Preview APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build Android preview APK
+        working-directory: mobile
+        run: eas build --profile preview --platform android --non-interactive

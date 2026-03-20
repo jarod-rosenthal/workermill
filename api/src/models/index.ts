@@ -118,3 +118,4 @@ export { MarketingCampaign, type CampaignPlatform, type CampaignStatus } from ".
 export { MarketingContent, type ContentPlatform, type ContentType, type ContentStatus } from "./MarketingContent.js";
 export { MarketingAction, type MarketingActionType } from "./MarketingAction.js";
 export { OrgCredential } from "./OrgCredential.js";
+export { PushSubscription, type Platform } from "./PushSubscription.js";

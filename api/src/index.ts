@@ -61,6 +61,7 @@ import {
   prdRouter,
   specsRouter,
   attachmentsRouter,
+  pushRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -266,6 +267,7 @@ app.use("/api/auth", strictLimiter, authRouter);
 
 // Authenticated routes with standard rate limiting
 app.use("/api/profile", authenticatedLimiter, profileRouter);
+app.use("/api/push", authenticatedLimiter, pushRouter);
 app.use("/api/organizations", authenticatedLimiter, organizationsRouter);
 app.use("/api/invites", authenticatedLimiter, inviteRouter);
 app.use("/api/control-center", authenticatedLimiter, controlCenterRouter);

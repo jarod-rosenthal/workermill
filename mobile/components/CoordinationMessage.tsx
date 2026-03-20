@@ -1,7 +1,6 @@
 import React from 'react';
 import { View, Text } from 'react-native';
 import { ContextMessage, ContextMessageType } from '../types/coordination';
-import { Badge } from './ui/Badge';
 
 interface CoordinationMessageProps {
   message: ContextMessage;

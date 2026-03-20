@@ -2,7 +2,7 @@ import React from 'react';
 import { TouchableOpacity, Text, ActivityIndicator } from 'react-native';
 
 interface ButtonProps {
-  variant?: 'primary' | 'secondary' | 'outline' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
   size?: 'sm' | 'md' | 'lg';
   loading?: boolean;
   disabled?: boolean;
@@ -18,6 +18,7 @@ const variants = {
   secondary: 'bg-slate-600 active:bg-slate-700',
   outline: 'border border-brand-600 bg-transparent active:bg-brand-50 dark:active:bg-brand-950',
   ghost: 'bg-transparent active:bg-slate-100 dark:active:bg-slate-800',
+  destructive: 'bg-red-600 active:bg-red-700',
 };
 
 const textColors = {
@@ -25,6 +26,7 @@ const textColors = {
   secondary: 'text-white',
   outline: 'text-brand-600 dark:text-brand-400',
   ghost: 'text-slate-900 dark:text-slate-100',
+  destructive: 'text-white',
 };
 
 const sizes = {
@@ -72,7 +74,7 @@ export function Button({
       {loading ? (
         <ActivityIndicator
           size="small"
-          color={variant === 'primary' || variant === 'secondary' ? '#ffffff' : '#6366f1'}
+          color={variant === 'primary' || variant === 'secondary' || variant === 'destructive' ? '#ffffff' : '#6366f1'}
           className="mr-2"
         />
       ) : null}

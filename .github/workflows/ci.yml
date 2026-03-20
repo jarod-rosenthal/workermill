@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  mobile-ci:
+    name: Mobile - Type Check, Lint, Test & Placeholder Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Type Check
+        working-directory: mobile
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: mobile
+        run: npx expo lint
+
+      - name: Unit Tests
+        working-directory: mobile
+        run: npx jest --passWithNoTests
+
+      - name: Placeholder Guard - Check for COGNITO_CLIENT_ID placeholder
+        working-directory: mobile
+        run: |
+          if grep -r "<REPLACE_WITH_CLIENT_ID>" .; then
+            echo "ERROR: COGNITO_CLIENT_ID placeholder not replaced"
+            exit 1
+          fi
+
+  api-ci:
+    name: API - Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Type Check
+        working-directory: api
+        run: npm run typecheck

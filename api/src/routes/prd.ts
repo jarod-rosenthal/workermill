@@ -690,15 +690,23 @@ router.post(
             childDescription += `\n\n<!-- PRECOMPUTED_STORIES_JSON\n${JSON.stringify(card.stories)}\nEND_PRECOMPUTED_STORIES -->`;
           }
 
-          // First card (no deps) starts planning; others blocked until deps complete
-          // Card 0 is always Foundation with no dependencies; all others depend on it
-          const hasDependencies = i > 0 || (card.dependencyIndices && card.dependencyIndices.length > 0);
+          // Use 1-based storyIndex to match task-dispatch.ts convention.
+          // task-monitor.ts uses `if (siblingIndex)` truthiness check which skips 0.
+          const storyIndex1 = i + 1;
+          // Convert 0-based dependencyIndices to 1-based storyDependencies
+          const storyDeps1 = (card.dependencyIndices || []).map((d: number) => d + 1);
+          const hasDependencies = storyDeps1.length > 0;
           const initialStatus = hasDependencies ? "blocked" : "planning";
+          // Foundation story (index 0) skips quality gates — it creates the project from scratch
+          const isFoundationStory = i === 0;
+          const childQualityGates = isFoundationStory ? null : (decomposed.qualityGates || null);
+
           logger.info("Creating GitHub Issues child task", {
-            index: i, issueKey: childIssueKey, initialStatus,
-            dependencyIndices: card.dependencyIndices,
+            index: i, storyIndex: storyIndex1, issueKey: childIssueKey, initialStatus,
+            storyDependencies: storyDeps1,
           });
 
+          const featureBranch = parentTask.githubBranch;
           const childTask = taskRepo.create({
             orgId: org.id,
             jiraIssueKey: childIssueKey,
@@ -711,6 +719,7 @@ router.post(
             ticketSystem: "github",
             scmProvider: org.scmProvider || "github",
             githubRepo: targetRepo,
+            githubBranch: featureBranch,
             status: initialStatus,
             pipelineVersion: "v2",
             executionMode: "parallel",
@@ -721,13 +730,15 @@ router.post(
             improvementEnabled: org.autoImproveEnabled ?? false,
             standardSdkMode: false,
             parentTaskId: parentTask.id,
-            storyIndex: i,
+            storyIndex: storyIndex1,
             storyTitle: card.title,
-            storyDependencies: card.dependencyIndices || [],
+            storyDependencies: storyDeps1,
             retryCount: 0,
             maxRetries: 3,
             jiraFields: {
-              qualityGates: decomposed.qualityGates || null,
+              storyIndex: storyIndex1,
+              storyDependencies: storyDeps1,
+              qualityGates: childQualityGates,
               ciWorkflowPath: decomposed.ciWorkflowPath || null,
               preComputedStories: card.stories || null,
             },

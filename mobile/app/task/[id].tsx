@@ -2,10 +2,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
   Alert,
-  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -23,7 +21,6 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Button } from '@/components/ui/Button';
 import { apiClient } from '@/lib/api-client';
-import { createLogsSSE, createCoordinationSSE } from '@/lib/sse-client';
 import type { WorkerTask } from '@/types/tasks';
 
 type TabType = 'logs' | 'coordination' | 'code';
@@ -186,11 +183,8 @@ export default function TaskDetailScreen() {
   const { id: taskId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>('logs');
-  const [refreshing, setRefreshing] = useState(false);
-  const [logSSEConnected, setLogSSEConnected] = useState(false);
-  const [logSSEError, setLogSSEError] = useState<string | null>(null);
-  const [coordinationSSEConnected, setCoordinationSSEConnected] = useState(false);
-  const [coordinationSSEError, setCoordinationSSEError] = useState<string | null>(null);
+  const [logSSEError] = useState<string | null>(null);
+  const [coordinationSSEError] = useState<string | null>(null);
 
   const { getTaskById, loadTasks } = useTasksStore();
   const { getMessagesByParentTask, connectSSE, disconnectSSE, isSSEConnected } = useCoordinationStore();
@@ -223,7 +217,7 @@ export default function TaskDetailScreen() {
     return () => {
       disconnectSSE();
     };
-  }, [taskId, task, isAuthenticated]);
+  }, [taskId, task, isAuthenticated, connectSSE, disconnectSSE]);
 
   // Handle task actions
   const handleCancelTask = useCallback(() => {
@@ -275,27 +269,6 @@ export default function TaskDetailScreen() {
     );
   }, [taskId, loadTasks]);
 
-  // Handle refresh
-  const onRefresh = useCallback(async () => {
-    if (!taskId) return;
-
-    setRefreshing(true);
-    try {
-      await loadTasks();
-
-      // Reconnect SSE if needed
-      if (isAuthenticated) {
-        const tokens = await apiClient.getStoredTokens();
-        if (tokens.accessToken) {
-          connectSSE(taskId, tokens.accessToken);
-        }
-      }
-    } catch (error) {
-      console.error('Refresh failed:', error);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [taskId, loadTasks, isAuthenticated]);
 
   // Handle back navigation
   const handleGoBack = useCallback(() => {
@@ -303,7 +276,7 @@ export default function TaskDetailScreen() {
   }, [router]);
 
   // Loading state
-  if (!task && !refreshing) {
+  if (!task) {
     return (
       <SafeAreaView className="flex-1 bg-slate-50 dark:bg-slate-950">
         <View className="flex-1 justify-center items-center px-6">
@@ -316,15 +289,6 @@ export default function TaskDetailScreen() {
     );
   }
 
-  if (!task) {
-    return (
-      <SafeAreaView className="flex-1 bg-slate-50 dark:bg-slate-950">
-        <View className="flex-1 justify-center items-center">
-          <Spinner />
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -332,7 +296,7 @@ export default function TaskDetailScreen() {
         return (
           <View className="flex-1">
             {/* Offline indicator for logs SSE */}
-            {!logSSEConnected && logSSEError && (
+            {logSSEError && (
               <OfflineBanner visible={true} />
             )}
 

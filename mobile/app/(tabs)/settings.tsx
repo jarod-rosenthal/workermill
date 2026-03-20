@@ -16,8 +16,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Button } from '@/components/ui/Button';
 import { BiometricAuth } from '@/lib/biometric';
-import { registerPushToken, unregisterPushToken } from '@/lib/push';
-import { apiClient } from '@/lib/api-client';
+import { unregisterPushToken } from '@/lib/push';
 
 interface SettingsSectionProps {
   title: string;
@@ -118,7 +117,6 @@ function SettingsRow({
 export default function SettingsScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
-  const [switchingOrg, setSwitchingOrg] = useState(false);
 
   const {
     user,
@@ -132,7 +130,6 @@ export default function SettingsScreen() {
   const {
     preferences,
     isLoading: preferencesLoading,
-    error: preferencesError,
     updatePreferences,
     loadPreferences,
   } = useNotificationsStore();
@@ -327,7 +324,6 @@ export default function SettingsScreen() {
             title="Switch Organization"
             icon="swap-horizontal-outline"
             onPress={handleOrgSwitch}
-            disabled={switchingOrg}
             isLast
           />
         </SettingsSection>

@@ -22,6 +22,14 @@ export function AuthCallback() {
       const errorParam = searchParams.get("error");
       const errorDescription = searchParams.get("error_description");
 
+      // If this callback was initiated from the mobile app, redirect to the
+      // mobile deep link instead of processing it here.
+      if (stateParam && stateParam.startsWith("mobile_")) {
+        const mobileRedirect = `workermill://auth/callback?code=${encodeURIComponent(code || "")}`;
+        window.location.href = mobileRedirect;
+        return;
+      }
+
       if (errorParam) {
         setError(errorDescription || errorParam);
         return;

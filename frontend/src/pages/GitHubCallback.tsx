@@ -44,6 +44,13 @@ export function GitHubCallback() {
       }
 
       try {
+        // Check if this callback was initiated from the mobile app
+        if (state && state.startsWith("mobile_")) {
+          const mobileRedirect = `workermill://auth/callback?code=${encodeURIComponent(code)}`;
+          window.location.href = mobileRedirect;
+          return;
+        }
+
         const redirectUri = `${window.location.origin}/auth/github/callback`;
 
         const response = await authAPI.githubCallback({

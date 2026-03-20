@@ -6,7 +6,7 @@ import { COGNITO_REGION, COGNITO_CLIENT_ID } from '@/constants/config';
 jest.mock('expo-secure-store');
 
 // Mock axios with proper instance structure
-const mockAxiosInstance = jest.fn();
+const mockAxiosInstance = jest.fn() as any;
 Object.assign(mockAxiosInstance, {
   interceptors: {
     request: {

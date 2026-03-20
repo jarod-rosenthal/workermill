@@ -193,11 +193,11 @@ export default function TaskDetailScreen() {
   const [coordinationSSEError, setCoordinationSSEError] = useState<string | null>(null);
 
   const { getTaskById, loadTasks } = useTasksStore();
-  const { getMessages, connectToTask, disconnectFromTask, isConnected } = useCoordinationStore();
+  const { getMessagesByParentTask, connectSSE, disconnectSSE, isSSEConnected } = useCoordinationStore();
   const { isAuthenticated } = useAuthStore();
 
   const task = getTaskById(taskId || '');
-  const coordinationMessages = getMessages(taskId || '');
+  const coordinationMessages = getMessagesByParentTask(taskId || '');
 
   // Initialize SSE connections when task loads
   useEffect(() => {
@@ -208,7 +208,7 @@ export default function TaskDetailScreen() {
         const tokens = await apiClient.getStoredTokens();
         if (tokens.accessToken && task) {
           // Connect coordination SSE
-          connectToTask(taskId, tokens.accessToken);
+          connectSSE(taskId, tokens.accessToken);
         }
       } catch (error) {
         console.error('Failed to initialize task SSE connections:', error);
@@ -221,7 +221,7 @@ export default function TaskDetailScreen() {
 
     // Cleanup on unmount
     return () => {
-      disconnectFromTask(taskId);
+      disconnectSSE();
     };
   }, [taskId, task, isAuthenticated]);
 
@@ -287,7 +287,7 @@ export default function TaskDetailScreen() {
       if (isAuthenticated) {
         const tokens = await apiClient.getStoredTokens();
         if (tokens.accessToken) {
-          connectToTask(taskId, tokens.accessToken);
+          connectSSE(taskId, tokens.accessToken);
         }
       }
     } catch (error) {
@@ -347,7 +347,7 @@ export default function TaskDetailScreen() {
         return (
           <View className="flex-1">
             {/* Offline indicator for coordination SSE */}
-            {!isConnected(taskId || '') && coordinationSSEError && (
+            {!isSSEConnected && coordinationSSEError && (
               <OfflineBanner visible={true} />
             )}
 

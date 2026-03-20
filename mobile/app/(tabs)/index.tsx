@@ -88,7 +88,7 @@ export default function DashboardScreen() {
         // Fire REST fetch and SSE reconnect in parallel
         const restPromise = loadTasks();
         const ssePromise = new Promise<void>((resolve) => {
-          connectSSE(tokens.accessToken);
+          connectSSE(tokens.accessToken!);
           // SSE connection is fire-and-forget, resolve immediately
           resolve();
         });

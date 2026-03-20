@@ -362,7 +362,7 @@ export default function BoardsScreen() {
     if (searchQuery.trim()) {
       return (
         <EmptyState
-          icon="search-outline"
+          icon="search"
           message={`No boards found for "${searchQuery}"`}
         />
       );
@@ -371,7 +371,7 @@ export default function BoardsScreen() {
     return (
       <View className="flex-1 justify-center items-center px-4">
         <EmptyState
-          icon="grid-outline"
+          icon="grid-view"
           message="No boards yet. Create your first board."
         />
         <Button

@@ -253,7 +253,7 @@ function ChecklistSection({ items, onToggleItem, onAddItem, onDeleteItem }: Chec
 
       {items.length === 0 && !isAddingItem ? (
         <EmptyState
-          icon="checkbox-outline"
+          icon="check-box-outline-blank"
           message="No checklist items."
         />
       ) : (
@@ -434,7 +434,7 @@ function ActivitySection({ activities, isLoading, onRefresh }: ActivitySectionPr
 
       {activities.length === 0 ? (
         <EmptyState
-          icon="time-outline"
+          icon="access-time"
           message="No activity yet."
         />
       ) : (
@@ -722,7 +722,10 @@ export default function CardDetailScreen() {
   if (error && !currentBoard) {
     return (
       <View className="flex-1 justify-center items-center bg-white dark:bg-slate-950 px-4">
-        <ErrorState message="Could not load card" />
+        <ErrorState
+          message="Could not load card"
+          onRetry={() => window.location.reload()}
+        />
       </View>
     );
   }
@@ -730,7 +733,10 @@ export default function CardDetailScreen() {
   if (!card) {
     return (
       <View className="flex-1 justify-center items-center bg-white dark:bg-slate-950 px-4">
-        <ErrorState message="Card not found" />
+        <ErrorState
+          message="Card not found"
+          onRetry={() => window.location.reload()}
+        />
       </View>
     );
   }

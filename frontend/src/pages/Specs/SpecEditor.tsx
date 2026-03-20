@@ -41,10 +41,12 @@ export default function SpecEditor() {
     versions,
     isLoading,
     isScoring,
+    isImproving,
     error,
     fetchSpec,
     updateSpec,
     scoreSpec,
+    improveSpec,
     fetchVersions,
   } = useSpecsStore();
 
@@ -313,7 +315,11 @@ export default function SpecEditor() {
 
         {/* Right panel — score + versions (40%) */}
         <div className="w-[40%] overflow-y-auto p-6 space-y-6">
-          <QualityScorePanel spec={currentSpec} />
+          <QualityScorePanel
+            spec={currentSpec}
+            onImprove={() => improveSpec(currentSpec.id)}
+            isImproving={isImproving}
+          />
 
           {/* Version history */}
           <div className="rounded-xl border border-border bg-card p-4">

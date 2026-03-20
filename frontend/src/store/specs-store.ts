@@ -16,6 +16,7 @@ interface SpecsState {
   versions: SpecVersion[];
   isLoading: boolean;
   isScoring: boolean;
+  isImproving: boolean;
   error: string | null;
 
   fetchSpecs: (params?: {
@@ -27,6 +28,7 @@ interface SpecsState {
   updateSpec: (specId: string, data: UpdateSpecData) => Promise<void>;
   deleteSpec: (specId: string) => Promise<void>;
   scoreSpec: (specId: string) => Promise<QualityFeedback>;
+  improveSpec: (specId: string) => Promise<void>;
   fetchVersions: (specId: string) => Promise<void>;
   fetchTemplates: () => Promise<void>;
 
@@ -41,6 +43,7 @@ export const useSpecsStore = create<SpecsState>((set) => ({
   versions: [],
   isLoading: false,
   isScoring: false,
+  isImproving: false,
   error: null,
 
   fetchSpecs: async (params) => {
@@ -134,6 +137,20 @@ export const useSpecsStore = create<SpecsState>((set) => ({
         error instanceof Error ? error.message : "Failed to score spec";
       set({ error: message, isScoring: false });
       throw error;
+    }
+  },
+
+  improveSpec: async (specId) => {
+    set({ isImproving: true });
+    try {
+      const updated = await specsApi.improveSpec(specId);
+      set((state) => ({
+        specs: state.specs.map((s) => (s.id === specId ? updated : s)),
+        currentSpec:
+          state.currentSpec?.id === specId ? updated : state.currentSpec,
+      }));
+    } finally {
+      set({ isImproving: false });
     }
   },
 

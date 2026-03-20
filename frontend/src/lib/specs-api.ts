@@ -110,6 +110,11 @@ export async function scoreSpec(specId: string): Promise<QualityFeedback> {
   return response.data.spec?.qualityFeedback ?? response.data;
 }
 
+export async function improveSpec(specId: string): Promise<Spec> {
+  const response = await apiClient.post(`/specs/${specId}/improve`);
+  return response.data.spec;
+}
+
 export async function getSpecVersions(
   specId: string,
 ): Promise<SpecVersion[]> {

@@ -405,6 +405,89 @@ router.post(
 );
 
 // =============================================================================
+// Improve
+// =============================================================================
+
+/**
+ * POST /api/specs/:specId/improve
+ * Improve spec content using critic feedback + current knowledge
+ */
+router.post(
+  "/:specId/improve",
+  param("specId").isUUID(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const specId = req.params.specId as string;
+      const specRepo = AppDataSource.getRepository(KbSpec);
+
+      const spec = await specRepo.findOne({ where: { id: specId, orgId: org.id } });
+      if (!spec) {
+        res.status(404).json({ error: "Spec not found" });
+        return;
+      }
+
+      if (!spec.qualityFeedback) {
+        res.status(400).json({ error: "Score the spec first before improving" });
+        return;
+      }
+
+      // Gather repo context
+      const { gatherRepoContext, searchCurrentKnowledge, improveSpec } = await import("../services/spec-improver.js");
+
+      let repoContext = null;
+      const defaultRepo = org.getDefaultRepo();
+      if (defaultRepo) {
+        const { getOrgCredentials } = await import("../services/org-credentials.js");
+        const creds = await getOrgCredentials(org.id);
+        const token = creds.githubToken || creds.scmToken;
+        if (token) {
+          repoContext = await gatherRepoContext(defaultRepo, token);
+        }
+      }
+
+      // Search for current knowledge
+      const webResults = await searchCurrentKnowledge(spec.content || "");
+
+      // Improve the spec
+      const improvedContent = await improveSpec(
+        spec.content || "",
+        spec.qualityFeedback,
+        repoContext,
+        webResults,
+      );
+
+      // Save improved content with version bump
+      const previousVersion = spec.version || 1;
+      await specRepo.update(specId, {
+        content: improvedContent,
+        version: previousVersion + 1,
+        qualityScore: null,      // Reset score — needs re-scoring
+        qualityFeedback: null,   // Reset feedback
+        status: "draft",         // Back to draft for re-scoring
+      });
+
+      const updated = await specRepo.findOne({ where: { id: specId } });
+
+      logger.info("Spec improved", {
+        specId,
+        orgId: org.id,
+        previousVersion,
+        newVersion: previousVersion + 1,
+        hasRepoContext: !!repoContext,
+        webResultsCount: webResults.length,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      logger.error("Error improving spec", { error });
+      res.status(500).json({ error: "Failed to improve spec" });
+    }
+  },
+);
+
+// =============================================================================
 // Version History
 // =============================================================================
 

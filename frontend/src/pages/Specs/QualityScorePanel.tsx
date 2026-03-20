@@ -1,4 +1,4 @@
-import { Lightbulb } from "lucide-react";
+import { Lightbulb, Sparkles } from "lucide-react";
 import type { Spec } from "../../lib/specs-api";
 
 const DIMENSION_LABELS: Record<string, string> = {
@@ -31,7 +31,13 @@ function barColor(score: number): string {
   return "bg-red-500";
 }
 
-export default function QualityScorePanel({ spec }: { spec: Spec }) {
+interface QualityScorePanelProps {
+  spec: Spec;
+  onImprove?: () => void;
+  isImproving?: boolean;
+}
+
+export default function QualityScorePanel({ spec, onImprove, isImproving }: QualityScorePanelProps) {
   const feedback = spec.qualityFeedback;
   const overall = spec.qualityScore;
 
@@ -113,6 +119,35 @@ export default function QualityScorePanel({ spec }: { spec: Spec }) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Improve button */}
+      {onImprove && (
+        <div className="mt-4 pt-4 border-t border-border/50">
+          <button
+            onClick={onImprove}
+            disabled={isImproving}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+          >
+            {isImproving ? (
+              <>
+                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Improving...
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4" />
+                Improve Spec
+              </>
+            )}
+          </button>
+          <p className="text-xs text-muted-foreground mt-2 text-center">
+            AI rewrites your spec using critic feedback and current knowledge
+          </p>
         </div>
       )}
     </div>

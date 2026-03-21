@@ -191,7 +191,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Fetch user profile now that we have tokens
       await get().refreshUserProfile();
     } catch (error: any) {
-      const errorMessage = error.response?.data?.message || 'Sign in failed';
+      const errorMessage = error.response?.data?.error || error.response?.data?.message || 'Sign in failed';
       set({
         isLoading: false,
         error: errorMessage,

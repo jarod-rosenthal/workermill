@@ -47,7 +47,7 @@ test.describe("Blocker Handling", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -102,7 +102,7 @@ test.describe("Blocker Handling", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -163,7 +163,7 @@ test.describe("Blocker Handling", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 

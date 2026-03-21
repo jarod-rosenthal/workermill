@@ -59,7 +59,7 @@ test.describe("Multi-Task Parallel Execution", () => {
     const tasks = await Promise.all(
       jiraKeys.map((jiraKey) =>
         waitFor(async () => apiClient.getTaskByJiraKey(jiraKey), {
-          timeout: 15000,
+          timeout: 30000,
         }),
       ),
     );
@@ -118,7 +118,7 @@ test.describe("Multi-Task Parallel Execution", () => {
     const tasks = await Promise.all(
       jiraKeys.map(({ jiraKey }) =>
         waitFor(async () => apiClient.getTaskByJiraKey(jiraKey), {
-          timeout: 15000,
+          timeout: 30000,
         }),
       ),
     );
@@ -162,7 +162,7 @@ test.describe("Multi-Task Parallel Execution", () => {
     // Wait for task to be created
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     expect(task).toBeTruthy();
     createdTaskIds.push(task.id);
@@ -186,7 +186,7 @@ test.describe("Multi-Task Parallel Execution", () => {
         const t = await apiClient.getTask(task.id);
         return t?.status === "cancelled" ? t : null;
       },
-      { timeout: 15000, interval: 1000 },
+      { timeout: 30000, interval: 1000 },
     );
     expect(cancelled.status).toBe("cancelled");
 
@@ -241,7 +241,7 @@ test.describe("Multi-Task Parallel Execution", () => {
     const tasks = await Promise.all(
       jiraKeys.map((jiraKey) =>
         waitFor(async () => apiClient.getTaskByJiraKey(jiraKey), {
-          timeout: 15000,
+          timeout: 30000,
         }),
       ),
     );

@@ -79,6 +79,13 @@ router.use(authenticateApiKey);
 router.get(
   "/poll",
   asyncHandler(async (req: Request, res: Response) => {
+    // In mock-worker mode (E2E tests), block agent polling so the
+    // orchestrator processes tasks with mock workers instead.
+    if (process.env.MOCK_WORKERS === "true") {
+      res.json({ tasks: [], managerTasks: [] });
+      return;
+    }
+
     const agentId = req.query.agentId as string;
     const org = req.organization!;
 
@@ -255,6 +262,13 @@ router.get(
 router.post(
   "/claim",
   asyncHandler(async (req: Request, res: Response) => {
+    // In mock-worker mode (E2E tests), reject agent claims so the
+    // orchestrator processes tasks with mock workers instead.
+    if (process.env.MOCK_WORKERS === "true") {
+      res.status(409).json({ error: "Mock worker mode active — agent claims disabled" });
+      return;
+    }
+
     const { taskId, agentId } = req.body;
     const org = req.organization!;
 

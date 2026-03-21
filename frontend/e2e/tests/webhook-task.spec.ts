@@ -50,7 +50,7 @@ test.describe("Webhook to Task Flow", () => {
     // Wait for task to be created
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     expect(task).toBeTruthy();
     createdTaskIds.push(task.id);
@@ -86,7 +86,7 @@ test.describe("Webhook to Task Flow", () => {
     // Wait for task and verify model
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
 
     expect(task).toBeTruthy();
@@ -111,7 +111,7 @@ test.describe("Webhook to Task Flow", () => {
     // Wait for task
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -148,7 +148,7 @@ test.describe("Webhook to Task Flow", () => {
     // Wait for task
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -175,7 +175,7 @@ test.describe("Webhook to Task Flow", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 

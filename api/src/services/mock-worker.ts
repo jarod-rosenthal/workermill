@@ -7,8 +7,8 @@
  * Scenarios (based on Jira issue key prefix):
  * - E2E-FAIL-*   → failure
  * - E2E-BLOCKER-* → blocker/escalation
- * - E2E-SLOW-*   → slow execution (~30s)
- * - Everything else → success (~5s)
+ * - E2E-SLOW-*   → slow execution (~12s)
+ * - Everything else → success (~1s)
  */
 
 import { logger } from "../utils/logger.js";
@@ -134,19 +134,19 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Run the success scenario (~5s).
+ * Run the success scenario (~1s).
  */
 async function runSuccess(opts: MockWorkerOptions): Promise<void> {
   const { taskId, apiBaseUrl, apiKey, summary } = opts;
 
   await postLog(apiBaseUrl, taskId, apiKey, `[mock] Starting mock execution for: ${summary}`);
-  await sleep(1000);
+  await sleep(200);
   await postLog(apiBaseUrl, taskId, apiKey, "[mock] Analyzing task requirements...");
-  await sleep(1000);
+  await sleep(200);
   await postLog(apiBaseUrl, taskId, apiKey, "[mock] Implementing changes...");
-  await sleep(1000);
+  await sleep(200);
   await postLog(apiBaseUrl, taskId, apiKey, "[mock] Running tests...");
-  await sleep(1000);
+  await sleep(200);
   await postLog(
     apiBaseUrl,
     taskId,
@@ -155,7 +155,7 @@ async function runSuccess(opts: MockWorkerOptions): Promise<void> {
     "result",
   );
   await postLog(apiBaseUrl, taskId, apiKey, "::result::review_requested", "result");
-  await sleep(1000);
+  await sleep(200);
 
   await workerComplete(apiBaseUrl, taskId, apiKey, {
     exitCode: 0,
@@ -169,15 +169,15 @@ async function runSuccess(opts: MockWorkerOptions): Promise<void> {
 }
 
 /**
- * Run the failure scenario (~3s).
+ * Run the failure scenario (~0.6s).
  */
 async function runFailure(opts: MockWorkerOptions): Promise<void> {
   const { taskId, apiBaseUrl, apiKey, summary } = opts;
 
   await postLog(apiBaseUrl, taskId, apiKey, `[mock] Starting mock execution for: ${summary}`);
-  await sleep(1000);
+  await sleep(200);
   await postLog(apiBaseUrl, taskId, apiKey, "[mock] Analyzing task requirements...");
-  await sleep(1000);
+  await sleep(200);
   await postLog(
     apiBaseUrl,
     taskId,
@@ -186,7 +186,7 @@ async function runFailure(opts: MockWorkerOptions): Promise<void> {
     "output",
     "error",
   );
-  await sleep(1000);
+  await sleep(200);
 
   await workerComplete(apiBaseUrl, taskId, apiKey, {
     exitCode: 1,
@@ -200,15 +200,15 @@ async function runFailure(opts: MockWorkerOptions): Promise<void> {
 }
 
 /**
- * Run the blocker scenario (~4s).
+ * Run the blocker scenario (~0.6s).
  */
 async function runBlocker(opts: MockWorkerOptions): Promise<void> {
   const { taskId, apiBaseUrl, apiKey, summary } = opts;
 
   await postLog(apiBaseUrl, taskId, apiKey, `[mock] Starting mock execution for: ${summary}`);
-  await sleep(1000);
+  await sleep(200);
   await postLog(apiBaseUrl, taskId, apiKey, "[mock] Analyzing task requirements...");
-  await sleep(1000);
+  await sleep(200);
   await postLog(
     apiBaseUrl,
     taskId,
@@ -229,7 +229,7 @@ async function runBlocker(opts: MockWorkerOptions): Promise<void> {
     maxAutoRetries: 3,
   });
 
-  await sleep(1000);
+  await sleep(200);
 
   await workerComplete(apiBaseUrl, taskId, apiKey, {
     exitCode: 1,
@@ -243,21 +243,21 @@ async function runBlocker(opts: MockWorkerOptions): Promise<void> {
 }
 
 /**
- * Run the slow scenario (~30s).
+ * Run the slow scenario (~12s).
  */
 async function runSlow(opts: MockWorkerOptions): Promise<void> {
   const { taskId, apiBaseUrl, apiKey, summary } = opts;
 
   await postLog(apiBaseUrl, taskId, apiKey, `[mock] Starting mock execution for: ${summary}`);
-  await sleep(5000);
+  await sleep(2000);
   await postLog(apiBaseUrl, taskId, apiKey, "[mock] Analyzing task requirements...");
-  await sleep(5000);
+  await sleep(2000);
   await postLog(apiBaseUrl, taskId, apiKey, "[mock] Implementing changes (large refactor)...");
-  await sleep(5000);
+  await sleep(2000);
   await postLog(apiBaseUrl, taskId, apiKey, "[mock] Running full test suite...");
-  await sleep(5000);
+  await sleep(2000);
   await postLog(apiBaseUrl, taskId, apiKey, "[mock] Tests passed. Creating PR...");
-  await sleep(5000);
+  await sleep(2000);
   await postLog(
     apiBaseUrl,
     taskId,
@@ -266,7 +266,7 @@ async function runSlow(opts: MockWorkerOptions): Promise<void> {
     "result",
   );
   await postLog(apiBaseUrl, taskId, apiKey, "::result::review_requested", "result");
-  await sleep(5000);
+  await sleep(2000);
 
   await workerComplete(apiBaseUrl, taskId, apiKey, {
     exitCode: 0,

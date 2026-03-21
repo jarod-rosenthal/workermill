@@ -80,7 +80,9 @@ export class APIClient {
 
   async getTaskByJiraKey(jiraKey: string) {
     const data = await this.getTasks({ jiraKey });
-    return data?.tasks?.find(
+    // Response uses "activeTasks" (not "tasks") for the visible task list
+    const tasks = data?.activeTasks || data?.tasks || [];
+    return tasks.find(
       (t: { jiraKey?: string; jiraIssueKey?: string }) =>
         t.jiraKey === jiraKey || t.jiraIssueKey === jiraKey,
     );

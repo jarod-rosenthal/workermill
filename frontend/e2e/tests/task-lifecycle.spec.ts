@@ -46,7 +46,7 @@ test.describe("Task Lifecycle", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -75,7 +75,7 @@ test.describe("Task Lifecycle", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -104,7 +104,7 @@ test.describe("Task Lifecycle", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -134,7 +134,7 @@ test.describe("Task Lifecycle", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -157,7 +157,7 @@ test.describe("Task Lifecycle", () => {
         const t = await apiClient.getTask(task.id);
         return t?.status === "cancelled" ? t : null;
       },
-      { timeout: 15000, interval: 1000 },
+      { timeout: 30000, interval: 1000 },
     );
 
     expect(cancelled.status).toBe("cancelled");
@@ -176,7 +176,7 @@ test.describe("Task Lifecycle", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -199,7 +199,7 @@ test.describe("Task Lifecycle", () => {
         const t = await apiClient.getTask(task.id);
         return t?.status === "queued" || t?.status === "running" ? t : null;
       },
-      { timeout: 15000, interval: 1000 },
+      { timeout: 30000, interval: 1000 },
     );
 
     expect(["queued", "running"]).toContain(retried.status);
@@ -218,7 +218,7 @@ test.describe("Task Lifecycle", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 

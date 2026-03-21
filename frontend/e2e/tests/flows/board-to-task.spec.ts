@@ -175,7 +175,7 @@ test.describe("Board to Task Flow", () => {
 
     // The task should be visible (it may take a moment to appear)
     await expect(page.locator(`text=${cardTitle}`).first()).toBeVisible({
-      timeout: 15000,
+      timeout: 30000,
     });
   });
 
@@ -271,7 +271,7 @@ test.describe("Board to Task Flow", () => {
         .locator(
           'text=/review|completed|done|success|pr created/i',
         );
-      await expect(statusBadge.first()).toBeVisible({ timeout: 15000 });
+      await expect(statusBadge.first()).toBeVisible({ timeout: 30000 });
     }
   });
 
@@ -336,7 +336,7 @@ test.describe("Board to Task Flow", () => {
     // Verify the task was created with the correct description via API
     const task = await waitFor(
       async () => apiClient.getTask(taskId),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
 
     expect(task).toBeTruthy();

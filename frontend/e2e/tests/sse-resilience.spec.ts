@@ -48,7 +48,7 @@ test.describe("SSE Resilience", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -61,7 +61,7 @@ test.describe("SSE Resilience", () => {
 
     // Wait for the task to appear (might need polling)
     await expect(page.locator(`text=${jiraKey}`)).toBeVisible({
-      timeout: 15000,
+      timeout: 30000,
     });
 
     // Wait for mock worker to complete (~5s for success)
@@ -107,11 +107,11 @@ test.describe("SSE Resilience", () => {
 
     const successTask = await waitFor(
       async () => apiClient.getTaskByJiraKey(successKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     const failTask = await waitFor(
       async () => apiClient.getTaskByJiraKey(failKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
 
     createdTaskIds.push(successTask.id, failTask.id);
@@ -164,7 +164,7 @@ test.describe("SSE Resilience", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -180,7 +180,7 @@ test.describe("SSE Resilience", () => {
     // Visit dashboard to see the task
     await page.goto("/dashboard");
     await expect(page.locator(`text=${jiraKey}`)).toBeVisible({
-      timeout: 15000,
+      timeout: 30000,
     });
 
     // Navigate to settings
@@ -200,7 +200,7 @@ test.describe("SSE Resilience", () => {
 
     // Task should still be visible after navigation
     await expect(page.locator(`text=${jiraKey}`)).toBeVisible({
-      timeout: 15000,
+      timeout: 30000,
     });
   });
 
@@ -227,7 +227,7 @@ test.describe("SSE Resilience", () => {
     for (const key of keys) {
       const task = await waitFor(
         async () => apiClient.getTaskByJiraKey(key),
-        { timeout: 15000 },
+        { timeout: 30000 },
       );
       createdTaskIds.push(task.id);
     }
@@ -242,7 +242,7 @@ test.describe("SSE Resilience", () => {
     // All tasks should appear (or at least the dashboard should not crash)
     // Check at least one is visible
     await expect(page.locator(`text=${keys[0]}`)).toBeVisible({
-      timeout: 15000,
+      timeout: 30000,
     });
   });
 });

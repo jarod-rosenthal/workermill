@@ -30,6 +30,14 @@ RUN curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /
     && apt-get install -y docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
+# Docker security wrapper — blocks --privileged and host bind mounts to prevent
+# AI-generated code from escaping the container. Workers can still spin up
+# databases/caches via named volumes and port mapping. See docker-safe-wrapper.sh.
+COPY docker-safe-wrapper.sh /usr/local/bin/docker-safe-wrapper.sh
+RUN chmod +x /usr/local/bin/docker-safe-wrapper.sh \
+    && mv /usr/bin/docker /usr/bin/docker.real \
+    && ln -s /usr/local/bin/docker-safe-wrapper.sh /usr/bin/docker
+
 # Kaniko executor for Docker image builds (daemon-less, works in Fargate).
 # Only tool that MUST be baked in — no standalone binary download exists.
 COPY --from=gcr.io/kaniko-project/executor:latest /kaniko/executor /kaniko/executor

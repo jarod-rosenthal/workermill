@@ -506,6 +506,48 @@ cmd_start() {
     check_worker_image
   else
     log "Mock worker mode — skipping OAuth and worker image checks"
+
+    # Stop the WorkerMill agent if running — it would claim tasks before mock workers
+    local agent_port_file="$HOME/.workermill/agent.port"
+    local agent_token_file="$HOME/.workermill/agent.token"
+    local agent_pid_file="$HOME/.workermill/agent.pid"
+    if [ -f "$agent_port_file" ]; then
+      local agent_port
+      agent_port=$(cat "$agent_port_file" 2>/dev/null)
+      if [ -n "$agent_port" ] && lsof -ti :"$agent_port" &>/dev/null; then
+        warn "Stopping WorkerMill agent (conflicts with mock workers)"
+        # Try graceful shutdown via HTTP
+        if [ -f "$agent_token_file" ]; then
+          local agent_token
+          agent_token=$(cat "$agent_token_file" 2>/dev/null)
+          curl -s -X POST "http://localhost:${agent_port}/shutdown" \
+            -H "Authorization: Bearer ${agent_token}" &>/dev/null || true
+          sleep 1
+        fi
+        # Force-kill if still running
+        if lsof -ti :"$agent_port" &>/dev/null; then
+          lsof -ti :"$agent_port" | xargs -r kill -9 2>/dev/null || true
+          sleep 0.5
+        fi
+        # Also kill by PID file if it exists
+        if [ -f "$agent_pid_file" ]; then
+          local agent_pid
+          agent_pid=$(cat "$agent_pid_file" 2>/dev/null)
+          if [ -n "$agent_pid" ] && kill -0 "$agent_pid" 2>/dev/null; then
+            kill -9 "$agent_pid" 2>/dev/null || true
+          fi
+        fi
+        log "Agent stopped"
+      fi
+    elif [ -f "$agent_pid_file" ]; then
+      local agent_pid
+      agent_pid=$(cat "$agent_pid_file" 2>/dev/null)
+      if [ -n "$agent_pid" ] && kill -0 "$agent_pid" 2>/dev/null; then
+        warn "Stopping WorkerMill agent (conflicts with mock workers)"
+        kill -9 "$agent_pid" 2>/dev/null || true
+        log "Agent stopped"
+      fi
+    fi
   fi
 
   # Start services

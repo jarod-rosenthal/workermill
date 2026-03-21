@@ -8,7 +8,10 @@ import { test, expect } from "@playwright/test";
  * routes remain accessible.
  */
 test.describe("Route Protection (Unauthenticated)", () => {
+  const isLocal = !process.env.BASE_URL;
+
   test("visiting /dashboard redirects to /login", async ({ page }) => {
+    test.skip(isLocal, "Local mode auto-logs in — no login redirect");
     await page.goto("/dashboard");
 
     // Should redirect to login or cognito auth page
@@ -18,6 +21,7 @@ test.describe("Route Protection (Unauthenticated)", () => {
   });
 
   test("visiting /settings redirects to /login", async ({ page }) => {
+    test.skip(isLocal, "Local mode auto-logs in — no login redirect");
     await page.goto("/settings");
 
     await expect(page).toHaveURL(/.*login.*|.*cognito.*|.*auth.*/, {
@@ -26,6 +30,7 @@ test.describe("Route Protection (Unauthenticated)", () => {
   });
 
   test("visiting /profile redirects to /login", async ({ page }) => {
+    test.skip(isLocal, "Local mode auto-logs in — no login redirect");
     await page.goto("/profile");
 
     await expect(page).toHaveURL(/.*login.*|.*cognito.*|.*auth.*/, {
@@ -34,6 +39,7 @@ test.describe("Route Protection (Unauthenticated)", () => {
   });
 
   test("visiting /analytics redirects to /login", async ({ page }) => {
+    test.skip(isLocal, "Local mode auto-logs in — no login redirect");
     await page.goto("/analytics");
 
     await expect(page).toHaveURL(/.*login.*|.*cognito.*|.*auth.*/, {
@@ -42,6 +48,7 @@ test.describe("Route Protection (Unauthenticated)", () => {
   });
 
   test("visiting /boards redirects to /login", async ({ page }) => {
+    test.skip(isLocal, "Local mode auto-logs in — no login redirect");
     await page.goto("/boards");
 
     await expect(page).toHaveURL(/.*login.*|.*cognito.*|.*auth.*/, {
@@ -50,6 +57,7 @@ test.describe("Route Protection (Unauthenticated)", () => {
   });
 
   test("visiting /personas redirects to /login", async ({ page }) => {
+    test.skip(isLocal, "Local mode auto-logs in — no login redirect");
     await page.goto("/personas");
 
     await expect(page).toHaveURL(/.*login.*|.*cognito.*|.*auth.*/, {
@@ -58,6 +66,7 @@ test.describe("Route Protection (Unauthenticated)", () => {
   });
 
   test("visiting /billing redirects to /login", async ({ page }) => {
+    test.skip(isLocal, "Local mode auto-logs in — no login redirect");
     await page.goto("/billing");
 
     await expect(page).toHaveURL(/.*login.*|.*cognito.*|.*auth.*/, {

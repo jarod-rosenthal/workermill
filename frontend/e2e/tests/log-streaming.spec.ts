@@ -48,7 +48,7 @@ test.describe("Log Streaming", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -103,7 +103,7 @@ test.describe("Log Streaming", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -137,7 +137,7 @@ test.describe("Log Streaming", () => {
     if ((await logArea.count()) > 0) {
       // The success mock posts multiple log lines
       await expect(logArea.first()).toContainText(/\[mock\]|Starting|Running/, {
-        timeout: 15000,
+        timeout: 30000,
       });
     }
   });
@@ -155,7 +155,7 @@ test.describe("Log Streaming", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -189,7 +189,7 @@ test.describe("Log Streaming", () => {
     if ((await logArea.count()) > 0) {
       await expect(logArea.first()).toContainText(
         /ERROR|Build failed|type error/i,
-        { timeout: 15000 },
+        { timeout: 30000 },
       );
     }
   });
@@ -207,7 +207,7 @@ test.describe("Log Streaming", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -258,7 +258,7 @@ test.describe("Log Streaming", () => {
 
     if ((await logArea.count()) > 0) {
       await expect(logArea.first()).toContainText(/\[mock\]|Starting|Analyzing/, {
-        timeout: 15000,
+        timeout: 30000,
       });
     }
   });

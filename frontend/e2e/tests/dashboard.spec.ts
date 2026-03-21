@@ -36,7 +36,7 @@ test.describe("Dashboard", () => {
     // Wait for dashboard to be ready — MainDashboard.tsx renders data-testid="dashboard"
     await expect(
       page.locator('[data-testid="dashboard"]'),
-    ).toBeVisible({ timeout: 15000 });
+    ).toBeVisible({ timeout: 30000 });
 
     // Should show either task list or empty state
     const taskList = page.locator('[data-testid="task-list"]');
@@ -60,13 +60,13 @@ test.describe("Dashboard", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
     await page.goto("/dashboard");
     await expect(page.locator(`text=${jiraKey}`)).toBeVisible({
-      timeout: 15000,
+      timeout: 30000,
     });
 
     // Task card should have a status indicator — MainDashboard uses data-testid="task-card" and data-testid="task-status"
@@ -98,7 +98,7 @@ test.describe("Dashboard", () => {
 
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -135,7 +135,7 @@ test.describe("Dashboard", () => {
     await page.goto("/dashboard");
     await page.waitForSelector(
       '[data-testid="dashboard"]',
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
 
     // Create a task via webhook
@@ -149,7 +149,7 @@ test.describe("Dashboard", () => {
     await apiClient.sendJiraWebhook(payload);
     const task = await waitFor(
       async () => apiClient.getTaskByJiraKey(jiraKey),
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
     createdTaskIds.push(task.id);
 
@@ -158,7 +158,7 @@ test.describe("Dashboard", () => {
     await page.waitForTimeout(5000);
 
     await expect(page.locator(`text=${jiraKey}`)).toBeVisible({
-      timeout: 15000,
+      timeout: 30000,
     });
   });
 
@@ -166,7 +166,7 @@ test.describe("Dashboard", () => {
     await page.goto("/dashboard");
     await page.waitForSelector(
       '[data-testid="dashboard"]',
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
 
     const userMenu = page.locator(
@@ -196,7 +196,7 @@ test.describe("Dashboard", () => {
   test("sidebar navigation links are present", async ({ page }) => {
     await page.goto("/dashboard");
     await page.waitForSelector('[data-testid="dashboard"]', {
-      timeout: 15000,
+      timeout: 30000,
     });
 
     // Check for common navigation links

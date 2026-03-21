@@ -300,7 +300,9 @@ router.post(
       const canUseEpicMode = (org.primaryProvider === "anthropic" || !org.primaryProvider) && !hasRoutingOverrides;
 
       // Create task
-      const needsPlanning = isPrdTicket || isV2Pipeline || isMultiProvider;
+      // Mock worker mode: skip planning entirely — tasks go straight to queued
+      // so mock workers can pick them up immediately for E2E testing
+      const needsPlanning = process.env.MOCK_WORKERS !== "true" && (isPrdTicket || isV2Pipeline || isMultiProvider);
       const initialStatus = needsPlanning ? "planning" : "queued";
       const taskPersona = needsPlanning ? "project_manager" : persona;
 

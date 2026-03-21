@@ -3,23 +3,31 @@ export interface Board {
   name: string;
   description?: string;
   prefix: string;
-  org_id: string;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-  is_starred?: boolean;
-  card_count: number;
-  column_count: number;
+  position?: number;
+  template?: string;
+  metadata?: any;
+  qualityGateCommands?: string;
+  ciWorkflowPath?: string;
+  priority?: string;
+  dueDate?: string;
+  assigneeId?: string;
+  status?: string;
+  prdSource?: string;
+  cardCount: number;
+  columnCount: number;
+  isStarred?: boolean;
+  createdAt: string;
+  updatedAt: string;
   columns: Column[];
 }
 
 export interface Column {
   id: string;
-  board_id: string;
+  boardId: string;
   name: string;
   position: number;
-  created_at: string;
-  updated_at: string;
+  createdAt: string;
+  updatedAt: string;
   cards: Card[];
 }
 

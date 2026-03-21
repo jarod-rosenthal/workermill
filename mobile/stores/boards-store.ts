@@ -65,10 +65,10 @@ export const useBoardsStore = create<BoardsState>()(
         set({ isLoading: true, error: null });
 
         try {
-          const boards = await apiClient.get<Board[]>('/boards');
+          const data = await apiClient.get<{ boards: Board[] }>('/boards');
 
           set({
-            boards,
+            boards: data.boards || [],
             lastUpdated: new Date().toISOString(),
             isLoading: false,
             error: null

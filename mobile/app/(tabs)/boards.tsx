@@ -32,7 +32,7 @@ function BoardListItem({ board, onPress, onStarPress }: BoardListItemProps) {
       className="mb-3"
       style={{ minHeight: 48, minWidth: 48 }} // Minimum touch target
       accessibilityRole="button"
-      accessibilityLabel={`Board ${board.prefix} - ${board.name}. ${board.card_count} cards, ${board.column_count} columns`}
+      accessibilityLabel={`Board ${board.prefix} - ${board.name}. ${board.cardCount} cards, ${board.columnCount} columns`}
       accessibilityHint="Double tap to open board"
     >
       <Card className="p-4">
@@ -76,7 +76,7 @@ function BoardListItem({ board, onPress, onStarPress }: BoardListItemProps) {
                   className="text-xs text-slate-500 dark:text-slate-400"
                   accessibilityRole="text"
                 >
-                  {board.card_count} cards
+                  {board.cardCount} cards
                 </Text>
               </View>
               <View className="flex-row items-center">
@@ -90,7 +90,7 @@ function BoardListItem({ board, onPress, onStarPress }: BoardListItemProps) {
                   className="text-xs text-slate-500 dark:text-slate-400"
                   accessibilityRole="text"
                 >
-                  {board.column_count} columns
+                  {board.columnCount} columns
                 </Text>
               </View>
             </View>
@@ -101,12 +101,12 @@ function BoardListItem({ board, onPress, onStarPress }: BoardListItemProps) {
             className="p-2"
             style={{ minHeight: 44, minWidth: 44 }} // Minimum touch target
             accessibilityRole="button"
-            accessibilityLabel={board.is_starred ? "Unstar board" : "Star board"}
+            accessibilityLabel={board.isStarred ? "Unstar board" : "Star board"}
           >
             <Ionicons
-              name={board.is_starred ? "star" : "star-outline"}
+              name={board.isStarred ? "star" : "star-outline"}
               size={20}
-              color={board.is_starred ? "#facc15" : "#64748b"}
+              color={board.isStarred ? "#facc15" : "#64748b"}
             />
           </TouchableOpacity>
         </View>
@@ -328,7 +328,7 @@ export default function BoardsScreen() {
 
   const handleStarToggle = useCallback(async (board: Board) => {
     try {
-      await toggleBoardStar(board.id, !board.is_starred);
+      await toggleBoardStar(board.id, !board.isStarred);
     } catch (error) {
       Alert.alert('Error', 'Failed to update board star status');
     }

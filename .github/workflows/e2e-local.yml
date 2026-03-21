@@ -9,12 +9,12 @@ on:
         options:
           - local
           - production
-        default: local
+        default: production
 
 jobs:
   e2e:
     name: E2E Tests (Playwright)
-    runs-on: [self-hosted, linux, x64, ecs]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     env:
@@ -29,6 +29,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -38,17 +40,29 @@ jobs:
         working-directory: frontend
         run: npx playwright install chromium --with-deps
 
-      # Local: start full stack with mock workers
+      # Local: start full stack with Cognito auth (not auto-login)
+      - name: Install API dependencies
+        if: inputs.target == 'local'
+        working-directory: api
+        run: npm ci
+
       - name: Start local WorkerMill
         if: inputs.target == 'local'
+        env:
+          COGNITO_USER_POOL_ID: us-east-1_oHZOtoac8
+          COGNITO_CLIENT_ID: 4bpjbr7gu9ne5rgo3v0rjic7hq
+          COGNITO_DOMAIN: auth.workermill.com
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           chmod +x bin/local-workermill
-          ./bin/local-workermill start --mock-workers --skip-fe
+          ./bin/local-workermill start --cognito-auth --mock-workers --skip-fe
           # Playwright starts its own frontend via webServer config
 
       - name: Run E2E tests
         working-directory: frontend
-        run: npx playwright test
+        run: npx playwright test --reporter=list,html
         env:
           BASE_URL: ${{ inputs.target == 'production' && 'https://workermill.com' || '' }}
 

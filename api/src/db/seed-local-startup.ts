@@ -9,7 +9,7 @@
  */
 
 import { AppDataSource } from "./connection.js";
-import { Organization, User, UserOrganization } from "../models/index.js";
+import { Organization, User, UserOrganization, WebhookEndpoint } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import { TOS_VERSION } from "../constants/tos.js";
 
@@ -69,45 +69,45 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
     blockerWaitTimeoutMinutes: 20,
   };
 
-  // Find or create default org — seed only on first run
+  // Find or create default org
   let org = await orgRepo.findOne({ where: { name: LOCAL_ORG_NAME } });
-  if (org) {
-    // Org already exists — don't overwrite user's settings
-    const localAdmin = await userRepo.findOne({ where: { email: LOCAL_ADMIN_EMAIL } });
-    if (localAdmin) return;
-  } else {
+  if (!org) {
     org = orgRepo.create({ name: LOCAL_ORG_NAME, ...DEFAULTS });
     await orgRepo.save(org);
     logger.info("Created local organization", { orgId: org.id });
   }
 
-  // Check if the local admin user exists (look for our specific user, not any admin)
+  // Find or create admin user
   let adminUser = await userRepo.findOne({ where: { email: LOCAL_ADMIN_EMAIL } });
-  if (adminUser) {
-    return;
+  if (!adminUser) {
+    logger.info("Local mode: seeding admin user");
+    adminUser = userRepo.create({
+      orgId: org.id,
+      cognitoId: LOCAL_COGNITO_ID,
+      email: LOCAL_ADMIN_EMAIL,
+      fullName: "Local Admin",
+      role: "admin",
+      tosAcceptedAt: new Date(),
+      tosVersion: TOS_VERSION,
+    });
+    await userRepo.save(adminUser);
+    logger.info("Created local admin user", { userId: adminUser.id });
+  } else {
+    // Ensure TOS is accepted (may have been seeded before TOS fix)
+    if (!adminUser.tosVersion || adminUser.tosVersion !== TOS_VERSION) {
+      adminUser.tosAcceptedAt = new Date();
+      adminUser.tosVersion = TOS_VERSION;
+      await userRepo.save(adminUser);
+      logger.info("Updated local admin TOS version");
+    }
   }
 
-  logger.info("Local mode: seeding admin user");
-
-  // Create admin user
-  adminUser = userRepo.create({
-    orgId: org.id,
-    cognitoId: LOCAL_COGNITO_ID,
-    email: LOCAL_ADMIN_EMAIL,
-    fullName: "Local Admin",
-    role: "admin",
-    tosAcceptedAt: new Date(),
-    tosVersion: TOS_VERSION,
-  });
-  await userRepo.save(adminUser);
-  logger.info("Created local admin user", { userId: adminUser.id });
-
-  // Create user-organization mapping
+  // Ensure user-organization mapping exists
   const uoRepo = AppDataSource.getRepository(UserOrganization);
-  const existing = await uoRepo.findOne({
+  const uoExisting = await uoRepo.findOne({
     where: { userId: adminUser.id, orgId: org.id },
   });
-  if (!existing) {
+  if (!uoExisting) {
     const uo = uoRepo.create({
       userId: adminUser.id,
       orgId: org.id,
@@ -115,6 +115,26 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
       isDefault: true,
     });
     await uoRepo.save(uo);
+  }
+
+  // Ensure Jira webhook endpoint exists (for E2E tests and local development)
+  // Signature verification is disabled so local webhooks work without secrets
+  const webhookRepo = AppDataSource.getRepository(WebhookEndpoint);
+  const jiraEndpoint = await webhookRepo.findOne({
+    where: { orgId: org.id, integrationType: "jira" },
+  });
+  if (!jiraEndpoint) {
+    const endpoint = webhookRepo.create({
+      orgId: org.id,
+      integrationType: "jira" as const,
+      webhookSecret: "local-dev-secret",
+      isActive: true,
+      config: { skipSignatureValidation: true },
+    });
+    await webhookRepo.save(endpoint);
+    logger.info("Created local Jira webhook endpoint", {
+      url: `/api/webhooks/${org.slug}/jira`,
+    });
   }
 
   logger.info("Local mode bootstrap complete");

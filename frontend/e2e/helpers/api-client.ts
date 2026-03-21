@@ -40,7 +40,7 @@ export class APIClient {
             `E2E test task created at ${new Date().toISOString()}`,
           issuetype: { name: "Task" },
           project: { key: options.issueKey.split("-")[0] },
-          labels: (options.labels || ["workermill"]).map((name) => ({ name })),
+          labels: options.labels || ["workermill"],
           status: { name: "To Do" },
         },
       },
@@ -59,7 +59,10 @@ export class APIClient {
   async sendJiraWebhook(
     payload: ReturnType<typeof this.createJiraWebhookPayload>,
   ) {
-    return this.request.post(`${this.apiURL}/api/webhooks/jira`, {
+    // Use org-scoped webhook endpoint (legacy /api/webhooks/jira was removed)
+    // Local dev uses slug "local", production uses the org's actual slug
+    const orgSlug = process.env.E2E_ORG_SLUG || "local";
+    return this.request.post(`${this.apiURL}/api/webhooks/${orgSlug}/jira`, {
       data: payload,
     });
   }

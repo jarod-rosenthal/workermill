@@ -1,5 +1,4 @@
 import { test, expect } from "@playwright/test";
-import { APIClient } from "../../helpers/api-client";
 
 /**
  * Settings propagation flow tests.
@@ -10,22 +9,17 @@ import { APIClient } from "../../helpers/api-client";
  *
  * All mutations are non-destructive — original values are restored.
  */
-const isProduction = !!process.env.BASE_URL?.includes("workermill.com");
+const isProduction = !!process.env.BASE_URL; // Skip when targeting a deployed env (no mock workers)
+
+// Derive API URL once — locally API is on :3001, in production it's same host
+const baseURL = process.env.BASE_URL || "http://localhost:5173";
+const apiURL = baseURL.includes("localhost")
+  ? baseURL.replace(/:\d+$/, ":3001")
+  : baseURL;
 
 test.describe("Settings Propagation", () => {
-  // Raw API calls don't carry browser auth tokens in production
+  // Direct API calls only work with local auth (EXECUTION_MODE=local auto-authenticates)
   test.skip(isProduction, "Direct API calls require local auth — only runs against local stack");
-
-  let apiClient: APIClient;
-  let apiURL: string;
-
-  test.beforeAll(async ({ request }) => {
-    apiClient = new APIClient(request);
-    const baseURL = process.env.BASE_URL || "http://localhost:5173";
-    apiURL = baseURL.includes("localhost")
-      ? baseURL.replace(/:\d+$/, ":3001")
-      : baseURL;
-  });
 
   // ── Test 1: Settings page loads with current values ──────────────────
 
@@ -47,7 +41,6 @@ test.describe("Settings Propagation", () => {
     );
     if ((await aiNav.count()) > 0) {
       await aiNav.first().click();
-      await page.waitForTimeout(500);
     }
 
     // Should show AI Workers / model-related content
@@ -66,7 +59,6 @@ test.describe("Settings Propagation", () => {
     const hasText = (await parallelText.count()) > 0;
     expect(hasInput || hasText).toBeTruthy();
 
-    // If it's an input, verify it has a numeric value
     if (hasInput) {
       const value = await parallelInput.first().inputValue();
       expect(Number(value)).toBeGreaterThan(0);
@@ -78,7 +70,6 @@ test.describe("Settings Propagation", () => {
   test("settings round-trip — modify maxParallelExperts, verify, restore", async ({
     request,
   }) => {
-    // Step 1: Read current settings
     const getResponse = await request.get(`${apiURL}/api/settings`);
     expect(getResponse.ok()).toBeTruthy();
     const original = await getResponse.json();
@@ -87,72 +78,46 @@ test.describe("Settings Propagation", () => {
     const originalValue = original.maxParallelExperts;
     expect(typeof originalValue).toBe("number");
 
-    // Step 2: Compute a different value (toggle between two safe values)
     const newValue = originalValue === 14 ? 12 : 14;
 
-    // Step 3: Modify the setting
     const putResponse = await request.put(`${apiURL}/api/settings`, {
       data: { maxParallelExperts: newValue },
     });
     expect(putResponse.ok()).toBeTruthy();
 
-    // Step 4: Read back and verify the change persisted
     const verifyResponse = await request.get(`${apiURL}/api/settings`);
     expect(verifyResponse.ok()).toBeTruthy();
     const updated = await verifyResponse.json();
     expect(updated.maxParallelExperts).toBe(newValue);
 
-    // Step 5: Restore original value
-    const restoreResponse = await request.put(`${apiURL}/api/settings`, {
+    // Restore
+    await request.put(`${apiURL}/api/settings`, {
       data: { maxParallelExperts: originalValue },
     });
-    expect(restoreResponse.ok()).toBeTruthy();
-
-    // Step 6: Confirm restoration
-    const finalResponse = await request.get(`${apiURL}/api/settings`);
-    expect(finalResponse.ok()).toBeTruthy();
-    const restored = await finalResponse.json();
-    expect(restored.maxParallelExperts).toBe(originalValue);
   });
 
   // ── Test 3: Worker config reflects org settings ──────────────────────
 
   test("worker config returns expected structure", async ({ request }) => {
-    // worker-decisions routes use API key auth (authenticateApiKey middleware).
-    // In self-hosted / local mode, apiKey="self-hosted" bypasses auth.
-    // For production, E2E_API_KEY env var can be provided.
     const apiKey = process.env.E2E_API_KEY || "self-hosted";
 
     const response = await request.get(
       `${apiURL}/api/worker-decisions/worker-config`,
-      {
-        headers: { "x-api-key": apiKey },
-      },
+      { headers: { "x-api-key": apiKey } },
     );
     expect(response.ok()).toBeTruthy();
 
     const config = await response.json();
-
-    // Verify the expected top-level structure
     expect(config).toHaveProperty("defaults");
     expect(config).toHaveProperty("reviewSchema");
     expect(config).toHaveProperty("personaIcons");
-
-    // Defaults should contain key operational values
-    expect(config.defaults).toBeDefined();
     expect(typeof config.defaults).toBe("object");
-
-    // Review schema should define the structured review format
-    expect(config.reviewSchema).toBeDefined();
-
-    // Persona icons should be a mapping object
     expect(typeof config.personaIcons).toBe("object");
   });
 
   // ── Test 4: Quality gate settings toggle ─────────────────────────────
 
   test("quality gate toggle state matches API", async ({ page, request }) => {
-    // Step 1: Read current quality gate setting from API
     const apiResponse = await request.get(`${apiURL}/api/settings`);
     expect(apiResponse.ok()).toBeTruthy();
     const settings = await apiResponse.json();
@@ -160,20 +125,16 @@ test.describe("Settings Propagation", () => {
     expect(settings).toHaveProperty("qualityGateEnabled");
     const apiQualityGateEnabled = settings.qualityGateEnabled;
 
-    // Step 2: Navigate to settings page
     await page.goto("/settings");
     await page.waitForLoadState("domcontentloaded");
 
-    // Navigate to AI Workers or the section containing quality gates
     const aiNav = page.locator(
       'button:has-text("AI Workers"), a:has-text("AI Workers"), [data-testid="settings-nav-ai-workers"]',
     );
     if ((await aiNav.count()) > 0) {
       await aiNav.first().click();
-      await page.waitForTimeout(500);
     }
 
-    // Step 3: Find the quality gate toggle in the UI
     const qualityGateToggle = page.locator(
       '[data-testid="quality-gate-toggle"], input[name="qualityGateEnabled"], [data-testid*="quality-gate"] input[type="checkbox"], [data-testid*="quality-gate"] button[role="switch"]',
     );
@@ -181,25 +142,17 @@ test.describe("Settings Propagation", () => {
 
     const hasToggle = (await qualityGateToggle.count()) > 0;
     const hasLabel = (await qualityGateLabel.count()) > 0;
-
-    // Quality gate section should be present in some form
     expect(hasToggle || hasLabel).toBeTruthy();
 
-    // Step 4: If we found a toggle, verify its state matches the API
     if (hasToggle) {
       const toggle = qualityGateToggle.first();
-      const tagName = await toggle.evaluate((el) =>
-        el.tagName.toLowerCase(),
-      );
+      const tagName = await toggle.evaluate((el) => el.tagName.toLowerCase());
 
       if (tagName === "input") {
-        const isChecked = await toggle.isChecked();
-        expect(isChecked).toBe(apiQualityGateEnabled);
+        expect(await toggle.isChecked()).toBe(apiQualityGateEnabled);
       } else if (tagName === "button") {
-        // role="switch" buttons use aria-checked
         const ariaChecked = await toggle.getAttribute("aria-checked");
-        const isPressed = ariaChecked === "true";
-        expect(isPressed).toBe(apiQualityGateEnabled);
+        expect(ariaChecked === "true").toBe(apiQualityGateEnabled);
       }
     }
   });

@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { APIClient } from "../../helpers/api-client";
 import { createTestJiraKey, waitFor } from "../../helpers/test-data";
 
-const isProduction = !!process.env.BASE_URL?.includes('workermill.com');
+const isProduction = !!process.env.BASE_URL; // Skip when targeting a deployed env (no mock workers)
 
 /**
  * Multi-Task Parallel Execution flow tests.

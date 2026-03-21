@@ -164,6 +164,9 @@ describe('AuthStore', () => {
     it('should reset biometric fail count', async () => {
       const store = useAuthStore.getState();
 
+      // Enable biometric first — resetBiometricFailCount uses get().isBiometricEnabled
+      useAuthStore.setState({ isBiometricEnabled: true, biometricFailCount: 2 });
+
       await store.resetBiometricFailCount();
 
       expect(mockedSecureStore.setItemAsync).toHaveBeenCalledWith('biometric_fail_count', '0');

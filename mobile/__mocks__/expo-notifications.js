@@ -5,6 +5,8 @@ export const setNotificationHandler = jest.fn();
 export const addNotificationReceivedListener = jest.fn();
 export const addNotificationResponseReceivedListener = jest.fn();
 export const removeNotificationSubscription = jest.fn();
+export const removeAllNotificationListeners = jest.fn();
+export const openSettingsAsync = jest.fn();
 
 export default {
   getPermissionsAsync,
@@ -14,4 +16,6 @@ export default {
   addNotificationReceivedListener,
   addNotificationResponseReceivedListener,
   removeNotificationSubscription,
+  removeAllNotificationListeners,
+  openSettingsAsync,
 };

@@ -24,20 +24,18 @@ const mockSSEClient = {
   isConnected: jest.fn(() => true),
 };
 
-// Mock task data
+// Mock task data (camelCase to match WorkerTask interface)
 const mockTask: WorkerTask = {
   id: 'task-1',
-  issue_key: 'TEST-123',
+  jiraIssueKey: 'TEST-123',
   summary: 'Test task',
   status: 'executing' as WorkerTaskStatus,
-  persona: 'backend_developer',
-  persona_emoji: '🧑‍💻',
-  created_at: '2024-01-01T00:00:00Z',
-  started_at: '2024-01-01T00:01:00Z',
-  elapsed_time_ms: 60000,
-  cost_cents: 150,
-  retry_count: 0,
-  workflow_mode: 'auto',
+  workerPersona: 'backend_developer',
+  createdAt: '2024-01-01T00:00:00Z',
+  startedAt: '2024-01-01T00:01:00Z',
+  estimatedCostUsd: 1.50,
+  retryCount: 0,
+  workflowMode: 'auto',
 };
 
 const mockStats = {
@@ -47,9 +45,17 @@ const mockStats = {
   periodCompleted: 15,
 };
 
+// Mock API response matches new shape: { activeTasks, queuedTasks, recentCompleted, stats }
 const mockApiResponse = {
-  tasks: [mockTask],
-  stats: mockStats,
+  activeTasks: [mockTask],
+  queuedTasks: [],
+  recentCompleted: [],
+  stats: {
+    activeWorkers: 2,
+    queueDepth: 5,
+    periodCost: 12.00, // in dollars, store converts to cents
+    periodCompleted: 15,
+  },
 };
 
 describe('TasksStore', () => {
@@ -281,7 +287,7 @@ describe('TasksStore', () => {
         tasks: [
           { ...mockTask, id: 'task-1', status: 'executing' },
           { ...mockTask, id: 'task-2', status: 'queued' },
-          { ...mockTask, id: 'task-3', status: 'completed', completed_at: '2024-01-01T12:00:00Z' },
+          { ...mockTask, id: 'task-3', status: 'completed', completedAt: '2024-01-01T12:00:00Z' },
         ] as WorkerTask[]
       });
     });
@@ -319,8 +325,8 @@ describe('TasksStore', () => {
         tasks: [
           { ...mockTask, id: 'task-1', status: 'executing' },
           { ...mockTask, id: 'task-2', status: 'queued' },
-          { ...mockTask, id: 'task-3', status: 'completed', completed_at: halfDayAgo.toISOString() },
-          { ...mockTask, id: 'task-4', status: 'failed', failed_at: twoDaysAgo.toISOString() },
+          { ...mockTask, id: 'task-3', status: 'completed', completedAt: halfDayAgo.toISOString() },
+          { ...mockTask, id: 'task-4', status: 'failed', completedAt: twoDaysAgo.toISOString() },
           { ...mockTask, id: 'task-5', status: 'planning' },
         ] as WorkerTask[]
       });

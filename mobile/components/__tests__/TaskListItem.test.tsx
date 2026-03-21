@@ -5,17 +5,16 @@ import { WorkerTask } from '../../types/tasks';
 
 const mockTask: WorkerTask = {
   id: 'test-task-1',
-  issue_key: 'WM-123',
+  jiraIssueKey: 'WM-123',
   summary: 'Implement user authentication system',
   status: 'executing',
-  persona: 'Backend Developer',
-  persona_emoji: '🔧',
-  created_at: '2024-01-15T10:00:00Z',
-  started_at: '2024-01-15T10:05:00Z',
-  elapsed_time_ms: 125000, // 2 minutes 5 seconds
-  cost_cents: 250, // $2.50
-  retry_count: 0,
-  workflow_mode: 'auto' as const,
+  workerPersona: 'Backend Developer',
+  createdAt: '2024-01-15T10:00:00Z',
+  startedAt: '2024-01-15T10:05:00Z',
+  completedAt: '2024-01-15T10:07:05Z', // 2 minutes 5 seconds after startedAt
+  estimatedCostUsd: 2.50,
+  retryCount: 0,
+  workflowMode: 'auto',
 };
 
 describe('TaskListItem', () => {
@@ -33,12 +32,12 @@ describe('TaskListItem', () => {
     expect(screen.getByText('Executing')).toBeTruthy();
   });
 
-  it('renders persona emoji and name', () => {
+  it('renders robot emoji and persona name', () => {
     render(<TaskListItem task={mockTask} />);
 
     const personaText = screen.getByLabelText('Worker: Backend Developer');
     expect(personaText).toBeTruthy();
-    expect(screen.getByText('🔧 Backend Developer')).toBeTruthy();
+    expect(screen.getByText('🤖 Backend Developer')).toBeTruthy();
   });
 
   it('renders elapsed time when provided', () => {
@@ -57,8 +56,8 @@ describe('TaskListItem', () => {
     expect(screen.getByText('$2.50')).toBeTruthy();
   });
 
-  it('handles task without elapsed time', () => {
-    const taskWithoutTime = { ...mockTask, elapsed_time_ms: undefined };
+  it('handles task without started time', () => {
+    const taskWithoutTime = { ...mockTask, startedAt: undefined, completedAt: undefined };
     render(<TaskListItem task={taskWithoutTime} />);
 
     expect(screen.getByText('WM-123')).toBeTruthy();
@@ -66,18 +65,18 @@ describe('TaskListItem', () => {
   });
 
   it('handles task without cost', () => {
-    const taskWithoutCost = { ...mockTask, cost_cents: undefined };
+    const taskWithoutCost = { ...mockTask, estimatedCostUsd: undefined, costUsd: undefined };
     render(<TaskListItem task={taskWithoutCost} />);
 
     expect(screen.getByText('WM-123')).toBeTruthy();
     expect(screen.queryByLabelText(/Cost:/)).toBeNull();
   });
 
-  it('handles task without persona emoji', () => {
-    const taskWithoutEmoji = { ...mockTask, persona_emoji: undefined };
-    render(<TaskListItem task={taskWithoutEmoji} />);
+  it('handles task without persona', () => {
+    const taskWithoutPersona = { ...mockTask, workerPersona: undefined };
+    render(<TaskListItem task={taskWithoutPersona} />);
 
-    expect(screen.getByText('🤖 Backend Developer')).toBeTruthy();
+    expect(screen.queryByLabelText(/Worker:/)).toBeNull();
   });
 
   it('calls onPress when tapped', () => {
@@ -102,7 +101,8 @@ describe('TaskListItem', () => {
     it('formats hours and minutes correctly', () => {
       const taskWithHours = {
         ...mockTask,
-        elapsed_time_ms: 3665000, // 1 hour, 1 minute, 5 seconds
+        startedAt: '2024-01-15T10:00:00Z',
+        completedAt: '2024-01-15T11:01:05Z', // 1 hour, 1 minute, 5 seconds
       };
       render(<TaskListItem task={taskWithHours} />);
 
@@ -113,7 +113,8 @@ describe('TaskListItem', () => {
     it('formats minutes and seconds correctly', () => {
       const taskWithMinutes = {
         ...mockTask,
-        elapsed_time_ms: 65000, // 1 minute, 5 seconds
+        startedAt: '2024-01-15T10:00:00Z',
+        completedAt: '2024-01-15T10:01:05Z', // 1 minute, 5 seconds
       };
       render(<TaskListItem task={taskWithMinutes} />);
 
@@ -124,7 +125,8 @@ describe('TaskListItem', () => {
     it('formats seconds correctly', () => {
       const taskWithSeconds = {
         ...mockTask,
-        elapsed_time_ms: 30000, // 30 seconds
+        startedAt: '2024-01-15T10:00:00Z',
+        completedAt: '2024-01-15T10:00:30Z', // 30 seconds
       };
       render(<TaskListItem task={taskWithSeconds} />);
 
@@ -137,7 +139,7 @@ describe('TaskListItem', () => {
     it('formats dollars and cents correctly', () => {
       const taskWithHighCost = {
         ...mockTask,
-        cost_cents: 12345, // $123.45
+        estimatedCostUsd: 123.45,
       };
       render(<TaskListItem task={taskWithHighCost} />);
 
@@ -148,7 +150,7 @@ describe('TaskListItem', () => {
     it('formats zero cost correctly', () => {
       const taskWithZeroCost = {
         ...mockTask,
-        cost_cents: 0,
+        estimatedCostUsd: 0,
       };
       render(<TaskListItem task={taskWithZeroCost} />);
 

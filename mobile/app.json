@@ -8,7 +8,7 @@
     "userInterfaceStyle": "automatic",
     "scheme": "workermill",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#0f172a"
     },
@@ -23,14 +23,16 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png",
         "backgroundColor": "#0f172a"
       },
       "package": "com.workermill.mobile",
       "permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT"]
     },
     "notification": {
-      "icon": "./assets/notification-icon.png",
+      "icon": "./assets/android-icon-monochrome.png",
       "color": "#6366f1",
       "androidMode": "default"
     },

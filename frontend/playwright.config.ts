@@ -55,6 +55,7 @@ export default defineConfig({
         storageState: "e2e/.auth/user.json",
       },
       dependencies: ["setup"],
+      testIgnore: /auth-routes\.spec\.ts/,
     },
 
     // Unauthenticated tests (route protection, public pages)

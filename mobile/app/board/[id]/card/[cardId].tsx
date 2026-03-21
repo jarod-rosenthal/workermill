@@ -110,8 +110,17 @@ function EditableField({ label, value, onSave, multiline, placeholder }: Editabl
         <View className="border border-slate-200 dark:border-slate-700 rounded-lg p-3">
           <MarkdownDisplay
             style={{
-              body: { fontSize: 14, color: '#1e293b' },
+              body: { fontSize: 14, color: '#e2e8f0' },
               paragraph: { marginTop: 0, marginBottom: 8 },
+              heading1: { color: '#f1f5f9' },
+              heading2: { color: '#f1f5f9' },
+              heading3: { color: '#f1f5f9' },
+              strong: { color: '#f1f5f9' },
+              link: { color: '#818cf8' },
+              code_inline: { backgroundColor: '#1e293b', color: '#e2e8f0' },
+              code_block: { backgroundColor: '#1e293b', color: '#e2e8f0' },
+              bullet_list: { color: '#e2e8f0' },
+              ordered_list: { color: '#e2e8f0' },
             }}
           >
             {value || placeholder || 'No description'}

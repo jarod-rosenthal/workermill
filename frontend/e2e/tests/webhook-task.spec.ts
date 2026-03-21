@@ -13,6 +13,10 @@ const isProduction = !!process.env.BASE_URL?.includes('workermill.com');
  * Uses the mock worker service via Jira key prefixes to control task outcomes.
  */
 test.describe("Webhook to Task Flow", () => {
+  // Webhook tests send Jira payloads and need mock workers for task completion.
+  // The APIClient fixture also can't cross beforeAll→test scope in Playwright.
+  test.skip(isProduction, "Requires mock workers and Jira webhook config — only runs against local stack");
+
   let apiClient: APIClient;
   const createdTaskIds: string[] = [];
 
@@ -159,7 +163,6 @@ test.describe("Webhook to Task Flow", () => {
   });
 
   test("task created via webhook completes via mock worker", async () => {
-    test.skip(isProduction, 'Requires mock workers — only runs against local stack');
     const jiraKey = createTestJiraKey("success");
 
     const payload = apiClient.createJiraWebhookPayload({

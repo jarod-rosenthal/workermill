@@ -56,11 +56,28 @@ setup("authenticate", async ({ page }) => {
     await page.waitForURL(/.*dashboard.*|.*onboarding.*|.*\/$/, { timeout: 30000 });
   }
 
-  // Verify we're authenticated — just confirm the page loaded (any content)
-  // Local mode may show dashboard, onboarding, or setup depending on DB state
-  await expect(page.locator("body")).not.toBeEmpty({ timeout: 30000 });
+  // Wait for auth tokens to be persisted to localStorage by Zustand.
+  // In local mode, the Login component calls /auth/me, receives a user,
+  // then sets tokens in the auth store which persists to localStorage.
+  // We must wait for this before saving storageState, otherwise subsequent
+  // tests won't have the auth tokens needed for API calls.
+  await page.waitForFunction(
+    () => {
+      const authStorage = localStorage.getItem("auth-storage");
+      if (!authStorage) return false;
+      try {
+        const parsed = JSON.parse(authStorage);
+        // Zustand persist wraps state in { state: { ... } }
+        const state = parsed.state || parsed;
+        return !!state.accessToken || !!state.user;
+      } catch {
+        return false;
+      }
+    },
+    { timeout: 30000 },
+  );
 
-  // Save authentication state
+  // Save authentication state (cookies + localStorage including auth tokens)
   await page.context().storageState({ path: authFile });
   console.log("Authentication setup complete");
 });

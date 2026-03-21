@@ -16,7 +16,7 @@ test.describe("Multi-Task Parallel Execution", () => {
   let apiClient: APIClient;
   const createdTaskIds: string[] = [];
 
-  test.beforeAll(async ({ request }) => {
+  test.beforeEach(async ({ request }) => {
     apiClient = new APIClient(request);
   });
 

@@ -142,7 +142,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await SecureStore.setItemAsync(SECURE_STORE_KEYS.BIOMETRIC_FAIL_COUNT, '0');
     set({
       biometricFailCount: 0,
-      shouldShowBiometric: true
+      shouldShowBiometric: get().isBiometricEnabled,
     });
   },
 

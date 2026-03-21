@@ -88,6 +88,7 @@ scripts/diagnose-tenant.ts
 
 # Misc artifacts
 *.png
+!mobile/assets/*.png
 swebench_predictions.jsonl
 
 .workermill-message.md

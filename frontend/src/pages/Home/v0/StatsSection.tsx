@@ -1,8 +1,8 @@
 const stats = [
   {
-    value: "273",
+    value: "500+",
     label: "Tasks completed",
-    detail: "Across 6 repositories and 4 organizations",
+    detail: "Across multiple repositories and organizations",
   },
   {
     value: "4+",

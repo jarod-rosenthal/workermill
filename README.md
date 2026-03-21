@@ -31,7 +31,7 @@
 Most AI coding tools are single-agent, single-file, one-shot. WorkerMill is an **orchestration layer** — it coordinates multiple AI experts working in parallel on your codebase, with real quality enforcement.
 
 - **Full pipeline, not a chatbot** — Planning, decomposition, parallel expert execution, quality gates, and PR delivery. Submit a task or an entire product spec.
-- **13 worker personas** — Backend, frontend, devops, security, QA, and more. Auto-assigned based on task content, or manually selected.
+- **13+ worker personas** — Backend, frontend, devops, security, QA, and more. Auto-assigned based on task content, or manually selected. Create custom personas for your org.
 - **Two-phase quality gates** — Pre-commit (lint, typecheck, test, build) + post-push CI polling. Gate failures trigger automatic fix agents.
 - **Any provider, any SCM** — Anthropic, OpenAI, Google, Ollama. GitHub, GitLab, Bitbucket. Mix and match per role.
 
@@ -158,11 +158,11 @@ Bring your own API keys. The execution pipeline is identical regardless of provi
 | Provider | Models | Integration |
 |----------|--------|-------------|
 | **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | Claude CLI (default) |
-| **OpenAI** | GPT-5.2, GPT-4o | Vercel AI SDK |
-| **Google** | Gemini 3.1 Pro, Gemini Flash | Vercel AI SDK |
+| **OpenAI** | GPT-4o, o3-mini, o1 | Vercel AI SDK |
+| **Google** | Gemini 3 Pro, Gemini 2.0 Flash | Vercel AI SDK |
 | **Ollama** | Local/self-hosted models | Vercel AI SDK + codebase RAG |
 
-### Worker Personas (13 roles)
+### Worker Personas (13 built-in roles)
 
 | Persona | Best For |
 |---------|----------|

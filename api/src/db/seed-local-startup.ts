@@ -46,7 +46,6 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
     maxFixRetries: 5,
     maxTargetFiles: 20,
     // Planning
-    // 90 matches production (workermill-examples org). CLAUDE.md mentions 85 but that's outdated.
     criticApprovalThreshold: 85,
     planningMode: "simplified",
     prdPlanningMode: "strict",

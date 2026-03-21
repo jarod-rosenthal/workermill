@@ -25,37 +25,35 @@ Notifications.setNotificationHandler({
 function useProtectedRoute(isAppReady: boolean) {
   const router = useRouter();
   const segments = useSegments();
-  const { isAuthenticated, isLoading, shouldShowBiometric } = useAuthStore();
-  const hasNavigated = React.useRef(false);
+  // Use selectors to avoid re-renders from unrelated store changes
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const isLoading = useAuthStore((s) => s.isLoading);
+  const shouldShowBiometric = useAuthStore((s) => s.shouldShowBiometric);
+  const lastNavTarget = React.useRef<string | null>(null);
 
   useEffect(() => {
     if (!isAppReady || isLoading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    let target: string | null = null;
 
-    if (!isAuthenticated) {
-      if (!inAuthGroup && !hasNavigated.current) {
-        hasNavigated.current = true;
-        // Use setTimeout to ensure the navigator is mounted
-        setTimeout(() => router.replace('/(auth)/sign-in'), 0);
-      }
-    } else {
-      if (inAuthGroup) {
-        hasNavigated.current = true;
-        const target = shouldShowBiometric ? '/(auth)/biometric' : '/(tabs)';
-        setTimeout(() => router.replace(target), 0);
-      } else {
-        // Already on the right screen, reset flag so future auth changes can navigate
-        hasNavigated.current = false;
-      }
+    if (!isAuthenticated && !inAuthGroup) {
+      target = '/(auth)/sign-in';
+    } else if (isAuthenticated && inAuthGroup) {
+      target = shouldShowBiometric ? '/(auth)/biometric' : '/(tabs)';
     }
-  }, [isAuthenticated, isLoading, shouldShowBiometric, segments]);
+
+    // Only navigate if target changed (prevents re-render loops)
+    if (target && target !== lastNavTarget.current) {
+      lastNavTarget.current = target;
+      setTimeout(() => router.replace(target as any), 0);
+    }
+  }, [isAuthenticated, isLoading, shouldShowBiometric, segments, isAppReady]);
 }
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const [isAppReady, setIsAppReady] = useState(false);
-  const { checkAuthStatus, loadBiometricSettings, isLoading } = useAuthStore();
-  const { loadPreferences } = useNotificationsStore();
+  const isLoading = useAuthStore((s) => s.isLoading);
 
   useProtectedRoute(isAppReady);
 
@@ -64,15 +62,16 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     const initializeApp = async () => {
       try {
         // Load auth state and biometric settings
+        const store = useAuthStore.getState();
         await Promise.all([
-          loadBiometricSettings(),
-          checkAuthStatus()
+          store.loadBiometricSettings(),
+          store.checkAuthStatus()
         ]);
 
         // Load notification preferences if authenticated
         // (will fail gracefully if not authenticated)
         try {
-          await loadPreferences();
+          await useNotificationsStore.getState().loadPreferences();
         } catch (error) {
           console.warn('Failed to load notification preferences:', error);
         }

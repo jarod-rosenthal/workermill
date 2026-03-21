@@ -381,8 +381,11 @@ export class LiveDiffManager {
 
   // ── Diff Editor ──
 
-  openDiff(fp: string): void {
+  async openDiff(fp: string): Promise<void> {
     this.currentFile = fp;
+
+    // Close any existing live diff tab so we reuse a single tab
+    await this.closeLiveDiffTab();
 
     const beforeUri = buildUri(BEFORE_SCHEME, this.taskId, fp);
     const afterUri = buildUri(AFTER_SCHEME, this.taskId, fp);
@@ -406,6 +409,30 @@ export class LiveDiffManager {
       title,
       { preview: true, preserveFocus: true } as vscode.TextDocumentShowOptions,
     );
+  }
+
+  /** Close any open tab whose URI matches our before/after schemes for this task. */
+  private async closeLiveDiffTab(): Promise<void> {
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        const input = tab.input;
+        if (
+          input &&
+          typeof input === "object" &&
+          "modified" in input &&
+          "original" in input
+        ) {
+          const diffInput = input as { original: vscode.Uri; modified: vscode.Uri };
+          if (
+            diffInput.modified.scheme === AFTER_SCHEME &&
+            diffInput.modified.authority === this.taskId
+          ) {
+            await vscode.window.tabGroups.close(tab);
+            return;
+          }
+        }
+      }
+    }
   }
 
   // ── File Picker ──
@@ -456,6 +483,9 @@ export class LiveDiffManager {
 
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.fireDebounceTimer) clearTimeout(this.fireDebounceTimer);
+
+    // Close the live diff tab
+    this.closeLiveDiffTab();
 
     // Remove shared file states for this task
     for (const fp of this.files.keys()) {

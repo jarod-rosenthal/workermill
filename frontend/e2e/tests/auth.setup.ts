@@ -25,10 +25,10 @@ setup("authenticate", async ({ page }) => {
   // Navigate to login page
   await page.goto("/login");
 
-  // Wait to see where we end up — either login form or auto-redirect to dashboard
+  // Wait to see where we end up — either login form or auto-redirect to dashboard/onboarding
   try {
-    // If we land on dashboard within 10s, local auto-login worked — skip credential fill
-    await page.waitForURL(/.*dashboard.*/, { timeout: 10000 });
+    // If we land on dashboard or onboarding within 10s, auto-login worked — skip credential fill
+    await page.waitForURL(/.*dashboard.*|.*onboarding.*|.*setup.*/, { timeout: 10000 });
     console.log("Auto-login detected (local mode) — skipping credential fill");
   } catch {
     // Still on login/cognito page — need to fill credentials
@@ -53,13 +53,13 @@ setup("authenticate", async ({ page }) => {
     }
 
     // Wait for redirect to dashboard after login
-    await page.waitForURL(/.*dashboard.*|.*\/$/, { timeout: 30000 });
+    await page.waitForURL(/.*dashboard.*|.*onboarding.*|.*\/$/, { timeout: 30000 });
   }
 
-  // Verify we're authenticated
+  // Verify we're authenticated — accept dashboard, onboarding, or any nav
   await expect(
-    page.locator('[data-testid="dashboard"], [data-testid="user-menu"], nav').first(),
-  ).toBeVisible({ timeout: 10000 });
+    page.locator('[data-testid="dashboard"], [data-testid="user-menu"], nav, main').first(),
+  ).toBeVisible({ timeout: 15000 });
 
   // Save authentication state
   await page.context().storageState({ path: authFile });

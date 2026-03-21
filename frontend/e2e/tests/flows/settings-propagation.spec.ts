@@ -10,7 +10,12 @@ import { APIClient } from "../../helpers/api-client";
  *
  * All mutations are non-destructive — original values are restored.
  */
+const isProduction = !!process.env.BASE_URL?.includes("workermill.com");
+
 test.describe("Settings Propagation", () => {
+  // Raw API calls don't carry browser auth tokens in production
+  test.skip(isProduction, "Direct API calls require local auth — only runs against local stack");
+
   let apiClient: APIClient;
   let apiURL: string;
 

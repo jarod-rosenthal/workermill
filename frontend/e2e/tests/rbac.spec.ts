@@ -17,19 +17,18 @@ test.describe("RBAC", () => {
     page,
   }) => {
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
 
-    // The settings page should load for any authenticated user
+    // Wait for settings page to fully render (may take time on production)
     await expect(page.locator("body")).toContainText(
       /settings|general|organization/i,
-      { timeout: 15000 },
+      { timeout: 30000 },
     );
 
     // Team section should be visible (admin can manage, viewer can see)
     const teamSection = page.locator(
-      'button:has-text("Team"), a:has-text("Team"), text=/team/i',
+      'button:has-text("Team"), a:has-text("Team"), [data-testid="settings-nav-team"]',
     );
-    await expect(teamSection.first()).toBeVisible({ timeout: 10000 });
+    await expect(teamSection.first()).toBeVisible({ timeout: 15000 });
   });
 
   test("persona studio respects create permissions", async ({ page }) => {

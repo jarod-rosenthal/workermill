@@ -57,8 +57,10 @@ test.describe("Personas CRUD", () => {
     await page.goto("/personas");
     await page.waitForLoadState("networkidle");
 
-    // PersonaStudio.tsx uses data-testid="create-persona-btn"
+    // Wait for page content to render (persona cards or create button)
     const createBtn = page.locator('[data-testid="create-persona-btn"]');
+    const personaCard = page.locator('[data-testid="persona-card"]');
+    await expect(createBtn.or(personaCard).first()).toBeVisible({ timeout: 15000 });
 
     if ((await createBtn.count()) > 0) {
       await createBtn.first().click();
@@ -94,8 +96,10 @@ test.describe("Personas CRUD", () => {
     await page.goto("/personas");
     await page.waitForLoadState("networkidle");
 
-    // Find create button
+    // Wait for page content to render
     const createBtn = page.locator('[data-testid="create-persona-btn"]');
+    const personaCard = page.locator('[data-testid="persona-card"]');
+    await expect(createBtn.or(personaCard).first()).toBeVisible({ timeout: 15000 });
 
     if ((await createBtn.count()) === 0) {
       test.skip();

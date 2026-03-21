@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   CheckCircle,
   Circle,
@@ -30,9 +30,9 @@ export function GettingStartedChecklist() {
     return localStorage.getItem("workermill-onboarding-dismissed") === "true";
   });
   const navigate = useNavigate();
+  const location = useLocation();
   const organization = useAuthStore((state) => state.organization);
   const user = useAuthStore((state) => state.user);
-  const isProPlan = !organization?.plan || organization.plan === "pro";
 
   // Sync server-side dismiss flag on mount
   useEffect(() => {
@@ -42,12 +42,13 @@ export function GettingStartedChecklist() {
     }
   }, [user]);
 
+  // Re-fetch status on mount AND when user navigates back (e.g. from settings)
   useEffect(() => {
     if (dismissed) return;
     fetchChecklistStatus();
-  }, [dismissed]);
+  }, [dismissed, location.pathname]);
 
-  const fetchChecklistStatus = async () => {
+  const fetchChecklistStatus = useCallback(async () => {
     try {
       const token = localStorage.getItem("accessToken");
 
@@ -121,7 +122,7 @@ export function GettingStartedChecklist() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dismissed]);
 
   const handleDismiss = () => {
     setDismissed(true);
@@ -136,14 +137,11 @@ export function GettingStartedChecklist() {
 
   if (dismissed || loading || !status) return null;
 
-  // Pro users don't need AI provider keys (they use Claude CLI auth, not cloud execution)
-  const showAiProviderStep = !isProPlan;
-
   // Count completed steps
   const steps = [
     status.scmConnected,
     status.issueTrackerConnected,
-    ...(showAiProviderStep ? [status.aiProviderConnected] : []),
+    status.aiProviderConnected,
     status.hasCreatedTask,
   ];
   const totalSteps = steps.length;
@@ -195,11 +193,7 @@ export function GettingStartedChecklist() {
           completed={status.scmConnected}
           stepNumber={1}
           title="Connect your code repository"
-          description={
-            isProPlan
-              ? "GitHub is available on Pro"
-              : "GitHub, GitLab, or Bitbucket"
-          }
+          description="GitHub, GitLab, or Bitbucket"
           icon={GitBranch}
           onClick={() => navigate("/settings?tab=integrations")}
           actionLabel="Connect"
@@ -214,20 +208,18 @@ export function GettingStartedChecklist() {
           actionLabel="Connect"
           optional
         />
-        {showAiProviderStep && (
-          <ChecklistStep
-            completed={status.aiProviderConnected}
-            stepNumber={3}
-            title="Set up your AI provider API key"
-            description="Anthropic, OpenAI, Google, or others"
-            icon={Bot}
-            onClick={() => navigate("/settings?tab=ai-workers")}
-            actionLabel="Configure"
-          />
-        )}
+        <ChecklistStep
+          completed={status.aiProviderConnected}
+          stepNumber={3}
+          title="Set up your AI provider API key"
+          description="Anthropic, OpenAI, Google, or others"
+          icon={Bot}
+          onClick={() => navigate("/settings?tab=ai-workers")}
+          actionLabel="Configure"
+        />
         <ChecklistStep
           completed={status.hasCreatedTask}
-          stepNumber={showAiProviderStep ? 4 : 3}
+          stepNumber={4}
           title="Create your first task"
           description="Run a task from the dashboard or a board"
           icon={Rocket}

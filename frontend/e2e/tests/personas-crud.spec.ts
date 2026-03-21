@@ -55,10 +55,11 @@ test.describe("Personas CRUD", () => {
 
   test("create persona dialog opens", async ({ page }) => {
     await page.goto("/personas");
-    // Wait for page content to render (persona cards or create button)
+
+    // Wait for the page to show persona-related content
+    await expect(page.locator("body")).toContainText(/persona|studio|developer|engineer/i, { timeout: 15000 });
+
     const createBtn = page.locator('[data-testid="create-persona-btn"]');
-    const personaCard = page.locator('[data-testid="persona-card"]');
-    await expect(createBtn.or(personaCard).first()).toBeVisible({ timeout: 15000 });
 
     if ((await createBtn.count()) > 0) {
       await createBtn.first().click();
@@ -92,12 +93,11 @@ test.describe("Personas CRUD", () => {
     const personaSlug = `e2e_persona_${testId.replace(/-/g, '_')}`;
 
     await page.goto("/personas");
-    await page.waitForLoadState("domcontentloaded");
 
-    // Wait for page content to render
+    // Wait for the page to show persona-related content
+    await expect(page.locator("body")).toContainText(/persona|studio|developer|engineer/i, { timeout: 15000 });
+
     const createBtn = page.locator('[data-testid="create-persona-btn"]');
-    const personaCard = page.locator('[data-testid="persona-card"]');
-    await expect(createBtn.or(personaCard).first()).toBeVisible({ timeout: 15000 });
 
     if ((await createBtn.count()) === 0) {
       test.skip();

@@ -18,7 +18,7 @@ const apiURL = baseURL.includes("localhost") ? baseURL.replace(/:\d+$/, ":3001")
 test.describe("API Key Lifecycle", () => {
   test("API keys page loads via settings integrations", async ({ page }) => {
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Navigate to Integrations section where API Access lives
     const integrationsNav = page.locator(
@@ -38,7 +38,7 @@ test.describe("API Key Lifecycle", () => {
 
   test("create API key via WorkerMill MCP slide-over", async ({ page }) => {
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Navigate to Integrations section
     const integrationsNav = page.locator(
@@ -164,7 +164,7 @@ test.describe("API Key Lifecycle", () => {
 
   test("profile page shows API key management section", async ({ page }) => {
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Navigate to Integrations where API keys live
     const integrationsNav = page.locator(
@@ -196,7 +196,7 @@ test.describe("API Key Lifecycle", () => {
 
   test("Remote Agent section shows org-level API key", async ({ page }) => {
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Navigate to Remote Agent section if it exists
     const remoteAgentNav = page.locator(

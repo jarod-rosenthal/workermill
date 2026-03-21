@@ -183,11 +183,11 @@ test.describe("SSE Resilience", () => {
 
     // Navigate to settings
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Navigate to analytics
     await page.goto("/analytics");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Navigate back to dashboard
     await page.goto("/dashboard");

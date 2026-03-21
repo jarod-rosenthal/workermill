@@ -33,7 +33,7 @@ test.describe("Boards CRUD", () => {
 
   test("create board dialog opens", async ({ page }) => {
     await page.goto("/boards");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Find and click the create board button — BoardsList.tsx uses data-testid="create-board-btn"
     const createBtn = page.locator('[data-testid="create-board-btn"]');
@@ -61,7 +61,7 @@ test.describe("Boards CRUD", () => {
     const boardName = `E2E Board ${testId}`;
 
     await page.goto("/boards");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Find and click the create board button
     const createBtn = page.locator('[data-testid="create-board-btn"]');
@@ -95,7 +95,7 @@ test.describe("Boards CRUD", () => {
     // Navigate back to boards list if we're on a board detail page
     if (page.url().match(/\/boards\/[a-f0-9-]+/)) {
       await page.goto("/boards");
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("domcontentloaded");
     }
 
     // Verify the board exists in the list
@@ -138,7 +138,7 @@ test.describe("Boards CRUD", () => {
 
   test("board detail page shows columns", async ({ page }) => {
     await page.goto("/boards");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Click on the first board card link — BoardCard wraps content in <Link to={`/boards/${board.id}`}>
     const firstBoard = page.locator(
@@ -147,7 +147,7 @@ test.describe("Boards CRUD", () => {
 
     if ((await firstBoard.count()) > 0) {
       await firstBoard.first().click();
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("domcontentloaded");
 
       // Board detail (BoardView) shows columns with ColumnHeader components
       // Columns have names like "To Do", "In Progress", "Done", "Backlog", etc.

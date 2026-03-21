@@ -64,7 +64,7 @@ test.describe("Board to Task Flow", () => {
 
     // Navigate to boards page
     await page.goto("/boards");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Find and click the create board button — BoardsList.tsx uses data-testid="create-board-btn"
     const createBtn = page.locator('[data-testid="create-board-btn"]');
@@ -93,7 +93,7 @@ test.describe("Board to Task Flow", () => {
 
     // Wait for navigation to the new board or for it to appear in the list
     await page.waitForTimeout(2000);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Extract board ID from URL if we navigated to the board detail page
     let boardId: string | null = null;
@@ -106,7 +106,7 @@ test.describe("Board to Task Flow", () => {
       const boardLink = page.locator(`a:has-text("${boardName}")`);
       if ((await boardLink.count()) > 0) {
         await boardLink.first().click();
-        await page.waitForLoadState("networkidle");
+        await page.waitForLoadState("domcontentloaded");
         const newMatch = page.url().match(/\/boards\/([a-f0-9-]+)/);
         if (newMatch) {
           boardId = newMatch[1];
@@ -252,7 +252,7 @@ test.describe("Board to Task Flow", () => {
 
     // Navigate to the board and verify the card shows updated worker status
     await page.goto(`/boards/${boardId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // The card should be visible on the board
     await expect(page.locator(`text=${cardTitle}`).first()).toBeVisible({
@@ -347,7 +347,7 @@ test.describe("Board to Task Flow", () => {
 
     // Navigate to board page and verify the card and its status
     await page.goto(`/boards/${boardId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Card should be visible
     await expect(page.locator(`text=${cardTitle}`).first()).toBeVisible({

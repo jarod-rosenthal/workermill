@@ -33,7 +33,7 @@ test.describe("Settings Propagation", () => {
     page,
   }) => {
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Should show settings content
     await expect(page.locator("body")).toContainText(
@@ -162,7 +162,7 @@ test.describe("Settings Propagation", () => {
 
     // Step 2: Navigate to settings page
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Navigate to AI Workers or the section containing quality gates
     const aiNav = page.locator(

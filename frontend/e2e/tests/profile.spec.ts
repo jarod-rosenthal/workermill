@@ -24,7 +24,7 @@ test.describe("Profile", () => {
 
   test("display name field is editable", async ({ page }) => {
     await page.goto("/profile");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     const nameInput = page.locator(
       '[data-testid="display-name-input"], input[name="displayName"], input[name="fullName"]',
@@ -47,7 +47,7 @@ test.describe("Profile", () => {
 
   test("password change form has required fields", async ({ page }) => {
     await page.goto("/profile");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Should have password-related fields
     const passwordInputs = page.locator('input[type="password"]');
@@ -60,7 +60,7 @@ test.describe("Profile", () => {
 
   test("MFA section is visible", async ({ page }) => {
     await page.goto("/profile");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Profile page should have MFA section
     const mfaSection = page.locator(
@@ -73,7 +73,7 @@ test.describe("Profile", () => {
 
   test("profile page has save button", async ({ page }) => {
     await page.goto("/profile");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Should have a save/update button
     const saveBtn = page.locator(
@@ -87,7 +87,7 @@ test.describe("Profile", () => {
 
   test("back navigation returns to dashboard", async ({ page }) => {
     await page.goto("/profile");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     const backLink = page.locator(
       'a[href="/dashboard"]:has-text("Back"), a[href="/dashboard"]:has-text("Dashboard"), [data-testid="back-to-dashboard"]',

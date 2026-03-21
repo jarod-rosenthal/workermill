@@ -29,7 +29,7 @@ test.describe("Settings Mutations", () => {
 
   test("general section shows organization name", async ({ page }) => {
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Click general section via data-testid
     const generalNav = page.locator('[data-testid="settings-nav-general"]');
@@ -53,7 +53,7 @@ test.describe("Settings Mutations", () => {
 
   test("team section shows member list or invite form", async ({ page }) => {
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Navigate to team section via data-testid
     const teamNav = page.locator('[data-testid="settings-nav-team"]');
@@ -71,7 +71,7 @@ test.describe("Settings Mutations", () => {
 
   test("AI workers section shows model configuration", async ({ page }) => {
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Navigate to AI workers section via data-testid
     const aiNav = page.locator('[data-testid="settings-nav-ai-workers"]');
@@ -89,7 +89,7 @@ test.describe("Settings Mutations", () => {
 
   test("integrations section shows SCM providers", async ({ page }) => {
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Navigate to integrations section via data-testid
     const integrationsNav = page.locator('[data-testid="settings-nav-integrations"]');
@@ -107,7 +107,7 @@ test.describe("Settings Mutations", () => {
 
   test("settings page has save functionality", async ({ page }) => {
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Settings page uses data-testid="settings-save"
     const saveBtn = page.locator(
@@ -121,7 +121,7 @@ test.describe("Settings Mutations", () => {
 
   test("back to dashboard navigation works", async ({ page }) => {
     await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Settings page has a "Back to Dashboard" link
     const backLink = page.locator(

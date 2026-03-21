@@ -33,7 +33,7 @@ test.describe("RBAC", () => {
 
   test("persona studio respects create permissions", async ({ page }) => {
     await page.goto("/personas");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // All users should be able to view personas
     await expect(page.locator("body")).toContainText(
@@ -59,7 +59,7 @@ test.describe("RBAC", () => {
 
   test("boards page respects create permissions", async ({ page }) => {
     await page.goto("/boards");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // All users should be able to view boards
     await expect(page.locator("body")).toContainText(/boards/i, {
@@ -119,7 +119,7 @@ test.describe("RBAC", () => {
 
   test("billing page is accessible", async ({ page }) => {
     await page.goto("/billing");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Billing page should show plan/billing info
     await expect(page.locator("body")).toContainText(

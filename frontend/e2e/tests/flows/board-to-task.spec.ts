@@ -2,6 +2,8 @@ import { test, expect } from "@playwright/test";
 import { APIClient } from "../../helpers/api-client";
 import { generateTestId, waitFor } from "../../helpers/test-data";
 
+const isProduction = !!process.env.BASE_URL?.includes('workermill.com');
+
 /**
  * Board-to-Task flow tests.
  *
@@ -14,6 +16,7 @@ import { generateTestId, waitFor } from "../../helpers/test-data";
  * Jira key prefix (E2E-TEST-* = success).
  */
 test.describe("Board to Task Flow", () => {
+  test.skip(isProduction, 'Requires mock workers — only runs against local stack');
   let apiClient: APIClient;
   const createdBoardIds: string[] = [];
   const createdTaskIds: string[] = [];
@@ -63,10 +66,8 @@ test.describe("Board to Task Flow", () => {
     await page.goto("/boards");
     await page.waitForLoadState("networkidle");
 
-    // Find and click the create board button
-    const createBtn = page.locator(
-      'button:has-text("Create"), button:has-text("New Board"), button:has-text("New"), [data-testid="create-board-btn"]',
-    );
+    // Find and click the create board button — BoardsList.tsx uses data-testid="create-board-btn"
+    const createBtn = page.locator('[data-testid="create-board-btn"]');
 
     if ((await createBtn.count()) === 0) {
       test.skip();
@@ -75,24 +76,17 @@ test.describe("Board to Task Flow", () => {
 
     await createBtn.first().click();
 
-    // Wait for dialog to appear
-    const dialog = page.locator(
-      '[role="dialog"], [data-testid="create-board-dialog"], .modal, [class*="dialog"], [class*="modal"]',
-    );
-    await expect(dialog.first()).toBeVisible({ timeout: 5000 });
+    // Wait for dialog — CreateBoardDialog renders heading "Create New Board"
+    await expect(page.locator('text="Create New Board"')).toBeVisible({ timeout: 5000 });
 
-    // Fill in board name
-    const nameInput = page.locator(
-      'input[name="name"], input[placeholder*="name" i], input[placeholder*="board" i]',
-    );
+    // Fill in board name — first text input in the dialog is the name field (autoFocus)
+    const nameInput = page.locator('.fixed input[type="text"]').first();
     if ((await nameInput.count()) > 0) {
-      await nameInput.first().fill(boardName);
+      await nameInput.fill(boardName);
     }
 
-    // Submit the create form
-    const submitBtn = dialog.locator(
-      'button:has-text("Create"), button:has-text("Save"), button[type="submit"]',
-    );
+    // Submit — button with text "Create Board"
+    const submitBtn = page.locator('button:has-text("Create Board")');
     if ((await submitBtn.count()) > 0) {
       await submitBtn.first().click();
     }

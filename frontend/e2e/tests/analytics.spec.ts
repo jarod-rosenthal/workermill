@@ -10,26 +10,26 @@ test.describe("Analytics", () => {
   test("analytics page loads", async ({ page }) => {
     await page.goto("/analytics");
 
-    // Should show analytics content
-    await expect(page.locator("body")).toContainText(/analytics|usage|stats/i, {
+    // Analytics.tsx renders data-testid="analytics-page" and heading "Analytics"
+    await expect(page.locator('[data-testid="analytics-page"]')).toBeVisible({
       timeout: 15000,
     });
   });
 
   test("analytics shows usage or task data sections", async ({ page }) => {
     await page.goto("/analytics");
-    await page.waitForLoadState("networkidle");
 
-    // Should show some analytics content - charts, stats, or empty state
-    const analyticsContent = page.locator(
-      '[data-testid="usage-stats"], [data-testid="task-stats"], [data-testid="analytics-empty-state"], canvas, svg, [class*="chart"]',
-    );
+    // Wait for the page container to be visible
+    await expect(page.locator('[data-testid="analytics-page"]')).toBeVisible({
+      timeout: 15000,
+    });
+
+    // The page shows text like "Analytics", "Plan", "Tasks Used", "Usage", etc.
     const textContent = page.locator(
-      'text=/usage|tasks|completed|failed|total|analytics/i',
+      'text=/Analytics|Plan|Tasks Used|Usage|Executive Dashboard|Effectiveness/i',
     );
 
-    // At minimum, the page should have relevant content
-    await expect(analyticsContent.or(textContent).first()).toBeVisible({
+    await expect(textContent.first()).toBeVisible({
       timeout: 10000,
     });
   });
@@ -38,11 +38,15 @@ test.describe("Analytics", () => {
     page,
   }) => {
     await page.goto("/analytics");
-    await page.waitForLoadState("networkidle");
 
-    // Many analytics pages have date range controls
+    // Wait for page to load
+    await expect(page.locator('[data-testid="analytics-page"]')).toBeVisible({
+      timeout: 15000,
+    });
+
+    // Analytics.tsx renders time range buttons: "7 Days", "30 Days", "90 Days"
     const dateControl = page.locator(
-      '[data-testid="date-range"], select, button:has-text("7 days"), button:has-text("30 days"), button:has-text("Last")',
+      'button:has-text("7 Days"), button:has-text("30 Days"), button:has-text("90 Days")',
     );
 
     if ((await dateControl.count()) > 0) {
@@ -52,11 +56,14 @@ test.describe("Analytics", () => {
 
   test("back to dashboard link works", async ({ page }) => {
     await page.goto("/analytics");
-    await page.waitForLoadState("networkidle");
 
-    const backLink = page.locator(
-      'a[href="/dashboard"]:has-text("Back"), a[href="/dashboard"]:has-text("Dashboard"), [data-testid="back-to-dashboard"]',
-    );
+    // Wait for page to load
+    await expect(page.locator('[data-testid="analytics-page"]')).toBeVisible({
+      timeout: 15000,
+    });
+
+    // Analytics.tsx has <Link to="/dashboard"> with ArrowLeft icon and "Dashboard" text
+    const backLink = page.locator('a[href="/dashboard"]');
     if ((await backLink.count()) > 0) {
       await backLink.first().click();
       await expect(page).toHaveURL(/.*dashboard.*/);

@@ -2,6 +2,8 @@ import { test, expect } from "@playwright/test";
 import { APIClient } from "../helpers/api-client";
 import { createTestJiraKey, waitFor } from "../helpers/test-data";
 
+const isProduction = !!process.env.BASE_URL?.includes('workermill.com');
+
 /**
  * Blocker handling tests.
  *
@@ -12,6 +14,7 @@ import { createTestJiraKey, waitFor } from "../helpers/test-data";
  * blocker_detected coordination message and completes with escalated status.
  */
 test.describe("Blocker Handling", () => {
+  test.skip(isProduction, 'Requires mock workers — only runs against local stack');
   let apiClient: APIClient;
   const createdTaskIds: string[] = [];
 

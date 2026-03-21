@@ -2,6 +2,8 @@ import { test, expect } from "@playwright/test";
 import { APIClient } from "../helpers/api-client";
 import { createTestJiraKey, waitFor } from "../helpers/test-data";
 
+const isProduction = !!process.env.BASE_URL?.includes('workermill.com');
+
 /**
  * Webhook to Task Creation flow tests.
  *
@@ -11,6 +13,7 @@ import { createTestJiraKey, waitFor } from "../helpers/test-data";
  * Uses the mock worker service via Jira key prefixes to control task outcomes.
  */
 test.describe("Webhook to Task Flow", () => {
+  test.skip(isProduction, 'Requires mock workers — only runs against local stack');
   let apiClient: APIClient;
   const createdTaskIds: string[] = [];
 

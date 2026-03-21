@@ -2,6 +2,8 @@ import { test, expect } from "@playwright/test";
 import { APIClient } from "../helpers/api-client";
 import { createTestJiraKey, waitFor } from "../helpers/test-data";
 
+const isProduction = !!process.env.BASE_URL?.includes('workermill.com');
+
 /**
  * Task Lifecycle tests.
  *
@@ -13,6 +15,7 @@ import { createTestJiraKey, waitFor } from "../helpers/test-data";
  * - Retry: failed -> queued (re-queued)
  */
 test.describe("Task Lifecycle", () => {
+  test.skip(isProduction, 'Requires mock workers — only runs against local stack');
   let apiClient: APIClient;
   const createdTaskIds: string[] = [];
 

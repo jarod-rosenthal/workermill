@@ -16,24 +16,18 @@ test.describe("Boards CRUD", () => {
   test("boards list page loads", async ({ page }) => {
     await page.goto("/boards");
 
-    // Should show boards page content
-    await expect(page.locator("body")).toContainText(/boards|projects/i, {
+    // Should show boards page content — BoardsList.tsx renders "Boards" heading
+    await expect(page.locator("body")).toContainText(/boards/i, {
       timeout: 15000,
     });
 
-    // Should show either a list of boards or an empty state with create button
-    const boardsList = page.locator(
-      '[data-testid="boards-list"], [class*="board"], [class*="card"]',
-    );
-    const createBtn = page.locator(
-      'button:has-text("Create"), button:has-text("New Board"), [data-testid="create-board-btn"]',
-    );
-    const emptyState = page.locator(
-      'text=/no boards|create your first|get started/i',
-    );
+    // Should show either board cards, create button, or empty state
+    const boardCards = page.locator('[data-testid="board-card"]');
+    const createBtn = page.locator('[data-testid="create-board-btn"]');
+    const emptyState = page.locator('[data-testid="empty-state"]');
 
     await expect(
-      boardsList.or(createBtn).or(emptyState).first(),
+      boardCards.or(createBtn).or(emptyState).first(),
     ).toBeVisible({ timeout: 10000 });
   });
 
@@ -41,23 +35,20 @@ test.describe("Boards CRUD", () => {
     await page.goto("/boards");
     await page.waitForLoadState("networkidle");
 
-    // Find and click the create board button
-    const createBtn = page.locator(
-      'button:has-text("Create"), button:has-text("New Board"), button:has-text("New"), [data-testid="create-board-btn"]',
-    );
+    // Find and click the create board button — BoardsList.tsx uses data-testid="create-board-btn"
+    const createBtn = page.locator('[data-testid="create-board-btn"]');
 
     if ((await createBtn.count()) > 0) {
       await createBtn.first().click();
 
-      // Dialog should appear with form fields
-      const dialog = page.locator(
-        '[role="dialog"], [data-testid="create-board-dialog"], .modal, [class*="dialog"], [class*="modal"]',
-      );
+      // CreateBoardDialog renders as a fixed overlay div (not role="dialog")
+      // It contains a heading "Create New Board" and a form
+      const dialog = page.locator('text="Create New Board"');
       await expect(dialog.first()).toBeVisible({ timeout: 5000 });
 
-      // Should have name input
+      // Should have Board Name input (label-based, no name attr)
       const nameInput = page.locator(
-        'input[name="name"], input[placeholder*="name" i], input[placeholder*="board" i]',
+        'input[type="text"]:near(:text("Board Name"))',
       );
       if ((await nameInput.count()) > 0) {
         await expect(nameInput.first()).toBeVisible();
@@ -73,9 +64,7 @@ test.describe("Boards CRUD", () => {
     await page.waitForLoadState("networkidle");
 
     // Find and click the create board button
-    const createBtn = page.locator(
-      'button:has-text("Create"), button:has-text("New Board"), button:has-text("New"), [data-testid="create-board-btn"]',
-    );
+    const createBtn = page.locator('[data-testid="create-board-btn"]');
 
     if ((await createBtn.count()) === 0) {
       test.skip();
@@ -84,36 +73,24 @@ test.describe("Boards CRUD", () => {
 
     await createBtn.first().click();
 
-    // Wait for dialog
-    const dialog = page.locator(
-      '[role="dialog"], [data-testid="create-board-dialog"], .modal, [class*="dialog"], [class*="modal"]',
-    );
-    await expect(dialog.first()).toBeVisible({ timeout: 5000 });
+    // Wait for dialog — CreateBoardDialog heading
+    await expect(page.locator('text="Create New Board"')).toBeVisible({ timeout: 5000 });
 
-    // Fill in board name
-    const nameInput = page.locator(
-      'input[name="name"], input[placeholder*="name" i], input[placeholder*="board" i]',
-    );
+    // Fill in board name — the first text input in the dialog is "Board Name"
+    // CreateBoardDialog has autoFocus on the name input
+    const nameInput = page.locator('.fixed input[type="text"]').first();
     if ((await nameInput.count()) > 0) {
-      await nameInput.first().fill(boardName);
+      await nameInput.fill(boardName);
     }
 
-    // Submit
-    const submitBtn = dialog.locator(
-      'button:has-text("Create"), button:has-text("Save"), button[type="submit"]',
-    );
+    // Submit — button with text "Create Board"
+    const submitBtn = page.locator('button:has-text("Create Board")');
     if ((await submitBtn.count()) > 0) {
       await submitBtn.first().click();
     }
 
-    // Should navigate to the new board or show it in the list
+    // Should navigate to the new board (handleCreate navigates to /boards/:id)
     await page.waitForTimeout(2000);
-
-    // Verify the board exists - either on a board detail page or in the list
-    const boardVisible = page.locator(`text=${boardName}`);
-    if ((await boardVisible.count()) > 0) {
-      await expect(boardVisible.first()).toBeVisible({ timeout: 10000 });
-    }
 
     // Navigate back to boards list if we're on a board detail page
     if (page.url().match(/\/boards\/[a-f0-9-]+/)) {
@@ -121,33 +98,35 @@ test.describe("Boards CRUD", () => {
       await page.waitForLoadState("networkidle");
     }
 
+    // Verify the board exists in the list
+    const boardVisible = page.locator(`text=${boardName}`);
+    if ((await boardVisible.count()) > 0) {
+      await expect(boardVisible.first()).toBeVisible({ timeout: 10000 });
+    }
+
     // Clean up: delete the board
-    // Look for the board card with a menu/delete button
+    // BoardCard has a MoreHorizontal menu button, then a Delete option
     const boardCard = page.locator(
-      `[data-testid="board-card"]:has-text("${boardName}"), a:has-text("${boardName}"), [class*="card"]:has-text("${boardName}")`,
+      `[data-testid="board-card"]:has-text("${boardName}")`,
     );
 
     if ((await boardCard.count()) > 0) {
-      // Look for a menu button on the card
-      const menuBtn = boardCard
-        .first()
-        .locator(
-          'button[aria-label="More"], button:has-text("..."), [data-testid="board-menu"]',
-        );
+      // The MoreHorizontal (three dots) button is in the action overlay
+      const menuBtn = boardCard.first().locator('button:has(svg)').last();
       if ((await menuBtn.count()) > 0) {
-        await menuBtn.first().click();
+        await menuBtn.click();
         await page.waitForTimeout(500);
 
-        // Click delete option
+        // Click delete option in the dropdown
         const deleteOption = page.locator(
-          'button:has-text("Delete"), [role="menuitem"]:has-text("Delete")',
+          'button:has-text("Delete")',
         );
         if ((await deleteOption.count()) > 0) {
           await deleteOption.first().click();
 
-          // Confirm deletion if there's a confirm dialog
+          // Confirm deletion — delete confirm dialog has "Delete Board" button
           const confirmBtn = page.locator(
-            'button:has-text("Confirm"), button:has-text("Delete"):not([data-testid="board-menu"])',
+            'button:has-text("Delete Board")',
           );
           if ((await confirmBtn.count()) > 0) {
             await confirmBtn.first().click();
@@ -161,18 +140,19 @@ test.describe("Boards CRUD", () => {
     await page.goto("/boards");
     await page.waitForLoadState("networkidle");
 
-    // Click on the first board if available
+    // Click on the first board card link — BoardCard wraps content in <Link to={`/boards/${board.id}`}>
     const firstBoard = page.locator(
-      '[data-testid="board-card"] a, a[href^="/boards/"]:not([href="/boards"])',
+      '[data-testid="board-card"] a[href^="/boards/"]',
     );
 
     if ((await firstBoard.count()) > 0) {
       await firstBoard.first().click();
       await page.waitForLoadState("networkidle");
 
-      // Board detail should show columns (To Do, In Progress, Done, etc.)
+      // Board detail (BoardView) shows columns with ColumnHeader components
+      // Columns have names like "To Do", "In Progress", "Done", "Backlog", etc.
       const columns = page.locator(
-        '[data-testid="board-column"], [class*="column"], text=/To Do|In Progress|Done|Backlog/i',
+        'text=/To Do|In Progress|Done|Backlog|Review|New|Testing|Resolved/i',
       );
       await expect(columns.first()).toBeVisible({ timeout: 10000 });
     } else {

@@ -36,9 +36,7 @@ test.describe("Auth Login", () => {
 
     // Should show dashboard content, not redirect to login
     await expect(
-      page.locator(
-        '[data-testid="dashboard"], [data-testid="task-list"], nav',
-      ),
+      page.locator('[data-testid="dashboard"]'),
     ).toBeVisible({ timeout: 15000 });
 
     // URL should still be dashboard

@@ -2,6 +2,8 @@ import { test, expect } from "@playwright/test";
 import { APIClient } from "../helpers/api-client";
 import { createTestJiraKey, waitFor } from "../helpers/test-data";
 
+const isProduction = !!process.env.BASE_URL?.includes('workermill.com');
+
 /**
  * Log Streaming (SSE) tests.
  *
@@ -14,6 +16,7 @@ import { createTestJiraKey, waitFor } from "../helpers/test-data";
  * that is documented as "sacred" in CLAUDE.md.
  */
 test.describe("Log Streaming", () => {
+  test.skip(isProduction, 'Requires mock workers — only runs against local stack');
   let apiClient: APIClient;
   const createdTaskIds: string[] = [];
 

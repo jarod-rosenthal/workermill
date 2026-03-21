@@ -2,6 +2,8 @@ import { test, expect } from "@playwright/test";
 import { APIClient } from "../../helpers/api-client";
 import { createTestJiraKey, waitFor } from "../../helpers/test-data";
 
+const isProduction = !!process.env.BASE_URL?.includes('workermill.com');
+
 /**
  * Multi-Task Parallel Execution flow tests.
  *
@@ -10,6 +12,7 @@ import { createTestJiraKey, waitFor } from "../../helpers/test-data";
  * correctly in the dashboard UI.
  */
 test.describe("Multi-Task Parallel Execution", () => {
+  test.skip(isProduction, 'Requires mock workers — only runs against local stack');
   let apiClient: APIClient;
   const createdTaskIds: string[] = [];
 

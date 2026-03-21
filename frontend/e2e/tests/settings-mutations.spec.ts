@@ -20,10 +20,10 @@ test.describe("Settings Mutations", () => {
       { timeout: 15000 },
     );
 
-    // Should have settings navigation items
-    const navItems = page.locator(
-      'text=/General|Team|AI Workers|Integrations|Billing|Notifications/i',
-    );
+    // Settings page uses data-testid="settings-nav" for the nav sidebar
+    // Nav items have data-testid="settings-nav-{id}" — ids include:
+    // general, team, ai-workers, quality, integrations, remote-agent, billing, notifications, data
+    const navItems = page.locator('[data-testid="settings-nav"]');
     await expect(navItems.first()).toBeVisible({ timeout: 10000 });
   });
 
@@ -31,21 +31,19 @@ test.describe("Settings Mutations", () => {
     await page.goto("/settings");
     await page.waitForLoadState("networkidle");
 
-    // Click general section if it's nav-based
-    const generalNav = page.locator(
-      'button:has-text("General"), a:has-text("General"), [data-testid="settings-nav-general"]',
-    );
+    // Click general section via data-testid
+    const generalNav = page.locator('[data-testid="settings-nav-general"]');
     if ((await generalNav.count()) > 0) {
       await generalNav.first().click();
       await page.waitForTimeout(500);
     }
 
-    // Should show org name input or display
-    const orgNameInput = page.locator(
-      'input[name="orgName"], input[name="name"], input[name="organizationName"]',
-    );
+    // Should show org-related content
     const orgNameText = page.locator(
       'text=/organization|org name/i',
+    );
+    const orgNameInput = page.locator(
+      'input[name="orgName"], input[name="name"], input[name="organizationName"]',
     );
 
     await expect(orgNameInput.or(orgNameText).first()).toBeVisible({
@@ -57,10 +55,8 @@ test.describe("Settings Mutations", () => {
     await page.goto("/settings");
     await page.waitForLoadState("networkidle");
 
-    // Navigate to team section
-    const teamNav = page.locator(
-      'button:has-text("Team"), a:has-text("Team"), [data-testid="settings-nav-team"]',
-    );
+    // Navigate to team section via data-testid
+    const teamNav = page.locator('[data-testid="settings-nav-team"]');
     if ((await teamNav.count()) > 0) {
       await teamNav.first().click();
       await page.waitForTimeout(500);
@@ -77,10 +73,8 @@ test.describe("Settings Mutations", () => {
     await page.goto("/settings");
     await page.waitForLoadState("networkidle");
 
-    // Navigate to AI workers section
-    const aiNav = page.locator(
-      'button:has-text("AI Workers"), a:has-text("AI Workers"), [data-testid="settings-nav-ai-workers"]',
-    );
+    // Navigate to AI workers section via data-testid
+    const aiNav = page.locator('[data-testid="settings-nav-ai-workers"]');
     if ((await aiNav.count()) > 0) {
       await aiNav.first().click();
       await page.waitForTimeout(500);
@@ -97,10 +91,8 @@ test.describe("Settings Mutations", () => {
     await page.goto("/settings");
     await page.waitForLoadState("networkidle");
 
-    // Navigate to integrations section
-    const integrationsNav = page.locator(
-      'button:has-text("Integrations"), a:has-text("Integrations"), [data-testid="settings-nav-integrations"]',
-    );
+    // Navigate to integrations section via data-testid
+    const integrationsNav = page.locator('[data-testid="settings-nav-integrations"]');
     if ((await integrationsNav.count()) > 0) {
       await integrationsNav.first().click();
       await page.waitForTimeout(500);
@@ -117,9 +109,9 @@ test.describe("Settings Mutations", () => {
     await page.goto("/settings");
     await page.waitForLoadState("networkidle");
 
-    // Look for save buttons across sections
+    // Settings page uses data-testid="settings-save"
     const saveBtn = page.locator(
-      'button:has-text("Save"), button:has-text("Update"), button:has-text("Apply")',
+      '[data-testid="settings-save"], button:has-text("Save"), button:has-text("Update"), button:has-text("Apply")',
     );
 
     if ((await saveBtn.count()) > 0) {
@@ -131,8 +123,9 @@ test.describe("Settings Mutations", () => {
     await page.goto("/settings");
     await page.waitForLoadState("networkidle");
 
+    // Settings page has a "Back to Dashboard" link
     const backLink = page.locator(
-      'a[href="/dashboard"]:has-text("Back"), a[href="/dashboard"]:has-text("Dashboard"), [data-testid="back-to-dashboard"]',
+      'a[href="/dashboard"]',
     );
     if ((await backLink.count()) > 0) {
       await backLink.first().click();

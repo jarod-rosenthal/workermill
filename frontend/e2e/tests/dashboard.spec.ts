@@ -2,6 +2,8 @@ import { test, expect } from "@playwright/test";
 import { APIClient } from "../helpers/api-client";
 import { createTestJiraKey, waitFor } from "../helpers/test-data";
 
+const isProduction = !!process.env.BASE_URL?.includes('workermill.com');
+
 /**
  * Dashboard tests.
  *
@@ -31,26 +33,22 @@ test.describe("Dashboard", () => {
   }) => {
     await page.goto("/dashboard");
 
-    // Wait for dashboard to be ready
+    // Wait for dashboard to be ready — MainDashboard.tsx renders data-testid="dashboard"
     await expect(
-      page.locator(
-        '[data-testid="dashboard"], [data-testid="task-list"], .task-list',
-      ),
+      page.locator('[data-testid="dashboard"]'),
     ).toBeVisible({ timeout: 15000 });
 
     // Should show either task list or empty state
-    const taskList = page.locator(
-      '[data-testid="task-list"], .task-list, table',
-    );
-    const emptyState = page.locator(
-      '[data-testid="empty-state"], .empty-state',
-    );
+    const taskList = page.locator('[data-testid="task-list"]');
+    const emptyState = page.locator('[data-testid="empty-state"]');
     await expect(taskList.or(emptyState).first()).toBeVisible({
       timeout: 10000,
     });
   });
 
   test("task card displays correct status badge", async ({ page }) => {
+    test.skip(isProduction, 'Requires mock workers — only runs against local stack');
+
     const jiraKey = createTestJiraKey("success");
     const payload = apiClient.createJiraWebhookPayload({
       issueKey: jiraKey,
@@ -71,14 +69,14 @@ test.describe("Dashboard", () => {
       timeout: 15000,
     });
 
-    // Task card should have a status indicator
+    // Task card should have a status indicator — MainDashboard uses data-testid="task-card" and data-testid="task-status"
     const taskCard = page.locator(
-      `[data-testid="task-card"]:has-text("${jiraKey}"), tr:has-text("${jiraKey}")`,
+      `[data-testid="task-card"]:has-text("${jiraKey}")`,
     );
     if ((await taskCard.count()) > 0) {
       const statusBadge = taskCard
         .first()
-        .locator('[data-testid="task-status"], .status, [class*="status"]');
+        .locator('[data-testid="task-status"]');
       if ((await statusBadge.count()) > 0) {
         // Should show some status text (queued, running, review, etc.)
         await expect(statusBadge.first()).not.toBeEmpty();
@@ -87,6 +85,8 @@ test.describe("Dashboard", () => {
   });
 
   test("task card click navigates to detail or expands", async ({ page }) => {
+    test.skip(isProduction, 'Requires mock workers — only runs against local stack');
+
     const jiraKey = createTestJiraKey();
     const payload = apiClient.createJiraWebhookPayload({
       issueKey: jiraKey,
@@ -130,9 +130,11 @@ test.describe("Dashboard", () => {
   test("dashboard refreshes data when new task is created", async ({
     page,
   }) => {
+    test.skip(isProduction, 'Requires mock workers — only runs against local stack');
+
     await page.goto("/dashboard");
     await page.waitForSelector(
-      '[data-testid="dashboard"], [data-testid="task-list"], .task-list, table, [data-testid="empty-state"]',
+      '[data-testid="dashboard"]',
       { timeout: 15000 },
     );
 
@@ -152,15 +154,8 @@ test.describe("Dashboard", () => {
     createdTaskIds.push(task.id);
 
     // Dashboard should eventually show the new task (via polling or manual refresh)
-    const refreshBtn = page.locator(
-      '[data-testid="refresh-button"], button:has-text("Refresh")',
-    );
-    if ((await refreshBtn.count()) > 0) {
-      await refreshBtn.first().click();
-    } else {
-      // Wait for automatic polling cycle
-      await page.waitForTimeout(5000);
-    }
+    // Wait for automatic polling cycle
+    await page.waitForTimeout(5000);
 
     await expect(page.locator(`text=${jiraKey}`)).toBeVisible({
       timeout: 15000,
@@ -170,7 +165,7 @@ test.describe("Dashboard", () => {
   test("profile dropdown shows user info", async ({ page }) => {
     await page.goto("/dashboard");
     await page.waitForSelector(
-      '[data-testid="dashboard"], [data-testid="task-list"]',
+      '[data-testid="dashboard"]',
       { timeout: 15000 },
     );
 
@@ -200,7 +195,7 @@ test.describe("Dashboard", () => {
 
   test("sidebar navigation links are present", async ({ page }) => {
     await page.goto("/dashboard");
-    await page.waitForSelector('[data-testid="dashboard"], nav', {
+    await page.waitForSelector('[data-testid="dashboard"]', {
       timeout: 15000,
     });
 

@@ -34,10 +34,12 @@ function TaskDetailHeader({ task, onCancel, onRetry }: TaskDetailHeaderProps) {
   const canCancel = ['queued', 'claimed', 'environment_setup', 'dispatching', 'planning', 'executing'].includes(task.status);
   const canRetry = ['failed', 'cancelled'].includes(task.status);
 
-  const formatElapsedTime = (elapsedMs?: number): string => {
-    if (!elapsedMs) return '';
+  const formatElapsedTime = (startedAt?: string): string => {
+    if (!startedAt) return '';
 
-    const seconds = Math.floor(elapsedMs / 1000);
+    const start = new Date(startedAt).getTime();
+    const end = task.completedAt ? new Date(task.completedAt).getTime() : Date.now();
+    const seconds = Math.floor((end - start) / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
 
@@ -50,9 +52,9 @@ function TaskDetailHeader({ task, onCancel, onRetry }: TaskDetailHeaderProps) {
     return `${seconds}s`;
   };
 
-  const formatCost = (costCents?: number): string => {
-    if (!costCents) return '';
-    return `$${(costCents / 100).toFixed(2)}`;
+  const formatCost = (costUsd?: number): string => {
+    if (!costUsd) return '';
+    return `$${costUsd.toFixed(2)}`;
   };
 
   return (
@@ -61,9 +63,11 @@ function TaskDetailHeader({ task, onCancel, onRetry }: TaskDetailHeaderProps) {
         {/* Issue Key and Summary */}
         <View className="flex-row items-start justify-between mb-3">
           <View className="flex-1 mr-3">
-            <Text className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-              {task.issue_key}
-            </Text>
+            {task.jiraIssueKey && (
+              <Text className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                {task.jiraIssueKey}
+              </Text>
+            )}
             <Text className="text-slate-600 dark:text-slate-400 text-base mt-1">
               {task.summary}
             </Text>
@@ -73,17 +77,19 @@ function TaskDetailHeader({ task, onCancel, onRetry }: TaskDetailHeaderProps) {
 
         {/* Metadata */}
         <View className="flex-row items-center mb-3">
-          <Text className="text-slate-500 dark:text-slate-400 text-sm mr-4">
-            {task.persona_emoji || '🤖'} {task.persona}
-          </Text>
-          {task.elapsed_time_ms && (
+          {task.workerPersona && (
             <Text className="text-slate-500 dark:text-slate-400 text-sm mr-4">
-              {formatElapsedTime(task.elapsed_time_ms)}
+              🤖 {task.workerPersona}
             </Text>
           )}
-          {task.cost_cents && (
+          {task.startedAt && (
+            <Text className="text-slate-500 dark:text-slate-400 text-sm mr-4">
+              {formatElapsedTime(task.startedAt)}
+            </Text>
+          )}
+          {(task.estimatedCostUsd || task.costUsd) && (
             <Text className="text-slate-500 dark:text-slate-400 text-sm">
-              {formatCost(task.cost_cents)}
+              {formatCost(task.estimatedCostUsd ?? task.costUsd)}
             </Text>
           )}
         </View>

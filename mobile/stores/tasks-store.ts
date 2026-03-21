@@ -77,14 +77,14 @@ const getRecentTasks = (tasks: WorkerTask[]): WorkerTask[] => {
   return tasks.filter(task => {
     if (!recentStatuses.includes(task.status)) return false;
 
-    const completionTime = task.completed_at || task.failed_at;
+    const completionTime = task.completedAt;
     if (!completionTime) return false;
 
     return new Date(completionTime) > oneDayAgo;
   }).sort((a, b) => {
     // Sort by completion time descending (most recent first)
-    const aTime = a.completed_at || a.failed_at || '';
-    const bTime = b.completed_at || b.failed_at || '';
+    const aTime = a.completedAt || '';
+    const bTime = b.completedAt || '';
     return bTime.localeCompare(aTime);
   });
 };
@@ -108,13 +108,32 @@ export const useTasksStore = create<TasksState>()(
 
         try {
           const data = await apiClient.get<{
-            tasks: WorkerTask[];
-            stats: TaskStats;
+            activeTasks: WorkerTask[];
+            queuedTasks: WorkerTask[];
+            recentCompleted: WorkerTask[];
+            stats: {
+              activeWorkers: number;
+              queueDepth: number;
+              periodCost: number;
+              periodCompleted: number;
+            };
           }>('/control-center');
 
+          // Combine all task lists, deduplicating by id
+          const taskMap = new Map<string, WorkerTask>();
+          for (const task of [...(data.activeTasks || []), ...(data.queuedTasks || []), ...(data.recentCompleted || [])]) {
+            taskMap.set(task.id, task);
+          }
+          const tasks = Array.from(taskMap.values());
+
           set({
-            tasks: data.tasks,
-            stats: data.stats,
+            tasks,
+            stats: {
+              activeWorkersCount: data.stats?.activeWorkers ?? 0,
+              queueDepth: data.stats?.queueDepth ?? 0,
+              periodCostCents: Math.round((data.stats?.periodCost ?? 0) * 100),
+              periodCompleted: data.stats?.periodCompleted ?? 0,
+            },
             lastUpdated: new Date().toISOString(),
             isLoading: false,
             error: null
@@ -227,6 +246,12 @@ export const useTasksStore = create<TasksState>()(
         tasks: state.tasks,
         stats: state.stats,
         lastUpdated: state.lastUpdated,
+      }),
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted as Partial<TasksState>),
+        // Ensure tasks is always an array (hydration from empty storage can yield undefined)
+        tasks: (persisted as any)?.tasks ?? current.tasks ?? [],
       }),
     }
   )

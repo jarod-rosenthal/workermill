@@ -9,10 +9,12 @@ interface TaskListItemProps {
   className?: string;
 }
 
-function formatElapsedTime(elapsedMs?: number): string {
-  if (!elapsedMs) return '';
+function formatDuration(startedAt?: string, completedAt?: string): string {
+  if (!startedAt) return '';
 
-  const seconds = Math.floor(elapsedMs / 1000);
+  const start = new Date(startedAt).getTime();
+  const end = completedAt ? new Date(completedAt).getTime() : Date.now();
+  const seconds = Math.floor((end - start) / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
 
@@ -25,14 +27,14 @@ function formatElapsedTime(elapsedMs?: number): string {
   return `${seconds}s`;
 }
 
-function formatCost(costCents?: number): string {
-  if (!costCents) return '';
-  return `$${(costCents / 100).toFixed(2)}`;
+function formatCost(costUsd?: number): string {
+  if (!costUsd) return '';
+  return `$${costUsd.toFixed(2)}`;
 }
 
 export function TaskListItem({ task, onPress, className }: TaskListItemProps) {
-  const elapsedTime = formatElapsedTime(task.elapsed_time_ms);
-  const cost = formatCost(task.cost_cents);
+  const elapsedTime = formatDuration(task.startedAt, task.completedAt);
+  const cost = formatCost(task.estimatedCostUsd ?? task.costUsd);
 
   return (
     <TouchableOpacity
@@ -45,16 +47,18 @@ export function TaskListItem({ task, onPress, className }: TaskListItemProps) {
       `}
       style={{ minHeight: 48 }}
       accessibilityRole="button"
-      accessibilityLabel={`Task ${task.issue_key}: ${task.summary}`}
+      accessibilityLabel={`Task ${task.jiraIssueKey || task.id}: ${task.summary}`}
     >
       <View className="flex-row items-start justify-between mb-2">
         <View className="flex-1 mr-3">
-          <Text
-            className="text-slate-900 dark:text-slate-100 font-medium text-sm"
-            numberOfLines={1}
-          >
-            {task.issue_key}
-          </Text>
+          {task.jiraIssueKey && (
+            <Text
+              className="text-slate-900 dark:text-slate-100 font-medium text-sm"
+              numberOfLines={1}
+            >
+              {task.jiraIssueKey}
+            </Text>
+          )}
           <Text
             className="text-slate-600 dark:text-slate-400 text-sm mt-1"
             numberOfLines={2}
@@ -67,31 +71,33 @@ export function TaskListItem({ task, onPress, className }: TaskListItemProps) {
 
       <View className="flex-row items-center justify-between">
         <View className="flex-row items-center">
-          <Text
-            className="text-slate-500 dark:text-slate-400 text-xs mr-2"
-            accessibilityLabel={`Worker: ${task.persona}`}
-          >
-            {task.persona_emoji || '🤖'} {task.persona}
-          </Text>
+          {task.workerPersona && (
+            <Text
+              className="text-slate-500 dark:text-slate-400 text-xs mr-2"
+              accessibilityLabel={`Worker: ${task.workerPersona}`}
+            >
+              🤖 {task.workerPersona}
+            </Text>
+          )}
         </View>
 
         <View className="flex-row items-center space-x-3">
-          {elapsedTime && (
+          {elapsedTime ? (
             <Text
               className="text-slate-500 dark:text-slate-400 text-xs"
               accessibilityLabel={`Duration: ${elapsedTime}`}
             >
               {elapsedTime}
             </Text>
-          )}
-          {cost && (
+          ) : null}
+          {cost ? (
             <Text
               className="text-slate-500 dark:text-slate-400 text-xs font-medium"
               accessibilityLabel={`Cost: ${cost}`}
             >
               {cost}
             </Text>
-          )}
+          ) : null}
         </View>
       </View>
     </TouchableOpacity>

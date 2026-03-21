@@ -26,27 +26,31 @@ export type WorkerTaskStatus =
 
 export interface WorkerTask {
   id: string;
-  issue_key: string;
+  jiraIssueKey?: string;
   summary: string;
   description?: string;
   status: WorkerTaskStatus;
-  persona: string;
-  persona_emoji?: string;
-  created_at: string;
-  started_at?: string;
-  completed_at?: string;
-  failed_at?: string;
-  elapsed_time_ms?: number;
-  cost_cents?: number;
-  retry_count: number;
-  workflow_mode: 'auto' | 'manual' | 'review';
-  board_id?: string;
-  card_id?: string;
-  parent_task_id?: string;
-  error_message?: string;
-  environment?: {
-    [key: string]: any;
-  };
+  workerPersona?: string;
+  workerModel?: string;
+  workerProvider?: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  updatedAt?: string;
+  estimatedCostUsd?: number;
+  costUsd?: number;
+  durationMinutes?: number;
+  retryCount?: number;
+  revisionCount?: number;
+  workflowMode?: string;
+  workflowModeName?: string;
+  githubPrUrl?: string;
+  githubBranch?: string;
+  errorMessage?: string;
+  cardBoardId?: string;
+  cardId?: string;
+  parentTaskId?: string;
+  ecsTaskId?: string;
 }
 
 export interface TaskStep {

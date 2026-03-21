@@ -38,7 +38,7 @@ test.describe("Personas CRUD", () => {
 
   test("persona search filters the list", async ({ page }) => {
     await page.goto("/personas");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // PersonaStudio.tsx uses data-testid="persona-search"
     const searchInput = page.locator('[data-testid="persona-search"]');
@@ -55,8 +55,6 @@ test.describe("Personas CRUD", () => {
 
   test("create persona dialog opens", async ({ page }) => {
     await page.goto("/personas");
-    await page.waitForLoadState("networkidle");
-
     // Wait for page content to render (persona cards or create button)
     const createBtn = page.locator('[data-testid="create-persona-btn"]');
     const personaCard = page.locator('[data-testid="persona-card"]');
@@ -94,7 +92,7 @@ test.describe("Personas CRUD", () => {
     const personaSlug = `e2e_persona_${testId.replace(/-/g, '_')}`;
 
     await page.goto("/personas");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Wait for page content to render
     const createBtn = page.locator('[data-testid="create-persona-btn"]');
@@ -134,7 +132,7 @@ test.describe("Personas CRUD", () => {
     // handleCreatePersona navigates to /personas/:id on success
     // Navigate back to list to verify and clean up
     await page.goto("/personas");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Verify persona was created
     const personaVisible = page.locator(`text=${personaName}`);
@@ -170,14 +168,14 @@ test.describe("Personas CRUD", () => {
 
   test("persona detail page shows directives", async ({ page }) => {
     await page.goto("/personas");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // PersonaStudio.tsx renders persona cards as <Link to={`/personas/${persona.id}`}>
     const personaCard = page.locator('[data-testid="persona-card"]');
 
     if ((await personaCard.count()) > 0) {
       await personaCard.first().click();
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("domcontentloaded");
 
       // Persona detail should show some content about the persona
       await expect(page.locator("body")).toContainText(

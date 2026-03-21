@@ -22,11 +22,12 @@ setup("authenticate", async ({ page }) => {
     );
   }
 
-  // Navigate to the app - should redirect to login
-  await page.goto("/");
+  // Navigate to login page directly.
+  // Going to "/" lands on the public homepage which doesn't redirect.
+  // Going to "/login" triggers Cognito redirect or shows the login form.
+  await page.goto("/login");
 
-  // Wait for redirect to Cognito hosted UI or login page.
-  // Use retry logic to handle slow local dev server startup.
+  // Wait for Cognito hosted UI redirect or for the login form to render.
   const loginTimeout = 45000;
   try {
     await page.waitForURL(/.*login.*|.*cognito.*|.*auth.*/, {
@@ -35,10 +36,9 @@ setup("authenticate", async ({ page }) => {
   } catch {
     const currentUrl = page.url();
     throw new Error(
-      `Login redirect not detected within ${loginTimeout}ms. ` +
+      `Login page not loaded within ${loginTimeout}ms. ` +
         `Current URL: ${currentUrl}. ` +
-        `Expected a redirect to a URL containing "login", "cognito", or "auth". ` +
-        `If running locally, ensure the API and frontend are started.`,
+        `Expected URL containing "login", "cognito", or "auth".`,
     );
   }
 

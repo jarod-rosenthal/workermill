@@ -105,10 +105,10 @@ export default function QuickStart() {
             </div>
           </div>
           <p className="text-sm text-muted-foreground mb-4">
-            Workers run on your machine using your Anthropic API key. Code never leaves your computer.
+            Workers run on your machine using your own API key. Code never leaves your computer.
           </p>
           <div className="text-sm text-muted-foreground">
-            <strong className="text-foreground">Requires:</strong> Anthropic API key (or existing Claude CLI login)
+            <strong className="text-foreground">Requires:</strong> AI provider API key (Anthropic, OpenAI, Google, or Ollama) + Docker
           </div>
         </div>
 

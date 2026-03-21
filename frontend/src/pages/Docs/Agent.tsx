@@ -139,8 +139,8 @@ export default function AgentSetup() {
           </div>
           <h3 className="font-semibold text-foreground">Bring Your Own Key</h3>
           <p className="text-sm text-muted-foreground">
-            Uses your Anthropic API key. Pay your provider directly and
-            run as many tasks as your machine can handle.
+            Uses your own API keys (Anthropic, OpenAI, Google, or Ollama).
+            Pay your provider directly — no markup.
           </p>
         </div>
       </div>
@@ -232,10 +232,10 @@ export default function AgentSetup() {
               <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
               <div>
                 <span className="text-sm font-medium text-foreground">
-                  Anthropic API key (or existing Claude CLI login)
+                  AI provider API key
                 </span>
                 <p className="text-xs text-muted-foreground">
-                  Powers the AI workers and planning agent
+                  Anthropic, OpenAI, Google, or Ollama — powers the workers and planner
                 </p>
               </div>
             </div>
@@ -578,7 +578,7 @@ export default function AgentSetup() {
                 </h4>
                 <p className="text-sm text-muted-foreground">
                   When a task is found, the agent runs the planning step using
-                  Claude CLI on your machine. The plan is decomposed into stories
+                  your configured AI provider. The plan is decomposed into stories
                   assigned to expert personas (backend, frontend, DevOps, etc.).
                 </p>
               </div>
@@ -589,10 +589,10 @@ export default function AgentSetup() {
               </div>
               <div>
                 <h4 className="font-medium text-foreground">
-                  3. Workers execute as native processes
+                  3. Workers execute in Docker containers
                 </h4>
                 <p className="text-sm text-muted-foreground">
-                  Each story spawns an isolated native process running Claude CLI.
+                  Each story spawns an isolated Docker container running your chosen AI provider.
                   Workers clone your repository, make changes, and create pull
                   requests — all on your machine.
                 </p>
@@ -626,15 +626,15 @@ export default function AgentSetup() {
   │  Your Machine                                       │
   │                                                     │
   │  ┌──────────────┐    ┌──────────────────────────┐   │
-  │  │  Agent CLI   │───▶│  Claude CLI (planning)   │   │
-  │  │  polls API   │    │  uses Anthropic API key   │   │
+  │  │  Agent CLI   │───▶│  AI Provider (planning)  │   │
+  │  │  polls API   │    │  uses your API key        │   │
   │  └──────┬───────┘    └──────────────────────────┘   │
   │         │                                           │
   │         │ spawns                                    │
   │         ▼                                           │
   │  ┌──────────────┐  ┌──────────────┐                 │
   │  │  Worker 1    │  │  Worker 2    │  ...            │
-  │  │  (process)   │  │  (process)   │                 │
+  │  │  (container) │  │  (container) │                 │
   │  └──────┬───────┘  └──────┬───────┘                 │
   └─────────┼─────────────────┼─────────────────────────┘
             │                 │

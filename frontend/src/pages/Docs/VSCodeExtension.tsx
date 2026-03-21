@@ -637,7 +637,7 @@ export default function VSCodeExtension() {
               (or click the rocket icon in the editor title bar)
             </li>
             <li>
-              The agent decomposes the spec using Claude CLI locally, streaming
+              The agent decomposes the spec using your configured AI provider, streaming
               progress in real time
             </li>
             <li>
@@ -646,9 +646,8 @@ export default function VSCodeExtension() {
             </li>
           </ol>
           <p className="text-xs text-muted-foreground">
-            Full Build runs entirely on your machine using your API key
-            (or existing Claude CLI authentication). The resulting board and cards are synced to the
-            cloud dashboard.
+            Full Build runs entirely on your machine using your API key.
+            The resulting board and cards are synced to the cloud dashboard.
           </p>
         </div>
       </section>

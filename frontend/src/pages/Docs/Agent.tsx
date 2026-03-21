@@ -107,7 +107,7 @@ export default function AgentSetup() {
         </h1>
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
           A standalone binary that executes AI coding tasks on your machine
-          using your Anthropic API key. No Docker or Node.js required.
+          using your API key. Workers run in Docker containers for isolation.
         </p>
       </div>
 
@@ -119,8 +119,8 @@ export default function AgentSetup() {
           </div>
           <h3 className="font-semibold text-foreground">Your Infrastructure</h3>
           <p className="text-sm text-muted-foreground">
-            Code stays on your machine. Workers run as isolated native
-            processes with no external access to your filesystem.
+            Code stays on your machine. Workers run in isolated Docker
+            containers with no external access to your filesystem.
           </p>
         </div>
         <div className="bg-card border border-border rounded-xl p-5 space-y-2">
@@ -173,10 +173,10 @@ export default function AgentSetup() {
                   RAM
                 </td>
                 <td className="px-5 py-3 text-sm text-muted-foreground">
-                  8 GB
+                  16 GB
                 </td>
                 <td className="px-5 py-3 text-sm text-muted-foreground">
-                  16 GB+
+                  32 GB+
                 </td>
               </tr>
               <tr>
@@ -201,6 +201,15 @@ export default function AgentSetup() {
                 </td>
                 <td className="px-5 py-3 text-sm text-muted-foreground">
                   20 GB+ free
+                </td>
+              </tr>
+              <tr>
+                <td className="px-5 py-3 text-sm text-foreground flex items-center gap-2">
+                  <Monitor className="w-4 h-4 text-muted-foreground" />
+                  OS
+                </td>
+                <td className="px-5 py-3 text-sm text-muted-foreground" colSpan={2}>
+                  macOS (Intel & Apple Silicon), Linux (x64), Windows (x64, native or WSL)
                 </td>
               </tr>
               <tr>
@@ -234,6 +243,17 @@ export default function AgentSetup() {
               <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
               <div>
                 <span className="text-sm font-medium text-foreground">
+                  Docker
+                </span>
+                <p className="text-xs text-muted-foreground">
+                  Workers run in isolated Docker containers
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+              <div>
+                <span className="text-sm font-medium text-foreground">
                   Git
                 </span>
                 <p className="text-xs text-muted-foreground">
@@ -243,9 +263,9 @@ export default function AgentSetup() {
             </div>
           </div>
           <p className="text-xs text-muted-foreground mt-4">
-            The agent is a standalone binary — no Docker or Node.js required.
-            The setup wizard checks all prerequisites and installs Claude CLI
-            automatically if missing.
+            The agent is a single binary — no Node.js required. Docker is needed
+            for worker containers. The setup wizard checks all prerequisites and
+            installs Claude CLI automatically if missing.
           </p>
         </div>
       </section>
@@ -274,7 +294,7 @@ export default function AgentSetup() {
                   </span>
                 </div>
                 <p className="text-muted-foreground mb-4">
-                  Install the WorkerMill agent. No Node.js required — it's a standalone binary.
+                  Install the WorkerMill agent. No Node.js required — it's a single binary.
                 </p>
                 <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
                   <code className="text-foreground">

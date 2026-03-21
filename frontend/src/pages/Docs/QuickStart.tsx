@@ -151,7 +151,7 @@ export default function QuickStart() {
                   <h3 className="font-semibold text-foreground text-lg">Install the CLI</h3>
                   <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">1 min</span>
                 </div>
-                <p className="text-muted-foreground mb-4">Install the WorkerMill agent. No Node.js required.</p>
+                <p className="text-muted-foreground mb-4">Install the WorkerMill agent. Requires Docker for worker containers.</p>
                 <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
                   <code className="text-foreground">curl -fsSL https://workermill.com/install.sh | bash</code>
                   <button
@@ -424,10 +424,17 @@ export default function QuickStart() {
         <div className="grid md:grid-cols-2 gap-4">
           <div className="bg-card border border-border rounded-xl p-5 space-y-3">
             <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-cyan-500 animate-pulse"></div>
+              <span className="font-medium text-foreground">Planning</span>
+            </div>
+            <p className="text-sm text-muted-foreground">Planner agent decomposing the task into stories</p>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+            <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
               <span className="font-medium text-foreground">Queued</span>
             </div>
-            <p className="text-sm text-muted-foreground">Waiting for a worker to pick it up</p>
+            <p className="text-sm text-muted-foreground">Plan approved, waiting for a worker to pick it up</p>
           </div>
           <div className="bg-card border border-border rounded-xl p-5 space-y-3">
             <div className="flex items-center gap-2">
@@ -446,9 +453,30 @@ export default function QuickStart() {
           <div className="bg-card border border-border rounded-xl p-5 space-y-3">
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-green-500"></div>
+              <span className="font-medium text-foreground">Completed</span>
+            </div>
+            <p className="text-sm text-muted-foreground">Task finished with no code changes needed</p>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-green-500"></div>
               <span className="font-medium text-foreground">Deployed</span>
             </div>
             <p className="text-sm text-muted-foreground">Merged and deployed successfully</p>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-orange-500"></div>
+              <span className="font-medium text-foreground">Escalated</span>
+            </div>
+            <p className="text-sm text-muted-foreground">Worker needs clarification — respond to unblock</p>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-red-500"></div>
+              <span className="font-medium text-foreground">Failed</span>
+            </div>
+            <p className="text-sm text-muted-foreground">Task encountered an error — check logs and retry</p>
           </div>
         </div>
       </section>

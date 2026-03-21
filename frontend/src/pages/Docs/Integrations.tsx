@@ -506,7 +506,7 @@ export default function Integrations() {
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Check className="w-4 h-4 text-green-500" />
-                No Docker or cloud setup required
+                Docker workers with full isolation
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Check className="w-4 h-4 text-green-500" />
@@ -518,7 +518,7 @@ export default function Integrations() {
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Check className="w-4 h-4 text-green-500" />
-                Standalone binary (no Node.js needed)
+                Single binary (no Node.js needed)
               </div>
             </div>
           </div>

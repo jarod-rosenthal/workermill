@@ -26,32 +26,30 @@ function useProtectedRoute(isAppReady: boolean) {
   const router = useRouter();
   const segments = useSegments();
   const { isAuthenticated, isLoading, shouldShowBiometric } = useAuthStore();
-  const [isMounted, setIsMounted] = useState(false);
+  const hasNavigated = React.useRef(false);
 
   useEffect(() => {
-    // Wait one tick after mount so the navigator (Slot/Stack) is ready
-    setIsMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (!isMounted || !isAppReady || isLoading) return;
+    if (!isAppReady || isLoading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!isAuthenticated) {
-      if (!inAuthGroup) {
-        router.replace('/(auth)/sign-in');
+      if (!inAuthGroup && !hasNavigated.current) {
+        hasNavigated.current = true;
+        // Use setTimeout to ensure the navigator is mounted
+        setTimeout(() => router.replace('/(auth)/sign-in'), 0);
       }
     } else {
       if (inAuthGroup) {
-        if (shouldShowBiometric) {
-          router.replace('/(auth)/biometric');
-        } else {
-          router.replace('/(tabs)');
-        }
+        hasNavigated.current = true;
+        const target = shouldShowBiometric ? '/(auth)/biometric' : '/(tabs)';
+        setTimeout(() => router.replace(target), 0);
+      } else {
+        // Already on the right screen, reset flag so future auth changes can navigate
+        hasNavigated.current = false;
       }
     }
-  }, [isAuthenticated, isLoading, shouldShowBiometric, segments, router, isMounted, isAppReady]);
+  }, [isAuthenticated, isLoading, shouldShowBiometric, segments]);
 }
 
 function AuthGate({ children }: { children: React.ReactNode }) {
@@ -87,7 +85,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     };
 
     initializeApp();
-  }, [checkAuthStatus, loadBiometricSettings, loadPreferences]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
+  }, []);
 
   // Set up notification listeners
   useEffect(() => {

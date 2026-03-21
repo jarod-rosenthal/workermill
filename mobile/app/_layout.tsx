@@ -22,25 +22,28 @@ Notifications.setNotificationHandler({
   }),
 });
 
-function useProtectedRoute() {
+function useProtectedRoute(isAppReady: boolean) {
   const router = useRouter();
   const segments = useSegments();
   const { isAuthenticated, isLoading, shouldShowBiometric } = useAuthStore();
+  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
-    if (isLoading) return; // Wait for auth check to complete
+    // Wait one tick after mount so the navigator (Slot/Stack) is ready
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isMounted || !isAppReady || isLoading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!isAuthenticated) {
-      // User not authenticated, redirect to auth
       if (!inAuthGroup) {
         router.replace('/(auth)/sign-in');
       }
     } else {
-      // User authenticated
       if (inAuthGroup) {
-        // Check if should show biometric unlock
         if (shouldShowBiometric) {
           router.replace('/(auth)/biometric');
         } else {
@@ -48,7 +51,7 @@ function useProtectedRoute() {
         }
       }
     }
-  }, [isAuthenticated, isLoading, shouldShowBiometric, segments, router]);
+  }, [isAuthenticated, isLoading, shouldShowBiometric, segments, router, isMounted, isAppReady]);
 }
 
 function AuthGate({ children }: { children: React.ReactNode }) {
@@ -56,7 +59,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const { checkAuthStatus, loadBiometricSettings, isLoading } = useAuthStore();
   const { loadPreferences } = useNotificationsStore();
 
-  useProtectedRoute();
+  useProtectedRoute(isAppReady);
 
   // Initialize app
   useEffect(() => {

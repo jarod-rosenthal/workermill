@@ -143,9 +143,9 @@ test.describe("Personas CRUD", () => {
     }
 
     // Clean up: click persona card to navigate to detail page
-    const personaCard = page.locator(`[data-testid="persona-card"]:has-text("${personaName}")`);
-    if ((await personaCard.count()) > 0) {
-      await personaCard.first().click();
+    const createdCard = page.locator(`[data-testid="persona-card"]:has-text("${personaName}")`);
+    if ((await createdCard.count()) > 0) {
+      await createdCard.first().click();
       await page.waitForTimeout(1000);
 
       // Look for delete button on detail page

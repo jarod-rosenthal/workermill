@@ -56,24 +56,12 @@ setup("authenticate", async ({ page }) => {
     await page.waitForURL(/.*dashboard.*|.*onboarding.*|.*\/$/, { timeout: 30000 });
   }
 
-  // Wait for auth tokens to be persisted to localStorage by Zustand.
-  // In local mode, the Login component calls /auth/me, receives a user,
-  // then sets tokens in the auth store which persists to localStorage.
-  // We must wait for this before saving storageState, otherwise subsequent
-  // tests won't have the auth tokens needed for API calls.
+  // Wait for auth tokens to be persisted to localStorage.
+  // The auth store saves tokens via localStorage.setItem("accessToken", ...).
+  // In local mode, the Login component calls /auth/me, sets "local-dev-token".
+  // We must wait for this before saving storageState.
   await page.waitForFunction(
-    () => {
-      const authStorage = localStorage.getItem("auth-storage");
-      if (!authStorage) return false;
-      try {
-        const parsed = JSON.parse(authStorage);
-        // Zustand persist wraps state in { state: { ... } }
-        const state = parsed.state || parsed;
-        return !!state.accessToken || !!state.user;
-      } catch {
-        return false;
-      }
-    },
+    () => !!localStorage.getItem("accessToken"),
     { timeout: 30000 },
   );
 

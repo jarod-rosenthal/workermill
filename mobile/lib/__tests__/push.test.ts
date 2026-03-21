@@ -5,10 +5,21 @@ import { Platform } from 'react-native';
 import { PushNotificationManager } from '../push';
 import { apiClient } from '../api-client';
 
-// Mock dependencies
-jest.mock('expo-notifications');
-jest.mock('expo-device');
-jest.mock('expo-secure-store');
+// Re-mock native modules with configurable properties for per-test overrides
+// eslint-disable-next-line no-var -- var survives jest.mock hoisting (const/let do not)
+var mockDeviceState = { isDevice: true, deviceName: 'Test Device', brand: 'Apple', modelName: 'iPhone' };
+jest.mock('expo-device', () => ({
+  __esModule: true,
+  get isDevice() { return mockDeviceState.isDevice; },
+  get deviceName() { return mockDeviceState.deviceName; },
+  get brand() { return mockDeviceState.brand; },
+  get modelName() { return mockDeviceState.modelName; },
+}));
+jest.mock('expo-secure-store', () => ({
+  getItemAsync: jest.fn(),
+  setItemAsync: jest.fn(),
+  deleteItemAsync: jest.fn(),
+}));
 jest.mock('../api-client');
 jest.mock('react-native', () => ({
   Platform: {
@@ -25,16 +36,16 @@ describe('PushNotificationManager', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    // Default mocks using mockImplementation
-    Object.defineProperty(mockedDevice, 'isDevice', { value: true, writable: true });
-    Object.defineProperty(mockedDevice, 'deviceName', { value: 'iPhone 14', writable: true });
-    Object.defineProperty(mockedDevice, 'brand', { value: 'Apple', writable: true });
-    Object.defineProperty(mockedDevice, 'modelName', { value: 'iPhone', writable: true });
+    // Reset device mock state
+    mockDeviceState.isDevice = true;
+    mockDeviceState.deviceName = 'iPhone 14';
+    mockDeviceState.brand = 'Apple';
+    mockDeviceState.modelName = 'iPhone';
   });
 
   describe('isSupported', () => {
     it('should return true for physical iOS device', async () => {
-      Object.defineProperty(mockedDevice, 'isDevice', { value: true, writable: true });
+      mockDeviceState.isDevice = true;
       (Platform.OS as any) = 'ios';
 
       const isSupported = await PushNotificationManager.isSupported();
@@ -42,7 +53,7 @@ describe('PushNotificationManager', () => {
     });
 
     it('should return true for physical Android device', async () => {
-      Object.defineProperty(mockedDevice, 'isDevice', { value: true, writable: true });
+      mockDeviceState.isDevice = true;
       (Platform.OS as any) = 'android';
 
       const isSupported = await PushNotificationManager.isSupported();
@@ -50,14 +61,14 @@ describe('PushNotificationManager', () => {
     });
 
     it('should return false for simulator/emulator', async () => {
-      Object.defineProperty(mockedDevice, 'isDevice', { value: false, writable: true });
+      mockDeviceState.isDevice = false;
 
       const isSupported = await PushNotificationManager.isSupported();
       expect(isSupported).toBe(false);
     });
 
     it('should return false for unsupported platform', async () => {
-      Object.defineProperty(mockedDevice, 'isDevice', { value: true, writable: true });
+      mockDeviceState.isDevice = true;
       (Platform.OS as any) = 'web';
 
       const isSupported = await PushNotificationManager.isSupported();
@@ -123,7 +134,7 @@ describe('PushNotificationManager', () => {
     });
 
     it('should return null for unsupported device', async () => {
-      Object.defineProperty(mockedDevice, 'isDevice', { value: false, writable: true });
+      mockDeviceState.isDevice = false;
 
       const result = await PushNotificationManager.requestPermissionsAndGetToken();
 

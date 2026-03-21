@@ -11,14 +11,19 @@ jest.mock('expo-notifications', () => ({
   addNotificationReceivedListener: jest.fn(),
   addNotificationResponseReceivedListener: jest.fn(),
   removeNotificationSubscription: jest.fn(),
+  openSettingsAsync: jest.fn(),
+  setNotificationChannelAsync: jest.fn(),
+  AndroidImportance: { MAX: 5, HIGH: 4, DEFAULT: 3, LOW: 2, MIN: 1 },
 }));
 
-jest.mock('expo-device', () => ({
-  isDevice: true,
-  deviceName: 'Test Device',
-  brand: 'Test Brand',
-  modelName: 'Test Model',
-}));
+jest.mock('expo-device', () => {
+  const obj = {};
+  Object.defineProperty(obj, 'isDevice', { value: true, writable: true, configurable: true });
+  Object.defineProperty(obj, 'deviceName', { value: 'Test Device', writable: true, configurable: true });
+  Object.defineProperty(obj, 'brand', { value: 'Test Brand', writable: true, configurable: true });
+  Object.defineProperty(obj, 'modelName', { value: 'Test Model', writable: true, configurable: true });
+  return obj;
+});
 
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () => ({

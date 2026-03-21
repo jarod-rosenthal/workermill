@@ -339,7 +339,8 @@ describe('SSEClient', () => {
       errorHandler({ type: 'error' });
       MockedEventSource.mockClear();
 
-      jest.advanceTimersByTime(1000);
+      // Advance past max backoff to ensure reconnect fires regardless of attempt count
+      jest.advanceTimersByTime(30000);
       expect(MockedEventSource).toHaveBeenCalledTimes(1);
     });
   });

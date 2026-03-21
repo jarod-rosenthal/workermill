@@ -36,8 +36,8 @@ export interface BoardsState {
   // Actions - Card components
   addCardLabel: (boardId: string, cardId: string, labelId: string) => Promise<void>;
   removeCardLabel: (boardId: string, cardId: string, labelId: string) => Promise<void>;
-  addChecklistItem: (boardId: string, cardId: string, text: string) => Promise<ChecklistItem>;
-  updateChecklistItem: (boardId: string, cardId: string, itemId: string, data: { text?: string; completed?: boolean }) => Promise<ChecklistItem>;
+  addChecklistItem: (boardId: string, cardId: string, title: string) => Promise<ChecklistItem>;
+  updateChecklistItem: (boardId: string, cardId: string, itemId: string, data: { title?: string; isCompleted?: boolean }) => Promise<ChecklistItem>;
   deleteChecklistItem: (boardId: string, cardId: string, itemId: string) => Promise<void>;
   getCardActivity: (boardId: string, cardId: string) => Promise<CardActivity[]>;
 
@@ -87,7 +87,8 @@ export const useBoardsStore = create<BoardsState>()(
         set({ isBoardLoading: true, error: null });
 
         try {
-          const board = await apiClient.get<Board>(`/boards/${boardId}`);
+          const data = await apiClient.get<{ board: Board }>(`/boards/${boardId}`);
+          const board = data.board;
 
           set(state => ({
             currentBoard: board,
@@ -167,7 +168,7 @@ export const useBoardsStore = create<BoardsState>()(
 
       toggleBoardStar: async (boardId: string, isStarred: boolean) => {
         try {
-          const board = await apiClient.put<Board>(`/boards/${boardId}`, { is_starred: isStarred });
+          const board = await apiClient.put<Board>(`/boards/${boardId}`, { isStarred });
 
           set(state => ({
             boards: state.boards.map(b => b.id === boardId ? board : b),
@@ -188,7 +189,7 @@ export const useBoardsStore = create<BoardsState>()(
         try {
           const card = await apiClient.post<Card>(`/boards/${boardId}/cards`, {
             ...data,
-            column_id: columnId
+            columnId
           });
 
           // Update current board if it matches
@@ -201,7 +202,7 @@ export const useBoardsStore = create<BoardsState>()(
                     ? { ...col, cards: [card, ...col.cards] }
                     : col
                 ),
-                card_count: state.currentBoard.card_count + 1
+                cardCount: state.currentBoard.cardCount + 1
               };
 
               return {
@@ -269,7 +270,7 @@ export const useBoardsStore = create<BoardsState>()(
       moveCard: async (boardId: string, cardId: string, columnId: string, position) => {
         try {
           const card = await apiClient.put<Card>(`/boards/${boardId}/cards/${cardId}`, {
-            column_id: columnId,
+            columnId,
             position
           });
 
@@ -283,7 +284,7 @@ export const useBoardsStore = create<BoardsState>()(
               const updatedBoard = {
                 ...state.currentBoard,
                 columns: state.currentBoard.columns.map(col => {
-                  if (col.id === oldCard.column_id && col.id !== columnId) {
+                  if (col.id === oldCard.columnId && col.id !== columnId) {
                     // Remove from old column
                     return {
                       ...col,
@@ -334,7 +335,7 @@ export const useBoardsStore = create<BoardsState>()(
                   ...col,
                   cards: col.cards.filter(c => c.id !== cardId)
                 })),
-                card_count: state.currentBoard.card_count - 1
+                cardCount: state.currentBoard.cardCount - 1
               };
 
               return {
@@ -359,7 +360,7 @@ export const useBoardsStore = create<BoardsState>()(
         try {
           await apiClient.post(`/boards/${boardId}/cards/${cardId}/run`);
 
-          // The task creation will be reflected in the card's linked_task_id
+          // The task creation will be reflected in the card's workerTaskId
           // via a subsequent loadBoard call or real-time update
         } catch (error: any) {
           const errorMessage = error.response?.data?.message || 'Failed to run card as task';
@@ -384,7 +385,7 @@ export const useBoardsStore = create<BoardsState>()(
       // Card component operations
       addCardLabel: async (boardId: string, cardId: string, labelId: string) => {
         try {
-          await apiClient.post(`/boards/${boardId}/cards/${cardId}/labels`, { label_id: labelId });
+          await apiClient.post(`/boards/${boardId}/cards/${cardId}/labels`, { labelId });
 
           // Reload the card to get updated labels
           await get().loadBoard(boardId);
@@ -408,9 +409,9 @@ export const useBoardsStore = create<BoardsState>()(
         }
       },
 
-      addChecklistItem: async (boardId: string, cardId: string, text: string) => {
+      addChecklistItem: async (boardId: string, cardId: string, title: string) => {
         try {
-          const item = await apiClient.post<ChecklistItem>(`/boards/${boardId}/cards/${cardId}/checklist`, { text });
+          const item = await apiClient.post<ChecklistItem>(`/boards/${boardId}/cards/${cardId}/checklist`, { title });
 
           // Update current board if it matches
           set(state => {
@@ -423,7 +424,7 @@ export const useBoardsStore = create<BoardsState>()(
                     if (card.id === cardId) {
                       return {
                         ...card,
-                        checklist_items: [...card.checklist_items, item]
+                        checklistItems: [...card.checklistItems, item]
                       };
                     }
                     return card;
@@ -466,7 +467,7 @@ export const useBoardsStore = create<BoardsState>()(
                     if (card.id === cardId) {
                       return {
                         ...card,
-                        checklist_items: card.checklist_items.map(ci => ci.id === itemId ? item : ci)
+                        checklistItems: card.checklistItems.map(ci => ci.id === itemId ? item : ci)
                       };
                     }
                     return card;
@@ -509,7 +510,7 @@ export const useBoardsStore = create<BoardsState>()(
                     if (card.id === cardId) {
                       return {
                         ...card,
-                        checklist_items: card.checklist_items.filter(ci => ci.id !== itemId)
+                        checklistItems: card.checklistItems.filter(ci => ci.id !== itemId)
                       };
                     }
                     return card;
@@ -552,7 +553,7 @@ export const useBoardsStore = create<BoardsState>()(
       },
 
       getStarredBoards: () => {
-        return get().boards.filter(board => board.is_starred).sort((a, b) => a.name.localeCompare(b.name));
+        return get().boards.filter(board => board.isStarred).sort((a, b) => a.name.localeCompare(b.name));
       },
 
       getCardById: (boardId: string, cardId: string) => {

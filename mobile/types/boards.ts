@@ -26,72 +26,71 @@ export interface Column {
   boardId: string;
   name: string;
   position: number;
+  color?: string;
+  wipLimit?: number;
   createdAt: string;
-  updatedAt: string;
   cards: Card[];
 }
 
 export interface Card {
   id: string;
-  board_id: string;
-  column_id: string;
-  issue_key: string;
+  boardId: string;
+  columnId: string;
+  issueKey: string;
   title: string;
   description?: string;
   priority: 'urgent' | 'high' | 'medium' | 'low';
   position: number;
-  created_by: string;
-  assigned_to?: string;
-  created_at: string;
-  updated_at: string;
-  due_date?: string;
+  coverColor?: string;
+  requesterName?: string;
+  assigneeId?: string;
+  assigneeName?: string;
+  createdAt: string;
+  updatedAt: string;
+  dueDate?: string;
+  githubRepo?: string;
   labels: Label[];
-  checklist_items: ChecklistItem[];
+  checklistItems: ChecklistItem[];
   dependencies: CardDependency[];
-  linked_task_id?: string;
-  linked_task_status?: string;
-  activity_count?: number;
+  dependents: CardDependency[];
+  workerTaskId?: string;
+  workerStatus?: string;
+  commentCount?: number;
 }
 
 export interface Label {
   id: string;
-  board_id: string;
   name: string;
   color: string;
-  created_at: string;
+  createdAt: string;
 }
 
 export interface ChecklistItem {
   id: string;
-  card_id: string;
-  text: string;
-  completed: boolean;
+  cardId: string;
+  title: string;
+  isCompleted: boolean;
   position: number;
-  created_at: string;
-  updated_at?: string;
+  createdAt: string;
 }
 
 export interface CardDependency {
-  id: string;
-  card_id: string;
-  depends_on_card_id: string;
-  dependency_type: 'blocks' | 'related';
-  created_at: string;
-  depends_on_card?: Pick<Card, 'id' | 'issue_key' | 'title'>;
+  cardId: string;
+  title: string;
 }
 
 export interface CardActivity {
   id: string;
-  card_id: string;
-  user_id: string;
-  user_name: string;
+  cardId: string;
+  userId: string;
+  userName: string;
   action: 'created' | 'moved' | 'edited' | 'task_started' | 'task_completed' | 'task_failed';
   details?: {
-    from_column?: string;
-    to_column?: string;
-    field_changed?: string;
-    old_value?: string;
-    new_value?: string;
+    fromColumn?: string;
+    toColumn?: string;
+    fieldChanged?: string;
+    oldValue?: string;
+    newValue?: string;
   };
-  created_at: string;
+  createdAt: string;
 }

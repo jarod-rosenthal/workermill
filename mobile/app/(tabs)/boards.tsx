@@ -301,8 +301,8 @@ export default function BoardsScreen() {
   // Sort boards: starred first, then alphabetically
   const sortedBoards = useMemo(() => {
     return [...filteredBoards].sort((a, b) => {
-      if (a.is_starred && !b.is_starred) return -1;
-      if (!a.is_starred && b.is_starred) return 1;
+      if (a.isStarred && !b.isStarred) return -1;
+      if (!a.isStarred && b.isStarred) return 1;
       return a.name.localeCompare(b.name);
     });
   }, [filteredBoards]);

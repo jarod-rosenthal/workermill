@@ -14,51 +14,49 @@ jest.mock('../StatusBadge', () => ({
 describe('BoardCard', () => {
   const mockCard: Card = {
     id: 'card-1',
-    board_id: 'board-1',
-    column_id: 'column-1',
-    issue_key: 'WM-123',
+    boardId: 'board-1',
+    columnId: 'column-1',
+    issueKey: 'WM-123',
     title: 'Test Card Title',
     description: 'Test card description',
     priority: 'high',
     position: 1,
-    created_by: 'user-1',
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-01-01T00:00:00Z',
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
     labels: [
       {
         id: 'label-1',
-        board_id: 'board-1',
         name: 'Feature',
         color: '#3b82f6',
-        created_at: '2024-01-01T00:00:00Z',
+        createdAt: '2024-01-01T00:00:00Z',
       },
       {
         id: 'label-2',
-        board_id: 'board-1',
         name: 'High Priority',
         color: '#ef4444',
-        created_at: '2024-01-01T00:00:00Z',
+        createdAt: '2024-01-01T00:00:00Z',
       },
     ],
-    checklist_items: [
+    checklistItems: [
       {
         id: 'item-1',
-        card_id: 'card-1',
-        text: 'Task 1',
-        completed: true,
+        cardId: 'card-1',
+        title: 'Task 1',
+        isCompleted: true,
         position: 1,
-        created_at: '2024-01-01T00:00:00Z',
+        createdAt: '2024-01-01T00:00:00Z',
       },
       {
         id: 'item-2',
-        card_id: 'card-1',
-        text: 'Task 2',
-        completed: false,
+        cardId: 'card-1',
+        title: 'Task 2',
+        isCompleted: false,
         position: 2,
-        created_at: '2024-01-01T00:00:00Z',
+        createdAt: '2024-01-01T00:00:00Z',
       },
     ],
     dependencies: [],
+    dependents: [],
   };
 
   const mockOnPress = jest.fn();
@@ -90,14 +88,14 @@ describe('BoardCard', () => {
   });
 
   it('does not show checklist progress when no checklist items', () => {
-    const cardWithoutChecklist = { ...mockCard, checklist_items: [] };
+    const cardWithoutChecklist = { ...mockCard, checklistItems: [] };
     render(<BoardCard card={cardWithoutChecklist} onPress={mockOnPress} onLongPress={mockOnLongPress} />);
 
     expect(screen.queryByText('0/0')).toBeNull();
   });
 
   it('shows worker status badge when linked task exists', () => {
-    const cardWithTask = { ...mockCard, linked_task_status: 'running' };
+    const cardWithTask = { ...mockCard, workerStatus: 'running' };
     render(<BoardCard card={cardWithTask} onPress={mockOnPress} onLongPress={mockOnLongPress} />);
 
     expect(screen.getByTestId('status-badge')).toBeTruthy();

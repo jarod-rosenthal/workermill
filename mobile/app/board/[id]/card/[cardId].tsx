@@ -204,8 +204,8 @@ function PrioritySelector({ value, onSelect }: PrioritySelectorProps) {
 
 interface ChecklistSectionProps {
   items: ChecklistItem[];
-  onToggleItem: (itemId: string, completed: boolean) => void;
-  onAddItem: (text: string) => void;
+  onToggleItem: (itemId: string, isCompleted: boolean) => void;
+  onAddItem: (title: string) => void;
   onDeleteItem: (itemId: string) => void;
 }
 
@@ -224,7 +224,7 @@ function ChecklistSection({ items, onToggleItem, onAddItem, onDeleteItem }: Chec
   const handleDeleteItem = useCallback((item: ChecklistItem) => {
     Alert.alert(
       'Delete Item',
-      `Delete "${item.text}"?`,
+      `Delete "${item.title}"?`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: () => onDeleteItem(item.id) },
@@ -232,7 +232,7 @@ function ChecklistSection({ items, onToggleItem, onAddItem, onDeleteItem }: Chec
     );
   }, [onDeleteItem]);
 
-  const completedCount = items.filter(item => item.completed).length;
+  const completedCount = items.filter(item => item.isCompleted).length;
 
   return (
     <View className="mb-6">
@@ -266,30 +266,30 @@ function ChecklistSection({ items, onToggleItem, onAddItem, onDeleteItem }: Chec
                 className="flex-row items-center py-2 border-b border-slate-100 dark:border-slate-800 last:border-b-0"
               >
                 <Switch
-                  value={item.completed}
-                  onValueChange={(completed) => onToggleItem(item.id, completed)}
+                  value={item.isCompleted}
+                  onValueChange={(isCompleted) => onToggleItem(item.id, isCompleted)}
                   trackColor={{ false: '#e2e8f0', true: '#22c55e' }}
                   thumbColor="#ffffff"
                   accessibilityRole="checkbox"
-                  accessibilityState={{ checked: item.completed }}
-                  accessibilityLabel={`${item.completed ? 'Completed' : 'Incomplete'}: ${item.text}`}
+                  accessibilityState={{ checked: item.isCompleted }}
+                  accessibilityLabel={`${item.isCompleted ? 'Completed' : 'Incomplete'}: ${item.title}`}
                 />
                 <Text
                   className={`flex-1 ml-3 ${
-                    item.completed
+                    item.isCompleted
                       ? 'text-slate-500 dark:text-slate-400 line-through'
                       : 'text-slate-900 dark:text-slate-100'
                   }`}
                   accessibilityRole="text"
                 >
-                  {item.text}
+                  {item.title}
                 </Text>
                 <TouchableOpacity
                   onPress={() => handleDeleteItem(item)}
                   className="p-2"
                   style={{ minHeight: 44, minWidth: 44 }}
                   accessibilityRole="button"
-                  accessibilityLabel={`Delete item: ${item.text}`}
+                  accessibilityLabel={`Delete item: ${item.title}`}
                 >
                   <Ionicons name="trash-outline" size={16} className="text-red-500" />
                 </TouchableOpacity>
@@ -357,11 +357,11 @@ function ActivitySection({ activities, isLoading, onRefresh }: ActivitySectionPr
   const formatActivityMessage = useCallback((activity: CardActivity) => {
     switch (activity.action) {
       case 'created':
-        return `Card created by ${activity.user_name}`;
+        return `Card created by ${activity.userName}`;
       case 'moved':
-        return `Moved from ${activity.details?.from_column} to ${activity.details?.to_column} by ${activity.user_name}`;
+        return `Moved from ${activity.details?.fromColumn} to ${activity.details?.toColumn} by ${activity.userName}`;
       case 'edited':
-        return `${activity.details?.field_changed} updated by ${activity.user_name}`;
+        return `${activity.details?.fieldChanged} updated by ${activity.userName}`;
       case 'task_started':
         return 'AI task started';
       case 'task_completed':
@@ -369,7 +369,7 @@ function ActivitySection({ activities, isLoading, onRefresh }: ActivitySectionPr
       case 'task_failed':
         return 'AI task failed';
       default:
-        return `${activity.action} by ${activity.user_name}`;
+        return `${activity.action} by ${activity.userName}`;
     }
   }, []);
 
@@ -460,7 +460,7 @@ function ActivitySection({ activities, isLoading, onRefresh }: ActivitySectionPr
                   className="text-xs text-slate-500 dark:text-slate-400"
                   accessibilityRole="text"
                 >
-                  {formatTimestamp(activity.created_at)}
+                  {formatTimestamp(activity.createdAt)}
                 </Text>
               </View>
             </View>
@@ -561,11 +561,11 @@ export default function CardDetailScreen() {
     }
   }, [boardId, cardId, updateCard, loadActivity]);
 
-  const handleToggleChecklistItem = useCallback(async (itemId: string, completed: boolean) => {
+  const handleToggleChecklistItem = useCallback(async (itemId: string, isCompleted: boolean) => {
     if (!boardId || !cardId) return;
 
     try {
-      await updateChecklistItem(boardId, cardId, itemId, { completed });
+      await updateChecklistItem(boardId, cardId, itemId, { isCompleted });
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to update checklist item');
     }
@@ -657,7 +657,7 @@ export default function CardDetailScreen() {
     if (!currentBoard || !card) return;
 
     const columnOptions = currentBoard.columns
-      .filter(col => col.id !== card.column_id)
+      .filter(col => col.id !== card.columnId)
       .map(col => col.name);
 
     if (columnOptions.length === 0) {
@@ -745,7 +745,7 @@ export default function CardDetailScreen() {
     <>
       <Stack.Screen
         options={{
-          title: card.issue_key,
+          title: card.issueKey,
           headerTitleStyle: {
             fontSize: 18,
             fontWeight: '600',
@@ -755,7 +755,7 @@ export default function CardDetailScreen() {
               onPress={() => {
                 const options = [
                   'Run as AI Task',
-                  ...(card.linked_task_id ? ['Cancel Task'] : []),
+                  ...(card.workerTaskId ? ['Cancel Task'] : []),
                   'Move to Column',
                   'Delete Card',
                   'Cancel'
@@ -791,7 +791,7 @@ export default function CardDetailScreen() {
                     'Choose an action',
                     [
                       { text: 'Run as Task', onPress: handleRunAsTask },
-                      ...(card.linked_task_id ? [{ text: 'Cancel Task', onPress: handleCancelTask }] : []),
+                      ...(card.workerTaskId ? [{ text: 'Cancel Task', onPress: handleCancelTask }] : []),
                       { text: 'Move', onPress: handleMoveCard },
                       { text: 'Delete', style: 'destructive' as const, onPress: handleDeleteCard },
                       { text: 'Cancel', style: 'cancel' as const },
@@ -823,17 +823,17 @@ export default function CardDetailScreen() {
         }
       >
         {/* Worker status */}
-        {card.linked_task_status && (
+        {card.workerStatus && (
           <View className="mb-4">
             <View className="flex-row items-center justify-between">
               <Text className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 Worker Status
               </Text>
-              <StatusBadge status={card.linked_task_status as any} />
+              <StatusBadge status={card.workerStatus as any} />
             </View>
-            {card.linked_task_id && (
+            {card.workerTaskId && (
               <TouchableOpacity
-                onPress={() => router.push(`/task/${card.linked_task_id}`)}
+                onPress={() => router.push(`/task/${card.workerTaskId}`)}
                 className="mt-2 p-2 bg-blue-50 dark:bg-blue-950 rounded-lg"
                 style={{ minHeight: 44 }}
                 accessibilityRole="button"
@@ -892,7 +892,7 @@ export default function CardDetailScreen() {
 
         {/* Checklist */}
         <ChecklistSection
-          items={card.checklist_items}
+          items={card.checklistItems}
           onToggleItem={handleToggleChecklistItem}
           onAddItem={handleAddChecklistItem}
           onDeleteItem={handleDeleteChecklistItem}
@@ -906,25 +906,19 @@ export default function CardDetailScreen() {
             </Text>
             {card.dependencies.map((dep) => (
               <View
-                key={dep.id}
+                key={dep.cardId}
                 className="flex-row items-center py-2 border border-slate-200 dark:border-slate-700 rounded-lg px-3 mb-2"
               >
                 <Ionicons
-                  name={dep.dependency_type === 'blocks' ? 'stop-outline' : 'link-outline'}
+                  name="link-outline"
                   size={16}
                   className="text-slate-500 mr-3"
                 />
                 <View className="flex-1">
                   <Text className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                    {dep.depends_on_card?.issue_key}
-                  </Text>
-                  <Text className="text-xs text-slate-600 dark:text-slate-400">
-                    {dep.depends_on_card?.title}
+                    {dep.title}
                   </Text>
                 </View>
-                <Text className="text-xs text-slate-500 dark:text-slate-400 capitalize">
-                  {dep.dependency_type}
-                </Text>
               </View>
             ))}
           </View>

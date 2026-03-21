@@ -14,29 +14,28 @@ const mockedApiClient = apiClient as jest.Mocked<typeof apiClient>;
 // Mock data
 const mockColumn: Column = {
   id: 'col-1',
-  board_id: 'board-1',
+  boardId: 'board-1',
   name: 'To Do',
   position: 0,
-  created_at: '2024-01-01T00:00:00Z',
-  updated_at: '2024-01-01T00:00:00Z',
+  createdAt: '2024-01-01T00:00:00Z',
   cards: []
 };
 
 const mockCard: Card = {
   id: 'card-1',
-  board_id: 'board-1',
-  column_id: 'col-1',
-  issue_key: 'TEST-123',
+  boardId: 'board-1',
+  columnId: 'col-1',
+  issueKey: 'TEST-123',
   title: 'Test card',
   description: 'Test description',
   priority: 'medium',
   position: 0,
-  created_by: 'user-1',
-  created_at: '2024-01-01T00:00:00Z',
-  updated_at: '2024-01-01T00:00:00Z',
+  createdAt: '2024-01-01T00:00:00Z',
+  updatedAt: '2024-01-01T00:00:00Z',
   labels: [],
-  checklist_items: [],
-  dependencies: []
+  checklistItems: [],
+  dependencies: [],
+  dependents: []
 };
 
 const mockBoard: Board = {
@@ -44,32 +43,30 @@ const mockBoard: Board = {
   name: 'Test Board',
   description: 'Test description',
   prefix: 'TEST',
-  org_id: 'org-1',
-  created_by: 'user-1',
-  created_at: '2024-01-01T00:00:00Z',
-  updated_at: '2024-01-01T00:00:00Z',
-  is_starred: false,
-  card_count: 1,
-  column_count: 1,
+  createdAt: '2024-01-01T00:00:00Z',
+  updatedAt: '2024-01-01T00:00:00Z',
+  isStarred: false,
+  cardCount: 1,
+  columnCount: 1,
   columns: [{ ...mockColumn, cards: [mockCard] }]
 };
 
 const mockChecklistItem: ChecklistItem = {
   id: 'item-1',
-  card_id: 'card-1',
-  text: 'Test item',
-  completed: false,
+  cardId: 'card-1',
+  title: 'Test item',
+  isCompleted: false,
   position: 0,
-  created_at: '2024-01-01T00:00:00Z'
+  createdAt: '2024-01-01T00:00:00Z'
 };
 
 const mockActivity: CardActivity = {
   id: 'activity-1',
-  card_id: 'card-1',
-  user_id: 'user-1',
-  user_name: 'Test User',
+  cardId: 'card-1',
+  userId: 'user-1',
+  userName: 'Test User',
   action: 'created',
-  created_at: '2024-01-01T00:00:00Z'
+  createdAt: '2024-01-01T00:00:00Z'
 };
 
 describe('BoardsStore', () => {
@@ -95,7 +92,7 @@ describe('BoardsStore', () => {
 
   describe('loadBoards', () => {
     it('loads boards from API', async () => {
-      mockedApiClient.get.mockResolvedValue([mockBoard]);
+      mockedApiClient.get.mockResolvedValue({ boards: [mockBoard] });
 
       const store = useBoardsStore.getState();
       await store.loadBoards();
@@ -142,7 +139,7 @@ describe('BoardsStore', () => {
 
   describe('loadBoard', () => {
     it('loads specific board from API', async () => {
-      mockedApiClient.get.mockResolvedValue(mockBoard);
+      mockedApiClient.get.mockResolvedValue({ board: mockBoard });
 
       const store = useBoardsStore.getState();
       await store.loadBoard('board-1');
@@ -159,7 +156,7 @@ describe('BoardsStore', () => {
       // Set initial boards list
       useBoardsStore.setState({ boards: [mockBoard] });
 
-      mockedApiClient.get.mockResolvedValue(updatedBoard);
+      mockedApiClient.get.mockResolvedValue({ board: updatedBoard });
 
       const store = useBoardsStore.getState();
       await store.loadBoard('board-1');
@@ -243,7 +240,7 @@ describe('BoardsStore', () => {
     });
 
     it('toggles board star', async () => {
-      const starredBoard = { ...mockBoard, is_starred: true };
+      const starredBoard = { ...mockBoard, isStarred: true };
 
       // Set initial board
       useBoardsStore.setState({ boards: [mockBoard] });
@@ -253,8 +250,8 @@ describe('BoardsStore', () => {
       const store = useBoardsStore.getState();
       await store.toggleBoardStar('board-1', true);
 
-      expect(mockedApiClient.put).toHaveBeenCalledWith('/boards/board-1', { is_starred: true });
-      expect(useBoardsStore.getState().boards[0].is_starred).toBe(true);
+      expect(mockedApiClient.put).toHaveBeenCalledWith('/boards/board-1', { isStarred: true });
+      expect(useBoardsStore.getState().boards[0].isStarred).toBe(true);
     });
   });
 
@@ -279,7 +276,7 @@ describe('BoardsStore', () => {
       expect(mockedApiClient.post).toHaveBeenCalledWith('/boards/board-1/cards', {
         title: 'New Card',
         description: 'Test description',
-        column_id: 'col-1'
+        columnId: 'col-1'
       });
       expect(result).toEqual(newCard);
 
@@ -303,7 +300,7 @@ describe('BoardsStore', () => {
     });
 
     it('moves card between columns', async () => {
-      const movedCard = { ...mockCard, column_id: 'col-2' };
+      const movedCard = { ...mockCard, columnId: 'col-2' };
       mockedApiClient.put.mockResolvedValue(movedCard);
 
       // Add a second column to the board
@@ -320,7 +317,7 @@ describe('BoardsStore', () => {
       const result = await store.moveCard('board-1', 'card-1', 'col-2', 0);
 
       expect(mockedApiClient.put).toHaveBeenCalledWith('/boards/board-1/cards/card-1', {
-        column_id: 'col-2',
+        columnId: 'col-2',
         position: 0
       });
       expect(result).toEqual(movedCard);
@@ -337,7 +334,7 @@ describe('BoardsStore', () => {
       const state = useBoardsStore.getState();
       const column = state.currentBoard?.columns.find(c => c.id === 'col-1');
       expect(column?.cards).toHaveLength(0);
-      expect(state.currentBoard?.card_count).toBe(0);
+      expect(state.currentBoard?.cardCount).toBe(0);
     });
 
     it('runs card as task', async () => {
@@ -369,18 +366,18 @@ describe('BoardsStore', () => {
 
     it('adds card label', async () => {
       mockedApiClient.post.mockResolvedValue(undefined);
-      mockedApiClient.get.mockResolvedValue(mockBoard); // For reload
+      mockedApiClient.get.mockResolvedValue({ board: mockBoard }); // For reload
 
       const store = useBoardsStore.getState();
       await store.addCardLabel('board-1', 'card-1', 'label-1');
 
-      expect(mockedApiClient.post).toHaveBeenCalledWith('/boards/board-1/cards/card-1/labels', { label_id: 'label-1' });
+      expect(mockedApiClient.post).toHaveBeenCalledWith('/boards/board-1/cards/card-1/labels', { labelId: 'label-1' });
       expect(mockedApiClient.get).toHaveBeenCalledWith('/boards/board-1'); // Reload called
     });
 
     it('removes card label', async () => {
       mockedApiClient.delete.mockResolvedValue(undefined);
-      mockedApiClient.get.mockResolvedValue(mockBoard); // For reload
+      mockedApiClient.get.mockResolvedValue({ board: mockBoard }); // For reload
 
       const store = useBoardsStore.getState();
       await store.removeCardLabel('board-1', 'card-1', 'label-1');
@@ -404,18 +401,18 @@ describe('BoardsStore', () => {
       const store = useBoardsStore.getState();
       const result = await store.addChecklistItem('board-1', 'card-1', 'Test item');
 
-      expect(mockedApiClient.post).toHaveBeenCalledWith('/boards/board-1/cards/card-1/checklist', { text: 'Test item' });
+      expect(mockedApiClient.post).toHaveBeenCalledWith('/boards/board-1/cards/card-1/checklist', { title: 'Test item' });
       expect(result).toEqual(mockChecklistItem);
 
       const card = store.getCardById('board-1', 'card-1');
-      expect(card?.checklist_items).toContain(mockChecklistItem);
+      expect(card?.checklistItems).toContain(mockChecklistItem);
     });
 
     it('updates checklist item', async () => {
-      const updatedItem = { ...mockChecklistItem, completed: true };
+      const updatedItem = { ...mockChecklistItem, isCompleted: true };
 
       // Set initial card with checklist item
-      const cardWithItem = { ...mockCard, checklist_items: [mockChecklistItem] };
+      const cardWithItem = { ...mockCard, checklistItems: [mockChecklistItem] };
       const boardWithItem = {
         ...mockBoard,
         columns: [{ ...mockColumn, cards: [cardWithItem] }]
@@ -425,18 +422,18 @@ describe('BoardsStore', () => {
       mockedApiClient.put.mockResolvedValue(updatedItem);
 
       const store = useBoardsStore.getState();
-      const result = await store.updateChecklistItem('board-1', 'card-1', 'item-1', { completed: true });
+      const result = await store.updateChecklistItem('board-1', 'card-1', 'item-1', { isCompleted: true });
 
-      expect(mockedApiClient.put).toHaveBeenCalledWith('/boards/board-1/cards/card-1/checklist/item-1', { completed: true });
+      expect(mockedApiClient.put).toHaveBeenCalledWith('/boards/board-1/cards/card-1/checklist/item-1', { isCompleted: true });
       expect(result).toEqual(updatedItem);
 
       const card = store.getCardById('board-1', 'card-1');
-      expect(card?.checklist_items[0].completed).toBe(true);
+      expect(card?.checklistItems[0].isCompleted).toBe(true);
     });
 
     it('deletes checklist item', async () => {
       // Set initial card with checklist item
-      const cardWithItem = { ...mockCard, checklist_items: [mockChecklistItem] };
+      const cardWithItem = { ...mockCard, checklistItems: [mockChecklistItem] };
       const boardWithItem = {
         ...mockBoard,
         columns: [{ ...mockColumn, cards: [cardWithItem] }]
@@ -451,7 +448,7 @@ describe('BoardsStore', () => {
       expect(mockedApiClient.delete).toHaveBeenCalledWith('/boards/board-1/cards/card-1/checklist/item-1');
 
       const card = store.getCardById('board-1', 'card-1');
-      expect(card?.checklist_items).toHaveLength(0);
+      expect(card?.checklistItems).toHaveLength(0);
     });
 
     it('gets card activity', async () => {
@@ -467,7 +464,7 @@ describe('BoardsStore', () => {
 
   describe('convenience getters', () => {
     beforeEach(() => {
-      const starredBoard = { ...mockBoard, id: 'board-2', name: 'Starred Board', is_starred: true };
+      const starredBoard = { ...mockBoard, id: 'board-2', name: 'Starred Board', isStarred: true };
       useBoardsStore.setState({
         boards: [mockBoard, starredBoard],
         currentBoard: mockBoard
@@ -494,7 +491,7 @@ describe('BoardsStore', () => {
 
       expect(starredBoards).toHaveLength(1);
       expect(starredBoards[0].name).toBe('Starred Board');
-      expect(starredBoards[0].is_starred).toBe(true);
+      expect(starredBoards[0].isStarred).toBe(true);
     });
 
     it('getCardById returns correct card', () => {

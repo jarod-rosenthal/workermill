@@ -244,14 +244,14 @@ export default function BoardDetailScreen() {
   }, [id, loadBoard]);
 
   const handleCardPress = useCallback((card: Card) => {
-    router.push(`/board/${card.board_id}/card/${card.id}`);
+    router.push(`/board/${card.boardId}/card/${card.id}`);
   }, []);
 
   const handleCardLongPress = useCallback((card: Card) => {
     const options = [
       'Edit Card',
       'Run as AI Task',
-      ...(card.linked_task_id ? ['Cancel Task'] : []),
+      ...(card.workerTaskId ? ['Cancel Task'] : []),
       'Move to Column',
       'Delete Card',
       'Cancel'
@@ -270,7 +270,7 @@ export default function BoardDetailScreen() {
         async (buttonIndex) => {
           switch (options[buttonIndex]) {
             case 'Edit Card':
-              router.push(`/board/${card.board_id}/card/${card.id}`);
+              router.push(`/board/${card.boardId}/card/${card.id}`);
               break;
             case 'Run as AI Task':
               handleRunCardAsTask(card);
@@ -293,9 +293,9 @@ export default function BoardDetailScreen() {
         card.title,
         'Choose an action',
         [
-          { text: 'Edit', onPress: () => router.push(`/board/${card.board_id}/card/${card.id}`) },
+          { text: 'Edit', onPress: () => router.push(`/board/${card.boardId}/card/${card.id}`) },
           { text: 'Run as Task', onPress: () => handleRunCardAsTask(card) },
-          ...(card.linked_task_id ? [{ text: 'Cancel Task', onPress: () => handleCancelCardTask(card) }] : []),
+          ...(card.workerTaskId ? [{ text: 'Cancel Task', onPress: () => handleCancelCardTask(card) }] : []),
           { text: 'Delete', style: 'destructive' as const, onPress: () => handleDeleteCard(card) },
           { text: 'Cancel', style: 'cancel' as const },
         ]
@@ -306,7 +306,7 @@ export default function BoardDetailScreen() {
 
   const handleRunCardAsTask = useCallback(async (card: Card) => {
     try {
-      await runCardAsTask(card.board_id, card.id);
+      await runCardAsTask(card.boardId, card.id);
       Alert.alert('Success', 'Task has been created and will start running');
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to run card as task');
@@ -324,7 +324,7 @@ export default function BoardDetailScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await cancelCardTask(card.board_id, card.id);
+              await cancelCardTask(card.boardId, card.id);
               Alert.alert('Success', 'Task has been cancelled');
             } catch (error: any) {
               Alert.alert('Error', error.message || 'Failed to cancel task');
@@ -339,7 +339,7 @@ export default function BoardDetailScreen() {
     if (!currentBoard) return;
 
     const columnOptions = currentBoard.columns
-      .filter(col => col.id !== card.column_id)
+      .filter(col => col.id !== card.columnId)
       .map(col => col.name);
 
     if (columnOptions.length === 0) {
@@ -359,7 +359,7 @@ export default function BoardDetailScreen() {
             const selectedColumn = currentBoard.columns.find(col => col.name === columnOptions[buttonIndex]);
             if (selectedColumn) {
               try {
-                await moveCard(card.board_id, card.id, selectedColumn.id);
+                await moveCard(card.boardId, card.id, selectedColumn.id);
               } catch (error: any) {
                 Alert.alert('Error', error.message || 'Failed to move card');
               }
@@ -379,7 +379,7 @@ export default function BoardDetailScreen() {
               const selectedColumn = currentBoard.columns.find(col => col.name === colName);
               if (selectedColumn) {
                 try {
-                  await moveCard(card.board_id, card.id, selectedColumn.id);
+                  await moveCard(card.boardId, card.id, selectedColumn.id);
                 } catch (error: any) {
                   Alert.alert('Error', error.message || 'Failed to move card');
                 }
@@ -403,7 +403,7 @@ export default function BoardDetailScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteCard(card.board_id, card.id);
+              await deleteCard(card.boardId, card.id);
             } catch (error: any) {
               Alert.alert('Error', error.message || 'Failed to delete card');
             }
@@ -510,7 +510,7 @@ export default function BoardDetailScreen() {
                   className="text-sm text-slate-600 dark:text-slate-400"
                   accessibilityRole="text"
                 >
-                  {currentBoard.card_count}
+                  {currentBoard.cardCount}
                 </Text>
               </View>
               <View className="flex-row items-center">
@@ -524,7 +524,7 @@ export default function BoardDetailScreen() {
                   className="text-sm text-slate-600 dark:text-slate-400"
                   accessibilityRole="text"
                 >
-                  {currentBoard.column_count}
+                  {currentBoard.columnCount}
                 </Text>
               </View>
             </View>

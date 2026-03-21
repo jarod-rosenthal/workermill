@@ -45,7 +45,7 @@ export function BoardCard({ card, onPress, onLongPress }: BoardCardProps) {
       className="mb-3"
       style={{ minHeight: 48, minWidth: 48 }} // Minimum touch target
       accessibilityRole="button"
-      accessibilityLabel={`Card ${card.issue_key}: ${card.title}`}
+      accessibilityLabel={`Card ${card.issueKey}: ${card.title}`}
       accessibilityHint="Double tap to open card details, long press for options"
     >
       <View
@@ -63,10 +63,10 @@ export function BoardCard({ card, onPress, onLongPress }: BoardCardProps) {
               className="text-xs font-mono text-slate-600 dark:text-slate-400"
               accessibilityRole="text"
             >
-              {card.issue_key}
+              {card.issueKey}
             </Text>
-            {card.linked_task_status && (
-              <StatusBadge status={card.linked_task_status as any} />
+            {card.workerStatus && (
+              <StatusBadge status={card.workerStatus as any} />
             )}
           </View>
 
@@ -96,14 +96,14 @@ export function BoardCard({ card, onPress, onLongPress }: BoardCardProps) {
         )}
 
         {/* Checklist progress indicator */}
-        {card.checklist_items.length > 0 && (
+        {card.checklistItems.length > 0 && (
           <View className="px-3 pb-3">
             <View className="flex-row items-center">
               <View className="flex-1 bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mr-2">
                 <View
                   className="bg-green-500 h-1.5 rounded-full"
                   style={{
-                    width: `${(card.checklist_items.filter(item => item.completed).length / card.checklist_items.length) * 100}%`
+                    width: `${(card.checklistItems.filter(item => item.isCompleted).length / card.checklistItems.length) * 100}%`
                   }}
                 />
               </View>
@@ -111,7 +111,7 @@ export function BoardCard({ card, onPress, onLongPress }: BoardCardProps) {
                 className="text-xs text-slate-600 dark:text-slate-400"
                 accessibilityRole="text"
               >
-                {card.checklist_items.filter(item => item.completed).length}/{card.checklist_items.length}
+                {card.checklistItems.filter(item => item.isCompleted).length}/{card.checklistItems.length}
               </Text>
             </View>
           </View>

@@ -94,7 +94,7 @@ jobs:
 
       - name: Check for COGNITO_CLIENT_ID placeholder
         run: |
-          if grep -r "<REPLACE_WITH_CLIENT_ID>" mobile/; then
+          if grep -r --include="*.ts" --include="*.tsx" --include="*.js" --include="*.json" "<REPLACE_WITH_CLIENT_ID>" mobile/; then
             echo "ERROR: COGNITO_CLIENT_ID placeholder not replaced"
             exit 1
           fi

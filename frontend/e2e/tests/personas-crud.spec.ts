@@ -46,6 +46,7 @@ test.describe("Personas CRUD", () => {
     if ((await searchInput.count()) > 0) {
       // Search for a common persona
       await searchInput.first().fill("backend");
+      // Brief wait for search debounce before checking filtered results
       await page.waitForTimeout(500);
 
       // Should show filtered results
@@ -130,10 +131,10 @@ test.describe("Personas CRUD", () => {
     const submitBtn = page.locator('button[type="submit"]:has-text("Create Persona")');
     if ((await submitBtn.count()) > 0) {
       await submitBtn.first().click();
-      await page.waitForTimeout(2000);
+      // handleCreatePersona navigates to /personas/:id on success
+      await page.waitForURL(/\/personas\/[a-f0-9-]+/, { timeout: 10000 }).catch(() => {});
     }
 
-    // handleCreatePersona navigates to /personas/:id on success
     // Navigate back to list to verify and clean up
     await page.goto("/personas");
     await page.waitForLoadState("domcontentloaded");
@@ -148,7 +149,7 @@ test.describe("Personas CRUD", () => {
     const createdCard = page.locator(`[data-testid="persona-card"]:has-text("${personaName}")`);
     if ((await createdCard.count()) > 0) {
       await createdCard.first().click();
-      await page.waitForTimeout(1000);
+      await page.waitForLoadState("domcontentloaded");
 
       // Look for delete button on detail page
       const deleteBtn = page.locator(

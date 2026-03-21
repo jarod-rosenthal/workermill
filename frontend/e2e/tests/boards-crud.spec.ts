@@ -90,7 +90,7 @@ test.describe("Boards CRUD", () => {
     }
 
     // Should navigate to the new board (handleCreate navigates to /boards/:id)
-    await page.waitForTimeout(2000);
+    await page.waitForURL(/\/boards\/[a-f0-9-]+/, { timeout: 10000 }).catch(() => {});
 
     // Navigate back to boards list if we're on a board detail page
     if (page.url().match(/\/boards\/[a-f0-9-]+/)) {
@@ -115,12 +115,12 @@ test.describe("Boards CRUD", () => {
       const menuBtn = boardCard.first().locator('button:has(svg)').last();
       if ((await menuBtn.count()) > 0) {
         await menuBtn.click();
-        await page.waitForTimeout(500);
 
-        // Click delete option in the dropdown
+        // Wait for dropdown menu to appear
         const deleteOption = page.locator(
           'button:has-text("Delete")',
         );
+        await expect(deleteOption.first()).toBeVisible({ timeout: 5000 });
         if ((await deleteOption.count()) > 0) {
           await deleteOption.first().click();
 

@@ -15,7 +15,6 @@ const isProduction = !!process.env.BASE_URL?.includes('workermill.com');
  * - UI handles rapid status transitions
  */
 test.describe("SSE Resilience", () => {
-  test.skip(isProduction, 'Requires mock workers — only runs against local stack');
   let apiClient: APIClient;
   const createdTaskIds: string[] = [];
 
@@ -36,6 +35,7 @@ test.describe("SSE Resilience", () => {
   test("dashboard reflects task status changes without manual refresh", async ({
     page,
   }) => {
+    test.skip(isProduction, 'Requires mock workers — only runs against local stack');
     // Create a success task
     const jiraKey = createTestJiraKey("success");
     const payload = apiClient.createJiraWebhookPayload({
@@ -84,6 +84,7 @@ test.describe("SSE Resilience", () => {
   });
 
   test("multiple tasks update independently", async ({ page }) => {
+    test.skip(isProduction, 'Requires mock workers — only runs against local stack');
     // Create two tasks with different scenarios
     const successKey = createTestJiraKey("success");
     const failKey = createTestJiraKey("fail");
@@ -151,6 +152,7 @@ test.describe("SSE Resilience", () => {
   test("page navigation away and back preserves task data", async ({
     page,
   }) => {
+    test.skip(isProduction, 'Requires mock workers — only runs against local stack');
     const jiraKey = createTestJiraKey("success");
     const payload = apiClient.createJiraWebhookPayload({
       issueKey: jiraKey,
@@ -205,6 +207,7 @@ test.describe("SSE Resilience", () => {
   test("rapid task creation does not break the dashboard", async ({
     page,
   }) => {
+    test.skip(isProduction, 'Requires mock workers — only runs against local stack');
     // Create 3 tasks rapidly
     const keys: string[] = [];
     for (let i = 0; i < 3; i++) {

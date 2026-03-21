@@ -35,7 +35,6 @@ test.describe("Settings Mutations", () => {
     const generalNav = page.locator('[data-testid="settings-nav-general"]');
     if ((await generalNav.count()) > 0) {
       await generalNav.first().click();
-      await page.waitForTimeout(500);
     }
 
     // Should show org-related content
@@ -59,7 +58,6 @@ test.describe("Settings Mutations", () => {
     const teamNav = page.locator('[data-testid="settings-nav-team"]');
     if ((await teamNav.count()) > 0) {
       await teamNav.first().click();
-      await page.waitForTimeout(500);
     }
 
     // Should show team members or invite functionality
@@ -77,7 +75,6 @@ test.describe("Settings Mutations", () => {
     const aiNav = page.locator('[data-testid="settings-nav-ai-workers"]');
     if ((await aiNav.count()) > 0) {
       await aiNav.first().click();
-      await page.waitForTimeout(500);
     }
 
     // Should show model-related settings
@@ -95,7 +92,6 @@ test.describe("Settings Mutations", () => {
     const integrationsNav = page.locator('[data-testid="settings-nav-integrations"]');
     if ((await integrationsNav.count()) > 0) {
       await integrationsNav.first().click();
-      await page.waitForTimeout(500);
     }
 
     // Should show integration-related content (GitHub, GitLab, Bitbucket, Jira)

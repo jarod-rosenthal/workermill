@@ -64,41 +64,6 @@ export class APIClient {
     });
   }
 
-  createGithubIssuesWebhookPayload(options: {
-    repo: string;
-    issueNumber: number;
-    title: string;
-    body?: string;
-    labels?: string[];
-  }) {
-    return {
-      action: "labeled",
-      issue: {
-        number: options.issueNumber,
-        title: options.title,
-        body:
-          options.body ||
-          `E2E test issue created at ${new Date().toISOString()}`,
-        labels: (options.labels || ["workermill"]).map((name) => ({ name })),
-        state: "open",
-        html_url: `https://github.com/${options.repo}/issues/${options.issueNumber}`,
-      },
-      repository: {
-        full_name: options.repo,
-        html_url: `https://github.com/${options.repo}`,
-      },
-      label: { name: "workermill" },
-    };
-  }
-
-  async sendGithubIssuesWebhook(
-    payload: ReturnType<typeof this.createGithubIssuesWebhookPayload>,
-  ) {
-    return this.request.post(`${this.apiURL}/api/webhooks/github-issues`, {
-      data: payload,
-    });
-  }
-
   // ── Task queries (authenticated — uses Playwright storage state) ──
 
   async getTasks(params?: { status?: string; jiraKey?: string }) {
@@ -140,10 +105,4 @@ export class APIClient {
     return this.request.delete(`${this.apiURL}/api/tasks/${taskId}`);
   }
 
-  async cleanupTestTasks(prefix = "E2E-", maxAge = "0") {
-    return this.request.delete(
-      `${this.apiURL}/api/control-center/tasks/cleanup`,
-      { params: { prefix, maxAge } },
-    );
-  }
 }

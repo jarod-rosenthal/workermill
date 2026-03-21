@@ -96,18 +96,22 @@ test.describe("RBAC", () => {
 
   test("management dashboard access is role-restricted", async ({ page }) => {
     await page.goto("/management");
-    await page.waitForTimeout(3000);
+    await page.waitForLoadState("domcontentloaded");
 
     // Management dashboard is for platform admins only
     // If user has access: shows management content
     // If not: may redirect or show error
-    const url = page.url();
     const managementContent = page.locator(
       'text=/management|platform|admin|organizations/i',
     );
     const accessDenied = page.locator(
       'text=/access denied|forbidden|not authorized|unauthorized/i',
     );
+
+    // Wait for either management content, access denied, or a redirect to settle
+    await expect(managementContent.or(accessDenied).first()).toBeVisible({ timeout: 10000 }).catch(() => {});
+
+    const url = page.url();
     const redirect = /\/(dashboard|login)/.test(url);
 
     const hasManagement = (await managementContent.count()) > 0;

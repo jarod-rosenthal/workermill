@@ -26,7 +26,6 @@ test.describe("API Key Lifecycle", () => {
     );
     if ((await integrationsNav.count()) > 0) {
       await integrationsNav.first().click();
-      await page.waitForTimeout(500);
     }
 
     // The API Access section should be visible with API key related content
@@ -46,7 +45,6 @@ test.describe("API Key Lifecycle", () => {
     );
     if ((await integrationsNav.count()) > 0) {
       await integrationsNav.first().click();
-      await page.waitForTimeout(500);
     }
 
     // Look for the WorkerMill MCP "Configure" button to open the slide-over
@@ -67,7 +65,6 @@ test.describe("API Key Lifecycle", () => {
     }
 
     await targetBtn.click();
-    await page.waitForTimeout(500);
 
     // The slide-over should show "WorkerMill MCP Integration" or similar
     const slideOver = page.locator('text=/WorkerMill MCP Integration|Generate API keys/i');
@@ -110,7 +107,8 @@ test.describe("API Key Lifecycle", () => {
     const doneBtn = page.locator('button:has-text("Done")');
     if ((await doneBtn.count()) > 0) {
       await doneBtn.first().click();
-      await page.waitForTimeout(300);
+      // Wait for slide-over to close
+      await expect(slideOver.first()).toBeHidden({ timeout: 5000 }).catch(() => {});
     }
   });
 
@@ -172,7 +170,6 @@ test.describe("API Key Lifecycle", () => {
     );
     if ((await integrationsNav.count()) > 0) {
       await integrationsNav.first().click();
-      await page.waitForTimeout(500);
     }
 
     // Verify the API Access section exists
@@ -209,7 +206,6 @@ test.describe("API Key Lifecycle", () => {
     }
 
     await remoteAgentNav.first().click();
-    await page.waitForTimeout(500);
 
     // Should show API Key section for agent connection
     const apiKeySection = page.locator('text=/API Key/i');

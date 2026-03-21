@@ -23,23 +23,23 @@ export function StatsBar({
   const stats = [
     {
       label: 'Active',
-      value: activeWorkers.toString(),
-      accessibilityLabel: `${activeWorkers} active workers`,
+      value: String(activeWorkers ?? 0),
+      accessibilityLabel: `${activeWorkers ?? 0} active workers`,
     },
     {
       label: 'Queue',
-      value: queueDepth.toString(),
-      accessibilityLabel: `${queueDepth} tasks in queue`,
+      value: String(queueDepth ?? 0),
+      accessibilityLabel: `${queueDepth ?? 0} tasks in queue`,
     },
     {
       label: 'Cost',
-      value: formatCost(periodCost),
-      accessibilityLabel: `Period cost: ${formatCost(periodCost)}`,
+      value: formatCost(periodCost ?? 0),
+      accessibilityLabel: `Period cost: ${formatCost(periodCost ?? 0)}`,
     },
     {
       label: 'Completed',
-      value: periodCompleted.toString(),
-      accessibilityLabel: `${periodCompleted} tasks completed`,
+      value: String(periodCompleted ?? 0),
+      accessibilityLabel: `${periodCompleted ?? 0} tasks completed`,
     },
   ];
 

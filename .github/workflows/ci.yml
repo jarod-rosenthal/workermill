@@ -27,10 +27,10 @@ jobs:
     name: Mobile - Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -48,10 +48,10 @@ jobs:
     name: Mobile - Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -69,10 +69,10 @@ jobs:
     name: Mobile - Unit Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -90,7 +90,7 @@ jobs:
     name: Mobile - Placeholder Guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check for COGNITO_CLIENT_ID placeholder
         run: |
@@ -104,10 +104,10 @@ jobs:
     runs-on: ubuntu-latest
     if: contains(github.event.pull_request.changed_files, 'api/') || contains(github.event.commits[0].modified, 'api/') || github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -126,10 +126,10 @@ jobs:
     runs-on: ubuntu-latest
     if: contains(github.event.pull_request.changed_files, 'api/src/routes/push.ts') || contains(github.event.commits[0].modified, 'api/src/routes/push.ts') || github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -148,10 +148,10 @@ jobs:
     runs-on: ubuntu-latest
     if: contains(github.event.pull_request.changed_files, 'api/src/services/push-notifications.ts') || contains(github.event.commits[0].modified, 'api/src/services/push-notifications.ts') || github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'

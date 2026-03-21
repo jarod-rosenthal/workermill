@@ -23,10 +23,10 @@ jobs:
       CI: true
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
@@ -62,7 +62,7 @@ jobs:
 
       - name: Upload Playwright HTML report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report-${{ inputs.target }}
           path: frontend/playwright-report/
@@ -70,7 +70,7 @@ jobs:
 
       - name: Upload failure screenshots & traces
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ inputs.target }}
           path: frontend/e2e/test-results/

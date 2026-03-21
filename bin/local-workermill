@@ -167,8 +167,8 @@ check_prerequisites() {
     fi
   fi
 
-  # Check Claude CLI
-  if ! command -v claude &> /dev/null; then
+  # Check Claude CLI (not needed when using mock workers)
+  if [ "${MOCK_WORKERS:-}" != "true" ] && ! command -v claude &> /dev/null; then
     missing+=("claude (npm install -g @anthropic-ai/claude-code)")
   fi
 
@@ -501,8 +501,12 @@ cmd_start() {
 
   # Pre-flight checks
   check_prerequisites
-  check_oauth_token
-  check_worker_image
+  if [ "$mock_workers" != "true" ]; then
+    check_oauth_token
+    check_worker_image
+  else
+    log "Mock worker mode — skipping OAuth and worker image checks"
+  fi
 
   # Start services
   if [ "$skip_db" = false ]; then

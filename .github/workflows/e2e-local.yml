@@ -40,7 +40,7 @@ jobs:
         working-directory: frontend
         run: npx playwright install chromium --with-deps
 
-      # Local: start full stack with Cognito auth (not auto-login)
+      # Local: start full stack with local auto-login + mock workers
       - name: Install API dependencies
         if: inputs.target == 'local'
         working-directory: api
@@ -48,16 +48,11 @@ jobs:
 
       - name: Start local WorkerMill
         if: inputs.target == 'local'
-        env:
-          COGNITO_USER_POOL_ID: us-east-1_oHZOtoac8
-          COGNITO_CLIENT_ID: 4bpjbr7gu9ne5rgo3v0rjic7hq
-          COGNITO_DOMAIN: auth.workermill.com
-          AWS_REGION: us-east-1
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           chmod +x bin/local-workermill
-          ./bin/local-workermill start --cognito-auth --mock-workers --skip-fe
+          ./bin/local-workermill start --mock-workers --skip-fe
+          # API runs on :3001 with EXECUTION_MODE=local (auto-login)
+          # Playwright starts frontend on :5173 via webServer config
 
       - name: Run E2E tests
         working-directory: frontend

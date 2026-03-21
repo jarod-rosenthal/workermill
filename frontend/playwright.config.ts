@@ -74,15 +74,17 @@ export default defineConfig({
   timeout: 60000,
   expect: { timeout: 10000 },
 
-  // Only start dev servers if not running against a deployed environment
-  ...(!process.env.CI && !process.env.BASE_URL
+  // Start dev server when targeting localhost (no BASE_URL set).
+  // In CI with BASE_URL (production), skip — tests hit the deployed site.
+  // In CI without BASE_URL (local target), start vite for the frontend.
+  ...(!process.env.BASE_URL
     ? {
         webServer: [
           {
             command: "npx vite",
             url: "http://localhost:5173",
             reuseExistingServer: true,
-            timeout: 30000,
+            timeout: 60000,
           },
         ],
       }

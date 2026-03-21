@@ -63,7 +63,7 @@ setup("authenticate", async ({ page }) => {
 
   // Verify we're authenticated by checking for dashboard elements
   await expect(
-    page.locator('[data-testid="dashboard"], [data-testid="user-menu"], nav'),
+    page.locator('[data-testid="dashboard"], [data-testid="user-menu"], nav').first(),
   ).toBeVisible({
     timeout: 10000,
   });

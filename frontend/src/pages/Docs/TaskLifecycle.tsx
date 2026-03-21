@@ -93,13 +93,13 @@ const autopilotStages = [
     ],
   },
   {
-    status: "merged",
+    status: "deployed",
     icon: GitMerge,
     color: "text-accent",
     bgColor: "bg-accent/10",
     borderColor: "border-accent/30",
-    title: "Auto Merge",
-    description: "PR is automatically merged. Task complete.",
+    title: "Deployed",
+    description: "PR is automatically merged and deployed. Task complete.",
     duration: "Instant",
     details: [
       "PR merged to main branch",
@@ -168,12 +168,12 @@ const reviewRequestedFlow = [
     ],
   },
   {
-    status: "webhook_triggered",
+    status: "review_approved",
     icon: Webhook,
     color: "text-cyan-500",
     bgColor: "bg-cyan-500/10",
     borderColor: "border-cyan-500/30",
-    title: "Approval Webhook",
+    title: "Review Approved",
     description: "PR approval fires a webhook that triggers continuation.",
     details: [
       "GitHub webhook detects PR approval",
@@ -398,9 +398,9 @@ const advancedFeatures = [
     icon: Save,
     color: "text-blue-500",
     bgColor: "bg-blue-500/10",
-    description: "Workers save execution state to S3 for seamless recovery from unexpected interruptions.",
+    description: "Workers save execution state for seamless recovery from unexpected interruptions.",
     details: [
-      "State saved to S3 every 60 seconds",
+      "State checkpointed periodically during execution",
       "Automatic recovery from interruptions",
       "Task re-queued with checkpoint reference",
       "New worker resumes from saved state",

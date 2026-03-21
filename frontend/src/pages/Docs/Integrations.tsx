@@ -61,7 +61,7 @@ export default function Integrations() {
                 <Bell className="w-8 h-8 text-green-500" />
               </div>
               <div className="font-medium text-foreground">Notifications</div>
-              <div className="text-xs text-muted-foreground">Slack, Teams</div>
+              <div className="text-xs text-muted-foreground">Slack, Email</div>
             </div>
           </div>
         </div>
@@ -421,29 +421,29 @@ export default function Integrations() {
             </div>
           </div>
 
-          {/* Microsoft Teams */}
+          {/* Email Notifications */}
           <div className="bg-card border border-border rounded-xl p-5">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-[#5059C9]/20 flex items-center justify-center">
-                <MessageCircle className="w-5 h-5 text-[#5059C9]" />
+              <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                <MessageCircle className="w-5 h-5 text-blue-500" />
               </div>
-              <h3 className="font-semibold text-foreground">Microsoft Teams</h3>
+              <h3 className="font-semibold text-foreground">Email</h3>
             </div>
             <p className="text-sm text-muted-foreground mb-4">
-              Push notifications to Microsoft Teams channels using incoming webhooks.
+              Email notifications for task completions, failures, cost alerts, and team invites.
             </p>
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Check className="w-4 h-4 text-green-500" />
-                Incoming webhook connector
+                Task completion & failure alerts
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Check className="w-4 h-4 text-green-500" />
-                Rich card formatting
+                Cost budget warnings
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Check className="w-4 h-4 text-green-500" />
-                Team channel targeting
+                Per-user notification preferences
               </div>
             </div>
           </div>
@@ -532,7 +532,7 @@ export default function Integrations() {
               <h3 className="font-semibold text-foreground">AWS ECS (Cloud Mode)</h3>
             </div>
             <p className="text-sm text-muted-foreground mb-4">
-              Workers run on AWS ECS Fargate. Requires an AI provider API key (BYOK).
+              Cloud mode: workers run on AWS ECS Fargate. Self-hosted: workers run as Docker containers on your machine. BYOK — bring your own API key.
             </p>
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2 text-muted-foreground">
@@ -545,7 +545,7 @@ export default function Integrations() {
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Check className="w-4 h-4 text-green-500" />
-                Worker checkpointing to S3
+                Worker checkpointing
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Check className="w-4 h-4 text-green-500" />

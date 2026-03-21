@@ -276,7 +276,7 @@ export default function Repositories() {
               <div className="text-muted-foreground mt-1">
                 Git:{" "}
                 <code className="px-1 bg-muted rounded">
-                  https://x-token-auth:&lt;token&gt;@bitbucket.org/...
+                  https://x-bitbucket-api-token-auth:&lt;token&gt;@bitbucket.org/...
                 </code>
               </div>
             </div>

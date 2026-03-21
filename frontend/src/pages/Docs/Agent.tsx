@@ -341,7 +341,7 @@ export default function AgentSetup() {
                   </p>
                   <div className="bg-muted/30 rounded-lg p-4 font-mono text-xs space-y-1.5">
                     <div className="text-green-500">
-                      ✓ Claude CLI (1.0.22)
+                      ✓ Claude CLI
                     </div>
                     <div className="text-green-500">
                       ✓ Claude authenticated
@@ -454,7 +454,7 @@ export default function AgentSetup() {
                     &nbsp; Agent:&nbsp;&nbsp;&nbsp;&nbsp; agent-workstation
                   </div>
                   <div className="text-muted-foreground">
-                    &nbsp; Workers:&nbsp;&nbsp; <span className="text-yellow-500">4</span>{" "}
+                    &nbsp; Workers:&nbsp;&nbsp; <span className="text-yellow-500">10</span>{" "}
                     parallel
                   </div>
                   <div className="text-muted-foreground">

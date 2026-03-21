@@ -261,7 +261,7 @@ export default function Personas() {
                 <h4 className="font-medium text-foreground">Balanced Models</h4>
               </div>
               <p className="text-sm text-muted-foreground">
-                Claude Sonnet, GPT-4o, Gemini 2.0 Flash - optimal balance of speed and capability for most development tasks.
+                Claude Sonnet, GPT-4o, Gemini 2.0 Flash — optimal balance of speed and capability for most development tasks.
               </p>
             </div>
             <div className="bg-background rounded-lg p-4 border border-border">
@@ -279,7 +279,7 @@ export default function Personas() {
                 <h4 className="font-medium text-foreground">Efficient Models</h4>
               </div>
               <p className="text-sm text-muted-foreground">
-                Claude Haiku, GPT-4o-mini, Gemini Flash - optimized for speed on simpler tasks.
+                Claude Haiku, GPT-4o Mini, Gemini Flash — optimized for speed on simpler tasks.
               </p>
             </div>
             <div className="bg-background rounded-lg p-4 border border-border">

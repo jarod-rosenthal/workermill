@@ -33,18 +33,27 @@ const mockUser = {
   email: 'test@example.com',
   name: 'Test User',
   role: 'member' as const,
-  organizations: [
-    {
-      id: 'org-1',
-      name: 'Test Org',
-      role: 'member',
-    },
-  ],
-  current_organization: {
+  organization: {
     id: 'org-1',
     name: 'Test Org',
     plan: 'pro',
   },
+};
+
+// What the API /auth/me actually returns
+const mockMeResponse = {
+  user: {
+    id: 'user-1',
+    email: 'test@example.com',
+    fullName: 'Test User',
+    role: 'member',
+  },
+  organization: {
+    id: 'org-1',
+    name: 'Test Org',
+    plan: 'pro',
+  },
+  needsSetup: false,
 };
 
 const mockTokens = {
@@ -225,9 +234,9 @@ describe('AuthStore', () => {
       const store = useAuthStore.getState();
 
       mockedApiClient.post.mockResolvedValue({
-        user: mockUser,
         tokens: mockTokens,
       });
+      mockedApiClient.get.mockResolvedValue(mockMeResponse);
 
       await store.signIn('test@example.com', 'password');
 
@@ -267,7 +276,9 @@ describe('AuthStore', () => {
     it('should sign in with SSO successfully', async () => {
       const store = useAuthStore.getState();
 
-      await store.signInWithSSO(mockTokens, mockUser);
+      mockedApiClient.get.mockResolvedValue(mockMeResponse);
+
+      await store.signInWithSSO(mockTokens);
 
       expect(mockedApiClient.storeTokens).toHaveBeenCalledWith(mockTokens);
       expect(useAuthStore.getState().isAuthenticated).toBe(true);
@@ -303,7 +314,7 @@ describe('AuthStore', () => {
         refreshToken: 'valid-refresh',
         idToken: 'valid-id',
       });
-      mockedApiClient.get.mockResolvedValue(mockUser);
+      mockedApiClient.get.mockResolvedValue(mockMeResponse);
 
       await store.checkAuthStatus();
 
@@ -329,7 +340,7 @@ describe('AuthStore', () => {
     it('should refresh user profile successfully', async () => {
       const store = useAuthStore.getState();
 
-      mockedApiClient.get.mockResolvedValue(mockUser);
+      mockedApiClient.get.mockResolvedValue(mockMeResponse);
 
       await store.refreshUserProfile();
 

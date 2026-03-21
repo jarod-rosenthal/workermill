@@ -10,15 +10,14 @@ export type ContextMessageType =
 
 export interface ContextMessage {
   id: string;
-  parent_task_id: string;
-  task_id: string;
+  parentTaskId: string;
+  taskId: string;
   persona: string;
-  persona_emoji?: string;
-  message_type: ContextMessageType;
+  messageType: ContextMessageType;
   content: string;
   metadata?: {
     [key: string]: any;
   };
-  created_at: string;
-  updated_at?: string;
+  sessionId?: string;
+  createdAt: string;
 }

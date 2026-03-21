@@ -83,7 +83,6 @@ describe('SsoAuthManager', () => {
               accessToken: 'test-access-token',
               refreshToken: 'test-refresh-token',
               idToken: 'test-id-token',
-              user: { id: '1', email: 'test@example.com', name: 'Test User', role: 'member', organizations: [], current_organization: { id: '1', name: 'Test Org', plan: 'free' } },
             }),
           } as Response);
 
@@ -128,7 +127,6 @@ describe('SsoAuthManager', () => {
             accessToken: 'test-access-token',
             refreshToken: 'test-refresh-token',
             idToken: 'test-id-token',
-            user: { id: '1', email: 'test@example.com', name: 'Test User', role: 'member', organizations: [], current_organization: { id: '1', name: 'Test Org', plan: 'free' } },
           }),
         } as Response);
 
@@ -230,7 +228,6 @@ describe('SsoAuthManager', () => {
           accessToken: 'test-access-token',
           refreshToken: 'test-refresh-token',
           idToken: 'test-id-token',
-          user: { id: '1', email: 'test@example.com', name: 'Test User', role: 'member', organizations: [], current_organization: { id: '1', name: 'Test Org', plan: 'free' } },
         },
       });
     });

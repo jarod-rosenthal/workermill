@@ -26,7 +26,7 @@ export function CoordinationFeed({
 
   // Sort messages in chronological order (oldest first, as per spec)
   const sortedMessages = [...messages].sort((a, b) =>
-    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   );
 
   // Auto-scroll to bottom when new messages arrive (if enabled)

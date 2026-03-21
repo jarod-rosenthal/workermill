@@ -91,14 +91,11 @@ export default function SignInScreen() {
       const result = await signInWithProvider(providerName, ssoConfig);
 
       if (result.success && result.data) {
-        await signInWithSSO(
-          {
-            accessToken: result.data.accessToken,
-            refreshToken: result.data.refreshToken,
-            idToken: result.data.idToken,
-          },
-          result.data.user
-        );
+        await signInWithSSO({
+          accessToken: result.data.accessToken,
+          refreshToken: result.data.refreshToken,
+          idToken: result.data.idToken,
+        });
 
         // Register push token after successful sign-in
         registerPushToken();

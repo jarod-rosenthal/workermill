@@ -24,13 +24,12 @@ const mockSSEClient = {
 // Mock message data
 const createMockMessage = (overrides: Partial<ContextMessage> = {}): ContextMessage => ({
   id: 'msg-1',
-  parent_task_id: 'parent-task-1',
-  task_id: 'task-1',
+  parentTaskId: 'parent-task-1',
+  taskId: 'task-1',
   persona: 'backend_developer',
-  persona_emoji: '🧑‍💻',
-  message_type: 'decision' as ContextMessageType,
+  messageType: 'decision' as ContextMessageType,
   content: 'This is a test decision',
-  created_at: '2024-01-01T00:00:00Z',
+  createdAt: '2024-01-01T00:00:00Z',
   ...overrides
 });
 
@@ -202,18 +201,18 @@ describe('CoordinationStore', () => {
 
       const message1 = createMockMessage({
         id: 'msg-1',
-        parent_task_id: 'parent-task-1',
+        parentTaskId: 'parent-task-1',
         persona: 'backend_developer',
-        message_type: 'decision',
+        messageType: 'decision',
         content: 'This is a test decision'
       });
 
       const message2 = createMockMessage({
         id: 'msg-2', // Different ID
-        created_at: '2024-01-01T01:00:00Z', // Different timestamp
-        parent_task_id: 'parent-task-1', // Same parent_task_id
+        createdAt: '2024-01-01T01:00:00Z', // Different timestamp
+        parentTaskId: 'parent-task-1', // Same parentTaskId
         persona: 'backend_developer', // Same persona
-        message_type: 'decision', // Same message_type
+        messageType: 'decision', // Same messageType
         content: 'This is a test decision' // Same content
       });
 
@@ -230,20 +229,20 @@ describe('CoordinationStore', () => {
       consoleSpy.mockRestore();
     });
 
-    it('allows messages that differ in parent_task_id', () => {
+    it('allows messages that differ in parentTaskId', () => {
       const store = useCoordinationStore.getState();
 
       const message1 = createMockMessage({
-        parent_task_id: 'parent-task-1',
+        parentTaskId: 'parent-task-1',
         persona: 'backend_developer',
-        message_type: 'decision',
+        messageType: 'decision',
         content: 'This is a test decision'
       });
 
       const message2 = createMockMessage({
-        parent_task_id: 'parent-task-2', // Different parent_task_id
+        parentTaskId: 'parent-task-2', // Different parentTaskId
         persona: 'backend_developer',
-        message_type: 'decision',
+        messageType: 'decision',
         content: 'This is a test decision'
       });
 
@@ -257,16 +256,16 @@ describe('CoordinationStore', () => {
       const store = useCoordinationStore.getState();
 
       const message1 = createMockMessage({
-        parent_task_id: 'parent-task-1',
+        parentTaskId: 'parent-task-1',
         persona: 'backend_developer',
-        message_type: 'decision',
+        messageType: 'decision',
         content: 'This is a test decision'
       });
 
       const message2 = createMockMessage({
-        parent_task_id: 'parent-task-1',
+        parentTaskId: 'parent-task-1',
         persona: 'frontend_developer', // Different persona
-        message_type: 'decision',
+        messageType: 'decision',
         content: 'This is a test decision'
       });
 
@@ -276,20 +275,20 @@ describe('CoordinationStore', () => {
       expect(useCoordinationStore.getState().messages).toHaveLength(2);
     });
 
-    it('allows messages that differ in message_type', () => {
+    it('allows messages that differ in messageType', () => {
       const store = useCoordinationStore.getState();
 
       const message1 = createMockMessage({
-        parent_task_id: 'parent-task-1',
+        parentTaskId: 'parent-task-1',
         persona: 'backend_developer',
-        message_type: 'decision',
+        messageType: 'decision',
         content: 'This is a test decision'
       });
 
       const message2 = createMockMessage({
-        parent_task_id: 'parent-task-1',
+        parentTaskId: 'parent-task-1',
         persona: 'backend_developer',
-        message_type: 'question', // Different message_type
+        messageType: 'question', // Different messageType
         content: 'This is a test decision'
       });
 
@@ -303,16 +302,16 @@ describe('CoordinationStore', () => {
       const store = useCoordinationStore.getState();
 
       const message1 = createMockMessage({
-        parent_task_id: 'parent-task-1',
+        parentTaskId: 'parent-task-1',
         persona: 'backend_developer',
-        message_type: 'decision',
+        messageType: 'decision',
         content: 'This is a test decision'
       });
 
       const message2 = createMockMessage({
-        parent_task_id: 'parent-task-1',
+        parentTaskId: 'parent-task-1',
         persona: 'backend_developer',
-        message_type: 'decision',
+        messageType: 'decision',
         content: 'This is a different decision' // Different content
       });
 
@@ -326,17 +325,17 @@ describe('CoordinationStore', () => {
       const store = useCoordinationStore.getState();
 
       const baseMessage = createMockMessage({
-        parent_task_id: 'parent-task-1',
+        parentTaskId: 'parent-task-1',
         persona: 'backend_developer',
-        message_type: 'decision',
+        messageType: 'decision',
         content: 'This is a test decision'
       });
 
       // Message that matches 3 out of 4 fields (different persona)
       const message2 = createMockMessage({
-        parent_task_id: 'parent-task-1',
+        parentTaskId: 'parent-task-1',
         persona: 'frontend_developer', // Different
-        message_type: 'decision',
+        messageType: 'decision',
         content: 'This is a test decision'
       });
 
@@ -356,7 +355,7 @@ describe('CoordinationStore', () => {
         const message = createMockMessage({
           id: `msg-${i}`,
           content: `Message ${i}`,
-          created_at: new Date(Date.now() + i * 1000).toISOString() // Different timestamps
+          createdAt: new Date(Date.now() + i * 1000).toISOString() // Different timestamps
         });
         store.addMessage(message);
       }
@@ -377,19 +376,19 @@ describe('CoordinationStore', () => {
       const message1 = createMockMessage({
         id: 'msg-1',
         content: 'First message',
-        created_at: '2024-01-01T00:00:00Z' // Oldest
+        createdAt: '2024-01-01T00:00:00Z' // Oldest
       });
 
       const message2 = createMockMessage({
         id: 'msg-2',
         content: 'Second message',
-        created_at: '2024-01-01T02:00:00Z' // Newest
+        createdAt: '2024-01-01T02:00:00Z' // Newest
       });
 
       const message3 = createMockMessage({
         id: 'msg-3',
         content: 'Third message',
-        created_at: '2024-01-01T01:00:00Z' // Middle
+        createdAt: '2024-01-01T01:00:00Z' // Middle
       });
 
       store.addMessage(message1);
@@ -409,21 +408,21 @@ describe('CoordinationStore', () => {
       const messages = [
         createMockMessage({
           id: 'msg-1',
-          parent_task_id: 'parent-task-1',
+          parentTaskId: 'parent-task-1',
           persona: 'backend_developer',
-          message_type: 'decision'
+          messageType: 'decision'
         }),
         createMockMessage({
           id: 'msg-2',
-          parent_task_id: 'parent-task-2',
+          parentTaskId: 'parent-task-2',
           persona: 'backend_developer',
-          message_type: 'question'
+          messageType: 'question'
         }),
         createMockMessage({
           id: 'msg-3',
-          parent_task_id: 'parent-task-1',
+          parentTaskId: 'parent-task-1',
           persona: 'frontend_developer',
-          message_type: 'decision'
+          messageType: 'decision'
         }),
       ];
 
@@ -435,7 +434,7 @@ describe('CoordinationStore', () => {
       const messages = store.getMessagesByParentTask('parent-task-1');
 
       expect(messages).toHaveLength(2);
-      expect(messages.every(m => m.parent_task_id === 'parent-task-1')).toBe(true);
+      expect(messages.every(m => m.parentTaskId === 'parent-task-1')).toBe(true);
     });
 
     it('getMessagesByType filters by message type', () => {
@@ -443,7 +442,7 @@ describe('CoordinationStore', () => {
       const messages = store.getMessagesByType('decision');
 
       expect(messages).toHaveLength(2);
-      expect(messages.every(m => m.message_type === 'decision')).toBe(true);
+      expect(messages.every(m => m.messageType === 'decision')).toBe(true);
     });
 
     it('getMessagesByPersona filters by persona', () => {
@@ -483,7 +482,7 @@ describe('CoordinationStore', () => {
         createMockMessage({
           id: `msg-${i}`,
           content: `Message ${i}`,
-          created_at: new Date(Date.now() + i * 1000).toISOString()
+          createdAt: new Date(Date.now() + i * 1000).toISOString()
         })
       );
 

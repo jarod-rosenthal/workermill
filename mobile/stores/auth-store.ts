@@ -11,21 +11,18 @@ const SECURE_STORE_KEYS = {
   BIOMETRIC_ENABLED: 'biometric_enabled',
 } as const;
 
+export interface UserOrganization {
+  id: string;
+  name: string;
+  plan: string;
+}
+
 export interface User {
   id: string;
   email: string;
   name: string;
   role: 'admin' | 'member';
-  organizations: {
-    id: string;
-    name: string;
-    role: string;
-  }[];
-  current_organization: {
-    id: string;
-    name: string;
-    plan: string;
-  };
+  organization: UserOrganization | null;
 }
 
 interface AuthState {
@@ -67,7 +64,7 @@ interface AuthState {
     accessToken: string;
     refreshToken: string;
     idToken: string;
-  }, user: User) => Promise<void>;
+  }) => Promise<void>;
   signOut: () => Promise<void>;
   checkAuthStatus: () => Promise<void>;
   refreshUserProfile: () => Promise<void>;
@@ -178,7 +175,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     try {
       const response = await apiClient.post<{
-        user: User;
         tokens: {
           accessToken: string;
           refreshToken: string;
@@ -192,12 +188,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Reset biometric fail count on successful sign-in
       await get().resetBiometricFailCount();
 
-      set({
-        isAuthenticated: true,
-        user: response.user,
-        isLoading: false,
-        error: null
-      });
+      // Fetch user profile now that we have tokens
+      await get().refreshUserProfile();
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || 'Sign in failed';
       set({
@@ -210,7 +202,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  signInWithSSO: async (tokens, user) => {
+  signInWithSSO: async (tokens) => {
     set({ isLoading: true, error: null });
 
     try {
@@ -220,12 +212,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Reset biometric fail count on successful sign-in
       await get().resetBiometricFailCount();
 
-      set({
-        isAuthenticated: true,
-        user,
-        isLoading: false,
-        error: null
-      });
+      // Fetch user profile now that we have tokens
+      await get().refreshUserProfile();
     } catch (error: any) {
       const errorMessage = error.message || 'SSO sign in failed';
       set({
@@ -301,7 +289,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   refreshUserProfile: async () => {
     try {
-      const user = await apiClient.get<User>('/auth/me');
+      const response = await apiClient.get<{
+        user: { id: string; email: string; fullName: string; role: string };
+        organization: UserOrganization | null;
+      }>('/auth/me');
+      const user: User = {
+        id: response.user.id,
+        email: response.user.email,
+        name: response.user.fullName,
+        role: (response.user.role as 'admin' | 'member') || 'member',
+        organization: response.organization,
+      };
       set({
         isAuthenticated: true,
         user,

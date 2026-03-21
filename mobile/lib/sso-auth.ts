@@ -12,22 +12,6 @@ export interface SsoTokenResult {
   accessToken: string;
   refreshToken: string;
   idToken: string;
-  user: {
-    id: string;
-    email: string;
-    name: string;
-    role: 'admin' | 'member';
-    organizations: {
-      id: string;
-      name: string;
-      role: string;
-    }[];
-    current_organization: {
-      id: string;
-      name: string;
-      plan: string;
-    };
-  };
 }
 
 export interface SsoAuthResult {

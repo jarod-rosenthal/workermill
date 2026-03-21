@@ -316,8 +316,8 @@ export default function SettingsScreen() {
         {/* Organization Section */}
         <SettingsSection title="Organization">
           <SettingsRow
-            title={user.current_organization?.name || 'Unknown Organization'}
-            subtitle={user.current_organization?.plan ? `${user.current_organization.plan} plan` : undefined}
+            title={user.organization?.name || 'Unknown Organization'}
+            subtitle={user.organization?.plan ? `${user.organization.plan} plan` : undefined}
             icon="business-outline"
           />
           <SettingsRow

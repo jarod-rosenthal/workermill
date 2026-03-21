@@ -48,7 +48,7 @@ function TypeBadge({ messageType }: { messageType: ContextMessageType }) {
 }
 
 export function CoordinationMessage({ message }: CoordinationMessageProps) {
-  const timestamp = new Date(message.created_at).toLocaleTimeString('en-US', {
+  const timestamp = new Date(message.createdAt).toLocaleTimeString('en-US', {
     hour12: false,
     hour: '2-digit',
     minute: '2-digit',
@@ -64,16 +64,8 @@ export function CoordinationMessage({ message }: CoordinationMessageProps) {
       {/* Header with persona, type badge, and timestamp */}
       <View className="flex-row items-start justify-between mb-3">
         <View className="flex-row items-center flex-1 mr-3">
-          {/* Persona emoji and name */}
+          {/* Persona name */}
           <View className="flex-row items-center mr-3">
-            {message.persona_emoji && (
-              <Text
-                className="text-lg mr-2"
-                accessibilityLabel={`Persona: ${message.persona}`}
-              >
-                {message.persona_emoji}
-              </Text>
-            )}
             <Text
               className="text-sm font-medium text-slate-900 dark:text-slate-100"
               accessibilityRole="text"
@@ -83,7 +75,7 @@ export function CoordinationMessage({ message }: CoordinationMessageProps) {
           </View>
 
           {/* Type badge */}
-          <TypeBadge messageType={message.message_type} />
+          <TypeBadge messageType={message.messageType} />
         </View>
 
         {/* Timestamp */}

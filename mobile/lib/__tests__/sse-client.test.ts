@@ -380,7 +380,7 @@ describe('SSEClient', () => {
         call => call[0] === ('coordination_message' as any)
       )?.[1] as Function;
 
-      const testData = { persona: 'backend', message_type: 'decision', content: 'test' };
+      const testData = { persona: 'backend', messageType: 'decision', content: 'test' };
       coordinationHandler({ data: JSON.stringify(testData) });
 
       expect(mockOnEvent).toHaveBeenCalledWith({

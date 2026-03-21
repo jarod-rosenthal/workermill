@@ -37,9 +37,9 @@ const MAX_PERSISTED_MESSAGES = 100;
 // Helper function for 4-field deduplication
 const isDuplicateMessage = (existingMessages: ContextMessage[], newMessage: ContextMessage): boolean => {
   return existingMessages.some(existing =>
-    existing.parent_task_id === newMessage.parent_task_id &&
+    existing.parentTaskId === newMessage.parentTaskId &&
     existing.persona === newMessage.persona &&
-    existing.message_type === newMessage.message_type &&
+    existing.messageType === newMessage.messageType &&
     existing.content === newMessage.content
   );
 };
@@ -48,7 +48,7 @@ const isDuplicateMessage = (existingMessages: ContextMessage[], newMessage: Cont
 const enforceMessageLimits = (messages: ContextMessage[]): { memory: ContextMessage[], persisted: ContextMessage[] } => {
   // Sort by timestamp descending (newest first)
   const sortedMessages = [...messages].sort((a, b) =>
-    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
 
   // Memory messages (newest 200)
@@ -130,9 +130,9 @@ export const useCoordinationStore = create<CoordinationState>()(
           // Check for duplicates using 4-field comparison
           if (isDuplicateMessage(state.messages, message)) {
             console.log('Discarding duplicate coordination message:', {
-              parentTaskId: message.parent_task_id,
+              parentTaskId: message.parentTaskId,
               persona: message.persona,
-              messageType: message.message_type,
+              messageType: message.messageType,
               content: message.content.substring(0, 100) + '...'
             });
             return state; // No change for duplicates
@@ -160,11 +160,11 @@ export const useCoordinationStore = create<CoordinationState>()(
 
       // Convenience getters
       getMessagesByParentTask: (parentTaskId: string) => {
-        return get().messages.filter(message => message.parent_task_id === parentTaskId);
+        return get().messages.filter(message => message.parentTaskId === parentTaskId);
       },
 
       getMessagesByType: (type: ContextMessageType) => {
-        return get().messages.filter(message => message.message_type === type);
+        return get().messages.filter(message => message.messageType === type);
       },
 
       getMessagesByPersona: (persona: string) => {

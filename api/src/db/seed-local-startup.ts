@@ -11,6 +11,7 @@
 import { AppDataSource } from "./connection.js";
 import { Organization, User, UserOrganization } from "../models/index.js";
 import { logger } from "../utils/logger.js";
+import { TOS_VERSION } from "../constants/tos.js";
 
 const LOCAL_ORG_NAME = "Local";
 const LOCAL_ADMIN_EMAIL = "admin@localhost";
@@ -95,6 +96,8 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
     email: LOCAL_ADMIN_EMAIL,
     fullName: "Local Admin",
     role: "admin",
+    tosAcceptedAt: new Date(),
+    tosVersion: TOS_VERSION,
   });
   await userRepo.save(adminUser);
   logger.info("Created local admin user", { userId: adminUser.id });

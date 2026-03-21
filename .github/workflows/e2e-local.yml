@@ -58,15 +58,14 @@ jobs:
         run: |
           chmod +x bin/local-workermill
           ./bin/local-workermill start --cognito-auth --mock-workers --skip-fe
-          # Playwright starts its own frontend via webServer config
 
       - name: Run E2E tests
         working-directory: frontend
-        run: npx playwright test --reporter=list,html
+        run: npx playwright test
         env:
           BASE_URL: ${{ inputs.target == 'production' && 'https://workermill.com' || '' }}
 
-      - name: Upload Playwright report
+      - name: Upload Playwright HTML report
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -74,7 +73,7 @@ jobs:
           path: frontend/playwright-report/
           retention-days: 30
 
-      - name: Upload test results
+      - name: Upload failure screenshots & traces
         if: failure()
         uses: actions/upload-artifact@v4
         with:

@@ -150,13 +150,13 @@ ${userTask}
 ${workingDir}
 
 ## Instructions
-1. Use your tools to explore the codebase — understand existing structure, patterns, and dependencies
+1. Briefly explore the working directory (ONE ls call, maybe a few reads) to understand what exists. Do NOT explore outside the working directory. Do NOT repeatedly list the same directory. If a directory doesn't exist yet, that's fine — the stories will create it.
 2. Design a plan that breaks the task into focused stories, each assigned to a specialist persona
-3. Your plan must meet these quality criteria (score >= 80/100):
+3. Keep the number of stories between 3–8. Combine small related tasks into one story rather than creating 15+ micro-stories.
+4. Your plan must meet these quality criteria (score >= 80/100):
    - Every story has a clear, specific description (not vague)
-   - File paths and dependencies are verified against the actual codebase
    - Stories are ordered correctly — dependencies satisfied before dependents
-   - No missing steps (e.g., don't forget database migrations, config files, tests)
+   - No missing steps (database, config, tests should be part of relevant stories, not separate ones)
    - Each story is scoped for ONE persona — don't mix frontend and backend in one story
    - Descriptions include enough detail for the persona to execute without ambiguity
 
@@ -185,8 +185,8 @@ Available personas: architect, backend_developer, frontend_developer, fullstack_
     system: planner?.systemPrompt || "You are an implementation planner.",
     prompt: plannerPrompt,
     tools: readOnlyTools as ToolSet,
-    stopWhen: stepCountIs(30),
-    abortSignal: AbortSignal.timeout(5 * 60 * 1000),
+    stopWhen: stepCountIs(10),
+    abortSignal: AbortSignal.timeout(3 * 60 * 1000),
   });
 
   for await (const _chunk of planStream.textStream) { /* drive */ }
@@ -390,6 +390,7 @@ export async function runOrchestration(
     // Build tools filtered by persona's allowed tools
     const allTools = createToolDefinitions(workingDir, model);
     const personaTools: Record<string, AnyToolDef> = {};
+    let lastToolCall = "";  // Dedup consecutive identical tool calls
     for (const toolName of persona.tools) {
       const toolDef = allTools[toolName as keyof typeof allTools] as AnyToolDef;
       if (toolDef) {
@@ -398,11 +399,25 @@ export async function runOrchestration(
           execute: async (input: Record<string, unknown>) => {
             const allowed = await permissions.checkPermission(toolName, input);
             if (!allowed) return "Tool execution denied by user.";
-            spinner.stop();
-            printToolCall(toolName, input);
+
+            // Dedup: skip printing if identical to last call
+            const callKey = `${toolName}:${JSON.stringify(input)}`;
+            const isDuplicate = callKey === lastToolCall;
+            lastToolCall = callKey;
+
+            if (!isDuplicate) {
+              spinner.stop();
+              printToolCall(toolName, input);
+            }
             const result = await toolDef.execute(input);
             const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-            printToolResult(toolName, resultStr);
+            if (!isDuplicate) {
+              printToolResult(toolName, resultStr);
+            } else {
+              // Still show a brief note so user knows something happened
+              spinner.stop();
+              console.log(chalk.dim(`    (repeated ${toolName} call, same result)`));
+            }
             spinner.start();
             return result;
           },

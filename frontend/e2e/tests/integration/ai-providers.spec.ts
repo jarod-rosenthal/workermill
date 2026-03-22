@@ -16,7 +16,7 @@ test.describe("AI Provider Integration", () => {
 
   test.beforeAll(async ({ request }) => {
     config = await detectIntegrations(request);
-    switcher = new ProviderSwitcher(request);
+    switcher = new ProviderSwitcher();
     await switcher.saveOriginal();
   });
 
@@ -30,6 +30,7 @@ test.describe("AI Provider Integration", () => {
 
   test.afterAll(async () => {
     await switcher.restore();
+    await switcher.dispose();
     await cleanupBranches("story/int-");
   });
 

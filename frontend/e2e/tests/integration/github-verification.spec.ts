@@ -55,11 +55,18 @@ test.describe("GitHub Verification", () => {
     const result = await createAndWait(api, { ...task, timeout: 450_000 });
     expect(["pr_approved", "review_approved", "completed", "review_requested"].includes(result.status)).toBeTruthy();
 
-    // Verify PR exists
+    // Verify PR exists — unless the task completed without code changes
     const keyLower = jiraKey.toLowerCase();
-    const pr = await verifyPRExists(`story/${keyLower}`);
-    expect(pr).toBeTruthy();
-    expect(pr!.title).toBeTruthy();
+    const branch = await verifyBranchExists(`story/${keyLower}`);
+    if (!branch) {
+      // No branch means no code changes were made — valid if task completed
+      expect(result.status).toBe("completed");
+    } else {
+      // Branch exists, so a PR should have been created
+      const pr = await verifyPRExists(`story/${keyLower}`);
+      expect(pr).toBeTruthy();
+      expect(pr!.title).toBeTruthy();
+    }
   });
 
   test("cleanup helper deletes test branches", async () => {

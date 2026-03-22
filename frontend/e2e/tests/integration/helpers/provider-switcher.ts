@@ -1,17 +1,24 @@
-import type { APIRequestContext } from "@playwright/test";
+import { request as playwrightRequest, type APIRequestContext } from "@playwright/test";
 
 const API_URL = "http://localhost:3001";
 
 export class ProviderSwitcher {
-  private request: APIRequestContext;
+  private request!: APIRequestContext;
   private original: Record<string, unknown> = {};
   private saved = false;
+  private ownsContext = false;
 
-  constructor(request: APIRequestContext) {
-    this.request = request;
+  private async ensureContext(): Promise<void> {
+    if (!this.request) {
+      this.request = await playwrightRequest.newContext({
+        storageState: "e2e/.auth/user.json",
+      });
+      this.ownsContext = true;
+    }
   }
 
   async saveOriginal(): Promise<void> {
+    await this.ensureContext();
     const response = await this.request.get(`${API_URL}/api/settings`);
     if (!response.ok()) throw new Error("Failed to fetch settings for save");
     this.original = await response.json();
@@ -54,7 +61,14 @@ export class ProviderSwitcher {
     });
   }
 
+  async dispose(): Promise<void> {
+    if (this.ownsContext && this.request) {
+      await this.request.dispose();
+    }
+  }
+
   private async updateSettings(fields: Record<string, unknown>): Promise<void> {
+    await this.ensureContext();
     const response = await this.request.put(`${API_URL}/api/settings`, {
       data: fields,
     });

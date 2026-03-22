@@ -91,47 +91,17 @@ export function printToolResult(toolName: string, result: string): void {
   const isError = result.startsWith("Error:");
   const lines = result.split("\n");
 
-  // For read_file: just show line count, not content
-  if (toolName === "read_file" && !isError) {
-    console.log(chalk.dim(`    (${lines.length} lines)`));
-    return;
-  }
-
-  // For edit_file: just show the result summary line
-  if (toolName === "edit_file" && !isError) {
-    console.log(chalk.dim(`    ${lines[0]}`));
-    return;
-  }
-
-  // For write_file: just show the result summary
-  if (toolName === "write_file" && !isError) {
-    console.log(chalk.dim(`    ${lines[0]}`));
-    return;
-  }
-
-  // For errors: show full error
-  if (isError) {
-    for (const line of lines.slice(0, 5)) {
+  for (const line of lines) {
+    if (isError) {
       console.log(chalk.red(`    ${line}`));
+    } else {
+      // Highlight file paths
+      const highlighted = line.replace(
+        /([a-zA-Z0-9_\-./]+\.(ts|tsx|js|jsx|py|go|rs|java|md|json|yaml|yml|css|html|sql|sh))/g,
+        (match) => chalk.cyan(match)
+      );
+      console.log(chalk.dim(`    ${highlighted}`));
     }
-    if (lines.length > 5) console.log(chalk.red(`    ... ${lines.length - 5} more lines`));
-    return;
-  }
-
-  // Everything else: show 5 lines max
-  const maxLines = 5;
-  const truncated = lines.length > maxLines;
-  const displayLines = truncated ? lines.slice(0, maxLines) : lines;
-
-  for (const line of displayLines) {
-    const highlighted = line.replace(
-      /([a-zA-Z0-9_\-./]+\.(ts|tsx|js|jsx|py|go|rs|java|md|json|yaml|yml|css|html|sql|sh))/g,
-      (match) => chalk.cyan(match)
-    );
-    console.log(chalk.dim(`    ${highlighted}`));
-  }
-  if (truncated) {
-    console.log(chalk.dim(`    ... ${lines.length - maxLines} more lines`));
   }
 }
 

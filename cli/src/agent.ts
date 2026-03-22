@@ -4,7 +4,7 @@ import pathModule from "path";
 import chalk from "chalk";
 import ora from "ora";
 import { execSync } from "child_process";
-import { streamText, stepCountIs, type ToolSet } from "ai";
+import { streamText, type ToolSet } from "ai";
 import { createModel } from "../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
 import type { AIProvider } from "../../packages/engine/src/types.js";
@@ -296,7 +296,7 @@ Focus on writing clean, production-ready code.`;
           content: m.content,
         })),
         tools: getActiveTools() as ToolSet,
-        stopWhen: stepCountIs(100),
+
         abortSignal: currentAbortController.signal,
       });
 

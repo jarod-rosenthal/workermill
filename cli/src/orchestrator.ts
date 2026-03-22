@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import ora from "ora";
-import { streamText, generateObject, generateText, stepCountIs, type ToolSet } from "ai";
+import { streamText, generateObject, generateText, type ToolSet } from "ai";
 import { z } from "zod";
 import { createModel } from "../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
@@ -151,14 +151,13 @@ ${userTask}
 ${workingDir}
 
 ## Instructions
-1. Briefly explore the working directory (ONE ls call, maybe a few reads) to understand what exists. Do NOT explore outside the working directory. Do NOT repeatedly list the same directory. If a directory doesn't exist yet, that's fine — the stories will create it.
-2. Design a plan that breaks the task into focused stories, each assigned to a specialist persona
-3. Keep the number of stories between 3–8. Combine small related tasks into one story rather than creating 15+ micro-stories.
-4. Your plan must meet these quality criteria (score >= 80/100):
-   - Every story has a clear, specific description (not vague)
+1. Use your tools to explore the working directory and understand what exists. Stay within the working directory.
+2. Design a plan that breaks the task into focused stories, each assigned to a specialist persona.
+3. Each story should be a meaningful unit of work — not too granular, not too broad.
+4. Quality criteria:
+   - Every story has a clear, specific description
    - Stories are ordered correctly — dependencies satisfied before dependents
-   - No missing steps (database, config, tests should be part of relevant stories, not separate ones)
-   - Each story is scoped for ONE persona — don't mix frontend and backend in one story
+   - Each story is scoped for ONE persona
    - Descriptions include enough detail for the persona to execute without ambiguity
 
 ## Output format
@@ -186,7 +185,7 @@ Available personas: architect, backend_developer, frontend_developer, fullstack_
     system: planner?.systemPrompt || "You are an implementation planner.",
     prompt: plannerPrompt,
     tools: readOnlyTools as ToolSet,
-    stopWhen: stepCountIs(10),
+
     abortSignal: AbortSignal.timeout(3 * 60 * 1000),
   });
 
@@ -332,7 +331,7 @@ export async function runOrchestration(
         system: critic.systemPrompt,
         prompt: `Review this implementation plan. Score it 0-100 using ::review_score::N marker.\n\nStories:\n${plannerStories.map(s => `- ${s.id}: ${s.title} (${s.persona}) — ${s.description}`).join("\n")}`,
         tools: criticReadOnly as ToolSet,
-        stopWhen: stepCountIs(15),
+
         abortSignal: AbortSignal.timeout(3 * 60 * 1000),
       });
       for await (const _chunk of criticStream.textStream) { /* drive */ }
@@ -347,7 +346,7 @@ export async function runOrchestration(
       const feedbackLines = criticText.split("\n").filter(l => !l.includes("::review_score::") && !l.includes("::review_verdict::"));
       const feedback = feedbackLines.join("\n").trim();
       if (feedback) {
-        for (const line of feedback.split("\n").slice(0, 20)) {
+        for (const line of feedback.split("\n")) {
           console.log(chalk.dim("  " + line));
         }
       }
@@ -484,7 +483,7 @@ When you modify a file, include ::file_modified::path markers.${revisionFeedback
         system: systemPrompt,
         prompt: story.description,
         tools: personaTools as ToolSet,
-        stopWhen: stepCountIs(50),
+
         abortSignal: AbortSignal.timeout(10 * 60 * 1000),
       });
 
@@ -546,12 +545,7 @@ When you modify a file, include ::file_modified::path markers.${revisionFeedback
       const outTokens = usage?.outputTokens || 0;
       costTracker.addUsage(persona.name, provider, modelName, inTokens, outTokens);
 
-      // Print summary
-      if (text.trim()) {
-        const paragraphs = text.trim().split("\n\n");
-        const summary = paragraphs[paragraphs.length - 1].slice(0, 200);
-        console.log(chalk.dim(`    ${summary}${summary.length >= 200 ? "..." : ""}`));
-      }
+      // (agent text already streamed live above)
 
       console.log(chalk.green(`  ✓ Story ${i + 1}/${sorted.length} — ${persona.name} — ${story.title}`));
       console.log();
@@ -631,7 +625,7 @@ If there are issues, be specific about which files and what needs to change.`;
           system: reviewer.systemPrompt,
           prompt: reviewPrompt,
           tools: reviewerTools,
-          stopWhen: stepCountIs(30),
+  
           abortSignal: AbortSignal.timeout(5 * 60 * 1000),
         });
 
@@ -760,7 +754,7 @@ Working directory: ${workingDir}
 - Only run commands that complete and exit
 
 ## Reviewer feedback — fix these issues:
-${reviewText.slice(0, 3000)}
+${reviewText}
 
 Your task: Address the reviewer's feedback for "${story.title}". Fix the specific issues mentioned. Do not rewrite code that wasn't flagged.`;
 
@@ -770,7 +764,7 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
               system: revisionSystemPrompt,
               prompt: `Fix the reviewer's issues for: ${story.title}\n\n${story.description}`,
               tools: storyTools as ToolSet,
-              stopWhen: stepCountIs(30),
+      
               abortSignal: AbortSignal.timeout(5 * 60 * 1000),
             });
 
@@ -828,13 +822,10 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
         console.log(chalk.dim("  " + diff.split("\n").join("\n  ")));
       }
       if (untracked) {
-        const untrackedFiles = untracked.split("\n").slice(0, 20);
+        const untrackedFiles = untracked.split("\n");
         console.log(chalk.dim("  New files:"));
         for (const f of untrackedFiles) {
           console.log(chalk.dim(`    + ${f}`));
-        }
-        if (untracked.split("\n").length > 20) {
-          console.log(chalk.dim(`    ... and ${untracked.split("\n").length - 20} more`));
         }
       }
       console.log();

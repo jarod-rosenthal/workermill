@@ -1,7 +1,6 @@
 import chalk from "chalk";
 import ora from "ora";
-import { streamText, generateObject, stepCountIs, type ToolSet } from "ai";
-import { z } from "zod";
+import { streamText, generateText, stepCountIs, type ToolSet } from "ai";
 import { createModel } from "../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
 import type { AIProvider } from "../../packages/engine/src/types.js";
@@ -29,6 +28,33 @@ interface SharedContext {
   learnings: string[];
 }
 
+/**
+ * Extract balanced JSON from text response (same approach as WorkerMill's parsePlanResponse).
+ * Finds the first { and extracts the balanced JSON object.
+ */
+function extractJson(text: string): unknown | null {
+  // Try ```json fence first
+  const fenceStart = text.indexOf("```json");
+  const searchFrom = fenceStart !== -1 ? fenceStart + 7 : 0;
+
+  const braceStart = text.indexOf("{", searchFrom);
+  if (braceStart === -1) return null;
+
+  let depth = 0;
+  for (let i = braceStart; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}") depth--;
+    if (depth === 0) {
+      try {
+        return JSON.parse(text.slice(braceStart, i + 1));
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
 export async function classifyComplexity(
   config: CliConfig,
   userInput: string
@@ -45,34 +71,53 @@ export async function classifyComplexity(
   const model = createModel(provider as AIProvider, modelName, host);
 
   try {
-    const result = await generateObject({
+    // Use plain text generation + JSON parsing (same as WorkerMill's planning workflow)
+    const result = await generateText({
       model,
-      schema: z.object({
-        complexity: z.enum(["single", "multi"]),
-        reason: z.string(),
-        stories: z.array(z.object({
-          title: z.string(),
-          persona: z.string(),
-          description: z.string(),
-          dependsOn: z.array(z.number()).optional(),
-        })).optional(),
-      }),
-      prompt: `Analyze this coding task. If it involves multiple distinct concerns that would benefit from different specialist personas working sequentially, classify as "multi" and provide a story breakdown with persona assignments. Otherwise classify as "single".
+      prompt: `Analyze this coding task and classify its complexity. Respond with a JSON object inside a \`\`\`json code fence.
+
+If the task involves multiple distinct concerns that would benefit from different specialist personas working sequentially, classify as "multi" and provide a story breakdown. Otherwise classify as "single".
 
 Available personas: architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer
 
 Task:
-${userInput}`,
+${userInput}
+
+Respond with ONLY a JSON object in this format:
+\`\`\`json
+{
+  "complexity": "single" or "multi",
+  "reason": "brief explanation",
+  "stories": [
+    {
+      "title": "Story title",
+      "persona": "persona_slug",
+      "description": "What this expert should do"
+    }
+  ]
+}
+\`\`\`
+
+The "stories" array is only needed when complexity is "multi". Each story should have a clear, distinct responsibility.`,
     });
 
-    return {
-      isMulti: result.object.complexity === "multi",
-      stories: result.object.stories,
-      reason: result.object.reason,
-    };
-  } catch {
-    // Fallback for providers without structured output (Ollama)
-    return { isMulti: false, reason: "Could not classify — defaulting to single agent" };
+    const parsed = extractJson(result.text) as {
+      complexity?: string;
+      reason?: string;
+      stories?: Story[];
+    } | null;
+
+    if (parsed && parsed.complexity) {
+      return {
+        isMulti: parsed.complexity === "multi",
+        stories: parsed.stories,
+        reason: parsed.reason || "",
+      };
+    }
+
+    return { isMulti: false, reason: "Could not parse classification response" };
+  } catch (err) {
+    return { isMulti: false, reason: `Classification failed: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 

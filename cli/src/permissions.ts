@@ -108,29 +108,32 @@ export class PermissionManager {
     return choice === "y" || choice === "yes";
   }
 
-  /** Prompt using the shared readline, or create a temporary one if none bound */
+  /**
+   * Prompt the user with a question. Uses a dedicated temporary readline
+   * to avoid conflicts with the main agent readline's line event handler.
+   */
   askUser(prompt: string): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       this.cancelCurrentPrompt = () => {
         reject(new Error("cancelled"));
       };
+
+      // Pause the main readline so it doesn't compete for stdin
       if (this.rl) {
-        // Temporarily resume the shared readline for this question
-        this.rl.resume();
-        this.rl.question(prompt, (answer) => {
-          this.cancelCurrentPrompt = null;
-          this.rl!.pause();
-          resolve(answer);
-        });
-      } else {
-        // Fallback: create a temporary readline (shouldn't happen in normal flow)
-        const tempRl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        tempRl.question(prompt, (answer) => {
-          this.cancelCurrentPrompt = null;
-          tempRl.close();
-          resolve(answer);
-        });
+        this.rl.pause();
       }
+
+      // Create a dedicated readline for this question
+      const questionRl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+
+      questionRl.question(prompt, (answer) => {
+        this.cancelCurrentPrompt = null;
+        questionRl.close();
+        resolve(answer);
+      });
     });
   }
 

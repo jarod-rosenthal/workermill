@@ -10,9 +10,10 @@ import * as globTool from "./glob.js";
 import * as grepTool from "./grep.js";
 import * as lsTool from "./ls.js";
 import * as fetchTool from "./fetch.js";
+import * as patchTool from "./patch.js";
 
 // Re-export all tool modules
-export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool };
+export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool };
 
 /**
  * Creates Vercel AI SDK tool definitions for use with generateText().
@@ -299,6 +300,24 @@ export function createToolDefinitions(workingDir: string) {
           return `Content from ${result.url} (${result.contentType || "unknown"}):\n\n${result.content}`;
         }
         return `Error: ${result.error}`;
+      },
+    }),
+
+    patch: tool({
+      description: patchTool.description,
+      inputSchema: z.object({
+        patch_text: z.string().describe("Unified diff patch text with --- and +++ headers and @@ hunk markers"),
+      }),
+      execute: async ({ patch_text }) => {
+        const result = await patchTool.execute({ patch_text });
+        if (result.success) {
+          const parts: string[] = ["Patch applied successfully:"];
+          if (result.filesCreated.length > 0) parts.push(`  Created: ${result.filesCreated.join(", ")}`);
+          if (result.filesModified.length > 0) parts.push(`  Modified: ${result.filesModified.join(", ")}`);
+          if (result.filesDeleted.length > 0) parts.push(`  Deleted: ${result.filesDeleted.join(", ")}`);
+          return parts.join("\n");
+        }
+        return `Error: ${result.error}${result.hint ? `\nHint: ${result.hint}` : ""}`;
       },
     }),
   };

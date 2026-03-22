@@ -14,6 +14,7 @@ import type { CliConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
 import { createSession, saveSession, addMessage, loadLatestSession, type Session } from "./session.js";
 import { shouldCompact, compactMessages } from "./compaction.js";
+import * as logger from "./logger.js";
 
 export async function runAgent(config: CliConfig, trustAll: boolean, resume?: boolean): Promise<void> {
   const { provider, model: modelName, apiKey, host } = getProviderForPersona(config);
@@ -63,16 +64,21 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
       execute: async (input: Record<string, unknown>) => {
         const allowed = await permissions.checkPermission(name, input);
         if (!allowed) {
+          logger.debug("Tool denied by user", { tool: name });
           return "Tool execution denied by user.";
         }
+        logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
         printToolCall(name, input);
         const result = await td.execute(input);
         const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+        logger.debug("Tool result", { tool: name, result: resultStr.slice(0, 200) });
         printToolResult(name, resultStr);
         return result;
       },
     };
   }
+
+  logger.info("Session started", { provider, model: modelName, workingDir, trustAll });
 
   // Clear screen and show header
   printHeader("0.1.0", provider, modelName, workingDir);
@@ -135,13 +141,16 @@ Focus on writing clean, production-ready code.`;
 
     try {
       addMessage(session, "user", trimmed);
+      logger.info("User message", { length: trimmed.length, preview: trimmed.slice(0, 100) });
 
       // On first message, check if the task warrants multi-expert orchestration
       if (session.messages.length <= 1) {
         const { classifyComplexity, runOrchestration } = await import("./orchestrator.js");
 
         console.log(chalk.dim("\n  Analyzing task complexity..."));
+        logger.info("Running complexity classifier");
         const classification = await classifyComplexity(config, trimmed);
+        logger.info("Classification result", { isMulti: classification.isMulti, reason: classification.reason, storyCount: classification.stories?.length });
 
         if (classification.isMulti && classification.stories && classification.stories.length > 1) {
           console.log();
@@ -173,6 +182,7 @@ Focus on writing clean, production-ready code.`;
         }
       }
 
+      logger.info("Starting streamText", { model: modelName, messageCount: session.messages.length });
       const thinkingSpinner = ora({ text: chalk.dim("Thinking..."), prefixText: " " }).start();
 
       const stream = streamText({
@@ -214,6 +224,7 @@ Focus on writing clean, production-ready code.`;
 
       // Store assistant response
       const finalText = await stream.text;
+      logger.info("Response complete", { tokens, textLength: finalText.length });
       addMessage(session, "assistant", finalText);
 
       // Auto-save session after each exchange
@@ -239,6 +250,7 @@ Focus on writing clean, production-ready code.`;
       printStatusBar(provider, modelName, session.totalTokens, trustAll ? "trust all" : "ask");
       console.log();
     } catch (err) {
+      logger.error("Agent error", { error: err instanceof Error ? err.message : String(err) });
       printError(err instanceof Error ? err.message : String(err));
     }
 
@@ -249,6 +261,8 @@ Focus on writing clean, production-ready code.`;
   });
 
   rl.on("close", () => {
+    logger.info("Session ended", { totalTokens: session.totalTokens, messages: session.messages.length });
+    logger.flush();
     // Don't exit immediately if we're still processing a request
     if (processing) {
       const checkDone = setInterval(() => {

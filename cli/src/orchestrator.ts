@@ -113,6 +113,7 @@ async function planStories(
   config: CliConfig,
   userTask: string,
   workingDir: string,
+  sandboxed = true,
 ): Promise<Story[]> {
   const planner = loadPersona("planner");
 
@@ -130,7 +131,7 @@ async function planStories(
   }
 
   const plannerModel = createModel(pProvider as AIProvider, pModel, pHost);
-  const plannerTools = createToolDefinitions(workingDir, plannerModel);
+  const plannerTools = createToolDefinitions(workingDir, plannerModel, sandboxed);
 
   const readOnlyTools: Record<string, AnyToolDef> = {};
   if (planner) {
@@ -275,7 +276,8 @@ function extractScore(text: string): number {
 export async function runOrchestration(
   config: CliConfig,
   userTask: string,
-  trustAll: boolean
+  trustAll: boolean,
+  sandboxed = true,
 ): Promise<void> {
   const costTracker = new CostTracker();
   const context: SharedContext = {
@@ -288,7 +290,7 @@ export async function runOrchestration(
   const workingDir = process.cwd();
 
   // Planner explores codebase and produces stories
-  const plannerStories = await planStories(config, userTask, workingDir);
+  const plannerStories = await planStories(config, userTask, workingDir, sandboxed);
 
   // Show the plan
   console.log(chalk.bold(`\n  Plan: ${plannerStories.length} stories`));
@@ -304,7 +306,7 @@ export async function runOrchestration(
     if (critic) {
       const { provider: cProvider, model: cModel, host: cHost } = getProviderForPersona(config, "critic");
       const criticModel = createModel(cProvider as AIProvider, cModel, cHost);
-      const criticTools = createToolDefinitions(workingDir, criticModel);
+      const criticTools = createToolDefinitions(workingDir, criticModel, sandboxed);
       const criticReadOnly: Record<string, AnyToolDef> = {};
       for (const name of critic.tools) {
         if (criticTools[name as keyof typeof criticTools]) {
@@ -388,7 +390,7 @@ export async function runOrchestration(
     const model = createModel(provider as AIProvider, modelName, host);
 
     // Build tools filtered by persona's allowed tools
-    const allTools = createToolDefinitions(workingDir, model);
+    const allTools = createToolDefinitions(workingDir, model, sandboxed);
     const personaTools: Record<string, AnyToolDef> = {};
     let lastToolCall = "";  // Dedup consecutive identical tool calls
     for (const toolName of persona.tools) {
@@ -558,7 +560,7 @@ When you modify a file, include ::file_modified::path markers.${revisionFeedback
     }
 
     const reviewModel = createModel(revProvider as AIProvider, revModel, revHost);
-    const reviewTools = createToolDefinitions(workingDir, reviewModel);
+    const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
 
     // Only read-only tools for reviewer
     const reviewerTools: Record<string, AnyToolDef> = {};
@@ -693,7 +695,7 @@ If there are issues, be specific about which files and what needs to change.`;
           }).start();
 
           const storyModel = createModel(sProvider as AIProvider, sModel, sHost);
-          const storyAllTools = createToolDefinitions(workingDir, storyModel);
+          const storyAllTools = createToolDefinitions(workingDir, storyModel, sandboxed);
           const storyTools: Record<string, AnyToolDef> = {};
           for (const toolName of storyPersona.tools) {
             const toolDef = storyAllTools[toolName as keyof typeof storyAllTools] as AnyToolDef;

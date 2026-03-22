@@ -271,7 +271,7 @@ Focus on writing clean, production-ready code.`;
           console.log(chalk.dim(`  → multi-expert (${classification.reason})\n`));
 
           // Orchestrator runs planner to determine stories, critic validates, then prompts user
-          await runOrchestration(config, input, trustAll);
+          await runOrchestration(config, input, trustAll, sandboxed);
           processing = false;
           rl.resume();
           rl.prompt();

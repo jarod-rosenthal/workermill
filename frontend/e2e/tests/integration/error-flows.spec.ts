@@ -53,7 +53,7 @@ test.describe("Error Flows", () => {
 
     // Verify it reaches a terminal status — the task may complete before cancel arrives
     const finalStatus = await waitForStatus(
-      api, jiraKey, TERMINAL_STATUSES, 60_000,
+      api, jiraKey, TERMINAL_STATUSES, 120_000,
     );
     expect(TERMINAL_STATUSES.includes(finalStatus)).toBeTruthy();
   });

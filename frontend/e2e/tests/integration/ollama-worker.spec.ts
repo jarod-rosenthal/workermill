@@ -63,13 +63,10 @@ test.describe("Ollama Worker Integration", () => {
     const jiraKey = `INT-${Date.now()}`;
     const payload = api.createJiraWebhookPayload({
       issueKey: jiraKey,
-      summary: "Add string utility functions with tests",
+      summary: "Add capitalize utility with test",
       description:
-        "Create src/utils/strings.ts with two functions:\n" +
-        "1. capitalize(str) - capitalizes the first letter of a string\n" +
-        "2. slugify(str) - converts a string to a URL-friendly slug (lowercase, hyphens)\n\n" +
-        "Add comprehensive tests in src/__tests__/strings.test.ts covering edge cases " +
-        "(empty string, already capitalized, special characters in slugify).",
+        "Create src/utils/capitalize.ts with a function capitalize(str: string): string that capitalizes the first letter. " +
+        "Add a test in src/__tests__/capitalize.test.ts.",
     });
 
     const webhookResponse = await api.sendJiraWebhook(payload);

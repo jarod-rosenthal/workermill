@@ -59,10 +59,15 @@ test.describe("GitHub Verification", () => {
     const keyLower = jiraKey.toLowerCase();
     const branch = await verifyBranchExists(`story/${keyLower}`);
     if (!branch) {
-      // No branch means no code changes were made — valid if task completed
-      expect(result.status).toBe("completed");
+      // No branch means either no code changes (completed) or branch deleted after merge (pr_approved)
+      expect(["completed", "pr_approved", "review_approved"].includes(result.status)).toBeTruthy();
+      // If PR was merged, verify via PR search (branch may be deleted but PR record remains)
+      if (result.status === "pr_approved" || result.status === "review_approved") {
+        const pr = await verifyPRExists(`story/${keyLower}`);
+        expect(pr).toBeTruthy();
+      }
     } else {
-      // Branch exists, so a PR should have been created
+      // Branch exists — PR should exist (open for review_requested, any state otherwise)
       const pr = await verifyPRExists(`story/${keyLower}`);
       expect(pr).toBeTruthy();
       expect(pr!.title).toBeTruthy();

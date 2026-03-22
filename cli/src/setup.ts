@@ -105,7 +105,8 @@ export async function runSetup(): Promise<CliConfig> {
   }
 
   // Ask for model override
-  const modelOverride = await ask(rl, chalk.dim(`  Model [${selected.defaultModel}]: `));
+  console.log();
+  const modelOverride = await ask(rl, chalk.dim(`  Model (press Enter for ${selected.defaultModel}): `));
   if (modelOverride.trim()) {
     providerConfig.model = modelOverride.trim();
   }

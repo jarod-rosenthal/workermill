@@ -19,6 +19,7 @@ const program = new Command()
   .option("--auto-revise", "Auto-revise on failed reviews without prompting")
   .option("--max-revisions <n>", "Max review→revise cycles (default: 2)", parseInt)
   .option("--critic", "Run separate critic pass on plan before execution")
+  .option("--full-disk", "Allow tools to access files outside working directory (default: restricted to cwd)")
   .action(async (options) => {
     // Header is shown by runAgent after config is loaded (so it can show provider info)
 
@@ -50,7 +51,8 @@ const program = new Command()
     }
 
     // Run interactive agent
-    await runAgent(config, options.trust || false, options.resume || false, options.plan || false);
+    const fullDisk = options.fullDisk || false;
+    await runAgent(config, options.trust || false, options.resume || false, options.plan || false, fullDisk);
   });
 
 program.parse();

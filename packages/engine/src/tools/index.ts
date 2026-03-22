@@ -19,10 +19,25 @@ import * as gitTool from "./git.js";
 export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool, subAgentTool, gitTool };
 
 /**
+ * Validate that a resolved path is within the allowed working directory.
+ * Returns the path if valid, throws if not.
+ */
+function assertPathInBounds(resolvedPath: string, workingDir: string, sandboxed: boolean): string {
+  if (!sandboxed) return resolvedPath;
+  const normalized = path.resolve(resolvedPath);
+  const normalizedWorkDir = path.resolve(workingDir);
+  if (!normalized.startsWith(normalizedWorkDir + path.sep) && normalized !== normalizedWorkDir) {
+    throw new Error(`Path "${resolvedPath}" is outside the working directory. Use --full-disk to allow access outside ${workingDir}`);
+  }
+  return normalized;
+}
+
+/**
  * Creates Vercel AI SDK tool definitions for use with generateText().
  * All file paths are resolved relative to workingDir.
+ * When sandboxed=true (default), all paths are restricted to workingDir.
  */
-export function createToolDefinitions(workingDir: string, model?: LanguageModel) {
+export function createToolDefinitions(workingDir: string, model?: LanguageModel, sandboxed = true) {
   return {
     bash: tool({
       description: bashTool.description,
@@ -43,6 +58,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel)
             ? cwd
             : path.resolve(workingDir, cwd)
           : workingDir;
+        assertPathInBounds(resolvedCwd, workingDir, sandboxed);
         const result = await bashTool.execute({
           command,
           cwd: resolvedCwd,
@@ -77,6 +93,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel)
         const resolvedPath = path.isAbsolute(filePath)
           ? filePath
           : path.resolve(workingDir, filePath);
+        assertPathInBounds(resolvedPath, workingDir, sandboxed);
         const result = await readFileTool.execute({
           path: resolvedPath,
           encoding: encoding as BufferEncoding | undefined,
@@ -110,6 +127,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel)
         const resolvedPath = path.isAbsolute(filePath)
           ? filePath
           : path.resolve(workingDir, filePath);
+        assertPathInBounds(resolvedPath, workingDir, sandboxed);
         const result = await writeFileTool.execute({
           path: resolvedPath,
           content,
@@ -150,6 +168,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel)
         const resolvedPath = path.isAbsolute(filePath)
           ? filePath
           : path.resolve(workingDir, filePath);
+        assertPathInBounds(resolvedPath, workingDir, sandboxed);
         const result = await editFileTool.execute({
           path: resolvedPath,
           old_string,
@@ -188,6 +207,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel)
             ? cwd
             : path.resolve(workingDir, cwd)
           : workingDir;
+        assertPathInBounds(resolvedCwd, workingDir, sandboxed);
         const result = await globTool.execute({
           pattern,
           cwd: resolvedCwd,
@@ -246,6 +266,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel)
             ? searchPath
             : path.resolve(workingDir, searchPath)
           : workingDir;
+        assertPathInBounds(resolvedPath, workingDir, sandboxed);
         const result = await grepTool.execute({
           pattern,
           path: resolvedPath,
@@ -282,6 +303,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel)
       }),
       execute: async ({ path: dirPath, ignore, maxDepth, maxFiles }) => {
         const resolvedPath = path.isAbsolute(dirPath) ? dirPath : path.resolve(workingDir, dirPath);
+        assertPathInBounds(resolvedPath, workingDir, sandboxed);
         const result = await lsTool.execute({ path: resolvedPath, ignore, maxDepth, maxFiles });
         if (result.success) {
           return `${result.tree}\n\n${result.totalFiles} files, ${result.totalDirs} directories${result.truncated ? " (truncated)" : ""}`;
@@ -367,6 +389,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel)
                     const resolvedPath = path.isAbsolute(filePath)
                       ? filePath
                       : path.resolve(workingDir, filePath);
+                    assertPathInBounds(resolvedPath, workingDir, sandboxed);
                     const result = await readFileTool.execute({ path: resolvedPath, maxLines, startLine });
                     return result.success ? result.content || "" : `Error: ${result.error}`;
                   },
@@ -381,6 +404,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel)
                     const resolvedCwd = cwd
                       ? path.isAbsolute(cwd) ? cwd : path.resolve(workingDir, cwd)
                       : workingDir;
+                    assertPathInBounds(resolvedCwd, workingDir, sandboxed);
                     const result = await globTool.execute({ pattern, cwd: resolvedCwd });
                     return result.success
                       ? result.count === 0
@@ -400,6 +424,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel)
                     const resolvedPath = searchPath
                       ? path.isAbsolute(searchPath) ? searchPath : path.resolve(workingDir, searchPath)
                       : workingDir;
+                    assertPathInBounds(resolvedPath, workingDir, sandboxed);
                     const result = await grepTool.execute({ pattern, path: resolvedPath, filePattern });
                     if (!result.success) return `Error: ${result.error}`;
                     if (result.matchCount === 0) return `No matches for: ${pattern}`;
@@ -422,6 +447,7 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel)
                     const resolvedPath = path.isAbsolute(dirPath)
                       ? dirPath
                       : path.resolve(workingDir, dirPath);
+                    assertPathInBounds(resolvedPath, workingDir, sandboxed);
                     const result = await lsTool.execute({ path: resolvedPath, maxDepth });
                     return result.success ? result.tree : `Error: ${result.error}`;
                   },

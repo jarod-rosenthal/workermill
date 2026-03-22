@@ -60,7 +60,7 @@ function completer(line: string): [string[], string] {
   return [[], line];
 }
 
-export async function runAgent(config: CliConfig, trustAll: boolean, resume?: boolean, startInPlanMode?: boolean): Promise<void> {
+export async function runAgent(config: CliConfig, trustAll: boolean, resume?: boolean, startInPlanMode?: boolean, fullDisk?: boolean): Promise<void> {
   const { provider, model: modelName, apiKey, host } = getProviderForPersona(config);
 
   // Set API keys in env if provided
@@ -79,7 +79,8 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
   const aiProvider = provider as AIProvider;
   const model = createModel(aiProvider, modelName, host);
   const workingDir = process.cwd();
-  const tools = createToolDefinitions(workingDir, model);
+  const sandboxed = !fullDisk;
+  const tools = createToolDefinitions(workingDir, model, sandboxed);
   const permissions = new PermissionManager(trustAll);
 
   // readline will be bound to permissions after creation (see below)

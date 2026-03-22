@@ -797,8 +797,11 @@ Always output your thinking as text before using tools.`;
       // AI SDK v6: TextStreamPart uses 'text' property, not 'textDelta'
       for await (const chunk of stream.fullStream) {
         if (chunk.type === 'text-delta' && chunk.text) {
-          // Output text as it streams (real-time visibility)
-          process.stdout.write(chunk.text);
+          // Only stream raw text for non-review personas. Review personas use
+          // structured output (JSON) which looks garbled when streamed token-by-token.
+          if (!useStructuredOutput) {
+            process.stdout.write(chunk.text);
+          }
         } else if (chunk.type === 'error') {
           console.error(`${LOG_PREFIX} Stream error:`, chunk.error);
         }
@@ -806,7 +809,7 @@ Always output your thinking as text before using tools.`;
       }
 
       // Ensure final newline after streaming text
-      console.log('');
+      if (!useStructuredOutput) console.log('');
 
       // Get final results after stream completes
       resultText = await stream.text;

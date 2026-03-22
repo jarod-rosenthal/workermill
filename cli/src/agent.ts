@@ -173,6 +173,8 @@ Focus on writing clean, production-ready code.`;
         }
       }
 
+      const thinkingSpinner = ora({ text: chalk.dim("Thinking..."), prefixText: " " }).start();
+
       const stream = streamText({
         model,
         system: systemPrompt,
@@ -186,11 +188,20 @@ Focus on writing clean, production-ready code.`;
       });
 
       let fullText = "";
-      process.stdout.write("\n");
+      let spinnerStopped = false;
 
       for await (const chunk of stream.textStream) {
+        if (!spinnerStopped) {
+          thinkingSpinner.stop();
+          spinnerStopped = true;
+          process.stdout.write("\n");
+        }
         process.stdout.write(chalk.white(chunk));
         fullText += chunk;
+      }
+
+      if (!spinnerStopped) {
+        thinkingSpinner.stop();
       }
 
       if (fullText.trim()) {

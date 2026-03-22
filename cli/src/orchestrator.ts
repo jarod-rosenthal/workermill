@@ -775,6 +775,12 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
     } catch {
       console.log(chalk.dim("  Initializing git repository..."));
       execSync("git init", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
+      // Create default .gitignore if none exists
+      const fs = await import("fs");
+      const gitignorePath = `${workingDir}/.gitignore`;
+      if (!fs.existsSync(gitignorePath)) {
+        fs.writeFileSync(gitignorePath, "node_modules/\ndist/\n.env\n.workermill/\n*.log\n", "utf-8");
+      }
       console.log(chalk.green("  ✓ Git repo initialized"));
     }
 

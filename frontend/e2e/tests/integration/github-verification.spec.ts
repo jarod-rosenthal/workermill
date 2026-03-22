@@ -7,6 +7,7 @@ import { createAndWait, getRandomUtilityTask, getRandomEndpointTask } from "./he
 const isLocal = !process.env.BASE_URL;
 
 test.describe("GitHub Verification", () => {
+  test.describe.configure({ mode: "serial" });
   test.skip(!isLocal, "Integration tests only run against local stack");
 
   let api: APIClient;

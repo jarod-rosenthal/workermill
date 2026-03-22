@@ -8,6 +8,7 @@ import { createAndWait, getProviderTask, SUCCESS_STATUSES } from "./helpers/task
 const isLocal = !process.env.BASE_URL;
 
 test.describe("AI Provider Integration", () => {
+  test.describe.configure({ mode: "serial" });
   test.skip(!isLocal, "Integration tests only run against local stack");
 
   let api: APIClient;

@@ -24,6 +24,7 @@ const isLocal = !process.env.BASE_URL;
 const FULL_TIMEOUT = 480_000; // 8 min for planning + execution + review
 
 test.describe("Ollama Worker Integration", () => {
+  test.describe.configure({ mode: "serial" });
   test.skip(!isLocal, "Integration tests only run against local stack with Ollama");
 
   let api: APIClient;

@@ -7,6 +7,7 @@ import { createIntKey, waitForStatus, TERMINAL_STATUSES } from "./helpers/task-h
 const isLocal = !process.env.BASE_URL;
 
 test.describe("Error Flows", () => {
+  test.describe.configure({ mode: "serial" });
   test.skip(!isLocal, "Integration tests only run against local stack");
 
   let api: APIClient;

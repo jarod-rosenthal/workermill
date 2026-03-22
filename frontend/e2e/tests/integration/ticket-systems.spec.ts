@@ -7,6 +7,7 @@ const isLocal = !process.env.BASE_URL;
 const API_URL = "http://localhost:3001";
 
 test.describe("Ticket System Integration", () => {
+  test.describe.configure({ mode: "serial" });
   test.skip(!isLocal, "Integration tests only run against local stack");
 
   let api: APIClient;

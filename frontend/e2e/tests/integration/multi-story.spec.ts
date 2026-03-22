@@ -7,6 +7,7 @@ import { waitForStatus, getRandomPrdTask, TERMINAL_STATUSES, SUCCESS_STATUSES } 
 const isLocal = !process.env.BASE_URL;
 
 test.describe("Multi-Story PRD Execution", () => {
+  test.describe.configure({ mode: "serial" });
   test.skip(!isLocal, "Integration tests only run against local stack");
 
   let api: APIClient;

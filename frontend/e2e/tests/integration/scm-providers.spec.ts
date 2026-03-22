@@ -8,6 +8,7 @@ import { createAndWait, getRandomUtilityTask, SUCCESS_STATUSES } from "./helpers
 const isLocal = !process.env.BASE_URL;
 
 test.describe("SCM Provider Integration", () => {
+  test.describe.configure({ mode: "serial" });
   test.skip(!isLocal, "Integration tests only run against local stack");
 
   let api: APIClient;

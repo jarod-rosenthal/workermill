@@ -478,10 +478,12 @@ When you modify a file, include ::file_modified::path markers.${revisionFeedback
     } // end revision loop
   }
 
-  // Run inline review
-  console.log(chalk.bold("  ─── Review ───"));
-  console.log();
+  // Review config
+  const maxRevisions = config.review?.maxRevisions ?? 2;
+  const autoRevise = config.review?.autoRevise ?? false;
+  const approvalThreshold = config.review?.approvalThreshold ?? 80;
 
+  // Run inline review with revision loop
   const reviewer = loadPersona("reviewer");
   if (reviewer) {
     const { provider: revProvider, model: revModel, host: revHost } = getProviderForPersona(
@@ -497,11 +499,6 @@ When you modify a file, include ::file_modified::path markers.${revisionFeedback
       if (envVar && key && !process.env[envVar]) process.env[envVar] = key;
     }
 
-    const reviewSpinner = ora({
-      text: chalk.white("Reviewer — Checking code quality"),
-      prefixText: "  ",
-    }).start();
-
     const reviewModel = createModel(revProvider as AIProvider, revModel, revHost);
     const reviewTools = createToolDefinitions(workingDir, reviewModel);
 
@@ -513,8 +510,19 @@ When you modify a file, include ::file_modified::path markers.${revisionFeedback
       }
     }
 
-    try {
-      const reviewPrompt = `Review the changes made by the following experts:
+    for (let reviewRound = 0; reviewRound <= maxRevisions; reviewRound++) {
+      const isRevision = reviewRound > 0;
+      console.log(chalk.bold(`  ─── Review${isRevision ? ` (revision ${reviewRound}/${maxRevisions})` : ""} ───`));
+      console.log();
+
+      const reviewSpinner = ora({
+        stream: process.stdout,
+        text: chalk.white(isRevision ? "Reviewer — Re-checking after revisions" : "Reviewer — Checking code quality"),
+        prefixText: "  ",
+      }).start();
+
+      try {
+        const reviewPrompt = `Review the changes made by the following experts:
 
 ${sorted.map((s, idx) => `${idx + 1}. ${s.persona}: ${s.title} — ${s.description}`).join("\n")}
 
@@ -528,53 +536,171 @@ Use the read_file, glob, and grep tools to examine the actual changes. Look for:
 - Code that doesn't follow project conventions
 - Missing tests
 
-Provide a review with a quality score (0-100) using ::review_score:: marker and a verdict using ::review_verdict::approved or ::review_verdict::needs_revision.`;
+Provide a review with a quality score (0-100) using ::review_score:: marker and a verdict using ::review_verdict::approved or ::review_verdict::needs_revision.
+If there are issues, be specific about which files and what needs to change.`;
 
-      const reviewStream = streamText({
-        model: reviewModel,
-        system: reviewer.systemPrompt,
-        prompt: reviewPrompt,
-        tools: reviewerTools,
-        stopWhen: stepCountIs(30),
-        abortSignal: AbortSignal.timeout(5 * 60 * 1000),
-      });
+        const reviewStream = streamText({
+          model: reviewModel,
+          system: reviewer.systemPrompt,
+          prompt: reviewPrompt,
+          tools: reviewerTools,
+          stopWhen: stepCountIs(30),
+          abortSignal: AbortSignal.timeout(5 * 60 * 1000),
+        });
 
-      for await (const _chunk of reviewStream.textStream) {
-        // Drive execution
-      }
+        for await (const _chunk of reviewStream.textStream) { /* drive */ }
 
-      const reviewText = await reviewStream.text;
-      const reviewUsage = await reviewStream.totalUsage;
+        const reviewText = await reviewStream.text;
+        const reviewUsage = await reviewStream.totalUsage;
 
-      reviewSpinner.stop();
+        reviewSpinner.stop();
 
-      // Extract review markers (with fallback parsing)
-      const verdictMatch = reviewText.match(/::review_verdict::(\w+)/);
-      const score = extractScore(reviewText);
-      const verdict = verdictMatch ? verdictMatch[1] : (score >= 85 ? "approved" : "unknown");
+        // Extract review markers (with fallback parsing)
+        const score = extractScore(reviewText);
+        const approved = score >= approvalThreshold;
 
-      // Display review result
-      const scoreColor = score >= 85 ? chalk.green : score >= 70 ? chalk.yellow : chalk.red;
-      console.log(`  ${scoreColor(`Score: ${score}/100`)} — ${verdict === "approved" || verdict === "approve" ? chalk.green("APPROVED") : chalk.yellow("NEEDS REVISION")}`);
+        // Display review result
+        const scoreColor = score >= approvalThreshold ? chalk.green : score >= 60 ? chalk.yellow : chalk.red;
+        console.log(`  ${scoreColor(`Score: ${score}/100`)} — ${approved ? chalk.green("APPROVED") : chalk.yellow("NEEDS REVISION")}`);
 
-      // Print review feedback (last meaningful paragraph)
-      const reviewParagraphs = reviewText.split("\n\n").filter(p => p.trim() && !p.includes("::"));
-      if (reviewParagraphs.length > 0) {
+        // Print review feedback
+        const reviewParagraphs = reviewText.split("\n\n").filter(p => p.trim() && !p.includes("::"));
+        if (reviewParagraphs.length > 0) {
+          console.log();
+          const feedback = reviewParagraphs[reviewParagraphs.length - 1].slice(0, 500);
+          console.log(chalk.dim("  " + feedback));
+        }
         console.log();
-        const feedback = reviewParagraphs[reviewParagraphs.length - 1].slice(0, 300);
-        console.log(chalk.dim("  " + feedback));
-      }
-      console.log();
 
-      // Track reviewer cost
-      const revIn = reviewUsage?.inputTokens || 0;
-      const revOut = reviewUsage?.outputTokens || 0;
-      costTracker.addUsage("Reviewer", revProvider, revModel, revIn, revOut);
-    } catch (err) {
-      reviewSpinner.stop();
-      console.log(chalk.yellow(`  ⚠ Review skipped: ${err instanceof Error ? err.message : String(err)}`));
-      console.log();
-    }
+        // Track reviewer cost
+        costTracker.addUsage(`Reviewer (round ${reviewRound + 1})`, revProvider, revModel,
+          reviewUsage?.inputTokens || 0, reviewUsage?.outputTokens || 0);
+
+        // If approved or out of revision attempts, done
+        if (approved) break;
+        if (reviewRound >= maxRevisions) {
+          console.log(chalk.yellow(`  ⚠ Max review revisions (${maxRevisions}) reached`));
+          break;
+        }
+
+        // Ask user or auto-revise
+        let shouldRevise = autoRevise;
+        if (!autoRevise) {
+          try {
+            const answer = await permissions.askUser(
+              chalk.dim("  Revise and re-review? ") + chalk.white(`(y/n, ${maxRevisions - reviewRound} attempt${maxRevisions - reviewRound > 1 ? "s" : ""} left): `)
+            );
+            shouldRevise = answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
+          } catch {
+            shouldRevise = false; // cancelled
+          }
+        } else {
+          console.log(chalk.dim(`  Auto-revising (${maxRevisions - reviewRound} attempt${maxRevisions - reviewRound > 1 ? "s" : ""} left)...`));
+        }
+
+        if (!shouldRevise) {
+          console.log(chalk.dim("  Skipping revision, proceeding to commit."));
+          break;
+        }
+
+        // Re-execute stories with reviewer feedback
+        console.log(chalk.bold("\n  ─── Revision Pass ───\n"));
+
+        for (let i = 0; i < sorted.length; i++) {
+          const story = sorted[i];
+          const storyPersona = loadPersona(story.persona);
+          if (!storyPersona) continue;
+
+          const { provider: sProvider, model: sModel, host: sHost } = getProviderForPersona(
+            config, storyPersona.provider || story.persona
+          );
+          if (sProvider) {
+            const sApiKey = config.providers[sProvider]?.apiKey;
+            if (sApiKey) {
+              const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
+              const envVar = envMap[sProvider];
+              if (envVar && !process.env[envVar]) {
+                const key = sApiKey.startsWith("{env:") ? process.env[sApiKey.slice(5, -1)] : sApiKey;
+                if (key) process.env[envVar] = key;
+              }
+            }
+          }
+
+          const revSpinner = ora({
+            stream: process.stdout,
+            text: chalk.white(`Revising ${i + 1}/${sorted.length} — ${storyPersona.name} — ${story.title}`),
+            prefixText: "  ",
+          }).start();
+
+          const storyModel = createModel(sProvider as AIProvider, sModel, sHost);
+          const storyAllTools = createToolDefinitions(workingDir, storyModel);
+          const storyTools: Record<string, AnyToolDef> = {};
+          for (const toolName of storyPersona.tools) {
+            const toolDef = storyAllTools[toolName as keyof typeof storyAllTools] as AnyToolDef;
+            if (toolDef) {
+              storyTools[toolName] = {
+                ...toolDef,
+                execute: async (input: Record<string, unknown>) => {
+                  const allowed = await permissions.checkPermission(toolName, input);
+                  if (!allowed) return "Tool execution denied by user.";
+                  revSpinner.stop();
+                  printToolCall(toolName, input);
+                  const result = await toolDef.execute(input);
+                  const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+                  printToolResult(toolName, resultStr);
+                  revSpinner.start();
+                  return result;
+                },
+              };
+            }
+          }
+
+          const revisionSystemPrompt = `${storyPersona.systemPrompt}
+
+Working directory: ${workingDir}
+
+## Critical rules
+- NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, nodemon, tsc --watch, etc.)
+- NEVER run interactive commands that wait for user input
+- Only run commands that complete and exit
+
+## Reviewer feedback — fix these issues:
+${reviewText.slice(0, 3000)}
+
+Your task: Address the reviewer's feedback for "${story.title}". Fix the specific issues mentioned. Do not rewrite code that wasn't flagged.`;
+
+          try {
+            const revStream = streamText({
+              model: storyModel,
+              system: revisionSystemPrompt,
+              prompt: `Fix the reviewer's issues for: ${story.title}\n\n${story.description}`,
+              tools: storyTools as ToolSet,
+              stopWhen: stepCountIs(30),
+              abortSignal: AbortSignal.timeout(5 * 60 * 1000),
+            });
+
+            for await (const _chunk of revStream.textStream) { /* drive */ }
+            const revUsage = await revStream.totalUsage;
+            revSpinner.stop();
+
+            costTracker.addUsage(`${storyPersona.name} (revision)`, sProvider, sModel,
+              revUsage?.inputTokens || 0, revUsage?.outputTokens || 0);
+
+            console.log(chalk.green(`  ✓ Revised ${i + 1}/${sorted.length} — ${storyPersona.name} — ${story.title}`));
+          } catch (err) {
+            revSpinner.stop();
+            console.log(chalk.yellow(`  ⚠ Revision failed for story ${i + 1}: ${err instanceof Error ? err.message : String(err)}`));
+          }
+        }
+        console.log();
+        // Loop back to review again
+      } catch (err) {
+        reviewSpinner.stop();
+        console.log(chalk.yellow(`  ⚠ Review skipped: ${err instanceof Error ? err.message : String(err)}`));
+        console.log();
+        break;
+      }
+    } // end review loop
   }
 
   // Git commit step

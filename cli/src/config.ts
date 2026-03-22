@@ -14,11 +14,21 @@ export interface MCPServerConfig {
   env?: Record<string, string>;
 }
 
+export interface ReviewConfig {
+  /** Max review→revise cycles before giving up (default: 2) */
+  maxRevisions?: number;
+  /** Auto-revise without prompting user (default: false — prompts each time) */
+  autoRevise?: boolean;
+  /** Score threshold for approval (default: 80) */
+  approvalThreshold?: number;
+}
+
 export interface CliConfig {
   providers: Record<string, ProviderConfig>;
   default: string;
   routing?: Record<string, string>;
   mcp?: Record<string, MCPServerConfig>;
+  review?: ReviewConfig;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".workermill");
@@ -66,6 +76,7 @@ export function resolveConfig(): CliConfig {
     default: project?.default || global.default,
     routing: { ...global.routing, ...(project?.routing || {}) },
     mcp: { ...global.mcp, ...(project?.mcp || {}) },
+    review: { ...global.review, ...(project?.review || {}) },
   };
 }
 

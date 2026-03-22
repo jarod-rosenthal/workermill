@@ -1,5 +1,6 @@
 import readline from "readline";
 import chalk from "chalk";
+import ora from "ora";
 import { streamText, stepCountIs, type ToolSet } from "ai";
 import { createModel } from "../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
@@ -110,6 +111,41 @@ Guidelines:
 
     try {
       session.messages.push({ role: "user", content: trimmed });
+
+      // Check if task warrants multi-expert mode
+      if (session.messages.length <= 1) {
+        const { classifyComplexity, runOrchestration } = await import("./orchestrator.js");
+
+        const spinner = ora({ text: "Analyzing task complexity...", prefixText: "  " }).start();
+        const classification = await classifyComplexity(config, trimmed);
+        spinner.stop();
+
+        if (classification.isMulti && classification.stories && classification.stories.length > 1) {
+          console.log();
+          console.log(chalk.bold("  This looks like it needs multiple experts:"));
+          console.log();
+          classification.stories.forEach((s, i) => {
+            const persona = s.persona.replace(/_/g, " ");
+            console.log(chalk.white(`    ${i + 1}. ${chalk.cyan(persona)} — ${s.title}`));
+          });
+          console.log();
+
+          const rlTemp = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const answer = await new Promise<string>((resolve) => {
+            rlTemp.question(chalk.dim("  Run this plan? (y/n): "), resolve);
+          });
+          rlTemp.close();
+
+          if (answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes") {
+            await runOrchestration(config, classification.stories, trustAll);
+            rl.resume();
+            rl.prompt();
+            return;
+          }
+          console.log(chalk.dim("  OK, handling as single agent."));
+          console.log();
+        }
+      }
 
       const stream = streamText({
         model,

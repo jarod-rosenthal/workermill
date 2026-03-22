@@ -175,6 +175,8 @@ export interface EpicConfig {
   githubReviewerToken?: string;
   targetRepo: string;
   model?: string;
+  /** AI provider for worker execution (anthropic, openai, google, ollama) */
+  workerProvider?: string;
   jiraIssueKey?: string;
   /** Which ticket system to use for comments (jira, linear, github, internal) */
   ticketSystem?: "jira" | "linear" | "github" | "internal";

@@ -12,7 +12,7 @@ import * as path from "path";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { getTicketLabel, type EpicConfig, type StreamMessage } from "./types.js";
-import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
+import { createAIClient, type AIClient, type AIClientOptions, type AIProvider } from "./ai-client-types.js";
 
 /**
  * Deployment decision from DevOps Engineer.
@@ -528,13 +528,18 @@ export class InlineDeployer {
 
     // Initialize AIClient if unified client is enabled
     if (config.useUnifiedClient) {
+      const provider = (config.workerProvider || "anthropic") as AIProvider;
+      const isAnthropic = provider === "anthropic";
       this.aiClient = createAIClient({
-        provider: "anthropic",
-        apiKeys: { anthropic: config.anthropicApiKey },
+        provider,
+        apiKeys: {
+          anthropic: isAnthropic ? config.anthropicApiKey : undefined,
+          ollamaHost: provider === "ollama" ? (process.env.OLLAMA_HOST || "http://localhost:11434") : undefined,
+        },
         apiConfig: { baseUrl: config.apiBaseUrl, orgApiKey: config.orgApiKey },
-        useAgentSdk: true,
+        useAgentSdk: isAnthropic,
         githubToken: config.githubToken,
-        oauthToken: config.anthropicApiKey ? undefined : "mounted",
+        oauthToken: isAnthropic && !config.anthropicApiKey ? "mounted" : undefined,
       });
     }
   }

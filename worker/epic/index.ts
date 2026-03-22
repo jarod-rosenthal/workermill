@@ -66,6 +66,7 @@ function loadConfig(): EpicConfig {
     githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN || undefined,
     targetRepo: process.env.TARGET_REPO!,
     model: process.env.WORKER_MODEL || process.env.MODEL,  // Worker model for story execution (inline-reviewer uses MANAGER_MODEL separately)
+    workerProvider: process.env.WORKER_PROVIDER || "anthropic",
     jiraIssueKey: process.env.JIRA_ISSUE_KEY || process.env.TICKET_KEY || "",
     ticketSystem:
       (process.env.TICKET_SYSTEM as "jira" | "linear" | "github" | "internal") || "jira",

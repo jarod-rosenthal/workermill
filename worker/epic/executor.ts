@@ -21,7 +21,7 @@ import { CoordinationClient } from "./coordination-client.js";
 import { GitOps, getBitbucketAuthHeader } from "./git-ops.js";
 import { TicketOps } from "./ticket-ops.js";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
-import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
+import { createAIClient, type AIClient, type AIClientOptions, type AIProvider } from "./ai-client-types.js";
 import type { DecisionClient } from "./decision-client.js";
 import { createRetryableApi } from "./api-retry.js";
 import { isDockerDaemonReachable } from "./gate-utils.js";
@@ -121,15 +121,20 @@ export class StoryExecutor {
 
     // Initialize AIClient if unified client is enabled
     if (config.useUnifiedClient) {
+      const provider = (config.workerProvider || "anthropic") as AIProvider;
+      const isAnthropic = provider === "anthropic";
       this.aiClient = createAIClient({
-        provider: "anthropic",
-        apiKeys: { anthropic: config.anthropicApiKey },
+        provider,
+        apiKeys: {
+          anthropic: isAnthropic ? config.anthropicApiKey : undefined,
+          ollamaHost: provider === "ollama" ? (process.env.OLLAMA_HOST || "http://localhost:11434") : undefined,
+        },
         apiConfig: { baseUrl: config.apiBaseUrl, orgApiKey: config.orgApiKey },
-        useAgentSdk: true,
+        useAgentSdk: isAnthropic,  // Only use Claude CLI for Anthropic
         githubToken: config.githubToken,
         // Docker sandbox mounts ~/.claude/.credentials.json — Claude CLI reads it directly.
         // Pass "mounted" as a truthy sentinel so validateApiKey() doesn't reject.
-        oauthToken: config.anthropicApiKey ? undefined : "mounted",
+        oauthToken: isAnthropic && !config.anthropicApiKey ? "mounted" : undefined,
       });
     }
   }

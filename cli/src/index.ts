@@ -16,7 +16,7 @@ const program = new Command()
   .option("--trust", "Skip all tool permission prompts")
   .option("--resume", "Resume the last conversation")
   .action(async (options) => {
-    printHeader(VERSION);
+    // Header is shown by runAgent after config is loaded (so it can show provider info)
 
     // Load or create config
     let config = loadConfig();

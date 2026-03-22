@@ -7,10 +7,27 @@ export function incrementToolCount(toolName: string): void {
   toolCounts[toolName] = (toolCounts[toolName] || 0) + 1;
 }
 
-export function printHeader(version: string): void {
+export function printHeader(version: string, provider?: string, model?: string, cwd?: string): void {
+  // Clear screen
+  process.stdout.write("\x1b[2J\x1b[H");
+
+  const width = process.stdout.columns || 80;
+
+  // Top bar
+  const title = ` WorkerMill v${version} `;
+  const bar = "─".repeat(Math.max(0, width - title.length - 2));
+  console.log(chalk.cyan("╭" + "─".repeat(title.length) + bar + "╮"));
+  console.log(chalk.cyan("│") + chalk.bold.white(title) + chalk.dim(bar.replace(/./g, " ")) + chalk.cyan("│"));
+  console.log(chalk.cyan("╰" + "─".repeat(title.length) + bar + "╯"));
   console.log();
-  console.log(chalk.bold.white("  WorkerMill") + chalk.dim(` v${version}`));
-  console.log(chalk.dim("  Type /help for commands, Ctrl+C to exit"));
+
+  if (provider && model) {
+    console.log(chalk.dim(`  Provider: `) + chalk.white(`${provider}/${model}`));
+  }
+  if (cwd) {
+    console.log(chalk.dim(`  cwd: `) + chalk.white(cwd));
+  }
+  console.log(chalk.dim(`  Type `) + chalk.white("/help") + chalk.dim(` for commands, `) + chalk.white("Ctrl+C") + chalk.dim(` to exit`));
   console.log();
 }
 
@@ -217,50 +234,44 @@ export function printStatusBar(
   tokens: number,
   permissionMode: string
 ): void {
-  // Build tool counts string
-  const counts = Object.entries(toolCounts)
-    .filter(([_, count]) => count > 0)
-    .map(([name, count]) => {
-      const shortNames: Record<string, string> = {
-        bash: "Bash",
-        read_file: "Read",
-        write_file: "Write",
-        edit_file: "Edit",
-        glob: "Glob",
-        grep: "Grep",
-        ls: "List",
-        fetch: "Fetch",
-        patch: "Patch",
-        sub_agent: "Agent",
-      };
-      return `${shortNames[name] || name} ${count}`;
-    })
-    .join(chalk.dim(" | "));
-
-  const left = `${provider}/${model}`;
-  const right = `${tokens.toLocaleString()} tok`;
-  const middle = counts ? `  ${counts}  ` : "";
-
-  // Get terminal width
   const width = process.stdout.columns || 80;
-  const content = `  ${left}${middle}  ${right}  ${permissionMode}`;
-  const padding = Math.max(0, width - content.length);
 
-  console.log(
-    chalk.bgGray.white(` ${left}`) +
-    chalk.bgGray.dim(middle ? ` | ${middle}` : "") +
-    chalk.bgGray(" ".repeat(Math.max(1, padding))) +
-    chalk.bgGray.white(`${right} `) +
-    chalk.bgGray.dim(` ${permissionMode} `)
-  );
-}
+  // Build tool counts
+  const shortNames: Record<string, string> = {
+    bash: "Bash",
+    read_file: "Read",
+    write_file: "Write",
+    edit_file: "Edit",
+    glob: "Glob",
+    grep: "Grep",
+    ls: "List",
+    fetch: "Fetch",
+    patch: "Patch",
+    sub_agent: "Agent",
+  };
 
-// Renamed from printStatus for backward compatibility
-export function printStatus(
-  provider: string,
-  model: string,
-  tokens: number,
-  _cost: number
-): void {
-  printStatusBar(provider, model, tokens, "");
+  const countParts = Object.entries(toolCounts)
+    .filter(([_, count]) => count > 0)
+    .map(([name, count]) => `${shortNames[name] || name} ${count}`);
+
+  const left = ` ${provider}/${model}`;
+  const toolStr = countParts.length > 0 ? " │ " + countParts.join(" │ ") : "";
+  const right = `${tokens.toLocaleString()} tok `;
+  const permStr = permissionMode ? ` ${permissionMode} ` : "";
+
+  // Calculate padding
+  const contentLen = left.length + toolStr.length + right.length + permStr.length + 3;
+  const pad = Math.max(1, width - contentLen);
+
+  // Render full-width bar
+  const bar =
+    chalk.bgRgb(30, 30, 30).white(left) +
+    chalk.bgRgb(30, 30, 30).dim(toolStr) +
+    chalk.bgRgb(30, 30, 30)(" ".repeat(pad)) +
+    chalk.bgRgb(30, 30, 30).white(right) +
+    (permissionMode
+      ? chalk.bgRgb(30, 30, 30).dim("│ ") + chalk.bgRgb(30, 30, 30).green(permStr)
+      : "");
+
+  console.log(bar);
 }

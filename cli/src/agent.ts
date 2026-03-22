@@ -9,7 +9,7 @@ import type { AIProvider } from "../../packages/engine/src/types.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = any;
 import { PermissionManager } from "./permissions.js";
-import { printToolCall, printToolResult, printError, printStatusBar } from "./tui.js";
+import { printToolCall, printToolResult, printError, printStatusBar, printHeader } from "./tui.js";
 import type { CliConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
 import { createSession, saveSession, addMessage, loadLatestSession, type Session } from "./session.js";
@@ -74,14 +74,17 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
     };
   }
 
-  console.log(chalk.dim(`  Provider: ${provider}/${modelName}`));
-  console.log(chalk.dim(`  Working directory: ${workingDir}`));
+  // Clear screen and show header
+  printHeader("0.1.0", provider, modelName, workingDir);
+
+  // Show initial status bar
+  printStatusBar(provider, modelName, 0, trustAll ? "trust all" : "ask");
   console.log();
 
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: chalk.cyan("  > "),
+    prompt: chalk.cyan("❯ "),
   });
 
   // Bind the readline to the permission manager so it reuses the same instance

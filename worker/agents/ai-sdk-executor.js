@@ -890,10 +890,8 @@ Always output your thinking as text before using tools.`;
       console.log(`::code_quality_score::${resultOutput.codeQualityScore}`);
       console.log(`::feedback::${resultOutput.feedback}`);
 
-      // Also emit in the text marker format for compatibility
+      // Emit legacy marker for coordinator parsing
       console.log(`REVIEW_DECISION: ${resultOutput.decision}`);
-      console.log(`CODE_QUALITY_SCORE: ${resultOutput.codeQualityScore}`);
-      console.log(`FEEDBACK: ${resultOutput.feedback}`);
     } else {
       // Extract and output markers (for worker tasks)
       emitMarkers(resultText, actualModel);

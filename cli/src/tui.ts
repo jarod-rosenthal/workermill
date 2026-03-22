@@ -1,121 +1,127 @@
 import chalk from "chalk";
 
-function highlightCode(code: string, language: string): string {
-  // Highlight strings (both single and double quoted)
-  code = code.replace(/(["'`])(?:(?=(\\?))\2.)*?\1/g, (match) => chalk.green(match));
+// Track tool usage counts for status bar
+const toolCounts: Record<string, number> = {};
 
-  // Highlight comments
-  code = code.replace(/(\/\/.*$)/gm, (match) => chalk.dim(match));
-  code = code.replace(/(\/\*[\s\S]*?\*\/)/g, (match) => chalk.dim(match));
-  code = code.replace(/(#.*$)/gm, (match) => chalk.dim(match));
-
-  // Highlight keywords (JS/TS/Python common)
-  const keywords = /\b(const|let|var|function|return|if|else|for|while|class|import|export|from|async|await|try|catch|throw|new|this|def|self|yield|with|as)\b/g;
-  code = code.replace(keywords, (match) => chalk.magenta(match));
-
-  // Highlight types/builtins
-  const types = /\b(string|number|boolean|void|null|undefined|true|false|none|True|False|None|int|float|dict|list|Promise|Array|Object|Map|Set)\b/g;
-  code = code.replace(types, (match) => chalk.yellow(match));
-
-  return code;
+export function incrementToolCount(toolName: string): void {
+  toolCounts[toolName] = (toolCounts[toolName] || 0) + 1;
 }
 
 export function printHeader(version: string): void {
   console.log();
-  console.log(chalk.bold.cyan("  ╦ ╦┌─┐┬─┐┬┌─┌─┐┬─┐╔╦╗┬┬  ┬  "));
-  console.log(chalk.bold.cyan("  ║║║│ │├┬┘├┴┐├┤ ├┬┘║║║││  │  "));
-  console.log(chalk.bold.cyan("  ╚╩╝└─┘┴└─┴ ┴└─┘┴└─╩ ╩┴┴─┘┴─┘"));
-  console.log(chalk.dim(`  v${version} — AI coding agent`));
+  console.log(chalk.bold.white("  WorkerMill") + chalk.dim(` v${version}`));
   console.log(chalk.dim("  Type /help for commands, Ctrl+C to exit"));
   console.log();
 }
 
 export function printToolCall(toolName: string, toolInput: Record<string, unknown>): void {
-  const icon = getToolIcon(toolName);
-  console.log();
-  console.log(chalk.cyan(`  ${icon} ${toolName}`));
+  incrementToolCount(toolName);
 
   switch (toolName) {
     case "bash":
-      console.log(chalk.dim("  $ ") + chalk.white(String(toolInput.command || "")));
+      console.log(chalk.dim(`\n  > `) + chalk.yellow(String(toolInput.command || "")));
       break;
+
     case "read_file":
-      console.log(chalk.dim("  → ") + chalk.white(String(toolInput.path || "")));
+      console.log(chalk.dim(`\n  ● Read `) + chalk.white(String(toolInput.path || "")));
       break;
+
     case "write_file":
-      console.log(chalk.dim("  → ") + chalk.white(String(toolInput.path || "")));
+      console.log(chalk.dim(`\n  ● Write `) + chalk.white(String(toolInput.path || "")));
       break;
-    case "edit_file":
-      console.log(chalk.dim("  → ") + chalk.white(String(toolInput.path || "")));
+
+    case "edit_file": {
+      const filePath = String(toolInput.path || "");
+      console.log(chalk.dim(`\n  ● Edit `) + chalk.white(filePath));
+      // Show diff
       if (toolInput.old_string && toolInput.new_string) {
         const oldLines = String(toolInput.old_string).split("\n");
         const newLines = String(toolInput.new_string).split("\n");
-        for (const line of oldLines.slice(0, 10)) {
-          console.log(chalk.red("  - " + line));
+        const maxShow = 8;
+        for (const line of oldLines.slice(0, maxShow)) {
+          console.log(chalk.red(`    - ${line}`));
         }
-        if (oldLines.length > 10) console.log(chalk.red(`  ... (${oldLines.length - 10} more lines)`));
-        for (const line of newLines.slice(0, 10)) {
-          console.log(chalk.green("  + " + line));
+        if (oldLines.length > maxShow) console.log(chalk.red(`    ... +${oldLines.length - maxShow} lines`));
+        for (const line of newLines.slice(0, maxShow)) {
+          console.log(chalk.green(`    + ${line}`));
         }
-        if (newLines.length > 10) console.log(chalk.green(`  ... (${newLines.length - 10} more lines)`));
-      }
-      break;
-    case "glob":
-      console.log(chalk.dim("  → ") + chalk.white(String(toolInput.pattern || "")));
-      break;
-    case "grep":
-      console.log(chalk.dim("  → ") + chalk.white(String(toolInput.pattern || "")));
-      break;
-    case "ls":
-      console.log(chalk.dim("  → ") + chalk.white(String(toolInput.path || "")));
-      break;
-    case "fetch":
-      console.log(chalk.dim("  → ") + chalk.white(String(toolInput.url || "")));
-      break;
-    case "patch": {
-      const lines = String(toolInput.patch_text || "").split("\n").slice(0, 5);
-      for (const line of lines) {
-        if (line.startsWith("+")) console.log(chalk.green("  " + line));
-        else if (line.startsWith("-")) console.log(chalk.red("  " + line));
-        else console.log(chalk.dim("  " + line));
+        if (newLines.length > maxShow) console.log(chalk.green(`    ... +${newLines.length - maxShow} lines`));
       }
       break;
     }
-    case "sub_agent":
-      console.log(chalk.dim("  → ") + chalk.white(String(toolInput.prompt || "").slice(0, 100)));
+
+    case "patch": {
+      console.log(chalk.dim(`\n  ● Patch `) + chalk.white("(multi-file)"));
+      const patchLines = String(toolInput.patch_text || "").split("\n").slice(0, 10);
+      for (const line of patchLines) {
+        if (line.startsWith("+++") || line.startsWith("---")) {
+          console.log(chalk.bold(`    ${line}`));
+        } else if (line.startsWith("+")) {
+          console.log(chalk.green(`    ${line}`));
+        } else if (line.startsWith("-")) {
+          console.log(chalk.red(`    ${line}`));
+        } else if (line.startsWith("@@")) {
+          console.log(chalk.cyan(`    ${line}`));
+        } else {
+          console.log(chalk.dim(`    ${line}`));
+        }
+      }
       break;
+    }
+
+    case "glob":
+      console.log(chalk.dim(`\n  ● Glob `) + chalk.white(String(toolInput.pattern || "")));
+      break;
+
+    case "grep":
+      console.log(chalk.dim(`\n  ● Grep `) + chalk.white(String(toolInput.pattern || "")));
+      break;
+
+    case "ls":
+      console.log(chalk.dim(`\n  ● List `) + chalk.white(String(toolInput.path || ".")));
+      break;
+
+    case "fetch":
+      console.log(chalk.dim(`\n  ● Fetch `) + chalk.white(String(toolInput.url || "")));
+      break;
+
+    case "sub_agent":
+      console.log(chalk.dim(`\n  ● Agent `) + chalk.white(String(toolInput.prompt || "").slice(0, 80)));
+      break;
+
     default:
-      console.log(chalk.dim("  " + JSON.stringify(toolInput).slice(0, 100)));
+      console.log(chalk.dim(`\n  ● ${toolName}`));
   }
 }
 
 export function printToolResult(toolName: string, result: string): void {
-  const maxLines = 30;
+  // Truncate long results
+  const maxLines = 25;
   const lines = result.split("\n");
   const truncated = lines.length > maxLines;
   const displayLines = truncated ? lines.slice(0, maxLines) : lines;
 
-  // Color based on tool type
   const isError = result.startsWith("Error:");
-  const color = isError ? chalk.red : chalk.dim;
 
   for (const line of displayLines) {
-    // Highlight file paths in results
-    const highlighted = line.replace(
-      /([a-zA-Z0-9_\-./]+\.(ts|tsx|js|jsx|py|go|rs|java|md|json|yaml|yml|css|html))/g,
-      (match) => chalk.cyan(match)
-    );
-    console.log(color("  │ ") + highlighted);
+    if (isError) {
+      console.log(chalk.red(`    ${line}`));
+    } else {
+      // Highlight file paths
+      const highlighted = line.replace(
+        /([a-zA-Z0-9_\-./]+\.(ts|tsx|js|jsx|py|go|rs|java|md|json|yaml|yml|css|html|sql|sh))/g,
+        (match) => chalk.cyan(match)
+      );
+      console.log(chalk.dim(`    ${highlighted}`));
+    }
   }
   if (truncated) {
-    console.log(chalk.dim(`  │ ... (${lines.length - maxLines} more lines)`));
+    console.log(chalk.dim(`    ... ${lines.length - maxLines} more lines`));
   }
-  console.log(chalk.dim("  │"));
 }
 
 export function printAgentText(text: string): void {
   if (!text.trim()) return;
-  console.log();
 
   let inCodeBlock = false;
   let codeLanguage = "";
@@ -126,43 +132,75 @@ export function printAgentText(text: string): void {
       inCodeBlock = true;
       codeLanguage = line.slice(3).trim();
       codeLines = [];
-      console.log(chalk.dim("  ┌─" + (codeLanguage ? ` ${codeLanguage} ` : "") + "─".repeat(Math.max(0, 40 - codeLanguage.length))));
-    } else if (line.startsWith("```") && inCodeBlock) {
+      continue;
+    }
+
+    if (line.startsWith("```") && inCodeBlock) {
       inCodeBlock = false;
-      const highlighted = highlightCode(codeLines.join("\n"), codeLanguage);
-      for (const codeLine of highlighted.split("\n")) {
-        console.log(chalk.dim("  │ ") + codeLine);
+      // Print code block
+      if (codeLanguage) {
+        console.log(chalk.dim(`    ${codeLanguage}`));
       }
-      console.log(chalk.dim("  └" + "─".repeat(43)));
-    } else if (inCodeBlock) {
+      for (const codeLine of codeLines) {
+        console.log(chalk.white(`    ${highlightCode(codeLine)}`));
+      }
+      console.log();
+      continue;
+    }
+
+    if (inCodeBlock) {
       codeLines.push(line);
-    } else if (line.startsWith("# ")) {
-      console.log(chalk.bold.white("\n  " + line.slice(2)));
+      continue;
+    }
+
+    // Markdown rendering
+    if (line.startsWith("# ")) {
+      console.log(chalk.bold.white(`\n  ${line.slice(2)}`));
     } else if (line.startsWith("## ")) {
-      console.log(chalk.bold.white("\n  " + line.slice(3)));
+      console.log(chalk.bold.white(`\n  ${line.slice(3)}`));
     } else if (line.startsWith("### ")) {
-      console.log(chalk.bold.dim("\n  " + line.slice(4)));
-    } else if (line.startsWith("- ")) {
-      console.log(chalk.white("  • " + line.slice(2)));
+      console.log(chalk.bold.dim(`\n  ${line.slice(4)}`));
+    } else if (line.startsWith("- ") || line.startsWith("* ")) {
+      console.log(chalk.white(`  ${line}`));
     } else if (line.startsWith("> ")) {
-      console.log(chalk.dim("  ▎ ") + chalk.italic(line.slice(2)));
-    } else if (line.match(/^\d+\. /)) {
-      console.log(chalk.white("  " + line));
-    } else if (line.startsWith("**") && line.endsWith("**")) {
-      console.log(chalk.bold.white("  " + line.slice(2, -2)));
+      console.log(chalk.dim(`  ${line}`));
+    } else if (line.trim() === "") {
+      console.log();
     } else {
-      console.log(chalk.white("  " + line));
+      // Inline formatting
+      let formatted = line;
+      formatted = formatted.replace(/\*\*(.*?)\*\*/g, (_, text) => chalk.bold(text));
+      formatted = formatted.replace(/`([^`]+)`/g, (_, code) => chalk.cyan(code));
+      console.log(chalk.white(`  ${formatted}`));
     }
   }
 
   // Close unclosed code block
   if (inCodeBlock && codeLines.length > 0) {
-    const highlighted = highlightCode(codeLines.join("\n"), codeLanguage);
-    for (const codeLine of highlighted.split("\n")) {
-      console.log(chalk.dim("  │ ") + codeLine);
+    for (const codeLine of codeLines) {
+      console.log(chalk.white(`    ${highlightCode(codeLine)}`));
     }
-    console.log(chalk.dim("  └" + "─".repeat(43)));
   }
+}
+
+function highlightCode(line: string): string {
+  let result = line;
+  // Strings
+  result = result.replace(/(["'`])(?:(?=(\\?))\2.)*?\1/g, (m) => chalk.green(m));
+  // Comments
+  result = result.replace(/(\/\/.*$)/gm, (m) => chalk.dim(m));
+  result = result.replace(/(#.*$)/gm, (m) => chalk.dim(m));
+  // Keywords
+  result = result.replace(
+    /\b(const|let|var|function|return|if|else|for|while|class|import|export|from|async|await|try|catch|throw|new|this|def|self|type|interface)\b/g,
+    (m) => chalk.magenta(m)
+  );
+  // Types
+  result = result.replace(
+    /\b(string|number|boolean|void|null|undefined|true|false|Promise|Array)\b/g,
+    (m) => chalk.yellow(m)
+  );
+  return result;
 }
 
 export function printError(message: string): void {
@@ -173,23 +211,56 @@ export function printSuccess(message: string): void {
   console.log(chalk.green(`\n  ✓ ${message}\n`));
 }
 
-export function printStatus(provider: string, model: string, tokens: number, cost: number): void {
-  const costStr = cost > 0 ? ` | $${cost.toFixed(4)}` : "";
-  console.log(chalk.dim(`  ${provider}/${model} | ${tokens.toLocaleString()} tokens${costStr}`));
+export function printStatusBar(
+  provider: string,
+  model: string,
+  tokens: number,
+  permissionMode: string
+): void {
+  // Build tool counts string
+  const counts = Object.entries(toolCounts)
+    .filter(([_, count]) => count > 0)
+    .map(([name, count]) => {
+      const shortNames: Record<string, string> = {
+        bash: "Bash",
+        read_file: "Read",
+        write_file: "Write",
+        edit_file: "Edit",
+        glob: "Glob",
+        grep: "Grep",
+        ls: "List",
+        fetch: "Fetch",
+        patch: "Patch",
+        sub_agent: "Agent",
+      };
+      return `${shortNames[name] || name} ${count}`;
+    })
+    .join(chalk.dim(" | "));
+
+  const left = `${provider}/${model}`;
+  const right = `${tokens.toLocaleString()} tok`;
+  const middle = counts ? `  ${counts}  ` : "";
+
+  // Get terminal width
+  const width = process.stdout.columns || 80;
+  const content = `  ${left}${middle}  ${right}  ${permissionMode}`;
+  const padding = Math.max(0, width - content.length);
+
+  console.log(
+    chalk.bgGray.white(` ${left}`) +
+    chalk.bgGray.dim(middle ? ` | ${middle}` : "") +
+    chalk.bgGray(" ".repeat(Math.max(1, padding))) +
+    chalk.bgGray.white(`${right} `) +
+    chalk.bgGray.dim(` ${permissionMode} `)
+  );
 }
 
-function getToolIcon(toolName: string): string {
-  const icons: Record<string, string> = {
-    bash: "⚡",
-    read_file: "📄",
-    write_file: "✏️",
-    edit_file: "✏️",
-    glob: "🔍",
-    grep: "🔎",
-    ls: "📁",
-    fetch: "🌐",
-    patch: "🩹",
-    sub_agent: "🤖",
-  };
-  return icons[toolName] || "🔧";
+// Renamed from printStatus for backward compatibility
+export function printStatus(
+  provider: string,
+  model: string,
+  tokens: number,
+  _cost: number
+): void {
+  printStatusBar(provider, model, tokens, "");
 }

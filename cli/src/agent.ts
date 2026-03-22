@@ -9,7 +9,7 @@ import type { AIProvider } from "../../packages/engine/src/types.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = any;
 import { PermissionManager } from "./permissions.js";
-import { printToolCall, printToolResult, printError, printStatus } from "./tui.js";
+import { printToolCall, printToolResult, printError, printStatusBar } from "./tui.js";
 import type { CliConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
 import { createSession, saveSession, addMessage, loadLatestSession, type Session } from "./session.js";
@@ -230,7 +230,7 @@ Only propose a plan for genuinely complex multi-domain tasks. Simple tasks shoul
       }
 
       console.log();
-      printStatus(provider, modelName, session.totalTokens, 0);
+      printStatusBar(provider, modelName, session.totalTokens, trustAll ? "trust all" : "ask");
       console.log();
     } catch (err) {
       printError(err instanceof Error ? err.message : String(err));

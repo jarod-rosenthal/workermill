@@ -7,10 +7,16 @@ export class PermissionManager {
   private sessionAllow = new Set<string>();
   private trustAll: boolean;
   private configTrust: Set<string>;
+  private rl: readline.Interface | null = null;
 
   constructor(trustAll = false, configTrust: string[] = []) {
     this.trustAll = trustAll;
     this.configTrust = new Set(configTrust);
+  }
+
+  /** Bind to the agent's readline instance so we reuse it for prompts */
+  setReadline(rl: readline.Interface): void {
+    this.rl = rl;
   }
 
   async checkPermission(
@@ -37,38 +43,39 @@ export class PermissionManager {
     }
     console.log(chalk.cyan(`  └${"─".repeat(43)}┘`));
 
-    // Read a single keypress directly from stdin to avoid conflicting
-    // with the agent's readline instance
-    const answer = await new Promise<string>((resolve) => {
-      const wasRaw = process.stdin.isRaw;
-      process.stdout.write(
-        chalk.dim("  Allow? ") + chalk.white("(y)es / (n)o / (a)lways: ")
-      );
+    const answer = await this.askUser(
+      chalk.dim("  Allow? ") + chalk.white("(y)es / (n)o / (a)lways: ")
+    );
 
-      if (process.stdin.isTTY) {
-        process.stdin.setRawMode(true);
-      }
-      process.stdin.resume();
+    const choice = answer.trim().toLowerCase();
 
-      const onData = (buf: Buffer) => {
-        const ch = buf.toString();
-        process.stdin.removeListener("data", onData);
-        if (process.stdin.isTTY) {
-          process.stdin.setRawMode(wasRaw ?? false);
-        }
-        process.stdout.write(ch + "\n");
-        resolve(ch.trim().toLowerCase());
-      };
-
-      process.stdin.on("data", onData);
-    });
-
-    if (answer === "a") {
+    if (choice === "a" || choice === "always") {
       this.sessionAllow.add(toolName);
       return true;
     }
 
-    return answer === "y";
+    return choice === "y" || choice === "yes";
+  }
+
+  /** Prompt using the shared readline, or create a temporary one if none bound */
+  askUser(prompt: string): Promise<string> {
+    return new Promise<string>((resolve) => {
+      if (this.rl) {
+        // Temporarily resume the shared readline for this question
+        this.rl.resume();
+        this.rl.question(prompt, (answer) => {
+          this.rl!.pause();
+          resolve(answer);
+        });
+      } else {
+        // Fallback: create a temporary readline (shouldn't happen in normal flow)
+        const tempRl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        tempRl.question(prompt, (answer) => {
+          tempRl.close();
+          resolve(answer);
+        });
+      }
+    });
   }
 
   private formatToolCall(toolName: string, input: Record<string, unknown>): string {

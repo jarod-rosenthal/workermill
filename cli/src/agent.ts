@@ -37,6 +37,8 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
   const tools = createToolDefinitions(workingDir, model);
   const permissions = new PermissionManager(trustAll);
 
+  // readline will be bound to permissions after creation (see below)
+
   // Initialize or resume session
   let session: Session;
   if (resume) {
@@ -81,6 +83,9 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
     output: process.stdout,
     prompt: chalk.cyan("  > "),
   });
+
+  // Bind the readline to the permission manager so it reuses the same instance
+  permissions.setReadline(rl);
 
   const systemPrompt = `You are WorkerMill, an AI coding agent running in the user's terminal.
 You have access to tools for reading, writing, and editing files, running bash commands, searching code, and fetching web content.
@@ -139,11 +144,7 @@ Guidelines:
           });
           console.log();
 
-          const rlTemp = readline.createInterface({ input: process.stdin, output: process.stdout });
-          const answer = await new Promise<string>((resolve) => {
-            rlTemp.question(chalk.dim("  Run this plan? (y/n): "), resolve);
-          });
-          rlTemp.close();
+          const answer = await permissions.askUser(chalk.dim("  Run this plan? (y/n): "));
 
           if (answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes") {
             await runOrchestration(config, classification.stories, trustAll);

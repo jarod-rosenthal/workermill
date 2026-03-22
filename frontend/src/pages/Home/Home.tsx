@@ -102,6 +102,11 @@ export default function Home() {
             <p className="text-lg text-muted-foreground mb-8 max-w-xl mx-auto">
               Multi-expert execution, quality gates, and real PR delivery. Open source and free to run locally.
             </p>
+            <div className="mb-6">
+              <code className="px-5 py-3 bg-muted/50 rounded-xl border border-border font-mono text-sm text-foreground inline-block">
+                $ npx workermill
+              </code>
+            </div>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
                 to="/signup"
@@ -120,7 +125,7 @@ export default function Home() {
               </a>
             </div>
             <p className="mt-8 text-sm text-muted-foreground">
-              Cloud services coming soon. Bring your own API keys.
+              Run locally with Ollama, or bring your own API keys. Cloud platform coming soon.
             </p>
           </div>
         </section>

@@ -1,4 +1,4 @@
-import { ArrowRight, Play } from "lucide-react";
+import { ArrowRight, Terminal } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useState, useEffect, useCallback, useRef } from "react";
 
@@ -369,21 +369,46 @@ export default function Hero() {
               WorkerMill's tight feedback loops make cheap models smart. Planning Agent validates before execution. Tech Lead reviews after. You get 90% of expensive model quality at 10% of the cost.
             </p>
 
-            {/* CTAs */}
+            {/* CLI Install */}
+            <div className="space-y-4">
+              <div className="relative group">
+                <div className="flex items-center gap-3 px-5 py-3.5 bg-muted/50 rounded-xl border border-border font-mono text-sm">
+                  <span className="text-muted-foreground select-none">$</span>
+                  <span className="text-foreground flex-1">npx workermill</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText("npx workermill");
+                      const btn = document.getElementById("copy-btn");
+                      if (btn) { btn.textContent = "Copied!"; setTimeout(() => btn.textContent = "Copy", 2000); }
+                    }}
+                    id="copy-btn"
+                    className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded border border-border/50 hover:border-border transition-colors"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Works with Ollama, Anthropic, OpenAI, and Google. No account needed.
+              </p>
+            </div>
+
+            {/* Secondary CTAs */}
             <div className="flex flex-col sm:flex-row gap-4">
               <Link
                 to="/signup"
-                className="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-xl hover:shadow-lg hover:shadow-primary/30 transition-all duration-300 hover:-translate-y-0.5"
+                className="group inline-flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-xl hover:shadow-lg hover:shadow-primary/30 transition-all duration-300 hover:-translate-y-0.5"
               >
-                Join the Waitlist
-                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                Try Cloud Platform
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Link>
               <a
-                href="#how-it-works"
-                className="inline-flex items-center justify-center gap-2 px-8 py-4 text-foreground font-medium rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300"
+                href="https://marketplace.visualstudio.com/items?itemName=workermill.workermill"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-2 px-6 py-3 text-foreground font-medium rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300"
               >
-                <Play className="w-5 h-5" />
-                See How It Works
+                VS Code Extension
               </a>
             </div>
 

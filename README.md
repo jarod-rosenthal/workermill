@@ -11,6 +11,7 @@
   <a href="https://workermill.com">Website</a> ·
   <a href="https://workermill.com/docs">Docs</a> ·
   <a href="https://github.com/jarod-rosenthal/workermill/discussions">Discussions</a> ·
+  <a href="https://www.npmjs.com/package/workermill">CLI</a> ·
   <a href="https://marketplace.visualstudio.com/items?itemName=workermill.workermill">VS Code Extension</a>
 </h3>
 
@@ -35,9 +36,21 @@ Most AI coding tools are single-agent, single-file, one-shot. WorkerMill is an *
 - **Two-phase quality gates** — Pre-commit (lint, typecheck, test, build) + post-push CI polling. Gate failures trigger automatic fix agents.
 - **Any provider, any SCM** — Anthropic, OpenAI, Google, Ollama. GitHub, GitLab, Bitbucket. Mix and match per role.
 
-## Getting Started
+## WorkerMill CLI
 
-### Try It Now — Local Dev Environment
+The fastest way to use WorkerMill. Run any LLM provider locally — no API server, no Docker, no account needed.
+
+```bash
+npx workermill
+```
+
+First run auto-detects Ollama and walks you through setup. Then just describe what you want built — simple tasks get a single agent, complex tasks get multi-expert orchestration with planning, review, and git integration.
+
+Works with Ollama (local), Anthropic, OpenAI, and Google. [Full CLI documentation →](cli/README.md)
+
+## WorkerMill Platform
+
+### Getting Started — Local Dev Environment
 
 You can run the full WorkerMill platform locally right now. This gives you the API server, web dashboard, and worker execution — the same stack that powers the cloud platform.
 
@@ -237,6 +250,7 @@ Personas are auto-assigned based on task content or manually selected.
 ## Project Structure
 
 ```
+cli/                        WorkerMill CLI — standalone AI coding agent (npm)
 agent/                      Agent binary — CLI, worker spawning (Bun compile)
 api/                        API server — Express + TypeScript + TypeORM
 frontend/                   Web dashboard — React 19 + Vite + TailwindCSS + Zustand

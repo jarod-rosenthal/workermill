@@ -160,16 +160,35 @@ async function runPlannerCriticLoop(
 
   const storySummary = stories.map(s => `- ${s.id}: ${s.title} (${s.persona}) — ${s.description}`).join("\n");
 
+  // Build critic model + tools once (reused each iteration)
+  const { provider: cProvider, model: cModel, host: cHost } = getProviderForPersona(config, "critic");
+  const criticModel = createModel(cProvider as AIProvider, cModel, cHost);
+  const criticTools = createToolDefinitions(workingDir, criticModel);
+  const criticReadOnly: Record<string, AnyToolDef> = {};
+  for (const name of critic.tools) {
+    if (criticTools[name as keyof typeof criticTools]) {
+      criticReadOnly[name] = criticTools[name as keyof typeof criticTools];
+    }
+  }
+
+  let lastCriticFeedback = "";
+
   for (let iteration = 0; iteration < 3; iteration++) {
     const spinner = ora({
-      text: chalk.white(iteration === 0 ? "Planning implementation..." : `Revising plan (iteration ${iteration + 1})...`),
+      text: chalk.white(iteration === 0 ? "Planning implementation..." : `Revising plan (attempt ${iteration + 1})...`),
       prefixText: "  ",
     }).start();
+
+    // Build planner prompt — include critic feedback on revisions
+    let plannerPrompt = `Create an implementation plan for these stories:\n\n${storySummary}\n\nWorking directory: ${workingDir}`;
+    if (iteration > 0 && lastCriticFeedback) {
+      plannerPrompt += `\n\n## Critic feedback from previous attempt (address these issues):\n${lastCriticFeedback}`;
+    }
 
     const planStream = streamText({
       model: plannerModel,
       system: planner.systemPrompt,
-      prompt: `Create an implementation plan for these stories:\n\n${storySummary}\n\nWorking directory: ${workingDir}`,
+      prompt: plannerPrompt,
       tools: readOnlyTools as ToolSet,
       stopWhen: stepCountIs(30),
       abortSignal: AbortSignal.timeout(5 * 60 * 1000),
@@ -180,16 +199,6 @@ async function runPlannerCriticLoop(
     spinner.stop();
 
     // Run critic
-    const { provider: cProvider, model: cModel, host: cHost } = getProviderForPersona(config, "critic");
-    const criticModel = createModel(cProvider as AIProvider, cModel, cHost);
-    const criticTools = createToolDefinitions(workingDir, criticModel);
-    const criticReadOnly: Record<string, AnyToolDef> = {};
-    for (const name of critic.tools) {
-      if (criticTools[name as keyof typeof criticTools]) {
-        criticReadOnly[name] = criticTools[name as keyof typeof criticTools];
-      }
-    }
-
     const criticSpinner = ora({
       text: chalk.white("Critic reviewing plan..."),
       prefixText: "  ",
@@ -198,7 +207,7 @@ async function runPlannerCriticLoop(
     const criticStream = streamText({
       model: criticModel,
       system: critic.systemPrompt,
-      prompt: `Review this implementation plan:\n\n${planText}`,
+      prompt: `Review this implementation plan and output a score using ::review_score::N (0-100) and ::review_verdict::approve or ::review_verdict::revise markers.\n\nPlan:\n${planText}`,
       tools: criticReadOnly as ToolSet,
       stopWhen: stepCountIs(20),
       abortSignal: AbortSignal.timeout(3 * 60 * 1000),
@@ -208,8 +217,8 @@ async function runPlannerCriticLoop(
     const criticText = await criticStream.text;
     criticSpinner.stop();
 
-    const scoreMatch = criticText.match(/::review_score::(\d+)/);
-    const score = scoreMatch ? parseInt(scoreMatch[1], 10) : 0;
+    // Extract score — try marker first, then fallback to natural language patterns
+    const score = extractScore(criticText);
     const scoreColor = score >= 85 ? chalk.green : score >= 70 ? chalk.yellow : chalk.red;
     console.log(`  ${scoreColor(`Plan score: ${score}/100`)}`);
 
@@ -217,11 +226,45 @@ async function runPlannerCriticLoop(
       console.log(chalk.green("  ✓ Plan approved by critic"));
       return true;
     }
+
+    // Save feedback for next planner iteration
+    lastCriticFeedback = criticText.slice(0, 2000);
     console.log(chalk.yellow(`  Plan needs revision (score ${score}/100)`));
   }
 
   console.log(chalk.yellow("  ⚠ Max planner iterations reached, proceeding anyway"));
   return true;
+}
+
+/** Extract a numeric score from critic output — tries markers, then natural language patterns */
+function extractScore(text: string): number {
+  // 1. Try ::review_score:: marker
+  const markerMatch = text.match(/::review_score::(\d+)/);
+  if (markerMatch) return parseInt(markerMatch[1], 10);
+
+  // 2. Try "Score: N/100" or "score: N" patterns
+  const scorePatterns = [
+    /\bscore[:\s]+(\d+)\s*\/\s*100/i,
+    /\b(\d+)\s*\/\s*100/,
+    /\bscore[:\s]+(\d+)/i,
+    /\brating[:\s]+(\d+)/i,
+  ];
+  for (const pattern of scorePatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (n >= 0 && n <= 100) return n;
+    }
+  }
+
+  // 3. If text contains "approve" but no score, assume 85
+  if (/\bapprove/i.test(text)) return 85;
+
+  // 4. If text contains "revise" or "revision" but no score, assume 60
+  if (/\brevis/i.test(text)) return 60;
+
+  // 5. No score found — default to 75 (proceed with caution rather than block)
+  return 75;
 }
 
 export async function runOrchestration(
@@ -331,6 +374,12 @@ export async function runOrchestration(
 Working directory: ${workingDir}
 
 Your task: ${story.description}
+
+## Critical rules
+- NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, nodemon, tsc --watch, webpack serve, etc.). These block execution indefinitely.
+- NEVER run interactive commands that wait for user input.
+- Only run commands that complete and exit: npm install, npm test, npx tsc --noEmit, etc.
+- If you need to verify a server works, check that the code compiles or run a quick test — do NOT start the actual server.
 
 When you make a decision that affects other parts of the system, include ::decision:: markers in your output.
 When you learn something useful, include ::learning:: markers.
@@ -479,17 +528,14 @@ Provide a review with a quality score (0-100) using ::review_score:: marker and 
 
       reviewSpinner.stop();
 
-      // Extract review markers
-      const scoreMatch = reviewText.match(/::review_score::(\d+)/);
+      // Extract review markers (with fallback parsing)
       const verdictMatch = reviewText.match(/::review_verdict::(\w+)/);
-      const score = scoreMatch ? parseInt(scoreMatch[1], 10) : null;
-      const verdict = verdictMatch ? verdictMatch[1] : "unknown";
+      const score = extractScore(reviewText);
+      const verdict = verdictMatch ? verdictMatch[1] : (score >= 85 ? "approved" : "unknown");
 
       // Display review result
-      if (score !== null) {
-        const scoreColor = score >= 85 ? chalk.green : score >= 70 ? chalk.yellow : chalk.red;
-        console.log(`  ${scoreColor(`Score: ${score}/100`)} — ${verdict === "approved" ? chalk.green("APPROVED") : chalk.yellow("NEEDS REVISION")}`);
-      }
+      const scoreColor = score >= 85 ? chalk.green : score >= 70 ? chalk.yellow : chalk.red;
+      console.log(`  ${scoreColor(`Score: ${score}/100`)} — ${verdict === "approved" || verdict === "approve" ? chalk.green("APPROVED") : chalk.yellow("NEEDS REVISION")}`);
 
       // Print review feedback (last meaningful paragraph)
       const reviewParagraphs = reviewText.split("\n\n").filter(p => p.trim() && !p.includes("::"));

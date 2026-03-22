@@ -54,11 +54,49 @@ interface BashResult {
   duration: number;
 }
 
+/** Patterns that indicate long-running/interactive processes */
+const LONG_RUNNING_PATTERNS = [
+  /\bnpm\s+(?:run\s+)?(?:dev|start|serve)\b/,
+  /\bnpx\s+(?:next|vite|webpack-dev-server|react-scripts\s+start)\b/,
+  /\bnodemon\b/,
+  /\btsc\s+--watch\b/,
+  /\bwebpack\s+serve\b/,
+  /\byarn\s+(?:dev|start|serve)\b/,
+  /\bpnpm\s+(?:dev|start|serve)\b/,
+  /\bpython\s+-m\s+(?:http\.server|flask\s+run|uvicorn|gunicorn)\b/,
+  /\brails\s+server\b/,
+  /\bphp\s+-S\b/,
+  /\bdocker\s+compose\s+up(?!\s+--build\b.*--exit)/,
+];
+
+function isLongRunning(command: string): string | null {
+  for (const pattern of LONG_RUNNING_PATTERNS) {
+    if (pattern.test(command)) {
+      const match = command.match(pattern);
+      return match ? match[0] : "long-running process";
+    }
+  }
+  return null;
+}
+
 export async function execute({
   command,
   cwd,
   timeout = 120000,
 }: BashParams): Promise<BashResult> {
+  // Block known long-running processes
+  const longRunning = isLongRunning(command);
+  if (longRunning) {
+    return {
+      success: false,
+      exitCode: -1,
+      stdout: "",
+      stderr: "",
+      error: `Blocked: "${longRunning}" is a long-running process that would block execution. Use a one-shot command instead (e.g., "npx tsc --noEmit" to check compilation, "npm test" to run tests).`,
+      duration: 0,
+    };
+  }
+
   return new Promise((resolve) => {
     const startTime = Date.now();
     let stdout = "";

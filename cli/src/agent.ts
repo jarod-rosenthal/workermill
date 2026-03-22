@@ -125,6 +125,10 @@ Guidelines:
         const classification = await classifyComplexity(config, trimmed);
         spinner.stop();
 
+        if (!classification.isMulti) {
+          console.log(chalk.dim(`  Classification: single — ${classification.reason}`));
+        }
+
         if (classification.isMulti && classification.stories && classification.stories.length > 1) {
           console.log();
           console.log(chalk.bold("  This looks like it needs multiple experts:"));

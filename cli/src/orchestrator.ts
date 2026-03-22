@@ -107,15 +107,17 @@ The "stories" array is only needed when complexity is "multi". Each story should
       stories?: Story[];
     } | null;
 
-    if (parsed && parsed.complexity) {
-      return {
-        isMulti: parsed.complexity === "multi",
-        stories: parsed.stories,
-        reason: parsed.reason || "",
-      };
+    if (!parsed) {
+      // Debug: show what the model returned so we can diagnose
+      const preview = result.text.slice(0, 300).replace(/\n/g, "\\n");
+      return { isMulti: false, reason: `Could not parse JSON from response: "${preview}"` };
     }
 
-    return { isMulti: false, reason: "Could not parse classification response" };
+    return {
+      isMulti: parsed.complexity === "multi",
+      stories: parsed.stories,
+      reason: parsed.reason || "",
+    };
   } catch (err) {
     return { isMulti: false, reason: `Classification failed: ${err instanceof Error ? err.message : String(err)}` };
   }

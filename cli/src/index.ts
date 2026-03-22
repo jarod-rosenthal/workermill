@@ -16,6 +16,8 @@ const program = new Command()
   .option("--trust", "Skip all tool permission prompts")
   .option("--resume", "Resume the last conversation")
   .option("--plan", "Start in plan mode (read-only tools)")
+  .option("--auto-revise", "Auto-revise on failed reviews without prompting")
+  .option("--max-revisions <n>", "Max review→revise cycles (default: 2)", parseInt)
   .action(async (options) => {
     // Header is shown by runAgent after config is loaded (so it can show provider info)
 
@@ -34,6 +36,15 @@ const program = new Command()
       if (providerConfig) {
         providerConfig.model = options.model;
       }
+    }
+
+    // Apply review overrides
+    if (options.autoRevise || options.maxRevisions) {
+      config.review = {
+        ...config.review,
+        ...(options.autoRevise ? { autoRevise: true } : {}),
+        ...(options.maxRevisions ? { maxRevisions: options.maxRevisions } : {}),
+      };
     }
 
     // Run interactive agent

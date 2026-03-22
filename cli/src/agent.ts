@@ -116,29 +116,31 @@ Only propose a plan for genuinely complex multi-domain tasks. Simple tasks shoul
 
   rl.prompt();
 
-  // Debounce input: buffer consecutive line events and process after a pause.
-  // This handles long prompts that terminals split across multiple lines on paste/wrap.
-  let inputBuffer = "";
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let processing = false;
 
-  async function processInput(fullInput: string): Promise<void> {
-    const trimmed = fullInput.trim();
-    if (!trimmed) {
-      rl.prompt();
+  rl.on("line", (input: string) => {
+    const trimmed = input.trim();
+    if (!trimmed || processing) {
+      if (!processing) rl.prompt();
       return;
     }
+
+    // Set processing flag SYNCHRONOUSLY before any await
+    processing = true;
+    rl.pause();
 
     // Handle slash commands
     if (trimmed.startsWith("/")) {
-      await handleCommand(trimmed, config, session);
-      rl.prompt();
+      handleCommand(trimmed, config, session).then(() => {
+        processing = false;
+        rl.resume();
+        rl.prompt();
+      });
       return;
     }
 
-    // Pause readline during agent execution
-    processing = true;
-    rl.pause();
+    // Process the input asynchronously
+    (async () => {
 
     try {
       addMessage(session, "user", trimmed);
@@ -237,31 +239,25 @@ Only propose a plan for genuinely complex multi-domain tasks. Simple tasks shoul
     processing = false;
     rl.resume();
     rl.prompt();
-  }
-
-  rl.on("line", (input: string) => {
-    if (processing) return; // Ignore input while agent is running
-
-    // Buffer the input and debounce
-    if (inputBuffer) {
-      inputBuffer += " " + input;
-    } else {
-      inputBuffer = input;
-    }
-
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      const full = inputBuffer;
-      inputBuffer = "";
-      debounceTimer = null;
-      processInput(full);
-    }, 200); // 200ms debounce — enough to catch split lines, fast enough to feel instant
+    })(); // end async IIFE
   });
 
   rl.on("close", () => {
-    saveSession(session);
-    console.log(chalk.dim("\n  Goodbye!\n"));
-    process.exit(0);
+    // Don't exit immediately if we're still processing a request
+    if (processing) {
+      const checkDone = setInterval(() => {
+        if (!processing) {
+          clearInterval(checkDone);
+          saveSession(session);
+          console.log(chalk.dim("\n  Goodbye!\n"));
+          process.exit(0);
+        }
+      }, 500);
+    } else {
+      saveSession(session);
+      console.log(chalk.dim("\n  Goodbye!\n"));
+      process.exit(0);
+    }
   });
 }
 

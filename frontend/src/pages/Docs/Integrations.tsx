@@ -7,7 +7,7 @@ import {
   MessageSquare,
   RefreshCw,
   Brain,
-  Clock,
+
   MessageCircle,
   Bell,
   Cloud,
@@ -556,34 +556,6 @@ export default function Integrations() {
         </div>
       </section>
 
-      {/* Coming Soon */}
-      <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-          <Clock className="w-5 h-5 text-muted-foreground" />
-          Coming Soon
-        </h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { name: "Asana", desc: "Enterprise project management", icon: Ticket, color: "text-orange-500" },
-            { name: "ClickUp", desc: "All-in-one productivity", icon: Ticket, color: "text-pink-500" },
-            { name: "Azure DevOps", desc: "Microsoft boards and repos", icon: Server, color: "text-blue-500" },
-            { name: "PagerDuty", desc: "Incident response automation", icon: Bell, color: "text-green-500" },
-          ].map((item) => (
-            <div key={item.name} className="bg-card border border-border rounded-xl p-5 opacity-75">
-              <div className="flex items-center gap-3 mb-3">
-                <div className={`w-10 h-10 rounded-lg bg-muted flex items-center justify-center`}>
-                  <item.icon className={`w-5 h-5 ${item.color}`} />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-foreground">{item.name}</h3>
-                  <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">Coming Soon</span>
-                </div>
-              </div>
-              <p className="text-sm text-muted-foreground">{item.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
 
       {/* Jira Comments */}
       <section className="space-y-4">

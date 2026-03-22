@@ -794,6 +794,66 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
     scmProvider: task.scmProvider,
   });
 
+  // LOCAL MODE: Spawn local Docker container instead of ECS
+  if (localEpicSpawner.isLocalMode()) {
+    logger.info("Running in local execution mode - spawning local multi-expert coordinator", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+    });
+
+    await taskRepo.update({ id: task.id }, {
+      status: "executing",
+      startedAt: new Date(),
+    });
+    task.status = "executing";
+    task.startedAt = new Date();
+
+    // Publish story_ready messages BEFORE spawning container
+    if (task.executionPlanV2?.steps?.length) {
+      await publishStoriesReady(task);
+    }
+
+    // Fetch credentials (same as spawnEpicContainer local path)
+    let localCredentials: OrgCredentials | undefined;
+    const localCredentialsOrgId = task.getCredentialsOrgId();
+    try {
+      localCredentials = await getOrgCredentials(localCredentialsOrgId);
+      if (!task.skipManagerReview) {
+        try {
+          const reviewerToken = await getReviewerGitHubToken(localCredentialsOrgId);
+          if (reviewerToken) localCredentials.githubReviewerToken = reviewerToken;
+        } catch { /* reviewer token is optional */ }
+      }
+    } catch (error) {
+      logger.warn("Could not fetch credentials, falling back to .env.local", {
+        taskId: task.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // Spawn local Epic Coordinator — entrypoint detects multi-expert mode from env
+    await localEpicSpawner.spawnEpicCoordinator(task, localCredentials ? {
+      githubToken: localCredentials.githubToken,
+      githubReviewerToken: localCredentials.githubReviewerToken,
+      scmToken: localCredentials.scmToken,
+      bitbucketUsername: localCredentials.bitbucketUsername,
+      bitbucketEmail: localCredentials.bitbucketEmail,
+      jiraBaseUrl: localCredentials.jiraBaseUrl,
+      jiraEmail: localCredentials.jiraEmail,
+      jiraApiToken: localCredentials.jiraApiToken,
+      managerProvider: localCredentials.managerProvider,
+      managerModelId: localCredentials.managerModelId,
+      ollamaBaseUrl: localCredentials.ollamaBaseUrl,
+    } : undefined);
+
+    logger.info("Local multi-expert coordinator started", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+    });
+
+    return;
+  }
+
   // Get credentials for the container (use credentialsOrgId for platform tasks)
   const multiExpertCredentialsOrgId = task.getCredentialsOrgId();
   const credentials = await getOrgCredentials(multiExpertCredentialsOrgId);

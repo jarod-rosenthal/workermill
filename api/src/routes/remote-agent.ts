@@ -89,6 +89,13 @@ router.get(
     const agentId = req.query.agentId as string;
     const org = req.organization!;
 
+    // When remoteAgentOnly is OFF, the orchestrator handles tasks —
+    // agent stays connected but idle (no tasks returned).
+    if (!org.remoteAgentOnly) {
+      res.json({ tasks: [], managerTasks: [] });
+      return;
+    }
+
     if (!agentId) {
       res.status(400).json({ error: "agentId query parameter is required" });
       return;
@@ -271,6 +278,13 @@ router.post(
 
     const { taskId, agentId } = req.body;
     const org = req.organization!;
+
+    // When remoteAgentOnly is OFF, the orchestrator handles tasks —
+    // agent cannot claim.
+    if (!org.remoteAgentOnly) {
+      res.status(409).json({ error: "Local mode is off — orchestrator handles tasks" });
+      return;
+    }
 
     if (!taskId || !agentId) {
       res.status(400).json({ error: "taskId and agentId are required" });

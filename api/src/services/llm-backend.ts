@@ -241,9 +241,9 @@ class ClaudeCliBackend implements LLMBackend {
         "--permission-mode", "bypassPermissions",
         "--strict-mcp-config",
       ];
-      if (options.maxOutputTokens) {
-        args.push("--max-output-tokens", String(options.maxOutputTokens));
-      }
+      // Note: Claude CLI does not support --max-tokens or --max-output-tokens.
+      // Output limits are managed by the CLI itself. The maxOutputTokens option
+      // is only used by AiSdkBackend.
 
       const claude = spawn(
         this.claudePath,
@@ -372,9 +372,7 @@ class ClaudeCliBackend implements LLMBackend {
       "--model", options.model,
       "--permission-mode", "bypassPermissions",
     ];
-    if (options.maxOutputTokens) {
-      streamArgs.push("--max-tokens", String(options.maxOutputTokens));
-    }
+    // Note: Claude CLI does not support --max-tokens. See generate() comment.
     streamArgs.push(options.prompt);
 
     const claude = spawn(

@@ -1,4 +1,5 @@
 import { tool } from "ai";
+import type { LanguageModel } from "ai";
 import { z } from "zod";
 import path from "path";
 
@@ -11,15 +12,16 @@ import * as grepTool from "./grep.js";
 import * as lsTool from "./ls.js";
 import * as fetchTool from "./fetch.js";
 import * as patchTool from "./patch.js";
+import * as subAgentTool from "./sub-agent.js";
 
 // Re-export all tool modules
-export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool };
+export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool, subAgentTool };
 
 /**
  * Creates Vercel AI SDK tool definitions for use with generateText().
  * All file paths are resolved relative to workingDir.
  */
-export function createToolDefinitions(workingDir: string) {
+export function createToolDefinitions(workingDir: string, model?: LanguageModel) {
   return {
     bash: tool({
       description: bashTool.description,
@@ -320,5 +322,103 @@ export function createToolDefinitions(workingDir: string) {
         return `Error: ${result.error}${result.hint ? `\nHint: ${result.hint}` : ""}`;
       },
     }),
+
+    ...(model
+      ? {
+          sub_agent: tool({
+            description: subAgentTool.description,
+            inputSchema: z.object({
+              prompt: z
+                .string()
+                .describe("Detailed task description for the sub-agent. Be specific about what to look for."),
+              maxTurns: z
+                .number()
+                .optional()
+                .describe("Maximum tool-use turns (default: 20)"),
+            }),
+            execute: async ({ prompt, maxTurns }) => {
+              const readOnlyTools = {
+                read_file: tool({
+                  description: readFileTool.description,
+                  inputSchema: z.object({
+                    path: z.string().describe("Path to the file to read"),
+                    maxLines: z.number().optional().describe("Max lines to read"),
+                    startLine: z.number().optional().describe("Start line (1-indexed)"),
+                  }),
+                  execute: async ({ path: filePath, maxLines, startLine }) => {
+                    const resolvedPath = path.isAbsolute(filePath)
+                      ? filePath
+                      : path.resolve(workingDir, filePath);
+                    const result = await readFileTool.execute({ path: resolvedPath, maxLines, startLine });
+                    return result.success ? result.content || "" : `Error: ${result.error}`;
+                  },
+                }),
+                glob: tool({
+                  description: globTool.description,
+                  inputSchema: z.object({
+                    pattern: z.string().describe("Glob pattern to match files"),
+                    cwd: z.string().optional().describe("Directory to search in"),
+                  }),
+                  execute: async ({ pattern, cwd }) => {
+                    const resolvedCwd = cwd
+                      ? path.isAbsolute(cwd) ? cwd : path.resolve(workingDir, cwd)
+                      : workingDir;
+                    const result = await globTool.execute({ pattern, cwd: resolvedCwd });
+                    return result.success
+                      ? result.count === 0
+                        ? `No files found matching: ${pattern}`
+                        : `Found ${result.count} file(s):\n${result.matches!.join("\n")}`
+                      : `Error: ${result.error}`;
+                  },
+                }),
+                grep: tool({
+                  description: grepTool.description,
+                  inputSchema: z.object({
+                    pattern: z.string().describe("Regex pattern to search for"),
+                    path: z.string().optional().describe("File or directory to search in"),
+                    filePattern: z.string().optional().describe("Glob to filter files"),
+                  }),
+                  execute: async ({ pattern, path: searchPath, filePattern }) => {
+                    const resolvedPath = searchPath
+                      ? path.isAbsolute(searchPath) ? searchPath : path.resolve(workingDir, searchPath)
+                      : workingDir;
+                    const result = await grepTool.execute({ pattern, path: resolvedPath, filePattern });
+                    if (!result.success) return `Error: ${result.error}`;
+                    if (result.matchCount === 0) return `No matches for: ${pattern}`;
+                    const lines: string[] = [`Found ${result.matchCount} match(es):`];
+                    for (const [file, matches] of Object.entries(result.results!)) {
+                      for (const match of matches) {
+                        lines.push(`${file}:${match.line}: ${match.content}`);
+                      }
+                    }
+                    return lines.join("\n");
+                  },
+                }),
+                ls: tool({
+                  description: lsTool.description,
+                  inputSchema: z.object({
+                    path: z.string().describe("Directory path to list"),
+                    maxDepth: z.number().optional().describe("Max depth (default: 3)"),
+                  }),
+                  execute: async ({ path: dirPath, maxDepth }) => {
+                    const resolvedPath = path.isAbsolute(dirPath)
+                      ? dirPath
+                      : path.resolve(workingDir, dirPath);
+                    const result = await lsTool.execute({ path: resolvedPath, maxDepth });
+                    return result.success ? result.tree : `Error: ${result.error}`;
+                  },
+                }),
+              };
+
+              const executor = subAgentTool.createSubAgentExecutor(model!, workingDir, readOnlyTools);
+              const result = await executor({ prompt, maxTurns });
+              if (result.success) {
+                return `Sub-agent findings (${result.turnsUsed} turns):\n\n${result.content}`;
+              }
+              return `Error: ${result.error}`;
+            },
+          }),
+        }
+      : {}),
   };
 }

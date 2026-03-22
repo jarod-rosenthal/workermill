@@ -108,7 +108,7 @@ export class AISdkClient implements AIClient {
 
     try {
       const model = createModel(this.provider, modelName);
-      const tools = createToolDefinitions(options.workingDir);
+      const tools = createToolDefinitions(options.workingDir, model);
 
       const stream = streamText({
         model,

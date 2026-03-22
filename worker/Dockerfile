@@ -46,6 +46,9 @@ COPY --from=gcr.io/kaniko-project/executor:latest /kaniko/docker-credential-ecr-
 # Install Claude Code CLI (pinned to prevent breaking changes)
 RUN npm install -g @anthropic-ai/claude-code@1
 
+# Allow legacy peer deps globally (ollama-ai-provider-v2 requires zod@^4 but AI SDK uses zod@^3)
+RUN npm config set legacy-peer-deps true
+
 # Create app directory
 WORKDIR /app
 
@@ -60,7 +63,7 @@ COPY AGENTS.md /app/AGENTS.md
 # Copy package.json for any dependencies
 COPY package.json /app/package.json
 WORKDIR /app
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 # Make log-parser executable
 RUN chmod +x /app/scripts/log-parser.cjs

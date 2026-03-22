@@ -24,6 +24,7 @@ import { join } from "path";
 import { generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createOllama } from "ollama-ai-provider-v2";
 
 import { logger } from "../utils/logger.js";
 import {
@@ -844,9 +845,9 @@ async function runWithAiSdk(
       break;
     }
     case "ollama": {
-      const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-      const client = createOpenAI({ baseURL: `${baseUrl}/v1`, apiKey: "ollama" });
-      model = client(modelName);
+      const baseUrl = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || "http://localhost:11434";
+      const ollama = createOllama({ baseURL: baseUrl });
+      model = ollama(modelName);
       break;
     }
     default:

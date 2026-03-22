@@ -7,7 +7,8 @@
  */
 
 import { anthropic } from "@ai-sdk/anthropic";
-import { openai, createOpenAI } from "@ai-sdk/openai";
+import { openai } from "@ai-sdk/openai";
+import { createOllama } from "ollama-ai-provider-v2";
 import { google } from "@ai-sdk/google";
 import type { LanguageModel } from "ai";
 import type { AIProvider } from "./types.js";
@@ -48,12 +49,8 @@ export function createModel(provider: AIProvider, modelName: string): LanguageMo
 
     case "ollama": {
       const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
-      // Use OpenAI-compatible API for Ollama
-      const ollamaClient = createOpenAI({
-        baseURL: `${ollamaHost}/v1`,
-        apiKey: "ollama", // Ollama doesn't require a real API key
-      });
-      return ollamaClient(modelName);
+      const ollama = createOllama({ baseURL: ollamaHost });
+      return ollama(modelName);
     }
 
     default:

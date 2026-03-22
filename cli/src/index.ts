@@ -14,6 +14,7 @@ const program = new Command()
   .option("--provider <provider>", "Override default provider")
   .option("--model <model>", "Override model")
   .option("--trust", "Skip all tool permission prompts")
+  .option("--resume", "Resume the last conversation")
   .action(async (options) => {
     printHeader(VERSION);
 
@@ -35,7 +36,7 @@ const program = new Command()
     }
 
     // Run interactive agent
-    await runAgent(config, options.trust || false);
+    await runAgent(config, options.trust || false, options.resume || false);
   });
 
 program.parse();

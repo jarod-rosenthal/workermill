@@ -12,14 +12,10 @@ import { PermissionManager } from "./permissions.js";
 import { printToolCall, printToolResult, printError, printStatus } from "./tui.js";
 import type { CliConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
+import { createSession, saveSession, addMessage, loadLatestSession, type Session } from "./session.js";
+import { shouldCompact, compactMessages } from "./compaction.js";
 
-interface AgentSession {
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
-  totalTokens: number;
-  totalCost: number;
-}
-
-export async function runAgent(config: CliConfig, trustAll: boolean): Promise<void> {
+export async function runAgent(config: CliConfig, trustAll: boolean, resume?: boolean): Promise<void> {
   const { provider, model: modelName, apiKey, host } = getProviderForPersona(config);
 
   // Set API keys in env if provided
@@ -41,11 +37,20 @@ export async function runAgent(config: CliConfig, trustAll: boolean): Promise<vo
   const tools = createToolDefinitions(workingDir, model);
   const permissions = new PermissionManager(trustAll);
 
-  const session: AgentSession = {
-    messages: [],
-    totalTokens: 0,
-    totalCost: 0,
-  };
+  // Initialize or resume session
+  let session: Session;
+  if (resume) {
+    const loaded = loadLatestSession();
+    if (loaded) {
+      session = loaded;
+      console.log(chalk.green(`  Resumed session ${session.id.slice(0, 8)}... (${session.messages.length} messages)\n`));
+    } else {
+      session = createSession(provider, modelName);
+      console.log(chalk.dim("  No previous session found, starting fresh.\n"));
+    }
+  } else {
+    session = createSession(provider, modelName);
+  }
 
   // Wrap tools with permission checks
   const permissionedTools: Record<string, AnyToolDef> = {};
@@ -110,7 +115,7 @@ Guidelines:
     rl.pause();
 
     try {
-      session.messages.push({ role: "user", content: trimmed });
+      addMessage(session, "user", trimmed);
 
       // Check if task warrants multi-expert mode
       if (session.messages.length <= 1) {
@@ -151,7 +156,7 @@ Guidelines:
         model,
         system: systemPrompt,
         messages: session.messages.map((m) => ({
-          role: m.role as "user" | "assistant",
+          role: m.role,
           content: m.content,
         })),
         tools: permissionedTools as ToolSet,
@@ -177,10 +182,29 @@ Guidelines:
 
       // Store assistant response
       const finalText = await stream.text;
-      session.messages.push({ role: "assistant", content: finalText });
+      addMessage(session, "assistant", finalText);
+
+      // Auto-save session after each exchange
+      saveSession(session);
+
+      // Check for auto-compaction
+      const compactionLevel = shouldCompact(session.totalTokens, modelName);
+      if (compactionLevel !== "none") {
+        const spinner = ora({ text: `Compacting conversation (${compactionLevel})...`, prefixText: "  " }).start();
+        const plainMessages = session.messages.map(m => ({ role: m.role, content: m.content }));
+        const compacted = await compactMessages(model, plainMessages, compactionLevel);
+        // Rebuild session messages with timestamps
+        session.messages = compacted.map(m => ({
+          role: m.role,
+          content: m.content,
+          timestamp: new Date().toISOString(),
+        }));
+        saveSession(session);
+        spinner.succeed("Conversation compacted");
+      }
 
       console.log();
-      printStatus(provider, modelName, session.totalTokens, session.totalCost);
+      printStatus(provider, modelName, session.totalTokens, 0);
       console.log();
     } catch (err) {
       printError(err instanceof Error ? err.message : String(err));
@@ -191,6 +215,7 @@ Guidelines:
   });
 
   rl.on("close", () => {
+    saveSession(session);
     console.log(chalk.dim("\n  Goodbye!\n"));
     process.exit(0);
   });
@@ -199,7 +224,7 @@ Guidelines:
 async function handleCommand(
   cmd: string,
   config: CliConfig,
-  session: AgentSession
+  session: Session
 ): Promise<void> {
   const parts = cmd.slice(1).split(" ");
   const command = parts[0];
@@ -210,6 +235,7 @@ async function handleCommand(
       console.log(chalk.bold("  Commands:"));
       console.log(chalk.dim("  /help     ") + "Show this help");
       console.log(chalk.dim("  /clear    ") + "Clear conversation history");
+      console.log(chalk.dim("  /compact  ") + "Manually compact conversation history");
       console.log(chalk.dim("  /status   ") + "Show session status");
       console.log(chalk.dim("  /model    ") + "Show current model");
       console.log(chalk.dim("  /quit     ") + "Exit");
@@ -217,8 +243,29 @@ async function handleCommand(
       break;
     case "clear":
       session.messages = [];
-      console.log(chalk.green("\n  ✓ Conversation cleared\n"));
+      saveSession(session);
+      console.log(chalk.green("\n  Conversation cleared\n"));
       break;
+    case "compact": {
+      const { provider: cProvider, model: cModelName, host: cHost } = getProviderForPersona(config);
+      const cModel = createModel(cProvider as AIProvider, cModelName, cHost);
+      const plainMessages = session.messages.map(m => ({ role: m.role, content: m.content }));
+      if (plainMessages.length <= 4) {
+        console.log(chalk.dim("\n  Not enough messages to compact.\n"));
+        break;
+      }
+      const spinner = ora({ text: "Compacting conversation...", prefixText: "  " }).start();
+      const compacted = await compactMessages(cModel, plainMessages, "soft");
+      session.messages = compacted.map(m => ({
+        role: m.role,
+        content: m.content,
+        timestamp: new Date().toISOString(),
+      }));
+      saveSession(session);
+      spinner.succeed(`Compacted to ${session.messages.length} messages`);
+      console.log();
+      break;
+    }
     case "status":
       console.log();
       console.log(chalk.bold("  Session Status:"));

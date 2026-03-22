@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsup src/index.ts --format esm --target node20 --clean --banner.js '#!/usr/bin/env node'",
+    "build": "tsup src/index.ts --format esm --target node20 --clean --shims --banner.js '#!/usr/bin/env node' --external @ai-sdk/anthropic --external @ai-sdk/openai --external @ai-sdk/google --external @ai-sdk/openai-compatible --external ai --external zod --external chalk --external commander --external ora",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

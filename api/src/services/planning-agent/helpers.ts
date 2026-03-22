@@ -122,21 +122,26 @@ export function parseJsonResponse<T>(text: string): T {
  * Uses bracket-matching instead of lazy regex to handle backticks in reasoning text.
  */
 export function parseExecutionPlanJson(text: string): ExecutionPlan {
+  // Strip <think>...</think> reasoning blocks (qwen3-coder, DeepSeek R1, etc.)
+  // These contain { } characters that confuse brace-matching.
+  const stripped = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  const cleanText = stripped.length > 0 ? stripped : text;
+
   try {
     // Strategy 1: Find ```json fence and extract balanced JSON
-    const jsonFenceStart = text.indexOf("```json");
+    const jsonFenceStart = cleanText.indexOf("```json");
     if (jsonFenceStart !== -1) {
-      const braceStart = text.indexOf("{", jsonFenceStart + 7);
+      const braceStart = cleanText.indexOf("{", jsonFenceStart + 7);
       if (braceStart !== -1) {
-        const extracted = extractBalancedJson(text, braceStart);
+        const extracted = extractBalancedJson(cleanText, braceStart);
         if (extracted) return JSON.parse(extracted) as ExecutionPlan;
       }
     }
 
     // Strategy 2: Find raw JSON from first {
-    const braceStart = text.indexOf("{");
+    const braceStart = cleanText.indexOf("{");
     if (braceStart !== -1) {
-      const extracted = extractBalancedJson(text, braceStart);
+      const extracted = extractBalancedJson(cleanText, braceStart);
       if (extracted) return JSON.parse(extracted) as ExecutionPlan;
     }
 

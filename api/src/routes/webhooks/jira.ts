@@ -291,7 +291,7 @@ router.post(
       } else if (hasRouting && routing.model) {
         model = routing.model;
       } else {
-        model = PROVIDER_DEFAULT_MODELS[workerProvider] || PROVIDER_DEFAULT_MODELS.anthropic;
+        model = org.defaultWorkerModel || PROVIDER_DEFAULT_MODELS[workerProvider] || PROVIDER_DEFAULT_MODELS.anthropic;
       }
 
       // Check if Epic mode can be used (Anthropic only, no routing overrides)

@@ -17,19 +17,10 @@ export class PermissionManager {
     toolName: string,
     toolInput: Record<string, unknown>
   ): Promise<boolean> {
-    // Trust mode — allow everything
     if (this.trustAll) return true;
-
-    // Read tools — always allowed
     if (READ_TOOLS.has(toolName)) return true;
-
-    // Session-level always allow
     if (this.sessionAllow.has(toolName)) return true;
-
-    // Config-level trust
     if (this.configTrust.has(toolName)) return true;
-
-    // Ask the user
     return this.promptUser(toolName, toolInput);
   }
 
@@ -46,23 +37,38 @@ export class PermissionManager {
     }
     console.log(chalk.cyan(`  └${"─".repeat(43)}┘`));
 
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    // Read a single keypress directly from stdin to avoid conflicting
+    // with the agent's readline instance
     const answer = await new Promise<string>((resolve) => {
-      rl.question(
-        chalk.dim("  Allow? ") + chalk.white("(y)es / (n)o / (a)lways: "),
-        resolve
+      const wasRaw = process.stdin.isRaw;
+      process.stdout.write(
+        chalk.dim("  Allow? ") + chalk.white("(y)es / (n)o / (a)lways: ")
       );
+
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(true);
+      }
+      process.stdin.resume();
+
+      const onData = (buf: Buffer) => {
+        const ch = buf.toString();
+        process.stdin.removeListener("data", onData);
+        if (process.stdin.isTTY) {
+          process.stdin.setRawMode(wasRaw ?? false);
+        }
+        process.stdout.write(ch + "\n");
+        resolve(ch.trim().toLowerCase());
+      };
+
+      process.stdin.on("data", onData);
     });
-    rl.close();
 
-    const choice = answer.trim().toLowerCase();
-
-    if (choice === "a" || choice === "always") {
+    if (answer === "a") {
       this.sessionAllow.add(toolName);
       return true;
     }
 
-    return choice === "y" || choice === "yes";
+    return answer === "y";
   }
 
   private formatToolCall(toolName: string, input: Record<string, unknown>): string {

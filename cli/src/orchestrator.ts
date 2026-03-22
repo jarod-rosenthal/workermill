@@ -189,9 +189,12 @@ Available personas: architect, backend_developer, frontend_developer, fullstack_
     abortSignal: AbortSignal.timeout(3 * 60 * 1000),
   });
 
+  // Capture ALL text output (stream.text only has final text, misses text between tool calls)
+  let planText = "";
   let plannerShownText = false;
   for await (const chunk of planStream.textStream) {
     if (chunk) {
+      planText += chunk;
       if (!plannerShownText) {
         spinner.stop();
         plannerShownText = true;
@@ -202,7 +205,11 @@ Available personas: architect, backend_developer, frontend_developer, fullstack_
   if (plannerShownText) {
     process.stdout.write("\n");
   }
-  const planText = await planStream.text;
+  // Also check stream.text in case the accumulated text missed something
+  const finalText = await planStream.text;
+  if (finalText && finalText.length > planText.length) {
+    planText = finalText;
+  }
   spinner.stop();
 
   let stories = parseStoriesFromText(planText);
@@ -556,15 +563,15 @@ When you modify a file, include ::file_modified::path markers.${revisionFeedback
         abortSignal: AbortSignal.timeout(10 * 60 * 1000),
       });
 
+      let allText = "";
       let hasShownText = false;
       for await (const chunk of stream.textStream) {
-        // Stream agent thinking to the user
         if (chunk) {
+          allText += chunk;
           if (!hasShownText) {
             spinner.stop();
             hasShownText = true;
           }
-          // Filter out marker lines from display
           if (!chunk.includes("::decision::") && !chunk.includes("::learning::") &&
               !chunk.includes("::file_created::") && !chunk.includes("::file_modified::")) {
             process.stdout.write(chalk.dim(chunk));
@@ -575,7 +582,8 @@ When you modify a file, include ::file_modified::path markers.${revisionFeedback
         process.stdout.write("\n");
       }
 
-      const text = await stream.text;
+      const finalStreamText = await stream.text;
+      const text = finalStreamText && finalStreamText.length > allText.length ? finalStreamText : allText;
       const usage = await stream.totalUsage;
 
       spinner.stop();
@@ -698,14 +706,15 @@ If there are issues, be specific about which files and what needs to change.`;
           abortSignal: AbortSignal.timeout(5 * 60 * 1000),
         });
 
+        let allReviewText = "";
         let reviewerShownText = false;
         for await (const chunk of reviewStream.textStream) {
           if (chunk) {
+            allReviewText += chunk;
             if (!reviewerShownText) {
               reviewSpinner.stop();
               reviewerShownText = true;
             }
-            // Filter out marker lines
             if (!chunk.includes("::review_score::") && !chunk.includes("::review_verdict::")) {
               process.stdout.write(chalk.dim(chunk));
             }
@@ -715,7 +724,8 @@ If there are issues, be specific about which files and what needs to change.`;
           process.stdout.write("\n");
         }
 
-        const reviewText = await reviewStream.text;
+        const finalReviewText = await reviewStream.text;
+        const reviewText = finalReviewText && finalReviewText.length > allReviewText.length ? finalReviewText : allReviewText;
         const reviewUsage = await reviewStream.totalUsage;
 
         reviewSpinner.stop();

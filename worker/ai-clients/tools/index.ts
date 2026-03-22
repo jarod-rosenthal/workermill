@@ -8,9 +8,10 @@ import * as writeFileTool from "./write-file.js";
 import * as editFileTool from "./edit-file.js";
 import * as globTool from "./glob.js";
 import * as grepTool from "./grep.js";
+import * as lsTool from "./ls.js";
 
 // Re-export all tool modules
-export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool };
+export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool };
 
 /**
  * Creates Vercel AI SDK tool definitions for use with generateText().
@@ -261,6 +262,24 @@ export function createToolDefinitions(workingDir: string) {
             }
           }
           return lines.join("\n");
+        }
+        return `Error: ${result.error}`;
+      },
+    }),
+
+    ls: tool({
+      description: lsTool.description,
+      inputSchema: z.object({
+        path: z.string().describe("Directory path to list (absolute or relative to cwd)"),
+        ignore: z.array(z.string()).optional().describe('Glob patterns to exclude (e.g., ["node_modules", "dist"])'),
+        maxDepth: z.number().optional().describe("Maximum directory depth to traverse (default: 3)"),
+        maxFiles: z.number().optional().describe("Maximum number of entries to return (default: 1000)"),
+      }),
+      execute: async ({ path: dirPath, ignore, maxDepth, maxFiles }) => {
+        const resolvedPath = path.isAbsolute(dirPath) ? dirPath : path.resolve(workingDir, dirPath);
+        const result = await lsTool.execute({ path: resolvedPath, ignore, maxDepth, maxFiles });
+        if (result.success) {
+          return `${result.tree}\n\n${result.totalFiles} files, ${result.totalDirs} directories${result.truncated ? " (truncated)" : ""}`;
         }
         return `Error: ${result.error}`;
       },

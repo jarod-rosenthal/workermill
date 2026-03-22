@@ -116,8 +116,14 @@ Only propose a plan for genuinely complex multi-domain tasks. Simple tasks shoul
 
   rl.prompt();
 
-  rl.on("line", async (input: string) => {
-    const trimmed = input.trim();
+  // Debounce input: buffer consecutive line events and process after a pause.
+  // This handles long prompts that terminals split across multiple lines on paste/wrap.
+  let inputBuffer = "";
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let processing = false;
+
+  async function processInput(fullInput: string): Promise<void> {
+    const trimmed = fullInput.trim();
     if (!trimmed) {
       rl.prompt();
       return;
@@ -131,6 +137,7 @@ Only propose a plan for genuinely complex multi-domain tasks. Simple tasks shoul
     }
 
     // Pause readline during agent execution
+    processing = true;
     rl.pause();
 
     try {
@@ -227,8 +234,28 @@ Only propose a plan for genuinely complex multi-domain tasks. Simple tasks shoul
       printError(err instanceof Error ? err.message : String(err));
     }
 
+    processing = false;
     rl.resume();
     rl.prompt();
+  }
+
+  rl.on("line", (input: string) => {
+    if (processing) return; // Ignore input while agent is running
+
+    // Buffer the input and debounce
+    if (inputBuffer) {
+      inputBuffer += " " + input;
+    } else {
+      inputBuffer = input;
+    }
+
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      const full = inputBuffer;
+      inputBuffer = "";
+      debounceTimer = null;
+      processInput(full);
+    }, 200); // 200ms debounce — enough to catch split lines, fast enough to feel instant
   });
 
   rl.on("close", () => {

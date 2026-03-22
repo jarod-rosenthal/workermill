@@ -105,6 +105,7 @@ describe("validatePrdDependencies", () => {
       async generate(): Promise<LLMGenerateResult> {
         throw new Error("rate limited");
       },
+      // eslint-disable-next-line require-yield
       async *stream(): AsyncGenerator<LLMStreamEvent> {
         throw new Error("rate limited");
       },

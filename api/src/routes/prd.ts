@@ -780,6 +780,48 @@ router.post(
 
         emitDecomp?.({ phase: "resolving_content", detail: "Content resolved, starting decomposition" });
 
+        // ── Spec validation gate (streaming path only) ──
+        // Runs INSIDE server-side decomposition block — pre-decomposed agent data bypasses this.
+        if (decompositionId) {
+          emitDecomp?.({ phase: "validating_spec", detail: "Checking spec for dependency and quality issues" });
+
+          const valBackend = createLLMBackend({
+            provider: planProvider,
+            orgId: org.id,
+            ollamaBaseUrl: org.ollamaBaseUrl || undefined,
+          });
+
+          const warnings = await validatePrdDependencies(prdContent, valBackend, planModel);
+
+          if (warnings.length > 0) {
+            createSession(decompositionId, {
+              originalPrd: prdContent,
+              warnings,
+              status: "reviewing",
+              orgId: org.id,
+              provider: planProvider,
+              model: planModel,
+              ollamaBaseUrl: org.ollamaBaseUrl || undefined,
+              createdAt: Date.now(),
+              boardNameOverride: boardNameOverride || undefined,
+              specId: specRecord?.id || undefined,
+              syncToTracker: syncToTracker !== false,
+              githubRepo: org.getDefaultRepo() || undefined,
+              userId: user?.id || undefined,
+              source: source || "text",
+            });
+
+            logger.info("[spec-validator] Warnings found, pausing for user review", {
+              decompositionId,
+              warningCount: warnings.length,
+              orgId: org.id,
+            });
+
+            emitDecomp?.({ phase: "spec_review", warnings });
+            return; // PAUSE — user must call /proceed or /confirm-fix
+          }
+        }
+
         // Always use story-level decomposition for PRD builds — the decomposer
         // produces pre-computed stories per card for parallel expert execution.
         // The org's prdPlanningMode (strict/simplified) only controls the
@@ -907,6 +949,246 @@ router.post(
         res.status(500).json({ error: "PRD decomposition failed" });
       }
     }
+  },
+);
+
+// =============================================================================
+// Helper: Run decomposition from a session (shared by /proceed and /confirm-fix)
+// =============================================================================
+
+async function runDecomposition(
+  session: DecompositionSession,
+  decompositionId: string,
+  org: Organization,
+  emit: (event: import("../services/decomposition-events.js").DecompositionEvent) => void,
+): Promise<void> {
+  const prdContent = session.fixedPrd || session.originalPrd;
+  const planProvider = session.provider;
+  const planModel = session.model;
+
+  emit({ phase: "calling_llm", detail: `Decomposing spec (${planProvider}/${planModel})` });
+
+  const orgCreds = await getOrgCredentials(org.id);
+  let decomposed;
+
+  if (planProvider === "anthropic") {
+    decomposed = await decomposePrdWithStoriesStreaming(
+      prdContent,
+      planModel,
+      orgCreds.anthropicApiKey || undefined,
+      decompositionId,
+    );
+  } else {
+    const { createModel } = await import("../services/planning-agent/config.js");
+    const { generateText } = await import("ai");
+    const { SYSTEM_PROMPT_WITH_STORIES, validateDecomposedPrd } = await import("../services/prd-decomposer.js");
+
+    const providerKey = planProvider === "openai" ? orgCreds.openaiApiKey
+      : planProvider === "google" ? orgCreds.googleApiKey
+      : "";
+
+    if (!providerKey && planProvider !== "ollama") {
+      throw new Error(`No API key configured for ${planProvider}. Add one in Settings > Integrations.`);
+    }
+
+    const model = createModel(
+      planProvider,
+      planModel,
+      providerKey || "",
+      org.ollamaBaseUrl || undefined,
+    );
+
+    const result = await generateText({
+      model,
+      system: SYSTEM_PROMPT_WITH_STORIES,
+      prompt: `Decompose this PRD into implementation cards:\n\n${prdContent}`,
+      maxOutputTokens: 128000,
+    });
+
+    let jsonText = result.text.trim();
+    const fence = jsonText.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
+    if (fence) jsonText = fence[1].trim();
+    decomposed = validateDecomposedPrd(JSON.parse(jsonText));
+  }
+
+  emit({ phase: "creating_board", detail: "Creating board and cards" });
+
+  await createBoardFromDecomposition(decomposed, prdContent, org, {
+    boardNameOverride: session.boardNameOverride,
+    specId: session.specId,
+    syncToTracker: session.syncToTracker,
+    userId: session.userId,
+    source: session.source,
+    decompositionId,
+    emit,
+  });
+}
+
+// =============================================================================
+// POST /api/prd/decompose/proceed
+// =============================================================================
+
+router.post(
+  "/decompose/proceed",
+  body("decompositionId")
+    .isString()
+    .isLength({ min: 1, max: 100 })
+    .withMessage("decompositionId is required"),
+  body("action")
+    .isString()
+    .isIn(["proceed", "fix"])
+    .withMessage('action must be "proceed" or "fix"'),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    const { decompositionId, action } = req.body;
+    const org = req.organization!;
+
+    const session = getSession(decompositionId);
+    if (!session || session.orgId !== org.id) {
+      res.status(404).json({ error: "Session not found or expired" });
+      return;
+    }
+
+    // Guard against double-dispatch
+    if (session.status === "decomposing") {
+      res.status(409).json({ error: "Decomposition already in progress" });
+      return;
+    }
+
+    const emit = (event: import("../services/decomposition-events.js").DecompositionEvent) =>
+      decompositionEmitter.emitEvent(decompositionId, event);
+
+    if (action === "proceed") {
+      logger.info("[spec-validator] User proceeding without fixes", {
+        decompositionId,
+        orgId: org.id,
+      });
+
+      session.status = "decomposing";
+      // Fire-and-forget — return 202 immediately, work continues via SSE
+      runDecomposition(session, decompositionId, org, emit)
+        .then(() => deleteSession(decompositionId))
+        .catch((err) => {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          emit({ phase: "error", error: errMsg });
+          deleteSession(decompositionId);
+        });
+
+      res.status(202).json({ accepted: true, decompositionId });
+      return;
+    }
+
+    // action === "fix" — run repair pass
+    session.status = "repairing";
+    logger.info("[spec-validator] User requested spec repair", {
+      decompositionId,
+      orgId: org.id,
+    });
+
+    emit({ phase: "repairing_spec", detail: "Repairing spec based on identified issues" });
+
+    try {
+      const backend = createLLMBackend({
+        provider: session.provider,
+        orgId: session.orgId,
+        ollamaBaseUrl: session.ollamaBaseUrl,
+      });
+
+      const { fixedPrd, diff } = await repairPrdDependencies(
+        session.originalPrd,
+        session.warnings || [],
+        backend,
+        session.model,
+        (text) => emit({ phase: "repairing_spec", text }),
+      );
+
+      session.fixedPrd = fixedPrd;
+      session.status = "reviewing"; // Back to reviewing — user must accept/reject
+      emit({
+        phase: "repair_complete",
+        fixedPrd,
+        diff,
+        warnings: session.warnings,
+      });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error("[spec-validator] Repair failed", { error: errMsg, decompositionId });
+      session.status = "reviewing";
+      emit({ phase: "error", error: `Spec repair failed: ${errMsg}` });
+    }
+
+    res.status(202).json({ accepted: true, decompositionId });
+  },
+);
+
+// =============================================================================
+// POST /api/prd/decompose/confirm-fix
+// =============================================================================
+
+router.post(
+  "/decompose/confirm-fix",
+  body("decompositionId")
+    .isString()
+    .isLength({ min: 1, max: 100 })
+    .withMessage("decompositionId is required"),
+  body("action")
+    .isString()
+    .isIn(["accept", "reject"])
+    .withMessage('action must be "accept" or "reject"'),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    const { decompositionId, action } = req.body;
+    const org = req.organization!;
+
+    const session = getSession(decompositionId);
+    if (!session || session.orgId !== org.id) {
+      res.status(404).json({ error: "Session not found or expired" });
+      return;
+    }
+
+    // Guard against double-dispatch
+    if (session.status === "decomposing") {
+      res.status(409).json({ error: "Decomposition already in progress" });
+      return;
+    }
+
+    const emit = (event: import("../services/decomposition-events.js").DecompositionEvent) =>
+      decompositionEmitter.emitEvent(decompositionId, event);
+
+    if (action === "reject") {
+      logger.info("[spec-validator] User rejected fix, returning to review", {
+        decompositionId,
+        orgId: org.id,
+      });
+      session.fixedPrd = undefined;
+      session.status = "reviewing";
+      emit({ phase: "spec_review", warnings: session.warnings });
+      res.status(202).json({ accepted: true, decompositionId });
+      return;
+    }
+
+    // action === "accept" — decompose the fixed spec
+    if (!session.fixedPrd) {
+      res.status(400).json({ error: "No fixed spec available. Run repair first." });
+      return;
+    }
+
+    logger.info("[spec-validator] User accepted fix, proceeding to decomposition", {
+      decompositionId,
+      orgId: org.id,
+    });
+
+    session.status = "decomposing";
+    // Fire-and-forget — return 202 immediately, work continues via SSE
+    runDecomposition(session, decompositionId, org, emit)
+      .then(() => deleteSession(decompositionId))
+      .catch((err) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        emit({ phase: "error", error: errMsg });
+        deleteSession(decompositionId);
+      });
+
+    res.status(202).json({ accepted: true, decompositionId });
   },
 );
 

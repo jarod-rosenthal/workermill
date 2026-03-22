@@ -222,35 +222,104 @@ Available personas: architect, backend_developer, frontend_developer, fullstack_
 
 /** Parse stories JSON from planner output text */
 function parseStoriesFromText(text: string): Story[] {
-  // Try JSON code block first
-  const jsonBlockMatch = text.match(/```json\s*\n([\s\S]*?)\n```/);
-  if (jsonBlockMatch) {
-    try {
-      const parsed = JSON.parse(jsonBlockMatch[1]);
-      if (Array.isArray(parsed.stories)) return parsed.stories;
-      if (Array.isArray(parsed)) return parsed;
-    } catch { /* not valid JSON */ }
+  // Strategy 1: JSON code block (```json ... ```)
+  // Use greedy match and try multiple code blocks if first fails
+  const codeBlocks = [...text.matchAll(/```(?:json)?\s*\n?([\s\S]*?)```/g)];
+  for (const match of codeBlocks) {
+    const stories = tryParseStories(match[1].trim());
+    if (stories) return stories;
   }
 
-  // Try raw JSON object with "stories" key
-  const rawMatch = text.match(/\{\s*"stories"\s*:\s*\[[\s\S]*?\]\s*\}/);
-  if (rawMatch) {
-    try {
-      const parsed = JSON.parse(rawMatch[0]);
-      if (Array.isArray(parsed.stories)) return parsed.stories;
-    } catch { /* not valid JSON */ }
+  // Strategy 2: Find JSON object with "stories" key using bracket matching
+  const storiesIdx = text.indexOf('"stories"');
+  if (storiesIdx !== -1) {
+    // Walk back to find the opening {
+    let braceStart = text.lastIndexOf("{", storiesIdx);
+    if (braceStart !== -1) {
+      const json = extractBalancedJSON(text, braceStart);
+      if (json) {
+        const stories = tryParseStories(json);
+        if (stories) return stories;
+      }
+    }
   }
 
-  // Try any JSON array
-  const arrayMatch = text.match(/\[\s*\{[\s\S]*?"persona"[\s\S]*?\}\s*\]/);
-  if (arrayMatch) {
-    try {
-      const parsed = JSON.parse(arrayMatch[0]);
-      if (Array.isArray(parsed)) return parsed;
-    } catch { /* not valid JSON */ }
+  // Strategy 3: Find any JSON array containing objects with "persona"
+  const arrayStart = text.indexOf("[");
+  if (arrayStart !== -1 && text.indexOf('"persona"') !== -1) {
+    const json = extractBalancedJSON(text, arrayStart);
+    if (json) {
+      const stories = tryParseStories(json);
+      if (stories) return stories;
+    }
   }
+
+  // Strategy 4: Try parsing the entire text as JSON
+  const stories = tryParseStories(text.trim());
+  if (stories) return stories;
+
+  // Log what we couldn't parse for debugging
+  const preview = text.slice(0, 500);
+  console.log(chalk.dim(`  (planner output preview: ${preview}${text.length > 500 ? "..." : ""})`));
 
   return [];
+}
+
+/** Try to parse text as a stories array or object containing stories */
+function tryParseStories(text: string): Story[] | null {
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      // Validate at least one item has persona field
+      if (parsed.length > 0 && parsed[0].persona) return parsed;
+    }
+    if (parsed && Array.isArray(parsed.stories)) {
+      if (parsed.stories.length > 0) return parsed.stories;
+    }
+  } catch { /* not valid JSON */ }
+  return null;
+}
+
+/** Extract a balanced JSON structure starting at the given index */
+function extractBalancedJSON(text: string, start: number): string | null {
+  const open = text[start];
+  const close = open === "{" ? "}" : open === "[" ? "]" : null;
+  if (!close) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (ch === open) depth++;
+    if (ch === close) {
+      depth--;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null; // Unbalanced
 }
 
 /** Extract a numeric score from critic output — tries markers, then natural language patterns */

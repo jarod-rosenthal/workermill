@@ -33,6 +33,15 @@ import { decompositionEmitter } from "../services/decomposition-events.js";
 import { getOrgCredentials } from "../services/org-credentials.js";
 import { logger } from "../utils/logger.js";
 import { validateExternalUrl } from "../utils/url-validator.js";
+import {
+  validatePrdDependencies,
+  repairPrdDependencies,
+  createSession,
+  getSession,
+  deleteSession,
+} from "../services/prd-dependency-validator.js";
+import type { DecompositionSession } from "../services/prd-dependency-validator.js";
+import { createLLMBackend } from "../services/llm-backend.js";
 
 const router = Router();
 
@@ -280,6 +289,236 @@ const LABEL_COLORS: Record<string, string> = {
 
 function getLabelColor(name: string): string {
   return LABEL_COLORS[name.toLowerCase()] || "#6b7280";
+}
+
+// =============================================================================
+// Helper: Create board from decomposed PRD (shared by /decompose and /proceed)
+// =============================================================================
+
+interface BoardCreationOptions {
+  boardNameOverride?: string;
+  specId?: string;
+  syncToTracker?: boolean;
+  userId?: string;
+  source?: string;
+  decompositionId?: string;
+  emit?: (event: import("../services/decomposition-events.js").DecompositionEvent) => void;
+}
+
+async function createBoardFromDecomposition(
+  decomposed: import("../services/prd-decomposer.js").DecomposedPrd,
+  prdContent: string,
+  org: Organization,
+  opts: BoardCreationOptions,
+): Promise<{
+  board: KbBoard;
+  prefix: string;
+  createdCards: KbCard[];
+  decomposed: import("../services/prd-decomposer.js").DecomposedPrd;
+  trackerSync: unknown;
+}> {
+  const finalBoardName = opts.boardNameOverride || decomposed.boardName;
+
+  const result = await AppDataSource.transaction(async (em) => {
+    const boardRepo = em.getRepository(KbBoard);
+    const colRepo = em.getRepository(KbColumn);
+    const cardRepo = em.getRepository(KbCard);
+    const depRepo = em.getRepository(KbCardDependency);
+    const labelRepo = em.getRepository(KbLabel);
+    const cardLabelRepo = em.getRepository(KbCardLabel);
+
+    // Get max board position
+    const maxPos = await boardRepo
+      .createQueryBuilder("b")
+      .where("b.orgId = :orgId", { orgId: org.id })
+      .select("MAX(b.position)", "max")
+      .getRawOne();
+
+    const prefix = await generateUniquePrefix(boardRepo, org.id, finalBoardName);
+
+    // Create board with quality gates as first-class columns
+    const board = boardRepo.create({
+      orgId: org.id,
+      name: finalBoardName,
+      description: `Auto-generated from PRD decomposition`,
+      position: (maxPos?.max ?? -1) + 1,
+      prefix,
+      nextCardNumber: 1,
+      createdById: opts.userId || null,
+      qualityGateCommands: decomposed.qualityGates?.length ? decomposed.qualityGates : null,
+      ciWorkflowPath: decomposed.ciWorkflowPath || null,
+      prdContent: prdContent,
+      prdSource: opts.source || "text",
+    });
+    await boardRepo.save(board);
+
+    // Fire-and-forget: condense the PRD for worker prompts (reduces token usage)
+    const condenseKey = (await getOrgCredentials(org.id).catch(() => null))?.anthropicApiKey || undefined;
+    condensePrd(prdContent, condenseKey).then(async (condensed) => {
+      if (condensed !== prdContent) {
+        try {
+          await boardRepo.update({ id: board.id, orgId: org.id }, { prdContent: condensed });
+          logger.info(`[PRD] Board ${board.id} PRD condensed in background`);
+        } catch (err) {
+          logger.warn(`[PRD] Failed to save condensed PRD: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+    }).catch(() => { /* non-fatal */ });
+
+    // Create default columns
+    const columns: KbColumn[] = [];
+    for (const def of DEFAULT_BOARD_COLUMNS) {
+      const col = colRepo.create({
+        boardId: board.id,
+        name: def.name,
+        position: def.position,
+        color: def.color,
+      });
+      columns.push(col);
+    }
+    await colRepo.save(columns);
+
+    // Find the "To Do" column
+    const todoColumn = columns.find((c) => c.name === "To Do")!;
+
+    // Atomically claim card numbers for all cards at once
+    const cardCount = decomposed.cards.length;
+    const [{ next_num }] = await em.query(
+      `UPDATE "kb_boards" SET "next_card_number" = "next_card_number" + $1 WHERE "id" = $2 AND "org_id" = $3 RETURNING "next_card_number" - $1 AS next_num`,
+      [cardCount, board.id, org.id],
+    );
+    const startNumber = Number(next_num) || 1;
+
+    // Create cards in the "To Do" column
+    const createdCards: KbCard[] = [];
+    for (let i = 0; i < decomposed.cards.length; i++) {
+      const dc = decomposed.cards[i];
+
+      let description = dc.description;
+      if (dc.stories && dc.stories.length > 0) {
+        description += `\n\n<!-- PRECOMPUTED_STORIES_JSON\n${JSON.stringify(dc.stories)}\nEND_PRECOMPUTED_STORIES -->`;
+      }
+
+      const card = cardRepo.create({
+        boardId: board.id,
+        columnId: todoColumn.id,
+        title: dc.title,
+        description,
+        position: i,
+        priority: dc.priority,
+        cardNumber: startNumber + i,
+        githubRepo: org.getDefaultRepo() || null,
+      });
+      createdCards.push(card);
+    }
+    await cardRepo.save(createdCards);
+
+    // Create dependencies based on dependencyIndices
+    const dependencies: KbCardDependency[] = [];
+    for (let i = 0; i < decomposed.cards.length; i++) {
+      const dc = decomposed.cards[i];
+      for (const depIdx of dc.dependencyIndices) {
+        if (depIdx >= 0 && depIdx < createdCards.length && depIdx !== i) {
+          const dep = depRepo.create({
+            cardId: createdCards[i].id,
+            dependsOnCardId: createdCards[depIdx].id,
+          });
+          dependencies.push(dep);
+        }
+      }
+    }
+    if (dependencies.length > 0) {
+      await depRepo.save(dependencies);
+    }
+
+    // Create labels and card-label associations
+    const existingLabels = await labelRepo.find({ where: { orgId: org.id } });
+    const labelMap = new Map(existingLabels.map((l) => [l.name.toLowerCase(), l]));
+
+    async function getOrCreateLabel(name: string): Promise<KbLabel> {
+      const key = name.toLowerCase();
+      const existing = labelMap.get(key);
+      if (existing) return existing;
+
+      const label = labelRepo.create({
+        orgId: org.id,
+        name,
+        color: getLabelColor(name),
+      });
+      await labelRepo.save(label);
+      labelMap.set(key, label);
+      return label;
+    }
+
+    const cardLabelsToSave: KbCardLabel[] = [];
+    for (let i = 0; i < decomposed.cards.length; i++) {
+      const dc = decomposed.cards[i];
+      const card = createdCards[i];
+
+      const personaLabel = await getOrCreateLabel(dc.persona);
+      cardLabelsToSave.push(
+        cardLabelRepo.create({ cardId: card.id, labelId: personaLabel.id }),
+      );
+
+      for (const labelName of dc.labels) {
+        const label = await getOrCreateLabel(labelName);
+        if (label.id !== personaLabel.id) {
+          cardLabelsToSave.push(
+            cardLabelRepo.create({ cardId: card.id, labelId: label.id }),
+          );
+        }
+      }
+    }
+    if (cardLabelsToSave.length > 0) {
+      await cardLabelRepo.save(cardLabelsToSave);
+    }
+
+    return { board, prefix, createdCards, decomposed };
+  });
+
+  // Link spec to board (if spec-driven decomposition)
+  if (opts.specId) {
+    const specRepo = AppDataSource.getRepository(KbSpec);
+    const specRecord = await specRepo.findOne({ where: { id: opts.specId, orgId: org.id } });
+    if (specRecord) {
+      await specRepo.update(
+        { id: specRecord.id },
+        { boardId: result.board.id, status: "decomposed" as const },
+      );
+      await AppDataSource.getRepository(KbBoard).update(
+        { id: result.board.id },
+        { specId: specRecord.id },
+      );
+    }
+  }
+
+  // Sync to external tracker if requested
+  let trackerSync = null;
+  if (opts.syncToTracker !== false) {
+    try {
+      const { syncBoardToTracker } = await import("../services/tracker-sync.js");
+      trackerSync = await syncBoardToTracker(result.board.id, org.id);
+    } catch (err) {
+      logger.warn("External tracker sync failed (non-blocking)", { error: String(err) });
+    }
+  }
+
+  // Emit completion
+  opts.emit?.({
+    phase: "complete",
+    boardId: result.board.id,
+    detail: `Board "${result.board.name}" created with ${result.createdCards.length} cards`,
+  });
+
+  logger.info("PRD decomposed into board", {
+    boardId: result.board.id,
+    boardName: result.board.name,
+    cardCount: result.createdCards.length,
+    orgId: org.id,
+    userId: opts.userId || "agent",
+  });
+
+  return { ...result, trackerSync };
 }
 
 // =============================================================================
@@ -625,222 +864,15 @@ router.post(
       // 3. Create board, columns, cards, dependencies, and labels
       // ---------------------------------------------------------------
       emitDecomp?.({ phase: "creating_board", detail: "Creating board and cards" });
-      const finalBoardName = boardNameOverride || decomposed.boardName;
 
-      // --- All trackers (internal, GitHub Issues, Jira, Linear) use the same board/card path ---
-      // External trackers sync via syncBoardToTracker() after board creation (step 4).
-      const result = await AppDataSource.transaction(async (em) => {
-        const boardRepo = em.getRepository(KbBoard);
-        const colRepo = em.getRepository(KbColumn);
-        const cardRepo = em.getRepository(KbCard);
-        const depRepo = em.getRepository(KbCardDependency);
-        const labelRepo = em.getRepository(KbLabel);
-        const cardLabelRepo = em.getRepository(KbCardLabel);
-
-        // Get max board position
-        const maxPos = await boardRepo
-          .createQueryBuilder("b")
-          .where("b.orgId = :orgId", { orgId: org.id })
-          .select("MAX(b.position)", "max")
-          .getRawOne();
-
-        const prefix = await generateUniquePrefix(boardRepo, org.id, finalBoardName);
-
-        // Create board with quality gates as first-class columns
-        const board = boardRepo.create({
-          orgId: org.id,
-          name: finalBoardName,
-          description: `Auto-generated from PRD decomposition`,
-          position: (maxPos?.max ?? -1) + 1,
-          prefix,
-          nextCardNumber: 1,
-          createdById: user?.id || null,
-          qualityGateCommands: decomposed.qualityGates?.length ? decomposed.qualityGates : null,
-          ciWorkflowPath: decomposed.ciWorkflowPath || null,
-          prdContent: prdContent,
-          prdSource: source || "text",
-        });
-        await boardRepo.save(board);
-
-        // Fire-and-forget: condense the PRD for worker prompts (reduces token usage)
-        const condenseKey = (await getOrgCredentials(org.id).catch(() => null))?.anthropicApiKey || undefined;
-        condensePrd(prdContent, condenseKey).then(async (condensed) => {
-          if (condensed !== prdContent) {
-            try {
-              await boardRepo.update({ id: board.id, orgId: org.id }, { prdContent: condensed });
-              logger.info(`[PRD] Board ${board.id} PRD condensed in background`);
-            } catch (err) {
-              logger.warn(`[PRD] Failed to save condensed PRD: ${err instanceof Error ? err.message : err}`);
-            }
-          }
-        }).catch(() => { /* non-fatal */ });
-
-        // Create default columns
-        const columns: KbColumn[] = [];
-        for (const def of DEFAULT_BOARD_COLUMNS) {
-          const col = colRepo.create({
-            boardId: board.id,
-            name: def.name,
-            position: def.position,
-            color: def.color,
-          });
-          columns.push(col);
-        }
-        await colRepo.save(columns);
-
-        // Find the "To Do" column
-        const todoColumn = columns.find((c) => c.name === "To Do")!;
-
-        // Atomically claim card numbers for all cards at once
-        // This does a single atomic UPDATE to claim N sequential numbers
-        const cardCount = decomposed.cards.length;
-        const [{ next_num }] = await em.query(
-          `UPDATE "kb_boards" SET "next_card_number" = "next_card_number" + $1 WHERE "id" = $2 AND "org_id" = $3 RETURNING "next_card_number" - $1 AS next_num`,
-          [cardCount, board.id, org.id],
-        );
-        const startNumber = Number(next_num) || 1;
-
-        // Create cards in the "To Do" column
-        const createdCards: KbCard[] = [];
-        for (let i = 0; i < decomposed.cards.length; i++) {
-          const dc = decomposed.cards[i];
-
-          // If decomposition produced stories, embed them as a
-          // machine-readable marker at the end of the description.
-          // runCardAsWorkerTask() extracts this into jiraFields.preComputedStories.
-          let description = dc.description;
-          if (dc.stories && dc.stories.length > 0) {
-            description += `\n\n<!-- PRECOMPUTED_STORIES_JSON\n${JSON.stringify(dc.stories)}\nEND_PRECOMPUTED_STORIES -->`;
-          }
-
-          const card = cardRepo.create({
-            boardId: board.id,
-            columnId: todoColumn.id,
-            title: dc.title,
-            description,
-            position: i,
-            priority: dc.priority,
-            cardNumber: startNumber + i,
-            githubRepo: org.getDefaultRepo() || null,
-          });
-          createdCards.push(card);
-        }
-        await cardRepo.save(createdCards);
-
-        // Create dependencies based on dependencyIndices
-        const dependencies: KbCardDependency[] = [];
-        for (let i = 0; i < decomposed.cards.length; i++) {
-          const dc = decomposed.cards[i];
-          for (const depIdx of dc.dependencyIndices) {
-            if (depIdx >= 0 && depIdx < createdCards.length && depIdx !== i) {
-              const dep = depRepo.create({
-                cardId: createdCards[i].id,
-                dependsOnCardId: createdCards[depIdx].id,
-              });
-              dependencies.push(dep);
-            }
-          }
-        }
-        if (dependencies.length > 0) {
-          await depRepo.save(dependencies);
-        }
-
-        // Create labels and card-label associations
-        // First, load existing org labels to reuse them
-        const existingLabels = await labelRepo.find({ where: { orgId: org.id } });
-        const labelMap = new Map(existingLabels.map((l) => [l.name.toLowerCase(), l]));
-
-        async function getOrCreateLabel(name: string): Promise<KbLabel> {
-          const key = name.toLowerCase();
-          const existing = labelMap.get(key);
-          if (existing) return existing;
-
-          const label = labelRepo.create({
-            orgId: org.id,
-            name,
-            color: getLabelColor(name),
-          });
-          await labelRepo.save(label);
-          labelMap.set(key, label);
-          return label;
-        }
-
-        const cardLabelsToSave: KbCardLabel[] = [];
-        for (let i = 0; i < decomposed.cards.length; i++) {
-          const dc = decomposed.cards[i];
-          const card = createdCards[i];
-
-          // Add persona label
-          const personaLabel = await getOrCreateLabel(dc.persona);
-          cardLabelsToSave.push(
-            cardLabelRepo.create({ cardId: card.id, labelId: personaLabel.id }),
-          );
-
-          // Add additional labels
-          for (const labelName of dc.labels) {
-            const label = await getOrCreateLabel(labelName);
-            // Avoid duplicate if persona name matches a label name
-            if (label.id !== personaLabel.id) {
-              cardLabelsToSave.push(
-                cardLabelRepo.create({ cardId: card.id, labelId: label.id }),
-              );
-            }
-          }
-        }
-        if (cardLabelsToSave.length > 0) {
-          await cardLabelRepo.save(cardLabelsToSave);
-        }
-
-        return { board, prefix, createdCards, decomposed };
-      });
-
-      // ---------------------------------------------------------------
-      // 3b. Link spec to board (if spec-driven decomposition)
-      // ---------------------------------------------------------------
-      if (specRecord) {
-        await AppDataSource.getRepository(KbSpec).update(
-          { id: specRecord.id },
-          { boardId: result.board.id, status: "decomposed" as const },
-        );
-        await AppDataSource.getRepository(KbBoard).update(
-          { id: result.board.id },
-          { specId: specRecord.id },
-        );
-      }
-
-      // ---------------------------------------------------------------
-      // 4. Sync to external tracker if requested
-      // ---------------------------------------------------------------
-      let trackerSync = null;
-      if (syncToTracker !== false) {
-        try {
-          const { syncBoardToTracker } = await import("../services/tracker-sync.js");
-          trackerSync = await syncBoardToTracker(result.board.id, org.id);
-        } catch (err) {
-          logger.warn("External tracker sync failed (non-blocking)", { error: String(err) });
-        }
-      }
-
-      // ---------------------------------------------------------------
-      // 5. Board is ready — user kicks off the first card manually
-      //    (prdAutoRun only controls cascade AFTER a card completes)
-      // ---------------------------------------------------------------
-
-      // ---------------------------------------------------------------
-      // 6. Return response
-      // ---------------------------------------------------------------
-      emitDecomp?.({
-        phase: "complete",
-        boardId: result.board.id,
-        detail: `Board "${result.board.name}" created with ${result.createdCards.length} cards`,
-      });
-
-      logger.info("PRD decomposed into board", {
-        boardId: result.board.id,
-        boardName: result.board.name,
-        cardCount: result.createdCards.length,
-        orgId: org.id,
-        userId: user?.id || "agent",
+      const result = await createBoardFromDecomposition(decomposed, prdContent, org, {
+        boardNameOverride,
+        specId: specRecord?.id,
+        syncToTracker: syncToTracker !== false,
+        userId: user?.id,
+        source,
+        decompositionId,
+        emit: emitDecomp,
       });
 
       if (!isStreaming) {
@@ -856,7 +888,7 @@ router.post(
             dependencies: result.decomposed.cards[i].dependencyIndices,
             estimatedSteps: result.decomposed.cards[i].estimatedSteps,
           })),
-          trackerSync,
+          trackerSync: result.trackerSync,
         });
       }
     } catch (error) {

@@ -169,13 +169,11 @@ export function AllTasksSection({
                     <td className="p-3">
                       {(() => {
                         const isLocal = !!task.claimedByAgent;
-                        const isReview = task.skipManagerReview === false;
                         const isDeploy = !!task.deploymentEnabled;
                         const hasManager = !!task.managerEnabled;
 
                         const parts: string[] = [];
                         if (isLocal) parts.push("Local");
-                        if (isReview) parts.push("PR-Review");
                         if (isDeploy) parts.push("Deploy");
                         if (hasManager) parts.push("Anneal");
 

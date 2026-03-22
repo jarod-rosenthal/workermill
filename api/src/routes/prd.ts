@@ -75,6 +75,8 @@ router.get("/decompose/stream", authenticateSSE, (req: Request, res: Response) =
           if (!closed) {
             closed = true;
             unsubscribe();
+            clearInterval(heartbeat);
+            clearTimeout(timeout);
             res.end();
           }
         }, 500);
@@ -82,21 +84,30 @@ router.get("/decompose/stream", authenticateSSE, (req: Request, res: Response) =
     },
   );
 
-  // 5-minute timeout
+  // Heartbeat every 30s to keep connection alive through proxies (CloudFront, ALB)
+  const heartbeat = setInterval(() => {
+    if (!closed) {
+      res.write(": heartbeat\n\n");
+    }
+  }, 30_000);
+
+  // 15-minute timeout (extended for spec validation gate user interaction)
   const timeout = setTimeout(() => {
     if (!closed) {
       closed = true;
       unsubscribe();
+      clearInterval(heartbeat);
       res.write(`data: ${JSON.stringify({ phase: "error", error: "Stream timeout" })}\n\n`);
       res.end();
     }
-  }, 5 * 60 * 1000);
+  }, 15 * 60 * 1000);
 
   req.on("close", () => {
     if (!closed) {
       closed = true;
       unsubscribe();
       clearTimeout(timeout);
+      clearInterval(heartbeat);
     }
   });
 });

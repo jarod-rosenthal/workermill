@@ -14,7 +14,12 @@ export type DecompositionPhase =
   | "parsing"
   | "creating_board"
   | "complete"
-  | "error";
+  | "error"
+  // Spec validation gate phases
+  | "validating_spec"
+  | "spec_review"
+  | "repairing_spec"
+  | "repair_complete";
 
 export interface DecompositionEvent {
   phase: DecompositionPhase;
@@ -23,6 +28,16 @@ export interface DecompositionEvent {
   charsGenerated?: number;
   boardId?: string;
   error?: string;
+  // Spec validation gate fields
+  warnings?: Array<{
+    severity: "error" | "warning";
+    category: string;
+    message: string;
+    suggestion: string;
+    affectedPackages: string[];
+  }>;
+  fixedPrd?: string;
+  diff?: string;
 }
 
 class DecompositionEventEmitter extends EventEmitter {

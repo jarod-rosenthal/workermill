@@ -189,7 +189,7 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
       const activeStatuses = new Set([
         "planning", "pending_plan_approval",
         "queued", "dispatching", "claimed", "environment_setup", "executing",
-        "running", "consolidating", "integration_check", "deploying",
+        "running", "reviewing", "consolidating", "integration_check", "deploying",
         "blocked", "manager_review", "revision_needed",
       ]);
       const doneStatuses = new Set([
@@ -368,6 +368,7 @@ class TaskTreeItem extends vscode.TreeItem {
         this.iconPath = new vscode.ThemeIcon("lock", new vscode.ThemeColor("charts.orange"));
         break;
       case "manager_review":
+      case "reviewing":
         this.iconPath = new vscode.ThemeIcon("eye", new vscode.ThemeColor("charts.blue"));
         break;
       case "revision_needed":

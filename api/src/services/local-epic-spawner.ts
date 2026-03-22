@@ -810,6 +810,7 @@ class LocalEpicSpawner {
       GOOGLE_API_KEY: credentials?.googleApiKey || process.env.GOOGLE_API_KEY || "",
       GOOGLE_GENERATIVE_AI_API_KEY: credentials?.googleApiKey || process.env.GOOGLE_API_KEY || "",
       OLLAMA_HOST: credentials?.ollamaBaseUrl || process.env.OLLAMA_HOST || "",
+      OLLAMA_CONTEXT_WINDOW: String(task.organization?.ollamaContextWindow || 32768),
 
       // Note: CLAUDE_CODE_OAUTH_TOKEN is NOT passed here. Claude CLI inside the
       // container uses the mounted ~/.claude credentials file which includes the

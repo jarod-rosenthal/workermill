@@ -1221,6 +1221,15 @@ case "$WORKER_PROVIDER" in
         if [ -z "${OLLAMA_HOST}" ]; then
             post_log "warning" "WARNING: OLLAMA_HOST not set, using default: http://host.docker.internal:11434" "warning"
         fi
+        # Pre-load model with configured context window via native API.
+        # The OpenAI-compat endpoint (/v1) ignores num_ctx, so we must
+        # prime the model through /api/chat to set the right KV cache size.
+        local _ollama_url="${OLLAMA_HOST:-http://host.docker.internal:11434}"
+        local _ctx="${OLLAMA_CONTEXT_WINDOW:-32768}"
+        local _model="${WORKER_MODEL:-qwen3-coder:30b}"
+        post_log "info" "Pre-loading Ollama model ${_model} with ${_ctx} context window" "info"
+        curl -sf "${_ollama_url}/api/chat" -d "{\"model\":\"${_model}\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":false,\"options\":{\"num_ctx\":${_ctx},\"num_predict\":1}}" > /dev/null 2>&1 || \
+            post_log "warning" "Failed to pre-load Ollama model (may use default context window)" "warning"
         ;;
     azure)
         if [ -z "${AZURE_API_KEY}" ]; then

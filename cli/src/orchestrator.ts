@@ -245,6 +245,108 @@ When you modify a file, include ::file_modified::path markers.`;
     }
   }
 
+  // Run inline review
+  console.log(chalk.bold("  ─── Review ───"));
+  console.log();
+
+  const reviewer = loadPersona("reviewer");
+  if (reviewer) {
+    const { provider: revProvider, model: revModel, host: revHost } = getProviderForPersona(
+      config,
+      reviewer.provider || "reviewer"
+    );
+
+    const revApiKey = config.providers[revProvider]?.apiKey;
+    if (revApiKey) {
+      const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
+      const envVar = envMap[revProvider];
+      const key = revApiKey.startsWith("{env:") ? process.env[revApiKey.slice(5, -1)] : revApiKey;
+      if (envVar && key && !process.env[envVar]) process.env[envVar] = key;
+    }
+
+    const reviewSpinner = ora({
+      text: chalk.white("Reviewer — Checking code quality"),
+      prefixText: "  ",
+    }).start();
+
+    const reviewModel = createModel(revProvider as AIProvider, revModel, revHost);
+    const reviewTools = createToolDefinitions(workingDir, reviewModel);
+
+    // Only read-only tools for reviewer
+    const reviewerTools: Record<string, AnyToolDef> = {};
+    for (const toolName of reviewer.tools) {
+      if (reviewTools[toolName as keyof typeof reviewTools]) {
+        reviewerTools[toolName] = reviewTools[toolName as keyof typeof reviewTools];
+      }
+    }
+
+    try {
+      const reviewPrompt = `Review the changes made by the following experts:
+
+${stories.map((s, i) => `${i + 1}. ${s.persona}: ${s.title} — ${s.description}`).join("\n")}
+
+Files created: ${context.filesCreated.join(", ") || "none"}
+Files modified: ${context.filesModified.join(", ") || "none"}
+
+Use the read_file, glob, and grep tools to examine the actual changes. Look for:
+- Bugs or logic errors
+- Missing error handling
+- Security issues
+- Code that doesn't follow project conventions
+- Missing tests
+
+Provide a review with a quality score (0-100) using ::review_score:: marker and a verdict using ::review_verdict::approved or ::review_verdict::needs_revision.`;
+
+      const reviewStream = streamText({
+        model: reviewModel,
+        system: reviewer.systemPrompt,
+        prompt: reviewPrompt,
+        tools: reviewerTools,
+        stopWhen: stepCountIs(30),
+        abortSignal: AbortSignal.timeout(5 * 60 * 1000),
+      });
+
+      for await (const _chunk of reviewStream.textStream) {
+        // Drive execution
+      }
+
+      const reviewText = await reviewStream.text;
+      const reviewUsage = await reviewStream.totalUsage;
+
+      reviewSpinner.stop();
+
+      // Extract review markers
+      const scoreMatch = reviewText.match(/::review_score::(\d+)/);
+      const verdictMatch = reviewText.match(/::review_verdict::(\w+)/);
+      const score = scoreMatch ? parseInt(scoreMatch[1], 10) : null;
+      const verdict = verdictMatch ? verdictMatch[1] : "unknown";
+
+      // Display review result
+      if (score !== null) {
+        const scoreColor = score >= 85 ? chalk.green : score >= 70 ? chalk.yellow : chalk.red;
+        console.log(`  ${scoreColor(`Score: ${score}/100`)} — ${verdict === "approved" ? chalk.green("APPROVED") : chalk.yellow("NEEDS REVISION")}`);
+      }
+
+      // Print review feedback (last meaningful paragraph)
+      const reviewParagraphs = reviewText.split("\n\n").filter(p => p.trim() && !p.includes("::"));
+      if (reviewParagraphs.length > 0) {
+        console.log();
+        const feedback = reviewParagraphs[reviewParagraphs.length - 1].slice(0, 300);
+        console.log(chalk.dim("  " + feedback));
+      }
+      console.log();
+
+      // Track reviewer cost
+      const revIn = reviewUsage?.inputTokens || 0;
+      const revOut = reviewUsage?.outputTokens || 0;
+      costTracker.addUsage("Reviewer", revProvider, revModel, revIn, revOut);
+    } catch (err) {
+      reviewSpinner.stop();
+      console.log(chalk.yellow(`  ⚠ Review skipped: ${err instanceof Error ? err.message : String(err)}`));
+      console.log();
+    }
+  }
+
   // Print cost summary
   console.log(chalk.bold("  ─── Session Complete ───"));
   console.log();

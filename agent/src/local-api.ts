@@ -28,6 +28,10 @@ import {
   searchGitHubIssues,
   listGitHubRepos,
 } from "./issue-fetchers.js";
+import { createPatch } from "diff";
+import { parseDependencyWarnings } from "../../api/src/services/prd-dependency-validator.js";
+import type { DependencyWarning } from "../../api/src/services/prd-dependency-validator.js";
+
 // ── Types ──────────────────────────────────────────────
 
 export interface LocalTaskInfo {
@@ -58,6 +62,46 @@ type SSEClient = {
   res: ServerResponse;
   channel: string;
 };
+
+// ── Spec Validation Gate Session ──────────────────────
+
+interface BuildSession {
+  originalPrd: string;
+  fixedPrd?: string;
+  warnings?: DependencyWarning[];
+  status: "reviewing" | "repairing" | "decomposing" | "done";
+  planningConfig: { provider: string; model: string; apiKey?: string };
+  prdSystemPrompt: string;
+  repairPrompt: string;
+  source: string;
+  githubRepo?: string;
+  boardName?: string;
+  sendEvent: (type: string, data: unknown) => void;
+  res: ServerResponse;
+  heartbeatTimer?: ReturnType<typeof setInterval>;
+}
+
+let activeBuildSession: BuildSession | null = null;
+
+function clearBuildSession(): void {
+  if (activeBuildSession?.heartbeatTimer) {
+    clearInterval(activeBuildSession.heartbeatTimer);
+  }
+  activeBuildSession = null;
+}
+
+function startReviewHeartbeat(session: BuildSession): void {
+  session.heartbeatTimer = setInterval(() => {
+    try { session.res.write(": heartbeat\n\n"); } catch { clearBuildSession(); }
+  }, 30_000);
+}
+
+function stopReviewHeartbeat(session: BuildSession): void {
+  if (session.heartbeatTimer) {
+    clearInterval(session.heartbeatTimer);
+    session.heartbeatTimer = undefined;
+  }
+}
 
 // ── Event Bus ──────────────────────────────────────────
 
@@ -663,6 +707,59 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         }
       }
 
+      // ── Spec validation gate ──
+      let repairPrompt = "";
+      try {
+        const valData = await cloudProxy("GET", "/api/agent/validation-prompt") as {
+          validationPrompt?: string;
+          repairPrompt?: string;
+        };
+        if (valData?.validationPrompt) {
+          repairPrompt = valData.repairPrompt || "";
+          sendEvent("progress", { message: "Checking spec for dependency and quality issues..." });
+
+          const valPrompt = `${valData.validationPrompt}\n\n---\n\nAnalyze this project specification for dependency compatibility and content quality issues.\n\nSpec statistics: ${prdContent.split(/\s+/).length} words, ${prdContent.length} characters.\n\n---\n\n${prdContent}`;
+
+          let validationResult: string;
+          if (planningConfig.provider === "anthropic" || !planningConfig.provider) {
+            validationResult = await decomposePrdViaAgentSdk(valPrompt, "", (msg) => {
+              sendEvent("progress", { message: msg });
+            });
+          } else {
+            validationResult = await decomposePrdViaAiSdk(valPrompt, { ...planningConfig }, "", (msg) => {
+              sendEvent("progress", { message: msg });
+            });
+          }
+
+          const warnings = parseDependencyWarnings(validationResult);
+
+          if (warnings.length > 0) {
+            activeBuildSession = {
+              originalPrd: prdContent,
+              warnings,
+              status: "reviewing",
+              planningConfig,
+              prdSystemPrompt: prdSystemPrompt || "",
+              repairPrompt,
+              source: body.source || "text",
+              githubRepo: body.githubRepo,
+              boardName: body.boardName,
+              sendEvent,
+              res,
+            };
+            startReviewHeartbeat(activeBuildSession);
+            req.on("close", () => clearBuildSession());
+
+            sendEvent("spec_review", { warnings });
+            return; // PAUSE — user calls /proceed or /confirm-fix
+          }
+
+          sendEvent("progress", { message: "No dependency issues found" });
+        }
+      } catch {
+        sendEvent("progress", { message: "Spec validation skipped" });
+      }
+
       sendEvent("progress", { message: `Starting PRD decomposition...` });
 
       // Decompose PRD locally — routes to Claude Agent SDK (Anthropic) or Vercel AI SDK (others)
@@ -698,6 +795,144 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       }
     }
     return; // Response already ended in try or catch
+  }
+
+  // POST /api/prd/build/proceed — user action after spec_review
+  if (req.method === "POST" && path === "/api/prd/build/proceed") {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const session = activeBuildSession;
+      if (!session || session.status === "decomposing") {
+        return json(res, { error: "No active build session" }, 404);
+      }
+
+      if (body.action === "proceed") {
+        stopReviewHeartbeat(session);
+        session.status = "decomposing";
+        json(res, { accepted: true }, 202);
+
+        (async () => {
+          try {
+            session.sendEvent("progress", { message: "Starting PRD decomposition..." });
+            const decomposed = await decomposePrdLocal(
+              session.originalPrd, session.planningConfig,
+              session.prdSystemPrompt, (msg) => session.sendEvent("progress", { message: msg }),
+            );
+            session.sendEvent("progress", { message: `Creating board with ${decomposed.cards.length} cards...` });
+            const result = await cloudProxy!("POST", "/api/prd/decompose", {
+              source: session.source, content: session.originalPrd,
+              githubRepo: session.githubRepo, boardName: session.boardName,
+              preDecomposed: decomposed,
+            });
+            session.sendEvent("done", { result });
+          } catch (err) {
+            session.sendEvent("error", { error: err instanceof Error ? err.message : String(err) });
+          } finally {
+            try { session.res.end(); } catch { /* already closed */ }
+            clearBuildSession();
+          }
+        })();
+        return;
+      }
+
+      if (body.action === "fix") {
+        stopReviewHeartbeat(session);
+        session.status = "repairing";
+        json(res, { accepted: true }, 202);
+
+        (async () => {
+          try {
+            session.sendEvent("repairing_spec", { message: "Repairing spec..." });
+
+            const warningsList = (session.warnings || [])
+              .map((w, i) => `${i + 1}. [${w.severity}] ${w.category}: ${w.message}\n   Suggestion: ${w.suggestion}`)
+              .join("\n");
+            const repairFullPrompt = `${session.repairPrompt}\n\n---\n\nFix the following issues in this project specification:\n\n## Issues to Fix\n\n${warningsList}\n\n## Original Specification\n\n${session.originalPrd}`;
+
+            let fixedPrd: string;
+            if (session.planningConfig.provider === "anthropic" || !session.planningConfig.provider) {
+              fixedPrd = await decomposePrdViaAgentSdk(repairFullPrompt, "", (msg) => {
+                session.sendEvent("repairing_spec", { message: msg });
+              });
+            } else {
+              fixedPrd = await decomposePrdViaAiSdk(repairFullPrompt, { ...session.planningConfig }, "", (msg) => {
+                session.sendEvent("repairing_spec", { message: msg });
+              });
+            }
+
+            const diff = createPatch("spec.md", session.originalPrd, fixedPrd, "original", "fixed");
+            session.fixedPrd = fixedPrd;
+            session.status = "reviewing";
+            startReviewHeartbeat(session);
+            session.sendEvent("repair_complete", { fixedPrd, diff });
+          } catch (err) {
+            session.status = "reviewing";
+            startReviewHeartbeat(session);
+            session.sendEvent("error", { error: `Repair failed: ${err instanceof Error ? err.message : String(err)}` });
+          }
+        })();
+        return;
+      }
+
+      return json(res, { error: "Invalid action" }, 400);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // POST /api/prd/build/confirm-fix — accept or reject repaired spec
+  if (req.method === "POST" && path === "/api/prd/build/confirm-fix") {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const session = activeBuildSession;
+      if (!session || session.status === "decomposing") {
+        return json(res, { error: "No active build session" }, 404);
+      }
+
+      if (body.action === "reject") {
+        session.fixedPrd = undefined;
+        session.status = "reviewing";
+        session.sendEvent("spec_review", { warnings: session.warnings });
+        return json(res, { accepted: true }, 202);
+      }
+
+      if (body.action === "accept") {
+        if (!session.fixedPrd) {
+          return json(res, { error: "No fixed spec available" }, 400);
+        }
+
+        stopReviewHeartbeat(session);
+        session.status = "decomposing";
+        json(res, { accepted: true }, 202);
+
+        (async () => {
+          try {
+            session.sendEvent("progress", { message: "Starting PRD decomposition with repaired spec..." });
+            const decomposed = await decomposePrdLocal(
+              session.fixedPrd!, session.planningConfig,
+              session.prdSystemPrompt, (msg) => session.sendEvent("progress", { message: msg }),
+            );
+            session.sendEvent("progress", { message: `Creating board with ${decomposed.cards.length} cards...` });
+            const result = await cloudProxy!("POST", "/api/prd/decompose", {
+              source: session.source, content: session.fixedPrd,
+              githubRepo: session.githubRepo, boardName: session.boardName,
+              preDecomposed: decomposed,
+            });
+            session.sendEvent("done", { result });
+          } catch (err) {
+            session.sendEvent("error", { error: err instanceof Error ? err.message : String(err) });
+          } finally {
+            try { session.res.end(); } catch { /* already closed */ }
+            clearBuildSession();
+          }
+        })();
+        return;
+      }
+
+      return json(res, { error: "Invalid action" }, 400);
+    } catch (err) {
+      return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+    }
   }
 
   // ── Agent Planning Endpoints ──

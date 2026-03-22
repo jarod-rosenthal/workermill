@@ -563,12 +563,14 @@ If there are issues, be specific about which files and what needs to change.`;
         const scoreColor = score >= approvalThreshold ? chalk.green : score >= 60 ? chalk.yellow : chalk.red;
         console.log(`  ${scoreColor(`Score: ${score}/100`)} — ${approved ? chalk.green("APPROVED") : chalk.yellow("NEEDS REVISION")}`);
 
-        // Print review feedback
-        const reviewParagraphs = reviewText.split("\n\n").filter(p => p.trim() && !p.includes("::"));
-        if (reviewParagraphs.length > 0) {
+        // Print full review feedback (strip marker lines only)
+        const feedbackLines = reviewText.split("\n").filter(l => !l.includes("::review_score::") && !l.includes("::review_verdict::"));
+        const feedback = feedbackLines.join("\n").trim();
+        if (feedback) {
           console.log();
-          const feedback = reviewParagraphs[reviewParagraphs.length - 1].slice(0, 500);
-          console.log(chalk.dim("  " + feedback));
+          for (const line of feedback.split("\n")) {
+            console.log(chalk.dim("  " + line));
+          }
         }
         console.log();
 
@@ -706,10 +708,36 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
   // Git commit step
   try {
     const { execSync } = await import("child_process");
-    const diff = execSync("git diff --stat", { cwd: workingDir, encoding: "utf-8" }).trim();
-    if (diff) {
+
+    // Auto-init git if not a repo
+    try {
+      execSync("git rev-parse --git-dir", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
+    } catch {
+      console.log(chalk.dim("  Initializing git repository..."));
+      execSync("git init", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
+      console.log(chalk.green("  ✓ Git repo initialized"));
+    }
+
+    const diff = execSync("git diff --stat", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+    // Also check for untracked files
+    const untracked = execSync("git ls-files --others --exclude-standard", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+    const hasChanges = diff || untracked;
+
+    if (hasChanges) {
       console.log(chalk.bold("  ─── Changes ───"));
-      console.log(chalk.dim("  " + diff.split("\n").join("\n  ")));
+      if (diff) {
+        console.log(chalk.dim("  " + diff.split("\n").join("\n  ")));
+      }
+      if (untracked) {
+        const untrackedFiles = untracked.split("\n").slice(0, 20);
+        console.log(chalk.dim("  New files:"));
+        for (const f of untrackedFiles) {
+          console.log(chalk.dim(`    + ${f}`));
+        }
+        if (untracked.split("\n").length > 20) {
+          console.log(chalk.dim(`    ... and ${untracked.split("\n").length - 20} more`));
+        }
+      }
       console.log();
 
       if (!trustAll) {
@@ -718,18 +746,25 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
           // Stage specific files from context (NOT git add -A)
           const filesToStage = [...context.filesCreated, ...context.filesModified].filter(Boolean);
           if (filesToStage.length > 0) {
-            execSync(`git add ${filesToStage.map(f => `"${f}"`).join(" ")}`, { cwd: workingDir });
+            for (const f of filesToStage) {
+              try {
+                execSync(`git add "${f}"`, { cwd: workingDir, stdio: "pipe" });
+              } catch { /* file may not exist */ }
+            }
           } else {
-            execSync("git add -u", { cwd: workingDir }); // Only modified tracked files
+            // Fallback: stage tracked modified + all new files from context
+            execSync("git add -u", { cwd: workingDir, stdio: "pipe" });
           }
           const storyTitles = sorted.map(s => s.title).join(", ");
           const msg = `feat: ${storyTitles}`.slice(0, 72);
-          execSync(`git commit -m "${msg.replace(/"/g, '\\"')}"`, { cwd: workingDir });
+          execSync(`git commit -m "${msg.replace(/"/g, '\\"')}"`, { cwd: workingDir, stdio: "pipe" });
           console.log(chalk.green("  ✓ Changes committed"));
         }
       }
     }
-  } catch { /* not a git repo or no changes */ }
+  } catch (err) {
+    // Silently skip — don't dump git help text
+  }
 
   // Print cost summary
   console.log(chalk.bold("  ─── Session Complete ───"));

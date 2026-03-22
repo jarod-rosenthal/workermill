@@ -1,6 +1,48 @@
 import { execSync } from "child_process";
 
 const REPO = "jarod-rosenthal/test";
+const BASELINE_TAG = "e2e-baseline";
+
+/**
+ * Reset the test repo's main branch to the tagged baseline commit.
+ * This removes all files/branches created by previous test runs.
+ * The repo is dedicated to E2E testing — force push is safe.
+ */
+export async function resetRepoToBaseline(repo = REPO): Promise<void> {
+  try {
+    // Get baseline tag SHA
+    const sha = execSync(
+      `gh api repos/${repo}/git/ref/tags/${BASELINE_TAG} --jq '.object.sha' 2>/dev/null`,
+      { encoding: "utf-8", timeout: 10000 },
+    ).trim();
+    if (!sha) throw new Error("Baseline tag not found");
+
+    // Force-update main to the baseline SHA
+    execSync(
+      `gh api -X PATCH repos/${repo}/git/refs/heads/main -f sha="${sha}" -f force=true 2>/dev/null`,
+      { encoding: "utf-8", timeout: 10000 },
+    );
+
+    // Clean up all story/* and INT-* branches
+    await cleanupBranches("story/");
+
+    // Close any open PRs (they're now orphaned)
+    try {
+      const prs = execSync(
+        `gh pr list --repo ${repo} --state open --json number --jq '.[].number' 2>/dev/null`,
+        { encoding: "utf-8", timeout: 10000 },
+      ).trim();
+      if (prs) {
+        for (const num of prs.split("\n")) {
+          execSync(`gh pr close ${num} --repo ${repo} 2>/dev/null`, { timeout: 5000 });
+        }
+      }
+    } catch { /* best effort */ }
+  } catch (err) {
+    console.error(`Failed to reset repo to baseline: ${err}`);
+    throw err;
+  }
+}
 
 /**
  * Verify a branch exists on GitHub matching a pattern.

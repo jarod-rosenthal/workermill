@@ -16,7 +16,7 @@ import { spawn } from "child_process";
 import { generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { createOllama } from "ollama-ai-provider";
+
 import { logger } from "../utils/logger.js";
 import type { ExecutionPlan, PlannedStory } from "./planning-agent-local.js";
 
@@ -285,8 +285,8 @@ async function runCriticWithAiSdk(
     }
     case "ollama": {
       const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-      const ollama = createOllama({ baseURL: baseUrl });
-      model = ollama(modelName);
+      const client = createOpenAI({ baseURL: `${baseUrl}/v1`, apiKey: "ollama" });
+      model = client(modelName);
       break;
     }
     default:

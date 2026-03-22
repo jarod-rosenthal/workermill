@@ -19,7 +19,7 @@ import { generateText, streamText, LanguageModel } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { createOllama } from "ollama-ai-provider";
+
 import { getProviderCredentials } from "../config/index.js";
 import type { ProviderId } from "../providers/types.js";
 import { logger } from "../utils/logger.js";
@@ -678,8 +678,8 @@ export function createAiSdkModel(
     }
     case "ollama": {
       const baseUrl = ollamaBaseUrl || process.env.OLLAMA_HOST || "http://localhost:11434";
-      const ollama = createOllama({ baseURL: baseUrl });
-      return ollama(modelName) as unknown as LanguageModel;
+      const client = createOpenAI({ baseURL: `${baseUrl}/v1`, apiKey: "ollama" });
+      return client(modelName) as unknown as LanguageModel;
     }
     default:
       throw new Error(`Unknown provider: ${provider}. Supported: anthropic, openai, google, ollama`);

@@ -31,13 +31,14 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
     slug: "local",
     scmProvider: "github",
     maxConcurrentWorkers: 1,
-    // Models
-    defaultWorkerModel: "claude-sonnet-4-6",
+    // Models — worker execution uses Ollama; planning/management stays on Anthropic
+    defaultWorkerModel: "qwen3-coder:30b",
     managerModelId: "claude-opus-4-6",
     planningAgentModel: "claude-opus-4-6",
-    primaryProvider: "anthropic",
+    primaryProvider: "ollama",
     planningAgentProvider: "anthropic",
     managerProvider: "anthropic",
+    ollamaBaseUrl: process.env.OLLAMA_HOST || "http://host.docker.internal:11434",
     // Capacity
     maxParallelExperts: 10,
     ralphMaxStories: 10,
@@ -68,12 +69,25 @@ export async function seedLocalModeIfNeeded(): Promise<void> {
     blockerWaitTimeoutMinutes: 20,
   };
 
-  // Find or create default org
+  // Find or create default org, and keep settings in sync with DEFAULTS
   let org = await orgRepo.findOne({ where: { name: LOCAL_ORG_NAME } });
   if (!org) {
     org = orgRepo.create({ name: LOCAL_ORG_NAME, ...DEFAULTS });
     await orgRepo.save(org);
     logger.info("Created local organization", { orgId: org.id });
+  } else {
+    // Only fill in missing fields — never overwrite user-configured settings
+    let updated = false;
+    for (const [key, value] of Object.entries(DEFAULTS)) {
+      if ((org as unknown as Record<string, unknown>)[key] == null) {
+        (org as unknown as Record<string, unknown>)[key] = value;
+        updated = true;
+      }
+    }
+    if (updated) {
+      await orgRepo.save(org);
+      logger.info("Filled missing local organization defaults", { orgId: org.id });
+    }
   }
 
   // Find or create admin user

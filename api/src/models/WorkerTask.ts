@@ -630,7 +630,7 @@ export class WorkerTask {
 
   isTerminal(): boolean {
     // True terminal states - nothing more will happen
-    return ["completed", "deployed", "failed", "cancelled"].includes(this.status);
+    return ["completed", "deployed", "failed", "cancelled", "review_rejected"].includes(this.status);
   }
 
   isActive(): boolean {

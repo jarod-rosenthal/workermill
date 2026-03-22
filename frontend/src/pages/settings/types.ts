@@ -418,11 +418,6 @@ export const MODEL_OPTIONS: Record<string, ModelOption[]> = {
   ],
   ollama: [
     {
-      value: "qwen2.5-coder:32b",
-      label: "Qwen 2.5 Coder 32B",
-      tier: "Recommended",
-    },
-    {
       value: "qwen3-coder:30b",
       label: "Qwen 3 Coder 30B",
       tier: "Recommended",

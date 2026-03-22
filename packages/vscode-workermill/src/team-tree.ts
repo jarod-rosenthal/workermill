@@ -196,11 +196,15 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
         "pr_created", "review_requested", "pr_approved", "review_approved",
         "completed", "deployed",
       ]);
+      const terminalFailStatuses = new Set([
+        "failed", "cancelled", "review_rejected",
+      ]);
       const attentionStatuses = new Set([
-        "failed", "escalated", "cancelled", "review_rejected",
+        "escalated",
       ]);
       const active = this.tasks.filter((t) => activeStatuses.has(t.status));
       const approved = this.tasks.filter((t) => doneStatuses.has(t.status));
+      const terminalFailed = this.tasks.filter((t) => terminalFailStatuses.has(t.status));
       const needsAttention = this.tasks.filter((t) => attentionStatuses.has(t.status));
 
       const items: TreeItem[] = [];
@@ -263,7 +267,18 @@ export class TeamTreeProvider implements vscode.TreeDataProvider<TreeItem> {
         items.push(new InfoTreeItem("PR Approved", "No completed tasks yet", "$(check-all)"));
       }
 
-      // Needs Attention — failed, escalated, or cancelled tasks
+      // Failed/Cancelled — terminal failure states (collapsed by default)
+      if (terminalFailed.length > 0) {
+        items.push(new InfoTreeItem(
+          `Failed/Cancelled (${terminalFailed.length})`,
+          undefined,
+          "$(error)",
+          vscode.TreeItemCollapsibleState.Collapsed,
+          terminalFailed.map((t) => new TaskTreeItem(t)),
+        ));
+      }
+
+      // Needs Attention — escalated tasks requiring user action
       if (needsAttention.length > 0) {
         items.push(new InfoTreeItem(
           `Needs Attention (${needsAttention.length})`,

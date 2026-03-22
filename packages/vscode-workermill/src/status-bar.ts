@@ -91,10 +91,14 @@ export class StatusBar {
       return;
     }
 
-    const terminalStatuses = new Set(["completed", "deployed", "failed", "cancelled", "review_rejected",
-      "pr_created", "review_requested", "pr_approved", "review_approved"]);
-    const attentionStatuses = new Set(["failed", "escalated", "review_rejected"]);
-    const active = this.tasks.filter((t) => !terminalStatuses.has(t.status) && !attentionStatuses.has(t.status));
+    const nonActiveStatuses = new Set([
+      // Terminal
+      "completed", "deployed", "failed", "cancelled", "review_rejected",
+      // Waiting (done with active work)
+      "pr_created", "review_requested", "pr_approved", "review_approved",
+    ]);
+    const attentionStatuses = new Set(["failed", "escalated", "cancelled", "review_rejected"]);
+    const active = this.tasks.filter((t) => !nonActiveStatuses.has(t.status) && !attentionStatuses.has(t.status));
     const attention = this.tasks.filter((t) => attentionStatuses.has(t.status));
 
     const sandboxTag = this.sandbox === "docker" ? " $(shield) Docker" : "";

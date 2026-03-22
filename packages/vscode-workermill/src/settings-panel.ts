@@ -1784,6 +1784,15 @@ export class SettingsPanel {
       { value: "gemini-3-pro-preview", label: "Gemini 3 Pro" },
       { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
     ];
+    const OLLAMA_MODELS = [
+      { value: "qwen3-coder:30b", label: "Qwen 3 Coder 30B" },
+      { value: "devstral-small-2:24b-instruct-2512-q8_0", label: "Devstral Small 24B" },
+      { value: "qwen2.5-coder:14b", label: "Qwen 2.5 Coder 14B" },
+      { value: "deepseek-r1:70b", label: "DeepSeek R1 70B" },
+      { value: "llama3.3:70b", label: "Llama 3.3 70B" },
+      { value: "mistral:7b-instruct", label: "Mistral 7B Instruct" },
+      { value: "llama3.1:8b", label: "Llama 3.1 8B" },
+    ];
     // Premium-only models for tech lead and reviewer roles
     const ANTHROPIC_PREMIUM = ANTHROPIC_MODELS.filter(m => m.value !== "claude-haiku-4-5-20251001");
     const OPENAI_PREMIUM = OPENAI_MODELS.filter(m => m.value !== "gpt-5-mini");
@@ -1827,6 +1836,16 @@ export class SettingsPanel {
           gg.appendChild(o);
         });
         sel.appendChild(gg);
+
+        const lg = document.createElement("optgroup");
+        lg.label = "Ollama (Local)";
+        OLLAMA_MODELS.forEach(m => {
+          const o = document.createElement("option");
+          o.value = m.value; o.textContent = m.label;
+          if (m.value === currentValue) o.selected = true;
+          lg.appendChild(o);
+        });
+        sel.appendChild(lg);
       } else {
         aModels.forEach(m => {
           const o = document.createElement("option");

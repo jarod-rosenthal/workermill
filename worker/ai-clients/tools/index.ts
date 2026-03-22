@@ -9,9 +9,10 @@ import * as editFileTool from "./edit-file.js";
 import * as globTool from "./glob.js";
 import * as grepTool from "./grep.js";
 import * as lsTool from "./ls.js";
+import * as fetchTool from "./fetch.js";
 
 // Re-export all tool modules
-export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool };
+export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool };
 
 /**
  * Creates Vercel AI SDK tool definitions for use with generateText().
@@ -280,6 +281,22 @@ export function createToolDefinitions(workingDir: string) {
         const result = await lsTool.execute({ path: resolvedPath, ignore, maxDepth, maxFiles });
         if (result.success) {
           return `${result.tree}\n\n${result.totalFiles} files, ${result.totalDirs} directories${result.truncated ? " (truncated)" : ""}`;
+        }
+        return `Error: ${result.error}`;
+      },
+    }),
+
+    fetch: tool({
+      description: fetchTool.description,
+      inputSchema: z.object({
+        url: z.string().describe("The URL to fetch"),
+        format: z.enum(["text", "markdown", "html"]).optional().describe("Output format (default: markdown)"),
+        timeout: z.number().optional().describe("Timeout in milliseconds (default: 30000, max: 120000)"),
+      }),
+      execute: async ({ url, format, timeout }) => {
+        const result = await fetchTool.execute({ url, format, timeout });
+        if (result.success) {
+          return `Content from ${result.url} (${result.contentType || "unknown"}):\n\n${result.content}`;
         }
         return `Error: ${result.error}`;
       },

@@ -1,9 +1,10 @@
 import readline from "readline";
+import { execSync } from "child_process";
 import chalk from "chalk";
 import { saveConfig, type CliConfig, type ProviderConfig } from "./config.js";
 
 const PROVIDERS = [
-  { name: "ollama", display: "Ollama (local, no API key needed)", needsKey: false, defaultModel: "qwen2.5-coder:32b" },
+  { name: "ollama", display: "Ollama (local, no API key needed)", needsKey: false, defaultModel: "qwen3-coder:30b" },
   { name: "anthropic", display: "Anthropic (Claude)", needsKey: true, defaultModel: "claude-sonnet-4-6", envVar: "ANTHROPIC_API_KEY" },
   { name: "openai", display: "OpenAI (GPT)", needsKey: true, defaultModel: "gpt-4o", envVar: "OPENAI_API_KEY" },
   { name: "google", display: "Google (Gemini)", needsKey: true, defaultModel: "gemini-2.5-pro", envVar: "GOOGLE_API_KEY" },
@@ -51,19 +52,55 @@ export async function runSetup(): Promise<CliConfig> {
   }
 
   if (selected.name === "ollama") {
-    providerConfig.host = "http://localhost:11434";
-    // Try to connect
+    // Try multiple hosts: localhost first, then WSL host IP (for Windows Ollama)
+    const hostsToTry = ["http://localhost:11434"];
+
+    // Detect WSL and add the Windows host IP
     try {
-      const response = await globalThis.fetch("http://localhost:11434/api/tags");
-      if (response.ok) {
-        console.log(chalk.green("  ✓ Connected to Ollama at localhost:11434"));
-        const data = (await response.json()) as { models?: { name: string }[] };
-        if (data.models && data.models.length > 0) {
-          console.log(chalk.dim(`  Available models: ${data.models.map((m: { name: string }) => m.name).join(", ")}`));
-        }
+      const gateway = execSync("ip route show default 2>/dev/null | awk '{print $3}'", { encoding: "utf-8" }).trim();
+      if (gateway) {
+        hostsToTry.push(`http://${gateway}:11434`);
       }
-    } catch {
+    } catch { /* not on WSL */ }
+
+    // Also check OLLAMA_HOST env var
+    if (process.env.OLLAMA_HOST) {
+      const envHost = process.env.OLLAMA_HOST.startsWith("http")
+        ? process.env.OLLAMA_HOST
+        : `http://${process.env.OLLAMA_HOST}`;
+      hostsToTry.unshift(envHost);
+    }
+
+    let connectedHost: string | null = null;
+    let models: { name: string }[] = [];
+
+    for (const host of hostsToTry) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+        const response = await globalThis.fetch(`${host}/api/tags`, { signal: controller.signal });
+        clearTimeout(timeout);
+        if (response.ok) {
+          const data = (await response.json()) as { models?: { name: string }[] };
+          connectedHost = host;
+          models = data.models || [];
+          break;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    if (connectedHost) {
+      providerConfig.host = connectedHost;
+      console.log(chalk.green(`  ✓ Connected to Ollama at ${connectedHost}`));
+      if (models.length > 0) {
+        console.log(chalk.dim(`  Available models: ${models.map(m => m.name).join(", ")}`));
+      }
+    } else {
+      providerConfig.host = "http://localhost:11434";
       console.log(chalk.yellow("  ⚠ Could not connect to Ollama. Make sure it's running."));
+      console.log(chalk.dim("    Tried: " + hostsToTry.join(", ")));
     }
   }
 

@@ -33,7 +33,7 @@ interface SharedContext {
 export async function classifyComplexity(
   config: CliConfig,
   userInput: string
-): Promise<{ isMulti: boolean; stories?: Story[]; reason: string }> {
+): Promise<{ isMulti: boolean; reason: string }> {
   const { provider, model: modelName, apiKey, host } = getProviderForPersona(config);
 
   if (apiKey) {
@@ -50,19 +50,8 @@ export async function classifyComplexity(
       schema: z.object({
         complexity: z.enum(["single", "multi"]),
         reason: z.string(),
-        stories: z.array(z.object({
-          id: z.string().describe("Short kebab-case slug for this story"),
-          title: z.string(),
-          persona: z.string(),
-          description: z.string(),
-          dependsOn: z.array(z.string()).optional().describe("IDs of stories this depends on"),
-        })).optional(),
       }),
-      prompt: `Analyze this coding task. If it involves multiple distinct concerns that would benefit from different specialist personas working sequentially, classify as "multi" and provide a story breakdown with persona assignments. Otherwise classify as "single".
-
-Give each story a short kebab-case id (e.g., "setup-db", "add-api-routes"). Use these IDs in dependsOn to express ordering constraints.
-
-Available personas: architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer
+      prompt: `Analyze this coding task. If it involves multiple distinct concerns that would benefit from different specialist personas (e.g., database + backend + frontend + devops), classify as "multi". If it's a focused task that one developer could handle, classify as "single". Just classify — do not break down into stories.
 
 Task:
 ${userInput}`,
@@ -70,34 +59,20 @@ ${userInput}`,
 
     return {
       isMulti: result.object.complexity === "multi",
-      stories: result.object.stories,
       reason: result.object.reason,
     };
   } catch (err) {
-    // Fallback to text-based classification if structured output fails
+    // Fallback to text-based classification
     try {
       const textResult = await generateText({
         model,
-        prompt: `Classify this task as "single" or "multi". If multi, list stories with personas as JSON in a \`\`\`json code fence.
+        prompt: `Is this task "single" (one developer) or "multi" (needs multiple specialists)? Respond with just "single" or "multi" and a brief reason.
 
-Give each story a short kebab-case id (e.g., "setup-db", "add-api-routes"). Use these IDs in dependsOn to express ordering constraints.
-
-Available personas: architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer
-
-Task: ${userInput}
-
-Respond with JSON: {"complexity": "single"|"multi", "reason": "...", "stories": [{"id": "...", "title": "...", "persona": "...", "description": "...", "dependsOn": [...]}]}`,
+Task: ${userInput}`,
       });
 
-      const jsonMatch = textResult.text.match(/\{[\s\S]*"complexity"[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return {
-          isMulti: parsed.complexity === "multi",
-          stories: parsed.stories,
-          reason: parsed.reason || "",
-        };
-      }
+      const isMulti = /\bmulti\b/i.test(textResult.text);
+      return { isMulti, reason: textResult.text.slice(0, 200) };
     } catch { /* double fallback failed */ }
 
     return { isMulti: false, reason: `Classification failed: ${err instanceof Error ? err.message : String(err)}` };
@@ -136,31 +111,101 @@ function topologicalSort(stories: Story[]): Story[] {
 
 async function runPlannerCriticLoop(
   config: CliConfig,
-  stories: Story[],
+  userTask: string,
   workingDir: string,
-): Promise<boolean> {
+): Promise<Story[]> {
   const planner = loadPersona("planner");
   const critic = loadPersona("critic");
-  if (!planner || !critic) {
-    console.log(chalk.dim("  Skipping planner/critic (personas not found)"));
-    return true;
-  }
 
   const { provider: pProvider, model: pModel, host: pHost } = getProviderForPersona(config, "planner");
-  const plannerModel = createModel(pProvider as AIProvider, pModel, pHost);
-  const plannerTools = createToolDefinitions(workingDir, plannerModel);
-
-  const readOnlyNames = planner.tools;
-  const readOnlyTools: Record<string, AnyToolDef> = {};
-  for (const toolName of readOnlyNames) {
-    if (plannerTools[toolName as keyof typeof plannerTools]) {
-      readOnlyTools[toolName] = plannerTools[toolName as keyof typeof plannerTools];
+  if (pProvider) {
+    const pApiKey = config.providers[pProvider]?.apiKey;
+    if (pApiKey) {
+      const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
+      const envVar = envMap[pProvider];
+      if (envVar && !process.env[envVar]) {
+        const key = pApiKey.startsWith("{env:") ? process.env[pApiKey.slice(5, -1)] : pApiKey;
+        if (key) process.env[envVar] = key;
+      }
     }
   }
 
-  const storySummary = stories.map(s => `- ${s.id}: ${s.title} (${s.persona}) — ${s.description}`).join("\n");
+  const plannerModel = createModel(pProvider as AIProvider, pModel, pHost);
+  const plannerTools = createToolDefinitions(workingDir, plannerModel);
 
-  // Build critic model + tools once (reused each iteration)
+  const readOnlyTools: Record<string, AnyToolDef> = {};
+  if (planner) {
+    for (const toolName of planner.tools) {
+      if (plannerTools[toolName as keyof typeof plannerTools]) {
+        readOnlyTools[toolName] = plannerTools[toolName as keyof typeof plannerTools];
+      }
+    }
+  }
+
+  const plannerSystemPrompt = planner?.systemPrompt || "You are an implementation planner. Explore the codebase and create a detailed plan.";
+
+  const storySchema = `Return your plan as a JSON code block with this exact structure:
+\`\`\`json
+{
+  "stories": [
+    {
+      "id": "short-kebab-case-id",
+      "title": "Brief title",
+      "persona": "persona_name",
+      "description": "Detailed description of what this story should implement",
+      "dependsOn": ["id-of-dependency"]
+    }
+  ]
+}
+\`\`\`
+
+Available personas: architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer
+
+Each story should be a focused unit of work for ONE persona. Order them by dependencies.`;
+
+  // First pass: planner explores codebase and produces stories
+  const spinner = ora({ stream: process.stdout, text: chalk.white("Planning — exploring codebase and designing stories..."), prefixText: "  " }).start();
+
+  const planStream = streamText({
+    model: plannerModel,
+    system: plannerSystemPrompt,
+    prompt: `Analyze this task and create an implementation plan with story breakdown.\n\nTask: ${userTask}\n\nWorking directory: ${workingDir}\n\nUse your tools to explore the codebase first, then produce the plan.\n\n${storySchema}`,
+    tools: readOnlyTools as ToolSet,
+    stopWhen: stepCountIs(30),
+    abortSignal: AbortSignal.timeout(5 * 60 * 1000),
+  });
+
+  for await (const _chunk of planStream.textStream) { /* drive */ }
+  const planText = await planStream.text;
+  spinner.stop();
+
+  // Parse stories from planner output
+  let stories = parseStoriesFromText(planText);
+
+  if (stories.length === 0) {
+    console.log(chalk.yellow("  ⚠ Planner didn't produce structured stories, falling back to single fullstack story"));
+    stories = [{
+      id: "implement",
+      title: userTask.slice(0, 60),
+      persona: "fullstack_developer",
+      description: userTask,
+    }];
+  }
+
+  // Show what the planner came up with
+  console.log(chalk.bold(`  Plan: ${stories.length} stories`));
+  stories.forEach((s, i) => {
+    const persona = s.persona.replace(/_/g, " ");
+    console.log(chalk.dim(`    ${i + 1}. ${chalk.cyan(persona)}: ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`));
+  });
+  console.log();
+
+  // Critic pass (skip if no critic persona)
+  if (!critic) {
+    console.log(chalk.dim("  Skipping critic (persona not found)"));
+    return stories;
+  }
+
   const { provider: cProvider, model: cModel, host: cHost } = getProviderForPersona(config, "critic");
   const criticModel = createModel(cProvider as AIProvider, cModel, cHost);
   const criticTools = createToolDefinitions(workingDir, criticModel);
@@ -170,22 +215,6 @@ async function runPlannerCriticLoop(
       criticReadOnly[name] = criticTools[name as keyof typeof criticTools];
     }
   }
-
-  // First pass: plan + critique
-  const spinner = ora({ stream: process.stdout, text: chalk.white("Planning implementation..."), prefixText: "  " }).start();
-
-  const planStream = streamText({
-    model: plannerModel,
-    system: planner.systemPrompt,
-    prompt: `Create an implementation plan for these stories:\n\n${storySummary}\n\nWorking directory: ${workingDir}`,
-    tools: readOnlyTools as ToolSet,
-    stopWhen: stepCountIs(30),
-    abortSignal: AbortSignal.timeout(5 * 60 * 1000),
-  });
-
-  for await (const _chunk of planStream.textStream) { /* drive */ }
-  const planText = await planStream.text;
-  spinner.stop();
 
   const criticSpinner = ora({ stream: process.stdout, text: chalk.white("Critic reviewing plan..."), prefixText: "  " }).start();
 
@@ -208,7 +237,7 @@ async function runPlannerCriticLoop(
 
   if (score >= 80) {
     console.log(chalk.green("  ✓ Plan approved"));
-    return true;
+    return stories;
   }
 
   // One revision pass with critic feedback
@@ -218,25 +247,37 @@ async function runPlannerCriticLoop(
 
   const revisionStream = streamText({
     model: plannerModel,
-    system: planner.systemPrompt,
-    prompt: `Create an implementation plan for these stories:\n\n${storySummary}\n\nWorking directory: ${workingDir}\n\n## Critic feedback (address these issues):\n${criticText.slice(0, 2000)}`,
+    system: plannerSystemPrompt,
+    prompt: `Revise this implementation plan based on critic feedback.\n\nOriginal task: ${userTask}\n\nWorking directory: ${workingDir}\n\n## Critic feedback (address these issues):\n${criticText.slice(0, 2000)}\n\n${storySchema}`,
     tools: readOnlyTools as ToolSet,
     stopWhen: stepCountIs(30),
     abortSignal: AbortSignal.timeout(5 * 60 * 1000),
   });
 
   for await (const _chunk of revisionStream.textStream) { /* drive */ }
-  const revisedPlan = await revisionStream.text;
+  const revisedText = await revisionStream.text;
   revisionSpinner.stop();
 
+  // Parse revised stories
+  const revisedStories = parseStoriesFromText(revisedText);
+  if (revisedStories.length > 0) {
+    stories = revisedStories;
+    console.log(chalk.bold(`  Revised plan: ${stories.length} stories`));
+    stories.forEach((s, i) => {
+      const persona = s.persona.replace(/_/g, " ");
+      console.log(chalk.dim(`    ${i + 1}. ${chalk.cyan(persona)}: ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`));
+    });
+  }
+
+  // Quick re-score
   const criticSpinner2 = ora({ stream: process.stdout, text: chalk.white("Critic reviewing revision..."), prefixText: "  " }).start();
 
   const criticStream2 = streamText({
     model: criticModel,
     system: critic.systemPrompt,
-    prompt: `Review this implementation plan and output a score using ::review_score::N (0-100) and ::review_verdict::approve or ::review_verdict::revise markers.\n\nPlan:\n${revisedPlan}`,
+    prompt: `Review this revised implementation plan. Output a score using ::review_score::N (0-100).\n\nPlan:\n${revisedText}`,
     tools: criticReadOnly as ToolSet,
-    stopWhen: stepCountIs(20),
+    stopWhen: stepCountIs(15),
     abortSignal: AbortSignal.timeout(3 * 60 * 1000),
   });
 
@@ -246,14 +287,48 @@ async function runPlannerCriticLoop(
 
   const score2 = extractScore(criticText2);
   const scoreColor2 = score2 >= 80 ? chalk.green : score2 >= 60 ? chalk.yellow : chalk.red;
-  console.log(`  ${scoreColor2(`Revised plan score: ${score2}/100`)}`);
+  console.log(`  ${scoreColor2(`Revised score: ${score2}/100`)}`);
 
   if (score2 >= 80) {
     console.log(chalk.green("  ✓ Plan approved after revision"));
   } else {
-    console.log(chalk.yellow("  ⚠ Plan scored below 80, proceeding anyway"));
+    console.log(chalk.yellow("  ⚠ Score below 80, proceeding anyway"));
   }
-  return true;
+
+  return stories;
+}
+
+/** Parse stories JSON from planner output text */
+function parseStoriesFromText(text: string): Story[] {
+  // Try JSON code block first
+  const jsonBlockMatch = text.match(/```json\s*\n([\s\S]*?)\n```/);
+  if (jsonBlockMatch) {
+    try {
+      const parsed = JSON.parse(jsonBlockMatch[1]);
+      if (Array.isArray(parsed.stories)) return parsed.stories;
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* not valid JSON */ }
+  }
+
+  // Try raw JSON object with "stories" key
+  const rawMatch = text.match(/\{\s*"stories"\s*:\s*\[[\s\S]*?\]\s*\}/);
+  if (rawMatch) {
+    try {
+      const parsed = JSON.parse(rawMatch[0]);
+      if (Array.isArray(parsed.stories)) return parsed.stories;
+    } catch { /* not valid JSON */ }
+  }
+
+  // Try any JSON array
+  const arrayMatch = text.match(/\[\s*\{[\s\S]*?"persona"[\s\S]*?\}\s*\]/);
+  if (arrayMatch) {
+    try {
+      const parsed = JSON.parse(arrayMatch[0]);
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* not valid JSON */ }
+  }
+
+  return [];
 }
 
 /** Extract a numeric score from critic output — tries markers, then natural language patterns */
@@ -289,7 +364,7 @@ function extractScore(text: string): number {
 
 export async function runOrchestration(
   config: CliConfig,
-  stories: Story[],
+  userTask: string,
   trustAll: boolean
 ): Promise<void> {
   const costTracker = new CostTracker();
@@ -302,18 +377,11 @@ export async function runOrchestration(
   const permissions = new PermissionManager(trustAll);
   const workingDir = process.cwd();
 
+  // Planner explores codebase and produces stories (critic validates)
+  const plannerStories = await runPlannerCriticLoop(config, userTask, workingDir);
+
   // Sort by dependencies
-  const sorted = topologicalSort(stories);
-
-  console.log();
-  console.log(chalk.bold(`  Plan: ${sorted.length} stories`));
-  sorted.forEach((s, i) => {
-    console.log(chalk.dim(`    ${i + 1}. ${s.persona}: ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`));
-  });
-  console.log();
-
-  // Planner/critic validation
-  await runPlannerCriticLoop(config, sorted, workingDir);
+  const sorted = topologicalSort(plannerStories);
   console.log();
 
   // Prompt user to proceed (unless --trust mode)

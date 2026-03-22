@@ -264,20 +264,13 @@ Focus on writing clean, production-ready code.`;
         console.log(chalk.dim("\n  Analyzing task complexity..."));
         logger.info("Running complexity classifier");
         const classification = await classifyComplexity(config, input);
-        logger.info("Classification result", { isMulti: classification.isMulti, reason: classification.reason, storyCount: classification.stories?.length });
+        logger.info("Classification result", { isMulti: classification.isMulti, reason: classification.reason });
 
-        if (classification.isMulti && classification.stories && classification.stories.length > 1) {
-          console.log();
-          console.log(chalk.bold("  This task needs multiple experts:"));
-          console.log();
-          classification.stories.forEach((s, i) => {
-            const persona = s.persona.replace(/_/g, " ");
-            console.log(chalk.white(`    ${i + 1}. ${chalk.cyan(persona)} — ${s.title}`));
-          });
-          console.log();
+        if (classification.isMulti) {
+          console.log(chalk.dim(`  → multi-expert (${classification.reason})\n`));
 
-          // Orchestrator handles planner/critic and prompts user before execution
-          await runOrchestration(config, classification.stories, trustAll);
+          // Orchestrator runs planner to determine stories, critic validates, then prompts user
+          await runOrchestration(config, input, trustAll);
           processing = false;
           rl.resume();
           rl.prompt();

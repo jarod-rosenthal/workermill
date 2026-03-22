@@ -540,6 +540,14 @@ export async function decomposePrd(data: {
   return response.data;
 }
 
+export interface DependencyWarning {
+  severity: "error" | "warning";
+  category: string;
+  message: string;
+  suggestion: string;
+  affectedPackages: string[];
+}
+
 export interface DecompositionStreamEvent {
   phase: string;
   text?: string;
@@ -547,6 +555,10 @@ export interface DecompositionStreamEvent {
   charsGenerated?: number;
   boardId?: string;
   error?: string;
+  // Spec validation gate fields
+  warnings?: DependencyWarning[];
+  fixedPrd?: string;
+  diff?: string;
 }
 
 /**
@@ -563,8 +575,10 @@ export async function decomposePrdStreaming(
     boardName?: string;
   },
   onEvent: (event: DecompositionStreamEvent) => void,
+  /** Optional: pass in an ID so the caller can reference it for /proceed and /confirm-fix calls */
+  existingDecompositionId?: string,
 ): Promise<DecomposeResult> {
-  const decompositionId = crypto.randomUUID();
+  const decompositionId = existingDecompositionId || crypto.randomUUID();
   const token = localStorage.getItem("accessToken") || "";
 
   // Open SSE connection first
@@ -599,6 +613,21 @@ export async function decomposePrdStreaming(
   } finally {
     eventSource.close();
   }
+}
+
+// Spec validation gate endpoints
+export async function proceedDecomposition(
+  decompositionId: string,
+  action: "proceed" | "fix",
+): Promise<void> {
+  await apiClient.post("/prd/decompose/proceed", { decompositionId, action });
+}
+
+export async function confirmFix(
+  decompositionId: string,
+  action: "accept" | "reject",
+): Promise<void> {
+  await apiClient.post("/prd/decompose/confirm-fix", { decompositionId, action });
 }
 
 // Card dependencies

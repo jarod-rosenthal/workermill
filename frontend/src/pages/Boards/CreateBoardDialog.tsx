@@ -9,17 +9,26 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   ExternalLink,
+  Wrench,
+  ArrowRight,
+  Undo2,
+  Check,
 } from "lucide-react";
 import type { CreateBoardData } from "../../lib/boards-api";
 import {
   decomposePrdStreaming,
+  proceedDecomposition,
+  confirmFix,
   type DecomposeResult,
+  type DependencyWarning,
+  type DecompositionStreamEvent,
 } from "../../lib/boards-api";
 
 type DialogMode = "template" | "prd";
 type PrdSource = "text" | "file" | "url" | "repo";
-type PrdState = "input" | "loading" | "success" | "error";
+type PrdState = "input" | "loading" | "review" | "repairing" | "repair_review" | "success" | "error";
 
 interface CreateBoardDialogProps {
   open: boolean;
@@ -109,6 +118,9 @@ export default function CreateBoardDialog({
   const [streamText, setStreamText] = useState("");
   const [streamPhase, setStreamPhase] = useState("");
   const [streamChars, setStreamChars] = useState(0);
+  const [specWarnings, setSpecWarnings] = useState<DependencyWarning[]>([]);
+  const [specDiff, setSpecDiff] = useState("");
+  const [decompositionId, setDecompositionId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamContainerRef = useRef<HTMLPreElement>(null);
 
@@ -142,6 +154,9 @@ export default function CreateBoardDialog({
     setStreamText("");
     setStreamPhase("");
     setStreamChars(0);
+    setSpecWarnings([]);
+    setSpecDiff("");
+    setDecompositionId(null);
   };
 
   const handleClose = () => {
@@ -218,6 +233,8 @@ export default function CreateBoardDialog({
     }
 
     setPrdState("loading");
+    const newDecompositionId = crypto.randomUUID();
+    setDecompositionId(newDecompositionId);
     try {
       const payload: Parameters<typeof decomposePrdStreaming>[0] = {
         source: prdSource,
@@ -233,7 +250,8 @@ export default function CreateBoardDialog({
         payload.repoPath = prdRepoPath.trim() || undefined;
       }
 
-      const result = await decomposePrdStreaming(payload, (event) => {
+      const result = await decomposePrdStreaming(payload, (event: DecompositionStreamEvent) => {
+        // Capture decompositionId for later /proceed and /confirm-fix calls
         if (event.phase) {
           setStreamPhase(event.phase);
         }
@@ -243,7 +261,23 @@ export default function CreateBoardDialog({
         if (event.charsGenerated != null) {
           setStreamChars(event.charsGenerated);
         }
-      });
+
+        // Spec validation gate: pause on warnings
+        if (event.phase === "spec_review" && event.warnings) {
+          setSpecWarnings(event.warnings);
+          setPrdState("review");
+        }
+        // Repair streaming text
+        if (event.phase === "repairing_spec") {
+          setPrdState("repairing");
+        }
+        // Repair complete: show diff
+        if (event.phase === "repair_complete" && event.diff) {
+          setSpecDiff(event.diff);
+          if (event.warnings) setSpecWarnings(event.warnings);
+          setPrdState("repair_review");
+        }
+      }, newDecompositionId);
       setPrdResult(result);
       setPrdState("success");
     } catch (err) {
@@ -265,6 +299,59 @@ export default function CreateBoardDialog({
   const handleRetry = () => {
     setError(null);
     setPrdState("input");
+  };
+
+  // -- Spec validation gate handlers --
+  const handleProceedAnyway = async () => {
+    if (!decompositionId) return;
+    setPrdState("loading");
+    setStreamPhase("calling_llm");
+    setStreamText("");
+    try {
+      await proceedDecomposition(decompositionId, "proceed");
+      // SSE continues — the onEvent callback will handle the rest
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to proceed");
+      setPrdState("error");
+    }
+  };
+
+  const handleFixIssues = async () => {
+    if (!decompositionId) return;
+    setPrdState("repairing");
+    setStreamText("");
+    try {
+      await proceedDecomposition(decompositionId, "fix");
+      // SSE continues — repair_complete will fire via onEvent
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start repair");
+      setPrdState("error");
+    }
+  };
+
+  const handleAcceptFix = async () => {
+    if (!decompositionId) return;
+    setPrdState("loading");
+    setStreamPhase("calling_llm");
+    setStreamText("");
+    try {
+      await confirmFix(decompositionId, "accept");
+      // SSE continues — complete will fire via onEvent
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to accept fix");
+      setPrdState("error");
+    }
+  };
+
+  const handleRejectFix = async () => {
+    if (!decompositionId) return;
+    try {
+      await confirmFix(decompositionId, "reject");
+      // SSE will re-emit spec_review — onEvent callback handles it
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reject fix");
+      setPrdState("error");
+    }
   };
 
   // -- Tab styling --
@@ -442,15 +529,17 @@ export default function CreateBoardDialog({
         {mode === "prd" && (
           <div>
             {/* Loading / streaming state */}
-            {prdState === "loading" && (
+            {(prdState === "loading" || prdState === "repairing") && (
               <div className="flex flex-col py-4">
                 {/* Phase indicator */}
                 <div className="flex items-center gap-2 mb-3">
                   <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
                   <span className="text-sm font-medium text-foreground">
                     {streamPhase === "resolving_content" && "Resolving content..."}
+                    {streamPhase === "validating_spec" && "Checking for dependency issues..."}
                     {streamPhase === "calling_llm" && "Calling LLM..."}
                     {streamPhase === "streaming" && "Streaming response..."}
+                    {streamPhase === "repairing_spec" && "Repairing spec..."}
                     {streamPhase === "parsing" && "Parsing JSON..."}
                     {streamPhase === "creating_board" && "Creating board..."}
                     {!streamPhase && "Decomposing spec into cards..."}
@@ -477,6 +566,126 @@ export default function CreateBoardDialog({
                     </p>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Spec review state — warnings found */}
+            {prdState === "review" && specWarnings.length > 0 && (
+              <div className="flex flex-col py-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+                  <h3 className="text-sm font-semibold">
+                    {specWarnings.length} issue{specWarnings.length !== 1 ? "s" : ""} found in your spec
+                  </h3>
+                </div>
+
+                <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
+                  {specWarnings.map((w, i) => (
+                    <div
+                      key={i}
+                      className={`p-3 rounded-lg border text-sm ${
+                        w.severity === "error"
+                          ? "bg-red-500/10 border-red-500/30"
+                          : "bg-amber-500/10 border-amber-500/30"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-xs font-medium uppercase px-1.5 py-0.5 rounded ${
+                          w.severity === "error"
+                            ? "bg-red-500/20 text-red-500"
+                            : "bg-amber-500/20 text-amber-500"
+                        }`}>
+                          {w.severity}
+                        </span>
+                        <span className="text-xs text-muted-foreground font-mono">
+                          {w.category}
+                        </span>
+                      </div>
+                      <p className="text-foreground mb-1">{w.message}</p>
+                      <p className="text-muted-foreground text-xs">{w.suggestion}</p>
+                      {w.affectedPackages.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {w.affectedPackages.map((pkg) => (
+                            <span key={pkg} className="text-xs font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                              {pkg}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleClose}
+                    className="px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleProceedAnyway}
+                    className="px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors text-sm flex items-center gap-1.5"
+                  >
+                    Proceed Anyway
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleFixIssues}
+                    className="px-3 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-sm flex items-center gap-1.5"
+                  >
+                    <Wrench className="w-3.5 h-3.5" />
+                    Fix Issues
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Repair review state — show diff */}
+            {prdState === "repair_review" && (
+              <div className="flex flex-col py-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                  <h3 className="text-sm font-semibold">
+                    Spec repaired — review changes
+                  </h3>
+                </div>
+
+                <pre className="rounded-lg bg-muted/50 border border-border p-3 text-xs font-mono whitespace-pre-wrap break-words max-h-60 overflow-y-auto mb-4">
+                  {specDiff.split("\n").map((line, i) => {
+                    let lineClass = "text-muted-foreground";
+                    if (line.startsWith("+") && !line.startsWith("+++")) lineClass = "text-green-500";
+                    else if (line.startsWith("-") && !line.startsWith("---")) lineClass = "text-red-500";
+                    else if (line.startsWith("@@")) lineClass = "text-blue-400";
+                    return (
+                      <div key={i} className={lineClass}>
+                        {line}
+                      </div>
+                    );
+                  })}
+                </pre>
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRejectFix}
+                    className="px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors text-sm flex items-center gap-1.5"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                    Reject
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAcceptFix}
+                    className="px-3 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-sm flex items-center gap-1.5"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    Accept &amp; Build
+                  </button>
+                </div>
               </div>
             )}
 

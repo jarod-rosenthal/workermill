@@ -171,68 +171,88 @@ async function runPlannerCriticLoop(
     }
   }
 
-  let lastCriticFeedback = "";
+  // First pass: plan + critique
+  const spinner = ora({ text: chalk.white("Planning implementation..."), prefixText: "  " }).start();
 
-  for (let iteration = 0; iteration < 3; iteration++) {
-    const spinner = ora({
-      text: chalk.white(iteration === 0 ? "Planning implementation..." : `Revising plan (attempt ${iteration + 1})...`),
-      prefixText: "  ",
-    }).start();
+  const planStream = streamText({
+    model: plannerModel,
+    system: planner.systemPrompt,
+    prompt: `Create an implementation plan for these stories:\n\n${storySummary}\n\nWorking directory: ${workingDir}`,
+    tools: readOnlyTools as ToolSet,
+    stopWhen: stepCountIs(30),
+    abortSignal: AbortSignal.timeout(5 * 60 * 1000),
+  });
 
-    // Build planner prompt — include critic feedback on revisions
-    let plannerPrompt = `Create an implementation plan for these stories:\n\n${storySummary}\n\nWorking directory: ${workingDir}`;
-    if (iteration > 0 && lastCriticFeedback) {
-      plannerPrompt += `\n\n## Critic feedback from previous attempt (address these issues):\n${lastCriticFeedback}`;
-    }
+  for await (const _chunk of planStream.textStream) { /* drive */ }
+  const planText = await planStream.text;
+  spinner.stop();
 
-    const planStream = streamText({
-      model: plannerModel,
-      system: planner.systemPrompt,
-      prompt: plannerPrompt,
-      tools: readOnlyTools as ToolSet,
-      stopWhen: stepCountIs(30),
-      abortSignal: AbortSignal.timeout(5 * 60 * 1000),
-    });
+  const criticSpinner = ora({ text: chalk.white("Critic reviewing plan..."), prefixText: "  " }).start();
 
-    for await (const _chunk of planStream.textStream) { /* drive */ }
-    const planText = await planStream.text;
-    spinner.stop();
+  const criticStream = streamText({
+    model: criticModel,
+    system: critic.systemPrompt,
+    prompt: `Review this implementation plan and output a score using ::review_score::N (0-100) and ::review_verdict::approve or ::review_verdict::revise markers.\n\nPlan:\n${planText}`,
+    tools: criticReadOnly as ToolSet,
+    stopWhen: stepCountIs(20),
+    abortSignal: AbortSignal.timeout(3 * 60 * 1000),
+  });
 
-    // Run critic
-    const criticSpinner = ora({
-      text: chalk.white("Critic reviewing plan..."),
-      prefixText: "  ",
-    }).start();
+  for await (const _chunk of criticStream.textStream) { /* drive */ }
+  const criticText = await criticStream.text;
+  criticSpinner.stop();
 
-    const criticStream = streamText({
-      model: criticModel,
-      system: critic.systemPrompt,
-      prompt: `Review this implementation plan and output a score using ::review_score::N (0-100) and ::review_verdict::approve or ::review_verdict::revise markers.\n\nPlan:\n${planText}`,
-      tools: criticReadOnly as ToolSet,
-      stopWhen: stepCountIs(20),
-      abortSignal: AbortSignal.timeout(3 * 60 * 1000),
-    });
+  const score = extractScore(criticText);
+  const scoreColor = score >= 80 ? chalk.green : score >= 60 ? chalk.yellow : chalk.red;
+  console.log(`  ${scoreColor(`Plan score: ${score}/100`)}`);
 
-    for await (const _chunk of criticStream.textStream) { /* drive */ }
-    const criticText = await criticStream.text;
-    criticSpinner.stop();
-
-    // Extract score — try marker first, then fallback to natural language patterns
-    const score = extractScore(criticText);
-    const scoreColor = score >= 85 ? chalk.green : score >= 70 ? chalk.yellow : chalk.red;
-    console.log(`  ${scoreColor(`Plan score: ${score}/100`)}`);
-
-    if (score >= 85) {
-      console.log(chalk.green("  ✓ Plan approved by critic"));
-      return true;
-    }
-
-    // Save feedback for next planner iteration
-    lastCriticFeedback = criticText.slice(0, 2000);
-    console.log(chalk.yellow(`  Plan needs revision (score ${score}/100)`));
+  if (score >= 80) {
+    console.log(chalk.green("  ✓ Plan approved"));
+    return true;
   }
 
-  console.log(chalk.yellow("  ⚠ Max planner iterations reached, proceeding anyway"));
+  // One revision pass with critic feedback
+  console.log(chalk.yellow(`  Revising plan with critic feedback...`));
+
+  const revisionSpinner = ora({ text: chalk.white("Revising plan..."), prefixText: "  " }).start();
+
+  const revisionStream = streamText({
+    model: plannerModel,
+    system: planner.systemPrompt,
+    prompt: `Create an implementation plan for these stories:\n\n${storySummary}\n\nWorking directory: ${workingDir}\n\n## Critic feedback (address these issues):\n${criticText.slice(0, 2000)}`,
+    tools: readOnlyTools as ToolSet,
+    stopWhen: stepCountIs(30),
+    abortSignal: AbortSignal.timeout(5 * 60 * 1000),
+  });
+
+  for await (const _chunk of revisionStream.textStream) { /* drive */ }
+  const revisedPlan = await revisionStream.text;
+  revisionSpinner.stop();
+
+  const criticSpinner2 = ora({ text: chalk.white("Critic reviewing revision..."), prefixText: "  " }).start();
+
+  const criticStream2 = streamText({
+    model: criticModel,
+    system: critic.systemPrompt,
+    prompt: `Review this implementation plan and output a score using ::review_score::N (0-100) and ::review_verdict::approve or ::review_verdict::revise markers.\n\nPlan:\n${revisedPlan}`,
+    tools: criticReadOnly as ToolSet,
+    stopWhen: stepCountIs(20),
+    abortSignal: AbortSignal.timeout(3 * 60 * 1000),
+  });
+
+  for await (const _chunk of criticStream2.textStream) { /* drive */ }
+  const criticText2 = await criticStream2.text;
+  criticSpinner2.stop();
+
+  const score2 = extractScore(criticText2);
+  const scoreColor2 = score2 >= 80 ? chalk.green : score2 >= 60 ? chalk.yellow : chalk.red;
+  console.log(`  ${scoreColor2(`Revised plan score: ${score2}/100`)}`);
+
+  if (score2 >= 80) {
+    console.log(chalk.green("  ✓ Plan approved after revision"));
+  } else {
+    console.log(chalk.yellow("  ⚠ Plan scored below 80, proceeding anyway"));
+  }
   return true;
 }
 

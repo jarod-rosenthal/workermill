@@ -97,6 +97,14 @@ export interface IssueInfo {
   dependencyCount?: number;
 }
 
+export interface DependencyWarning {
+  severity: "error" | "warning";
+  category: string;
+  message: string;
+  suggestion: string;
+  affectedPackages: string[];
+}
+
 export interface CodeEventRecord {
   id: string;
   filePath: string | null;
@@ -274,6 +282,10 @@ export class AgentClient extends EventEmitter {
       boardName?: string;
     },
     onProgress: (message: string) => void,
+    callbacks?: {
+      onSpecReview?: (warnings: DependencyWarning[]) => Promise<"proceed" | "fix" | "cancel">;
+      onRepairComplete?: (diff: string, fixedPrd: string) => Promise<"accept" | "reject">;
+    },
   ): Promise<{ boardId: string | null; boardName: string; cardCount: number; parentIssueUrl?: string }> {
     return new Promise((resolve, reject) => {
       if (!this.port) return reject(new Error("Not connected"));
@@ -284,6 +296,51 @@ export class AgentClient extends EventEmitter {
         Accept: "text/event-stream",
       };
       if (this.token) prdHeaders["Authorization"] = `Bearer ${this.token}`;
+
+      // Event queue for handling async callbacks without dropping SSE events
+      const eventQueue: unknown[] = [];
+      let processing = false;
+      let settled = false;
+
+      const processQueue = async () => {
+        if (processing) return;
+        processing = true;
+        while (eventQueue.length > 0 && !settled) {
+          const event = eventQueue.shift() as Record<string, unknown>;
+          try {
+            await handleEvent(event);
+          } catch (err) {
+            if (!settled) { settled = true; reject(err instanceof Error ? err : new Error(String(err))); }
+          }
+        }
+        processing = false;
+      };
+
+      const handleEvent = async (event: Record<string, unknown>) => {
+        if (event.type === "progress" && event.message) {
+          onProgress(event.message as string);
+        } else if (event.type === "repairing_spec" && event.message) {
+          onProgress(event.message as string);
+        } else if (event.type === "spec_review" && callbacks?.onSpecReview && event.warnings) {
+          const action = await callbacks.onSpecReview(event.warnings as DependencyWarning[]);
+          if (action === "cancel") {
+            settled = true;
+            reject(new Error("Build cancelled by user"));
+            return;
+          }
+          await this.postJson("/api/prd/build/proceed", { action });
+        } else if (event.type === "repair_complete" && callbacks?.onRepairComplete && event.diff) {
+          const action = await callbacks.onRepairComplete(event.diff as string, (event.fixedPrd || "") as string);
+          await this.postJson("/api/prd/build/confirm-fix", { action });
+        } else if (event.type === "done" && event.result) {
+          settled = true;
+          resolve(event.result as { boardId: string | null; boardName: string; cardCount: number; parentIssueUrl?: string });
+        } else if (event.type === "error") {
+          settled = true;
+          reject(new Error((event.error as string) || "Full Build failed"));
+        }
+      };
+
       const req = http.request(
         {
           hostname: "127.0.0.1",
@@ -296,7 +353,6 @@ export class AgentClient extends EventEmitter {
           let buffer = "";
           res.on("data", (chunk) => {
             buffer += chunk.toString();
-            // Parse SSE events from buffer
             const parts = buffer.split("\n\n");
             buffer = parts.pop() || "";
             for (const part of parts) {
@@ -306,20 +362,14 @@ export class AgentClient extends EventEmitter {
               if (!dataLine) continue;
               try {
                 const event = JSON.parse(dataLine.slice(6));
-                if (event.type === "progress" && event.message) {
-                  onProgress(event.message);
-                } else if (event.type === "done" && event.result) {
-                  resolve(event.result);
-                } else if (event.type === "error") {
-                  reject(new Error(event.error || "Full Build failed"));
-                }
+                eventQueue.push(event);
+                processQueue();
               } catch {
-                /* ignore unparseable events */
+                /* ignore unparseable events (heartbeats, etc.) */
               }
             }
           });
           res.on("end", () => {
-            // Process remaining buffer
             if (buffer.trim()) {
               const dataLine = buffer
                 .split("\n")
@@ -327,26 +377,54 @@ export class AgentClient extends EventEmitter {
               if (dataLine) {
                 try {
                   const event = JSON.parse(dataLine.slice(6));
-                  if (event.type === "done" && event.result) {
-                    resolve(event.result);
-                    return;
-                  } else if (event.type === "error") {
-                    reject(new Error(event.error || "Full Build failed"));
-                    return;
-                  }
-                } catch {
-                  /* ignore */
-                }
+                  eventQueue.push(event);
+                  processQueue();
+                  return;
+                } catch { /* ignore */ }
               }
             }
-            // If we haven't resolved/rejected yet, stream ended unexpectedly
-            reject(new Error("Full Build stream ended without result"));
+            if (!settled) {
+              settled = true;
+              reject(new Error("Full Build stream ended without result"));
+            }
           });
-          res.on("error", reject);
+          res.on("error", (err) => { if (!settled) { settled = true; reject(err); } });
         },
       );
-      req.on("error", reject);
+      req.on("error", (err) => { if (!settled) { settled = true; reject(err); } });
       req.write(body);
+      req.end();
+    });
+  }
+
+  /** POST JSON to the agent local API (for build proceed/confirm-fix) */
+  private postJson(urlPath: string, body: unknown): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const data = JSON.stringify(body);
+      const headers: Record<string, string | number> = {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(data),
+      };
+      if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+      const req = http.request({
+        hostname: "127.0.0.1",
+        port: this.port,
+        path: urlPath,
+        method: "POST",
+        headers,
+      }, (res) => {
+        let buf = "";
+        res.on("data", (chunk) => { buf += chunk; });
+        res.on("end", () => {
+          if (res.statusCode && res.statusCode >= 400) {
+            reject(new Error(buf || `HTTP ${res.statusCode}`));
+          } else {
+            resolve();
+          }
+        });
+      });
+      req.on("error", reject);
+      req.write(data);
       req.end();
     });
   }

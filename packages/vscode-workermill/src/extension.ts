@@ -11,7 +11,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { AgentClient, type TaskInfo, type IssueInfo } from "./agent-client";
+import { AgentClient, type TaskInfo, type IssueInfo, type DependencyWarning } from "./agent-client";
 import { TeamTreeProvider } from "./team-tree";
 import { FeedViewProvider } from "./feed-view";
 import { StatusBar } from "./status-bar";
@@ -137,6 +137,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Live diff: register virtual document content providers
   LiveDiffManager.register(context);
+
+  // Spec diff: virtual document providers for validation gate repair review
+  const specBeforeContent = { value: "" };
+  const specAfterContent = { value: "" };
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider("workermill-spec-before", {
+      provideTextDocumentContent: () => specBeforeContent.value,
+    }),
+    vscode.workspace.registerTextDocumentContentProvider("workermill-spec-after", {
+      provideTextDocumentContent: () => specAfterContent.value,
+    }),
+  );
 
   // ── Task lifecycle auto-sync ──
 
@@ -954,6 +966,55 @@ export function activate(context: vscode.ExtensionContext): void {
             },
             (message) => {
               writeEmitter.fire(`\x1b[96m>\x1b[0m ${message}\r\n`);
+            },
+            {
+              onSpecReview: async (warnings: DependencyWarning[]) => {
+                // Show warnings in terminal
+                writeEmitter.fire(`\r\n\x1b[1m\x1b[93m⚠ Found ${warnings.length} issue${warnings.length !== 1 ? "s" : ""} in your spec:\x1b[0m\r\n`);
+                for (const w of warnings) {
+                  const icon = w.severity === "error" ? "\x1b[91m✗\x1b[0m" : "\x1b[93m!\x1b[0m";
+                  writeEmitter.fire(`  ${icon} ${w.message}\r\n`);
+                  writeEmitter.fire(`    \x1b[2m${w.suggestion}\x1b[0m\r\n`);
+                }
+                writeEmitter.fire("\r\n");
+
+                const items: Array<{ label: string; description: string; value: "fix" | "proceed" | "cancel" }> = [
+                  { label: "$(wrench) Fix Issues", description: "Let AI repair the spec before building", value: "fix" },
+                  { label: "$(arrow-right) Proceed Anyway", description: "Build with the current spec as-is", value: "proceed" },
+                  { label: "$(close) Cancel", description: "Abort the build", value: "cancel" },
+                ];
+                const picked = await vscode.window.showQuickPick(items, {
+                  placeHolder: `${warnings.length} issue${warnings.length !== 1 ? "s" : ""} found — how do you want to proceed?`,
+                });
+                return picked?.value || "cancel";
+              },
+
+              onRepairComplete: async (diff: string, fixedPrd: string) => {
+                writeEmitter.fire(`\x1b[92m✓\x1b[0m Spec repaired. Review the changes:\r\n`);
+
+                // Show diff in native VS Code diff editor using virtual documents
+                const beforeUri = vscode.Uri.parse(`workermill-spec-before://spec/original.md`);
+                const afterUri = vscode.Uri.parse(`workermill-spec-after://spec/fixed.md`);
+
+                // Update content for the providers
+                specBeforeContent.value = fileContent;
+                specAfterContent.value = fixedPrd;
+
+                await vscode.commands.executeCommand("vscode.diff", beforeUri, afterUri, "Spec Repair — Review Changes");
+
+                const items: Array<{ label: string; description: string; value: "accept" | "reject" }> = [
+                  { label: "$(check) Accept Fix", description: "Build with the repaired spec", value: "accept" },
+                  { label: "$(close) Reject Fix", description: "Go back to the warning screen", value: "reject" },
+                ];
+                const picked = await vscode.window.showQuickPick(items, {
+                  placeHolder: "Accept the repaired spec?",
+                });
+
+                // Close the diff tab
+                await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+
+                return picked?.value || "reject";
+              },
             },
           );
 

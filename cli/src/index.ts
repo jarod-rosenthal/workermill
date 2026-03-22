@@ -18,6 +18,7 @@ const program = new Command()
   .option("--plan", "Start in plan mode (read-only tools)")
   .option("--auto-revise", "Auto-revise on failed reviews without prompting")
   .option("--max-revisions <n>", "Max review→revise cycles (default: 2)", parseInt)
+  .option("--critic", "Run separate critic pass on plan before execution")
   .action(async (options) => {
     // Header is shown by runAgent after config is loaded (so it can show provider info)
 
@@ -39,11 +40,12 @@ const program = new Command()
     }
 
     // Apply review overrides
-    if (options.autoRevise || options.maxRevisions) {
+    if (options.autoRevise || options.maxRevisions || options.critic) {
       config.review = {
         ...config.review,
         ...(options.autoRevise ? { autoRevise: true } : {}),
         ...(options.maxRevisions ? { maxRevisions: options.maxRevisions } : {}),
+        ...(options.critic ? { useCritic: true } : {}),
       };
     }
 

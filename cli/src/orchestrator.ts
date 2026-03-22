@@ -109,13 +109,12 @@ function topologicalSort(stories: Story[]): Story[] {
   return result;
 }
 
-async function runPlannerCriticLoop(
+async function planStories(
   config: CliConfig,
   userTask: string,
   workingDir: string,
 ): Promise<Story[]> {
   const planner = loadPersona("planner");
-  const critic = loadPersona("critic");
 
   const { provider: pProvider, model: pModel, host: pHost } = getProviderForPersona(config, "planner");
   if (pProvider) {
@@ -142,9 +141,27 @@ async function runPlannerCriticLoop(
     }
   }
 
-  const plannerSystemPrompt = planner?.systemPrompt || "You are an implementation planner. Explore the codebase and create a detailed plan.";
+  const plannerPrompt = `You are an expert implementation planner. Analyze this task and create a high-quality implementation plan.
 
-  const storySchema = `Return your plan as a JSON code block with this exact structure:
+## Task
+${userTask}
+
+## Working directory
+${workingDir}
+
+## Instructions
+1. Use your tools to explore the codebase — understand existing structure, patterns, and dependencies
+2. Design a plan that breaks the task into focused stories, each assigned to a specialist persona
+3. Your plan must meet these quality criteria (score >= 80/100):
+   - Every story has a clear, specific description (not vague)
+   - File paths and dependencies are verified against the actual codebase
+   - Stories are ordered correctly — dependencies satisfied before dependents
+   - No missing steps (e.g., don't forget database migrations, config files, tests)
+   - Each story is scoped for ONE persona — don't mix frontend and backend in one story
+   - Descriptions include enough detail for the persona to execute without ambiguity
+
+## Output format
+Return ONLY a JSON code block with this structure:
 \`\`\`json
 {
   "stories": [
@@ -152,24 +169,21 @@ async function runPlannerCriticLoop(
       "id": "short-kebab-case-id",
       "title": "Brief title",
       "persona": "persona_name",
-      "description": "Detailed description of what this story should implement",
+      "description": "Detailed description: what to create/modify, which files, what approach, what to watch out for",
       "dependsOn": ["id-of-dependency"]
     }
   ]
 }
 \`\`\`
 
-Available personas: architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer
+Available personas: architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer`;
 
-Each story should be a focused unit of work for ONE persona. Order them by dependencies.`;
-
-  // First pass: planner explores codebase and produces stories
   const spinner = ora({ stream: process.stdout, text: chalk.white("Planning — exploring codebase and designing stories..."), prefixText: "  " }).start();
 
   const planStream = streamText({
     model: plannerModel,
-    system: plannerSystemPrompt,
-    prompt: `Analyze this task and create an implementation plan with story breakdown.\n\nTask: ${userTask}\n\nWorking directory: ${workingDir}\n\nUse your tools to explore the codebase first, then produce the plan.\n\n${storySchema}`,
+    system: planner?.systemPrompt || "You are an implementation planner.",
+    prompt: plannerPrompt,
     tools: readOnlyTools as ToolSet,
     stopWhen: stepCountIs(30),
     abortSignal: AbortSignal.timeout(5 * 60 * 1000),
@@ -179,120 +193,16 @@ Each story should be a focused unit of work for ONE persona. Order them by depen
   const planText = await planStream.text;
   spinner.stop();
 
-  // Parse stories from planner output
   let stories = parseStoriesFromText(planText);
 
   if (stories.length === 0) {
-    console.log(chalk.yellow("  ⚠ Planner didn't produce structured stories, falling back to single fullstack story"));
+    console.log(chalk.yellow("  ⚠ Planner didn't produce structured stories, falling back to single story"));
     stories = [{
       id: "implement",
       title: userTask.slice(0, 60),
       persona: "fullstack_developer",
       description: userTask,
     }];
-  }
-
-  // Show what the planner came up with
-  console.log(chalk.bold(`  Plan: ${stories.length} stories`));
-  stories.forEach((s, i) => {
-    const persona = s.persona.replace(/_/g, " ");
-    console.log(chalk.dim(`    ${i + 1}. ${chalk.cyan(persona)}: ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`));
-  });
-  console.log();
-
-  // Critic pass (skip if no critic persona)
-  if (!critic) {
-    console.log(chalk.dim("  Skipping critic (persona not found)"));
-    return stories;
-  }
-
-  const { provider: cProvider, model: cModel, host: cHost } = getProviderForPersona(config, "critic");
-  const criticModel = createModel(cProvider as AIProvider, cModel, cHost);
-  const criticTools = createToolDefinitions(workingDir, criticModel);
-  const criticReadOnly: Record<string, AnyToolDef> = {};
-  for (const name of critic.tools) {
-    if (criticTools[name as keyof typeof criticTools]) {
-      criticReadOnly[name] = criticTools[name as keyof typeof criticTools];
-    }
-  }
-
-  const criticSpinner = ora({ stream: process.stdout, text: chalk.white("Critic reviewing plan..."), prefixText: "  " }).start();
-
-  const criticStream = streamText({
-    model: criticModel,
-    system: critic.systemPrompt,
-    prompt: `Review this implementation plan and output a score using ::review_score::N (0-100) and ::review_verdict::approve or ::review_verdict::revise markers.\n\nPlan:\n${planText}`,
-    tools: criticReadOnly as ToolSet,
-    stopWhen: stepCountIs(20),
-    abortSignal: AbortSignal.timeout(3 * 60 * 1000),
-  });
-
-  for await (const _chunk of criticStream.textStream) { /* drive */ }
-  const criticText = await criticStream.text;
-  criticSpinner.stop();
-
-  const score = extractScore(criticText);
-  const scoreColor = score >= 80 ? chalk.green : score >= 60 ? chalk.yellow : chalk.red;
-  console.log(`  ${scoreColor(`Plan score: ${score}/100`)}`);
-
-  if (score >= 80) {
-    console.log(chalk.green("  ✓ Plan approved"));
-    return stories;
-  }
-
-  // One revision pass with critic feedback
-  console.log(chalk.yellow(`  Revising plan with critic feedback...`));
-
-  const revisionSpinner = ora({ stream: process.stdout, text: chalk.white("Revising plan..."), prefixText: "  " }).start();
-
-  const revisionStream = streamText({
-    model: plannerModel,
-    system: plannerSystemPrompt,
-    prompt: `Revise this implementation plan based on critic feedback.\n\nOriginal task: ${userTask}\n\nWorking directory: ${workingDir}\n\n## Critic feedback (address these issues):\n${criticText.slice(0, 2000)}\n\n${storySchema}`,
-    tools: readOnlyTools as ToolSet,
-    stopWhen: stepCountIs(30),
-    abortSignal: AbortSignal.timeout(5 * 60 * 1000),
-  });
-
-  for await (const _chunk of revisionStream.textStream) { /* drive */ }
-  const revisedText = await revisionStream.text;
-  revisionSpinner.stop();
-
-  // Parse revised stories
-  const revisedStories = parseStoriesFromText(revisedText);
-  if (revisedStories.length > 0) {
-    stories = revisedStories;
-    console.log(chalk.bold(`  Revised plan: ${stories.length} stories`));
-    stories.forEach((s, i) => {
-      const persona = s.persona.replace(/_/g, " ");
-      console.log(chalk.dim(`    ${i + 1}. ${chalk.cyan(persona)}: ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`));
-    });
-  }
-
-  // Quick re-score
-  const criticSpinner2 = ora({ stream: process.stdout, text: chalk.white("Critic reviewing revision..."), prefixText: "  " }).start();
-
-  const criticStream2 = streamText({
-    model: criticModel,
-    system: critic.systemPrompt,
-    prompt: `Review this revised implementation plan. Output a score using ::review_score::N (0-100).\n\nPlan:\n${revisedText}`,
-    tools: criticReadOnly as ToolSet,
-    stopWhen: stepCountIs(15),
-    abortSignal: AbortSignal.timeout(3 * 60 * 1000),
-  });
-
-  for await (const _chunk of criticStream2.textStream) { /* drive */ }
-  const criticText2 = await criticStream2.text;
-  criticSpinner2.stop();
-
-  const score2 = extractScore(criticText2);
-  const scoreColor2 = score2 >= 80 ? chalk.green : score2 >= 60 ? chalk.yellow : chalk.red;
-  console.log(`  ${scoreColor2(`Revised score: ${score2}/100`)}`);
-
-  if (score2 >= 80) {
-    console.log(chalk.green("  ✓ Plan approved after revision"));
-  } else {
-    console.log(chalk.yellow("  ⚠ Score below 80, proceeding anyway"));
   }
 
   return stories;
@@ -377,12 +287,62 @@ export async function runOrchestration(
   const permissions = new PermissionManager(trustAll);
   const workingDir = process.cwd();
 
-  // Planner explores codebase and produces stories (critic validates)
-  const plannerStories = await runPlannerCriticLoop(config, userTask, workingDir);
+  // Planner explores codebase and produces stories
+  const plannerStories = await planStories(config, userTask, workingDir);
+
+  // Show the plan
+  console.log(chalk.bold(`\n  Plan: ${plannerStories.length} stories`));
+  plannerStories.forEach((s, i) => {
+    const persona = s.persona.replace(/_/g, " ");
+    console.log(chalk.dim(`    ${i + 1}. ${chalk.cyan(persona)}: ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`));
+  });
+  console.log();
+
+  // Optional critic pass (--critic or config.review.useCritic)
+  if (config.review?.useCritic) {
+    const critic = loadPersona("critic");
+    if (critic) {
+      const { provider: cProvider, model: cModel, host: cHost } = getProviderForPersona(config, "critic");
+      const criticModel = createModel(cProvider as AIProvider, cModel, cHost);
+      const criticTools = createToolDefinitions(workingDir, criticModel);
+      const criticReadOnly: Record<string, AnyToolDef> = {};
+      for (const name of critic.tools) {
+        if (criticTools[name as keyof typeof criticTools]) {
+          criticReadOnly[name] = criticTools[name as keyof typeof criticTools];
+        }
+      }
+
+      const criticSpinner = ora({ stream: process.stdout, text: chalk.white("Critic reviewing plan..."), prefixText: "  " }).start();
+      const criticStream = streamText({
+        model: criticModel,
+        system: critic.systemPrompt,
+        prompt: `Review this implementation plan. Score it 0-100 using ::review_score::N marker.\n\nStories:\n${plannerStories.map(s => `- ${s.id}: ${s.title} (${s.persona}) — ${s.description}`).join("\n")}`,
+        tools: criticReadOnly as ToolSet,
+        stopWhen: stepCountIs(15),
+        abortSignal: AbortSignal.timeout(3 * 60 * 1000),
+      });
+      for await (const _chunk of criticStream.textStream) { /* drive */ }
+      const criticText = await criticStream.text;
+      criticSpinner.stop();
+
+      const score = extractScore(criticText);
+      const scoreColor = score >= 80 ? chalk.green : score >= 60 ? chalk.yellow : chalk.red;
+      console.log(`  ${scoreColor(`Critic score: ${score}/100`)}`);
+
+      // Show feedback
+      const feedbackLines = criticText.split("\n").filter(l => !l.includes("::review_score::") && !l.includes("::review_verdict::"));
+      const feedback = feedbackLines.join("\n").trim();
+      if (feedback) {
+        for (const line of feedback.split("\n").slice(0, 20)) {
+          console.log(chalk.dim("  " + line));
+        }
+      }
+      console.log();
+    }
+  }
 
   // Sort by dependencies
   const sorted = topologicalSort(plannerStories);
-  console.log();
 
   // Prompt user to proceed (unless --trust mode)
   if (!trustAll) {

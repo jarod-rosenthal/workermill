@@ -21,6 +21,8 @@ export interface ReviewConfig {
   autoRevise?: boolean;
   /** Score threshold for approval (default: 80) */
   approvalThreshold?: number;
+  /** Run separate critic pass on the plan before execution (default: false) */
+  useCritic?: boolean;
 }
 
 export interface CliConfig {

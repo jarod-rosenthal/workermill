@@ -50,7 +50,7 @@ export class PermissionManager {
     toolName: string,
     toolInput: Record<string, unknown>
   ): Promise<boolean> {
-    // Dangerous command check (applies even in trust-all mode)
+    // Dangerous command check
     if (toolName === "bash") {
       const cmd = String(toolInput.command || "");
       const danger = isDangerous(cmd);
@@ -58,6 +58,11 @@ export class PermissionManager {
         console.log();
         console.log(chalk.red.bold(`  ⚠ DANGEROUS: ${danger}`));
         console.log(chalk.red(`  Command: ${cmd}`));
+        if (this.trustAll) {
+          // In trust mode: warn but allow
+          console.log(chalk.yellow("  (allowed by --trust mode)"));
+          return true;
+        }
         const answer = await this.askUser(chalk.red("  Are you sure? (yes to confirm): "));
         if (answer.trim().toLowerCase() !== "yes") return false;
         return true;

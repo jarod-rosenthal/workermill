@@ -9,7 +9,7 @@
  * markers from stdout. Now it calls generateText() directly as a library call.
  */
 
-import { generateText, stepCountIs } from "ai";
+import { streamText, stepCountIs } from "ai";
 import type {
   AIClient,
   AIClientCapabilities,
@@ -110,7 +110,7 @@ export class AISdkClient implements AIClient {
       const model = createModel(this.provider, modelName);
       const tools = createToolDefinitions(options.workingDir);
 
-      const result = await generateText({
+      const stream = streamText({
         model,
         system: options.systemPrompt,
         prompt: options.prompt,
@@ -119,40 +119,50 @@ export class AISdkClient implements AIClient {
         abortSignal: AbortSignal.timeout(options.timeoutMs || 30 * 60 * 1000),
         ...buildCostTrackingMetadata(this.provider, options.env?.ORG_ID, options.parentTaskId),
         ...buildReasoningOptions(this.provider, modelName),
-      });
-
-      // Map steps to StreamMessage array for dashboard logging
-      if (result.steps) {
-        for (const step of result.steps) {
-          // Text output from this step
-          if (step.text) {
-            const msg: StreamMessage = { type: "text", content: step.text };
+        onStepFinish({ text, toolCalls, toolResults }) {
+          // Emit messages in real-time as each step completes
+          if (text) {
+            const msg: StreamMessage = { type: "text", content: text };
             messages.push(msg);
             options.onMessage?.(msg);
           }
-          // Tool calls
-          if (step.toolCalls) {
-            for (const toolCall of step.toolCalls) {
-              messages.push({
+          if (toolCalls) {
+            for (const toolCall of toolCalls) {
+              const msg: StreamMessage = {
                 type: "tool_use",
                 toolName: toolCall.toolName,
                 toolInput: toolCall.args as Record<string, unknown>,
-              });
+              };
+              messages.push(msg);
+              options.onMessage?.(msg);
             }
           }
-          // Tool results
-          if (step.toolResults) {
-            for (const toolResult of step.toolResults) {
-              messages.push({
+          if (toolResults) {
+            for (const toolResult of toolResults) {
+              const msg: StreamMessage = {
                 type: "tool_result",
                 content: typeof toolResult.result === "string"
                   ? toolResult.result
                   : JSON.stringify(toolResult.result),
-              });
+              };
+              messages.push(msg);
+              options.onMessage?.(msg);
             }
           }
-        }
+        },
+      });
+
+      // Consume the stream to drive execution (required for streamText)
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _chunk of stream.textStream) {
+        // Stream is consumed; onStepFinish handles message emission
       }
+
+      const result = {
+        text: await stream.text,
+        usage: await stream.totalUsage,
+        steps: [], // Steps already processed via onStepFinish
+      };
 
       // Final text as result message
       if (result.text) {

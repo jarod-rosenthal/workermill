@@ -145,7 +145,7 @@ export function parseDependencyWarnings(raw: string): DependencyWarning[] {
 // VALIDATION PROMPT
 // ============================================================================
 
-const VALIDATION_SYSTEM_PROMPT = `You are a dependency compatibility expert. Analyze the provided project specification for dependency and content quality issues.
+export const VALIDATION_SYSTEM_PROMPT = `You are a dependency compatibility expert. Analyze the provided project specification for dependency and content quality issues.
 
 Check for:
 1. **Cross-package conflicts** — packages known to be incompatible at specified versions (e.g., React 19 + React Router v5)
@@ -240,7 +240,7 @@ ${prdContent}`;
 // REPAIR PROMPT
 // ============================================================================
 
-const REPAIR_SYSTEM_PROMPT = `You are a technical editor fixing a project specification. You will receive the original spec and a list of issues to fix.
+export const REPAIR_SYSTEM_PROMPT = `You are a technical editor fixing a project specification. You will receive the original spec and a list of issues to fix.
 
 Rules:
 - ONLY change what is needed to resolve the listed issues

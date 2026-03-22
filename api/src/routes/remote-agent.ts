@@ -1399,6 +1399,22 @@ router.get(
   }),
 );
 
+// ─── GET /validation-prompt ──────────────────────────────────────────────────
+// Returns the spec validation and repair prompts.
+// Single source of truth — agent fetches these instead of hardcoding.
+router.get(
+  "/validation-prompt",
+  asyncHandler(async (_req: Request, res: Response) => {
+    const { VALIDATION_SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT } = await import(
+      "../services/prd-dependency-validator.js"
+    );
+    res.json({
+      validationPrompt: VALIDATION_SYSTEM_PROMPT,
+      repairPrompt: REPAIR_SYSTEM_PROMPT,
+    });
+  }),
+);
+
 // ─── GET /critic-prompt ──────────────────────────────────────────────────────
 // Returns the critic prompt template and approval threshold.
 // Keeps proprietary evaluation logic server-side instead of embedded in the npm package.

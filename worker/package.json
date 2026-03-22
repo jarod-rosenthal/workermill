@@ -24,6 +24,7 @@
     "express": "^4.21.0",
     "fast-glob": "^3.3.2",
     "http-proxy-middleware": "^2.0.6",
+    "ollama-ai-provider": "^1.2.0",
     "ollama-ai-provider-v2": "^3.5.0",
     "semver": "^7.7.3",
     "simple-git": "^3.30.0",

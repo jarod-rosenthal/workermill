@@ -2,7 +2,7 @@ import { type LanguageModel } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
 import { google } from "@ai-sdk/google";
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { createOllama } from "ollama-ai-provider-v2";
 import type { AIProvider } from "./types.js";
 
 export function createModel(
@@ -20,12 +20,8 @@ export function createModel(
       return google(modelName);
     case "ollama": {
       const host = ollamaHost || "http://localhost:11434";
-      const ollamaProvider = createOpenAICompatible({
-        name: "ollama",
-        baseURL: `${host}/v1`,
-        apiKey: "ollama",
-      });
-      return ollamaProvider.chatModel(modelName);
+      const ollamaProvider = createOllama({ baseURL: `${host}/api` });
+      return ollamaProvider(modelName);
     }
     default:
       throw new Error(`Unsupported provider: ${provider}`);

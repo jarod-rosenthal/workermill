@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import ora from "ora";
-import { streamText, generateText, stepCountIs, type ToolSet } from "ai";
+import { streamText, generateObject, generateText, stepCountIs, type ToolSet } from "ai";
+import { z } from "zod";
 import { createModel } from "../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
 import type { AIProvider } from "../../packages/engine/src/types.js";
@@ -28,40 +29,12 @@ interface SharedContext {
   learnings: string[];
 }
 
-/**
- * Extract balanced JSON from text response (same approach as WorkerMill's parsePlanResponse).
- * Finds the first { and extracts the balanced JSON object.
- */
-function extractJson(text: string): unknown | null {
-  // Try ```json fence first
-  const fenceStart = text.indexOf("```json");
-  const searchFrom = fenceStart !== -1 ? fenceStart + 7 : 0;
-
-  const braceStart = text.indexOf("{", searchFrom);
-  if (braceStart === -1) return null;
-
-  let depth = 0;
-  for (let i = braceStart; i < text.length; i++) {
-    if (text[i] === "{") depth++;
-    else if (text[i] === "}") depth--;
-    if (depth === 0) {
-      try {
-        return JSON.parse(text.slice(braceStart, i + 1));
-      } catch {
-        return null;
-      }
-    }
-  }
-  return null;
-}
-
 export async function classifyComplexity(
   config: CliConfig,
   userInput: string
 ): Promise<{ isMulti: boolean; stories?: Story[]; reason: string }> {
   const { provider, model: modelName, apiKey, host } = getProviderForPersona(config);
 
-  // Set API key
   if (apiKey) {
     const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
     const envVar = envMap[provider];
@@ -71,54 +44,56 @@ export async function classifyComplexity(
   const model = createModel(provider as AIProvider, modelName, host);
 
   try {
-    // Use plain text generation + JSON parsing (same as WorkerMill's planning workflow)
-    const result = await generateText({
+    const result = await generateObject({
       model,
-      prompt: `Analyze this coding task and classify its complexity. Respond with a JSON object inside a \`\`\`json code fence.
-
-If the task involves multiple distinct concerns that would benefit from different specialist personas working sequentially, classify as "multi" and provide a story breakdown. Otherwise classify as "single".
+      schema: z.object({
+        complexity: z.enum(["single", "multi"]),
+        reason: z.string(),
+        stories: z.array(z.object({
+          title: z.string(),
+          persona: z.string(),
+          description: z.string(),
+          dependsOn: z.array(z.number()).optional(),
+        })).optional(),
+      }),
+      prompt: `Analyze this coding task. If it involves multiple distinct concerns that would benefit from different specialist personas working sequentially, classify as "multi" and provide a story breakdown with persona assignments. Otherwise classify as "single".
 
 Available personas: architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer
 
 Task:
-${userInput}
-
-Respond with ONLY a JSON object in this format:
-\`\`\`json
-{
-  "complexity": "single" or "multi",
-  "reason": "brief explanation",
-  "stories": [
-    {
-      "title": "Story title",
-      "persona": "persona_slug",
-      "description": "What this expert should do"
-    }
-  ]
-}
-\`\`\`
-
-The "stories" array is only needed when complexity is "multi". Each story should have a clear, distinct responsibility.`,
+${userInput}`,
     });
 
-    const parsed = extractJson(result.text) as {
-      complexity?: string;
-      reason?: string;
-      stories?: Story[];
-    } | null;
-
-    if (!parsed) {
-      // Debug: show what the model returned so we can diagnose
-      const preview = result.text.slice(0, 300).replace(/\n/g, "\\n");
-      return { isMulti: false, reason: `Could not parse JSON from response: "${preview}"` };
-    }
-
     return {
-      isMulti: parsed.complexity === "multi",
-      stories: parsed.stories,
-      reason: parsed.reason || "",
+      isMulti: result.object.complexity === "multi",
+      stories: result.object.stories,
+      reason: result.object.reason,
     };
   } catch (err) {
+    // Fallback to text-based classification if structured output fails
+    try {
+      const textResult = await generateText({
+        model,
+        prompt: `Classify this task as "single" or "multi". If multi, list stories with personas as JSON in a \`\`\`json code fence.
+
+Available personas: architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer
+
+Task: ${userInput}
+
+Respond with JSON: {"complexity": "single"|"multi", "reason": "...", "stories": [...]}`,
+      });
+
+      const jsonMatch = textResult.text.match(/\{[\s\S]*"complexity"[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          isMulti: parsed.complexity === "multi",
+          stories: parsed.stories,
+          reason: parsed.reason || "",
+        };
+      }
+    } catch { /* double fallback failed */ }
+
     return { isMulti: false, reason: `Classification failed: ${err instanceof Error ? err.message : String(err)}` };
   }
 }

@@ -98,7 +98,21 @@ Guidelines:
 - When editing files, read them first to understand context
 - Prefer editing existing files over creating new ones
 - Run tests after making changes when test infrastructure exists
-- Use glob and grep to find relevant files before reading them`;
+- Use glob and grep to find relevant files before reading them
+
+Multi-expert orchestration:
+If the user's request involves multiple distinct concerns that would benefit from different specialists (e.g., frontend + backend + devops), propose a multi-expert plan instead of doing everything yourself. Format your proposal EXACTLY like this:
+
+::plan::
+[
+  {"title": "Story title", "persona": "backend_developer", "description": "What this expert does"},
+  {"title": "Another story", "persona": "frontend_developer", "description": "What this expert does"}
+]
+::end_plan::
+
+Available personas: architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer
+
+Only propose a plan for genuinely complex multi-domain tasks. Simple tasks should just be done directly.`;
 
   rl.prompt();
 
@@ -121,41 +135,6 @@ Guidelines:
 
     try {
       addMessage(session, "user", trimmed);
-
-      // Check if task warrants multi-expert mode
-      if (session.messages.length <= 1) {
-        const { classifyComplexity, runOrchestration } = await import("./orchestrator.js");
-
-        const spinner = ora({ text: "Analyzing task complexity...", prefixText: "  " }).start();
-        const classification = await classifyComplexity(config, trimmed);
-        spinner.stop();
-
-        if (!classification.isMulti) {
-          console.log(chalk.dim(`  Classification: single — ${classification.reason}`));
-        }
-
-        if (classification.isMulti && classification.stories && classification.stories.length > 1) {
-          console.log();
-          console.log(chalk.bold("  This looks like it needs multiple experts:"));
-          console.log();
-          classification.stories.forEach((s, i) => {
-            const persona = s.persona.replace(/_/g, " ");
-            console.log(chalk.white(`    ${i + 1}. ${chalk.cyan(persona)} — ${s.title}`));
-          });
-          console.log();
-
-          const answer = await permissions.askUser(chalk.dim("  Run this plan? (y/n): "));
-
-          if (answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes") {
-            await runOrchestration(config, classification.stories, trustAll);
-            rl.resume();
-            rl.prompt();
-            return;
-          }
-          console.log(chalk.dim("  OK, handling as single agent."));
-          console.log();
-        }
-      }
 
       const stream = streamText({
         model,
@@ -188,6 +167,39 @@ Guidelines:
       // Store assistant response
       const finalText = await stream.text;
       addMessage(session, "assistant", finalText);
+
+      // Check if the agent proposed a multi-expert plan
+      const planMatch = finalText.match(/::plan::\s*([\s\S]*?)\s*::end_plan::/);
+      if (planMatch) {
+        try {
+          const { runOrchestration } = await import("./orchestrator.js");
+          const stories = JSON.parse(planMatch[1]) as Array<{ title: string; persona: string; description: string }>;
+
+          if (stories.length > 1) {
+            console.log();
+            console.log(chalk.bold("  Multi-expert plan proposed:"));
+            console.log();
+            stories.forEach((s, i) => {
+              const persona = s.persona.replace(/_/g, " ");
+              console.log(chalk.white(`    ${i + 1}. ${chalk.cyan(persona)} — ${s.title}`));
+            });
+            console.log();
+
+            const answer = await permissions.askUser(chalk.dim("  Run this plan? (y/n): "));
+
+            if (answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes") {
+              await runOrchestration(config, stories, trustAll);
+              rl.resume();
+              rl.prompt();
+              return;
+            }
+            console.log(chalk.dim("  OK, continuing as single agent."));
+            console.log();
+          }
+        } catch {
+          // JSON parse failed — agent didn't format plan correctly, continue normally
+        }
+      }
 
       // Auto-save session after each exchange
       saveSession(session);

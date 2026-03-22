@@ -8,6 +8,7 @@ import * as Notifications from 'expo-notifications';
 import { useAuthStore } from '@/stores/auth-store';
 import { useNotificationsStore } from '@/stores/notifications-store';
 import { handleNotificationData } from '@/lib/deep-linking';
+import { syncPushToken } from '@/lib/push';
 import '../global.css';
 
 // Prevent the splash screen from auto-hiding
@@ -74,6 +75,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
           await useNotificationsStore.getState().loadPreferences();
         } catch (error) {
           console.warn('Failed to load notification preferences:', error);
+        }
+
+        // Re-sync push token on startup if authenticated
+        if (useAuthStore.getState().isAuthenticated) {
+          syncPushToken();
         }
       } catch (error) {
         console.error('App initialization error:', error);

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useBoardsStore } from '@/stores/boards-store';
 import { Board } from '@/types/boards';
 import { Spinner } from '@/components/ui/Spinner';
@@ -385,25 +386,26 @@ export default function BoardsScreen() {
 
   if (isLoading && boards.length === 0) {
     return (
-      <View className="flex-1 justify-center items-center bg-white dark:bg-slate-950">
-        <Spinner />
-      </View>
+      <SafeAreaView className="flex-1 bg-white dark:bg-slate-950" edges={['top']}>
+        <View className="flex-1 justify-center items-center">
+          <Spinner />
+        </View>
+      </SafeAreaView>
     );
   }
 
   if (error && boards.length === 0) {
     return (
-      <View className="flex-1 justify-center items-center bg-white dark:bg-slate-950 px-4">
-        <ErrorState
-          message="Could not load boards"
-          onRetry={handleRetry}
-        />
-      </View>
+      <SafeAreaView className="flex-1 bg-white dark:bg-slate-950" edges={['top']}>
+        <View className="flex-1 justify-center items-center px-4">
+          <ErrorState message="Could not load boards" onRetry={handleRetry} />
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View className="flex-1 bg-white dark:bg-slate-950">
+    <SafeAreaView className="flex-1 bg-white dark:bg-slate-950" edges={['top']}>
       {/* Search bar */}
       <View className="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
         <View className="flex-row items-center bg-slate-100 dark:bg-slate-800 rounded-lg px-3">
@@ -478,6 +480,6 @@ export default function BoardsScreen() {
         onSubmit={handleCreateBoard}
         isLoading={isCreatingBoard}
       />
-    </View>
+    </SafeAreaView>
   );
 }

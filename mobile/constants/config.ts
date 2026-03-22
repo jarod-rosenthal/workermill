@@ -9,6 +9,18 @@ export const SSE_BASE_URL = "https://workermill.com/api";
 export const COGNITO_REGION = "us-east-1";
 export const COGNITO_CLIENT_ID = process.env.EXPO_PUBLIC_COGNITO_CLIENT_ID || 'LOCAL_DEV_PLACEHOLDER';
 
+// Validate required config in production builds
+if (COGNITO_CLIENT_ID === 'LOCAL_DEV_PLACEHOLDER') {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.warn('[WorkerMill] EXPO_PUBLIC_COGNITO_CLIENT_ID not set — using placeholder. Auth will not work.');
+  } else {
+    throw new Error(
+      'EXPO_PUBLIC_COGNITO_CLIENT_ID environment variable is required for production builds. ' +
+      'Set it in your .env or eas.json build config.'
+    );
+  }
+}
+
 // AsyncStorage keys for Zustand persist middleware
 // IMPORTANT: versioned — increment suffix when store shape changes
 export const STORAGE_KEYS = {

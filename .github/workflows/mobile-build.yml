@@ -43,6 +43,26 @@ jobs:
         working-directory: mobile
         run: npm ci --legacy-peer-deps
 
+      - name: Type Check
+        working-directory: mobile
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: mobile
+        run: npx eslint . --ext .ts,.tsx
+
+      - name: Unit Tests
+        working-directory: mobile
+        run: npm test -- --ci --passWithNoTests --coverage
+
+      - name: Placeholder Guard
+        working-directory: mobile
+        run: |
+          if grep -r "REPLACE_WITH_CLIENT_ID" --include="*.ts" --include="*.tsx" --include="*.json" .; then
+            echo "ERROR: Found placeholder values in source files"
+            exit 1
+          fi
+
       - name: Setup EAS
         uses: expo/expo-github-action@v8
         with:
@@ -70,6 +90,26 @@ jobs:
       - name: Install dependencies
         working-directory: mobile
         run: npm ci --legacy-peer-deps
+
+      - name: Type Check
+        working-directory: mobile
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: mobile
+        run: npx eslint . --ext .ts,.tsx
+
+      - name: Unit Tests
+        working-directory: mobile
+        run: npm test -- --ci --passWithNoTests --coverage
+
+      - name: Placeholder Guard
+        working-directory: mobile
+        run: |
+          if grep -r "REPLACE_WITH_CLIENT_ID" --include="*.ts" --include="*.tsx" --include="*.json" .; then
+            echo "ERROR: Found placeholder values in source files"
+            exit 1
+          fi
 
       - name: Setup EAS
         uses: expo/expo-github-action@v8

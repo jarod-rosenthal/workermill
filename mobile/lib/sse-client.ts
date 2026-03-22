@@ -25,11 +25,14 @@ export class SSEClient {
   private options: SSEClientOptions;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempt = 0;
-  private readonly maxReconnectAttempts = Infinity; // Keep trying
+  private readonly maxReconnectAttempts = 100;
   private readonly reconnectDelays = [1000, 2000, 4000, 8000, 30000]; // 1s, 2s, 4s, 8s, 30s (cap)
   private state: SSEConnectionState = 'disconnected';
   private appStateSubscription: any = null;
   private manuallyDisconnected = false;
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+  private readonly heartbeatTimeout = 60000; // 60 seconds
+  private lastEventTime = 0;
 
   constructor(options: SSEClientOptions) {
     this.options = options;
@@ -121,6 +124,7 @@ export class SSEClient {
   }
 
   private performDisconnect(): void {
+    this.stopHeartbeat();
     this.clearReconnectTimer();
 
     if (this.eventSource) {
@@ -154,6 +158,8 @@ export class SSEClient {
     console.log('SSE connected');
     this.setState('connected');
     this.reconnectAttempt = 0; // Reset on successful connection
+    this.lastEventTime = Date.now();
+    this.startHeartbeat();
   };
 
   private handleError = (event: any) => {
@@ -162,6 +168,7 @@ export class SSEClient {
   };
 
   private handleMessage = (event: any) => {
+    this.lastEventTime = Date.now();
     try {
       const data = JSON.parse(event.data);
       this.options.onEvent?.({
@@ -175,6 +182,7 @@ export class SSEClient {
   };
 
   private handleTaskUpdate = (event: any) => {
+    this.lastEventTime = Date.now();
     try {
       const data = JSON.parse(event.data);
       this.options.onEvent?.({
@@ -188,6 +196,7 @@ export class SSEClient {
   };
 
   private handleCoordinationMessage = (event: any) => {
+    this.lastEventTime = Date.now();
     try {
       const data = JSON.parse(event.data);
       this.options.onEvent?.({
@@ -201,6 +210,7 @@ export class SSEClient {
   };
 
   private handleLogEntry = (event: any) => {
+    this.lastEventTime = Date.now();
     try {
       const data = JSON.parse(event.data);
       this.options.onEvent?.({
@@ -214,6 +224,7 @@ export class SSEClient {
   };
 
   private handleCodeEvent = (event: any) => {
+    this.lastEventTime = Date.now();
     try {
       const data = JSON.parse(event.data);
       this.options.onEvent?.({
@@ -242,7 +253,30 @@ export class SSEClient {
     this.scheduleReconnect();
   }
 
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.state === 'connected' && Date.now() - this.lastEventTime > this.heartbeatTimeout) {
+        console.warn('SSE heartbeat timeout — no event in 60s, reconnecting');
+        this.handleConnectionFailure(new Error('Heartbeat timeout — no events received'));
+      }
+    }, 15000);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
   private scheduleReconnect(): void {
+    if (this.reconnectAttempt >= this.maxReconnectAttempts) {
+      console.error(`SSE max reconnect attempts (${this.maxReconnectAttempts}) exhausted`);
+      this.options.onError?.(new Error(`Connection lost — max reconnect attempts (${this.maxReconnectAttempts}) exhausted. Tap to retry.`));
+      return;
+    }
+
     this.clearReconnectTimer();
 
     const delay = this.getReconnectDelay();
@@ -287,8 +321,16 @@ export class SSEClient {
     return this.reconnectAttempt;
   }
 
+  resetAndReconnect(): void {
+    this.reconnectAttempt = 0;
+    this.manuallyDisconnected = false;
+    this.performDisconnect();
+    this.connect();
+  }
+
   // Cleanup
   destroy(): void {
+    this.stopHeartbeat();
     this.performDisconnect();
 
     if (this.appStateSubscription) {

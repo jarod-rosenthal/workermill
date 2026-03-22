@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Alert,
   RefreshControl,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -65,10 +66,21 @@ export default function DashboardScreen() {
         };
 
         initializeDashboard();
+
+        // Poll for task updates every 10 seconds while screen is focused and app is active
+        const pollInterval = setInterval(async () => {
+          if (AppState.currentState !== 'active') return;
+          try {
+            await loadTasks();
+          } catch (error) {
+            // Silent failure on background poll — don't interrupt user
+          }
+        }, 10000);
       }
 
       // Cleanup SSE when screen loses focus
       return () => {
+        clearInterval(pollInterval);
         disconnectSSE();
       };
     }, [isAuthenticated, loadTasks, disconnectSSE])
@@ -142,9 +154,9 @@ export default function DashboardScreen() {
   }
 
   // Render section header
-  const renderSectionHeader = ({ section }: { section: TaskSection }) => (
+  const renderSectionHeader = useCallback(({ section }: { section: TaskSection }) => (
     <TouchableOpacity
-      onPress={section.collapsible ? () => setRecentCollapsed(!recentCollapsed) : undefined}
+      onPress={section.collapsible ? () => setRecentCollapsed(prev => !prev) : undefined}
       className="flex-row items-center justify-between py-3 px-4"
       accessibilityRole={section.collapsible ? 'button' : 'text'}
       accessibilityLabel={
@@ -163,14 +175,14 @@ export default function DashboardScreen() {
         </Text>
       )}
     </TouchableOpacity>
-  );
+  ), []);
 
   // Render task item
-  const renderTaskItem = ({ item }: { item: WorkerTask }) => (
+  const renderTaskItem = useCallback(({ item }: { item: WorkerTask }) => (
     <View className="px-4">
       <TaskListItem task={item} onPress={handleTaskPress} />
     </View>
-  );
+  ), [handleTaskPress]);
 
   // Check if we should show empty state
   const hasNoTasks = activeTasks.length === 0 && queuedTasks.length === 0 && recentTasks.length === 0;

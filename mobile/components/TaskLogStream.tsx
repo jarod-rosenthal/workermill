@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { View, Text, FlatList, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { TaskLog } from '../types/tasks';
 
 interface TaskLogStreamProps {
@@ -96,15 +97,28 @@ function LogLine({ entry }: { entry: LogEntry }) {
 }
 
 export function TaskLogStream({ logs, className }: TaskLogStreamProps) {
-  const scrollViewRef = useRef<ScrollView>(null);
-  const logEntries = logs.map(formatLogEntry);
+  const flatListRef = useRef<FlatList>(null);
+  const [isAutoScrolling, setIsAutoScrolling] = useState(true);
+  const logEntries = useMemo(() => logs.map(formatLogEntry), [logs]);
 
-  // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
-    if (scrollViewRef.current && logs.length > 0) {
-      scrollViewRef.current.scrollToEnd({ animated: true });
+    if (flatListRef.current && logs.length > 0 && isAutoScrolling) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 50);
     }
-  }, [logs.length]);
+  }, [logs.length, isAutoScrolling]);
+
+  const handleScroll = (event: any) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const isAtBottom = contentOffset.y >= contentSize.height - layoutMeasurement.height - 50;
+    setIsAutoScrolling(isAtBottom);
+  };
+
+  const scrollToBottom = () => {
+    flatListRef.current?.scrollToEnd({ animated: true });
+    setIsAutoScrolling(true);
+  };
 
   return (
     <View
@@ -112,26 +126,37 @@ export function TaskLogStream({ logs, className }: TaskLogStreamProps) {
       accessibilityRole="text"
       accessibilityLabel="Task execution logs"
     >
-      <ScrollView
-        ref={scrollViewRef}
-        className="flex-1 bg-slate-950 p-3"
-        contentContainerStyle={{ flexGrow: 1 }}
-        showsVerticalScrollIndicator={true}
-      >
-        {logEntries.length === 0 ? (
+      <FlatList
+        ref={flatListRef}
+        data={logEntries}
+        renderItem={({ item }) => <LogLine entry={item} />}
+        keyExtractor={(item, index) => `${item.id}-${index}`}
+        className="flex-1 bg-slate-950"
+        contentContainerStyle={{ padding: 12, flexGrow: 1 }}
+        onScroll={handleScroll}
+        scrollEventThrottle={100}
+        ListEmptyComponent={
           <View className="flex-1 items-center justify-center">
             <Text className="text-slate-400 text-sm italic">
               Waiting for logs...
             </Text>
           </View>
-        ) : (
-          <View>
-            {logEntries.map((entry, index) => (
-              <LogLine key={`${entry.id}-${index}`} entry={entry} />
-            ))}
-          </View>
-        )}
-      </ScrollView>
+        }
+        initialNumToRender={50}
+        maxToRenderPerBatch={20}
+        windowSize={10}
+      />
+      {!isAutoScrolling && logEntries.length > 0 && (
+        <TouchableOpacity
+          onPress={scrollToBottom}
+          className="absolute bottom-4 right-4 bg-brand-500 w-10 h-10 rounded-full items-center justify-center shadow-lg"
+          style={{ minHeight: 44, minWidth: 44 }}
+          accessibilityRole="button"
+          accessibilityLabel="Scroll to latest logs"
+        >
+          <Ionicons name="arrow-down" size={20} color="white" />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }

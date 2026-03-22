@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -31,6 +31,8 @@ export default function SignInScreen() {
   const [ssoProviders, setSsoProviders] = useState<SsoProvider[]>([]);
   const [ssoLoading, setSsoLoading] = useState<string | null>(null);
 
+  const passwordRef = useRef<TextInput>(null);
+
   const { signIn, signInWithSSO, isLoading, error, setError } = useAuthStore();
 
   // Load SSO configuration on mount
@@ -59,6 +61,12 @@ export default function SignInScreen() {
   const handleEmailSignIn = async () => {
     if (!email.trim() || !password.trim()) {
       setError('Please enter both email and password');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setError('Please enter a valid email address');
       return;
     }
 
@@ -207,6 +215,8 @@ export default function SignInScreen() {
                 style={{ minHeight: 48 }}
                 accessibilityLabel="Email address"
                 accessibilityRole="none"
+                returnKeyType="next"
+                onSubmitEditing={() => passwordRef.current?.focus()}
               />
             </View>
 
@@ -216,6 +226,7 @@ export default function SignInScreen() {
               </Text>
               <View className="relative">
                 <TextInput
+                  ref={passwordRef}
                   value={password}
                   onChangeText={setPassword}
                   placeholder="Enter your password"
@@ -228,6 +239,8 @@ export default function SignInScreen() {
                   style={{ minHeight: 48 }}
                   accessibilityLabel="Password"
                   accessibilityRole="none"
+                  returnKeyType="go"
+                  onSubmitEditing={handleEmailSignIn}
                 />
                 <Button
                   variant="ghost"

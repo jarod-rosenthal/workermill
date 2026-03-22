@@ -2,6 +2,9 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Crypto from 'expo-crypto';
 import { API_BASE_URL } from '@/constants/config';
 
+// Pending auth state for PKCE and CSRF validation
+let pendingAuth: { state: string; codeVerifier: string } | null = null;
+
 export interface SsoConfig {
   providers: { name: string; displayName: string }[];
   clientId: string;
@@ -21,7 +24,37 @@ export interface SsoAuthResult {
   cancelled?: boolean;
 }
 
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = btoa(binary);
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 export class SsoAuthManager {
+  /**
+   * Generate a cryptographically random code verifier for PKCE
+   */
+  private static async generateCodeVerifier(): Promise<string> {
+    const randomBytes = await Crypto.getRandomBytesAsync(64);
+    return base64UrlEncode(randomBytes);
+  }
+
+  /**
+   * Generate a code challenge from a code verifier using S256
+   */
+  private static async generateCodeChallenge(verifier: string): Promise<string> {
+    const digest = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      verifier,
+      { encoding: Crypto.CryptoEncoding.BASE64 }
+    );
+    // Convert standard base64 to base64url
+    return digest.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
   /**
    * Get available SSO providers configuration from the API
    */
@@ -44,6 +77,9 @@ export class SsoAuthManager {
   ): Promise<SsoAuthResult> {
     try {
       const state = `mobile_${Crypto.randomUUID()}`;
+      const codeVerifier = await this.generateCodeVerifier();
+      const codeChallenge = await this.generateCodeChallenge(codeVerifier);
+      pendingAuth = { state, codeVerifier };
 
       let authorizeUrl: string;
       let callbackEndpoint: string;
@@ -59,7 +95,8 @@ export class SsoAuthManager {
         const { authorizeUrl: ghUrl, state: ghState } = await response.json();
 
         // Replace the server-generated state with our mobile-prefixed state
-        authorizeUrl = ghUrl.replace(`state=${ghState}`, `state=${state}`);
+        authorizeUrl = ghUrl.replace(`state=${ghState}`, `state=${state}`) +
+          `&code_challenge=${codeChallenge}&code_challenge_method=S256`;
         callbackEndpoint = `${API_BASE_URL}/auth/github/callback`;
       } else {
         // Cognito providers (Google, Microsoft, Apple, Facebook)
@@ -70,7 +107,8 @@ export class SsoAuthManager {
           `&response_type=code` +
           `&scope=openid+email+profile` +
           `&redirect_uri=${redirectUri}` +
-          `&state=${state}`;
+          `&state=${state}` +
+          `&code_challenge=${codeChallenge}&code_challenge_method=S256`;
         callbackEndpoint = `${API_BASE_URL}/auth/sso-callback`;
       }
 
@@ -81,6 +119,7 @@ export class SsoAuthManager {
       );
 
       if (result.type !== 'success') {
+        pendingAuth = null;
         return {
           success: false,
           cancelled: result.type === 'cancel',
@@ -88,11 +127,21 @@ export class SsoAuthManager {
         };
       }
 
-      // Extract code from redirect URL
+      // Extract code and validate state from redirect URL
       const url = new URL(result.url);
       const code = url.searchParams.get('code');
+      const returnedState = url.searchParams.get('state');
+
+      if (returnedState !== pendingAuth?.state) {
+        pendingAuth = null;
+        return {
+          success: false,
+          error: 'Authentication state mismatch — possible CSRF attack',
+        };
+      }
 
       if (!code) {
+        pendingAuth = null;
         return {
           success: false,
           error: 'No authorization code received from provider',
@@ -107,11 +156,14 @@ export class SsoAuthManager {
         },
         body: JSON.stringify({
           code,
+          codeVerifier: pendingAuth.codeVerifier,
           redirectUri: providerName === "GitHub"
             ? "https://workermill.com/auth/github/callback"
             : "https://workermill.com/auth/callback",
         }),
       });
+
+      pendingAuth = null;
 
       if (!tokenResponse.ok) {
         const errorData = await tokenResponse.json().catch(() => ({}));
@@ -128,6 +180,7 @@ export class SsoAuthManager {
         data: tokenData,
       };
     } catch (error) {
+      pendingAuth = null;
       console.error('SSO authentication error:', error);
       return {
         success: false,
@@ -232,6 +285,13 @@ export class SsoAuthManager {
   static isProviderAvailable(providerName: string, ssoConfig: SsoConfig): boolean {
     return ssoConfig.providers.some(provider => provider.name === providerName);
   }
+
+  /**
+   * Validate an auth state parameter (for deep link callback verification)
+   */
+  static validateAuthState(state: string): boolean {
+    return pendingAuth !== null && pendingAuth.state === state;
+  }
 }
 
 // Export convenience functions for common usage patterns
@@ -244,3 +304,4 @@ export const signInWithApple = SsoAuthManager.signInWithApple;
 export const getProviderDisplayName = SsoAuthManager.getProviderDisplayName;
 export const getProviderIconName = SsoAuthManager.getProviderIconName;
 export const isProviderAvailable = SsoAuthManager.isProviderAvailable;
+export const validateAuthState = SsoAuthManager.validateAuthState;

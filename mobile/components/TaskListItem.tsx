@@ -32,7 +32,7 @@ function formatCost(costUsd?: number): string {
   return `$${costUsd.toFixed(2)}`;
 }
 
-export function TaskListItem({ task, onPress, className }: TaskListItemProps) {
+function TaskListItemInner({ task, onPress, className }: TaskListItemProps) {
   const elapsedTime = formatDuration(task.startedAt, task.completedAt);
   const cost = formatCost(task.estimatedCostUsd ?? task.costUsd);
 
@@ -103,3 +103,5 @@ export function TaskListItem({ task, onPress, className }: TaskListItemProps) {
     </TouchableOpacity>
   );
 }
+
+export const TaskListItem = React.memo(TaskListItemInner);

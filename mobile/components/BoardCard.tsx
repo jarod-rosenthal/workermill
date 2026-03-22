@@ -35,7 +35,7 @@ function LabelChip({ label }: { label: Label }) {
   );
 }
 
-export function BoardCard({ card, onPress, onLongPress }: BoardCardProps) {
+function BoardCardInner({ card, onPress, onLongPress }: BoardCardProps) {
   const priorityColor = priorityColors[card.priority];
 
   return (
@@ -120,3 +120,5 @@ export function BoardCard({ card, onPress, onLongPress }: BoardCardProps) {
     </TouchableOpacity>
   );
 }
+
+export const BoardCard = React.memo(BoardCardInner);

@@ -47,7 +47,7 @@ function TypeBadge({ messageType }: { messageType: ContextMessageType }) {
   );
 }
 
-export function CoordinationMessage({ message }: CoordinationMessageProps) {
+function CoordinationMessageInner({ message }: CoordinationMessageProps) {
   const timestamp = new Date(message.createdAt).toLocaleTimeString('en-US', {
     hour12: false,
     hour: '2-digit',
@@ -108,3 +108,5 @@ export function CoordinationMessage({ message }: CoordinationMessageProps) {
     </View>
   );
 }
+
+export const CoordinationMessage = React.memo(CoordinationMessageInner);

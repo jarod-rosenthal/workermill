@@ -183,6 +183,30 @@ export class PushNotificationManager {
   }
 
   /**
+   * Re-register push token if it has changed since last registration.
+   * Call on app startup after auth is confirmed.
+   */
+  static async syncPushToken(): Promise<void> {
+    try {
+      if (!await this.isSupported()) return;
+
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== 'granted') return;
+
+      const tokenData = await Notifications.getExpoPushTokenAsync();
+      const currentToken = tokenData.data;
+      const storedToken = await SecureStore.getItemAsync(PUSH_TOKEN_KEY);
+
+      if (currentToken !== storedToken) {
+        console.log('Push token changed, re-registering...');
+        await this.registerPushToken();
+      }
+    } catch (error) {
+      console.warn('Push token sync failed:', error);
+    }
+  }
+
+  /**
    * Get the stored push token
    */
   static async getStoredPushToken(): Promise<string | null> {
@@ -261,3 +285,4 @@ export const unregisterPushToken = PushNotificationManager.unregisterPushToken;
 export const getNotificationPreferences = PushNotificationManager.getNotificationPreferences;
 export const updateNotificationPreferences = PushNotificationManager.updateNotificationPreferences;
 export const isPushEnabled = PushNotificationManager.isPushEnabled;
+export const syncPushToken = PushNotificationManager.syncPushToken.bind(PushNotificationManager);

@@ -54,7 +54,13 @@ class ApiClient {
       async (error: AxiosError) => {
         const originalRequest = error.config;
 
-        if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+        if (error.response?.status === 401 && originalRequest) {
+          if (originalRequest._retry) {
+            // Retried request still got 401 — session is invalid, force sign-out
+            await this.clearTokens();
+            return Promise.reject(new Error('Session expired — please sign in again'));
+          }
+
           originalRequest._retry = true;
 
           try {
@@ -64,8 +70,6 @@ class ApiClient {
           } catch (refreshError) {
             // Refresh failed, clear tokens and redirect to sign-in
             await this.clearTokens();
-            // Navigate to sign-in screen would be handled by the navigation logic
-            // For now, we'll let the caller handle this by checking the error
             throw refreshError;
           }
         }
@@ -90,23 +94,42 @@ class ApiClient {
           throw new Error('No refresh token available');
         }
 
-        const response = await fetch(`https://cognito-idp.${COGNITO_REGION}.amazonaws.com/`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-amz-json-1.1',
-            'X-Amz-Target': 'AWSCognitoIdentityProviderService.InitiateAuth',
-          },
-          body: JSON.stringify({
-            AuthFlow: 'REFRESH_TOKEN_AUTH',
-            ClientId: COGNITO_CLIENT_ID,
-            AuthParameters: {
-              REFRESH_TOKEN: refreshToken,
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+        let response: Response;
+        try {
+          response = await fetch(`https://cognito-idp.${COGNITO_REGION}.amazonaws.com/`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-amz-json-1.1',
+              'X-Amz-Target': 'AWSCognitoIdentityProviderService.InitiateAuth',
             },
-          }),
-        });
+            body: JSON.stringify({
+              AuthFlow: 'REFRESH_TOKEN_AUTH',
+              ClientId: COGNITO_CLIENT_ID,
+              AuthParameters: {
+                REFRESH_TOKEN: refreshToken,
+              },
+            }),
+            signal: controller.signal,
+          });
+        } catch (fetchError: any) {
+          if (fetchError.name === 'AbortError') {
+            throw new Error('Token refresh timed out — please check your connection');
+          }
+          throw fetchError;
+        } finally {
+          clearTimeout(timeoutId);
+        }
 
         if (!response.ok) {
-          throw new Error(`Cognito refresh failed: ${response.status}`);
+          const errorBody = await response.json().catch(() => ({}));
+          const cognitoError = errorBody.__type || '';
+          if (cognitoError === 'NotAuthorizedException') {
+            throw new Error('Session expired — please sign in again');
+          }
+          throw new Error(`Token refresh failed: ${errorBody.message || response.status}`);
         }
 
         const data: CognitoRefreshResponse = await response.json();

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import { apiClient } from '@/lib/api-client';
+import { unregisterPushToken } from '@/lib/push';
 
 // Secure store keys
 const SECURE_STORE_KEYS = {
@@ -228,6 +229,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signOut: async () => {
     set({ isLoading: true });
+
+    // Unregister push token before clearing auth
+    try {
+      await unregisterPushToken();
+    } catch (e) {
+      console.warn('Push token unregistration failed:', e);
+    }
 
     try {
       // Clear tokens from secure store

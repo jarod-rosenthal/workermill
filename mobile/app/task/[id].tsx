@@ -20,9 +20,18 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Button } from '@/components/ui/Button';
 import { apiClient } from '@/lib/api-client';
-import type { WorkerTask } from '@/types/tasks';
+import { createLogsSSE, SSEClient } from '@/lib/sse-client';
+import type { WorkerTask, TaskLog } from '@/types/tasks';
 
 type TabType = 'logs' | 'coordination' | 'code';
+
+interface FileChange {
+  filename: string;
+  type: 'create' | 'edit' | 'delete';
+  oldContent?: string;
+  newContent?: string;
+  diffLines?: { type: 'add' | 'remove' | 'context'; lineNumber?: number; content: string }[];
+}
 
 interface TaskDetailHeaderProps {
   task: WorkerTask;
@@ -197,10 +206,20 @@ export default function TaskDetailScreen() {
 
   const task = getTaskById(taskId || '');
   const coordinationMessages = getMessagesByParentTask(taskId || '');
+  const [logs, setLogs] = useState<TaskLog[]>([]);
+  const [codeFiles, setCodeFiles] = useState<FileChange[]>([]);
+
+  // Reset logs and code files when task changes
+  useEffect(() => {
+    setLogs([]);
+    setCodeFiles([]);
+  }, [taskId]);
 
   // Initialize SSE connections when task loads
   useEffect(() => {
     if (!taskId || !isAuthenticated) return;
+
+    let logsClient: SSEClient | null = null;
 
     const initializeConnections = async () => {
       try {
@@ -208,6 +227,47 @@ export default function TaskDetailScreen() {
         if (tokens.accessToken && task) {
           // Connect coordination SSE
           connectSSE(taskId, tokens.accessToken);
+
+          // Connect logs SSE for live log streaming + code events
+          logsClient = createLogsSSE(taskId, tokens.accessToken, {
+            onEvent: (event) => {
+              if (event.type === 'log_entry') {
+                const logEntry: TaskLog = {
+                  id: event.data.id || `log-${Date.now()}-${Math.random()}`,
+                  task_id: taskId,
+                  timestamp: event.data.timestamp || event.timestamp,
+                  level: event.data.level || 'info',
+                  message: event.data.message || event.data.content || '',
+                  source: event.data.source || 'agent',
+                  metadata: event.data.metadata,
+                };
+                setLogs(prev => [...prev, logEntry]);
+              } else if (event.type === 'code_event') {
+                const fileData = event.data;
+                setCodeFiles(prev => {
+                  const filename = fileData.filename || fileData.file_path || 'unknown';
+                  const existing = prev.findIndex(f => f.filename === filename);
+                  const fileChange: FileChange = {
+                    filename,
+                    type: fileData.type || fileData.change_type || 'edit',
+                    oldContent: fileData.old_content || fileData.oldContent,
+                    newContent: fileData.new_content || fileData.newContent || fileData.content,
+                    diffLines: fileData.diff_lines || fileData.diffLines,
+                  };
+                  if (existing >= 0) {
+                    const updated = [...prev];
+                    updated[existing] = fileChange;
+                    return updated;
+                  }
+                  return [...prev, fileChange];
+                });
+              }
+            },
+            onError: (error) => {
+              console.error('Logs SSE error:', error);
+            },
+          });
+          logsClient.connect();
         }
       } catch (error) {
         console.error('Failed to initialize task SSE connections:', error);
@@ -218,9 +278,11 @@ export default function TaskDetailScreen() {
       initializeConnections();
     }
 
-    // Cleanup on unmount
     return () => {
       disconnectSSE();
+      if (logsClient) {
+        logsClient.destroy();
+      }
     };
   }, [taskId, task, isAuthenticated, connectSSE, disconnectSSE]);
 
@@ -306,7 +368,7 @@ export default function TaskDetailScreen() {
             )}
 
             <TaskLogStream
-              logs={[]}
+              logs={logs}
               className="flex-1"
             />
           </View>
@@ -340,7 +402,7 @@ export default function TaskDetailScreen() {
         return (
           <View className="flex-1">
             <DiffView
-              files={[]}
+              files={codeFiles}
               className="flex-1"
             />
           </View>

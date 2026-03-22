@@ -64,6 +64,7 @@ import {
   hasMutexConflict,
   hasFileOverlap,
   registerRunningStory,
+  unregisterRunningStory,
   scanRunningWorktrees,
   executeStoryAsync,
 } from "./coordinator-stories.js";
@@ -599,6 +600,9 @@ export class EpicCoordinator {
 
     this.coordination.startIteration();
 
+    // 0.2. Check for expert execution timeouts (safety net for stuck experts)
+    await this.checkExpertTimeouts();
+
     // 0.5. Check for blockers
     const blockerHandled = await this.checkAndHandleBlockers();
     if (blockerHandled) return;
@@ -925,6 +929,85 @@ export class EpicCoordinator {
         this.missionActive = false;
         await this.updateTaskStatus("failed", undefined, "Aborted by user due to blocker");
         break;
+    }
+  }
+
+  // =============================================================================
+  // Expert Timeout Detection
+  // =============================================================================
+
+  /**
+   * Detect experts stuck in "working" state beyond a safe threshold.
+   * Safety net for cases where the async story execution hangs without
+   * throwing (e.g., Ollama model unload, dropped connection).
+   */
+  private async checkExpertTimeouts(): Promise<void> {
+    const EXPERT_TIMEOUT_MS = 45 * 60 * 1000; // 45 minutes
+
+    for (const [persona, state] of this.expertStates) {
+      if (state.status !== "working" || !state.startedAt) continue;
+
+      const elapsed = Date.now() - state.startedAt.getTime();
+      if (elapsed < EXPERT_TIMEOUT_MS) continue;
+
+      const elapsedMin = Math.round(elapsed / 60_000);
+      console.error(`[Epic] Expert ${persona} stuck in "working" for ${elapsedMin}min — forcing failure`);
+
+      const storyIndex = state.currentStoryIndex;
+      const storyId = state.currentStoryId;
+
+      // Transition expert to blocked
+      this.expertStates.set(persona, {
+        persona,
+        status: "blocked",
+        currentStoryId: storyId,
+        currentStoryIndex: storyIndex,
+      });
+
+      if (storyIndex !== undefined) {
+        this.failedStoryIndices.add(storyIndex);
+
+        // Unregister from mutex/file-overlap tracking
+        unregisterRunningStory(storyIndex, this.runningStoryMutexGroups, this.runningStoryTargetFiles);
+
+        // Clean up orphaned worktree
+        if (this.activeWorktrees.has(storyIndex)) {
+          const worktreePath = this.activeWorktrees.get(storyIndex)!;
+          try {
+            await this.gitOps.forceRemoveWorktree(worktreePath);
+          } catch {
+            // Ignore cleanup errors
+          }
+          this.activeWorktrees.delete(storyIndex);
+        }
+      }
+
+      const errorMsg = `Expert ${persona} timed out after ${elapsedMin} minutes — execution appears stuck`;
+      await this.postLog(errorMsg, "error");
+      this.postDashboardLog(errorMsg);
+
+      // Post blocker to coordination feed
+      await this.coordination.postContext(
+        "blocker",
+        errorMsg,
+        persona,
+        this.config.parentTaskId,
+        {
+          storyIndex,
+          storyTitle: `Story ${storyIndex}`,
+          persona,
+          errorCategory: "unknown",
+          summary: errorMsg,
+          isEscalated: true,
+          isFixable: false,
+        },
+        `${persona}-story-${storyIndex}`
+      );
+
+      // Reset expert to idle after delay so coordinator can continue
+      setTimeout(() => {
+        this.expertStates.set(persona, { persona, status: "idle" });
+      }, 2000);
     }
   }
 

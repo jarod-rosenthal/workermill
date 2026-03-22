@@ -116,7 +116,10 @@ export class AISdkClient implements AIClient {
         prompt: options.prompt,
         tools,
         stopWhen: stepCountIs(options.maxTurns || 100),
-        abortSignal: AbortSignal.timeout(options.timeoutMs || 30 * 60 * 1000),
+        timeout: {
+          totalMs: options.timeoutMs || 30 * 60 * 1000,
+          chunkMs: 120_000, // Abort if no data received for 2 minutes (detects stalled/dropped connections)
+        },
         ...buildCostTrackingMetadata(this.provider, options.env?.ORG_ID, options.parentTaskId),
         ...buildReasoningOptions(this.provider, modelName),
         onStepFinish({ text, toolCalls, toolResults }) {
@@ -194,12 +197,16 @@ export class AISdkClient implements AIClient {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      // Check for timeout
-      if (errorMessage.includes("aborted") || errorMessage.includes("timeout")) {
+      // Check for timeout (total timeout, chunk stall timeout, or abort)
+      if (errorMessage.includes("aborted") || errorMessage.includes("timeout") || errorMessage.includes("Timeout")) {
+        const isChunkTimeout = errorMessage.toLowerCase().includes("chunk");
+        const detail = isChunkTimeout
+          ? "No response data received for 2 minutes — provider connection likely dropped"
+          : `Execution timed out after ${(options.timeoutMs || 30 * 60 * 1000) / 60000} minutes`;
         return {
           success: false,
           messages,
-          error: `Execution timed out after ${(options.timeoutMs || 30 * 60 * 1000) / 60000} minutes`,
+          error: detail,
           tokenUsage,
           modelUsed: modelName,
           markers: { result: "failed" },

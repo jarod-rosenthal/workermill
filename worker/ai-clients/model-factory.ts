@@ -49,7 +49,10 @@ export function createModel(provider: AIProvider, modelName: string): LanguageMo
 
     case "ollama": {
       const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
-      const ollamaProvider = createOllama({ baseURL: `${ollamaHost}/api` });
+      const ollamaProvider = createOllama({
+        baseURL: `${ollamaHost}/api`,
+        keepAlive: "-1", // Keep model loaded for container lifetime (prevents 5min default unload)
+      });
       return ollamaProvider(modelName);
     }
 

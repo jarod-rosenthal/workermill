@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { APIClient } from "../../helpers/api-client";
-import { waitFor } from "../../helpers/test-data";
+import { waitForStatus, TERMINAL_STATUSES } from "./helpers/task-helpers";
 
 /**
  * Integration tests — real Ollama worker execution against jarod-rosenthal/test.
@@ -22,29 +22,6 @@ const isLocal = !process.env.BASE_URL;
 
 // Generous timeouts for real AI execution
 const FULL_TIMEOUT = 480_000; // 8 min for planning + execution + review
-
-/**
- * Poll for task status via control-center activeTasks list.
- * The /tasks/:id endpoint returns 404 for tasks outside the display window,
- * so we poll via getTaskByJiraKey which searches the active task list.
- */
-async function waitForStatus(
-  api: APIClient,
-  jiraKey: string,
-  targetStatuses: string[],
-  timeout: number,
-): Promise<string> {
-  const result = await waitFor(
-    async () => {
-      const task = await api.getTaskByJiraKey(jiraKey);
-      if (!task) return null;
-      if (targetStatuses.includes(task.status)) return task.status;
-      return null;
-    },
-    { timeout, interval: 10_000 },
-  );
-  return result;
-}
 
 test.describe("Ollama Worker Integration", () => {
   test.skip(!isLocal, "Integration tests only run against local stack with Ollama");
@@ -72,12 +49,7 @@ test.describe("Ollama Worker Integration", () => {
     expect(webhookResponse.ok()).toBeTruthy();
 
     // Wait for full completion (planning → execution → review → pr_approved)
-    const terminalStatuses = [
-      "pr_approved", "review_approved", "completed", "deployed",
-      "review_requested", "failed", "escalated", "cancelled",
-    ];
-
-    const finalStatus = await waitForStatus(api, jiraKey, terminalStatuses, FULL_TIMEOUT - 30_000);
+    const finalStatus = await waitForStatus(api, jiraKey, TERMINAL_STATUSES, FULL_TIMEOUT - 30_000);
 
     // Should reach pr_approved (full flow with tech lead review)
     expect(
@@ -103,12 +75,7 @@ test.describe("Ollama Worker Integration", () => {
     const webhookResponse = await api.sendJiraWebhook(payload);
     expect(webhookResponse.ok()).toBeTruthy();
 
-    const terminalStatuses = [
-      "pr_approved", "review_approved", "completed", "deployed",
-      "review_requested", "failed", "escalated", "cancelled",
-    ];
-
-    const finalStatus = await waitForStatus(api, jiraKey, terminalStatuses, FULL_TIMEOUT - 30_000);
+    const finalStatus = await waitForStatus(api, jiraKey, TERMINAL_STATUSES, FULL_TIMEOUT - 30_000);
 
     // Should not fail
     expect(finalStatus).not.toBe("failed");
@@ -131,12 +98,7 @@ test.describe("Ollama Worker Integration", () => {
     expect(webhookResponse.ok()).toBeTruthy();
 
     // Wait for completion
-    const terminalStatuses = [
-      "pr_approved", "review_approved", "completed", "deployed",
-      "review_requested", "failed", "escalated",
-    ];
-
-    const finalStatus = await waitForStatus(api, jiraKey, terminalStatuses, FULL_TIMEOUT - 60_000);
+    const finalStatus = await waitForStatus(api, jiraKey, TERMINAL_STATUSES, FULL_TIMEOUT - 60_000);
 
     // Task should have completed (not failed)
     expect(finalStatus).not.toBe("failed");

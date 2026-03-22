@@ -11,6 +11,7 @@
     "@ai-sdk/anthropic": "^3.0.0",
     "@ai-sdk/google": "^3.0.0",
     "@ai-sdk/openai": "^3.0.0",
+    "@ai-sdk/openai-compatible": "^2.0.37",
     "@anthropic-ai/claude-code": "^0.2.60",
     "ai": "^6.0.0",
     "ollama-ai-provider-v2": "^3.5.0",

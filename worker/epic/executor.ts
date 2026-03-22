@@ -206,10 +206,11 @@ export class StoryExecutor {
    * Get formatted log prefix with persona emoji and provider icon.
    * Format: [🧪 qa_engineer 🤖] for persona + provider visibility
    */
-  private getLogPrefix(expert: ExpertPersona, provider: string = "anthropic"): string {
+  private getLogPrefix(expert: ExpertPersona, provider?: string): string {
     const emoji = this.personaIcons[expert] || "🤖";
-    const providerIcon = this.providerIcons[provider] || "🤖";
-    return `[${emoji}${expert}${providerIcon}]`;
+    const effectiveProvider = provider || this.config.workerProvider || "anthropic";
+    const providerIcon = this.providerIcons[effectiveProvider] || "🤖";
+    return `[${emoji} ${expert} ${providerIcon}]`;
   }
 
   /**

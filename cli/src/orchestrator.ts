@@ -172,7 +172,7 @@ async function runPlannerCriticLoop(
   }
 
   // First pass: plan + critique
-  const spinner = ora({ text: chalk.white("Planning implementation..."), prefixText: "  " }).start();
+  const spinner = ora({ stream: process.stdout, text: chalk.white("Planning implementation..."), prefixText: "  " }).start();
 
   const planStream = streamText({
     model: plannerModel,
@@ -187,7 +187,7 @@ async function runPlannerCriticLoop(
   const planText = await planStream.text;
   spinner.stop();
 
-  const criticSpinner = ora({ text: chalk.white("Critic reviewing plan..."), prefixText: "  " }).start();
+  const criticSpinner = ora({ stream: process.stdout, text: chalk.white("Critic reviewing plan..."), prefixText: "  " }).start();
 
   const criticStream = streamText({
     model: criticModel,
@@ -214,7 +214,7 @@ async function runPlannerCriticLoop(
   // One revision pass with critic feedback
   console.log(chalk.yellow(`  Revising plan with critic feedback...`));
 
-  const revisionSpinner = ora({ text: chalk.white("Revising plan..."), prefixText: "  " }).start();
+  const revisionSpinner = ora({ stream: process.stdout, text: chalk.white("Revising plan..."), prefixText: "  " }).start();
 
   const revisionStream = streamText({
     model: plannerModel,
@@ -229,7 +229,7 @@ async function runPlannerCriticLoop(
   const revisedPlan = await revisionStream.text;
   revisionSpinner.stop();
 
-  const criticSpinner2 = ora({ text: chalk.white("Critic reviewing revision..."), prefixText: "  " }).start();
+  const criticSpinner2 = ora({ stream: process.stdout, text: chalk.white("Critic reviewing revision..."), prefixText: "  " }).start();
 
   const criticStream2 = streamText({
     model: criticModel,

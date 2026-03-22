@@ -297,7 +297,7 @@ Focus on writing clean, production-ready code.`;
       }
 
       logger.info("Starting streamText", { model: modelName, messageCount: session.messages.length });
-      const thinkingSpinner = ora({ text: chalk.dim("Thinking..."), prefixText: " " }).start();
+      const thinkingSpinner = ora({ stream: process.stdout, text: chalk.dim("Thinking..."), prefixText: " " }).start();
 
       currentAbortController = new AbortController();
       const timeoutId = setTimeout(() => currentAbortController?.abort(), 10 * 60 * 1000);
@@ -356,7 +356,7 @@ Focus on writing clean, production-ready code.`;
       // Check for auto-compaction
       const compactionLevel = shouldCompact(session.totalTokens, modelName);
       if (compactionLevel !== "none") {
-        const spinner = ora({ text: `Compacting conversation (${compactionLevel})...`, prefixText: "  " }).start();
+        const spinner = ora({ stream: process.stdout, text: `Compacting conversation (${compactionLevel})...`, prefixText: "  " }).start();
         const plainMessages = session.messages.map(m => ({ role: m.role, content: m.content }));
         const compacted = await compactMessages(model, plainMessages, compactionLevel);
         // Rebuild session messages with timestamps

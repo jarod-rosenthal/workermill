@@ -316,6 +316,21 @@ export async function runOrchestration(
   await runPlannerCriticLoop(config, sorted, workingDir);
   console.log();
 
+  // Prompt user to proceed (unless --trust mode)
+  if (!trustAll) {
+    let answer = "n";
+    try {
+      answer = await permissions.askUser(chalk.dim("  Execute this plan? (y/n): "));
+    } catch {
+      // readline closed — default to no
+    }
+    if (answer.trim().toLowerCase() !== "y" && answer.trim().toLowerCase() !== "yes") {
+      console.log(chalk.dim("  Plan cancelled.\n"));
+      return;
+    }
+    console.log();
+  }
+
   for (let i = 0; i < sorted.length; i++) {
     const story = sorted[i];
     const persona = loadPersona(story.persona);

@@ -276,21 +276,12 @@ Focus on writing clean, production-ready code.`;
           });
           console.log();
 
-          let answer = "n";
-          try {
-            answer = await permissions.askUser(chalk.dim("  Run this plan? (y/n): "));
-          } catch {
-            // readline closed (piped input) — default to single agent
-          }
-
-          if (answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes") {
-            await runOrchestration(config, classification.stories, trustAll);
-            processing = false;
-            rl.resume();
-            rl.prompt();
-            return;
-          }
-          console.log(chalk.dim("  OK, handling as single agent.\n"));
+          // Orchestrator handles planner/critic and prompts user before execution
+          await runOrchestration(config, classification.stories, trustAll);
+          processing = false;
+          rl.resume();
+          rl.prompt();
+          return;
         } else {
           console.log(chalk.dim(`  → single agent (${classification.reason})\n`));
         }

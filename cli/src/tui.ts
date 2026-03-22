@@ -27,7 +27,7 @@ export function printHeader(version: string, provider?: string, model?: string, 
   if (cwd) {
     console.log(chalk.dim(`  cwd: `) + chalk.white(cwd));
   }
-  console.log(chalk.dim(`  Type `) + chalk.white("/help") + chalk.dim(` for commands, `) + chalk.white("Ctrl+C") + chalk.dim(` to exit`));
+  console.log(chalk.dim(`  Type `) + chalk.white("/help") + chalk.dim(` for commands, `) + chalk.white("Ctrl+C") + chalk.dim(` to cancel`));
   console.log();
 }
 
@@ -104,6 +104,10 @@ export function printToolCall(toolName: string, toolInput: Record<string, unknow
 
     case "sub_agent":
       console.log(chalk.dim(`\n  ● Agent `) + chalk.white(String(toolInput.prompt || "").slice(0, 80)));
+      break;
+
+    case "git":
+      console.log(chalk.dim(`\n  ● Git `) + chalk.white(`${toolInput.action}${toolInput.args ? " " + toolInput.args : ""}`));
       break;
 
     default:
@@ -232,7 +236,8 @@ export function printStatusBar(
   provider: string,
   model: string,
   tokens: number,
-  permissionMode: string
+  permissionMode: string,
+  cost?: number
 ): void {
   const width = process.stdout.columns || 80;
 
@@ -248,6 +253,7 @@ export function printStatusBar(
     fetch: "Fetch",
     patch: "Patch",
     sub_agent: "Agent",
+    git: "Git",
   };
 
   const countParts = Object.entries(toolCounts)
@@ -256,7 +262,8 @@ export function printStatusBar(
 
   const left = ` ${provider}/${model}`;
   const toolStr = countParts.length > 0 ? " │ " + countParts.join(" │ ") : "";
-  const right = `${tokens.toLocaleString()} tok `;
+  const costStr = cost !== undefined && cost > 0 ? `$${cost.toFixed(4)} │ ` : "";
+  const right = `${costStr}${tokens.toLocaleString()} tok `;
   const permStr = permissionMode ? ` ${permissionMode} ` : "";
 
   // Calculate padding

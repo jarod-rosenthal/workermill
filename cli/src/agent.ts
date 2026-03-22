@@ -1,6 +1,9 @@
 import readline from "readline";
+import fs from "fs";
+import pathModule from "path";
 import chalk from "chalk";
 import ora from "ora";
+import { execSync } from "child_process";
 import { streamText, stepCountIs, type ToolSet } from "ai";
 import { createModel } from "../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
@@ -9,14 +12,55 @@ import type { AIProvider } from "../../packages/engine/src/types.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = any;
 import { PermissionManager } from "./permissions.js";
+import { killActiveProcess } from "../../packages/engine/src/tools/bash.js";
 import { printToolCall, printToolResult, printError, printStatusBar, printHeader } from "./tui.js";
+import { handleCommand as handleSlashCommand, type CommandContext } from "./commands.js";
+import { CostTracker } from "./cost-tracker.js";
+
+type AgentState = "idle" | "streaming" | "tool_executing" | "permission_waiting";
 import type { CliConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
 import { createSession, saveSession, addMessage, loadLatestSession, type Session } from "./session.js";
 import { shouldCompact, compactMessages } from "./compaction.js";
 import * as logger from "./logger.js";
 
-export async function runAgent(config: CliConfig, trustAll: boolean, resume?: boolean): Promise<void> {
+// Input history persistence
+const HISTORY_FILE = pathModule.join(process.env.HOME || "~", ".workermill", "history");
+const MAX_HISTORY = 1000;
+
+function loadHistory(): string[] {
+  try {
+    if (fs.existsSync(HISTORY_FILE)) {
+      const lines = fs.readFileSync(HISTORY_FILE, "utf-8").split("\n").filter(Boolean);
+      return lines.slice(-MAX_HISTORY);
+    }
+  } catch { /* ignore */ }
+  return [];
+}
+
+function appendHistory(line: string): void {
+  try {
+    const dir = pathModule.dirname(HISTORY_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(HISTORY_FILE, line + "\n", "utf-8");
+  } catch { /* ignore */ }
+}
+
+// Slash command tab completion
+const SLASH_COMMANDS = [
+  "/help", "/clear", "/compact", "/status", "/model", "/quit",
+  "/cost", "/git", "/editor", "/plan", "/sessions", "/exit",
+];
+
+function completer(line: string): [string[], string] {
+  if (line.startsWith("/")) {
+    const hits = SLASH_COMMANDS.filter(c => c.startsWith(line));
+    return [hits.length ? hits : SLASH_COMMANDS, line];
+  }
+  return [[], line];
+}
+
+export async function runAgent(config: CliConfig, trustAll: boolean, resume?: boolean, startInPlanMode?: boolean): Promise<void> {
   const { provider, model: modelName, apiKey, host } = getProviderForPersona(config);
 
   // Set API keys in env if provided
@@ -55,6 +99,27 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
     session = createSession(provider, modelName);
   }
 
+  let agentState: AgentState = "idle";
+  let currentAbortController: AbortController | null = null;
+  let lastCtrlCTime = 0;
+  let planMode = startInPlanMode || false;
+  const costTracker = new CostTracker();
+
+  // Read-only tools allowed in plan mode
+  const READ_ONLY_TOOLS = new Set(["read_file", "glob", "grep", "ls", "sub_agent"]);
+  // Git is read-only in plan mode (status/diff/log only, filtered in tool wrapper)
+
+  function getActiveTools(): Record<string, AnyToolDef> {
+    if (!planMode) return permissionedTools;
+    const filtered: Record<string, AnyToolDef> = {};
+    for (const [name, def] of Object.entries(permissionedTools)) {
+      if (READ_ONLY_TOOLS.has(name)) {
+        filtered[name] = def;
+      }
+    }
+    return filtered;
+  }
+
   // Wrap tools with permission checks
   const permissionedTools: Record<string, AnyToolDef> = {};
   for (const [name, toolDef] of Object.entries(tools)) {
@@ -62,14 +127,19 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
     permissionedTools[name] = {
       ...td,
       execute: async (input: Record<string, unknown>) => {
+        const prevState = agentState;
+        agentState = "permission_waiting";
         const allowed = await permissions.checkPermission(name, input);
         if (!allowed) {
+          agentState = prevState;
           logger.debug("Tool denied by user", { tool: name });
           return "Tool execution denied by user.";
         }
         logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
         printToolCall(name, input);
+        agentState = "tool_executing";
         const result = await td.execute(input);
+        agentState = "streaming";
         const resultStr = typeof result === "string" ? result : JSON.stringify(result);
         logger.debug("Tool result", { tool: name, result: resultStr.slice(0, 200) });
         printToolResult(name, resultStr);
@@ -84,17 +154,62 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
   printHeader("0.1.0", provider, modelName, workingDir);
 
   // Show initial status bar
-  printStatusBar(provider, modelName, 0, trustAll ? "trust all" : "ask");
+  printStatusBar(provider, modelName, 0, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), 0);
   console.log();
 
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
     prompt: chalk.cyan("❯ "),
+    completer,
   });
+
+  // Load persistent history
+  const history = loadHistory();
+  (rl as any).history = history.reverse();
 
   // Bind the readline to the permission manager so it reuses the same instance
   permissions.setReadline(rl);
+
+  process.on("SIGINT", () => {
+    if (agentState === "streaming") {
+      if (currentAbortController) currentAbortController.abort();
+      console.log(chalk.yellow("\n  [cancelled]"));
+      agentState = "idle";
+      currentAbortController = null;
+      processing = false;
+      rl.resume();
+      rl.prompt();
+    } else if (agentState === "tool_executing") {
+      console.log(chalk.yellow("\n  [cancelling...]"));
+      killActiveProcess();
+      if (currentAbortController) currentAbortController.abort();
+      agentState = "idle";
+      currentAbortController = null;
+      processing = false;
+      rl.resume();
+      rl.prompt();
+    } else if (agentState === "permission_waiting") {
+      permissions.cancelPrompt();
+      console.log(chalk.yellow("\n  [cancelled]"));
+      agentState = "idle";
+      currentAbortController = null;
+      processing = false;
+      rl.resume();
+      rl.prompt();
+    } else {
+      // idle — double-tap to exit
+      const now = Date.now();
+      if (now - lastCtrlCTime < 500) {
+        console.log(chalk.dim("\n  Goodbye!\n"));
+        saveSession(session);
+        process.exit(0);
+      }
+      lastCtrlCTime = now;
+      console.log(chalk.dim("\n  Press Ctrl+C again to exit."));
+      rl.prompt();
+    }
+  });
 
   const systemPrompt = `You are WorkerMill, an AI coding agent running in the user's terminal.
 You have access to tools for reading, writing, and editing files, running bash commands, searching code, and fetching web content.
@@ -114,34 +229,33 @@ Focus on writing clean, production-ready code.`;
   rl.prompt();
 
   let processing = false;
+  let multilineBacktick = false;
+  let multilineBackslash = false;
+  let multilineBuffer: string[] = [];
 
-  rl.on("line", (input: string) => {
-    const trimmed = input.trim();
-    if (!trimmed || processing) {
-      if (!processing) rl.prompt();
-      return;
-    }
+  // Command context for slash commands
+  const cmdCtx: CommandContext = {
+    config,
+    session,
+    costTracker,
+    workingDir,
+    planMode,
+    setPlanMode: (mode: boolean) => { planMode = mode; cmdCtx.planMode = mode; },
+    processInput,
+  };
 
-    // Set processing flag SYNCHRONOUSLY before any await
+  function processInput(input: string): void {
     processing = true;
     rl.pause();
 
-    // Handle slash commands
-    if (trimmed.startsWith("/")) {
-      handleCommand(trimmed, config, session).then(() => {
-        processing = false;
-        rl.resume();
-        rl.prompt();
-      });
-      return;
-    }
-
-    // Process the input asynchronously
     (async () => {
-
     try {
-      addMessage(session, "user", trimmed);
-      logger.info("User message", { length: trimmed.length, preview: trimmed.slice(0, 100) });
+      addMessage(session, "user", input);
+      appendHistory(input);
+      if (!session.name) {
+        session.name = input.slice(0, 50).replace(/\n/g, " ");
+      }
+      logger.info("User message", { length: input.length, preview: input.slice(0, 100) });
 
       // On first message, check if the task warrants multi-expert orchestration
       if (session.messages.length <= 1) {
@@ -149,7 +263,7 @@ Focus on writing clean, production-ready code.`;
 
         console.log(chalk.dim("\n  Analyzing task complexity..."));
         logger.info("Running complexity classifier");
-        const classification = await classifyComplexity(config, trimmed);
+        const classification = await classifyComplexity(config, input);
         logger.info("Classification result", { isMulti: classification.isMulti, reason: classification.reason, storyCount: classification.stories?.length });
 
         if (classification.isMulti && classification.stories && classification.stories.length > 1) {
@@ -185,6 +299,10 @@ Focus on writing clean, production-ready code.`;
       logger.info("Starting streamText", { model: modelName, messageCount: session.messages.length });
       const thinkingSpinner = ora({ text: chalk.dim("Thinking..."), prefixText: " " }).start();
 
+      currentAbortController = new AbortController();
+      const timeoutId = setTimeout(() => currentAbortController?.abort(), 10 * 60 * 1000);
+      agentState = "streaming";
+
       const stream = streamText({
         model,
         system: systemPrompt,
@@ -192,9 +310,9 @@ Focus on writing clean, production-ready code.`;
           role: m.role,
           content: m.content,
         })),
-        tools: permissionedTools as ToolSet,
+        tools: getActiveTools() as ToolSet,
         stopWhen: stepCountIs(100),
-        abortSignal: AbortSignal.timeout(10 * 60 * 1000),
+        abortSignal: currentAbortController.signal,
       });
 
       let fullText = "";
@@ -210,6 +328,10 @@ Focus on writing clean, production-ready code.`;
         fullText += chunk;
       }
 
+      clearTimeout(timeoutId);
+      agentState = "idle";
+      currentAbortController = null;
+
       if (!spinnerStopped) {
         thinkingSpinner.stop();
       }
@@ -221,6 +343,7 @@ Focus on writing clean, production-ready code.`;
       const usage = await stream.totalUsage;
       const tokens = (usage?.inputTokens || 0) + (usage?.outputTokens || 0);
       session.totalTokens += tokens;
+      costTracker.addUsage("agent", provider, modelName, usage?.inputTokens || 0, usage?.outputTokens || 0);
 
       // Store assistant response
       const finalText = await stream.text;
@@ -247,17 +370,109 @@ Focus on writing clean, production-ready code.`;
       }
 
       console.log();
-      printStatusBar(provider, modelName, session.totalTokens, trustAll ? "trust all" : "ask");
+      printStatusBar(provider, modelName, session.totalTokens, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), costTracker.getTotalCost());
       console.log();
     } catch (err) {
-      logger.error("Agent error", { error: err instanceof Error ? err.message : String(err) });
-      printError(err instanceof Error ? err.message : String(err));
+      agentState = "idle";
+      currentAbortController = null;
+      if (err instanceof Error && err.name === "AbortError") {
+        // Already handled by SIGINT handler
+      } else {
+        logger.error("Agent error", { error: err instanceof Error ? err.message : String(err) });
+        printError(err instanceof Error ? err.message : String(err));
+      }
     }
 
     processing = false;
     rl.resume();
     rl.prompt();
     })(); // end async IIFE
+  }
+
+  rl.on("line", (input: string) => {
+    // Triple backtick multiline mode
+    if (input.trim() === "```" && !multilineBacktick && !multilineBackslash) {
+      multilineBacktick = true;
+      multilineBuffer = [];
+      process.stdout.write(chalk.dim("  ... "));
+      return;
+    }
+    if (input.trim() === "```" && multilineBacktick) {
+      multilineBacktick = false;
+      const fullInput = multilineBuffer.join("\n");
+      multilineBuffer = [];
+      if (!fullInput.trim() || processing) {
+        rl.prompt();
+        return;
+      }
+      processInput(fullInput);
+      return;
+    }
+    if (multilineBacktick) {
+      multilineBuffer.push(input);
+      process.stdout.write(chalk.dim("  ... "));
+      return;
+    }
+
+    // Backslash continuation: \ as very last char (no trailing whitespace)
+    if (input.endsWith("\\") && !input.endsWith("\\\\")) {
+      if (!multilineBackslash) {
+        multilineBackslash = true;
+        multilineBuffer = [input.slice(0, -1)];
+      } else {
+        multilineBuffer.push(input.slice(0, -1));
+      }
+      process.stdout.write(chalk.dim("  ... "));
+      return;
+    }
+    if (multilineBackslash) {
+      // This line doesn't end with \ — it's the final line
+      multilineBackslash = false;
+      multilineBuffer.push(input);
+      const fullInput = multilineBuffer.join("\n");
+      multilineBuffer = [];
+      if (!fullInput.trim() || processing) {
+        rl.prompt();
+        return;
+      }
+      processInput(fullInput);
+      return;
+    }
+
+    const trimmed = input.trim();
+    if (!trimmed || processing) {
+      if (!processing) rl.prompt();
+      return;
+    }
+
+    // ! prefix for direct bash execution
+    if (trimmed.startsWith("!")) {
+      const cmd = trimmed.slice(1).trim();
+      if (cmd) {
+        try {
+          const output = execSync(cmd, { cwd: workingDir, encoding: "utf-8", timeout: 30000 });
+          if (output.trim()) console.log(output);
+        } catch (err: any) {
+          console.log(chalk.red(err.stderr || err.message));
+        }
+      }
+      rl.prompt();
+      return;
+    }
+
+    // Handle slash commands
+    if (trimmed.startsWith("/")) {
+      processing = true;
+      rl.pause();
+      handleSlashCommand(trimmed, cmdCtx).then(() => {
+        processing = false;
+        rl.resume();
+        rl.prompt();
+      });
+      return;
+    }
+
+    processInput(trimmed);
   });
 
   rl.on("close", () => {
@@ -281,69 +496,3 @@ Focus on writing clean, production-ready code.`;
   });
 }
 
-async function handleCommand(
-  cmd: string,
-  config: CliConfig,
-  session: Session
-): Promise<void> {
-  const parts = cmd.slice(1).split(" ");
-  const command = parts[0];
-
-  switch (command) {
-    case "help":
-      console.log();
-      console.log(chalk.bold("  Commands:"));
-      console.log(chalk.dim("  /help     ") + "Show this help");
-      console.log(chalk.dim("  /clear    ") + "Clear conversation history");
-      console.log(chalk.dim("  /compact  ") + "Manually compact conversation history");
-      console.log(chalk.dim("  /status   ") + "Show session status");
-      console.log(chalk.dim("  /model    ") + "Show current model");
-      console.log(chalk.dim("  /quit     ") + "Exit");
-      console.log();
-      break;
-    case "clear":
-      session.messages = [];
-      saveSession(session);
-      console.log(chalk.green("\n  Conversation cleared\n"));
-      break;
-    case "compact": {
-      const { provider: cProvider, model: cModelName, host: cHost } = getProviderForPersona(config);
-      const cModel = createModel(cProvider as AIProvider, cModelName, cHost);
-      const plainMessages = session.messages.map(m => ({ role: m.role, content: m.content }));
-      if (plainMessages.length <= 4) {
-        console.log(chalk.dim("\n  Not enough messages to compact.\n"));
-        break;
-      }
-      const spinner = ora({ text: "Compacting conversation...", prefixText: "  " }).start();
-      const compacted = await compactMessages(cModel, plainMessages, "soft");
-      session.messages = compacted.map(m => ({
-        role: m.role,
-        content: m.content,
-        timestamp: new Date().toISOString(),
-      }));
-      saveSession(session);
-      spinner.succeed(`Compacted to ${session.messages.length} messages`);
-      console.log();
-      break;
-    }
-    case "status":
-      console.log();
-      console.log(chalk.bold("  Session Status:"));
-      console.log(chalk.dim("  Messages: ") + session.messages.length);
-      console.log(chalk.dim("  Tokens: ") + session.totalTokens.toLocaleString());
-      console.log();
-      break;
-    case "model": {
-      const { provider, model } = getProviderForPersona(config);
-      console.log(chalk.dim(`\n  ${provider}/${model}\n`));
-      break;
-    }
-    case "quit":
-    case "exit":
-      console.log(chalk.dim("\n  Goodbye!\n"));
-      process.exit(0);
-      break;
-    default:
-      console.log(chalk.yellow(`\n  Unknown command: /${command}. Type /help for available commands.\n`));
-  }
-}

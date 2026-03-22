@@ -1,5 +1,20 @@
 import { spawn } from "child_process";
 
+let activeChild: ReturnType<typeof spawn> | null = null;
+
+export function killActiveProcess(): void {
+  if (activeChild?.pid) {
+    try {
+      process.kill(-activeChild.pid, "SIGTERM");
+      setTimeout(() => {
+        try {
+          if (activeChild?.pid) process.kill(-activeChild.pid, "SIGKILL");
+        } catch { /* already exited */ }
+      }, 3000);
+    } catch { /* already exited */ }
+  }
+}
+
 export const name = "bash";
 
 export const description =
@@ -59,17 +74,21 @@ export async function execute({
         PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
       },
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
+
+    activeChild = child;
 
     // Set up timeout
     const timeoutId = setTimeout(() => {
       killed = true;
-      child.kill("SIGTERM");
-      // Force kill after 5 seconds if still running
+      try {
+        process.kill(-child.pid!, "SIGTERM");
+      } catch { /* ESRCH: already exited */ }
       setTimeout(() => {
-        if (!child.killed) {
-          child.kill("SIGKILL");
-        }
+        try {
+          process.kill(-child.pid!, "SIGKILL");
+        } catch { /* ESRCH: already exited */ }
       }, 5000);
     }, timeout);
 
@@ -91,6 +110,7 @@ export async function execute({
 
     child.on("close", (code: number | null) => {
       clearTimeout(timeoutId);
+      activeChild = null;
       const duration = Date.now() - startTime;
 
       if (killed) {
@@ -124,6 +144,7 @@ export async function execute({
 
     child.on("error", (err: Error) => {
       clearTimeout(timeoutId);
+      activeChild = null;
       const duration = Date.now() - startTime;
       resolve({
         success: false,

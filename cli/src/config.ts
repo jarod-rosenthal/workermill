@@ -8,10 +8,17 @@ export interface ProviderConfig {
   host?: string;
 }
 
+export interface MCPServerConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
 export interface CliConfig {
   providers: Record<string, ProviderConfig>;
   default: string;
   routing?: Record<string, string>;
+  mcp?: Record<string, MCPServerConfig>;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".workermill");
@@ -58,6 +65,7 @@ export function resolveConfig(): CliConfig {
     providers: { ...global.providers, ...(project?.providers || {}) },
     default: project?.default || global.default,
     routing: { ...global.routing, ...(project?.routing || {}) },
+    mcp: { ...global.mcp, ...(project?.mcp || {}) },
   };
 }
 

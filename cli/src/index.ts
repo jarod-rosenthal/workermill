@@ -15,6 +15,7 @@ const program = new Command()
   .option("--model <model>", "Override model")
   .option("--trust", "Skip all tool permission prompts")
   .option("--resume", "Resume the last conversation")
+  .option("--plan", "Start in plan mode (read-only tools)")
   .action(async (options) => {
     // Header is shown by runAgent after config is loaded (so it can show provider info)
 
@@ -36,7 +37,7 @@ const program = new Command()
     }
 
     // Run interactive agent
-    await runAgent(config, options.trust || false, options.resume || false);
+    await runAgent(config, options.trust || false, options.resume || false, options.plan || false);
   });
 
 program.parse();

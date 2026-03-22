@@ -13,9 +13,10 @@ import * as lsTool from "./ls.js";
 import * as fetchTool from "./fetch.js";
 import * as patchTool from "./patch.js";
 import * as subAgentTool from "./sub-agent.js";
+import * as gitTool from "./git.js";
 
 // Re-export all tool modules
-export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool, subAgentTool };
+export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool, subAgentTool, gitTool };
 
 /**
  * Creates Vercel AI SDK tool definitions for use with generateText().
@@ -320,6 +321,23 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel)
           return parts.join("\n");
         }
         return `Error: ${result.error}${result.hint ? `\nHint: ${result.hint}` : ""}`;
+      },
+    }),
+
+    git: tool({
+      description: gitTool.description,
+      inputSchema: z.object({
+        action: z.enum(["status", "diff", "log", "add", "commit", "branch", "checkout", "stash"])
+          .describe("The git action to perform"),
+        args: z.string().optional()
+          .describe("Additional arguments (file paths, branch name, commit message)"),
+      }),
+      execute: async ({ action, args }) => {
+        const result = await gitTool.execute({ action, args, cwd: workingDir });
+        if (result.success) {
+          return result.output || "(no output)";
+        }
+        return `Error: ${result.error}`;
       },
     }),
 

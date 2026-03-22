@@ -8,6 +8,7 @@ export class PermissionManager {
   private trustAll: boolean;
   private configTrust: Set<string>;
   private rl: readline.Interface | null = null;
+  private cancelCurrentPrompt: (() => void) | null = null;
 
   constructor(trustAll = false, configTrust: string[] = []) {
     this.trustAll = trustAll;
@@ -17,6 +18,13 @@ export class PermissionManager {
   /** Bind to the agent's readline instance so we reuse it for prompts */
   setReadline(rl: readline.Interface): void {
     this.rl = rl;
+  }
+
+  cancelPrompt(): void {
+    if (this.cancelCurrentPrompt) {
+      this.cancelCurrentPrompt();
+      this.cancelCurrentPrompt = null;
+    }
   }
 
   async checkPermission(
@@ -64,11 +72,15 @@ export class PermissionManager {
 
   /** Prompt using the shared readline, or create a temporary one if none bound */
   askUser(prompt: string): Promise<string> {
-    return new Promise<string>((resolve) => {
+    return new Promise<string>((resolve, reject) => {
+      this.cancelCurrentPrompt = () => {
+        reject(new Error("cancelled"));
+      };
       if (this.rl) {
         // Temporarily resume the shared readline for this question
         this.rl.resume();
         this.rl.question(prompt, (answer) => {
+          this.cancelCurrentPrompt = null;
           this.rl!.pause();
           resolve(answer);
         });
@@ -76,6 +88,7 @@ export class PermissionManager {
         // Fallback: create a temporary readline (shouldn't happen in normal flow)
         const tempRl = readline.createInterface({ input: process.stdin, output: process.stdout });
         tempRl.question(prompt, (answer) => {
+          this.cancelCurrentPrompt = null;
           tempRl.close();
           resolve(answer);
         });

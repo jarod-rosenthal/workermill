@@ -50,39 +50,11 @@ export function printToolCall(toolName: string, toolInput: Record<string, unknow
     case "edit_file": {
       const filePath = String(toolInput.path || "");
       console.log(chalk.dim(`\n  ● Edit `) + chalk.white(filePath));
-      // Show diff
-      if (toolInput.old_string && toolInput.new_string) {
-        const oldLines = String(toolInput.old_string).split("\n");
-        const newLines = String(toolInput.new_string).split("\n");
-        const maxShow = 8;
-        for (const line of oldLines.slice(0, maxShow)) {
-          console.log(chalk.red(`    - ${line}`));
-        }
-        if (oldLines.length > maxShow) console.log(chalk.red(`    ... +${oldLines.length - maxShow} lines`));
-        for (const line of newLines.slice(0, maxShow)) {
-          console.log(chalk.green(`    + ${line}`));
-        }
-        if (newLines.length > maxShow) console.log(chalk.green(`    ... +${newLines.length - maxShow} lines`));
-      }
       break;
     }
 
     case "patch": {
       console.log(chalk.dim(`\n  ● Patch `) + chalk.white("(multi-file)"));
-      const patchLines = String(toolInput.patch_text || "").split("\n").slice(0, 10);
-      for (const line of patchLines) {
-        if (line.startsWith("+++") || line.startsWith("---")) {
-          console.log(chalk.bold(`    ${line}`));
-        } else if (line.startsWith("+")) {
-          console.log(chalk.green(`    ${line}`));
-        } else if (line.startsWith("-")) {
-          console.log(chalk.red(`    ${line}`));
-        } else if (line.startsWith("@@")) {
-          console.log(chalk.cyan(`    ${line}`));
-        } else {
-          console.log(chalk.dim(`    ${line}`));
-        }
-      }
       break;
     }
 
@@ -116,25 +88,47 @@ export function printToolCall(toolName: string, toolInput: Record<string, unknow
 }
 
 export function printToolResult(toolName: string, result: string): void {
-  // Truncate long results
-  const maxLines = 25;
+  const isError = result.startsWith("Error:");
   const lines = result.split("\n");
+
+  // For read_file: just show line count, not content
+  if (toolName === "read_file" && !isError) {
+    console.log(chalk.dim(`    (${lines.length} lines)`));
+    return;
+  }
+
+  // For edit_file: just show the result summary line
+  if (toolName === "edit_file" && !isError) {
+    console.log(chalk.dim(`    ${lines[0]}`));
+    return;
+  }
+
+  // For write_file: just show the result summary
+  if (toolName === "write_file" && !isError) {
+    console.log(chalk.dim(`    ${lines[0]}`));
+    return;
+  }
+
+  // For errors: show full error
+  if (isError) {
+    for (const line of lines.slice(0, 5)) {
+      console.log(chalk.red(`    ${line}`));
+    }
+    if (lines.length > 5) console.log(chalk.red(`    ... ${lines.length - 5} more lines`));
+    return;
+  }
+
+  // Everything else: show 5 lines max
+  const maxLines = 5;
   const truncated = lines.length > maxLines;
   const displayLines = truncated ? lines.slice(0, maxLines) : lines;
 
-  const isError = result.startsWith("Error:");
-
   for (const line of displayLines) {
-    if (isError) {
-      console.log(chalk.red(`    ${line}`));
-    } else {
-      // Highlight file paths
-      const highlighted = line.replace(
-        /([a-zA-Z0-9_\-./]+\.(ts|tsx|js|jsx|py|go|rs|java|md|json|yaml|yml|css|html|sql|sh))/g,
-        (match) => chalk.cyan(match)
-      );
-      console.log(chalk.dim(`    ${highlighted}`));
-    }
+    const highlighted = line.replace(
+      /([a-zA-Z0-9_\-./]+\.(ts|tsx|js|jsx|py|go|rs|java|md|json|yaml|yml|css|html|sql|sh))/g,
+      (match) => chalk.cyan(match)
+    );
+    console.log(chalk.dim(`    ${highlighted}`));
   }
   if (truncated) {
     console.log(chalk.dim(`    ... ${lines.length - maxLines} more lines`));

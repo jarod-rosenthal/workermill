@@ -190,7 +190,19 @@ Available personas: architect, backend_developer, frontend_developer, fullstack_
     abortSignal: AbortSignal.timeout(3 * 60 * 1000),
   });
 
-  for await (const _chunk of planStream.textStream) { /* drive */ }
+  let plannerShownText = false;
+  for await (const chunk of planStream.textStream) {
+    if (chunk) {
+      if (!plannerShownText) {
+        spinner.stop();
+        plannerShownText = true;
+      }
+      process.stdout.write(chalk.dim(chunk));
+    }
+  }
+  if (plannerShownText) {
+    process.stdout.write("\n");
+  }
   const planText = await planStream.text;
   spinner.stop();
 
@@ -476,8 +488,23 @@ When you modify a file, include ::file_modified::path markers.${revisionFeedback
         abortSignal: AbortSignal.timeout(10 * 60 * 1000),
       });
 
-      for await (const _chunk of stream.textStream) {
-        // Drive execution
+      let hasShownText = false;
+      for await (const chunk of stream.textStream) {
+        // Stream agent thinking to the user
+        if (chunk) {
+          if (!hasShownText) {
+            spinner.stop();
+            hasShownText = true;
+          }
+          // Filter out marker lines from display
+          if (!chunk.includes("::decision::") && !chunk.includes("::learning::") &&
+              !chunk.includes("::file_created::") && !chunk.includes("::file_modified::")) {
+            process.stdout.write(chalk.dim(chunk));
+          }
+        }
+      }
+      if (hasShownText) {
+        process.stdout.write("\n");
       }
 
       const text = await stream.text;
@@ -608,7 +635,22 @@ If there are issues, be specific about which files and what needs to change.`;
           abortSignal: AbortSignal.timeout(5 * 60 * 1000),
         });
 
-        for await (const _chunk of reviewStream.textStream) { /* drive */ }
+        let reviewerShownText = false;
+        for await (const chunk of reviewStream.textStream) {
+          if (chunk) {
+            if (!reviewerShownText) {
+              reviewSpinner.stop();
+              reviewerShownText = true;
+            }
+            // Filter out marker lines
+            if (!chunk.includes("::review_score::") && !chunk.includes("::review_verdict::")) {
+              process.stdout.write(chalk.dim(chunk));
+            }
+          }
+        }
+        if (reviewerShownText) {
+          process.stdout.write("\n");
+        }
 
         const reviewText = await reviewStream.text;
         const reviewUsage = await reviewStream.totalUsage;
@@ -623,15 +665,6 @@ If there are issues, be specific about which files and what needs to change.`;
         const scoreColor = score >= approvalThreshold ? chalk.green : score >= 60 ? chalk.yellow : chalk.red;
         console.log(`  ${scoreColor(`Score: ${score}/100`)} — ${approved ? chalk.green("APPROVED") : chalk.yellow("NEEDS REVISION")}`);
 
-        // Print full review feedback (strip marker lines only)
-        const feedbackLines = reviewText.split("\n").filter(l => !l.includes("::review_score::") && !l.includes("::review_verdict::"));
-        const feedback = feedbackLines.join("\n").trim();
-        if (feedback) {
-          console.log();
-          for (const line of feedback.split("\n")) {
-            console.log(chalk.dim("  " + line));
-          }
-        }
         console.log();
 
         // Track reviewer cost

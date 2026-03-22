@@ -16,10 +16,11 @@ import { getProviderForPersona } from "./config.js";
 type AnyToolDef = any;
 
 export interface Story {
+  id: string;       // Short kebab-case slug
   title: string;
   persona: string;
   description: string;
-  dependsOn?: number[];
+  dependsOn?: string[];  // References to other story IDs
 }
 
 interface SharedContext {
@@ -50,13 +51,16 @@ export async function classifyComplexity(
         complexity: z.enum(["single", "multi"]),
         reason: z.string(),
         stories: z.array(z.object({
+          id: z.string().describe("Short kebab-case slug for this story"),
           title: z.string(),
           persona: z.string(),
           description: z.string(),
-          dependsOn: z.array(z.number()).optional(),
+          dependsOn: z.array(z.string()).optional().describe("IDs of stories this depends on"),
         })).optional(),
       }),
       prompt: `Analyze this coding task. If it involves multiple distinct concerns that would benefit from different specialist personas working sequentially, classify as "multi" and provide a story breakdown with persona assignments. Otherwise classify as "single".
+
+Give each story a short kebab-case id (e.g., "setup-db", "add-api-routes"). Use these IDs in dependsOn to express ordering constraints.
 
 Available personas: architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer
 
@@ -76,11 +80,13 @@ ${userInput}`,
         model,
         prompt: `Classify this task as "single" or "multi". If multi, list stories with personas as JSON in a \`\`\`json code fence.
 
+Give each story a short kebab-case id (e.g., "setup-db", "add-api-routes"). Use these IDs in dependsOn to express ordering constraints.
+
 Available personas: architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer
 
 Task: ${userInput}
 
-Respond with JSON: {"complexity": "single"|"multi", "reason": "...", "stories": [...]}`,
+Respond with JSON: {"complexity": "single"|"multi", "reason": "...", "stories": [{"id": "...", "title": "...", "persona": "...", "description": "...", "dependsOn": [...]}]}`,
       });
 
       const jsonMatch = textResult.text.match(/\{[\s\S]*"complexity"[\s\S]*\}/);
@@ -98,6 +104,126 @@ Respond with JSON: {"complexity": "single"|"multi", "reason": "...", "stories": 
   }
 }
 
+function topologicalSort(stories: Story[]): Story[] {
+  const idMap = new Map(stories.map(s => [s.id, s]));
+  const visited = new Set<string>();
+  const result: Story[] = [];
+  const visiting = new Set<string>();
+
+  function visit(id: string): void {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) {
+      console.log(chalk.yellow(`  ⚠ Circular dependency at ${id}, using input order`));
+      return;
+    }
+    visiting.add(id);
+    const story = idMap.get(id);
+    if (story?.dependsOn) {
+      for (const dep of story.dependsOn) {
+        if (idMap.has(dep)) visit(dep);
+      }
+    }
+    visiting.delete(id);
+    visited.add(id);
+    if (story) result.push(story);
+  }
+
+  for (const story of stories) {
+    visit(story.id);
+  }
+  return result;
+}
+
+async function runPlannerCriticLoop(
+  config: CliConfig,
+  stories: Story[],
+  workingDir: string,
+): Promise<boolean> {
+  const planner = loadPersona("planner");
+  const critic = loadPersona("critic");
+  if (!planner || !critic) {
+    console.log(chalk.dim("  Skipping planner/critic (personas not found)"));
+    return true;
+  }
+
+  const { provider: pProvider, model: pModel, host: pHost } = getProviderForPersona(config, "planner");
+  const plannerModel = createModel(pProvider as AIProvider, pModel, pHost);
+  const plannerTools = createToolDefinitions(workingDir, plannerModel);
+
+  const readOnlyNames = planner.tools;
+  const readOnlyTools: Record<string, AnyToolDef> = {};
+  for (const toolName of readOnlyNames) {
+    if (plannerTools[toolName as keyof typeof plannerTools]) {
+      readOnlyTools[toolName] = plannerTools[toolName as keyof typeof plannerTools];
+    }
+  }
+
+  const storySummary = stories.map(s => `- ${s.id}: ${s.title} (${s.persona}) — ${s.description}`).join("\n");
+
+  for (let iteration = 0; iteration < 3; iteration++) {
+    const spinner = ora({
+      text: chalk.white(iteration === 0 ? "Planning implementation..." : `Revising plan (iteration ${iteration + 1})...`),
+      prefixText: "  ",
+    }).start();
+
+    const planStream = streamText({
+      model: plannerModel,
+      system: planner.systemPrompt,
+      prompt: `Create an implementation plan for these stories:\n\n${storySummary}\n\nWorking directory: ${workingDir}`,
+      tools: readOnlyTools as ToolSet,
+      stopWhen: stepCountIs(30),
+      abortSignal: AbortSignal.timeout(5 * 60 * 1000),
+    });
+
+    for await (const _chunk of planStream.textStream) { /* drive */ }
+    const planText = await planStream.text;
+    spinner.stop();
+
+    // Run critic
+    const { provider: cProvider, model: cModel, host: cHost } = getProviderForPersona(config, "critic");
+    const criticModel = createModel(cProvider as AIProvider, cModel, cHost);
+    const criticTools = createToolDefinitions(workingDir, criticModel);
+    const criticReadOnly: Record<string, AnyToolDef> = {};
+    for (const name of critic.tools) {
+      if (criticTools[name as keyof typeof criticTools]) {
+        criticReadOnly[name] = criticTools[name as keyof typeof criticTools];
+      }
+    }
+
+    const criticSpinner = ora({
+      text: chalk.white("Critic reviewing plan..."),
+      prefixText: "  ",
+    }).start();
+
+    const criticStream = streamText({
+      model: criticModel,
+      system: critic.systemPrompt,
+      prompt: `Review this implementation plan:\n\n${planText}`,
+      tools: criticReadOnly as ToolSet,
+      stopWhen: stepCountIs(20),
+      abortSignal: AbortSignal.timeout(3 * 60 * 1000),
+    });
+
+    for await (const _chunk of criticStream.textStream) { /* drive */ }
+    const criticText = await criticStream.text;
+    criticSpinner.stop();
+
+    const scoreMatch = criticText.match(/::review_score::(\d+)/);
+    const score = scoreMatch ? parseInt(scoreMatch[1], 10) : 0;
+    const scoreColor = score >= 85 ? chalk.green : score >= 70 ? chalk.yellow : chalk.red;
+    console.log(`  ${scoreColor(`Plan score: ${score}/100`)}`);
+
+    if (score >= 85) {
+      console.log(chalk.green("  ✓ Plan approved by critic"));
+      return true;
+    }
+    console.log(chalk.yellow(`  Plan needs revision (score ${score}/100)`));
+  }
+
+  console.log(chalk.yellow("  ⚠ Max planner iterations reached, proceeding anyway"));
+  return true;
+}
+
 export async function runOrchestration(
   config: CliConfig,
   stories: Story[],
@@ -113,12 +239,22 @@ export async function runOrchestration(
   const permissions = new PermissionManager(trustAll);
   const workingDir = process.cwd();
 
+  // Sort by dependencies
+  const sorted = topologicalSort(stories);
+
   console.log();
-  console.log(chalk.bold(`  Plan: ${stories.length} stories`));
+  console.log(chalk.bold(`  Plan: ${sorted.length} stories`));
+  sorted.forEach((s, i) => {
+    console.log(chalk.dim(`    ${i + 1}. ${s.persona}: ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`));
+  });
   console.log();
 
-  for (let i = 0; i < stories.length; i++) {
-    const story = stories[i];
+  // Planner/critic validation
+  await runPlannerCriticLoop(config, sorted, workingDir);
+  console.log();
+
+  for (let i = 0; i < sorted.length; i++) {
+    const story = sorted[i];
     const persona = loadPersona(story.persona);
     if (!persona) {
       printError(`Unknown persona: ${story.persona}`);
@@ -139,7 +275,7 @@ export async function runOrchestration(
     }
 
     const spinner = ora({
-      text: chalk.white(`Story ${i + 1}/${stories.length} — ${persona.name} — ${story.title}`),
+      text: chalk.white(`Story ${i + 1}/${sorted.length} — ${persona.name} — ${story.title}`),
       prefixText: "  ",
     }).start();
 
@@ -167,6 +303,9 @@ export async function runOrchestration(
         };
       }
     }
+
+    let revisionFeedback = "";
+    for (let revision = 0; revision <= 2; revision++) {
 
     // Build system prompt with context from prior stories
     const contextParts: string[] = [];
@@ -196,7 +335,7 @@ Your task: ${story.description}
 When you make a decision that affects other parts of the system, include ::decision:: markers in your output.
 When you learn something useful, include ::learning:: markers.
 When you create a file, include ::file_created::path markers.
-When you modify a file, include ::file_modified::path markers.`;
+When you modify a file, include ::file_modified::path markers.${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
 
     try {
       const stream = streamText({
@@ -258,13 +397,16 @@ When you modify a file, include ::file_modified::path markers.`;
         console.log(chalk.dim(`    ${summary}${summary.length >= 200 ? "..." : ""}`));
       }
 
-      console.log(chalk.green(`  ✓ Story ${i + 1}/${stories.length} — ${persona.name} — ${story.title}`));
+      console.log(chalk.green(`  ✓ Story ${i + 1}/${sorted.length} — ${persona.name} — ${story.title}`));
       console.log();
+      break; // Story succeeded, exit revision loop
     } catch (err) {
       spinner.stop();
       printError(`Story ${i + 1} failed: ${err instanceof Error ? err.message : String(err)}`);
-      // Continue with next story rather than aborting
+      break; // Don't retry on errors, move to next story
     }
+
+    } // end revision loop
   }
 
   // Run inline review
@@ -305,7 +447,7 @@ When you modify a file, include ::file_modified::path markers.`;
     try {
       const reviewPrompt = `Review the changes made by the following experts:
 
-${stories.map((s, i) => `${i + 1}. ${s.persona}: ${s.title} — ${s.description}`).join("\n")}
+${sorted.map((s, idx) => `${idx + 1}. ${s.persona}: ${s.title} — ${s.description}`).join("\n")}
 
 Files created: ${context.filesCreated.join(", ") || "none"}
 Files modified: ${context.filesModified.join(", ") || "none"}
@@ -368,6 +510,34 @@ Provide a review with a quality score (0-100) using ::review_score:: marker and 
       console.log();
     }
   }
+
+  // Git commit step
+  try {
+    const { execSync } = await import("child_process");
+    const diff = execSync("git diff --stat", { cwd: workingDir, encoding: "utf-8" }).trim();
+    if (diff) {
+      console.log(chalk.bold("  ─── Changes ───"));
+      console.log(chalk.dim("  " + diff.split("\n").join("\n  ")));
+      console.log();
+
+      if (!trustAll) {
+        const answer = await permissions.askUser(chalk.dim("  Commit these changes? (y/n): "));
+        if (answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes") {
+          // Stage specific files from context (NOT git add -A)
+          const filesToStage = [...context.filesCreated, ...context.filesModified].filter(Boolean);
+          if (filesToStage.length > 0) {
+            execSync(`git add ${filesToStage.map(f => `"${f}"`).join(" ")}`, { cwd: workingDir });
+          } else {
+            execSync("git add -u", { cwd: workingDir }); // Only modified tracked files
+          }
+          const storyTitles = sorted.map(s => s.title).join(", ");
+          const msg = `feat: ${storyTitles}`.slice(0, 72);
+          execSync(`git commit -m "${msg.replace(/"/g, '\\"')}"`, { cwd: workingDir });
+          console.log(chalk.green("  ✓ Changes committed"));
+        }
+      }
+    }
+  } catch { /* not a git repo or no changes */ }
 
   // Print cost summary
   console.log(chalk.bold("  ─── Session Complete ───"));

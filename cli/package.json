@@ -42,5 +42,18 @@
     "anthropic",
     "openai"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jarod-rosenthal/workermill"
+  },
+  "homepage": "https://workermill.com",
+  "bugs": {
+    "url": "https://github.com/jarod-rosenthal/workermill/issues"
+  }
 }

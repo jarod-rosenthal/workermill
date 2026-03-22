@@ -3,6 +3,25 @@ import chalk from "chalk";
 
 const READ_TOOLS = new Set(["read_file", "glob", "grep", "ls", "sub_agent"]);
 
+const DANGEROUS_PATTERNS = [
+  { pattern: /rm\s+(-[a-z]*f|-[a-z]*r|--force|--recursive)/i, label: "recursive/forced delete" },
+  { pattern: /git\s+reset\s+--hard/i, label: "hard reset" },
+  { pattern: /git\s+push\s+.*--force/i, label: "force push" },
+  { pattern: /git\s+clean\s+-[a-z]*f/i, label: "git clean" },
+  { pattern: /drop\s+table/i, label: "drop table" },
+  { pattern: /truncate\s+/i, label: "truncate" },
+  { pattern: /DELETE\s+FROM\s+\w+\s*;/i, label: "DELETE without WHERE" },
+  { pattern: /chmod\s+777/i, label: "chmod 777" },
+  { pattern: />(\/dev\/sda|\/dev\/disk)/i, label: "write to disk device" },
+];
+
+function isDangerous(command: string): string | null {
+  for (const { pattern, label } of DANGEROUS_PATTERNS) {
+    if (pattern.test(command)) return label;
+  }
+  return null;
+}
+
 export class PermissionManager {
   private sessionAllow = new Set<string>();
   private trustAll: boolean;
@@ -31,6 +50,20 @@ export class PermissionManager {
     toolName: string,
     toolInput: Record<string, unknown>
   ): Promise<boolean> {
+    // Dangerous command check (applies even in trust-all mode)
+    if (toolName === "bash") {
+      const cmd = String(toolInput.command || "");
+      const danger = isDangerous(cmd);
+      if (danger) {
+        console.log();
+        console.log(chalk.red.bold(`  ⚠ DANGEROUS: ${danger}`));
+        console.log(chalk.red(`  Command: ${cmd}`));
+        const answer = await this.askUser(chalk.red("  Are you sure? (yes to confirm): "));
+        if (answer.trim().toLowerCase() !== "yes") return false;
+        return true;
+      }
+    }
+
     if (this.trustAll) return true;
     if (READ_TOOLS.has(toolName)) return true;
     if (this.sessionAllow.has(toolName)) return true;

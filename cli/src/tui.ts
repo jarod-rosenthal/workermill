@@ -141,15 +141,47 @@ export function printToolResult(toolName: string, result: string): void {
   }
 }
 
+function renderTable(lines: string[]): void {
+  const rows = lines.map(line =>
+    line.split("|").map(cell => cell.trim()).filter(Boolean)
+  );
+  // Skip separator rows (only dashes/colons)
+  const dataRows = rows.filter(row => !row.every(cell => /^[-:]+$/.test(cell)));
+  if (dataRows.length === 0) return;
+
+  const colWidths = dataRows[0].map((_, colIdx) =>
+    Math.max(...dataRows.map(row => (row[colIdx] || "").length))
+  );
+
+  for (let i = 0; i < dataRows.length; i++) {
+    const row = dataRows[i];
+    const formatted = row.map((cell, j) => cell.padEnd(colWidths[j] || 0)).join(" │ ");
+    if (i === 0) {
+      console.log(chalk.bold(`  ${formatted}`));
+      console.log(chalk.dim(`  ${"─".repeat(formatted.length)}`));
+    } else {
+      console.log(chalk.white(`  ${formatted}`));
+    }
+  }
+}
+
 export function printAgentText(text: string): void {
   if (!text.trim()) return;
 
   let inCodeBlock = false;
   let codeLanguage = "";
   let codeLines: string[] = [];
+  let inTable = false;
+  let tableLines: string[] = [];
 
   for (const line of text.split("\n")) {
     if (line.startsWith("```") && !inCodeBlock) {
+      // Flush table if we were in one
+      if (inTable) {
+        renderTable(tableLines);
+        inTable = false;
+        tableLines = [];
+      }
       inCodeBlock = true;
       codeLanguage = line.slice(3).trim();
       codeLines = [];
@@ -174,6 +206,42 @@ export function printAgentText(text: string): void {
       continue;
     }
 
+    // Table accumulation
+    if (line.trimStart().startsWith("|")) {
+      inTable = true;
+      tableLines.push(line);
+      continue;
+    }
+
+    // Flush table if we just left one
+    if (inTable) {
+      renderTable(tableLines);
+      inTable = false;
+      tableLines = [];
+    }
+
+    // Horizontal rule
+    if (line.match(/^[-*_]{3,}\s*$/)) {
+      console.log(chalk.dim(`  ${"─".repeat(Math.min(60, (process.stdout.columns || 80) - 4))}`));
+      continue;
+    }
+
+    // Task list checkboxes
+    if (line.match(/^[-*]\s+\[[ x]\]/)) {
+      const checked = line.includes("[x]");
+      const text = line.replace(/^[-*]\s+\[[ x]\]\s*/, "");
+      console.log(chalk.white(`  ${checked ? "☑" : "☐"} ${text}`));
+      continue;
+    }
+
+    // Nested lists (indented by 2+ spaces)
+    const nestedListMatch = line.match(/^(\s{2,})[-*]\s+(.*)/);
+    if (nestedListMatch) {
+      const indent = Math.floor(nestedListMatch[1].length / 2);
+      console.log(chalk.white(`  ${"  ".repeat(indent)}• ${nestedListMatch[2]}`));
+      continue;
+    }
+
     // Markdown rendering
     if (line.startsWith("# ")) {
       console.log(chalk.bold.white(`\n  ${line.slice(2)}`));
@@ -194,6 +262,11 @@ export function printAgentText(text: string): void {
       formatted = formatted.replace(/`([^`]+)`/g, (_, code) => chalk.cyan(code));
       console.log(chalk.white(`  ${formatted}`));
     }
+  }
+
+  // Flush remaining table
+  if (inTable && tableLines.length > 0) {
+    renderTable(tableLines);
   }
 
   // Close unclosed code block

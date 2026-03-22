@@ -202,10 +202,13 @@ export async function handleCommand(
     }
 
     case "quit":
-    case "exit":
-      console.log(chalk.dim("\n  Goodbye!\n"));
+    case "exit": {
+      const { exitTerminal } = await import("./terminal.js");
+      exitTerminal();
+      console.log(chalk.dim("  Goodbye!"));
       process.exit(0);
       break;
+    }
 
     default:
       console.log(chalk.yellow(`\n  Unknown command: /${command}. Type /help for available commands.\n`));

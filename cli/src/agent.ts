@@ -16,6 +16,7 @@ import { killActiveProcess } from "../../packages/engine/src/tools/bash.js";
 import { printToolCall, printToolResult, printError, printStatusBar, printHeader } from "./tui.js";
 import { handleCommand as handleSlashCommand, type CommandContext } from "./commands.js";
 import { CostTracker } from "./cost-tracker.js";
+import { initTerminal, exitTerminal, setStatusBar } from "./terminal.js";
 
 type AgentState = "idle" | "streaming" | "tool_executing" | "permission_waiting";
 import type { CliConfig } from "./config.js";
@@ -151,12 +152,15 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
 
   logger.info("Session started", { provider, model: modelName, workingDir, trustAll });
 
-  // Clear screen and show header
+  // Initialize managed terminal (scroll region + pinned bottom)
+  initTerminal();
+
+  // Show header in scroll region
   printHeader("0.1.0", provider, modelName, workingDir);
 
-  // Show initial status bar
-  printStatusBar(provider, modelName, 0, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), 0);
-  console.log();
+  // Set pinned status bar
+  const statusText = printStatusBar(provider, modelName, 0, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), 0);
+  setStatusBar(statusText);
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -202,8 +206,9 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
       // idle — double-tap to exit
       const now = Date.now();
       if (now - lastCtrlCTime < 500) {
-        console.log(chalk.dim("\n  Goodbye!\n"));
         saveSession(session);
+        exitTerminal();
+        console.log(chalk.dim("  Goodbye!"));
         process.exit(0);
       }
       lastCtrlCTime = now;
@@ -354,9 +359,9 @@ Focus on writing clean, production-ready code.`;
         spinner.succeed("Conversation compacted");
       }
 
-      console.log();
-      printStatusBar(provider, modelName, session.totalTokens, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), costTracker.getTotalCost());
-      console.log();
+      // Update pinned status bar
+      const bar = printStatusBar(provider, modelName, session.totalTokens, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), costTracker.getTotalCost());
+      setStatusBar(bar);
     } catch (err) {
       agentState = "idle";
       currentAbortController = null;
@@ -463,20 +468,21 @@ Focus on writing clean, production-ready code.`;
   rl.on("close", () => {
     logger.info("Session ended", { totalTokens: session.totalTokens, messages: session.messages.length });
     logger.flush();
-    // Don't exit immediately if we're still processing a request
+    const cleanup = () => {
+      saveSession(session);
+      exitTerminal();
+      console.log(chalk.dim("  Goodbye!"));
+      process.exit(0);
+    };
     if (processing) {
       const checkDone = setInterval(() => {
         if (!processing) {
           clearInterval(checkDone);
-          saveSession(session);
-          console.log(chalk.dim("\n  Goodbye!\n"));
-          process.exit(0);
+          cleanup();
         }
       }, 500);
     } else {
-      saveSession(session);
-      console.log(chalk.dim("\n  Goodbye!\n"));
-      process.exit(0);
+      cleanup();
     }
   });
 }

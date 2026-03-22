@@ -8,8 +8,6 @@ export function incrementToolCount(toolName: string): void {
 }
 
 export function printHeader(version: string, provider?: string, model?: string, cwd?: string): void {
-  // Clear screen
-  process.stdout.write("\x1b[2J\x1b[H");
 
   const width = process.stdout.columns || 80;
 
@@ -275,7 +273,7 @@ export function printStatusBar(
   tokens: number,
   permissionMode: string,
   cost?: number
-): void {
+): string {
   const width = process.stdout.columns || 80;
 
   // Build tool counts
@@ -317,5 +315,5 @@ export function printStatusBar(
       ? chalk.bgRgb(30, 30, 30).dim("│ ") + chalk.bgRgb(30, 30, 30).green(permStr)
       : "");
 
-  console.log(bar);
+  return bar;
 }

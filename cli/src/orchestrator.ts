@@ -457,6 +457,38 @@ function extractScore(text: string): number {
   return 75;
 }
 
+/**
+ * Parse AFFECTED_STORIES from reviewer output for selective revision.
+ * Copied from worker/epic/inline-reviewer.ts parseAffectedStories().
+ */
+function parseAffectedStories(text: string): { stories: number[]; reasons: Record<number, string> } | null {
+  const storiesMatch = text.match(/AFFECTED_STORIES:\s*\[([^\]]+)\]/i);
+  if (!storiesMatch) return null;
+
+  const stories = storiesMatch[1]
+    .split(",")
+    .map(s => parseInt(s.trim(), 10))
+    .filter(n => !isNaN(n));
+
+  if (stories.length === 0) return null;
+
+  let reasons: Record<number, string> = {};
+  const reasonsMatch = text.match(/AFFECTED_REASONS:\s*(\{[\s\S]*?\})/i);
+  if (reasonsMatch) {
+    try {
+      const parsed = JSON.parse(reasonsMatch[1]);
+      for (const [key, value] of Object.entries(parsed)) {
+        const storyIndex = parseInt(key, 10);
+        if (!isNaN(storyIndex) && typeof value === "string") {
+          reasons[storyIndex] = value;
+        }
+      }
+    } catch { /* continue without reasons */ }
+  }
+
+  return { stories, reasons };
+}
+
 export async function runOrchestration(
   config: CliConfig,
   userTask: string,
@@ -860,7 +892,20 @@ Use read_file, glob, grep, and git tools to examine the actual code. Check:
 Use \`git diff\` or read individual files to see the actual changes.
 
 Provide a review with a quality score (0-100) using ::review_score:: marker and a verdict using ::review_verdict::approved or ::review_verdict::needs_revision.
-If requesting revision, be specific about which files and what needs to change so workers know exactly what to fix.`;
+
+### For REVISION_NEEDED Decisions - Specify Affected Stories
+
+When requesting revision, you MUST specify which stories need changes. Use the story numbers from the Story Summary table above.
+
+\`\`\`
+AFFECTED_STORIES: [2, 3]
+AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Frontend form has no validation"}
+\`\`\`
+
+**Guidelines:**
+- Only include stories that have ACTUAL implementation issues
+- If ALL stories need revision, you may omit AFFECTED_STORIES (all will re-run)
+- Be specific in AFFECTED_REASONS so developers know exactly what to fix`;
 
         // Use onStepFinish for reviewer — same as WorkerMill ai-sdk-client.ts
         let allReviewText = "";
@@ -933,11 +978,33 @@ If requesting revision, be specific about which files and what needs to change s
           break;
         }
 
-        // Re-execute stories with reviewer feedback
+        // Parse which stories need revision (selective revision from inline-reviewer.ts)
+        const affected = parseAffectedStories(reviewText);
+        const affectedSet = affected ? new Set(affected.stories) : null;
+
+        if (affected) {
+          const selectiveInfo = `stories ${affected.stories.join(", ")}`;
+          wmCoordinatorLog(`Selective revision: ${selectiveInfo}`);
+          if (Object.keys(affected.reasons).length > 0) {
+            for (const [idx, reason] of Object.entries(affected.reasons)) {
+              wmCoordinatorLog(`  Story ${idx}: ${reason}`);
+            }
+          }
+        } else {
+          wmCoordinatorLog("Full revision (all stories)");
+        }
+
         console.log(chalk.bold("\n  ─── Revision Pass ───\n"));
 
         for (let i = 0; i < sorted.length; i++) {
           const story = sorted[i];
+
+          // Skip stories not affected by the review (selective revision)
+          if (affectedSet && !affectedSet.has(i + 1)) {
+            wmCoordinatorLog(`Skipping story ${i + 1}/${sorted.length} — not affected`);
+            continue;
+          }
+
           const storyPersona = loadPersona(story.persona);
           if (!storyPersona) continue;
 

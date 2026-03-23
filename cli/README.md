@@ -25,7 +25,7 @@ workermill
 
 - **Multi-expert orchestration** — Complex tasks automatically decomposed into stories, each assigned to a specialist persona (backend, frontend, devops, security, etc.)
 - **Any LLM provider** — Ollama (local), Anthropic, OpenAI, Google. Per-persona model routing.
-- **10 built-in tools** — File read/write/edit, bash, glob, grep, ls, fetch, patch, git, sub-agent
+- **13 built-in tools** — bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, sub_agent
 - **Plan mode** — Read-only research phase before making changes (`/plan` or `--plan`)
 - **Session management** — Persistent conversations with resume (`--resume`, `/sessions`)
 - **Cost tracking** — Per-model token pricing with `/cost` breakdown
@@ -110,9 +110,9 @@ Config stored at `~/.workermill/cli.json` (global) and `.workermill/config.json`
 }
 ```
 
-## 12 Built-in Personas
+## 15 Built-in Personas
 
-architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer, reviewer
+architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer, tech_writer, tech_lead, planner, critic
 
 ## Requirements
 

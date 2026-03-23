@@ -4,7 +4,7 @@ import pathModule from "path";
 import chalk from "chalk";
 import ora from "ora";
 import { execSync } from "child_process";
-import { streamText, type ToolSet } from "ai";
+import { streamText, stepCountIs, type ToolSet } from "ai";
 import { createModel } from "../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
 import type { AIProvider } from "../../packages/engine/src/types.js";
@@ -16,7 +16,7 @@ import { killActiveProcess } from "../../packages/engine/src/tools/bash.js";
 import { printToolCall, printToolResult, printError, printStatusBar, printHeader } from "./tui.js";
 import { handleCommand as handleSlashCommand, type CommandContext } from "./commands.js";
 import { CostTracker } from "./cost-tracker.js";
-import { initTerminal, exitTerminal, setStatusBar } from "./terminal.js";
+import { initTerminal, exitTerminal, setStatusBar, showStatusBar } from "./terminal.js";
 
 type AgentState = "idle" | "streaming" | "tool_executing" | "permission_waiting";
 import type { CliConfig } from "./config.js";
@@ -152,13 +152,12 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
 
   logger.info("Session started", { provider, model: modelName, workingDir, trustAll });
 
-  // Initialize managed terminal (scroll region + pinned bottom)
   initTerminal();
 
-  // Show header in scroll region
-  printHeader("0.1.0", provider, modelName, workingDir);
+  // Show header
+  printHeader("0.1.3", provider, modelName, workingDir);
 
-  // Set pinned status bar
+  // Set initial status bar
   const statusText = printStatusBar(provider, modelName, 0, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), 0);
   setStatusBar(statusText);
 
@@ -168,6 +167,12 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
     prompt: chalk.cyan("❯ "),
     completer,
   });
+
+  /** Show status bar line then prompt */
+  function promptWithStatus(): void {
+    showStatusBar();
+    rl.prompt();
+  }
 
   // Load persistent history
   const history = loadHistory();
@@ -184,7 +189,7 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
       currentAbortController = null;
       processing = false;
       rl.resume();
-      rl.prompt();
+      promptWithStatus();
     } else if (agentState === "tool_executing") {
       console.log(chalk.yellow("\n  [cancelling...]"));
       killActiveProcess();
@@ -193,7 +198,7 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
       currentAbortController = null;
       processing = false;
       rl.resume();
-      rl.prompt();
+      promptWithStatus();
     } else if (agentState === "permission_waiting") {
       permissions.cancelPrompt();
       console.log(chalk.yellow("\n  [cancelled]"));
@@ -201,7 +206,7 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
       currentAbortController = null;
       processing = false;
       rl.resume();
-      rl.prompt();
+      promptWithStatus();
     } else {
       // idle — double-tap to exit
       const now = Date.now();
@@ -213,7 +218,7 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
       }
       lastCtrlCTime = now;
       console.log(chalk.dim("\n  Press Ctrl+C again to exit."));
-      rl.prompt();
+      promptWithStatus();
     }
   });
 
@@ -232,7 +237,7 @@ Guidelines:
 
 Focus on writing clean, production-ready code.`;
 
-  rl.prompt();
+  promptWithStatus();
 
   let processing = false;
   let multilineBacktick = false;
@@ -276,10 +281,10 @@ Focus on writing clean, production-ready code.`;
           console.log(chalk.dim(`  → multi-expert (${classification.reason})\n`));
 
           // Orchestrator runs planner to determine stories, critic validates, then prompts user
-          await runOrchestration(config, input, trustAll, sandboxed);
+          await runOrchestration(config, input, trustAll, sandboxed, rl);
           processing = false;
           rl.resume();
-          rl.prompt();
+          promptWithStatus();
           return;
         } else {
           console.log(chalk.dim(`  → single agent (${classification.reason})\n`));
@@ -301,7 +306,7 @@ Focus on writing clean, production-ready code.`;
           content: m.content,
         })),
         tools: getActiveTools() as ToolSet,
-
+        stopWhen: stepCountIs(100),
         abortSignal: currentAbortController.signal,
       });
 
@@ -324,6 +329,7 @@ Focus on writing clean, production-ready code.`;
 
       if (!spinnerStopped) {
         thinkingSpinner.stop();
+        process.stdout.write("\n");
       }
 
       if (fullText.trim()) {
@@ -375,11 +381,14 @@ Focus on writing clean, production-ready code.`;
 
     processing = false;
     rl.resume();
-    rl.prompt();
+    promptWithStatus();
     })(); // end async IIFE
   }
 
   rl.on("line", (input: string) => {
+    // If a permission question is active, rl.question() handles it — don't process here
+    if (permissions.questionActive) return;
+
     // Triple backtick multiline mode
     if (input.trim() === "```" && !multilineBacktick && !multilineBackslash) {
       multilineBacktick = true;
@@ -457,7 +466,7 @@ Focus on writing clean, production-ready code.`;
       handleSlashCommand(trimmed, cmdCtx).then(() => {
         processing = false;
         rl.resume();
-        rl.prompt();
+        promptWithStatus();
       });
       return;
     }

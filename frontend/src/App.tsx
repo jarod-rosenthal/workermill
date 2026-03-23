@@ -54,6 +54,7 @@ import {
   Metrics,
   DocsCompliance,
   AgentSetup,
+  CLIDocs,
   VSCodeExtension,
   Repositories as DocsRepositories,
   CodebaseIndexing,
@@ -250,6 +251,7 @@ function App() {
           <Route path="/docs" element={<DarkRoute><DocsLayout /></DarkRoute>}>
             <Route index element={<DocsOverview />} />
             <Route path="quick-start" element={<QuickStart />} />
+            <Route path="cli" element={<CLIDocs />} />
             <Route path="agent" element={<AgentSetup />} />
             <Route
               path="local-agent"

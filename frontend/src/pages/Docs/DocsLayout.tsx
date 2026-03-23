@@ -23,14 +23,16 @@ import {
   FolderGit2,
   Radio,
   FileText,
+  TerminalSquare,
 } from "lucide-react";
 import { useAuthStore } from "../../store/auth-store";
 
 const navItems = [
   { to: "/docs", label: "Overview", icon: BookOpen, end: true },
   { to: "/docs/quick-start", label: "Quick Start", icon: Rocket },
-  { to: "/docs/agent", label: "Agent Setup", icon: Monitor },
+  { to: "/docs/cli", label: "WorkerMill CLI", icon: TerminalSquare },
   { to: "/docs/vscode-extension", label: "VS Code Extension", icon: Radio },
+  { to: "/docs/agent", label: "Remote Agent", icon: Monitor },
   { to: "/docs/repositories", label: "Repositories", icon: FolderGit2 },
   { to: "/docs/codebase-indexing", label: "Codebase Indexing", icon: Search },
   { to: "/docs/task-lifecycle", label: "Task Lifecycle", icon: Workflow },

@@ -393,13 +393,13 @@ export default function Hero() {
               </p>
             </div>
 
-            {/* Secondary CTAs */}
+            {/* Secondary CTAs — CLI + VS Code only */}
             <div className="flex flex-col sm:flex-row gap-4">
               <Link
-                to="/signup"
+                to="/docs/cli"
                 className="group inline-flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-xl hover:shadow-lg hover:shadow-primary/30 transition-all duration-300 hover:-translate-y-0.5"
               >
-                Try Cloud Platform
+                CLI Documentation
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Link>
               <a

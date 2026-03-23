@@ -14,9 +14,11 @@ import * as fetchTool from "./fetch.js";
 import * as patchTool from "./patch.js";
 import * as subAgentTool from "./sub-agent.js";
 import * as gitTool from "./git.js";
+import * as webSearchTool from "./web-search.js";
+import * as todoTool from "./todo.js";
 
 // Re-export all tool modules
-export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool, subAgentTool, gitTool };
+export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool, subAgentTool, gitTool, webSearchTool, todoTool };
 
 /**
  * Validate that a resolved path is within the allowed working directory.
@@ -360,6 +362,50 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
           return result.output || "(no output)";
         }
         return `Error: ${result.error}`;
+      },
+    }),
+
+    web_search: tool({
+      description: webSearchTool.description,
+      inputSchema: z.object({
+        query: z.string().describe("Search query — be specific, include library names, error messages, etc."),
+        maxResults: z.number().optional().describe("Maximum results to return (default: 8)"),
+      }),
+      execute: async ({ query, maxResults }) => {
+        const result = await webSearchTool.execute({ query, maxResults });
+        if (result.success && result.results && result.results.length > 0) {
+          return result.results
+            .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
+            .join("\n\n");
+        }
+        return result.error || "No results found";
+      },
+    }),
+
+    todo: tool({
+      description: todoTool.description,
+      inputSchema: z.object({
+        action: z.enum(["add", "update", "list", "clear"]).describe("Action to perform"),
+        text: z.string().optional().describe("Todo text (for add/update)"),
+        id: z.string().optional().describe("Todo ID (for update)"),
+        status: z.enum(["pending", "in_progress", "completed"]).optional().describe("New status (for update)"),
+      }),
+      execute: async ({ action, text, id, status }) => {
+        const result = await todoTool.execute({ action, text, id, status });
+        if (result.success) {
+          if (result.item) {
+            return `[${result.item.status}] ${result.item.id}: ${result.item.text}`;
+          }
+          if (result.items) {
+            if (result.items.length === 0) return "No todos";
+            const pending = result.items.filter(t => t.status !== "completed").length;
+            const done = result.items.filter(t => t.status === "completed").length;
+            return result.items
+              .map(t => `[${t.status === "completed" ? "✓" : t.status === "in_progress" ? "→" : " "}] ${t.id}: ${t.text}`)
+              .join("\n") + `\n\n${done}/${result.items.length} completed, ${pending} remaining`;
+          }
+        }
+        return result.error || "Unknown error";
       },
     }),
 

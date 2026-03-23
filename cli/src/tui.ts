@@ -1,106 +1,227 @@
 import chalk from "chalk";
+import { execSync } from "child_process";
+import * as logger from "./logger.js";
 
 // Track tool usage counts for status bar
 const toolCounts: Record<string, number> = {};
+
+// Cache git branch — updated periodically
+let cachedGitBranch = "";
+let lastBranchCheck = 0;
+function getGitBranch(): string {
+  const now = Date.now();
+  if (now - lastBranchCheck > 10_000) { // refresh every 10s
+    lastBranchCheck = now;
+    try {
+      cachedGitBranch = execSync("git rev-parse --abbrev-ref HEAD 2>/dev/null", { encoding: "utf-8", timeout: 2000 }).trim();
+    } catch { cachedGitBranch = ""; }
+  }
+  return cachedGitBranch;
+}
 
 export function incrementToolCount(toolName: string): void {
   toolCounts[toolName] = (toolCounts[toolName] || 0) + 1;
 }
 
 export function printHeader(version: string, provider?: string, model?: string, cwd?: string): void {
-
-  const width = process.stdout.columns || 80;
-
-  // Top bar
-  const title = ` WorkerMill v${version} `;
-  const bar = "─".repeat(Math.max(0, width - title.length - 2));
-  console.log(chalk.cyan("╭" + "─".repeat(title.length) + bar + "╮"));
-  console.log(chalk.cyan("│") + chalk.bold.white(title) + chalk.dim(bar.replace(/./g, " ")) + chalk.cyan("│"));
-  console.log(chalk.cyan("╰" + "─".repeat(title.length) + bar + "╯"));
   console.log();
-
+  console.log(chalk.bold.white(`  WorkerMill`) + chalk.dim(` v${version}`));
   if (provider && model) {
-    console.log(chalk.dim(`  Provider: `) + chalk.white(`${provider}/${model}`));
+    console.log(chalk.dim(`  ${provider}/`) + chalk.white(model));
   }
   if (cwd) {
     console.log(chalk.dim(`  cwd: `) + chalk.white(cwd));
   }
-  console.log(chalk.dim(`  Type `) + chalk.white("/help") + chalk.dim(` for commands, `) + chalk.white("Ctrl+C") + chalk.dim(` to cancel`));
+  console.log(chalk.dim(`  /help`) + chalk.dim(` for commands, `) + chalk.dim(`Ctrl+C`) + chalk.dim(` to cancel`));
   console.log();
 }
 
 export function printToolCall(toolName: string, toolInput: Record<string, unknown>): void {
   incrementToolCount(toolName);
+  logger.tool(toolName, toolInput);
+
+  // Claude Code style: ↓ ToolName path/detail
+  const arrow = chalk.dim("  ↓ ");
+  const label = chalk.cyan;
 
   switch (toolName) {
-    case "bash":
-      console.log(chalk.dim(`\n  > `) + chalk.yellow(String(toolInput.command || "")));
+    case "bash": {
+      let cmd = String(toolInput.command || "");
+      // Truncate heredoc content — just show the command, not the file contents
+      const heredocIdx = cmd.indexOf("<<");
+      if (heredocIdx > 0) cmd = cmd.slice(0, heredocIdx).trim() + " << ...";
+      // Truncate long commands
+      if (cmd.length > 120) cmd = cmd.slice(0, 117) + "...";
+      console.log(arrow + label("Bash ") + chalk.yellow(cmd));
       break;
+    }
 
     case "read_file":
-      console.log(chalk.dim(`\n  ● Read `) + chalk.white(String(toolInput.path || "")));
+      console.log(arrow + label("Read ") + chalk.white(String(toolInput.path || "")));
       break;
 
     case "write_file":
-      console.log(chalk.dim(`\n  ● Write `) + chalk.white(String(toolInput.path || "")));
+      console.log(arrow + label("Write ") + chalk.white(String(toolInput.path || "")));
       break;
 
-    case "edit_file": {
-      const filePath = String(toolInput.path || "");
-      console.log(chalk.dim(`\n  ● Edit `) + chalk.white(filePath));
+    case "edit_file":
+      console.log(arrow + label("Edit ") + chalk.white(String(toolInput.path || "")));
       break;
-    }
 
-    case "patch": {
-      console.log(chalk.dim(`\n  ● Patch `) + chalk.white("(multi-file)"));
+    case "patch":
+      console.log(arrow + label("Patch ") + chalk.white("(multi-file)"));
       break;
-    }
 
     case "glob":
-      console.log(chalk.dim(`\n  ● Glob `) + chalk.white(String(toolInput.pattern || "")));
+      console.log(arrow + label("Glob ") + chalk.white(String(toolInput.pattern || "")));
       break;
 
     case "grep":
-      console.log(chalk.dim(`\n  ● Grep `) + chalk.white(String(toolInput.pattern || "")));
+      console.log(arrow + label("Grep ") + chalk.white(String(toolInput.pattern || "")));
       break;
 
     case "ls":
-      console.log(chalk.dim(`\n  ● List `) + chalk.white(String(toolInput.path || ".")));
+      console.log(arrow + label("List ") + chalk.white(String(toolInput.path || ".")));
       break;
 
     case "fetch":
-      console.log(chalk.dim(`\n  ● Fetch `) + chalk.white(String(toolInput.url || "")));
+      console.log(arrow + label("Fetch ") + chalk.white(String(toolInput.url || "")));
       break;
 
     case "sub_agent":
-      console.log(chalk.dim(`\n  ● Agent `) + chalk.white(String(toolInput.prompt || "").slice(0, 80)));
+      console.log(arrow + label("Agent ") + chalk.white(String(toolInput.prompt || "").slice(0, 80)));
       break;
 
     case "git":
-      console.log(chalk.dim(`\n  ● Git `) + chalk.white(`${toolInput.action}${toolInput.args ? " " + toolInput.args : ""}`));
+      console.log(arrow + label("Git ") + chalk.white(`${toolInput.action}${toolInput.args ? " " + toolInput.args : ""}`));
       break;
 
     default:
-      console.log(chalk.dim(`\n  ● ${toolName}`));
+      console.log(arrow + label(toolName));
   }
 }
 
-export function printToolResult(toolName: string, result: string): void {
-  const isError = result.startsWith("Error:");
-  const lines = result.split("\n");
+/**
+ * Persona emojis — EXACT match from WorkerMill's frontend/src/hooks/usePersonas.ts
+ * and packages/vscode-workermill/src/feed-view.ts
+ */
+const PERSONA_EMOJIS: Record<string, string> = {
+  frontend_developer: "\u{1F3A8}",   // 🎨
+  backend_developer: "\u{1F4BB}",    // 💻
+  fullstack_developer: "\u{1F4BB}",  // 💻 (same as backend)
+  devops_engineer: "\u{1F527}",      // 🔧
+  security_engineer: "\u{1F512}",    // 🔐
+  qa_engineer: "\u{1F9EA}",          // 🧪
+  tech_writer: "\u{1F4DD}",          // 📝
+  project_manager: "\u{1F4CB}",      // 📋
+  architect: "\u{1F3D7}\uFE0F",      // 🏗️
+  database_engineer: "\u{1F4CA}",    // 📊
+  data_engineer: "\u{1F4CA}",        // 📊
+  data_ml_engineer: "\u{1F4CA}",     // 📊
+  ml_engineer: "\u{1F4CA}",          // 📊
+  mobile_developer: "\u{1F4F1}",     // 📱
+  tech_lead: "\u{1F451}",            // 👑
+  manager: "\u{1F454}",              // 👔
+  support_agent: "\u{1F4AC}",        // 💬
+  planner: "\u{1F4A1}",              // 💡 (planning_agent)
+  coordinator: "\u{1F3AF}",          // 🎯
+  critic: "\u{1F50D}",               // 🔍
+  reviewer: "\u{1F50D}",             // 🔍
+};
 
-  for (const line of lines) {
-    if (isError) {
+export function getPersonaEmoji(persona: string): string {
+  return PERSONA_EMOJIS[persona] || "🤖";
+}
+
+/**
+ * Print tool result — compact format like WorkerMill's worker.
+ * Only shows errors and brief summaries, NOT raw file contents.
+ */
+export function printToolResult(toolName: string, result: string): void {
+  const isError = result.startsWith("Error:") || result.startsWith("error:");
+  const lines = result.split("\n").filter(l => l.trim());
+
+  if (isError) {
+    // Show errors in full (up to 5 lines)
+    const errLines = lines.slice(0, 5);
+    for (const line of errLines) {
       console.log(chalk.red(`    ${line}`));
-    } else {
-      // Highlight file paths
-      const highlighted = line.replace(
-        /([a-zA-Z0-9_\-./]+\.(ts|tsx|js|jsx|py|go|rs|java|md|json|yaml|yml|css|html|sql|sh))/g,
-        (match) => chalk.cyan(match)
-      );
-      console.log(chalk.dim(`    ${highlighted}`));
     }
+    if (lines.length > 5) console.log(chalk.red(`    ... ${lines.length - 5} more lines`));
+    return;
   }
+
+  // Compact summaries by tool type
+  switch (toolName) {
+    case "read_file":
+      console.log(chalk.dim(`    (${lines.length} lines)`));
+      break;
+    case "write_file":
+    case "edit_file":
+    case "patch":
+      // Show the "File written successfully" or similar one-liner
+      if (lines.length === 1) {
+        console.log(chalk.dim(`    ${lines[0]}`));
+      } else {
+        console.log(chalk.dim(`    (${lines.length} lines changed)`));
+      }
+      break;
+    case "bash": {
+      // Show first 5 lines of bash output, skip if empty
+      if (lines.length === 0) break;
+      const shown = lines.slice(0, 5);
+      for (const line of shown) {
+        console.log(chalk.dim(`    ${line}`));
+      }
+      if (lines.length > 5) console.log(chalk.dim(`    ... ${lines.length - 5} more lines`));
+      break;
+    }
+    case "glob":
+    case "grep":
+    case "ls":
+      // Show first 8 lines for search/listing results
+      const searchShown = lines.slice(0, 8);
+      for (const line of searchShown) {
+        console.log(chalk.dim(`    ${line}`));
+      }
+      if (lines.length > 8) console.log(chalk.dim(`    ... ${lines.length - 8} more`));
+      break;
+    default:
+      if (lines.length <= 3) {
+        for (const line of lines) console.log(chalk.dim(`    ${line}`));
+      } else {
+        console.log(chalk.dim(`    (${lines.length} lines)`));
+      }
+  }
+}
+
+/**
+ * Print a WorkerMill-style log line.
+ * Format: [emoji persona_slug 🏠] message
+ * Matches the exact output from worker/epic/coordinator.ts
+ */
+export function wmLog(persona: string, message: string): void {
+  const emoji = getPersonaEmoji(persona);
+  console.log(chalk.cyan(`[${emoji} ${persona} 🏠] `) + chalk.white(message));
+  logger.info(`[${persona}] ${message}`);
+}
+
+/**
+ * Write a WorkerMill-style prefix for streaming text.
+ * Returns the prefix string so caller can write chunks after it.
+ */
+export function wmLogPrefix(persona: string): string {
+  const emoji = getPersonaEmoji(persona);
+  return chalk.cyan(`[${emoji} ${persona} 🏠] `);
+}
+
+/**
+ * Print a WorkerMill-style coordinator log line.
+ * Format: [coordinator] message
+ */
+export function wmCoordinatorLog(message: string): void {
+  console.log(chalk.cyan("[coordinator] ") + chalk.white(message));
+  logger.info(`[coordinator] ${message}`);
 }
 
 function renderTable(lines: string[]): void {
@@ -267,6 +388,33 @@ export function printSuccess(message: string): void {
   console.log(chalk.green(`\n  ✓ ${message}\n`));
 }
 
+// Session start time for elapsed display
+const sessionStartTime = Date.now();
+
+/** Format token count like Claude Code: 1.2k, 45k, 1.2M */
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
+  return String(n);
+}
+
+/** Format elapsed time like Claude Code: >1m, >5m, >12m */
+function formatElapsed(): string {
+  const mins = Math.floor((Date.now() - sessionStartTime) / 60_000);
+  if (mins < 1) return "<1m";
+  return `>${mins}m`;
+}
+
+/** Build a context usage bar (filled/empty blocks) like Claude Code */
+function contextBar(tokens: number, maxContext: number): string {
+  const barLen = 8;
+  const usage = Math.min(1, tokens / maxContext);
+  const filled = Math.round(usage * barLen);
+  const empty = barLen - filled;
+  const color = usage < 0.5 ? chalk.green : usage < 0.8 ? chalk.yellow : chalk.red;
+  return color("\u2588".repeat(filled)) + chalk.dim("\u2591".repeat(empty));
+}
+
 export function printStatusBar(
   provider: string,
   model: string,
@@ -275,8 +423,17 @@ export function printStatusBar(
   cost?: number
 ): string {
   const width = process.stdout.columns || 80;
+  const bg = chalk.bgRgb(30, 30, 30);
 
-  // Build tool counts
+  // Model display — compact like Claude Code: [model]
+  const modelDisplay = ` ${model} `;
+
+  // Context bar + token count
+  const maxCtx = 128_000; // reasonable default for most models
+  const bar = contextBar(tokens, maxCtx);
+  const tokStr = formatTokens(tokens);
+
+  // Tool counts — compact: Bash x3 | Read x5
   const shortNames: Record<string, string> = {
     bash: "Bash",
     read_file: "Read",
@@ -293,27 +450,34 @@ export function printStatusBar(
 
   const countParts = Object.entries(toolCounts)
     .filter(([_, count]) => count > 0)
-    .map(([name, count]) => `${shortNames[name] || name} ${count}`);
+    .map(([name, count]) => `${shortNames[name] || name} x${count}`);
+  const toolStr = countParts.length > 0 ? countParts.join(" | ") : "";
 
-  const left = ` ${provider}/${model}`;
-  const toolStr = countParts.length > 0 ? " │ " + countParts.join(" │ ") : "";
-  const costStr = cost !== undefined && cost > 0 ? `$${cost.toFixed(4)} │ ` : "";
-  const right = `${costStr}${tokens.toLocaleString()} tok `;
-  const permStr = permissionMode ? ` ${permissionMode} ` : "";
+  // Git branch (cached)
+  const gitBranch = getGitBranch();
 
-  // Calculate padding
-  const contentLen = left.length + toolStr.length + right.length + permStr.length + 3;
-  const pad = Math.max(1, width - contentLen);
+  // Working directory name
+  const cwd = process.cwd().split("/").pop() || "";
 
-  // Render full-width bar
-  const bar =
-    chalk.bgRgb(30, 30, 30).white(left) +
-    chalk.bgRgb(30, 30, 30).dim(toolStr) +
-    chalk.bgRgb(30, 30, 30)(" ".repeat(pad)) +
-    chalk.bgRgb(30, 30, 30).white(right) +
-    (permissionMode
-      ? chalk.bgRgb(30, 30, 30).dim("│ ") + chalk.bgRgb(30, 30, 30).green(permStr)
-      : "");
+  // Cost string
+  const costStr = cost !== undefined && cost > 0 ? `$${cost.toFixed(4)} | ` : "";
 
-  return bar;
+  // Time + mode
+  const elapsed = formatElapsed();
+  const modeStr = permissionMode || "ask";
+
+  // Assemble: [model] [bar] tokens | cwd git:(branch) | tools | cost elapsed mode
+  const left = bg.white(modelDisplay) + " " + bar + " " + bg.white(tokStr);
+  const middle = gitBranch
+    ? bg.dim(" | ") + bg.white(cwd) + bg.dim(" git:(") + bg.green(gitBranch) + bg.dim(")")
+    : bg.dim(" | ") + bg.white(cwd);
+  const tools = toolStr ? bg.dim(" | ") + bg.dim(toolStr) : "";
+  const right = bg.dim(" | ") + bg.dim(costStr) + bg.white(elapsed) + bg.dim("  ") + bg.green(modeStr) + " ";
+
+  // Calculate visible content length (strip ANSI for padding)
+  const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+  const contentLen = stripAnsi(left).length + stripAnsi(middle).length + stripAnsi(tools).length + stripAnsi(right).length;
+  const pad = Math.max(0, width - contentLen);
+
+  return left + middle + tools + bg(" ".repeat(pad)) + right;
 }

@@ -1,15 +1,16 @@
 {
   "name": "workermill",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "description": "AI coding agent with multi-expert orchestration. Works with any LLM provider.",
   "type": "module",
   "bin": {
-    "workermill": "./dist/index.js",
-    "wm": "./dist/index.js"
+    "workermill": "dist/index.js",
+    "wm": "dist/index.js"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsup src/index.ts --format esm --target node20 --clean --shims --banner.js '#!/usr/bin/env node' --external @ai-sdk/anthropic --external @ai-sdk/openai --external @ai-sdk/google --external @ai-sdk/openai-compatible --external ai --external zod --external chalk --external commander --external ora",
+    "build": "tsup",
+    "prepublishOnly": "npm run build",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -45,12 +46,13 @@
   "license": "MIT",
   "files": [
     "dist/",
+    "personas/",
     "README.md",
     "LICENSE"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/jarod-rosenthal/workermill"
+    "url": "git+https://github.com/jarod-rosenthal/workermill.git"
   },
   "homepage": "https://workermill.com",
   "bugs": {

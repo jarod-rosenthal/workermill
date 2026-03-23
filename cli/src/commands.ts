@@ -63,7 +63,7 @@ export async function handleCommand(
         console.log(chalk.dim("\n  Not enough messages to compact.\n"));
         break;
       }
-      const spinner = ora({ text: "Compacting conversation...", prefixText: "  " }).start();
+      const spinner = ora({ stream: process.stdout, text: "Compacting conversation...", prefixText: "  " }).start();
       const compacted = await compactMessages(model, plainMessages, "soft");
       ctx.session.messages = compacted.map(m => ({
         role: m.role,

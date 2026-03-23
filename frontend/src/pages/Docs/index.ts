@@ -16,6 +16,7 @@ export { default as Severity } from "./Severity";
 export { default as Metrics } from "./Metrics";
 export { default as DocsCompliance } from "./DocsCompliance";
 export { default as AgentSetup } from "./Agent";
+export { default as CLIDocs } from "./CLI";
 export { default as VSCodeExtension } from "./VSCodeExtension";
 export { default as Repositories } from "./Repositories";
 export { default as CodebaseIndexing } from "./CodebaseIndexing";

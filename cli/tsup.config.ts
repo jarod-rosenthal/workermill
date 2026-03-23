@@ -1,0 +1,46 @@
+import { defineConfig } from "tsup";
+
+export default defineConfig({
+  entry: ["src/index.ts"],
+  format: ["esm"],
+  target: "node20",
+  clean: true,
+  shims: true,
+  // Bundle the monorepo imports (../../packages/engine/) into dist.
+  // Keep npm dependencies external — users install them.
+  external: [
+    "@ai-sdk/anthropic",
+    "@ai-sdk/openai",
+    "@ai-sdk/google",
+    "@ai-sdk/openai-compatible",
+    "ollama-ai-provider-v2",
+    "ai",
+    "zod",
+    "chalk",
+    "commander",
+    "ora",
+    // Node.js builtins
+    "readline",
+    "fs",
+    "path",
+    "os",
+    "child_process",
+    "events",
+    "stream",
+    "util",
+    "net",
+    "tty",
+    "crypto",
+    "http",
+    "https",
+    "url",
+    "buffer",
+    "string_decoder",
+    "assert",
+    "node:readline",
+    "node:fs",
+    "node:path",
+    "node:os",
+    "node:child_process",
+  ],
+});

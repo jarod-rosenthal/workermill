@@ -5,7 +5,7 @@ import { runSetup } from "./setup.js";
 import { runAgent } from "./agent.js";
 import { printHeader } from "./tui.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.3";
 
 const program = new Command()
   .name("workermill")

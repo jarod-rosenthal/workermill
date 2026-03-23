@@ -28,6 +28,8 @@ export class PermissionManager {
   private configTrust: Set<string>;
   private rl: readline.Interface | null = null;
   private cancelCurrentPrompt: (() => void) | null = null;
+  /** True while rl.question() is active — external line handlers must ignore input */
+  questionActive = false;
 
   constructor(trustAll = false, configTrust: string[] = []) {
     this.trustAll = trustAll;
@@ -109,31 +111,38 @@ export class PermissionManager {
   }
 
   /**
-   * Prompt the user with a question. Uses a dedicated temporary readline
-   * to avoid conflicts with the main agent readline's line event handler.
+   * Prompt the user with a question. Sets questionActive flag so the
+   * agent's line handler knows to ignore this input.
    */
   askUser(prompt: string): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       this.cancelCurrentPrompt = () => {
+        this.questionActive = false;
         reject(new Error("cancelled"));
       };
 
-      // Pause the main readline so it doesn't compete for stdin
       if (this.rl) {
-        this.rl.pause();
+        this.questionActive = true;
+        this.rl.resume();
+        this.rl.question(prompt, (answer) => {
+          this.questionActive = false;
+          this.cancelCurrentPrompt = null;
+          this.rl!.pause();
+          resolve(answer);
+        });
+      } else {
+        const questionRl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        });
+        this.questionActive = true;
+        questionRl.question(prompt, (answer) => {
+          this.questionActive = false;
+          this.cancelCurrentPrompt = null;
+          questionRl.close();
+          resolve(answer);
+        });
       }
-
-      // Create a dedicated readline for this question
-      const questionRl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-      });
-
-      questionRl.question(prompt, (answer) => {
-        this.cancelCurrentPrompt = null;
-        questionRl.close();
-        resolve(answer);
-      });
     });
   }
 

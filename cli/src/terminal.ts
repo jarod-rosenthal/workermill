@@ -1,81 +1,50 @@
 /**
- * Terminal manager — ANSI scroll region with pinned status bar.
+ * Terminal manager — simple status bar above the prompt.
  *
- * NO alternate screen buffer (preserves scrollback).
- * Sets a scroll region so content scrolls up within rows 1 to (height-1).
- * Status bar is rendered at row height, outside the scroll region.
+ * No scroll regions, no monkey-patching. Content scrolls normally.
+ * Status bar is printed as a line above the readline prompt.
  */
 
-let active = false;
-let rows = process.stdout.rows || 40;
-let cols = process.stdout.columns || 80;
 let currentStatusBar = "";
 
-const _origWrite = process.stdout.write.bind(process.stdout);
-
-function raw(s: string): void {
-  _origWrite(s);
-}
-
-function applyScrollRegion(): void {
-  // Scroll region: rows 1 through (height - 1)
-  // Row (height) is reserved for status bar, outside the scroll region
-  raw(`\x1b[1;${rows - 1}r`);
-}
-
-function renderStatusBar(): void {
-  if (!currentStatusBar) return;
-  // Save cursor, jump to last row, clear it, render, restore cursor
-  raw("\x1b[s");
-  raw(`\x1b[${rows};1H`);
-  raw("\x1b[2K");
-  raw(currentStatusBar.slice(0, cols));
-  raw("\x1b[u");
-}
-
 export function initTerminal(): void {
-  if (active) return;
-  active = true;
-
-  rows = process.stdout.rows || 40;
-  cols = process.stdout.columns || 80;
-
-  // Clear screen and set up scroll region
-  raw("\x1b[2J\x1b[H");
-  applyScrollRegion();
-  // Position cursor at top of scroll region
-  raw("\x1b[1;1H");
-
-  // Monkey-patch console.log to stay in scroll region and refresh status bar
-  console.log = (...args: unknown[]) => {
-    const text = args.map(a => typeof a === "string" ? a : String(a)).join(" ");
-    // Write within scroll region (cursor is already there)
-    raw(text + "\n");
-    renderStatusBar();
-  };
+  // Set a bottom scroll margin so the terminal reserves a few blank rows
+  // at the bottom. This keeps content from being jammed against the last line.
+  const rows = process.stdout.rows || 40;
+  // Reserve 3 rows at the bottom as breathing room
+  process.stdout.write(`\x1b[1;${rows - 3}r`);
+  // Position cursor at top
+  process.stdout.write("\x1b[H");
 
   process.stdout.on("resize", () => {
-    rows = process.stdout.rows || 40;
-    cols = process.stdout.columns || 80;
-    applyScrollRegion();
-    renderStatusBar();
+    const newRows = process.stdout.rows || 40;
+    process.stdout.write(`\x1b[1;${newRows - 3}r`);
   });
 }
 
 export function setStatusBar(text: string): void {
   currentStatusBar = text;
-  if (active) renderStatusBar();
+}
+
+/** Print the status bar line. Called before showing the prompt.
+ *  Adds breathing room so output isn't jammed against the terminal bottom. */
+export function showStatusBar(): void {
+  if (currentStatusBar) {
+    process.stdout.write("\n\n" + currentStatusBar + "\n");
+  } else {
+    process.stdout.write("\n");
+  }
 }
 
 export function exitTerminal(): void {
-  if (!active) return;
-  active = false;
-  // Reset scroll region to full screen
-  raw("\x1b[r");
-  // Move cursor below status bar
-  raw(`\x1b[${rows};1H\n`);
+  // Reset scroll margin to full terminal
+  process.stdout.write("\x1b[r");
 }
 
 export function isManaged(): boolean {
-  return active;
+  return false;
+}
+
+export function getStatusBarText(): string {
+  return currentStatusBar;
 }

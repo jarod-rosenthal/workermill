@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import ora from "ora";
-import { streamText, generateObject, generateText, type ToolSet } from "ai";
+import { streamText, generateObject, generateText, stepCountIs, type ToolSet } from "ai";
 import { z } from "zod";
 import { createModel } from "../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
@@ -8,9 +8,96 @@ import type { AIProvider } from "../../packages/engine/src/types.js";
 import { loadPersona } from "./personas.js";
 import { CostTracker } from "./cost-tracker.js";
 import { PermissionManager } from "./permissions.js";
-import { printToolCall, printToolResult, printError } from "./tui.js";
+import { printToolCall, printToolResult, printError, getPersonaEmoji, wmLog, wmLogPrefix, wmCoordinatorLog } from "./tui.js";
 import type { CliConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
+
+/**
+ * Learning instructions — from worker/epic/experts.ts lines 50-69.
+ * Teaches models what constitutes a valid learning.
+ */
+const LEARNING_INSTRUCTIONS = `
+
+## Reporting Learnings
+
+When you discover something specific and actionable about this codebase, emit a learning marker:
+
+\`\`\`
+::learning::The test suite requires DATABASE_URL env var or tests silently pass without running
+::learning::New API routes must be registered in backend/src/routes/index.ts or they won't load
+\`\`\`
+
+**Emit a learning when you discover:**
+- A non-obvious requirement (specific env vars, config files, build steps)
+- A codebase convention not documented elsewhere (naming patterns, file organization)
+- A gotcha you had to work around (unexpected failures, ordering dependencies)
+- Files that must be modified together (route + model + migration + test)
+
+**Do NOT emit generic advice** like "write tests" or "handle errors properly."
+Include file paths, commands, and exact details. Only emit when you genuinely discover something non-obvious.
+`;
+
+/**
+ * Docker/real services instructions — from worker/epic/executor.ts lines 420-471.
+ */
+const DOCKER_INSTRUCTIONS = `
+
+## Development Environment
+
+If this task requires databases, caches, or other services, use Docker to run real instances instead of mocking them. Do NOT mock or stub external services.
+
+### Common Services
+- PostgreSQL: \`docker run -d --rm -p 5432:5432 -e POSTGRES_PASSWORD=test --name postgres-test postgres:16-alpine\`
+- Redis: \`docker run -d --rm -p 6379:6379 --name redis-test redis:7-alpine\`
+- MongoDB: \`docker run -d --rm -p 27017:27017 --name mongo-test mongo:7\`
+- MySQL: \`docker run -d --rm -p 3306:3306 -e MYSQL_ROOT_PASSWORD=test --name mysql-test mysql:8\`
+- If the project has a \`docker-compose.yml\`, use \`docker compose up -d\`
+
+Tests that pass against mocks but fail against real services are worthless.
+
+### CI/CD — Always add service containers
+When creating GitHub Actions CI workflows that run tests requiring databases, add \`services:\` blocks so CI has real instances. Match your local Docker setup with CI service containers.
+`;
+
+/**
+ * Technology version trust — from worker/epic/executor.ts lines 473-478.
+ */
+const VERSION_TRUST = `
+
+## Technology Versions — Trust the Spec
+
+If the ticket, PRD, or task description specifies a dependency version, USE THAT VERSION. Do NOT downgrade or "fix" versions you don't recognize — your training data has a cutoff and newer releases exist. Trust the spec over your knowledge.
+`;
+
+/**
+ * Build provider-specific reasoning options — from worker/ai-clients/model-factory.ts lines 127-175.
+ */
+function buildReasoningOptions(provider: string, modelName: string): Record<string, unknown> {
+  switch (provider) {
+    case "openai":
+      return { providerOptions: { openai: { reasoningSummary: "detailed" } } };
+    case "google":
+    case "gemini":
+      if (modelName && modelName.includes("gemini-3")) {
+        return { providerOptions: { google: { thinkingConfig: { thinkingLevel: "high", includeThoughts: true } } } };
+      }
+      return { providerOptions: { google: { thinkingConfig: { thinkingBudget: 8192, includeThoughts: true } } } };
+    default:
+      return {};
+  }
+}
+
+/**
+ * Check if an error is transient/retryable — from worker/epic/coordinator-utils.ts lines 45-66.
+ */
+function isTransientError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const msg = error instanceof Error ? error.message : String(error);
+  if (/status code (502|503|504)|socket hang up|ECONNRESET|ETIMEDOUT|network error|ECONNREFUSED/i.test(msg)) {
+    return true;
+  }
+  return false;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = any;
@@ -136,8 +223,18 @@ async function planStories(
   const readOnlyTools: Record<string, AnyToolDef> = {};
   if (planner) {
     for (const toolName of planner.tools) {
-      if (plannerTools[toolName as keyof typeof plannerTools]) {
-        readOnlyTools[toolName] = plannerTools[toolName as keyof typeof plannerTools];
+      const toolDef = plannerTools[toolName as keyof typeof plannerTools] as AnyToolDef;
+      if (toolDef) {
+        readOnlyTools[toolName] = {
+          ...toolDef,
+          execute: async (input: Record<string, unknown>) => {
+            wmLog("planner", `Tool: ${toolName}`);
+            const result = await toolDef.execute(input);
+            const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+            printToolResult(toolName, resultStr);
+            return result;
+          },
+        };
       }
     }
   }
@@ -176,41 +273,41 @@ Return ONLY a JSON code block with this structure:
 }
 \`\`\`
 
-Available personas: architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer`;
+Available personas: backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, tech_lead`;
 
-  const spinner = ora({ stream: process.stdout, text: chalk.white("Planning — exploring codebase and designing stories..."), prefixText: "  " }).start();
+  wmLog("planner", `Starting planning agent using ${pModel}`);
+  wmLog("planner", "Reading repository structure...");
 
+  // Use onStepFinish — same pattern as worker/ai-clients/ai-sdk-client.ts
+  let planText = "";
   const planStream = streamText({
     model: plannerModel,
     system: planner?.systemPrompt || "You are an implementation planner.",
     prompt: plannerPrompt,
     tools: readOnlyTools as ToolSet,
-
-    abortSignal: AbortSignal.timeout(3 * 60 * 1000),
-  });
-
-  // Capture ALL text output (stream.text only has final text, misses text between tool calls)
-  let planText = "";
-  let plannerShownText = false;
-  for await (const chunk of planStream.textStream) {
-    if (chunk) {
-      planText += chunk;
-      if (!plannerShownText) {
-        spinner.stop();
-        plannerShownText = true;
+    stopWhen: stepCountIs(100),
+    timeout: { totalMs: 3 * 60 * 1000, chunkMs: 120_000 },
+    onStepFinish({ text }) {
+      if (text) {
+        const lines = text.split("\n").filter(l => l.trim());
+        for (const line of lines) {
+          // Skip raw JSON lines — just show the planner's thinking
+          if (line.trim().startsWith("{") || line.trim().startsWith("}") ||
+              line.trim().startsWith('"') || line.trim().startsWith("[") ||
+              line.trim().startsWith("]") || line.includes("```")) continue;
+          wmLog("planner", line);
+        }
       }
-      process.stdout.write(chalk.dim(chunk));
-    }
-  }
-  if (plannerShownText) {
-    process.stdout.write("\n");
-  }
+    },
+  });
+  // Drive the stream
+  for await (const _chunk of planStream.textStream) { /* consumed */ }
+
   // Also check stream.text in case the accumulated text missed something
   const finalText = await planStream.text;
   if (finalText && finalText.length > planText.length) {
     planText = finalText;
   }
-  spinner.stop();
 
   let stories = parseStoriesFromText(planText);
 
@@ -219,7 +316,7 @@ Available personas: architect, backend_developer, frontend_developer, fullstack_
     stories = [{
       id: "implement",
       title: userTask.slice(0, 60),
-      persona: "fullstack_developer",
+      persona: "backend_developer",
       description: userTask,
     }];
   }
@@ -365,6 +462,7 @@ export async function runOrchestration(
   userTask: string,
   trustAll: boolean,
   sandboxed = true,
+  agentRl?: import("readline").Interface,
 ): Promise<void> {
   const costTracker = new CostTracker();
   const context: SharedContext = {
@@ -374,17 +472,19 @@ export async function runOrchestration(
     learnings: [],
   };
   const permissions = new PermissionManager(trustAll);
+  if (agentRl) permissions.setReadline(agentRl);
   const workingDir = process.cwd();
 
   // Planner explores codebase and produces stories
   const plannerStories = await planStories(config, userTask, workingDir, sandboxed);
 
-  // Show the plan
-  console.log(chalk.bold(`\n  Plan: ${plannerStories.length} stories`));
+  // Show the plan — WorkerMill format
+  wmLog("planner", `Plan generated: ${plannerStories.length} stories`);
   plannerStories.forEach((s, i) => {
-    const persona = s.persona.replace(/_/g, " ");
-    console.log(chalk.dim(`    ${i + 1}. ${chalk.cyan(persona)}: ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`));
+    const emoji = getPersonaEmoji(s.persona);
+    wmLog("planner", `Step ${i + 1}: [${s.persona}] ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`);
   });
+  wmLog("planner", `Plan validated: ${plannerStories.length} stories. Task queued for execution.`);
   console.log();
 
   // Optional critic pass (--critic or config.review.useCritic)
@@ -396,8 +496,18 @@ export async function runOrchestration(
       const criticTools = createToolDefinitions(workingDir, criticModel, sandboxed);
       const criticReadOnly: Record<string, AnyToolDef> = {};
       for (const name of critic.tools) {
-        if (criticTools[name as keyof typeof criticTools]) {
-          criticReadOnly[name] = criticTools[name as keyof typeof criticTools];
+        const toolDef = criticTools[name as keyof typeof criticTools] as AnyToolDef;
+        if (toolDef) {
+          criticReadOnly[name] = {
+            ...toolDef,
+            execute: async (input: Record<string, unknown>) => {
+              wmLog("critic", `Tool: ${name}`);
+              const result = await toolDef.execute(input);
+              const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+              printToolResult(name, resultStr);
+              return result;
+            },
+          };
         }
       }
 
@@ -407,25 +517,16 @@ export async function runOrchestration(
         system: critic.systemPrompt,
         prompt: `Review this implementation plan. Score it 0-100 using ::review_score::N marker.\n\nStories:\n${plannerStories.map(s => `- ${s.id}: ${s.title} (${s.persona}) — ${s.description}`).join("\n")}`,
         tools: criticReadOnly as ToolSet,
-
-        abortSignal: AbortSignal.timeout(3 * 60 * 1000),
+        stopWhen: stepCountIs(100),
+        timeout: { totalMs: 3 * 60 * 1000, chunkMs: 120_000 },
       });
       for await (const _chunk of criticStream.textStream) { /* drive */ }
       const criticText = await criticStream.text;
       criticSpinner.stop();
 
       const score = extractScore(criticText);
-      const scoreColor = score >= 80 ? chalk.green : score >= 60 ? chalk.yellow : chalk.red;
-      console.log(`  ${scoreColor(`Critic score: ${score}/100`)}`);
-
-      // Show feedback
-      const feedbackLines = criticText.split("\n").filter(l => !l.includes("::review_score::") && !l.includes("::review_verdict::"));
-      const feedback = feedbackLines.join("\n").trim();
-      if (feedback) {
-        for (const line of feedback.split("\n")) {
-          console.log(chalk.dim("  " + line));
-        }
-      }
+      wmLog("critic", `::review_score::${score}`);
+      wmLog("critic", score >= 80 ? "Plan approved" : "Plan needs revision");
       console.log();
     }
   }
@@ -469,9 +570,16 @@ export async function runOrchestration(
       if (envVar && !process.env[envVar]) process.env[envVar] = apiKey;
     }
 
+    console.log(chalk.bold(`\n  ─── Story ${i + 1}/${sorted.length} ───\n`));
+    wmCoordinatorLog(`Task claimed by orchestrator`);
+    wmLog(story.persona, `Starting ${story.title}`);
+    wmLog(story.persona, `Executing story with AIClient (model: ${modelName})...`);
+
     const spinner = ora({
-      text: chalk.white(`Story ${i + 1}/${sorted.length} — ${persona.name} — ${story.title}`),
-      prefixText: "  ",
+      stream: process.stdout,
+      text: "",
+      prefixText: "",
+      spinner: "dots",
     }).start();
 
     const model = createModel(provider as AIProvider, modelName, host);
@@ -496,16 +604,13 @@ export async function runOrchestration(
 
             if (!isDuplicate) {
               spinner.stop();
-              printToolCall(toolName, input);
+              // WorkerMill format: [emoji persona 🏠] Tool: tool_name
+              wmLog(story.persona, `Tool: ${toolName}`);
             }
             const result = await toolDef.execute(input);
             const resultStr = typeof result === "string" ? result : JSON.stringify(result);
             if (!isDuplicate) {
               printToolResult(toolName, resultStr);
-            } else {
-              // Still show a brief note so user knows something happened
-              spinner.stop();
-              console.log(chalk.dim(`    (repeated ${toolName} call, same result)`));
             }
             spinner.start();
             return result;
@@ -542,6 +647,12 @@ Working directory: ${workingDir}
 
 Your task: ${story.description}
 
+## Communication Style
+
+Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!", or similar. Start with the substance — what you did, what you found, or what you need. Be concise and informative. Do NOT repeat what you said in previous steps — each response should add new information only.
+
+When summarizing your work at the end, describe decisions in plain language. The internal DEC-xxx markers are parsed by the system automatically — your summary should restate decisions in readable form.
+
 ## Critical rules
 - NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, nodemon, tsc --watch, webpack serve, etc.). These block execution indefinitely.
 - NEVER run interactive commands that wait for user input.
@@ -549,50 +660,51 @@ Your task: ${story.description}
 - If you need to verify a server works, check that the code compiles or run a quick test — do NOT start the actual server.
 
 When you make a decision that affects other parts of the system, include ::decision:: markers in your output.
-When you learn something useful, include ::learning:: markers.
 When you create a file, include ::file_created::path markers.
-When you modify a file, include ::file_modified::path markers.${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
+When you modify a file, include ::file_modified::path markers.
+${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
 
     try {
+      // Use onStepFinish to capture text between tool calls — same pattern as
+      // worker/ai-clients/ai-sdk-client.ts (the battle-tested WorkerMill approach)
+      let allText = "";
       const stream = streamText({
         model,
         system: systemPrompt,
         prompt: story.description,
         tools: personaTools as ToolSet,
-
-        abortSignal: AbortSignal.timeout(10 * 60 * 1000),
+        stopWhen: stepCountIs(100),
+        timeout: { totalMs: 10 * 60 * 1000, chunkMs: 120_000 },
+        ...buildReasoningOptions(provider, modelName),
+        onStepFinish({ text }) {
+          if (text) {
+            spinner.stop();
+            const lines = text.split("\n").filter(l => l.trim());
+            for (const line of lines) {
+              if (line.includes("::decision::") || line.includes("::learning::") ||
+                  line.includes("::file_created::") || line.includes("::file_modified::")) continue;
+              wmLog(story.persona, line);
+            }
+          }
+        },
       });
 
-      let allText = "";
-      let hasShownText = false;
-      for await (const chunk of stream.textStream) {
-        if (chunk) {
-          allText += chunk;
-          if (!hasShownText) {
-            spinner.stop();
-            hasShownText = true;
-          }
-          if (!chunk.includes("::decision::") && !chunk.includes("::learning::") &&
-              !chunk.includes("::file_created::") && !chunk.includes("::file_modified::")) {
-            process.stdout.write(chalk.dim(chunk));
-          }
-        }
-      }
-      if (hasShownText) {
-        process.stdout.write("\n");
-      }
+      // Drive the stream (required for streamText) — onStepFinish handles display
+      for await (const _chunk of stream.textStream) { /* consumed */ }
 
-      const finalStreamText = await stream.text;
-      const text = finalStreamText && finalStreamText.length > allText.length ? finalStreamText : allText;
+      const text = await stream.text;
+      allText = text;
       const usage = await stream.totalUsage;
 
       spinner.stop();
 
-      // Extract markers for context sharing
+      // Extract markers and display as WorkerMill-style persona activity
       const decisionMatches = text.match(/::decision::(.*?)(?=::\w+::|$)/gs);
       if (decisionMatches) {
         for (const m of decisionMatches) {
-          context.decisions.push(m.replace("::decision::", "").trim());
+          const decision = m.replace("::decision::", "").trim();
+          context.decisions.push(decision);
+          wmLog(story.persona, decision);
         }
       }
 
@@ -622,15 +734,21 @@ When you modify a file, include ::file_modified::path markers.${revisionFeedback
       const outTokens = usage?.outputTokens || 0;
       costTracker.addUsage(persona.name, provider, modelName, inTokens, outTokens);
 
-      // (agent text already streamed live above)
-
-      console.log(chalk.green(`  ✓ Story ${i + 1}/${sorted.length} — ${persona.name} — ${story.title}`));
+      wmLog(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
       console.log();
       break; // Story succeeded, exit revision loop
     } catch (err) {
       spinner.stop();
-      printError(`Story ${i + 1} failed: ${err instanceof Error ? err.message : String(err)}`);
-      break; // Don't retry on errors, move to next story
+      const errMsg = err instanceof Error ? err.message : String(err);
+
+      // Retry on transient errors (network, 5xx) — from coordinator-utils.ts
+      if (isTransientError(err) && revision < 2) {
+        wmLog(story.persona, `Transient error: ${errMsg} — retrying...`);
+        continue; // retry this revision
+      }
+
+      printError(`Story ${i + 1} failed: ${errMsg}`);
+      break;
     }
 
     } // end revision loop
@@ -660,18 +778,29 @@ When you modify a file, include ::file_modified::path markers.${revisionFeedback
     const reviewModel = createModel(revProvider as AIProvider, revModel, revHost);
     const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
 
-    // Only read-only tools for reviewer
+    // Read-only tools for reviewer — wrapped with wmLog output
     const reviewerTools: Record<string, AnyToolDef> = {};
     for (const toolName of reviewer.tools) {
-      if (reviewTools[toolName as keyof typeof reviewTools]) {
-        reviewerTools[toolName] = reviewTools[toolName as keyof typeof reviewTools];
+      const toolDef = reviewTools[toolName as keyof typeof reviewTools] as AnyToolDef;
+      if (toolDef) {
+        reviewerTools[toolName] = {
+          ...toolDef,
+          execute: async (input: Record<string, unknown>) => {
+            wmLog("tech_lead", `Tool: ${toolName}`);
+            const result = await toolDef.execute(input);
+            const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+            printToolResult(toolName, resultStr);
+            return result;
+          },
+        };
       }
     }
 
+    let previousReviewFeedback = "";
     for (let reviewRound = 0; reviewRound <= maxRevisions; reviewRound++) {
       const isRevision = reviewRound > 0;
-      console.log(chalk.bold(`  ─── Review${isRevision ? ` (revision ${reviewRound}/${maxRevisions})` : ""} ───`));
-      console.log();
+      wmCoordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound}/${maxRevisions})...` : "Starting Tech Lead review...");
+      wmLog("tech_lead", "Starting agent execution");
 
       const reviewSpinner = ora({
         stream: process.stdout,
@@ -680,49 +809,80 @@ When you modify a file, include ::file_modified::path markers.${revisionFeedback
       }).start();
 
       try {
-        const reviewPrompt = `Review the changes made by the following experts:
+        // Build review prompt with full context — matches WorkerMill's inline-reviewer.ts buildReviewPrompt()
+        const previousFeedbackSection = isRevision && previousReviewFeedback
+          ? `## Previous Review Feedback (Review ${reviewRound}/${maxRevisions})
+This is a revision attempt. The previous code was reviewed and these issues were identified:
 
-${sorted.map((s, idx) => `${idx + 1}. ${s.persona}: ${s.title} — ${s.description}`).join("\n")}
+${previousReviewFeedback}
+
+**IMPORTANT: Check if ALL issues above have been addressed, not just some of them.**
+- The developer was instructed to fix every item
+- If ANY issue remains unaddressed, request another revision
+- Be specific about which items are still outstanding
+
+---
+
+`
+          : "";
+
+        const storySummaryRows = sorted.map((s, idx) => {
+          const files = [...context.filesCreated, ...context.filesModified]
+            .slice(0, 3).join(", ") || "(none)";
+          return `| ${idx + 1} | ${s.persona} | ${s.title} | ${files} |`;
+        }).join("\n");
+
+        const reviewPrompt = `${previousFeedbackSection}## Original Task
+
+${userTask}
+
+## Story Summary
+
+| # | Persona | Title | Files |
+|---|---------|-------|-------|
+${storySummaryRows}
+
+## Changes Made
 
 Files created: ${context.filesCreated.join(", ") || "none"}
 Files modified: ${context.filesModified.join(", ") || "none"}
+${context.decisions.length > 0 ? `\nDecisions made:\n${context.decisions.map(d => `- ${d}`).join("\n")}` : ""}
 
-Use the read_file, glob, and grep tools to examine the actual changes. Look for:
-- Bugs or logic errors
-- Missing error handling
-- Security issues
-- Code that doesn't follow project conventions
-- Missing tests
+## Review Instructions
+
+Use read_file, glob, grep, and git tools to examine the actual code. Check:
+- Does the code correctly implement the original task requirements?
+- Are there bugs, logic errors, or security issues?
+- Does the code follow existing project conventions?
+- Is error handling appropriate?
+- Are there missing pieces from the task requirements?
+
+Use \`git diff\` or read individual files to see the actual changes.
 
 Provide a review with a quality score (0-100) using ::review_score:: marker and a verdict using ::review_verdict::approved or ::review_verdict::needs_revision.
-If there are issues, be specific about which files and what needs to change.`;
+If requesting revision, be specific about which files and what needs to change so workers know exactly what to fix.`;
 
+        // Use onStepFinish for reviewer — same as WorkerMill ai-sdk-client.ts
+        let allReviewText = "";
         const reviewStream = streamText({
           model: reviewModel,
           system: reviewer.systemPrompt,
           prompt: reviewPrompt,
           tools: reviewerTools,
-  
-          abortSignal: AbortSignal.timeout(5 * 60 * 1000),
-        });
-
-        let allReviewText = "";
-        let reviewerShownText = false;
-        for await (const chunk of reviewStream.textStream) {
-          if (chunk) {
-            allReviewText += chunk;
-            if (!reviewerShownText) {
+          stopWhen: stepCountIs(100),
+          timeout: { totalMs: 5 * 60 * 1000, chunkMs: 120_000 },
+          onStepFinish({ text }) {
+            if (text) {
               reviewSpinner.stop();
-              reviewerShownText = true;
+              const lines = text.split("\n").filter(l => l.trim());
+              for (const line of lines) {
+                if (line.includes("::review_score::") || line.includes("::review_verdict::")) continue;
+                wmLog("tech_lead", line);
+              }
             }
-            if (!chunk.includes("::review_score::") && !chunk.includes("::review_verdict::")) {
-              process.stdout.write(chalk.dim(chunk));
-            }
-          }
-        }
-        if (reviewerShownText) {
-          process.stdout.write("\n");
-        }
+          },
+        });
+        for await (const _chunk of reviewStream.textStream) { /* consumed */ }
 
         const finalReviewText = await reviewStream.text;
         const reviewText = finalReviewText && finalReviewText.length > allReviewText.length ? finalReviewText : allReviewText;
@@ -734,10 +894,12 @@ If there are issues, be specific about which files and what needs to change.`;
         const score = extractScore(reviewText);
         const approved = score >= approvalThreshold;
 
-        // Display review result
-        const scoreColor = score >= approvalThreshold ? chalk.green : score >= 60 ? chalk.yellow : chalk.red;
-        console.log(`  ${scoreColor(`Score: ${score}/100`)} — ${approved ? chalk.green("APPROVED") : chalk.yellow("NEEDS REVISION")}`);
-
+        // Display review result — WorkerMill format
+        wmLog("tech_lead", `::code_quality_score::${score}`);
+        wmLog("tech_lead", `::review_decision::${approved ? "approved" : "needs_revision"}`);
+        wmCoordinatorLog(approved ? `Review approved (score: ${score}/100)` : `Review needs revision (score: ${score}/100)`);
+        // Save feedback for next review round — so tech_lead can check if issues were addressed
+        previousReviewFeedback = reviewText;
         console.log();
 
         // Track reviewer cost
@@ -794,10 +956,14 @@ If there are issues, be specific about which files and what needs to change.`;
             }
           }
 
+          wmCoordinatorLog(`Revision pass for story ${i + 1}/${sorted.length}`);
+          wmLog(story.persona, `Starting revision: ${story.title}`);
+
           const revSpinner = ora({
             stream: process.stdout,
-            text: chalk.white(`Revising ${i + 1}/${sorted.length} — ${storyPersona.name} — ${story.title}`),
-            prefixText: "  ",
+            text: "",
+            prefixText: "",
+            spinner: "dots",
           }).start();
 
           const storyModel = createModel(sProvider as AIProvider, sModel, sHost);
@@ -812,7 +978,7 @@ If there are issues, be specific about which files and what needs to change.`;
                   const allowed = await permissions.checkPermission(toolName, input);
                   if (!allowed) return "Tool execution denied by user.";
                   revSpinner.stop();
-                  printToolCall(toolName, input);
+                  wmLog(story.persona, `Tool: ${toolName}`);
                   const result = await toolDef.execute(input);
                   const resultStr = typeof result === "string" ? result : JSON.stringify(result);
                   printToolResult(toolName, resultStr);
@@ -826,6 +992,10 @@ If there are issues, be specific about which files and what needs to change.`;
           const revisionSystemPrompt = `${storyPersona.systemPrompt}
 
 Working directory: ${workingDir}
+
+## Communication Style
+
+Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!", or similar. Start with the substance — what you did, what you found, or what you need. Be concise and informative. Do NOT repeat what you said in previous steps — each response should add new information only.
 
 ## Critical rules
 - NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, nodemon, tsc --watch, etc.)
@@ -843,8 +1013,19 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
               system: revisionSystemPrompt,
               prompt: `Fix the reviewer's issues for: ${story.title}\n\n${story.description}`,
               tools: storyTools as ToolSet,
-      
-              abortSignal: AbortSignal.timeout(5 * 60 * 1000),
+              stopWhen: stepCountIs(100),
+              timeout: { totalMs: 5 * 60 * 1000, chunkMs: 120_000 },
+              ...buildReasoningOptions(sProvider, sModel),
+              onStepFinish({ text }) {
+                if (text) {
+                  revSpinner.stop();
+                  const lines = text.split("\n").filter(l => l.trim());
+                  for (const line of lines) {
+                    if (line.includes("::")) continue;
+                    wmLog(story.persona, line);
+                  }
+                }
+              },
             });
 
             for await (const _chunk of revStream.textStream) { /* drive */ }
@@ -854,7 +1035,7 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
             costTracker.addUsage(`${storyPersona.name} (revision)`, sProvider, sModel,
               revUsage?.inputTokens || 0, revUsage?.outputTokens || 0);
 
-            console.log(chalk.green(`  ✓ Revised ${i + 1}/${sorted.length} — ${storyPersona.name} — ${story.title}`));
+            wmLog(story.persona, `${story.title} — revision complete!`);
           } catch (err) {
             revSpinner.stop();
             console.log(chalk.yellow(`  ⚠ Revision failed for story ${i + 1}: ${err instanceof Error ? err.message : String(err)}`));
@@ -879,7 +1060,7 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
     try {
       execSync("git rev-parse --git-dir", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
     } catch {
-      console.log(chalk.dim("  Initializing git repository..."));
+      wmCoordinatorLog("Initializing git repository...");
       execSync("git init", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
       // Create default .gitignore if none exists
       const fs = await import("fs");
@@ -887,7 +1068,7 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
       if (!fs.existsSync(gitignorePath)) {
         fs.writeFileSync(gitignorePath, "node_modules/\ndist/\n.env\n.workermill/\n*.log\n", "utf-8");
       }
-      console.log(chalk.green("  ✓ Git repo initialized"));
+      wmCoordinatorLog("Git repo initialized");
     }
 
     const diff = execSync("git diff --stat", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();

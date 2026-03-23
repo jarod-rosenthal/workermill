@@ -16,15 +16,17 @@ import type {
   ResilienceConfig,
   StoryValidationResult,
 } from "./types.js";
-import { getExpertConfig, COORDINATION_INSTRUCTIONS, LEARNING_INSTRUCTIONS } from "./experts.js";
+import { getExpertConfig } from "./experts.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { GitOps, getBitbucketAuthHeader } from "./git-ops.js";
+import { PromptBuilder } from "./prompt-builder.js";
 import { TicketOps } from "./ticket-ops.js";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { createAIClient, type AIClient, type AIClientOptions, type AIProvider } from "./ai-client-types.js";
 import type { DecisionClient } from "./decision-client.js";
+import { CollaborationDetector } from "./collaboration-detector.js";
+import { validateStoryCompletion, rebaseSiblingBranches, extractLearningsFromResult } from "./story-validator.js";
 import { createRetryableApi } from "./api-retry.js";
-import { isDockerDaemonReachable } from "./gate-utils.js";
 import axios from "axios";
 import { createLogsApi } from "../lib/api-client.js";
 import * as fs from "fs/promises";
@@ -35,33 +37,6 @@ import { execSync, execFileSync, spawn } from "child_process";
 // via setIcons() called by the coordinator after getWorkerConfig().
 
 /**
- * Load directive content from filesystem for a given persona (fallback).
- * Returns empty string if directive not found.
- */
-async function loadDirectiveFromFile(persona: ExpertPersona): Promise<string> {
-  const directivePath = `/app/directives/${persona}/README.md`;
-  try {
-    const content = await fs.readFile(directivePath, "utf-8");
-    console.log(`[Epic] Loaded directive for ${persona} from file (${content.length} chars)`);
-    return content;
-  } catch {
-    console.log(`[Epic] No directive found for ${persona}, using default prompt`);
-    return "";
-  }
-}
-
-
-/**
- * Tracking info for blocking questions.
- */
-interface BlockingQuestion {
-  id: string;
-  questionId: string;
-  content: string;
-  targetPersona?: string;
-}
-
-/**
  * Story executor using Claude Agent SDK.
  */
 export class StoryExecutor {
@@ -70,10 +45,10 @@ export class StoryExecutor {
   private ticketOps: TicketOps;
   private config: EpicConfig;
   private logsApi: ReturnType<typeof createRetryableApi>;
-  // Track blocking questions that need answers before story completes
-  private pendingBlockingQuestions: Map<string, BlockingQuestion> = new Map();
-  // Cache for directive bundles (by persona slug)
-  private directiveCache: Map<string, { readme: string | null; common: Record<string, string> } | null> = new Map();
+  // Collaboration detection (questions, answers, decisions, acknowledgments)
+  private collaborationDetector: CollaborationDetector;
+  // Prompt builder (extracted from executor — handles system prompts + story prompts)
+  private promptBuilder: PromptBuilder;
   // Unified AIClient for feature-flagged execution
   private aiClient: AIClient | null = null;
   // Decision client for API-side error classification
@@ -119,6 +94,17 @@ export class StoryExecutor {
       logger: (msg) => console.log(`[Executor] ${msg}`),
     });
 
+    // Initialize PromptBuilder with shared dependencies
+    this.promptBuilder = new PromptBuilder(config, coordination, gitOps, this.logsApi);
+
+    // Initialize CollaborationDetector with callbacks
+    this.collaborationDetector = new CollaborationDetector(
+      config,
+      coordination,
+      (message, expert, type) => this.postLog(message, expert, type),
+      (toolName, filePath, expert, data) => this.postCodeEvent(toolName, filePath, expert, data)
+    );
+
     // Initialize AIClient if unified client is enabled
     if (config.useUnifiedClient) {
       const provider = (config.workerProvider || "anthropic") as AIProvider;
@@ -146,6 +132,8 @@ export class StoryExecutor {
   setIcons(personaIcons: Record<string, string>, providerIcons: Record<string, string>): void {
     this.personaIcons = personaIcons;
     this.providerIcons = providerIcons;
+    this.promptBuilder.personaIcons = personaIcons;
+    this.promptBuilder.providerIcons = providerIcons;
   }
 
   /**
@@ -158,6 +146,8 @@ export class StoryExecutor {
   setPromptTemplates(templates: { coordinationInstructions?: string; learningInstructions?: string }): void {
     this.serverCoordinationInstructions = templates.coordinationInstructions ?? null;
     this.serverLearningInstructions = templates.learningInstructions ?? null;
+    this.promptBuilder.serverCoordinationInstructions = this.serverCoordinationInstructions;
+    this.promptBuilder.serverLearningInstructions = this.serverLearningInstructions;
   }
 
   /**
@@ -268,333 +258,9 @@ export class StoryExecutor {
       });
   }
 
-  /**
-   * Load directive content for a persona.
-   * Tries API first (supports org customizations), falls back to file system.
-   * Also records directive usage for effectiveness tracking.
-   */
-  private async loadDirective(persona: ExpertPersona): Promise<string> {
-    // Check cache first
-    if (this.directiveCache.has(persona)) {
-      const cached = this.directiveCache.get(persona);
-      return cached?.readme || "";
-    }
-
-    // Try API first
-    try {
-      const response = await this.logsApi.get<{ directives?: { readme?: string | null; common?: Record<string, string>; readmeMeta?: { id: string; version: number } | null; commonMeta?: Record<string, { id: string; version: number }> } }>(`/api/personas/worker/${persona}/bundle`);
-      const bundle = response.data;
-
-      const directives = bundle?.directives;
-      if (directives && (directives.readme || Object.keys(directives.common || {}).length > 0)) {
-        console.log(`[Epic] Loaded directive for ${persona} from API`);
-        const cacheEntry = { readme: directives.readme ?? null, common: directives.common ?? {} };
-        this.directiveCache.set(persona, cacheEntry);
-
-        // Record directive usage for effectiveness tracking
-        await this.recordDirectiveUsage(persona, directives);
-
-        return directives.readme || "";
-      }
-    } catch {
-      // API doesn't have directives, fall back to file system
-    }
-
-    // Fall back to file system
-    this.directiveCache.set(persona, null);
-    return loadDirectiveFromFile(persona);
-  }
-
-  /**
-   * Record which directives were used for this task.
-   * This data is used to track directive effectiveness over time.
-   */
-  private async recordDirectiveUsage(
-    persona: ExpertPersona,
-    directives: {
-      readme?: string | null;
-      readmeMeta?: { id: string; version: number } | null;
-      common?: Record<string, string>;
-      commonMeta?: Record<string, { id: string; version: number }>;
-    }
-  ): Promise<void> {
-    try {
-      const usageRecords: Array<{
-        directiveId: string;
-        version: number;
-        type: "readme" | "common";
-        filename?: string;
-        personaSlug: string;
-      }> = [];
-
-      // Add readme directive if present
-      if (directives.readmeMeta?.id) {
-        usageRecords.push({
-          directiveId: directives.readmeMeta.id,
-          version: directives.readmeMeta.version,
-          type: "readme",
-          personaSlug: persona,
-        });
-      }
-
-      // Add common directives if present
-      if (directives.commonMeta) {
-        for (const [filename, meta] of Object.entries(directives.commonMeta)) {
-          if (meta?.id) {
-            usageRecords.push({
-              directiveId: meta.id,
-              version: meta.version,
-              type: "common",
-              filename,
-              personaSlug: persona,
-            });
-          }
-        }
-      }
-
-      if (usageRecords.length > 0) {
-        await this.logsApi.post("/api/directives/usage", {
-          taskId: this.config.parentTaskId,
-          directives: usageRecords,
-        });
-        console.log(`[Epic] Recorded ${usageRecords.length} directive(s) usage for ${persona}`);
-      }
-    } catch (error) {
-      // Don't fail the task if directive tracking fails
-      console.warn(`[Epic] Failed to record directive usage: ${error}`);
-    }
-  }
-
-  /**
-   * Build enriched system prompt for an expert.
-   * Layers:
-   * 1. Core identity (from experts.ts systemPrompt)
-   * 2. Domain expertise (loaded from directives/{persona}/README.md)
-   * 3. Coordination protocol (only if multi-story task)
-   */
-  private async buildEnrichedSystemPrompt(
-    expert: ExpertPersona,
-    totalStories: number
-  ): Promise<string> {
-    const expertConfig = getExpertConfig(expert);
-    let prompt = expertConfig.systemPrompt;
-
-    // Load domain expertise from directive
-    const directive = await this.loadDirective(expert);
-    if (directive) {
-      prompt += "\n\n## Domain Expertise\n\n" + directive;
-    }
-
-    // Inject org-level AI guidelines (intent engineering)
-    if (this.config.orgGuidelines) {
-      prompt += `\n\n## Organization Guidelines\n\nThe following guidelines are set by this organization and take precedence over general best practices. Treat these as hard constraints, not suggestions:\n\n${this.config.orgGuidelines}`;
-    }
-
-    // Only add coordination instructions for multi-story tasks (saves ~1K tokens for single-story)
-    if (totalStories > 1) {
-      prompt += this.serverCoordinationInstructions ?? COORDINATION_INSTRUCTIONS;
-    } else {
-      console.log(`[Epic] Skipping coordination instructions for single-story task`);
-    }
-
-    // Always add learning instructions so experts can report discoveries
-    prompt += this.serverLearningInstructions ?? LEARNING_INSTRUCTIONS;
-
-    // Communication tone — keep status updates professional and direct
-    prompt += `
-
-## Communication Style
-
-Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!", or similar. Start with the substance — what you did, what you found, or what you need. Be concise and informative.
-
-When summarizing your work at the end, describe decisions in plain language. The internal DEC-xxx markers are parsed by the system automatically — your summary should restate decisions in readable form. For example, instead of repeating "DEC-001: Created repository-level config", write "Decision 1: Created a repository-level configuration file for..." with enough context for a non-technical reader to understand.`;
-
-    // Docker environment — ALWAYS include instructions.
-    // Even if `docker info` fails at startup (e.g., socket permission race, native mode),
-    // the Claude agent may be able to use Docker at runtime, and the instructions
-    // serve as a strong signal to prefer real services over mocks.
-    const dockerAvailable = isDockerDaemonReachable();
-    if (!dockerAvailable) {
-      console.log("[Epic] Docker daemon not reachable at startup — Docker instructions still included in prompt");
-    }
-    prompt += `
-
-## Development Environment (MANDATORY)
-
-You have \`docker\` and \`docker compose\` available. **You MUST spin up real service dependencies** (databases, caches, message queues, etc.) using Docker containers before writing any application code that depends on them. Do NOT mock or stub external services — connect to real instances running in Docker.
-
-### Required Workflow
-1. **Before writing application code**: Start all required service containers
-2. **Configure your code** to connect to \`localhost\` on the container ports. The worker uses host networking, so Docker services are reachable at localhost.
-3. **Run tests against real services** — integration tests must hit real databases, not mocks
-4. **Clean up containers** when you're done (\`docker stop <name>\`)
-
-### Common Services
-- MongoDB: \`docker run -d --rm -p 27017:27017 --name mongo-test mongo:7\`
-- Redis: \`docker run -d --rm -p 6379:6379 --name redis-test redis:7-alpine\`
-- PostgreSQL: \`docker run -d --rm -p 5432:5432 -e POSTGRES_PASSWORD=test --name postgres-test postgres:16-alpine\`
-- MySQL: \`docker run -d --rm -p 3306:3306 -e MYSQL_ROOT_PASSWORD=test --name mysql-test mysql:8\`
-- RabbitMQ: \`docker run -d --rm -p 5672:5672 --name rabbitmq-test rabbitmq:3-alpine\`
-- If the project has a \`docker-compose.yml\`, use \`docker compose up -d\`
-- Connect to services at \`localhost\` on the mapped ports. For example: \`postgresql://user:pass@localhost:5432/db\`
-
-### Why This Matters
-Mocking produces code full of assumptions and interface mismatches that break on first contact with real services. Real containers catch connection strings, schema mismatches, query errors, and serialization bugs immediately — not after deployment. **Tests that pass against mocks but fail against real services are worthless.**
-
-### If Docker Is Not Working
-If \`docker\` commands fail, DO NOT fall back to mocking. Instead:
-1. Report the Docker error as a blocker
-2. If the quality gate commands include env vars like MONGODB_URI or REDIS_URL, the test infrastructure expects REAL services
-3. Never write test stubs or mock implementations as a workaround — the quality gates will catch and reject them
-
-### CI/CD Workflows Must Include Service Containers
-When creating GitHub Actions CI workflows that run tests requiring databases or other services, you **MUST** add \`services:\` blocks so the CI runner has real service instances. Example for PostgreSQL:
-\`\`\`yaml
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-\`\`\`
-The same pattern applies to Redis, MongoDB, MySQL, etc. **Tests that pass locally with Docker but fail in CI because there's no database are a waste of CI fix cycles.** Always match your local Docker setup with CI service containers.`;
-
-    // Version trust instruction — generic, not hardcoded to any specific version
-    prompt += `
-
-## ⚠️ Technology Versions — Trust the Spec
-
-**If the ticket, PRD, or task description specifies a dependency version, USE THAT VERSION.** Do NOT downgrade or "fix" versions you don't recognize — your training data has a cutoff and newer releases exist. Trust the spec over your knowledge.`;
-
-    return prompt;
-  }
-
-  /**
-   * Extract learnings from agent result messages.
-   * Parses ::learning:: markers from the agent's text output.
-   */
-  private extractLearningsFromResult(result: { messages: StreamMessage[] }): string[] {
-    const learnings: string[] = [];
-    const fullText = result.messages
-      .filter((m) => m.type === "text" || m.type === "result")
-      .map((m) => m.content || "")
-      .join("\n");
-
-    const pattern = /::learning::(.+)/g;
-    let match;
-    while ((match = pattern.exec(fullText)) !== null) {
-      const learning = match[1].trim();
-      if (learning.length > 0) learnings.push(learning);
-    }
-    return learnings;
-  }
-
-  /**
-   * Extract acceptance criteria from story description.
-   * Looks for GIVEN/WHEN/THEN format or bullet points.
-   */
-  private extractAcceptanceCriteria(description: string): string[] {
-    const criteria: string[] = [];
-
-    // Look for GIVEN/WHEN/THEN blocks
-    const gwtPattern = /(?:GIVEN|WHEN|THEN|AND)[:\s]+([^\n]+)/gi;
-    let match;
-    while ((match = gwtPattern.exec(description)) !== null) {
-      criteria.push(match[1].trim());
-    }
-
-    // If no GWT found, look for bullet points
-    if (criteria.length === 0) {
-      const bulletPattern = /^[\s]*[-*•]\s+(.+)$/gm;
-      while ((match = bulletPattern.exec(description)) !== null) {
-        criteria.push(match[1].trim());
-      }
-    }
-
-    // If still nothing, use the whole description as a single criterion
-    if (criteria.length === 0 && description.trim()) {
-      criteria.push(description.trim());
-    }
-
-    return criteria;
-  }
-
-  /**
-   * Validate story completion before marking it done.
-   * Checks acceptance criteria and verifies files were modified.
-   */
   // ─── Quality Gate Methods ─────────────────────────────────────────────────
 
   /**
-  /**
-   * Merge all completed sibling branches into the story worktree.
-   * Reuses the incremental rebase pattern — non-blocking on conflicts.
-   * Called at story start and before each quality gate retry.
-   */
-  private async rebaseSiblingBranches(
-    story: ReadyStory,
-    expert: ExpertPersona,
-    worktreePath?: string
-  ): Promise<void> {
-    if (!(this.resilience.incrementalRebaseEnabled ?? true)) return;
-    if (!worktreePath) return;
-    const wtPath = worktreePath;
-
-    try {
-      const allCompleted = await this.coordination.getAllCompletedBranchNames();
-      // Filter out branches already merged as declared dependencies and current story
-      const declaredDeps = new Set(story.dependencies || []);
-      const siblingBranches: string[] = [];
-      const sortedEntries = Array.from(allCompleted.entries()).sort(([a], [b]) => a - b);
-      for (const [idx, branch] of sortedEntries) {
-        if (idx === story.storyIndex) continue;
-        if (declaredDeps.has(idx)) continue;
-        siblingBranches.push(branch);
-      }
-
-      if (siblingBranches.length > 0) {
-        await this.postLog(
-          `Incremental rebase: merging ${siblingBranches.length} completed sibling branch(es)...`,
-          expert,
-          "system"
-        );
-        const siblingResult = await this.gitOps.mergeDependencyBranches(wtPath, siblingBranches);
-        if (siblingResult.merged.length > 0) {
-          await this.postLog(
-            `Incremental rebase: merged ${siblingResult.merged.length} sibling branch(es): ${siblingResult.merged.join(", ")}`,
-            expert,
-            "system"
-          );
-        }
-        if (siblingResult.conflicted.length > 0) {
-          await this.postLog(
-            `Incremental rebase: ${siblingResult.conflicted.length} sibling branch(es) had conflicts (non-blocking): ${siblingResult.conflicted.join(", ")}`,
-            expert,
-            "system"
-          );
-        }
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await this.postLog(
-        `Incremental rebase failed (non-blocking): ${msg}`,
-        expert,
-        "system"
-      );
-    }
-  }
-
   /**
    * [GATE 2] Post-push CI verification — waits for CI pipeline to complete
    * and verifies it passed. Only runs if CI workflow file exists in the worktree.
@@ -823,209 +489,6 @@ The same pattern applies to Redis, MongoDB, MySQL, etc. **Tests that pass locall
     return { passed: true, summary: "No pipeline triggered on branch — skipped" };
   }
 
-  private async validateStoryCompletion(
-    story: ReadyStory,
-    worktreePath: string,
-    changedFiles: string[],
-    expert: ExpertPersona
-  ): Promise<StoryValidationResult> {
-    const issues: string[] = [];
-    const acceptanceCriteria = this.extractAcceptanceCriteria(story.description);
-    let criteriaMetCount = 0;
-
-    await this.postLog(
-      `Validating ${story.title} (${acceptanceCriteria.length} criteria)...`,
-      expert,
-      "system"
-    );
-
-    // 1. Check that modified files are within targetFiles scope
-    if (
-      story.targetFiles &&
-      story.targetFiles.length > 0 &&
-      changedFiles.length > 0
-    ) {
-      const outOfScope = changedFiles.filter(
-        (f) =>
-          !story.targetFiles!.some(
-            (t) => f === t || f.startsWith(t + "/"),
-          ),
-      );
-      if (outOfScope.length > 0) {
-        issues.push(
-          `Files modified outside targetFiles scope: ${outOfScope.join(", ")}. ` +
-            `Expected scope: ${story.targetFiles.join(", ")}`,
-        );
-      }
-    }
-
-    // 1c. Typecheck gate — run tsc if the project has a tsconfig.json
-    if (changedFiles.some((f) => f.endsWith(".ts") || f.endsWith(".tsx"))) {
-      try {
-        const { existsSync } = await import("fs");
-        const tsconfigPath = `${worktreePath}/tsconfig.json`;
-        if (existsSync(tsconfigPath)) {
-          try {
-            execSync("npx tsc --noEmit 2>&1", {
-              cwd: worktreePath,
-              timeout: 300_000,
-              encoding: "utf-8",
-            });
-            await this.postLog(
-              `${story.title} — typecheck passed`,
-              expert,
-              "system",
-            );
-          } catch (tscError: unknown) {
-            const stderr =
-              (tscError as { stdout?: string }).stdout ||
-              (tscError as Error).message ||
-              "Unknown typecheck error";
-            // Truncate to first 500 chars to avoid log bloat
-            const truncated =
-              stderr.length > 500 ? stderr.slice(0, 500) + "..." : stderr;
-            issues.push(`Typecheck failed: ${truncated}`);
-          }
-        }
-      } catch {
-        // If fs import fails or any other issue, skip typecheck silently
-      }
-    }
-
-    // 1d. Go build gate — run go build/vet/test if the project has a go.mod
-    if (changedFiles.some((f) => f.endsWith(".go"))) {
-      try {
-        const { existsSync } = await import("fs");
-        const goModPath = `${worktreePath}/go.mod`;
-        if (existsSync(goModPath)) {
-          // Find the Go module root (may be in a subdirectory like api/)
-          const goModDir = (() => {
-            // Check if a changed .go file is in a subdirectory that has its own go.mod
-            for (const f of changedFiles.filter((cf) => cf.endsWith(".go"))) {
-              const parts = f.split("/");
-              for (let i = parts.length - 1; i > 0; i--) {
-                const sub = parts.slice(0, i).join("/");
-                const subGoMod = `${worktreePath}/${sub}/go.mod`;
-                if (existsSync(subGoMod)) return `${worktreePath}/${sub}`;
-              }
-            }
-            return worktreePath;
-          })();
-
-          const goGate = (cmd: string, label: string, timeout = 120_000) => {
-            try {
-              execSync(`${cmd} 2>&1`, {
-                cwd: goModDir,
-                timeout,
-                encoding: "utf-8",
-              });
-              return null;
-            } catch (err: unknown) {
-              const output =
-                (err as { stdout?: string }).stdout ||
-                (err as Error).message ||
-                `Unknown ${label} error`;
-              return output.length > 500 ? output.slice(0, 500) + "..." : output;
-            }
-          };
-
-          // gofmt check (formatting)
-          const fmtErr = goGate("gofmt -l .", "gofmt", 30_000);
-          if (fmtErr && fmtErr.trim().length > 0) {
-            issues.push(`Go formatting issues (gofmt): ${fmtErr}`);
-          }
-
-          // go vet (static analysis)
-          const vetErr = goGate("go vet ./...", "go vet");
-          if (vetErr) {
-            issues.push(`Go vet failed: ${vetErr}`);
-          }
-
-          // go build (compilation)
-          const buildErr = goGate("go build ./...", "go build");
-          if (buildErr) {
-            issues.push(`Go build failed: ${buildErr}`);
-          }
-
-          // go test (unit tests — longer timeout)
-          const testErr = goGate("go test ./... -count=1", "go test", 300_000);
-          if (testErr) {
-            issues.push(`Go tests failed: ${testErr}`);
-          }
-
-          if (!fmtErr && !vetErr && !buildErr && !testErr) {
-            await this.postLog(
-              `${story.title} — Go quality gates passed (fmt, vet, build, test)`,
-              expert,
-              "system",
-            );
-          }
-        }
-      } catch {
-        // If go is not available or any other issue, skip Go gates silently
-      }
-    }
-
-    // 2. Basic acceptance criteria validation
-    // For each criterion, do a simple keyword check against the changed files and story output
-    for (const criterion of acceptanceCriteria) {
-      // Extract key terms from the criterion
-      const keyTerms = criterion
-        .toLowerCase()
-        .split(/\s+/)
-        .filter(term => term.length > 3 && !["should", "must", "will", "when", "then", "given", "that", "with", "from", "this", "have", "been"].includes(term));
-
-      // Check if any changed file names match key terms
-      const fileMatchesTerms = changedFiles.some(file =>
-        keyTerms.some(term => file.toLowerCase().includes(term))
-      );
-
-      // Check if criterion mentions files that were changed
-      const criterionMentionsFile = changedFiles.some(file => {
-        const fileName = file.split("/").pop()?.toLowerCase() || "";
-        return criterion.toLowerCase().includes(fileName.replace(/\.[^.]+$/, ""));
-      });
-
-      if (fileMatchesTerms || criterionMentionsFile || changedFiles.length > 0) {
-        criteriaMetCount++;
-      } else {
-        // Only flag as issue if we have specific evidence it wasn't met
-        // Don't be too strict - the agent may have addressed it in a different way
-      }
-    }
-
-    // 3. Validation pass/fail decision
-    const majorIssues = issues.filter(i =>
-      i.includes("critical") ||
-      i.includes("required")
-    );
-
-    const valid = majorIssues.length === 0;
-
-    if (!valid) {
-      await this.postLog(
-        `⚠️ ${story.title} — validation issues: ${issues.join("; ")}`,
-        expert,
-        "system"
-      );
-    } else {
-      await this.postLog(
-        `${story.title} — validation passed (${criteriaMetCount}/${acceptanceCriteria.length} criteria, ${changedFiles.length} files)`,
-        expert,
-        "system"
-      );
-    }
-
-    return {
-      valid,
-      issues,
-      acceptanceCriteriaMet: criteriaMetCount,
-      acceptanceCriteriaTotal: acceptanceCriteria.length,
-      filesModified: changedFiles,
-      validationMethod: "auto",
-    };
-  }
-
   /**
    * Execute a story with an expert.
    * The expert agent can read, write, and edit files autonomously.
@@ -1053,7 +516,7 @@ The same pattern applies to Redis, MongoDB, MySQL, etc. **Tests that pass locall
     expertConfig.model = model;
 
     // Build enriched system prompt with directive and optional coordination
-    const enrichedSystemPrompt = await this.buildEnrichedSystemPrompt(expert, totalStories);
+    const enrichedSystemPrompt = await this.promptBuilder.buildEnrichedSystemPrompt(expert, totalStories);
     expertConfig.systemPrompt = enrichedSystemPrompt;
 
     const storyResult: StoryResult = {
@@ -1177,7 +640,7 @@ ${parts.join("\n\n")}
       }
 
       // 1c. Incremental rebase: merge all completed sibling branches (not just declared dependencies)
-      await this.rebaseSiblingBranches(story, expert, worktreePath);
+      await rebaseSiblingBranches(story, expert, worktreePath, this.coordination, this.gitOps, this.resilience, (msg, exp, type) => this.postLog(msg, exp, type));
 
       // 1d. Record baseline SHA after all merges — tech lead review will diff from here
       let postRebaseBaseSha: string | undefined;
@@ -1204,7 +667,7 @@ ${parts.join("\n\n")}
       }
 
       // 2. Build prompt with context (use worktree path)
-      const prompt = await this.buildPromptWithWorktree(story, expert, worktreePath, userFeedback, dependencyMergeContext, mergedSiblingFiles);
+      const prompt = await this.promptBuilder.buildPromptWithWorktree(story, expert, worktreePath, userFeedback, dependencyMergeContext, mergedSiblingFiles);
 
       // 3. Session ID for threading coordination messages
       const sessionId = `${expert}-story-${story.storyIndex}`;
@@ -1221,7 +684,7 @@ ${parts.join("\n\n")}
           storyId: story.id,
         },
         story.id,
-        (msg) => this.handleMessage(msg, expert, story)
+        (msg) => this.collaborationDetector.handleMessage(msg, expert, story, this.getLogPrefix(expert))
       );
 
       if (!result.success) {
@@ -1244,7 +707,7 @@ ${parts.join("\n\n")}
       // 4b. Run self-review prompt before committing (if enabled)
       if (this.resilience.selfReviewEnabled) {
         const currentChanges = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
-        const acceptanceCriteria = this.extractAcceptanceCriteria(story.description);
+        const acceptanceCriteria = this.promptBuilder.extractAcceptanceCriteria(story.description);
         await this.runSelfReview(story, expert, worktreePath, currentChanges, acceptanceCriteria);
       }
 
@@ -1301,11 +764,13 @@ ${parts.join("\n\n")}
       }
 
       // 6a. VALIDATION: Verify story completion before marking done
-      const validation = await this.validateStoryCompletion(
+      const validation = await validateStoryCompletion(
         story,
         worktreePath,
         changedFiles,
-        expert
+        expert,
+        this.promptBuilder,
+        (msg, exp, type) => this.postLog(msg, exp, type)
       );
 
       if (!validation.valid) {
@@ -1361,7 +826,7 @@ ${parts.join("\n\n")}
       storyResult.success = true;
 
       // Extract learnings from agent output
-      const learnings = this.extractLearningsFromResult(result);
+      const learnings = extractLearningsFromResult(result.messages);
       if (learnings.length > 0) {
         storyResult.learnings = learnings;
         await this.postLog(`Captured ${learnings.length} learning(s) from expert`, expert, "system");
@@ -1451,720 +916,6 @@ ${parts.join("\n\n")}
     }
 
     return storyResult;
-  }
-
-  /**
-   * Build the prompt for story execution with worktree path.
-   */
-  private async buildPromptWithWorktree(
-    story: ReadyStory,
-    expert: ExpertPersona,
-    worktreePath: string,
-    userFeedback?: string,
-    dependencyMergeContext?: string,
-    mergedSiblingFiles?: string[]
-  ): Promise<string> {
-    return this.buildPrompt(story, expert, userFeedback, worktreePath, dependencyMergeContext, mergedSiblingFiles);
-  }
-
-  /**
-   * Build the prompt for story execution.
-   * Includes pending questions, Q&A history, sibling context, and user feedback.
-   * @param repoPathOverride - Optional worktree path to use instead of main repo path
-   */
-  private async buildPrompt(
-    story: ReadyStory,
-    expert: ExpertPersona,
-    userFeedback?: string,
-    repoPathOverride?: string,
-    dependencyMergeContext?: string,
-    mergedSiblingFiles?: string[]
-  ): Promise<string> {
-    // Get constraints
-    const constraints = await this.coordination.getConstraints();
-    const constraintsText = constraints
-      .map((c) => "- " + c.content)
-      .join("\n");
-
-    // Build file scope guidance from targetFiles
-    let fileScopeConstraint = "";
-    if (story.targetFiles && story.targetFiles.length > 0) {
-      fileScopeConstraint = [
-        "",
-        "📋 TARGET FILES — These are the files planned for this story:",
-        ...story.targetFiles.map((f) => `  - ${f}`),
-        "",
-        "Focus your work on these files. These are the files assigned to your scope by the planner.",
-        "If the ticket requirements clearly need additional files not listed here, you may create them.",
-        "",
-        "**Fixing issues outside your target files:**",
-        "You MAY fix formatting, lint, and import errors in files outside your target list if they block",
-        "your quality gates. These are mechanical fixes (missing imports, unused variables, formatting).",
-        "",
-        "You MUST NOT change behavior, return codes, business logic, API contracts, or fix bugs in files",
-        "outside your target list. If a sibling story's code has a behavioral bug (wrong status code,",
-        "missing route registration, broken logic), post Q-BLOCKING-BUG with a description of the issue.",
-        "Do NOT fix it yourself — the owning expert must address it to avoid merge conflicts.",
-        "",
-        "Only ask Q-BLOCKING-SCOPE if you're unsure whether a LARGE architectural change outside your",
-        "scope is the right approach (e.g., restructuring a shared module, changing a database schema).",
-      ].join("\n");
-    }
-
-    // Get sibling decisions
-    const decisions = await this.coordination.getSiblingDecisions();
-    const decisionsText = decisions
-      .map((d) => "- [" + d.persona + "] " + d.content)
-      .join("\n");
-
-    // Get file changes from siblings
-    const fileChanges = await this.coordination.getSiblingFileChanges();
-    const fileChangesText = fileChanges
-      .map((f) => {
-        const filePath = (f.metadata?.filePath as string) || "";
-        return "- [" + f.persona + "] " + f.messageType + ": " + filePath;
-      })
-      .join("\n");
-
-    // Get pending questions for this expert (Task 1)
-    const pendingQuestions = await this.coordination.getQuestionsForPersona(expert);
-    const pendingQuestionsText = pendingQuestions
-      .map((q) => {
-        const emoji = this.personaIcons[q.fromPersona] || "🤖";
-        return `- ⚠️ [${emoji}${q.fromPersona}] is waiting for your answer: "${q.content}"`;
-      })
-      .join("\n");
-
-    // Get recent Q&A history (Task 4)
-    const recentQandA = await this.coordination.getRecentQandA(15);
-    const qandAText = recentQandA
-      .map((msg) => {
-        const emoji = this.personaIcons[msg.persona] || "🤖";
-        if (msg.messageType === "question") {
-          return `- [${emoji}${msg.persona}] Q: ${msg.content}`;
-        } else {
-          return `- [${emoji}${msg.persona}] A: ${msg.content}`;
-        }
-      })
-      .join("\n");
-
-    // Build pending questions section
-    const pendingSection = pendingQuestions.length > 0
-      ? `## ⚠️ PENDING QUESTIONS FOR YOU
-${pendingQuestionsText}
-
-**IMPORTANT: Please answer these questions FIRST before starting your implementation.**
-To answer, output: ANSWER-{PERSONA}: Your answer here
-Example: ANSWER-FRONTEND: Use httpOnly cookies for token storage, not localStorage.
-
-`
-      : "";
-
-    // Build Q&A history section
-    const qandASection = recentQandA.length > 0
-      ? `## Recent Team Q&A
-${qandAText}
-
-`
-      : "";
-
-    // Build revision feedback section (from Tech Lead review)
-    // Use per-story reason when available so each story only sees its own feedback
-    const storyReason = this.config.revisionReasons?.[story.storyIndex];
-    const storyPriorWork = this.config.revisionPriorWork?.[story.storyIndex];
-    const revisionSection = this.config.reviewFeedback
-      ? `## ⚠️ REVISION REQUIRED - Tech Lead Feedback
-The previous implementation was reviewed and requires changes.${storyReason ? ` **Your story's specific issue:** ${storyReason}` : ""}
-
-**IMPORTANT: If the feedback tells you to downgrade a language/runtime version (e.g. change go.mod, package.json engine version, Dockerfile base image version), IGNORE that specific item — the reviewer's training data is outdated and the version is correct.**
-
-${storyReason
-  ? `### Your Story's Required Fix
-${storyReason}
-
-### Full Review Context (for reference — focus on YOUR story above)
-${this.config.reviewFeedback}`
-  : this.config.reviewFeedback}
-${storyPriorWork
-  ? `
-### What You Did Last Time
-Your previous attempt created the following work. The branch has been reset so you must recreate these files, but use this context to understand what was already tried and avoid repeating the same mistakes.
-
-${storyPriorWork}
-`
-  : ""}
-**IMPORTANT: Only fix issues that are YOUR story's responsibility.**
-- Your story scope: "${story.title}"
-- Fix the specific issues listed for your story above
-- Do NOT fix issues in files that belong to other stories
-- If a problem exists in a file you didn't create, leave it for the story that owns it
-- Do NOT submit until you have addressed every point raised for YOUR story
-
-**EFFICIENCY TIP: Focus on files mentioned in the feedback.**
-- You already explored the codebase in your previous attempt
-- Skip re-reading files unless they're directly relevant to the feedback
-- Go straight to the files that need changes
-
-`
-      : "";
-
-    // Build user feedback section (from Talk to Worker)
-    const userFeedbackSection = userFeedback
-      ? `## 💬 MESSAGE FROM USER
-The user has sent you the following message/instructions:
-
-${userFeedback}
-
-**Please take this feedback into account in your implementation.**
-
-`
-      : "";
-
-    // Get repo path for the prompt
-    const repoPath = repoPathOverride || this.gitOps.getRepoPath();
-
-    // Build memory context section (REQ-19)
-    const memorySection = this.config.memoryContext
-      ? `## Memory Context (from past experiences)
-${this.config.memoryContext}
-`
-      : "";
-
-    // Build code context section (Codebase RAG)
-    const codeSection = this.config.codeContext
-      ? `## Relevant Code from This Repository
-${this.config.codeContext}
-`
-      : "";
-
-    // Build prior work context section (retry scenarios)
-    const priorWorkSection = this.config.priorWorkContext || "";
-
-    // Include original ticket requirements — THIS IS THE SPEC, not a reference
-    const ticketRequirementsSection = this.config.jiraRequirements
-      ? `## Ticket Requirements — THIS IS YOUR SPEC${this.config.ticketUrl ? ` ([source](${this.config.ticketUrl}))` : ""}
-${this.config.jiraRequirements}
-
-`
-      : "";
-
-    // Dependency merge issues section (conflicts/errors from mergeDependencyBranches)
-    const mergeIssuesSection = dependencyMergeContext || "";
-
-    // Sibling files warning — files from other stories merged into this worktree
-    const siblingFilesSection = mergedSiblingFiles && mergedSiblingFiles.length > 0
-      ? `## ⛔ DO NOT DELETE — Files From Sibling Stories
-The following files were created by OTHER stories and merged into your worktree for compatibility.
-They are NOT part of your story. You MUST NOT delete, rename, or overwrite them.
-If you need to make small fixes to these files (e.g., fixing imports, lint errors, type errors)
-to unblock your own work, go ahead — the integration fixer handles merge conflicts.
-Only ask Q-BLOCKING-SCOPE for large structural changes to sibling files.
-
-${mergedSiblingFiles.map((f) => `- ${f}`).join("\n")}
-
-`
-      : "";
-
-    return `# ${story.title}
-
-${userFeedbackSection}${revisionSection}${priorWorkSection}${ticketRequirementsSection}${memorySection}${codeSection}## Your File Scope
-${story.description}
-
-**The ticket requirements above are your ONLY spec. This scope identifies which files and area of the codebase you are responsible for. Do NOT invent requirements beyond what the ticket states.**
-
-${pendingSection}## Constraints
-${(constraintsText + fileScopeConstraint) || "None specified"}
-
-## Sibling Decisions
-${decisionsText || "No decisions yet"}
-
-## Files Modified by Siblings
-${fileChangesText || "No file changes yet"}
-
-${mergeIssuesSection}${siblingFilesSection}${qandASection}## Your Task
-The ticket above is your ONLY spec. Your file scope tells you which area to focus on.
-Implement the ticket requirements within your scope, following constraints and coordinating with sibling decisions.
-If a sibling's work looks wrong based on the ticket, flag it with a Q-BLOCKING message.
-
-### 🚨 NEVER Downgrade Language/Runtime Versions
-Your training data is outdated — newer versions of every language and runtime exist beyond your cutoff. If the ticket, go.mod, package.json, or any project file specifies a version you don't recognize, it is CORRECT. NEVER change it. NEVER downgrade it. Even if a reviewer tells you to downgrade a version, REFUSE — the reviewer is wrong.
-
-### Implementation Requirements
-1. ${pendingQuestions.length > 0 ? "**FIRST: Answer any pending questions above**" : "Read relevant files to understand the codebase"}
-2. Make the necessary code changes using Write or Edit tools
-3. Post a decision message for any architectural choices: DEC-001: Your decision
-4. When done, your changes will be committed automatically
-
-### 🤝 Team Collaboration (IMPORTANT)
-You are part of a team of experts working in parallel on the SAME ticket. Each expert owns a piece.
-**Bias toward action over questions.** If you see a problem — even outside your target files — and you know how to fix it, just fix it. Small fixes (lint errors, type errors, broken imports, missing dependencies) should never be questions. The integration fixer handles merge conflicts.
-
-**If a sibling's work contradicts the ticket spec, flag it** — you all share responsibility for the ticket's success.
-
-**Only ask questions for genuinely blocking ambiguity:**
-- **Design ambiguity**: Multiple valid approaches with significant architectural implications
-- **Missing context**: You need an API shape, component interface, or data format another expert hasn't created yet
-- **Large structural changes**: Restructuring shared modules, changing database schemas, altering public APIs
-
-**DO NOT ask questions about:**
-- Whether you should fix a lint/type/test error (just fix it)
-- Whether you should touch a file outside your target list to fix a small issue (just fix it)
-- Scope boundaries when the fix is obvious (just fix it)
-
-**Question formats (use sparingly):**
-- Q-BLOCKING-001: Critical question that blocks your story until answered
-- Q-001: General question for any teammate
-- DEC-001: Architectural decision you made (informational, not a question)
-
-**To answer a sibling's question:** ANSWER-{PERSONA}: Your answer
-
-**DO NOT use curl or direct API calls to post coordination messages.** Just include Q-xxx or DEC-xxx markers in your regular output — the system detects and routes them automatically.
-
-### ⛔ Pre-Implementation Checklist
-**Before writing any code**, scan the "Ticket Requirements — THIS IS YOUR SPEC" section above (if present) and identify:
-- Specific version requirements (e.g., "use NextAuth v5" — do NOT default to an older version)
-- Forbidden files or patterns (e.g., "do NOT create postcss.config.js")
-- Required files that must exist (e.g., ".prettierrc", "validations.ts")
-- .gitignore entries (never commit build artifacts like .next/, node_modules/, .env*)
-
-These constraints are **mandatory** and override any defaults or assumptions. If the ticket says "use X v5", you must use v5 even if v4 is more common or easier.
-
-### 📬 Live Communication Channel
-You have a 2-way message channel with the user while you work. **The user can see your responses in real-time on their dashboard.**
-
-**Receiving messages:** The user may send you messages at any time. When a message arrives, the file \`${repoPath}/.workermill-message.md\` will appear in your working directory. **You MUST check for this file:**
-- After every file you write or edit
-- Before every git commit
-- When you finish a logical step or subtask
-- When you are about to make a significant decision
-
-If the file exists, read it immediately with the Read tool. It contains instructions or feedback from the user — typically arriving within 10 seconds of being sent.
-
-**IMPORTANT — Acknowledge receipt:** When you find and read a message from the user, **immediately** write an acknowledgment to \`${repoPath}/.workermill-response.md\`. Example:
-\`\`\`
-Got your message about [topic]. I'm currently [what you're doing] and will [how you'll incorporate the feedback]. Working on it now.
-\`\`\`
-This lets the user know you received their message. Then continue working.
-
-**Sending messages:** To send a message to the user, write to \`${repoPath}/.workermill-response.md\` using the Write tool. The system picks it up within seconds and delivers it to the user's dashboard. Use this to:
-- **Acknowledge user messages** (always do this first)
-- Ask the user a clarifying question when you're unsure
-- Report a problem you can't resolve on your own
-- Confirm an approach before investing significant effort
-- Share important progress or findings
-
-After writing the file, continue working — you don't need to wait. If the user replies, it will appear in \`.workermill-message.md\` as described above.
-
-**CRITICAL — Blocking Questions (Q-BLOCKING):**
-When you post a Q-BLOCKING question, you MUST wait for the answer before continuing:
-
-1. Post your Q-BLOCKING question in your output (the system detects it automatically)
-2. Immediately run a bash wait loop to poll for the answer file:
-   \`\`\`bash
-   for i in $(seq 1 60); do [ -f ${repoPath}/.workermill-answer.md ] && cat ${repoPath}/.workermill-answer.md && break; sleep 5; done
-   \`\`\`
-3. Once the file appears, read it with the Read tool to get the full answer
-4. After reading the answer, acknowledge receipt by outputting: ACK-ANSWER: Thank you — incorporating the answer and continuing with implementation.
-5. Then delete the file so future answers aren't confused with old ones:
-   \`\`\`bash
-   rm -f ${repoPath}/.workermill-answer.md
-   \`\`\`
-6. Continue your implementation using the answer
-
-If the file doesn't appear within 5 minutes, proceed with your best judgment and note the assumption.
-
-**Receiving answers to non-blocking questions:** If you asked a non-blocking question using the Q-xxx pattern, the answer will appear in \`${repoPath}/.workermill-answer.md\`. Check for this file periodically — especially when you finish a logical step or feel stuck.
-
-### Repository & Working Directory
-The repository is cloned at: **${repoPath}**
-
-**IMPORTANT: Always use absolute paths from the repository root.**
-- Use absolute paths like \`${repoPath}/src/file.ts\` for Read/Write/Edit
-- Avoid \`cd\` commands - they can cause you to lose track of the working directory
-- If you must use \`cd\`, always return with \`cd ${repoPath}\` afterward
-- For Bash commands, prefix with the full path: \`ls ${repoPath}/src\`
-
-Begin your implementation now.`;
-  }
-
-  /**
-   * Handle messages from agent execution for logging.
-   * Posts to both CloudWatch (console) and WorkerMill dashboard API.
-   * Also detects decision/question/answer markers and posts them to coordination feed.
-   */
-  private handleMessage(
-    msg: StreamMessage,
-    expert: ExpertPersona,
-    story: ReadyStory
-  ): void {
-    const prefix = this.getLogPrefix(expert);
-
-    if (msg.type === "thinking" && msg.content) {
-      // Post thinking to dashboard + console (postLog handles both)
-      this.postLog(`[THINKING] ${msg.content}`, expert, "output");
-    } else if (msg.type === "tool_use" && msg.toolName) {
-      // Format tool usage with input for visibility
-      let toolMsg = `Tool: ${msg.toolName}`;
-      if (msg.toolInput) {
-        // Show key tool parameters (file paths, commands, etc.)
-        const input = msg.toolInput;
-        if (input.file_path) toolMsg += ` → ${input.file_path}`;
-        else if (input.command) toolMsg += ` → ${String(input.command).substring(0, 500)}`;
-        else if (input.path) toolMsg += ` → ${input.path}`;
-        else if (input.pattern) toolMsg += ` → pattern: ${input.pattern}`;
-        else {
-          // Show first few keys for other tools
-          const keys = Object.keys(input).slice(0, 3);
-          if (keys.length > 0) {
-            toolMsg += ` → ${keys.map(k => `${k}: ${String(input[k]).substring(0, 200)}`).join(", ")}`;
-          }
-        }
-      }
-      // Post tool usage to dashboard + console (postLog handles both)
-      this.postLog(toolMsg, expert, "tool");
-
-      // Post code events for Write/Edit tools (Live Code Viewer)
-      if (msg.toolName === "Write" && msg.toolInput) {
-        const input = msg.toolInput as Record<string, string>;
-        this.postCodeEvent("Write", input.file_path, expert, {
-          content: input.content,
-        });
-      } else if (msg.toolName === "Edit" && msg.toolInput) {
-        const input = msg.toolInput as Record<string, string>;
-        this.postCodeEvent("Edit", input.file_path, expert, {
-          oldStr: input.old_string,
-          newStr: input.new_string,
-        });
-      }
-    } else if (msg.type === "text" && msg.content) {
-      // Post full content to dashboard + console (postLog handles both)
-      this.postLog(msg.content, expert, "output");
-
-      // Detect and post collaboration markers to coordination feed
-      // Wrapped in Promise.allSettled so individual failures don't become unhandled rejections
-      Promise.allSettled([
-        this.detectAndPostDecisions(msg.content, expert, story),
-        this.detectAndPostQuestions(msg.content, expert, story),
-        this.detectAndPostAnswers(msg.content, expert, story),
-        this.detectAndPostAcknowledgments(msg.content, expert, story),
-      ]).catch(() => {}); // allSettled never rejects, but safety net
-    } else if (msg.type === "tool_result") {
-      console.log(`${prefix} Tool result received`);
-    } else if (msg.type === "result" && msg.content) {
-      // Post final result to dashboard + console (postLog handles both)
-      this.postLog(`Result: ${msg.content}`, expert, "output");
-    }
-  }
-
-  /**
-   * Check if a message contains collaboration markers worth posting to dashboard.
-   * Filters out "thinking out loud" messages that clutter the feed.
-   */
-  private isCollaborationMessage(content: string): boolean {
-    // Patterns that indicate meaningful collaboration
-    const collaborationPatterns = [
-      /DEC-\d+:/i,              // Decision
-      /Q-[A-Z0-9_-]+:/i,       // Question
-      /ANSWER-[A-Z0-9_-]+:/i,  // Answer
-      /CONSULT-[A-Z]+:/i,      // Consultation
-      /## Summary/i,            // Summary section
-      /completed.*story/i,      // Completion message
-      /blocked.*waiting/i,      // Blocker message
-    ];
-
-    return collaborationPatterns.some((pattern) => pattern.test(content));
-  }
-
-  /**
-   * Detect answer markers in agent output and post to coordination feed.
-   * Patterns:
-   * - ANSWER-FRONTEND: response (answering frontend_developer's question)
-   * - ANSWER-Q-001: response (answering specific question ID)
-   */
-  private async detectAndPostAnswers(
-    content: string,
-    expert: ExpertPersona,
-    story: ReadyStory
-  ): Promise<void> {
-    // Pattern: ANSWER-{PERSONA or Q-ID}: response
-    const answerPattern = /ANSWER-([A-Z0-9_-]+):\s*(.+?)(?=\n|$)/gi;
-    const matches = content.matchAll(answerPattern);
-
-    for (const match of matches) {
-      const targetRef = match[1].toUpperCase();
-      const answerContent = match[2].trim();
-
-      if (answerContent.length < 10) {
-        continue;
-      }
-
-      // Find the question this is answering
-      const unansweredQuestions = await this.coordination.getUnansweredQuestions();
-      let targetQuestion = unansweredQuestions.find((q) => {
-        // Match by question ID (ANSWER-Q-001)
-        if (targetRef.startsWith("Q-") && q.content.includes(targetRef)) {
-          return true;
-        }
-        // Match by persona (ANSWER-FRONTEND)
-        const targetPersona = this.resolveTargetPersona(targetRef);
-        if (targetPersona && q.fromPersona === targetPersona) {
-          return true;
-        }
-        // Match if question was explicitly targeting this expert
-        if (q.metadata?.targetPersona === expert) {
-          return true;
-        }
-        return false;
-      });
-
-      if (targetQuestion) {
-        console.log(`[${expert}] Posting answer to ${targetQuestion.fromPersona}'s question`);
-        await this.coordination.postAnswer(targetQuestion.id, answerContent, expert);
-        this.postLog(`💬 Answered ${targetQuestion.fromPersona}: "${answerContent}"`, expert, "system");
-      }
-    }
-  }
-
-  /**
-   * Detect ACK-ANSWER markers in agent output and post acknowledgment to coordination feed.
-   * Pattern: ACK-ANSWER: message
-   */
-  private detectAndPostAcknowledgments(
-    content: string,
-    expert: ExpertPersona,
-    story: ReadyStory
-  ): void {
-    const ackPattern = /ACK-ANSWER:\s*(.+?)(?=\n|$)/gi;
-    const matches = content.matchAll(ackPattern);
-
-    for (const match of matches) {
-      const ackContent = match[1].trim();
-
-      if (ackContent.length > 5) {
-        console.log(`[${expert}] Detected answer acknowledgment`);
-        this.coordination
-          .postContext(
-            "answer",
-            `Received answer — ${ackContent}`,
-            expert,
-            this.config.parentTaskId,
-            { storyIndex: story.storyIndex }
-          )
-          .catch((err) => {
-            console.error(`[${expert}] Failed to post acknowledgment:`, err);
-          });
-      }
-    }
-  }
-
-  /**
-   * Detect decision markers in agent output and post to coordination feed.
-   * Pattern: DEC-xxx: description
-   */
-  private detectAndPostDecisions(
-    content: string,
-    expert: ExpertPersona,
-    story: ReadyStory
-  ): void {
-    // Match patterns like "DEC-001: I will use React Query for data fetching"
-    const decisionPattern = /DEC-(\d+|[A-Z]+):\s*(.+?)(?=\n|$)/gi;
-    const matches = content.matchAll(decisionPattern);
-
-    for (const match of matches) {
-      const decisionId = `DEC-${match[1]}`;
-      const decisionContent = match[2].trim();
-
-      if (decisionContent.length > 10) { // Filter out too-short matches
-        console.log(`[${expert}] Detected decision: ${decisionId}`);
-        // Post asynchronously, don't block
-        this.coordination.postDecision(
-          decisionId,
-          decisionContent,
-          expert,
-          this.config.parentTaskId,
-          { rationale: `Story ${story.storyIndex}`, storyIndex: story.storyIndex }
-        ).catch((err) => {
-          console.error(`[${expert}] Failed to post decision:`, err);
-        });
-      }
-    }
-  }
-
-  /**
-   * Detect question markers in agent output and post to coordination feed.
-   * Patterns:
-   * - Q-001: question (general question)
-   * - Q-SECURITY-001: question (targets security_engineer)
-   * - Q-BLOCKING-001: question (blocks until answered)
-   * - Q-SECURITY-BLOCKING-001: question (targeted + blocking)
-   */
-  private detectAndPostQuestions(
-    content: string,
-    expert: ExpertPersona,
-    story: ReadyStory
-  ): void {
-    // Enhanced pattern to capture:
-    // Q-{optional-target}-{optional-BLOCKING}-{id}: question
-    // Examples: Q-001, Q-SECURITY-001, Q-BLOCKING-001, Q-SECURITY-BLOCKING-001
-    const questionPattern = /Q-(?:([A-Z]+)-)?(?:(BLOCKING)-)?(\d+|[A-Z]+):\s*(.+?)(?=\n|$)/gi;
-    const matches = content.matchAll(questionPattern);
-
-    for (const match of matches) {
-      const targetHint = match[1]?.toUpperCase(); // e.g., "SECURITY", "BACKEND"
-      const isBlocking = match[2]?.toUpperCase() === "BLOCKING";
-      const questionNum = match[3];
-      const questionContent = match[4].trim();
-
-      // Build question ID
-      let questionId = "Q-";
-      if (targetHint && targetHint !== "BLOCKING") {
-        questionId += targetHint + "-";
-      }
-      if (isBlocking) {
-        questionId += "BLOCKING-";
-      }
-      questionId += questionNum;
-
-      if (questionContent.length > 10) {
-        // Resolve target persona from hint
-        const targetPersona = targetHint ? this.resolveTargetPersona(targetHint) : undefined;
-
-        console.log(`[${expert}] Detected question: ${questionId}${targetPersona ? ` (targeting ${targetPersona})` : ""}${isBlocking ? " [BLOCKING]" : ""}`);
-
-        // Post the question with sessionId for threading
-        const sessionId = `${expert}-story-${story.storyIndex}`;
-        this.coordination.postContext(
-          "question",
-          `${questionId}: ${questionContent}`,
-          expert,
-          this.config.parentTaskId,
-          {
-            questionId,
-            fromStory: story.storyIndex,
-            targetPersona,
-            isBlocking,
-          },
-          sessionId
-        ).then((ctx) => {
-          // If blocking, track it for polling after execution
-          if (isBlocking && ctx) {
-            this.pendingBlockingQuestions.set(ctx.id, {
-              id: ctx.id,
-              questionId,
-              content: questionContent,
-              targetPersona,
-            });
-            this.postLog(`⏳ Posted blocking question ${questionId} - will wait for answer`, expert, "system");
-          }
-        }).catch((err) => {
-          console.error(`[${expert}] Failed to post question:`, err);
-        });
-      }
-    }
-  }
-
-  /**
-   * Resolve a target hint (e.g., "SECURITY") to a full persona (e.g., "security_engineer").
-   */
-  private resolveTargetPersona(hint: string): ExpertPersona | undefined {
-    const mappings: Record<string, ExpertPersona> = {
-      SECURITY: "security_engineer",
-      BACKEND: "backend_developer",
-      FRONTEND: "frontend_developer",
-      DEVOPS: "devops_engineer",
-      QA: "qa_engineer",
-      WRITER: "tech_writer",
-      API: "backend_developer",
-      DATABASE: "backend_developer",
-      DBA: "backend_developer",
-      ML: "data_ml_engineer",
-      DATA: "data_ml_engineer",
-      IOS: "mobile_developer",
-      ANDROID: "mobile_developer",
-      MOBILE: "mobile_developer",
-      ARCHITECT: "architect",
-      TECH_LEAD: "tech_lead",
-      TECHLEAD: "tech_lead",
-      LEAD: "tech_lead",
-    };
-    return mappings[hint.toUpperCase()];
-  }
-
-  /**
-   * Wait for answers to blocking questions with timeout.
-   * Polls the coordination feed for answers to pending blocking questions.
-   * Times out after 2 minutes to prevent indefinite blocking.
-   */
-  private async waitForBlockingAnswers(expert: ExpertPersona): Promise<void> {
-    const questions = Array.from(this.pendingBlockingQuestions.values());
-    if (questions.length === 0) return;
-
-    await this.postLog(
-      `⏳ Waiting for ${questions.length} blocking question answer(s)...`,
-      expert,
-      "system"
-    );
-
-    const TIMEOUT_MS = 120000; // 2 minutes
-    const POLL_INTERVAL_MS = 5000; // 5 seconds
-    const startTime = Date.now();
-    const answeredIds = new Set<string>();
-
-    while (
-      answeredIds.size < questions.length &&
-      Date.now() - startTime < TIMEOUT_MS
-    ) {
-      // Check for answers to each pending question
-      for (const q of questions) {
-        if (answeredIds.has(q.id)) continue;
-
-        const answer = await this.coordination.waitForAnswer(q.id, 0); // Non-blocking check
-        if (answer) {
-          answeredIds.add(q.id);
-          await this.postLog(
-            `✅ Got answer to ${q.questionId}: "${answer}"`,
-            expert,
-            "system"
-          );
-        }
-      }
-
-      // If all answered, break early
-      if (answeredIds.size >= questions.length) break;
-
-      // Wait before next poll
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-
-      // Log progress every 30 seconds
-      const elapsed = Date.now() - startTime;
-      if (elapsed > 0 && elapsed % 30000 < POLL_INTERVAL_MS) {
-        const remaining = questions.length - answeredIds.size;
-        await this.postLog(
-          `⏳ Still waiting for ${remaining} answer(s)... (${Math.round(elapsed / 1000)}s elapsed)`,
-          expert,
-          "system"
-        );
-      }
-    }
-
-    // Report final status
-    const unanswered = questions.filter((q) => !answeredIds.has(q.id));
-    if (unanswered.length > 0) {
-      await this.postLog(
-        `⚠️ Timed out waiting for ${unanswered.length} answer(s): ${unanswered.map((q) => q.questionId).join(", ")}`,
-        expert,
-        "system"
-      );
-    } else {
-      await this.postLog(
-        `✅ All blocking questions answered!`,
-        expert,
-        "system"
-      );
-    }
-
-    // Clear tracking
-    this.pendingBlockingQuestions.clear();
   }
 
   /**

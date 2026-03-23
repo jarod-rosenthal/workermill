@@ -25,6 +25,7 @@ dist-ssr
 
 # Playwright
 e2e/.auth/
+e2e/results/
 playwright-report/
 e2e/test-results/
 test-results/

@@ -247,8 +247,8 @@ export async function executeMarketingAgentMission(
         autoExecuted: false,
       });
       await actionRepo.save(record);
-    } catch {
-      // Non-critical
+    } catch (err) {
+      console.error("[marketing-agent] action record save failed:", err instanceof Error ? err.message : err);
     }
 
     return {

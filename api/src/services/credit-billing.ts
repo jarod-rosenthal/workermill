@@ -505,8 +505,8 @@ export async function deletePaymentMethod(
   // Detach from Stripe
   try {
     await stripe.paymentMethods.detach(pm.stripePaymentMethodId);
-  } catch {
-    // Ignore errors - payment method may already be detached
+  } catch (err) {
+    console.error("[credit-billing] Stripe payment method detach failed:", err instanceof Error ? err.message : err);
   }
 
   // Delete from database

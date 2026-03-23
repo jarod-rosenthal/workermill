@@ -1054,7 +1054,8 @@ export async function getWorkerConfig(): Promise<WorkerConfig> {
   try {
     const agentsPath = join(__dirname, "..", "..", "data", "AGENTS.md");
     agentsMd = await readFile(agentsPath, "utf-8");
-  } catch {
+  } catch (err) {
+    console.error("[worker-decision-engine] AGENTS.md read failed:", err instanceof Error ? err.message : err);
     agentsMd = "# AGENTS.md not found\n";
   }
 

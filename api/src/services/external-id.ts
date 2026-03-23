@@ -46,8 +46,8 @@ export async function getOrCreateExternalId(orgId: string): Promise<string> {
       if (existing.externalId) {
         return existing.externalId;
       }
-    } catch {
-      // Corrupted data, regenerate below
+    } catch (err) {
+      console.error("[external-id] corrupted AWS role config, regenerating:", err instanceof Error ? err.message : err);
     }
   }
 

@@ -467,8 +467,8 @@ export async function runConsistencyTest(
       // Only fetch once
       try {
         codebaseContext = await fetchCodebaseContextForTask(task.githubRepo, task.orgId);
-      } catch {
-        // Ignore
+      } catch (err) {
+        console.error("[planner-v2] codebase context fetch failed:", err instanceof Error ? err.message : err);
       }
     }
 

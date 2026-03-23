@@ -222,7 +222,8 @@ async function getJiraDefaultProjectKey(
     };
 
     return data.values?.[0]?.key || null;
-  } catch {
+  } catch (err) {
+    console.error("[tracker-sync] Jira project key fetch failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -253,7 +254,8 @@ async function getJiraStoryTypeId(
       (t) => t.name === "Story" && !t.subtask,
     );
     return storyType?.id || null;
-  } catch {
+  } catch (err) {
+    console.error("[tracker-sync] Jira story type fetch failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -522,7 +524,8 @@ async function getLinearDefaultTeamId(apiKey: string): Promise<string | null> {
     };
 
     return data.data?.teams?.nodes?.[0]?.id || null;
-  } catch {
+  } catch (err) {
+    console.error("[tracker-sync] Linear team ID fetch failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -606,7 +609,8 @@ async function ensureLinearLabel(
     }
 
     return null;
-  } catch {
+  } catch (err) {
+    console.error("[tracker-sync] Linear label ensure failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }

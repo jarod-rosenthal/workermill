@@ -822,7 +822,7 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
         try {
           const reviewerToken = await getReviewerGitHubToken(localCredentialsOrgId);
           if (reviewerToken) localCredentials.githubReviewerToken = reviewerToken;
-        } catch { /* reviewer token is optional */ }
+        } catch (err) { console.error("[pipeline-executor] reviewer token fetch failed:", err instanceof Error ? err.message : err); }
       }
     } catch (error) {
       logger.warn("Could not fetch credentials, falling back to .env.local", {

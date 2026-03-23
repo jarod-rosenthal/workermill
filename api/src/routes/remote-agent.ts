@@ -1607,8 +1607,8 @@ router.get(
           provider === "github" ? "github-token" : `${provider}-token`;
         const token = await getOrgSecret(org.id, secretName);
         configured = !!token;
-      } catch {
-        // Secrets fetch failed — treat as not configured
+      } catch (err) {
+        console.error("[remote-agent] SCM token fetch failed:", err instanceof Error ? err.message : err);
       }
     }
 

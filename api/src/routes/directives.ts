@@ -419,8 +419,8 @@ router.get(
         try {
           significance =
             await experimentRunner.checkExperimentSignificance(experimentId);
-        } catch {
-          // Ignore errors in significance check
+        } catch (err) {
+          console.error("[directives] experiment significance check failed:", err instanceof Error ? err.message : err);
         }
       }
 

@@ -640,8 +640,8 @@ export async function fetchEpicProgressForTask(
           },
         });
         storiesCompleted = completedContexts;
-      } catch {
-        // Context table might not exist or query failed, use fallback
+      } catch (err) {
+        console.error("[control-center] story completion count query failed:", err instanceof Error ? err.message : err);
       }
     }
 

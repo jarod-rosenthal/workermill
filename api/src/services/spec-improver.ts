@@ -119,8 +119,8 @@ export async function gatherRepoContext(
             break;
           }
         }
-      } catch {
-        // Try next file
+      } catch (err) {
+        console.error("[spec-improver] dependency file fetch failed:", err instanceof Error ? err.message : err);
       }
     }
 
@@ -146,8 +146,8 @@ export async function gatherRepoContext(
           );
         fileTree = paths.join("\n");
       }
-    } catch {
-      // Skip file tree
+    } catch (err) {
+      console.error("[spec-improver] repo tree fetch failed:", err instanceof Error ? err.message : err);
     }
 
     // Fetch README
@@ -166,8 +166,8 @@ export async function gatherRepoContext(
           readme = full.substring(0, 2000);
         }
       }
-    } catch {
-      // Skip readme
+    } catch (err) {
+      console.error("[spec-improver] README fetch failed:", err instanceof Error ? err.message : err);
     }
 
     // If we got nothing, return null
@@ -272,8 +272,8 @@ export async function searchCurrentKnowledge(
           );
         }
       }
-    } catch {
-      // Skip failed searches
+    } catch (err) {
+      console.error("[spec-improver] tech research fetch failed:", err instanceof Error ? err.message : err);
       results.push(
         `${tech}: Check for latest version and breaking changes`,
       );

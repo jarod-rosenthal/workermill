@@ -348,8 +348,8 @@ export class CodebaseIndexer {
           status.errorCount += 1;
           await this.statusRepo.save(status);
         }
-      } catch {
-        // Ignore status update error
+      } catch (err) {
+        console.error("[codebase-indexer] status update failed:", err instanceof Error ? err.message : err);
       }
 
       return {

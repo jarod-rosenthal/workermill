@@ -79,8 +79,8 @@ export async function executeSupportAgentTask(
         severity,
       });
       await logRepo.save(log);
-    } catch {
-      // Non-critical
+    } catch (err) {
+      console.error("[support-agent] task log save failed:", err instanceof Error ? err.message : err);
     }
   };
 

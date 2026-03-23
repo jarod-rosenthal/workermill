@@ -9,8 +9,23 @@ import type { Repository } from "typeorm";
 import type { User, NotificationPreferences } from "../models/User.js";
 import type { PushSubscription } from "../models/PushSubscription.js";
 
-// Mock the database connection
-vi.mock("../db/connection.js");
+// Mock the database connection with explicit factory to avoid loading entity imports
+vi.mock("../db/connection.js", () => ({
+  AppDataSource: {
+    getRepository: vi.fn(),
+  },
+}));
+
+// Mock model files to avoid TypeORM decorator issues in test environment
+vi.mock("../models/User.js", () => {
+  const MockUser = class User {};
+  return { User: MockUser, NotificationPreferences: {} };
+});
+
+vi.mock("../models/PushSubscription.js", () => {
+  const MockPushSubscription = class PushSubscription {};
+  return { PushSubscription: MockPushSubscription };
+});
 
 // Mock the logger
 vi.mock("../utils/logger.js", () => ({

@@ -61,6 +61,18 @@ vi.mock("../services/skill-injector.js", () => ({
   skillInjector: {},
 }));
 
+vi.mock("../middleware/tos.js", () => ({
+  requireCurrentTos: vi.fn((_req: Request, _res: Response, next: NextFunction) => {
+    next();
+  }),
+}));
+
+vi.mock("../models/index.js", () => ({
+  SemanticMemory: class SemanticMemory {},
+  EpisodicMemory: class EpisodicMemory {},
+  ProceduralMemory: class ProceduralMemory {},
+}));
+
 vi.mock("../utils/logger.js", () => ({
   logger: {
     info: vi.fn(),

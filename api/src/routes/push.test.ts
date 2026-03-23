@@ -36,10 +36,29 @@ vi.mock("../utils/logger.js", () => ({
   },
 }));
 
+vi.mock("../utils/errors.js", () => ({
+  BadRequestError: class BadRequestError extends Error {
+    constructor(message: string) { super(message); this.name = "BadRequestError"; }
+  },
+}));
+
+const { MockPushSubscription, MockUser } = vi.hoisted(() => ({
+  MockPushSubscription: class MockPushSubscription {},
+  MockUser: class MockUser {},
+}));
+
+vi.mock("../models/index.js", () => ({
+  PushSubscription: MockPushSubscription,
+  User: MockUser,
+  NotificationPreferences: {},
+}));
+
 import { AppDataSource } from "../db/connection.js";
 import { authenticateUser } from "../middleware/auth.js";
 import pushRouter from "./push.js";
-import { PushSubscription, User } from "../models/index.js";
+
+const PushSubscription = MockPushSubscription;
+const User = MockUser;
 
 describe("Push Notification Routes", () => {
   let app: express.Express;

@@ -155,7 +155,7 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
   initTerminal();
 
   // Show header
-  printHeader("0.1.8", provider, modelName, workingDir);
+  printHeader("0.1.9", provider, modelName, workingDir);
 
   // Set initial status bar
   const statusText = printStatusBar(provider, modelName, 0, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), 0, contextLength);
@@ -354,9 +354,13 @@ Focus on writing clean, production-ready code.`;
       thinkingSpinner.stop();
 
       const usage = await stream.totalUsage;
-      const tokens = (usage?.inputTokens || 0) + (usage?.outputTokens || 0);
+      const inputTokens = usage?.inputTokens || 0;
+      const outputTokens = usage?.outputTokens || 0;
+      const tokens = inputTokens + outputTokens;
       session.totalTokens += tokens;
-      costTracker.addUsage("agent", provider, modelName, usage?.inputTokens || 0, usage?.outputTokens || 0);
+      costTracker.addUsage("agent", provider, modelName, inputTokens, outputTokens);
+      // Track last input tokens — this is the actual context window usage
+      const lastContextUsage = inputTokens;
 
       // Store assistant response
       const finalText = await stream.text;
@@ -366,8 +370,8 @@ Focus on writing clean, production-ready code.`;
       // Auto-save session after each exchange
       saveSession(session);
 
-      // Check for auto-compaction
-      const compactionLevel = shouldCompact(session.totalTokens, modelName);
+      // Check for auto-compaction — use actual context usage, not cumulative spend
+      const compactionLevel = shouldCompact(lastContextUsage, modelName, contextLength);
       if (compactionLevel !== "none") {
         const spinner = ora({ stream: process.stdout, text: `Compacting conversation (${compactionLevel})...`, prefixText: "  " }).start();
         const plainMessages = session.messages.map(m => ({ role: m.role, content: m.content }));
@@ -382,8 +386,8 @@ Focus on writing clean, production-ready code.`;
         spinner.succeed("Conversation compacted");
       }
 
-      // Update pinned status bar
-      const bar = printStatusBar(provider, modelName, session.totalTokens, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), costTracker.getTotalCost(), contextLength);
+      // Update pinned status bar — context bar shows actual window usage, not cumulative spend
+      const bar = printStatusBar(provider, modelName, lastContextUsage, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), costTracker.getTotalCost(), contextLength);
       setStatusBar(bar);
     } catch (err) {
       agentState = "idle";

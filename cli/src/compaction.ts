@@ -26,8 +26,8 @@ export function getContextLimit(model: string): number {
   return CONTEXT_LIMITS["default"];
 }
 
-export function shouldCompact(totalTokens: number, model: string): "none" | "soft" | "hard" {
-  const limit = getContextLimit(model);
+export function shouldCompact(totalTokens: number, model: string, configuredContextLength?: number): "none" | "soft" | "hard" {
+  const limit = configuredContextLength || getContextLimit(model);
   if (totalTokens >= limit * 0.95) return "hard";
   if (totalTokens >= limit * 0.80) return "soft";
   return "none";

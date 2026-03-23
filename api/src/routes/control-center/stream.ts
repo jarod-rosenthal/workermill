@@ -102,7 +102,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
         "revision_needed", "awaiting_destructive_approval", "escalated",
         "pending_plan_approval"
       ];
-      const terminalStatuses = ["completed", "deployed", "failed"];
+      const terminalStatuses = ["completed", "deployed", "failed", "cancelled"];
       const doneStatuses = ["completed", "deployed", "pr_approved", "review_approved"];
 
       // ── Fetch displayable tasks using same JS filter as REST endpoint ──

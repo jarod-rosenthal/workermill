@@ -80,7 +80,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
       }
       // Show completed/deployed/failed tasks within the display period
       // Failed tasks are important to see so users know what went wrong
-      if (["completed", "deployed", "failed"].includes(t.status) &&
+      if (["completed", "deployed", "failed", "cancelled"].includes(t.status) &&
           t.completedAt && new Date(t.completedAt) > displayCutoff) {
         return true;
       }
@@ -191,9 +191,9 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         const taskTime = t.updatedAt || t.createdAt;
         return taskTime && new Date(taskTime) > intermediateCutoff;
       }
-      // Show completed/failed/deployed tasks within the display period
+      // Show completed/failed/deployed/cancelled tasks within the display period
       if (
-        ["completed", "deployed", "failed"].includes(t.status) &&
+        ["completed", "deployed", "failed", "cancelled"].includes(t.status) &&
         t.completedAt &&
         new Date(t.completedAt) > displayCutoff
       ) {

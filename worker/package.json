@@ -6,7 +6,9 @@
   "description": "WorkerMill AI Worker execution scripts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "vitest run --config epic/vitest.config.ts",
+    "test:watch": "vitest --config epic/vitest.config.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.0",

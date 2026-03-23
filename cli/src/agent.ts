@@ -5,7 +5,7 @@ import chalk from "chalk";
 import ora from "ora";
 import { execSync } from "child_process";
 import { streamText, stepCountIs, type ToolSet } from "ai";
-import { createModel } from "../../packages/engine/src/model-factory.js";
+import { createModel, buildOllamaOptions } from "../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
 import type { AIProvider } from "../../packages/engine/src/types.js";
 
@@ -62,7 +62,7 @@ function completer(line: string): [string[], string] {
 }
 
 export async function runAgent(config: CliConfig, trustAll: boolean, resume?: boolean, startInPlanMode?: boolean, fullDisk?: boolean): Promise<void> {
-  const { provider, model: modelName, apiKey, host } = getProviderForPersona(config);
+  const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(config);
 
   // Set API keys in env if provided
   if (apiKey) {
@@ -78,7 +78,7 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
   }
 
   const aiProvider = provider as AIProvider;
-  const model = createModel(aiProvider, modelName, host);
+  const model = createModel(aiProvider, modelName, host, contextLength);
   const workingDir = process.cwd();
   const sandboxed = !fullDisk;
   const tools = createToolDefinitions(workingDir, model, sandboxed);
@@ -155,10 +155,10 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
   initTerminal();
 
   // Show header
-  printHeader("0.1.7", provider, modelName, workingDir);
+  printHeader("0.1.8", provider, modelName, workingDir);
 
   // Set initial status bar
-  const statusText = printStatusBar(provider, modelName, 0, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), 0);
+  const statusText = printStatusBar(provider, modelName, 0, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), 0, contextLength);
   setStatusBar(statusText);
 
   const rl = readline.createInterface({
@@ -332,6 +332,7 @@ Focus on writing clean, production-ready code.`;
         tools: getActiveTools() as ToolSet,
         stopWhen: stepCountIs(100),
         abortSignal: currentAbortController.signal,
+        ...buildOllamaOptions(aiProvider, contextLength),
         onStepFinish({ text }) {
           if (text) {
             thinkingSpinner.stop();
@@ -382,7 +383,7 @@ Focus on writing clean, production-ready code.`;
       }
 
       // Update pinned status bar
-      const bar = printStatusBar(provider, modelName, session.totalTokens, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), costTracker.getTotalCost());
+      const bar = printStatusBar(provider, modelName, session.totalTokens, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), costTracker.getTotalCost(), contextLength);
       setStatusBar(bar);
     } catch (err) {
       agentState = "idle";

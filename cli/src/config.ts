@@ -6,6 +6,8 @@ export interface ProviderConfig {
   model: string;
   apiKey?: string;
   host?: string;
+  /** Ollama context window size (num_ctx). Default: 2048 by Ollama. Set to e.g. 65536 for 64K. */
+  contextLength?: number;
 }
 
 export interface MCPServerConfig {
@@ -85,7 +87,7 @@ export function resolveConfig(): CliConfig {
 export function getProviderForPersona(
   config: CliConfig,
   persona?: string
-): { provider: string; model: string; apiKey?: string; host?: string } {
+): { provider: string; model: string; apiKey?: string; host?: string; contextLength?: number } {
   const providerName = (persona && config.routing?.[persona]) || config.default;
   const providerConfig = config.providers[providerName];
 
@@ -100,5 +102,6 @@ export function getProviderForPersona(
       ? process.env[providerConfig.apiKey.slice(5, -1)] || undefined
       : providerConfig.apiKey,
     host: providerConfig.host,
+    contextLength: providerConfig.contextLength,
   };
 }

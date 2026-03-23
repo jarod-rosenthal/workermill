@@ -2,7 +2,7 @@ import chalk from "chalk";
 import ora from "ora";
 import { streamText, generateObject, generateText, stepCountIs, type ToolSet } from "ai";
 import { z } from "zod";
-import { createModel } from "../../packages/engine/src/model-factory.js";
+import { createModel, buildOllamaOptions } from "../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
 import type { AIProvider } from "../../packages/engine/src/types.js";
 import { loadPersona } from "./personas.js";
@@ -121,7 +121,7 @@ export async function classifyComplexity(
   config: CliConfig,
   userInput: string
 ): Promise<{ isMulti: boolean; reason: string }> {
-  const { provider, model: modelName, apiKey, host } = getProviderForPersona(config);
+  const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(config);
 
   if (apiKey) {
     const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
@@ -129,7 +129,7 @@ export async function classifyComplexity(
     if (envVar && !process.env[envVar]) process.env[envVar] = apiKey;
   }
 
-  const model = createModel(provider as AIProvider, modelName, host);
+  const model = createModel(provider as AIProvider, modelName, host, contextLength);
 
   try {
     const result = await generateObject({
@@ -204,7 +204,7 @@ async function planStories(
 ): Promise<Story[]> {
   const planner = loadPersona("planner");
 
-  const { provider: pProvider, model: pModel, host: pHost } = getProviderForPersona(config, "planner");
+  const { provider: pProvider, model: pModel, host: pHost, contextLength: pCtx } = getProviderForPersona(config, "planner");
   if (pProvider) {
     const pApiKey = config.providers[pProvider]?.apiKey;
     if (pApiKey) {
@@ -217,7 +217,7 @@ async function planStories(
     }
   }
 
-  const plannerModel = createModel(pProvider as AIProvider, pModel, pHost);
+  const plannerModel = createModel(pProvider as AIProvider, pModel, pHost, pCtx);
   const plannerTools = createToolDefinitions(workingDir, plannerModel, sandboxed);
 
   const readOnlyTools: Record<string, AnyToolDef> = {};
@@ -287,6 +287,7 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
     tools: readOnlyTools as ToolSet,
     stopWhen: stepCountIs(100),
     timeout: { totalMs: 3 * 60 * 1000, chunkMs: 120_000 },
+    ...buildOllamaOptions(pProvider as AIProvider, pCtx),
     onStepFinish({ text }) {
       if (text) {
         const lines = text.split("\n").filter(l => l.trim());
@@ -523,8 +524,8 @@ export async function runOrchestration(
   if (config.review?.useCritic) {
     const critic = loadPersona("critic");
     if (critic) {
-      const { provider: cProvider, model: cModel, host: cHost } = getProviderForPersona(config, "critic");
-      const criticModel = createModel(cProvider as AIProvider, cModel, cHost);
+      const { provider: cProvider, model: cModel, host: cHost, contextLength: cCtx } = getProviderForPersona(config, "critic");
+      const criticModel = createModel(cProvider as AIProvider, cModel, cHost, cCtx);
       const criticTools = createToolDefinitions(workingDir, criticModel, sandboxed);
       const criticReadOnly: Record<string, AnyToolDef> = {};
       for (const name of critic.tools) {
@@ -551,6 +552,7 @@ export async function runOrchestration(
         tools: criticReadOnly as ToolSet,
         stopWhen: stepCountIs(100),
         timeout: { totalMs: 3 * 60 * 1000, chunkMs: 120_000 },
+        ...buildOllamaOptions(cProvider as AIProvider, cCtx),
       });
       for await (const _chunk of criticStream.textStream) { /* drive */ }
       const criticText = await criticStream.text;
@@ -590,7 +592,7 @@ export async function runOrchestration(
     }
 
     // Resolve provider for this persona
-    const { provider, model: modelName, apiKey, host } = getProviderForPersona(
+    const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(
       config,
       persona.provider || story.persona
     );
@@ -614,7 +616,7 @@ export async function runOrchestration(
       spinner: "dots",
     }).start();
 
-    const model = createModel(provider as AIProvider, modelName, host);
+    const model = createModel(provider as AIProvider, modelName, host, contextLength);
 
     // Build tools filtered by persona's allowed tools
     const allTools = createToolDefinitions(workingDir, model, sandboxed);
@@ -708,6 +710,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
         stopWhen: stepCountIs(100),
         timeout: { totalMs: 10 * 60 * 1000, chunkMs: 120_000 },
         ...buildReasoningOptions(provider, modelName),
+        ...buildOllamaOptions(provider as AIProvider, contextLength),
         onStepFinish({ text }) {
           if (text) {
             spinner.stop();
@@ -794,7 +797,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
   // Run inline review with revision loop
   const reviewer = loadPersona("reviewer");
   if (reviewer) {
-    const { provider: revProvider, model: revModel, host: revHost } = getProviderForPersona(
+    const { provider: revProvider, model: revModel, host: revHost, contextLength: revCtx } = getProviderForPersona(
       config,
       reviewer.provider || "reviewer"
     );
@@ -807,7 +810,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
       if (envVar && key && !process.env[envVar]) process.env[envVar] = key;
     }
 
-    const reviewModel = createModel(revProvider as AIProvider, revModel, revHost);
+    const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx);
     const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
 
     // Read-only tools for reviewer — wrapped with wmLog output
@@ -916,6 +919,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           tools: reviewerTools,
           stopWhen: stepCountIs(100),
           timeout: { totalMs: 5 * 60 * 1000, chunkMs: 120_000 },
+          ...buildOllamaOptions(revProvider as AIProvider, revCtx),
           onStepFinish({ text }) {
             if (text) {
               reviewSpinner.stop();
@@ -1008,7 +1012,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           const storyPersona = loadPersona(story.persona);
           if (!storyPersona) continue;
 
-          const { provider: sProvider, model: sModel, host: sHost } = getProviderForPersona(
+          const { provider: sProvider, model: sModel, host: sHost, contextLength: sCtx } = getProviderForPersona(
             config, storyPersona.provider || story.persona
           );
           if (sProvider) {
@@ -1033,7 +1037,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
             spinner: "dots",
           }).start();
 
-          const storyModel = createModel(sProvider as AIProvider, sModel, sHost);
+          const storyModel = createModel(sProvider as AIProvider, sModel, sHost, sCtx);
           const storyAllTools = createToolDefinitions(workingDir, storyModel, sandboxed);
           const storyTools: Record<string, AnyToolDef> = {};
           for (const toolName of storyPersona.tools) {
@@ -1083,6 +1087,7 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
               stopWhen: stepCountIs(100),
               timeout: { totalMs: 5 * 60 * 1000, chunkMs: 120_000 },
               ...buildReasoningOptions(sProvider, sModel),
+              ...buildOllamaOptions(sProvider as AIProvider, sCtx),
               onStepFinish({ text }) {
                 if (text) {
                   revSpinner.stop();

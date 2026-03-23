@@ -91,9 +91,13 @@ export async function runSetup(): Promise<CliConfig> {
       }
     }
 
+    // Default context length for Ollama — 64K
+    providerConfig.contextLength = 65536;
+
     if (connectedHost) {
       providerConfig.host = connectedHost;
       console.log(chalk.green(`  ✓ Connected to Ollama at ${connectedHost}`));
+      console.log(chalk.dim(`  Context window: ${providerConfig.contextLength.toLocaleString()} tokens`));
       if (models.length > 0) {
         console.log(chalk.dim(`  Available models: ${models.map(m => m.name).join(", ")}`));
       }

@@ -420,7 +420,8 @@ export function printStatusBar(
   model: string,
   tokens: number,
   permissionMode: string,
-  cost?: number
+  cost?: number,
+  maxContext?: number
 ): string {
   const width = process.stdout.columns || 80;
   const bg = chalk.bgRgb(30, 30, 30);
@@ -428,9 +429,8 @@ export function printStatusBar(
   // Model display — compact like Claude Code: [model]
   const modelDisplay = ` ${model} `;
 
-  // Context bar + token count
-  const maxCtx = 128_000; // reasonable default for most models
-  const bar = contextBar(tokens, maxCtx);
+  // Context bar — uses configured context length or provider default
+  const bar = contextBar(tokens, maxContext || 128_000);
   const tokStr = formatTokens(tokens);
 
   // Tool counts — compact: Bash x3 | Read x5

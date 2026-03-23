@@ -39,3 +39,4 @@ export { default as marketingRouter } from "./marketing.js";
 export { default as specsRouter } from "./specs.js";
 export { default as attachmentsRouter } from "./attachments.js";
 export { default as pushRouter } from "./push.js";
+export { default as integrationTestsRouter } from "./integration-tests.js";

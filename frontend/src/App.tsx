@@ -33,6 +33,7 @@ import SkillLibrary from "./pages/SkillLibrary";
 import MemoryManagement from "./pages/MemoryManagement";
 import DirectiveEffectiveness from "./pages/DirectiveEffectiveness";
 import ManagementDashboard from "./pages/ManagementDashboard";
+import IntegrationTests from "./pages/IntegrationTests";
 import Demo from "./pages/Demo";
 import ShowcaseViewer from "./pages/ShowcaseViewer";
 import {
@@ -465,6 +466,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <DirectiveEffectiveness />
+              </ProtectedRoute>
+            }
+          />
+          {/* Integration Tests (local dev only) */}
+          <Route
+            path="/integration-tests"
+            element={
+              <ProtectedRoute>
+                <IntegrationTests />
               </ProtectedRoute>
             }
           />

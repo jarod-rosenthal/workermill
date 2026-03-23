@@ -62,6 +62,7 @@ import {
   specsRouter,
   attachmentsRouter,
   pushRouter,
+  integrationTestsRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -295,6 +296,9 @@ app.use("/api/memory", authenticatedLimiter, memoryRouter);
 app.use("/api/compliance", authenticatedLimiter, complianceRouter);
 app.use("/api/codebase", authenticatedLimiter, codebaseRouter);
 app.use("/api/directives", workerLogLimiter, directivesRouter);
+
+// Integration test dashboard (local dev only)
+app.use("/api/integration-tests", authenticatedLimiter, integrationTestsRouter);
 
 // Showcase routes (public, no auth required)
 app.use("/api/showcase", webhookLimiter, showcaseRouter);

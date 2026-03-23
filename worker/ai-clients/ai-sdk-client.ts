@@ -26,11 +26,11 @@ import { createToolDefinitions } from "./tools/index.js";
 
 // Default models per provider
 const PROVIDER_DEFAULT_MODELS: Record<AIProvider, string> = {
-  anthropic: "claude-haiku-4-5",
-  openai: "gpt-4o",
-  google: "gemini-2.0-flash",
-  gemini: "gemini-2.0-flash",
-  ollama: "qwen2.5-coder:32b",
+  anthropic: "claude-sonnet-4-6",
+  openai: "gpt-5.4",
+  google: "gemini-3.1-pro",
+  gemini: "gemini-3.1-pro",
+  ollama: "qwen3-coder:30b",
 };
 
 // Provider capabilities

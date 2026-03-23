@@ -139,17 +139,26 @@ export default function CLI() {
   "providers": {
     "ollama": {
       "model": "qwen3-coder:30b",
-      "host": "http://localhost:11434"
+      "host": "http://localhost:11434",
+      "contextLength": 65536
     },
     "anthropic": {
       "model": "claude-sonnet-4-6",
       "apiKey": "{env:ANTHROPIC_API_KEY}"
+    },
+    "openai": {
+      "model": "gpt-5.4",
+      "apiKey": "{env:OPENAI_API_KEY}"
+    },
+    "google": {
+      "model": "gemini-3.1-pro",
+      "apiKey": "{env:GOOGLE_API_KEY}"
     }
   },
   "default": "ollama",
   "routing": {
-    "architect": "anthropic",
-    "reviewer": "anthropic"
+    "tech_lead": "anthropic",
+    "planner": "anthropic"
   },
   "review": {
     "maxRevisions": 2,
@@ -161,22 +170,19 @@ export default function CLI() {
 
       {/* Personas */}
       <section className="space-y-4">
-        <h2 className="text-2xl font-semibold">15 Built-in Personas</h2>
+        <h2 className="text-2xl font-semibold">12 Built-in Personas</h2>
         <div className="flex flex-wrap gap-2">
           {[
-            { name: "Architect", emoji: "\u{1F3D7}\uFE0F" },
             { name: "Backend Developer", emoji: "\u{1F4BB}" },
             { name: "Frontend Developer", emoji: "\u{1F3A8}" },
-            { name: "Fullstack Developer", emoji: "\u{1F4BB}" },
             { name: "DevOps Engineer", emoji: "\u{1F527}" },
             { name: "QA Engineer", emoji: "\u{1F9EA}" },
             { name: "Security Engineer", emoji: "\u{1F512}" },
-            { name: "Database Engineer", emoji: "\u{1F4CA}" },
+            { name: "Data & ML Engineer", emoji: "\u{1F4CA}" },
             { name: "Mobile Developer", emoji: "\u{1F4F1}" },
-            { name: "Data Engineer", emoji: "\u{1F4CA}" },
-            { name: "ML Engineer", emoji: "\u{1F4CA}" },
-            { name: "Tech Lead / Reviewer", emoji: "\u{1F451}" },
             { name: "Tech Writer", emoji: "\u{1F4DD}" },
+            { name: "Architect", emoji: "\u{1F3D7}\uFE0F" },
+            { name: "Tech Lead", emoji: "\u{1F451}" },
             { name: "Planner", emoji: "\u{1F4A1}" },
             { name: "Critic", emoji: "\u{1F50D}" },
           ].map((p) => (

@@ -90,17 +90,26 @@ Config stored at `~/.workermill/cli.json` (global) and `.workermill/config.json`
   "providers": {
     "ollama": {
       "model": "qwen3-coder:30b",
-      "host": "http://localhost:11434"
+      "host": "http://localhost:11434",
+      "contextLength": 65536
     },
     "anthropic": {
       "model": "claude-sonnet-4-6",
       "apiKey": "{env:ANTHROPIC_API_KEY}"
+    },
+    "openai": {
+      "model": "gpt-5.4",
+      "apiKey": "{env:OPENAI_API_KEY}"
+    },
+    "google": {
+      "model": "gemini-3.1-pro",
+      "apiKey": "{env:GOOGLE_API_KEY}"
     }
   },
   "default": "ollama",
   "routing": {
-    "architect": "anthropic",
-    "reviewer": "anthropic"
+    "tech_lead": "anthropic",
+    "planner": "anthropic"
   },
   "review": {
     "maxRevisions": 2,
@@ -110,9 +119,9 @@ Config stored at `~/.workermill/cli.json` (global) and `.workermill/config.json`
 }
 ```
 
-## 15 Built-in Personas
+## 12 Built-in Personas
 
-architect, backend_developer, frontend_developer, fullstack_developer, devops_engineer, qa_engineer, security_engineer, database_engineer, mobile_developer, data_engineer, ml_engineer, tech_writer, tech_lead, planner, critic
+backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, architect, tech_lead, planner, critic
 
 ## Requirements
 

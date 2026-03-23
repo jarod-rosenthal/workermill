@@ -42,38 +42,38 @@ describe("model-factory", () => {
   describe("createModel", () => {
     it("creates model for anthropic provider", () => {
       process.env.ANTHROPIC_API_KEY = "sk-ant-test";
-      const model = createModel("anthropic", "claude-sonnet-4-20250514");
+      const model = createModel("anthropic", "claude-sonnet-4-6");
 
-      expect(anthropic).toHaveBeenCalledWith("claude-sonnet-4-20250514");
+      expect(anthropic).toHaveBeenCalledWith("claude-sonnet-4-6");
       expect(model).toEqual({ modelId: "claude-test" });
     });
 
     it("creates model for openai provider", () => {
       process.env.OPENAI_API_KEY = "sk-openai-test";
-      const model = createModel("openai", "gpt-4o");
+      const model = createModel("openai", "gpt-5.4");
 
-      expect(openai).toHaveBeenCalledWith("gpt-4o");
+      expect(openai).toHaveBeenCalledWith("gpt-5.4");
       expect(model).toEqual({ modelId: "gpt-test" });
     });
 
     it("creates model for google provider", () => {
       process.env.GOOGLE_GENERATIVE_AI_API_KEY = "google-key";
-      const model = createModel("google", "gemini-2.0-flash");
+      const model = createModel("google", "gemini-3.1-pro");
 
-      expect(google).toHaveBeenCalledWith("gemini-2.0-flash");
+      expect(google).toHaveBeenCalledWith("gemini-3.1-pro");
       expect(model).toEqual({ modelId: "gemini-test" });
     });
 
     it("creates model for gemini provider (alias)", () => {
       process.env.GOOGLE_GENERATIVE_AI_API_KEY = "google-key";
-      const model = createModel("gemini", "gemini-2.0-flash");
+      const model = createModel("gemini", "gemini-3.1-pro");
 
-      expect(google).toHaveBeenCalledWith("gemini-2.0-flash");
+      expect(google).toHaveBeenCalledWith("gemini-3.1-pro");
       expect(model).toEqual({ modelId: "gemini-test" });
     });
 
     it("creates model for ollama provider", () => {
-      const model = createModel("ollama", "qwen2.5-coder:32b");
+      const model = createModel("ollama", "qwen3-coder:30b");
 
       expect(createOllama).toHaveBeenCalledWith({
         baseURL: "http://localhost:11434/api",
@@ -104,14 +104,14 @@ describe("model-factory", () => {
 
     it("throws on missing ANTHROPIC_API_KEY", () => {
       delete process.env.ANTHROPIC_API_KEY;
-      expect(() => createModel("anthropic", "claude-test")).toThrow(
+      expect(() => createModel("anthropic", "claude-sonnet-4-6")).toThrow(
         "ANTHROPIC_API_KEY environment variable is required"
       );
     });
 
     it("throws on missing OPENAI_API_KEY", () => {
       delete process.env.OPENAI_API_KEY;
-      expect(() => createModel("openai", "gpt-4o")).toThrow(
+      expect(() => createModel("openai", "gpt-5.4")).toThrow(
         "OPENAI_API_KEY environment variable is required"
       );
     });
@@ -119,7 +119,7 @@ describe("model-factory", () => {
     it("throws on missing Google API key", () => {
       delete process.env.GOOGLE_API_KEY;
       delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-      expect(() => createModel("google", "gemini-2.0-flash")).toThrow(
+      expect(() => createModel("google", "gemini-3.1-pro")).toThrow(
         "GOOGLE_GENERATIVE_AI_API_KEY or GOOGLE_API_KEY environment variable is required"
       );
     });
@@ -127,10 +127,10 @@ describe("model-factory", () => {
     it("accepts GOOGLE_API_KEY as fallback and sets GOOGLE_GENERATIVE_AI_API_KEY", () => {
       delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
       process.env.GOOGLE_API_KEY = "google-fallback-key";
-      createModel("google", "gemini-2.0-flash");
+      createModel("google", "gemini-3.1-pro");
 
       expect(process.env.GOOGLE_GENERATIVE_AI_API_KEY).toBe("google-fallback-key");
-      expect(google).toHaveBeenCalledWith("gemini-2.0-flash");
+      expect(google).toHaveBeenCalledWith("gemini-3.1-pro");
     });
 
     it("throws on unknown provider", () => {
@@ -216,17 +216,17 @@ describe("model-factory", () => {
 
   describe("buildReasoningOptions", () => {
     it("returns empty object for anthropic", () => {
-      const result = buildReasoningOptions("anthropic", "claude-sonnet-4-20250514");
+      const result = buildReasoningOptions("anthropic", "claude-sonnet-4-6");
       expect(result).toEqual({});
     });
 
     it("returns empty object for ollama", () => {
-      const result = buildReasoningOptions("ollama", "qwen2.5-coder:32b");
+      const result = buildReasoningOptions("ollama", "qwen3-coder:30b");
       expect(result).toEqual({});
     });
 
     it("returns reasoningSummary for openai", () => {
-      const result = buildReasoningOptions("openai", "gpt-4o");
+      const result = buildReasoningOptions("openai", "gpt-5.4");
       expect(result).toEqual({
         providerOptions: {
           openai: { reasoningSummary: "detailed" },
@@ -234,22 +234,8 @@ describe("model-factory", () => {
       });
     });
 
-    it("returns thinkingConfig with thinkingBudget for non-gemini-3 google models", () => {
-      const result = buildReasoningOptions("google", "gemini-2.0-flash");
-      expect(result).toEqual({
-        providerOptions: {
-          google: {
-            thinkingConfig: {
-              thinkingBudget: 8192,
-              includeThoughts: true,
-            },
-          },
-        },
-      });
-    });
-
     it("returns thinkingConfig with thinkingLevel for gemini-3 models", () => {
-      const result = buildReasoningOptions("google", "gemini-3-pro");
+      const result = buildReasoningOptions("google", "gemini-3.1-pro");
       expect(result).toEqual({
         providerOptions: {
           google: {
@@ -262,13 +248,27 @@ describe("model-factory", () => {
       });
     });
 
-    it("returns thinkingConfig for gemini alias provider", () => {
-      const result = buildReasoningOptions("gemini", "gemini-2.0-flash");
+    it("returns thinkingConfig with thinkingBudget for older gemini models", () => {
+      const result = buildReasoningOptions("google", "gemini-2.5-flash");
       expect(result).toEqual({
         providerOptions: {
           google: {
             thinkingConfig: {
               thinkingBudget: 8192,
+              includeThoughts: true,
+            },
+          },
+        },
+      });
+    });
+
+    it("returns thinkingConfig for gemini alias provider", () => {
+      const result = buildReasoningOptions("gemini", "gemini-3.1-pro");
+      expect(result).toEqual({
+        providerOptions: {
+          google: {
+            thinkingConfig: {
+              thinkingLevel: "high",
               includeThoughts: true,
             },
           },

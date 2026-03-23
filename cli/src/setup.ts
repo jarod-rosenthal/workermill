@@ -6,8 +6,8 @@ import { saveConfig, type CliConfig, type ProviderConfig } from "./config.js";
 const PROVIDERS = [
   { name: "ollama", display: "Ollama (local, no API key needed)", needsKey: false, defaultModel: "qwen3-coder:30b" },
   { name: "anthropic", display: "Anthropic (Claude)", needsKey: true, defaultModel: "claude-sonnet-4-6", envVar: "ANTHROPIC_API_KEY" },
-  { name: "openai", display: "OpenAI (GPT)", needsKey: true, defaultModel: "gpt-4o", envVar: "OPENAI_API_KEY" },
-  { name: "google", display: "Google (Gemini)", needsKey: true, defaultModel: "gemini-2.5-pro", envVar: "GOOGLE_API_KEY" },
+  { name: "openai", display: "OpenAI (GPT)", needsKey: true, defaultModel: "gpt-5.4", envVar: "OPENAI_API_KEY" },
+  { name: "google", display: "Google (Gemini)", needsKey: true, defaultModel: "gemini-3.1-pro", envVar: "GOOGLE_API_KEY" },
 ];
 
 function ask(rl: readline.Interface, question: string): Promise<string> {

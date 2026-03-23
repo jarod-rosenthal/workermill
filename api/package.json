@@ -55,7 +55,6 @@
     "jsonwebtoken": "^9.0.3",
     "minimatch": "^9.0.5",
     "multer": "^2.1.1",
-    "ollama-ai-provider": "^1.2.0",
     "ollama-ai-provider-v2": "^3.5.0",
     "pg": "^8.13.0",
     "rate-limit-redis": "^4.3.1",
@@ -66,7 +65,7 @@
     "uuid": "^10.0.0",
     "winston": "^3.15.0",
     "yaml": "^2.8.2",
-    "zod": "^3.23.0"
+    "zod": "^4.1.8"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

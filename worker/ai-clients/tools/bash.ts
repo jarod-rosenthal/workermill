@@ -52,6 +52,10 @@ export async function execute({
 
     // Use shell to execute the command
     // Use /bin/bash explicitly to ensure it's found in container environments
+    // detached: true creates a new process group so we can kill the
+    // entire tree (bash + all child processes) on timeout. Without this,
+    // long-running children (e.g. ts-node-dev --respawn, npm start)
+    // survive the bash kill and become orphans that block the tool call.
     const child = spawn("/bin/bash", ["-c", command], {
       cwd: cwd || process.cwd(),
       env: {
@@ -59,16 +63,24 @@ export async function execute({
         PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
       },
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
 
-    // Set up timeout
+    // Set up timeout — kill the entire process group
     const timeoutId = setTimeout(() => {
       killed = true;
-      child.kill("SIGTERM");
+      try {
+        // Kill the process group (negative PID = kill group)
+        process.kill(-child.pid!, "SIGTERM");
+      } catch {
+        child.kill("SIGTERM");
+      }
       // Force kill after 5 seconds if still running
       setTimeout(() => {
-        if (!child.killed) {
-          child.kill("SIGKILL");
+        try {
+          process.kill(-child.pid!, "SIGKILL");
+        } catch {
+          // Process group already dead
         }
       }, 5000);
     }, timeout);

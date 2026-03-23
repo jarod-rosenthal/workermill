@@ -69,7 +69,12 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
         if (result.success) {
           return result.stdout || "(no output)";
         }
-        return `Error: ${result.error || result.stderr}\n${result.stdout || ""}`.trim();
+        // Show stderr first (the actual error), then stdout, then the exit code
+        const parts: string[] = [];
+        if (result.stderr) parts.push(result.stderr);
+        if (result.stdout) parts.push(result.stdout);
+        if (result.error) parts.push(result.error);
+        return `Error: ${parts.join("\n")}`.trim();
       },
     }),
 

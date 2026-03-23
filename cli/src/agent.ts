@@ -13,7 +13,7 @@ import type { AIProvider } from "../../packages/engine/src/types.js";
 type AnyToolDef = any;
 import { PermissionManager } from "./permissions.js";
 import { killActiveProcess } from "../../packages/engine/src/tools/bash.js";
-import { printToolCall, printToolResult, printError, printStatusBar, printHeader } from "./tui.js";
+import { printToolCall, printToolResult, printError, printStatusBar, printHeader, wmLog, wmLogPrefix } from "./tui.js";
 import { handleCommand as handleSlashCommand, type CommandContext } from "./commands.js";
 import { CostTracker } from "./cost-tracker.js";
 import { initTerminal, exitTerminal, setStatusBar, showStatusBar } from "./terminal.js";
@@ -138,7 +138,7 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
           return "Tool execution denied by user.";
         }
         logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
-        printToolCall(name, input);
+        wmLog(singleAgentPersona, `Tool: ${name}`);
         agentState = "tool_executing";
         const result = await td.execute(input);
         agentState = "streaming";
@@ -155,7 +155,7 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
   initTerminal();
 
   // Show header
-  printHeader("0.1.5", provider, modelName, workingDir);
+  printHeader("0.1.7", provider, modelName, workingDir);
 
   // Set initial status bar
   const statusText = printStatusBar(provider, modelName, 0, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), 0);
@@ -222,18 +222,42 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
     }
   });
 
-  const systemPrompt = `You are WorkerMill, an AI coding agent running in the user's terminal.
-You have access to tools for reading, writing, and editing files, running bash commands, searching code, and fetching web content.
+  const singleAgentPersona = "backend_developer";
+
+  const systemPrompt = `You are a senior developer in WorkerMill, an AI coding agent running in the user's terminal.
+
+Your specialties:
+- Full-stack development (Node.js, TypeScript, React, databases)
+- System design and architecture
+- Testing and quality assurance
+- DevOps and deployment
 
 Working directory: ${workingDir}
 
-Guidelines:
-- Be concise and direct in your responses
+## Communication Style
+
+Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!", or similar. Start with the substance — what you did, what you found, or what you need. Be concise and informative. Do NOT repeat what you said in previous steps — each response should add new information only.
+
+## Guidelines
 - Use tools proactively to explore the codebase before making changes
 - When editing files, read them first to understand context
 - Prefer editing existing files over creating new ones
 - Run tests after making changes when test infrastructure exists
 - Use glob and grep to find relevant files before reading them
+
+## Critical rules
+- NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, nodemon, tsc --watch, etc.)
+- NEVER run interactive commands that wait for user input
+- Only run commands that complete and exit
+
+## Reporting Learnings
+
+When you discover something specific and actionable about this codebase, emit a learning marker:
+::learning::The test suite requires DATABASE_URL env var or tests silently pass without running
+
+## Technology Versions — Trust the Spec
+
+If the task specifies a dependency version, USE THAT VERSION. Do NOT downgrade or "fix" versions you don't recognize.
 
 Focus on writing clean, production-ready code.`;
 
@@ -308,33 +332,25 @@ Focus on writing clean, production-ready code.`;
         tools: getActiveTools() as ToolSet,
         stopWhen: stepCountIs(100),
         abortSignal: currentAbortController.signal,
+        onStepFinish({ text }) {
+          if (text) {
+            thinkingSpinner.stop();
+            const lines = text.split("\n").filter(l => l.trim());
+            for (const line of lines) {
+              if (line.includes("::learning::")) continue;
+              wmLog(singleAgentPersona, line);
+            }
+          }
+        },
       });
 
-      let fullText = "";
-      let spinnerStopped = false;
-
-      for await (const chunk of stream.textStream) {
-        if (!spinnerStopped) {
-          thinkingSpinner.stop();
-          spinnerStopped = true;
-          process.stdout.write("\n");
-        }
-        process.stdout.write(chalk.white(chunk));
-        fullText += chunk;
-      }
+      // Drive the stream — onStepFinish handles display
+      for await (const _chunk of stream.textStream) { /* consumed */ }
 
       clearTimeout(timeoutId);
       agentState = "idle";
       currentAbortController = null;
-
-      if (!spinnerStopped) {
-        thinkingSpinner.stop();
-        process.stdout.write("\n");
-      }
-
-      if (fullText.trim()) {
-        process.stdout.write("\n");
-      }
+      thinkingSpinner.stop();
 
       const usage = await stream.totalUsage;
       const tokens = (usage?.inputTokens || 0) + (usage?.outputTokens || 0);

@@ -96,6 +96,8 @@ export interface AIClientResult {
   structuredOutput?: Record<string, unknown>;
   /** Output markers extracted from agent output */
   markers?: OutputMarkers;
+  /** Whether the execution failed due to rate limiting (429 / quota exceeded) */
+  rateLimited?: boolean;
 }
 
 // AIClient capabilities (per provider)

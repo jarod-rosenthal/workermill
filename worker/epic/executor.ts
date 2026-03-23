@@ -182,6 +182,7 @@ export class StoryExecutor {
         messages: result.messages,
         error: result.error,
         structuredOutput: result.structuredOutput,
+        rateLimited: result.rateLimited,
       };
     }
 

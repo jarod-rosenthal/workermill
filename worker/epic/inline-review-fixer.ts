@@ -159,6 +159,7 @@ export class InlineReviewFixer {
         messages: result.messages,
         error: result.error,
         structuredOutput: result.structuredOutput,
+        rateLimited: result.rateLimited,
       };
     }
     return runAgent(this.config, { ...options, onMessage });

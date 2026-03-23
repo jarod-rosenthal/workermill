@@ -106,6 +106,9 @@ export class AISdkClient implements AIClient {
     // The AI SDK provider packages read from environment variables.
     this.setProviderEnv();
 
+    // Loop detection: AbortController must be declared before try so catch can check it
+    const loopAbort = new AbortController();
+
     try {
       const model = createModel(this.provider, modelName);
       const tools = createToolDefinitions(options.workingDir, model);
@@ -114,7 +117,6 @@ export class AISdkClient implements AIClient {
       const recentToolSignatures: string[] = [];
       const LOOP_WINDOW = 6; // Check last 6 tool calls
       const LOOP_THRESHOLD = 4; // Abort if 4+ of last 6 are identical
-      const loopAbort = new AbortController();
 
       const stream = streamText({
         model,
@@ -205,6 +207,12 @@ export class AISdkClient implements AIClient {
       if (result.usage) {
         tokenUsage.inputTokens = result.usage.promptTokens || 0;
         tokenUsage.outputTokens = result.usage.completionTokens || 0;
+        // Cache token tracking (Anthropic-specific, exposed by AI SDK)
+        const details = (result.usage as { inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number } }).inputTokenDetails;
+        if (details) {
+          tokenUsage.cacheReadTokens = details.cacheReadTokens || 0;
+          tokenUsage.cacheCreationTokens = details.cacheWriteTokens || 0;
+        }
       }
       options.onTokenUsage?.(tokenUsage);
 
@@ -248,6 +256,24 @@ export class AISdkClient implements AIClient {
           tokenUsage,
           modelUsed: modelName,
           markers: { result: "failed" },
+        };
+      }
+
+      // Check for rate limit (429 or provider-specific rate limit messages)
+      const isRateLimit = errorMessage.includes("429") ||
+        errorMessage.toLowerCase().includes("rate limit") ||
+        errorMessage.toLowerCase().includes("rate_limit") ||
+        errorMessage.toLowerCase().includes("too many requests") ||
+        errorMessage.toLowerCase().includes("quota exceeded");
+      if (isRateLimit) {
+        return {
+          success: false,
+          messages,
+          error: errorMessage,
+          tokenUsage,
+          modelUsed: modelName,
+          markers: { result: "failed" },
+          rateLimited: true,
         };
       }
 

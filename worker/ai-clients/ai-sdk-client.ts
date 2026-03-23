@@ -110,12 +110,19 @@ export class AISdkClient implements AIClient {
       const model = createModel(this.provider, modelName);
       const tools = createToolDefinitions(options.workingDir, model);
 
+      // Loop detection: track recent tool call signatures to detect degenerate repetition
+      const recentToolSignatures: string[] = [];
+      const LOOP_WINDOW = 6; // Check last 6 tool calls
+      const LOOP_THRESHOLD = 4; // Abort if 4+ of last 6 are identical
+      const loopAbort = new AbortController();
+
       const stream = streamText({
         model,
         system: options.systemPrompt,
         prompt: options.prompt,
         tools,
         stopWhen: stepCountIs(options.maxTurns || 100),
+        abortSignal: loopAbort.signal,
         timeout: {
           totalMs: options.timeoutMs || 30 * 60 * 1000,
           chunkMs: 120_000, // Abort if no data received for 2 minutes (detects stalled/dropped connections)
@@ -138,6 +145,25 @@ export class AISdkClient implements AIClient {
               };
               messages.push(msg);
               options.onMessage?.(msg);
+
+              // Track tool signature for loop detection
+              const sig = `${toolCall.toolName}:${JSON.stringify(toolCall.args).substring(0, 200)}`;
+              recentToolSignatures.push(sig);
+              if (recentToolSignatures.length > LOOP_WINDOW) {
+                recentToolSignatures.shift();
+              }
+              // Check for repetitive loop
+              if (recentToolSignatures.length >= LOOP_WINDOW) {
+                const mostCommon = recentToolSignatures.reduce((acc, s) => {
+                  acc[s] = (acc[s] || 0) + 1;
+                  return acc;
+                }, {} as Record<string, number>);
+                const maxCount = Math.max(...Object.values(mostCommon));
+                if (maxCount >= LOOP_THRESHOLD) {
+                  console.error(`[AISdkClient] Tool call loop detected (${maxCount}/${LOOP_WINDOW} identical calls) — aborting`);
+                  loopAbort.abort();
+                }
+              }
             }
           }
           if (toolResults) {
@@ -196,6 +222,18 @@ export class AISdkClient implements AIClient {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Check for loop detection abort
+      if (loopAbort.signal.aborted) {
+        return {
+          success: false,
+          messages,
+          error: "Agent stuck in repetitive tool call loop — aborted",
+          tokenUsage,
+          modelUsed: modelName,
+          markers: { result: "failed" },
+        };
+      }
 
       // Check for timeout (total timeout, chunk stall timeout, or abort)
       if (errorMessage.includes("aborted") || errorMessage.includes("timeout") || errorMessage.includes("Timeout")) {

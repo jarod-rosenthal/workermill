@@ -123,6 +123,16 @@ Config stored at `~/.workermill/cli.json` (global) and `.workermill/config.json`
 
 backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, architect, tech_lead, planner, critic
 
+All worker personas include production-hardened rules:
+- **Real services, not mocks** — Docker containers for databases, caches, queues. Tests run against real services.
+- **Version trust** — Never downgrades language/runtime versions (training data is outdated)
+- **Learning markers** — Reports codebase discoveries with `::learning::` markers for team visibility
+- **Right-sized plans** — Planner matches plan complexity to task complexity (1 step for simple, 3-5 for complex)
+- **Approval bias** — Tech lead only blocks on real functional/security issues, not cosmetic preferences
+- **File overlap detection** — Critic catches parallel merge conflicts before they happen
+
+Custom personas can be added per-project in `.workermill/personas/` or globally in `~/.workermill/personas/`.
+
 ## Requirements
 
 - Node.js 20+

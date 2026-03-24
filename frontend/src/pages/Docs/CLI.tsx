@@ -191,6 +191,21 @@ export default function CLI() {
             </span>
           ))}
         </div>
+        <div className="space-y-2 mt-4">
+          <p className="text-sm text-muted-foreground">
+            All personas include production-hardened rules from WorkerMill's cloud platform:
+          </p>
+          <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+            <li><strong className="text-foreground">Real services, not mocks</strong> — Docker containers for databases, caches, queues</li>
+            <li><strong className="text-foreground">Version trust</strong> — Never downgrades language/runtime versions</li>
+            <li><strong className="text-foreground">Right-sized plans</strong> — Planner matches complexity to task scope</li>
+            <li><strong className="text-foreground">Approval bias</strong> — Tech lead only blocks on real issues, not cosmetics</li>
+            <li><strong className="text-foreground">File overlap detection</strong> — Critic catches merge conflicts before they happen</li>
+          </ul>
+          <p className="text-sm text-muted-foreground">
+            Custom personas: add <code className="text-primary">.workermill/personas/my_persona.md</code> to your project.
+          </p>
+        </div>
       </section>
 
       {/* Requirements */}

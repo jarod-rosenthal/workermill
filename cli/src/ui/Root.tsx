@@ -126,6 +126,8 @@ interface RootProps extends UseAgentOptions {
   workingDir: string;
   /** If set, auto-starts orchestration with this task on mount (from `wm build`). */
   initialBuildTask?: string;
+  /** Display strings for each role (e.g. "ollama/qwen3-coder:30b"). */
+  roleModels?: { worker: string; planner: string; reviewer: string };
 }
 
 // ---------------------------------------------------------------------------
@@ -489,6 +491,7 @@ export function Root(props: RootProps): React.ReactElement {
       cost={agent.cost}
       gitBranch={gitBranch}
       inputHistory={inputHistory}
+      roleModels={props.roleModels}
     />
   );
 }

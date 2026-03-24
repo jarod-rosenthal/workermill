@@ -11,6 +11,7 @@ interface StatusBarProps {
   mode: string;
   gitBranch: string;
   cwd: string;
+  roleModels?: { worker: string; planner: string; reviewer: string };
 }
 
 /** Format a token count as a compact string: 1.2k, 45k, 1.2M. */
@@ -59,7 +60,14 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
   const bgColor = theme.subtleDark;
 
   // Build segments
-  const modelStr = ` ${props.provider}/${props.model} `;
+  const rm = props.roleModels;
+  const workerStr = rm?.worker || `${props.provider}/${props.model}`;
+  // Show planner/reviewer only when they differ from worker
+  const extraRoles: string[] = [];
+  if (rm && rm.planner !== rm.worker) extraRoles.push(`plan:${rm.planner}`);
+  if (rm && rm.reviewer !== rm.worker) extraRoles.push(`review:${rm.reviewer}`);
+  const rolesStr = extraRoles.length > 0 ? ` (${extraRoles.join(", ")})` : "";
+  const modelStr = ` ${workerStr}${rolesStr} `;
   const pct = props.maxContext > 0 ? Math.round(usage * 100) : 0;
   const tokenStr = ` ${pct}% `;
   const costStr = formatCost(props.cost);

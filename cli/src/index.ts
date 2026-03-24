@@ -7,15 +7,38 @@ import { loadConfig, getProviderForPersona } from "./config.js";
 import { runSetup } from "./setup.js";
 import { Root } from "./ui/Root.js";
 
+/** Resolve display strings for all 3 roles from the full config. */
+function getRoleModelsFromConfig(config: import("./config.js").CliConfig): {
+  worker: string;
+  planner: string;
+  reviewer: string;
+} {
+  const worker = getProviderForPersona(config);
+  const planner = getProviderForPersona(config, "planner");
+  const reviewer = getProviderForPersona(config, "tech_lead");
+  return {
+    worker: `${worker.provider}/${worker.model}`,
+    planner: `${planner.provider}/${planner.model}`,
+    reviewer: `${reviewer.provider}/${reviewer.model}`,
+  };
+}
+
 /** Print the branded welcome header before Ink takes over the terminal. */
-function printWelcome(provider: string, model: string, workingDir: string): void {
+function printWelcome(roleModels: { worker: string; planner: string; reviewer: string }, workingDir: string): void {
   const brand = chalk.hex("#D77757");
   const dim = chalk.dim;
   const white = chalk.white;
   console.log();
   console.log(`  ${brand("◆")} ${white.bold("WorkerMill")} ${dim("v" + VERSION)}`);
   console.log();
-  console.log(dim(`  ${provider}/${model}`));
+  if (roleModels.planner === roleModels.worker && roleModels.reviewer === roleModels.worker) {
+    // All roles use the same model — show a single line
+    console.log(dim(`  ${roleModels.worker}`));
+  } else {
+    console.log(dim(`  worker:   ${roleModels.worker}`));
+    console.log(dim(`  planner:  ${roleModels.planner}`));
+    console.log(dim(`  reviewer: ${roleModels.reviewer}`));
+  }
   console.log(dim(`  cwd: ${workingDir}`));
   console.log();
   console.log(dim("  Ask me anything, or use ") + brand("/build") + dim(" to create software with multi-expert AI."));
@@ -23,7 +46,7 @@ function printWelcome(provider: string, model: string, workingDir: string): void
   console.log();
 }
 
-const VERSION = "0.4.1";
+const VERSION = "0.4.2";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {
@@ -67,8 +90,9 @@ const defaultCmd = program
     const config = await resolveConfig(options);
     const { provider, model, apiKey, host, contextLength } = getProviderForPersona(config);
     const workingDir = process.cwd();
+    const roleModels = getRoleModelsFromConfig(config);
 
-    printWelcome(provider, model, workingDir);
+    printWelcome(roleModels, workingDir);
 
     const { waitUntilExit } = render(
       React.createElement(Root, {
@@ -82,6 +106,7 @@ const defaultCmd = program
         sandboxed: !options.fullDisk,
         resume: options.resume || false,
         workingDir,
+        roleModels,
       }),
     );
 
@@ -110,6 +135,7 @@ const buildCmd = program
     }
 
     const { provider, model, apiKey, host, contextLength } = getProviderForPersona(config);
+    const roleModels = getRoleModelsFromConfig(config);
     const trustAll = options.trust || false;
     const sandboxed = !options.fullDisk;
 
@@ -140,6 +166,7 @@ const buildCmd = program
         resume: false,
         workingDir: process.cwd(),
         initialBuildTask: task,
+        roleModels,
       }),
     );
 

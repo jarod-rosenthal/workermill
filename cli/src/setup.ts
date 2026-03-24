@@ -133,8 +133,10 @@ async function getApiKey(
     return key;
   }
 
-  // Read key with masked echo — disable terminal echo, capture keystroke by keystroke
-  const key = await readKeyMasked(rl, chalk.dim(`  ${provider.display} API key: `));
+  // Pause readline so it doesn't echo the key in plaintext while we capture in raw mode
+  rl.pause();
+  const key = await readKeyMasked(chalk.dim(`  ${provider.display} API key: `));
+  rl.resume();
   const trimmed = key.trim();
   existingKeys.set(provider.name, trimmed);
   return trimmed;
@@ -145,7 +147,7 @@ async function getApiKey(
  * Shows first 6 chars as typed, then masks the middle, shows last 4 on Enter.
  * Press Tab to toggle reveal/mask the full key.
  */
-function readKeyMasked(rl: readline.Interface, prompt: string): Promise<string> {
+function readKeyMasked(prompt: string): Promise<string> {
   return new Promise((resolve) => {
     let buffer = "";
     let revealed = false;

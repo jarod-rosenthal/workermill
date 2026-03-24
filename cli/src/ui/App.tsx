@@ -41,6 +41,8 @@ interface AppProps {
   gitBranch: string;
   /** Past user inputs for history navigation. */
   inputHistory: string[];
+  /** Display strings for each role. */
+  roleModels?: { worker: string; planner: string; reviewer: string };
 }
 
 /** Simple yes/no confirm for orchestrator prompts. */
@@ -164,6 +166,7 @@ export function App(props: AppProps): React.ReactElement {
             mode={mode}
             gitBranch={props.gitBranch}
             cwd={props.workingDir.split("/").pop() || ""}
+            roleModels={props.roleModels}
           />
 
           {/* Line 3: User input */}

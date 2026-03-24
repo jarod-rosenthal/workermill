@@ -1337,9 +1337,6 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
     // Silently skip — don't dump git help text
   }
 
-  // Print cost summary
-  output.log("system", "--- Session Complete ---");
-  output.log("system", "");
-  output.log("system", costTracker.getSummary());
-  output.log("system", "");
+  // Final cost update — status bar shows the running total
+  output.updateCost?.(costTracker.getTotalCost());
 }

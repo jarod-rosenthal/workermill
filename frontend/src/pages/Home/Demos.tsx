@@ -97,7 +97,7 @@ export function Demos() {
 
         <div className="text-center mt-8">
           <a
-            href="https://www.youtube.com/@WorkerMill"
+            href="https://www.youtube.com/@JarodRosenthal"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 text-primary hover:underline text-sm font-medium"

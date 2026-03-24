@@ -1,4 +1,4 @@
-import { getPricingEngine } from "../../api/src/providers/index.js";
+import { getPricingEngine, hasProvider } from "../../api/src/providers/index.js";
 
 export interface CostEntry {
   persona: string;
@@ -7,6 +7,18 @@ export interface CostEntry {
   inputTokens: number;
   outputTokens: number;
   cost: number;
+}
+
+/**
+ * Resolve a config-level provider key (e.g. "openai_planner") to the base
+ * provider ID ("openai") that the pricing registry knows about.
+ */
+function resolveBaseProvider(provider: string): string {
+  if (hasProvider(provider)) return provider;
+  // Strip _planner, _reviewer, _critic etc. suffix added by setup routing
+  const base = provider.replace(/_[a-z]+$/, "");
+  if (hasProvider(base)) return base;
+  return provider; // fallback — getPricingEngine will use its own fallback
 }
 
 export class CostTracker {
@@ -19,7 +31,7 @@ export class CostTracker {
     inputTokens: number,
     outputTokens: number
   ): void {
-    const engine = getPricingEngine(provider);
+    const engine = getPricingEngine(resolveBaseProvider(provider));
     const cost = engine.calculateTokenCost(
       { inputTokens, outputTokens, cacheCreationTokens: 0, cacheReadTokens: 0 },
       model,

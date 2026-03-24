@@ -2,10 +2,13 @@
 api/src/**/*.js
 api/src/**/*.d.ts
 !api/src/types/**/*.d.ts
+cli/src/**/*.js
+cli/src/**/*.d.ts
 packages/engine/src/**/*.js
 packages/engine/src/**/*.d.ts
 worker/lib/**/*.js
 worker/lib/**/*.d.ts
+worker/lib/dist/
 worker/multi-expert/**/*.js
 worker/multi-expert/**/*.d.ts
 

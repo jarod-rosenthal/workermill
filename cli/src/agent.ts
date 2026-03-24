@@ -16,6 +16,7 @@ import { killActiveProcess } from "../../packages/engine/src/tools/bash.js";
 import { printToolCall, printError, printStatusBar, printHeader, wmLog, wmLogPrefix, formatToolCall } from "./tui.js";
 import { handleCommand as handleSlashCommand, type CommandContext } from "./commands.js";
 import { CostTracker } from "./cost-tracker.js";
+import type { OrchestrationOutput } from "./orchestrator.js";
 import { initTerminal, exitTerminal, setStatusBar, showStatusBar } from "./terminal.js";
 
 type AgentState = "idle" | "streaming" | "tool_executing" | "permission_waiting";
@@ -153,7 +154,7 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
   initTerminal();
 
   // Show header
-  printHeader("0.1.9", provider, modelName, workingDir);
+  printHeader("0.2.0", provider, modelName, workingDir);
 
   // Set initial status bar
   const statusText = printStatusBar(provider, modelName, 0, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), 0, contextLength);
@@ -277,6 +278,31 @@ Focus on writing clean, production-ready code.`;
     processInput,
   };
 
+  // Console-based adapter for OrchestrationOutput (used by old readline path)
+  let activeSpinner: ReturnType<typeof ora> | null = null;
+  const consoleOutput: OrchestrationOutput = {
+    log: (persona, message) => wmLog(persona, message),
+    coordinatorLog: (message) => console.log(chalk.dim(`  ${message}`)),
+    error: (message) => printError(message),
+    status: (message) => {
+      if (activeSpinner) activeSpinner.stop();
+      activeSpinner = ora({ stream: process.stdout, text: message, prefixText: "  " }).start();
+    },
+    statusDone: (message) => {
+      if (activeSpinner) {
+        if (message) activeSpinner.succeed(message);
+        else activeSpinner.stop();
+        activeSpinner = null;
+      }
+    },
+    confirm: (prompt) => new Promise<boolean>((resolve) => {
+      rl.question(chalk.cyan(`  ${prompt} (y/n) `), (answer) => {
+        resolve(answer.trim().toLowerCase() === "y");
+      });
+    }),
+    toolCall: (persona, toolName, _toolInput) => wmLog(persona, `Tool: ${toolName}`),
+  };
+
   function processInput(input: string): void {
     processing = true;
     rl.pause();
@@ -296,14 +322,14 @@ Focus on writing clean, production-ready code.`;
 
         console.log(chalk.dim("\n  Analyzing task complexity..."));
         logger.info("Running complexity classifier");
-        const classification = await classifyComplexity(config, input);
+        const classification = await classifyComplexity(config, input, consoleOutput);
         logger.info("Classification result", { isMulti: classification.isMulti, reason: classification.reason });
 
         if (classification.isMulti) {
           console.log(chalk.dim(`  → multi-expert (${classification.reason})\n`));
 
           // Orchestrator runs planner to determine stories, critic validates, then prompts user
-          await runOrchestration(config, input, trustAll, sandboxed, rl);
+          await runOrchestration(config, input, trustAll, sandboxed, consoleOutput);
           processing = false;
           rl.resume();
           promptWithStatus();

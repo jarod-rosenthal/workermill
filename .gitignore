@@ -2,6 +2,12 @@
 api/src/**/*.js
 api/src/**/*.d.ts
 !api/src/types/**/*.d.ts
+packages/engine/src/**/*.js
+packages/engine/src/**/*.d.ts
+worker/lib/**/*.js
+worker/lib/**/*.d.ts
+worker/multi-expert/**/*.js
+worker/multi-expert/**/*.d.ts
 
 # Dependencies
 node_modules/
@@ -60,6 +66,7 @@ infrastructure/terraform/modules/cognito-presignup/lambda/*.zip
 
 # Local WorkerMill development
 .local-workermill/
+.workermill/
 data/dumps/
 
 # Remote Agent

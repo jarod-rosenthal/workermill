@@ -1,0 +1,139 @@
+import React, { useState } from "react";
+import { Box, Text, useInput } from "ink";
+import { theme } from "./theme.js";
+import type { PermissionRequest } from "./types.js";
+
+interface Option {
+  key: string;
+  label: string;
+}
+
+/** Extract a short description of what the tool wants to do. */
+function describeAction(request: PermissionRequest): string {
+  const input = request.toolInput;
+  if (input.file_path) return String(input.file_path);
+  if (input.path) return String(input.path);
+  if (input.command) {
+    const cmd = String(input.command);
+    return cmd.length > 120 ? cmd.slice(0, 117) + "..." : cmd;
+  }
+  if (input.pattern) return `pattern: ${String(input.pattern)}`;
+  return "";
+}
+
+interface PermissionPromptProps {
+  request: PermissionRequest;
+}
+
+/**
+ * Interactive inline permission prompt with blue-purple border (matching
+ * Claude Code's permission/suggestion color). Renders a bordered box with
+ * the tool name, action detail, and a selectable list of options with
+ * radio-button style selection.
+ */
+export function PermissionPrompt({ request }: PermissionPromptProps): React.ReactElement {
+  const options: Option[] = request.isDangerous
+    ? [
+        { key: "y", label: "Yes, allow" },
+        { key: "n", label: "No, deny" },
+      ]
+    : [
+        { key: "y", label: "Allow" },
+        { key: "n", label: "Deny" },
+        { key: "a", label: "Always allow this tool" },
+        { key: "t", label: "Trust all tools" },
+      ];
+
+  const [selected, setSelected] = useState(0);
+  const [resolved, setResolved] = useState(false);
+
+  useInput(
+    (input, key) => {
+      if (resolved) return;
+
+      if (key.upArrow) {
+        setSelected((s) => Math.max(0, s - 1));
+        return;
+      }
+      if (key.downArrow) {
+        setSelected((s) => Math.min(options.length - 1, s + 1));
+        return;
+      }
+
+      if (key.return) {
+        setResolved(true);
+        const opt = options[selected];
+        if (opt.key === "n") request.resolve(false);
+        else if (opt.key === "t") request.resolve(true, "trust");
+        else if (opt.key === "a") request.resolve(true, "always");
+        else request.resolve(true);
+        return;
+      }
+
+      // Direct key shortcuts
+      if (input === "y" || input === "Y") {
+        setResolved(true);
+        request.resolve(true);
+      } else if (input === "n" || input === "N") {
+        setResolved(true);
+        request.resolve(false);
+      } else if (!request.isDangerous && (input === "a" || input === "A")) {
+        setResolved(true);
+        request.resolve(true, "always");
+      } else if (!request.isDangerous && (input === "t" || input === "T")) {
+        setResolved(true);
+        request.resolve(true, "trust");
+      }
+    },
+    { isActive: !resolved },
+  );
+
+  const detail = describeAction(request);
+  const borderColor = request.isDangerous ? theme.error : theme.permission;
+
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={borderColor}
+      paddingX={1}
+      marginY={1}
+      marginLeft={2}
+    >
+      {/* Header */}
+      {request.isDangerous ? (
+        <Text color={theme.error} bold>
+          {"\u26A0 "}Dangerous: {request.dangerLabel || request.toolName}
+        </Text>
+      ) : (
+        <Text color={theme.permission} bold>
+          {"? "}Allow <Text color={theme.text} bold>{request.toolName}</Text>
+        </Text>
+      )}
+
+      {/* Detail */}
+      {detail ? (
+        <Text color={theme.subtle}>{"  "}{detail}</Text>
+      ) : null}
+
+      {/* Spacer */}
+      <Text>{" "}</Text>
+
+      {/* Options with radio-button style */}
+      {options.map((opt, i) => {
+        const isSelected = i === selected;
+        const radio = isSelected ? "\u25C9" : "\u25CB";
+        return (
+          <Box key={opt.key} marginLeft={1}>
+            <Text
+              color={isSelected ? theme.permission : theme.subtle}
+              bold={isSelected}
+            >
+              {radio} ({opt.key}) {opt.label}
+            </Text>
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}

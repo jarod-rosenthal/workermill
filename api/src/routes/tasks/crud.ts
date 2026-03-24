@@ -16,7 +16,7 @@ import { inferPersonaFromJiraIssue } from "../../services/persona-inference.js";
 import { syncKbCardColumn } from "../../services/task-monitor.js";
 import { normalizeRepoWithOwner } from "./helpers.js";
 import { resetCancelledTask } from "./lifecycle.js";
-import { runCardAsWorkerTask } from "../boards.js";
+import { runCardAsWorkerTask } from "../boards/index.js";
 import { taskCreationLimiter } from "../../middleware/rate-limit.js";
 import { canCreateTask } from "../../services/billing.js";
 

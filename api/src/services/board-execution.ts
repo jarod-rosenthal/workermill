@@ -98,8 +98,8 @@ export async function processUnblockedCards(
     return { triggered: 0, stillBlocked: cards.length, alreadyComplete };
   }
 
-  // Dynamic import to avoid circular deps — boards.ts exports runCardAsWorkerTask
-  const { runCardAsWorkerTask } = await import("../routes/boards.js");
+  // Dynamic import to avoid circular deps — boards/index.ts re-exports runCardAsWorkerTask
+  const { runCardAsWorkerTask } = await import("../routes/boards/index.js");
 
   for (const card of cards) {
     // Skip cards that already have a worker task

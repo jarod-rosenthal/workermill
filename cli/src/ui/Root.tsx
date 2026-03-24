@@ -481,7 +481,7 @@ export function Root(props: RootProps): React.ReactElement {
       trustAll={props.trustAll}
       planMode={props.planMode}
       onSubmit={handleSubmit}
-      onCancel={agent.cancel}
+      onCancel={orchestrator.running ? orchestrator.cancel : agent.cancel}
       messages={agent.messages}
       status={orchestrator.running ? "tool_running" : agent.status}
       permissionRequest={agent.permissionRequest}

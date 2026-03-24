@@ -9,7 +9,7 @@
  * components.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import type { OrchestrationOutput } from "../orchestrator.js";
 import { loadConfig } from "../config.js";
 
@@ -61,6 +61,8 @@ export interface UseOrchestratorReturn {
   running: boolean;
   /** Start orchestration for a task. */
   start: (task: string, trustAll: boolean, sandboxed: boolean) => void;
+  /** Cancel the running orchestration. */
+  cancel: () => void;
   /** Current status message (replaces ora spinner in the old TUI). */
   statusMessage: string;
   /** Non-null when the orchestrator is waiting for user confirmation. */
@@ -87,6 +89,18 @@ export function useOrchestrator(
   const [statusMessage, setStatusMessage] = useState("");
   const [confirmRequest, setConfirmRequest] =
     useState<OrchestratorConfirmRequest | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // ------------------------------------------------------------------
+  // cancel()
+  // ------------------------------------------------------------------
+
+  const cancel = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+  }, []);
 
   // ------------------------------------------------------------------
   // start()
@@ -94,6 +108,11 @@ export function useOrchestrator(
 
   const start = useCallback(
     (task: string, trustAll: boolean, sandboxed: boolean) => {
+      // Abort any previous run
+      if (abortRef.current) abortRef.current.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       setRunning(true);
       setStatusMessage("");
       setConfirmRequest(null);
@@ -204,7 +223,7 @@ export function useOrchestrator(
 
           // ---- Classify complexity -----------------------------------
           addMessage("Analyzing task complexity\u{2026}");
-          const classification = await classifyComplexity(config, task, output);
+          const classification = await classifyComplexity(config, task, output, controller.signal);
 
           if (!classification.isMulti) {
             addMessage(
@@ -220,12 +239,16 @@ export function useOrchestrator(
           );
 
           // ---- Run full orchestration --------------------------------
-          await runOrchestration(config, task, trustAll, sandboxed, output);
+          await runOrchestration(config, task, trustAll, sandboxed, output, controller.signal);
 
           addMessage("**Orchestration complete.**");
         } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          addMessage(`**Orchestration failed:** ${msg}`);
+          if (controller.signal.aborted) {
+            addMessage("**Build cancelled.**");
+          } else {
+            const msg = err instanceof Error ? err.message : String(err);
+            addMessage(`**Orchestration failed:** ${msg}`);
+          }
         } finally {
           setRunning(false);
           setStatusMessage("");
@@ -240,5 +263,5 @@ export function useOrchestrator(
   // Return
   // ------------------------------------------------------------------
 
-  return { running, start, statusMessage, confirmRequest };
+  return { running, start, cancel, statusMessage, confirmRequest };
 }

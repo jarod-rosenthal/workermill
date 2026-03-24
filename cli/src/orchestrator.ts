@@ -240,6 +240,7 @@ export async function classifyComplexity(
   config: CliConfig,
   userInput: string,
   output: OrchestrationOutput,
+  abortSignal?: AbortSignal,
 ): Promise<{ isMulti: boolean; reason: string }> {
   logger.info("Classifying complexity", { input: userInput.slice(0, 200) });
   // Resolve file references before classification so "spec.md" becomes the full spec content
@@ -257,6 +258,7 @@ export async function classifyComplexity(
   try {
     const result = await generateObject({
       model,
+      abortSignal,
       schema: z.object({
         complexity: z.enum(["single", "multi"]),
         reason: z.string(),
@@ -276,6 +278,7 @@ ${resolvedInput}`,
     try {
       const textResult = await generateText({
         model,
+        abortSignal,
         prompt: `Is this task "single" (one developer) or "multi" (needs multiple specialists)? Respond with just "single" or "multi" and a brief reason.
 
 Task: ${resolvedInput}`,
@@ -326,6 +329,7 @@ async function planStories(
   workingDir: string,
   sandboxed: boolean,
   output: OrchestrationOutput,
+  abortSignal?: AbortSignal,
 ): Promise<{ stories: Story[]; provider: string; model: string; inputTokens: number; outputTokens: number }> {
   const planner = loadPersona("planner");
 
@@ -424,6 +428,7 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
   let planText = "";
   const planStream = streamText({
     model: plannerModel,
+    abortSignal,
     system: planner?.systemPrompt || "You are an implementation planner.",
     prompt: plannerPrompt,
     tools: readOnlyTools as ToolSet,
@@ -647,6 +652,7 @@ export async function runOrchestration(
   trustAll: boolean,
   sandboxed: boolean,
   output: OrchestrationOutput,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   // Resolve file references so "/build spec.md" becomes the full spec content
   userTask = resolveTaskInput(userTask, process.cwd());
@@ -661,7 +667,7 @@ export async function runOrchestration(
   const workingDir = process.cwd();
 
   // Planner explores codebase and produces stories
-  const planResult = await planStories(config, userTask, workingDir, sandboxed, output);
+  const planResult = await planStories(config, userTask, workingDir, sandboxed, output, abortSignal);
   const plannerStories = planResult.stories;
 
   // Track planner cost
@@ -701,6 +707,7 @@ export async function runOrchestration(
       output.status("Critic reviewing plan...");
       const criticStream = streamText({
         model: criticModel,
+        abortSignal,
         system: critic.systemPrompt,
         prompt: `Review this implementation plan. Score it 0-100 using ::review_score::N marker.\n\nStories:\n${plannerStories.map(s => `- ${s.id}: ${s.title} (${s.persona}) — ${s.description}`).join("\n")}`,
         tools: criticReadOnly as ToolSet,
@@ -848,6 +855,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
       let allText = "";
       const stream = streamText({
         model,
+        abortSignal,
         system: systemPrompt,
         prompt: story.description,
         tools: personaTools as ToolSet,
@@ -1059,6 +1067,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         let reviewerOutput = "";
         const reviewStream = streamText({
           model: reviewModel,
+          abortSignal,
           system: reviewer.systemPrompt,
           prompt: reviewPrompt,
           tools: reviewerTools,
@@ -1219,6 +1228,7 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
           try {
             const revStream = streamText({
               model: storyModel,
+              abortSignal,
               system: revisionSystemPrompt,
               prompt: `Fix the reviewer's issues for: ${story.title}\n\n${story.description}`,
               tools: storyTools as ToolSet,

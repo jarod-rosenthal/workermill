@@ -6,6 +6,7 @@ import { Header } from "./Home/v0/Header";
 import ShowcaseGallery from "../components/ShowcaseGallery";
 import ExecutionShowcase from "../components/ExecutionShowcase";
 import TrustCallout from "../components/TrustCallout";
+import { Demos } from "./Home/Demos";
 
 import { getFeaturedPost } from "../content/blog/posts";
 
@@ -347,6 +348,11 @@ export default function LandingV0() {
             <ShowcaseGallery />
           </div>
 
+          {/* Demo Videos */}
+          <div id="demos">
+            <Demos />
+          </div>
+
           {/* Featured Article */}
           <FeaturedArticle />
 
@@ -357,7 +363,9 @@ export default function LandingV0() {
           <OpenSourceBanner />
 
           {/* Now they're convinced — show how to get started */}
-          <InstallSection />
+          <div id="downloads">
+            <InstallSection />
+          </div>
 
 
         </div>

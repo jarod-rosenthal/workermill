@@ -9,6 +9,7 @@ import { UseCases } from "./UseCases";
 import { Metrics } from "./Metrics";
 import { Integrations } from "./Integrations";
 import { FAQ } from "./FAQ";
+import { Demos } from "./Demos";
 
 export default function Home() {
   return (
@@ -27,6 +28,9 @@ export default function Home() {
           <div className="hidden md:flex items-center gap-8">
             <a href="#how-it-works" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               How it Works
+            </a>
+            <a href="#demos" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              Demos
             </a>
             <a href="#workers" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Workers
@@ -59,6 +63,10 @@ export default function Home() {
 
         <div id="how-it-works">
           <HowItWorks />
+        </div>
+
+        <div id="demos">
+          <Demos />
         </div>
 
         <div id="workers">

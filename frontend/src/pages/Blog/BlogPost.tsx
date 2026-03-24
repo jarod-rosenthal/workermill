@@ -26,10 +26,8 @@ const postContent: Record<string, React.ReactNode> = {
       </p>
 
       <p>
-        We've been building WorkerMill — an open-source operations layer for AI
-        coding agents — for over a year. We've tested every major tool, spent
-        real money, and shipped real production code through them. This is what
-        we've actually seen.
+        We've been testing every major tool, spending real money, and shipping
+        real production code through them. This is what we've actually seen.
       </p>
 
       <h2>The Three Tiers Nobody Talks About</h2>

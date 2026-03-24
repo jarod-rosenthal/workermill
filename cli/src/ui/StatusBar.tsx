@@ -62,21 +62,21 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
   // Build segments
   const rm = props.roleModels;
   const workerStr = rm?.worker || `${props.provider}/${props.model}`;
-  // Show planner/reviewer only when they differ from worker
+  const modelStr = ` ${workerStr} `;
+  const pct = props.maxContext > 0 ? Math.round(usage * 100) : 0;
+  const tokenStr = ` ${pct}% `;
+  // Show planner/reviewer after context bar, only when they differ from worker
   const extraRoles: string[] = [];
   if (rm && rm.planner !== rm.worker) extraRoles.push(`plan:${rm.planner}`);
   if (rm && rm.reviewer !== rm.worker) extraRoles.push(`review:${rm.reviewer}`);
-  const rolesStr = extraRoles.length > 0 ? ` (${extraRoles.join(", ")})` : "";
-  const modelStr = ` ${workerStr}${rolesStr} `;
-  const pct = props.maxContext > 0 ? Math.round(usage * 100) : 0;
-  const tokenStr = ` ${pct}% `;
+  const rolesStr = extraRoles.length > 0 ? `  ${extraRoles.join("  ")} ` : "";
   const costStr = formatCost(props.cost);
   const branchStr = props.gitBranch ? ` git:(${props.gitBranch})` : "";
   const cwdStr = props.cwd ? ` ${props.cwd}` : "";
   const rightStr = `${cwdStr}${branchStr} | ${costStr} `;
 
   // Calculate padding needed to fill the terminal width
-  const fixedLen = modelStr.length + barLen + tokenStr.length + rightStr.length + props.mode.length + 2;
+  const fixedLen = modelStr.length + barLen + tokenStr.length + rolesStr.length + rightStr.length + props.mode.length + 2;
   const padding = Math.max(0, width - fixedLen);
 
   return (
@@ -94,6 +94,12 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
       <Text backgroundColor={bgColor} color={theme.text}>
         {tokenStr}
       </Text>
+      {/* Planner/reviewer roles (only when different from worker) */}
+      {rolesStr ? (
+        <Text backgroundColor={bgColor} color={theme.subtle}>
+          {rolesStr}
+        </Text>
+      ) : null}
       {/* Flexible spacer */}
       <Text backgroundColor={bgColor}>
         {" ".repeat(padding)}

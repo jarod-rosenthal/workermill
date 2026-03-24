@@ -206,11 +206,6 @@ const postContent: Record<string, React.ReactNode> = {
 
       <h2>What We've Learned Building This</h2>
 
-      <p>
-        After a year of running AI agents in production, here's what actually
-        matters:
-      </p>
-
       <h3>1. Quality Gates Are Worth More Than Better Models</h3>
       <p>
         A mediocre model with good quality gates produces better code than a

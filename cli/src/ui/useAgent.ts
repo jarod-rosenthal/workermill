@@ -101,6 +101,8 @@ export interface UseAgentReturn {
   addSystemMessage: (content: string) => void;
   /** Push a local-only user message into the conversation (no LLM call). */
   addUserMessage: (content: string) => void;
+  /** Update the displayed cost (used by orchestrator for live updates). */
+  setCost: (cost: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -680,5 +682,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     setPlanMode,
     addSystemMessage,
     addUserMessage,
+    setCost,
   };
 }

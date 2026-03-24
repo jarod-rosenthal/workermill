@@ -3,10 +3,32 @@ import { z } from "zod";
 import { createModel, buildOllamaOptions } from "../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
 import type { AIProvider } from "../../packages/engine/src/types.js";
+import fs from "fs";
+import path from "path";
 import { loadPersona } from "./personas.js";
 import { CostTracker } from "./cost-tracker.js";
 import type { CliConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
+
+/**
+ * If the task string looks like a file path (e.g. "spec.md", "docs/prd.yaml"),
+ * read the file and return its contents as the task. Otherwise return as-is.
+ * This lets users do `/build spec.md` and have the planner see the full spec.
+ */
+function resolveTaskInput(task: string, workingDir: string): string {
+  const trimmed = task.trim();
+  // Check if the entire task is a single file reference (no spaces, has extension)
+  if (!trimmed.includes(" ") && /\.\w{1,10}$/.test(trimmed)) {
+    const fullPath = path.resolve(workingDir, trimmed);
+    try {
+      const content = fs.readFileSync(fullPath, "utf-8");
+      return `Implement the following specification from ${trimmed}:\n\n${content}`;
+    } catch {
+      // Not a readable file — pass through as-is
+    }
+  }
+  return task;
+}
 
 export interface OrchestrationOutput {
   /** Log a message from a persona */
@@ -23,6 +45,8 @@ export interface OrchestrationOutput {
   confirm: (prompt: string) => Promise<boolean>;
   /** Log a tool call */
   toolCall: (persona: string, toolName: string, toolInput: Record<string, unknown>) => void;
+  /** Update running cost in the UI (optional — noop if not provided) */
+  updateCost?: (cost: number) => void;
 }
 
 /**
@@ -216,6 +240,8 @@ export async function classifyComplexity(
   userInput: string,
   output: OrchestrationOutput,
 ): Promise<{ isMulti: boolean; reason: string }> {
+  // Resolve file references before classification so "spec.md" becomes the full spec content
+  const resolvedInput = resolveTaskInput(userInput, process.cwd());
   const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(config);
 
   if (apiKey) {
@@ -236,7 +262,7 @@ export async function classifyComplexity(
       prompt: `Analyze this coding task. If it involves multiple distinct concerns that would benefit from different specialist personas (e.g., database + backend + frontend + devops), classify as "multi". If it's a focused task that one developer could handle, classify as "single". Just classify — do not break down into stories.
 
 Task:
-${userInput}`,
+${resolvedInput}`,
     });
 
     return {
@@ -250,7 +276,7 @@ ${userInput}`,
         model,
         prompt: `Is this task "single" (one developer) or "multi" (needs multiple specialists)? Respond with just "single" or "multi" and a brief reason.
 
-Task: ${userInput}`,
+Task: ${resolvedInput}`,
       });
 
       const isMulti = /\bmulti\b/i.test(textResult.text);
@@ -298,7 +324,7 @@ async function planStories(
   workingDir: string,
   sandboxed: boolean,
   output: OrchestrationOutput,
-): Promise<Story[]> {
+): Promise<{ stories: Story[]; provider: string; model: string; inputTokens: number; outputTokens: number }> {
   const planner = loadPersona("planner");
 
   const { provider: pProvider, model: pModel, host: pHost, contextLength: pCtx } = getProviderForPersona(config, "planner");
@@ -334,16 +360,35 @@ async function planStories(
     }
   }
 
+  // Detect file references in the task and read them upfront so the planner has full context
+  const fileRefPattern = /(?:^|\s)([\w./-]+\.(?:md|txt|yaml|yml|json|toml|ts|js|py|go|rs|spec|requirements|prd|plan))\b/gi;
+  const referencedFiles = [...new Set([...userTask.matchAll(fileRefPattern)].map(m => m[1]))];
+  let inlinedFileContext = "";
+  if (referencedFiles.length > 0) {
+    const fs = await import("fs");
+    const path = await import("path");
+    for (const ref of referencedFiles) {
+      const fullPath = path.default.resolve(workingDir, ref);
+      try {
+        const content = fs.default.readFileSync(fullPath, "utf-8");
+        inlinedFileContext += `\n### File: ${ref}\n\`\`\`\n${content}\n\`\`\`\n`;
+        output.log("planner", `Read referenced file: ${ref}`);
+      } catch {
+        // File doesn't exist or unreadable — planner can still try to read it via tools
+      }
+    }
+  }
+
   const plannerPrompt = `You are an expert implementation planner. Analyze this task and create a high-quality implementation plan.
 
 ## Task
 ${userTask}
-
+${inlinedFileContext ? `\n## Referenced Files\n${inlinedFileContext}` : ""}
 ## Working directory
 ${workingDir}
 
 ## Instructions
-1. Use your tools to explore the working directory and understand what exists. Stay within the working directory.
+1. Use your tools to explore the working directory and understand what exists. Stay within the working directory.${referencedFiles.length > 0 ? "\n   The referenced files above have been inlined for you. Read any additional files you need for context." : ""}
 2. Design a plan that breaks the task into focused stories, each assigned to a specialist persona.
 3. Each story should be a meaningful unit of work — not too granular, not too broad.
 4. Quality criteria:
@@ -405,6 +450,8 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
     planText = finalText;
   }
 
+  const planUsage = await planStream.totalUsage;
+
   let stories = parseStoriesFromText(planText, output);
 
   if (stories.length === 0) {
@@ -417,7 +464,13 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
     }];
   }
 
-  return stories;
+  return {
+    stories,
+    provider: pProvider,
+    model: pModel,
+    inputTokens: planUsage?.inputTokens || 0,
+    outputTokens: planUsage?.outputTokens || 0,
+  };
 }
 
 /** Parse stories JSON from planner output text */
@@ -593,6 +646,8 @@ export async function runOrchestration(
   sandboxed: boolean,
   output: OrchestrationOutput,
 ): Promise<void> {
+  // Resolve file references so "/build spec.md" becomes the full spec content
+  userTask = resolveTaskInput(userTask, process.cwd());
   const costTracker = new CostTracker();
   const context: SharedContext = {
     filesCreated: [],
@@ -604,7 +659,12 @@ export async function runOrchestration(
   const workingDir = process.cwd();
 
   // Planner explores codebase and produces stories
-  const plannerStories = await planStories(config, userTask, workingDir, sandboxed, output);
+  const planResult = await planStories(config, userTask, workingDir, sandboxed, output);
+  const plannerStories = planResult.stories;
+
+  // Track planner cost
+  costTracker.addUsage("Planner", planResult.provider, planResult.model, planResult.inputTokens, planResult.outputTokens);
+  output.updateCost?.(costTracker.getTotalCost());
 
   // Show the plan — WorkerMill format
   output.log("planner", `Plan generated: ${plannerStories.length} stories`);
@@ -849,6 +909,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
       const inTokens = usage?.inputTokens || 0;
       const outTokens = usage?.outputTokens || 0;
       costTracker.addUsage(persona.name, provider, modelName, inTokens, outTokens);
+      output.updateCost?.(costTracker.getTotalCost());
 
       output.log(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
       output.log("system", "");
@@ -914,7 +975,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
     for (let reviewRound = 0; reviewRound <= maxRevisions; reviewRound++) {
       const isRevision = reviewRound > 0;
       output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound}/${maxRevisions})...` : "Starting Tech Lead review...");
-      output.log("tech_lead", "Starting agent execution");
+      output.log("tech_lead", `Starting agent execution (model: ${revModel})`);
 
       output.status(isRevision ? "Reviewer -- Re-checking after revisions" : "Reviewer -- Checking code quality");
 
@@ -1031,6 +1092,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         // Track reviewer cost
         costTracker.addUsage(`Reviewer (round ${reviewRound + 1})`, revProvider, revModel,
           reviewUsage?.inputTokens || 0, reviewUsage?.outputTokens || 0);
+        output.updateCost?.(costTracker.getTotalCost());
 
         // If approved or out of revision attempts, done
         if (approved) break;
@@ -1102,7 +1164,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           }
 
           output.coordinatorLog(`Revision pass for story ${i + 1}/${sorted.length}`);
-          output.log(story.persona, `Starting revision: ${story.title}`);
+          output.log(story.persona, `Starting revision: ${story.title} (model: ${sModel})`);
 
           output.status("");
 
@@ -1173,6 +1235,7 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
 
             costTracker.addUsage(`${storyPersona.name} (revision)`, sProvider, sModel,
               revUsage?.inputTokens || 0, revUsage?.outputTokens || 0);
+            output.updateCost?.(costTracker.getTotalCost());
 
             output.log(story.persona, `${story.title} — revision complete!`);
           } catch (err) {

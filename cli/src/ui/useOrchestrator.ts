@@ -81,6 +81,7 @@ export interface UseOrchestratorReturn {
  */
 export function useOrchestrator(
   addMessage: (content: string, role?: "user" | "assistant") => void,
+  setCost?: (cost: number) => void,
 ): UseOrchestratorReturn {
   const [running, setRunning] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
@@ -194,6 +195,10 @@ export function useOrchestrator(
               addMessage(
                 `[${emoji} ${persona}] \u{2193} ${toolName}${detail ? " " + detail : ""}`,
               );
+            },
+
+            updateCost(cost: number): void {
+              setCost?.(cost);
             },
           };
 

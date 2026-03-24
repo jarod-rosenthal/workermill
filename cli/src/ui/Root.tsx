@@ -152,7 +152,7 @@ export function Root(props: RootProps): React.ReactElement {
     },
     [agent],
   );
-  const orchestrator = useOrchestrator(addOrchestratorMessage);
+  const orchestrator = useOrchestrator(addOrchestratorMessage, agent.setCost);
 
   // Auto-start build if launched via `wm build "task"`
   const buildStarted = useRef(false);

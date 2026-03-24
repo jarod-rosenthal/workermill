@@ -60,7 +60,8 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
 
   // Build segments
   const modelStr = ` ${props.provider}/${props.model} `;
-  const tokenStr = ` ${formatTokens(props.tokens)} `;
+  const pct = props.maxContext > 0 ? Math.round(usage * 100) : 0;
+  const tokenStr = ` ${pct}% `;
   const costStr = formatCost(props.cost);
   const branchStr = props.gitBranch ? ` git:(${props.gitBranch})` : "";
   const cwdStr = props.cwd ? ` ${props.cwd}` : "";

@@ -158,6 +158,74 @@ const OPENAI_MODELS: Record<string, ModelInfo> = {
     supportsStreaming: false,
     supportsCaching: true,
   },
+  "gpt-5.2-pro": {
+    id: "gpt-5.2-pro",
+    displayName: "GPT-5.2 Pro",
+    tier: "powerful",
+    inputRate: 0.00175, // $1.75 per 1M (estimated, same tier as 5.2 codex)
+    outputRate: 0.014, // $14 per 1M
+    cacheReadRate: 0.000175, // $0.175 per 1M
+    contextWindow: 128000,
+    supportsStreaming: false,
+    supportsCaching: true,
+  },
+  // GPT-5.3 Codex (latest code-specific model)
+  "gpt-5.3-codex": {
+    id: "gpt-5.3-codex",
+    displayName: "GPT-5.3 Codex",
+    tier: "powerful",
+    inputRate: 0.00175, // $1.75 per 1M (estimated from 5.2 pricing)
+    outputRate: 0.014, // $14 per 1M
+    cacheReadRate: 0.000175, // $0.175 per 1M
+    contextWindow: 128000,
+    supportsStreaming: false,
+    supportsCaching: true,
+  },
+  // GPT-5.4 family (latest, March 2026)
+  "gpt-5.4": {
+    id: "gpt-5.4",
+    displayName: "GPT-5.4",
+    tier: "powerful",
+    inputRate: 0.00075, // $0.75 per 1M (estimated)
+    outputRate: 0.0045, // $4.50 per 1M
+    cacheReadRate: 0.000075, // $0.075 per 1M
+    contextWindow: 128000,
+    supportsStreaming: true,
+    supportsCaching: true,
+  },
+  "gpt-5.4-mini": {
+    id: "gpt-5.4-mini",
+    displayName: "GPT-5.4 Mini",
+    tier: "budget",
+    inputRate: 0.00015, // $0.15 per 1M (estimated)
+    outputRate: 0.0006, // $0.60 per 1M
+    cacheReadRate: 0.000015, // $0.015 per 1M
+    contextWindow: 128000,
+    supportsStreaming: true,
+    supportsCaching: true,
+  },
+  "gpt-5.4-pro": {
+    id: "gpt-5.4-pro",
+    displayName: "GPT-5.4 Pro",
+    tier: "powerful",
+    inputRate: 0.005, // $5 per 1M (estimated)
+    outputRate: 0.02, // $20 per 1M
+    cacheReadRate: 0.0005, // $0.50 per 1M
+    contextWindow: 128000,
+    supportsStreaming: true,
+    supportsCaching: true,
+  },
+  "gpt-5.4-nano": {
+    id: "gpt-5.4-nano",
+    displayName: "GPT-5.4 Nano",
+    tier: "budget",
+    inputRate: 0.00005, // $0.05 per 1M (estimated)
+    outputRate: 0.0004, // $0.40 per 1M
+    cacheReadRate: 0.000005, // $0.005 per 1M
+    contextWindow: 128000,
+    supportsStreaming: true,
+    supportsCaching: true,
+  },
 };
 
 /**

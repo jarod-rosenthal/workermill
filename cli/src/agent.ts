@@ -154,7 +154,7 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
   initTerminal();
 
   // Show header
-  printHeader("0.4.0", provider, modelName, workingDir);
+  printHeader("0.4.1", provider, modelName, workingDir);
 
   // Set initial status bar
   const statusText = printStatusBar(provider, modelName, 0, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), 0, contextLength);

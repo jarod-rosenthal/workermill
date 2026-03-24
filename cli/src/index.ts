@@ -23,7 +23,7 @@ function printWelcome(provider: string, model: string, workingDir: string): void
   console.log();
 }
 
-const VERSION = "0.4.0";
+const VERSION = "0.4.1";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {

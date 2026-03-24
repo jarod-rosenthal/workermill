@@ -37,8 +37,8 @@ const PROVIDERS: ProviderOption[] = [
     needsKey: true,
     envVar: "OPENAI_API_KEY",
     models: [
-      { id: "gpt-5.2-codex", label: "GPT-5.2 Codex (built for code)" },
-      { id: "gpt-5", label: "GPT-5 (general flagship)" },
+      { id: "gpt-5.4", label: "GPT-5.4 (latest flagship)" },
+      { id: "gpt-5.3-codex", label: "GPT-5.3 Codex (built for code)" },
     ],
   },
   {

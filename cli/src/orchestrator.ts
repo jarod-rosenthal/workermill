@@ -6,6 +6,7 @@ import type { AIProvider } from "../../packages/engine/src/types.js";
 import fs from "fs";
 import path from "path";
 import { loadPersona } from "./personas.js";
+import * as logger from "./logger.js";
 import { CostTracker } from "./cost-tracker.js";
 import type { CliConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
@@ -240,6 +241,7 @@ export async function classifyComplexity(
   userInput: string,
   output: OrchestrationOutput,
 ): Promise<{ isMulti: boolean; reason: string }> {
+  logger.info("Classifying complexity", { input: userInput.slice(0, 200) });
   // Resolve file references before classification so "spec.md" becomes the full spec content
   const resolvedInput = resolveTaskInput(userInput, process.cwd());
   const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(config);
@@ -760,6 +762,7 @@ export async function runOrchestration(
     output.coordinatorLog(`Task claimed by orchestrator`);
     output.log(story.persona, `Starting ${story.title}`);
     output.log(story.persona, `Executing story with AIClient (model: ${modelName})...`);
+    logger.info(`Story ${i + 1}/${sorted.length} started`, { persona: story.persona, title: story.title, provider, model: modelName });
 
     output.status("");
 
@@ -912,15 +915,18 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
       output.updateCost?.(costTracker.getTotalCost());
 
       output.log(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
+      logger.info(`Story ${i + 1} completed`, { persona: story.persona, inputTokens: inTokens, outputTokens: outTokens });
       output.log("system", "");
       break; // Story succeeded, exit revision loop
     } catch (err) {
       output.statusDone();
       const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error(`Story ${i + 1} error`, { persona: story.persona, error: errMsg, revision });
 
       // Retry on transient errors (network, 5xx) — from coordinator-utils.ts
       if (isTransientError(err) && revision < 2) {
         output.log(story.persona, `Transient error: ${errMsg} — retrying...`);
+        logger.info(`Story ${i + 1} retrying (transient)`, { revision });
         continue; // retry this revision
       }
 
@@ -972,8 +978,10 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
     }
 
     let previousReviewFeedback = "";
+    logger.info("Starting review loop", { maxRevisions, approvalThreshold, provider: revProvider, model: revModel });
     for (let reviewRound = 0; reviewRound <= maxRevisions; reviewRound++) {
       const isRevision = reviewRound > 0;
+      logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
       output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound}/${maxRevisions})...` : "Starting Tech Lead review...");
       output.log("tech_lead", `Starting agent execution (model: ${revModel})`);
 
@@ -1080,6 +1088,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         // Extract review markers (with fallback parsing)
         const score = extractScore(reviewText);
         const approved = score >= approvalThreshold;
+        logger.info(`Review round ${reviewRound} result`, { score, approved, threshold: approvalThreshold, reviewTextLength: reviewText.length });
 
         // Display review result — WorkerMill format
         output.log("tech_lead", `::code_quality_score::${score}`);

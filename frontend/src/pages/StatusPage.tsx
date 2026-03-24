@@ -50,8 +50,8 @@ const STATUS_CONFIG = {
 const SERVICE_DESCRIPTIONS = {
   api: "Handles all API requests, authentication, and webhook processing",
   database: "PostgreSQL database for task state, logs, and user data",
-  taskProcessing: "Orchestrator that claims and dispatches worker tasks to ECS",
-  cdn: "CloudFront CDN serving the dashboard and static assets",
+  taskProcessing: "Orchestrator that claims and dispatches worker tasks",
+  cdn: "CDN serving the dashboard and static assets",
 };
 
 const SERVICE_ICONS = {

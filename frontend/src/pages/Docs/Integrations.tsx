@@ -480,7 +480,7 @@ export default function Integrations() {
           Cloud Execution
         </h2>
         <p className="text-muted-foreground">
-          WorkerMill runs AI workers on AWS infrastructure. The recommended approach is the
+          WorkerMill runs AI workers in isolated containers. The recommended approach is the
           <strong className="text-foreground"> Remote Agent</strong>, which runs on your machine and uses
           the cloud dashboard for monitoring.
         </p>
@@ -523,21 +523,21 @@ export default function Integrations() {
             </div>
           </div>
 
-          {/* AWS Cloud */}
+          {/* Cloud Mode */}
           <div className="bg-card border border-yellow-500/30 rounded-xl p-5">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-lg bg-yellow-500/20 flex items-center justify-center">
                 <Cloud className="w-5 h-5 text-yellow-500" />
               </div>
-              <h3 className="font-semibold text-foreground">AWS ECS (Cloud Mode)</h3>
+              <h3 className="font-semibold text-foreground">Cloud Mode</h3>
             </div>
             <p className="text-sm text-muted-foreground mb-4">
-              Cloud mode: workers run on AWS ECS Fargate. Self-hosted: workers run as Docker containers on your machine. BYOK — bring your own API key.
+              Workers run as managed containers in the cloud. BYOK — bring your own API key, pay your provider directly.
             </p>
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Check className="w-4 h-4 text-green-500" />
-                ECS Fargate execution
+                Managed container execution
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Check className="w-4 h-4 text-green-500" />

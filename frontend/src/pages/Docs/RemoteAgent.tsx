@@ -67,7 +67,7 @@ const comparisonRows = [
   },
   {
     aspect: "Execution",
-    cloud: "ECS Fargate containers",
+    cloud: "Managed containers",
     remote: "Local native processes",
   },
   {

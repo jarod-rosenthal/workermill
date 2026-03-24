@@ -1,75 +1,43 @@
 import {
   Rocket,
-  Settings,
-  GitBranch,
-  AlertCircle,
   ArrowRight,
   Copy,
   ExternalLink,
   Monitor,
   Cloud,
   Terminal,
+  Check,
+  Settings,
+  GitBranch,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useState } from "react";
 
-const labels = [
-  {
-    name: "workermill",
-    description: "Required - Triggers planning and parallel story execution",
-    required: true,
-  },
-  {
-    name: "haiku",
-    description: "Use efficient model (optimized for speed)",
-  },
-  {
-    name: "sonnet",
-    description: "Use balanced model (speed + capability)",
-  },
-  {
-    name: "opus",
-    description: "Use flagship model (most capable)",
-  },
-  {
-    name: "openai",
-    description: "Use OpenAI models (GPT-4o, o3-mini, o1)",
-  },
-  {
-    name: "gemini",
-    description: "Use Google Gemini models",
-  },
-  {
-    name: "ollama",
-    description: "Use self-hosted models via Ollama",
-  },
-  {
-    name: "deploy",
-    description: "Auto-merge and deploy (skip PR review)",
-  },
-  {
-    name: "review",
-    description: "Tech Lead Reviewer reviews PR first",
-  },
-  {
-    name: "critic",
-    description: "Planner-Critic validation before execution",
-  },
-  {
-    name: "improve",
-    description: "Self-improvement analysis after completion",
-  },
-];
+function CopyBlock({ code, label }: { code: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="relative group">
+      {label && (
+        <div className="text-xs text-muted-foreground mb-1">{label}</div>
+      )}
+      <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
+        <code className="text-foreground">{code}</code>
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(code);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }}
+          className="text-muted-foreground hover:text-foreground flex-shrink-0 ml-4"
+        >
+          {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function QuickStart() {
-  const [copied, setCopied] = useState<string | null>(null);
-
-  const copyToClipboard = (text: string, field: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(field);
-    setTimeout(() => setCopied(null), 2000);
-  };
-
   return (
     <div className="space-y-12">
       {/* Hero */}
@@ -79,16 +47,16 @@ export default function QuickStart() {
           Quick Start Guide
         </div>
         <h1 className="text-4xl font-bold text-foreground">
-          Get Started in 5 Minutes
+          Get Started in 2 Minutes
         </h1>
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-          Two ways to build: run workers locally with your API key, or use the cloud.
+          Run WorkerMill locally with any LLM provider. No account needed.
         </p>
       </div>
 
       {/* Option Selector */}
       <div className="grid md:grid-cols-2 gap-6">
-        {/* Option A: Local Mode */}
+        {/* Option A: CLI */}
         <div className="bg-card border-2 border-primary/50 rounded-xl p-6 relative">
           <div className="absolute -top-3 left-4">
             <span className="px-3 py-1 bg-primary text-primary-foreground text-xs font-semibold rounded-full">
@@ -97,46 +65,46 @@ export default function QuickStart() {
           </div>
           <div className="flex items-center gap-3 mb-4 mt-1">
             <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
-              <Monitor className="w-5 h-5 text-green-500" />
+              <Terminal className="w-5 h-5 text-green-500" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-foreground">Option A: Local Mode</h2>
-              <p className="text-sm text-green-500 font-medium">BYOK — bring your own key</p>
+              <h2 className="text-lg font-semibold text-foreground">WorkerMill CLI</h2>
+              <p className="text-sm text-green-500 font-medium">Open source — runs locally</p>
             </div>
           </div>
           <p className="text-sm text-muted-foreground mb-4">
-            Workers run on your machine using your own API key. Code never leaves your computer.
+            Multi-expert AI coding agent in your terminal. Works with Ollama, Anthropic, OpenAI, and Google.
           </p>
           <div className="text-sm text-muted-foreground">
-            <strong className="text-foreground">Requires:</strong> AI provider API key (Anthropic, OpenAI, Google, or Ollama) + Docker
+            <strong className="text-foreground">Requires:</strong> Node.js 18+ and an LLM provider (Ollama for free local, or a cloud API key)
           </div>
         </div>
 
-        {/* Option B: Cloud Mode */}
+        {/* Option B: Cloud Platform */}
         <div className="bg-card border border-border rounded-xl p-6">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
               <Cloud className="w-5 h-5 text-purple-500" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-foreground">Option B: Cloud Mode</h2>
-              <p className="text-sm text-purple-500 font-medium">Pay per project</p>
+              <h2 className="text-lg font-semibold text-foreground">Cloud Platform</h2>
+              <p className="text-sm text-purple-500 font-medium">Dashboard + VS Code extension</p>
             </div>
           </div>
           <p className="text-sm text-muted-foreground mb-4">
-            We handle execution. Bring your own API key (BYOK).
+            Web dashboard, issue tracker webhooks, and remote agent with Docker sandbox workers.
           </p>
           <div className="text-sm text-muted-foreground">
-            <strong className="text-foreground">Requires:</strong> AI provider API key
+            <strong className="text-foreground">Requires:</strong> Account + AI provider API key
           </div>
         </div>
       </div>
 
-      {/* Option A Steps */}
+      {/* CLI Steps */}
       <section className="space-y-6">
         <div className="flex items-center gap-3">
-          <Monitor className="w-5 h-5 text-green-500" />
-          <h2 className="text-2xl font-semibold text-foreground">Option A: Local Mode</h2>
+          <Terminal className="w-5 h-5 text-green-500" />
+          <h2 className="text-2xl font-semibold text-foreground">WorkerMill CLI</h2>
         </div>
 
         <div className="space-y-4">
@@ -148,20 +116,14 @@ export default function QuickStart() {
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-foreground text-lg">Install the CLI</h3>
-                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">1 min</span>
+                  <h3 className="font-semibold text-foreground text-lg">Run the CLI</h3>
+                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">30 sec</span>
                 </div>
-                <p className="text-muted-foreground mb-4">Install the WorkerMill agent. Requires Docker for worker containers.</p>
-                <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
-                  <code className="text-foreground">curl -fsSL https://workermill.com/install.sh | bash</code>
-                  <button
-                    onClick={() => copyToClipboard("curl -fsSL https://workermill.com/install.sh | bash", "install")}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <Copy className="w-4 h-4" />
-                    {copied === "install" && <span className="text-xs ml-1">Copied!</span>}
-                  </button>
-                </div>
+                <p className="text-muted-foreground mb-4">No install required — npx runs it directly.</p>
+                <CopyBlock code="npx workermill" />
+                <p className="text-xs text-muted-foreground mt-2">
+                  Or install globally: <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">npm install -g workermill</code>
+                </p>
               </div>
             </div>
           </div>
@@ -174,24 +136,31 @@ export default function QuickStart() {
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-foreground text-lg">Run Setup</h3>
-                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">2 min</span>
+                  <h3 className="font-semibold text-foreground text-lg">Pick your provider</h3>
+                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">1 min</span>
                 </div>
-                <p className="text-muted-foreground mb-4">Interactive wizard that checks prerequisites, installs Claude CLI if needed, and configures your API key and SCM tokens.</p>
-                <div className="space-y-2">
-                  <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
-                    <code className="text-foreground">workermill-agent setup</code>
-                    <button
-                      onClick={() => copyToClipboard("workermill-agent setup", "setup")}
-                      className="text-muted-foreground hover:text-foreground"
-                    >
-                      <Copy className="w-4 h-4" />
-                    </button>
+                <p className="text-muted-foreground mb-4">First run walks you through an interactive setup wizard.</p>
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div className="bg-muted/30 rounded-lg p-3">
+                    <div className="font-medium text-foreground text-sm mb-1">Ollama (local, free)</div>
+                    <p className="text-xs text-muted-foreground">Auto-detected on localhost. WSL supported. Default model: qwen3-coder:30b</p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Validates prerequisites, configures your API key and SCM tokens, and stores configuration in ~/.workermill/config.json.
-                  </p>
+                  <div className="bg-muted/30 rounded-lg p-3">
+                    <div className="font-medium text-foreground text-sm mb-1">Anthropic (Claude)</div>
+                    <p className="text-xs text-muted-foreground">Default model: claude-sonnet-4-6. Set ANTHROPIC_API_KEY or paste during setup.</p>
+                  </div>
+                  <div className="bg-muted/30 rounded-lg p-3">
+                    <div className="font-medium text-foreground text-sm mb-1">OpenAI (GPT)</div>
+                    <p className="text-xs text-muted-foreground">Default model: gpt-5.4. Set OPENAI_API_KEY or paste during setup.</p>
+                  </div>
+                  <div className="bg-muted/30 rounded-lg p-3">
+                    <div className="font-medium text-foreground text-sm mb-1">Google (Gemini)</div>
+                    <p className="text-xs text-muted-foreground">Default model: gemini-3.1-pro. Set GOOGLE_API_KEY or paste during setup.</p>
+                  </div>
                 </div>
+                <p className="text-xs text-muted-foreground mt-3">
+                  Config saved to <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">~/.workermill/cli.json</code>. Edit anytime or re-run setup.
+                </p>
               </div>
             </div>
           </div>
@@ -204,51 +173,24 @@ export default function QuickStart() {
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-foreground text-lg">Start the worker</h3>
-                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">30 sec</span>
-                </div>
-                <p className="text-muted-foreground mb-4">Start the local worker process. It will wait for tasks from workermill.com.</p>
-                <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
-                  <code className="text-foreground">workermill-agent start</code>
-                  <button
-                    onClick={() => copyToClipboard("workermill-agent start", "start")}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="mt-3 bg-muted/30 rounded-lg p-3 font-mono text-xs text-muted-foreground space-y-1">
-                  <div className="text-green-500">  All dependencies found</div>
-                  <div className="text-green-500">  Already authenticated</div>
-                  <div>Worker ready. Dashboard: https://workermill.com/dashboard</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Step 4 */}
-          <div className="bg-card border border-border rounded-xl p-6">
-            <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold flex-shrink-0">
-                4
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-foreground text-lg">Create a task</h3>
-                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">30 sec</span>
+                  <h3 className="font-semibold text-foreground text-lg">Describe what you want</h3>
+                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">That's it</span>
                 </div>
                 <p className="text-muted-foreground mb-4">
-                  Open <Link to="/dashboard" className="text-primary hover:underline">workermill.com/dashboard</Link> in your browser, or trigger a task from your issue tracker.
+                  Type your task. Simple tasks run in single-agent mode. Complex tasks are automatically decomposed into stories and assigned to specialist personas.
                 </p>
-                <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
-                  <li>Click <strong className="text-foreground">"Run Task"</strong> on the dashboard, or add the <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">workermill</code> label to a Jira/Linear/GitHub issue</li>
-                  <li>The Planning Agent decomposes your task into stories</li>
-                  <li>Workers execute stories in parallel</li>
-                  <li>A pull request is created when done</li>
-                </ol>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mt-4">
-                  <Terminal className="w-4 h-4" />
-                  <span>Watch progress in your terminal and on the dashboard</span>
+                <div className="bg-muted/30 rounded-lg p-4 font-mono text-xs text-muted-foreground space-y-1">
+                  <div className="text-white">  WorkerMill <span className="text-muted-foreground">v0.2.0</span></div>
+                  <div>  ollama/<span className="text-white">qwen3-coder:30b</span></div>
+                  <div>  cwd: <span className="text-white">~/projects/myapp</span></div>
+                  <div />
+                  <div className="text-white">  &gt; Add JWT authentication with refresh tokens to the Express API</div>
+                  <div />
+                  <div className="text-cyan-400">  [💡 planner 🏠] Starting planning agent...</div>
+                  <div className="text-cyan-400">  [💡 planner 🏠] Plan generated: 3 stories</div>
+                  <div className="text-cyan-400">  [🔐 security_engineer 🏠] Starting JWT auth implementation</div>
+                  <div className="text-cyan-400">  [🔐 security_engineer 🏠] Tool: bash → npm install jsonwebtoken bcrypt</div>
+                  <div className="text-cyan-400">  [🔐 security_engineer 🏠] Tool: write_file → src/middleware/auth.ts</div>
                 </div>
               </div>
             </div>
@@ -256,95 +198,148 @@ export default function QuickStart() {
         </div>
       </section>
 
-      {/* Option B Steps */}
+      {/* CLI Options */}
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold text-foreground">CLI Options</h2>
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left px-4 py-3 text-sm font-medium text-foreground">Flag</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-foreground">Description</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {[
+                { flag: "--trust", desc: "Skip tool permission prompts (auto-approve all)" },
+                { flag: "--plan", desc: "Read-only mode — explore the codebase without making changes" },
+                { flag: "--resume", desc: "Resume the last conversation" },
+                { flag: "--provider <name>", desc: "Override provider (ollama, anthropic, openai, google)" },
+                { flag: "--model <name>", desc: "Override model for this session" },
+                { flag: "--full-disk", desc: "Allow tools to access files outside working directory" },
+              ].map((row) => (
+                <tr key={row.flag}>
+                  <td className="px-4 py-3">
+                    <code className="bg-muted px-2 py-0.5 rounded text-xs font-mono text-foreground">{row.flag}</code>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground">{row.desc}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Slash Commands */}
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold text-foreground">Slash Commands</h2>
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left px-4 py-3 text-sm font-medium text-foreground">Command</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-foreground">Description</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {[
+                { cmd: "/help", desc: "Show all available commands" },
+                { cmd: "/status", desc: "Session stats — messages, tokens, cost, mode" },
+                { cmd: "/cost", desc: "Token cost breakdown by provider" },
+                { cmd: "/model", desc: "Show current provider and model" },
+                { cmd: "/git", desc: "Show branch and working tree status" },
+                { cmd: "/plan", desc: "Toggle read-only plan mode" },
+                { cmd: "/sessions", desc: "List, switch, or delete sessions" },
+                { cmd: "/compact", desc: "Compress conversation to save context" },
+                { cmd: "/editor", desc: "Open $EDITOR for multiline input" },
+                { cmd: "!<cmd>", desc: "Run a bash command directly (e.g. !git status)" },
+              ].map((row) => (
+                <tr key={row.cmd}>
+                  <td className="px-4 py-3">
+                    <code className="bg-muted px-2 py-0.5 rounded text-xs font-mono text-foreground">{row.cmd}</code>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground">{row.desc}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Cloud Platform Steps */}
       <section className="space-y-6">
         <div className="flex items-center gap-3">
           <Cloud className="w-5 h-5 text-purple-500" />
-          <h2 className="text-2xl font-semibold text-foreground">Option B: Cloud Mode</h2>
+          <h2 className="text-2xl font-semibold text-foreground">Cloud Platform</h2>
         </div>
 
         <div className="space-y-4">
-          {/* Step 1 */}
           <div className="bg-card border border-border rounded-xl p-6">
             <div className="flex items-start gap-4">
               <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold flex-shrink-0">
                 1
               </div>
               <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-foreground text-lg">Sign up</h3>
-                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">2 min</span>
-                </div>
+                <h3 className="font-semibold text-foreground text-lg mb-1">Sign up & configure</h3>
                 <p className="text-muted-foreground">
-                  Create an account at <Link to="/signup" className="text-primary hover:underline">workermill.com/signup</Link>.
+                  Create an account at <Link to="/signup" className="text-primary hover:underline">workermill.com/signup</Link>,
+                  then add your AI provider API key in <strong className="text-foreground">Settings &gt; AI Providers</strong> and
+                  connect your GitHub, GitLab, or Bitbucket repositories.
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Step 2 */}
           <div className="bg-card border border-border rounded-xl p-6">
             <div className="flex items-start gap-4">
               <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold flex-shrink-0">
                 2
               </div>
               <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-foreground text-lg">Add your API key</h3>
-                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">1 min</span>
-                </div>
-                <p className="text-muted-foreground mb-4">
-                  Go to <strong className="text-foreground">Settings &gt; AI Providers</strong> and add your API key.
+                <h3 className="font-semibold text-foreground text-lg mb-1">Create a task</h3>
+                <p className="text-muted-foreground mb-3">
+                  Click <strong className="text-foreground">"Run Task"</strong> on the dashboard, or add the <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">workermill</code> label to an issue in Jira, Linear, or GitHub Issues.
                 </p>
-                <div className="grid md:grid-cols-2 gap-3">
-                  <a
-                    href="https://console.anthropic.com/settings/keys"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground bg-muted/30 px-3 py-2 rounded-lg"
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                    Get Anthropic API Key
-                  </a>
-                  <a
-                    href="https://platform.openai.com/api-keys"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground bg-muted/30 px-3 py-2 rounded-lg"
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                    Get OpenAI API Key
-                  </a>
-                </div>
+                <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
+                  <li>The Planning Agent decomposes your task into stories</li>
+                  <li>Parallel workers execute stories in Docker sandboxes</li>
+                  <li>Tech Lead reviews the work and creates a pull request</li>
+                  <li>You review and merge</li>
+                </ol>
               </div>
             </div>
           </div>
 
-          {/* Step 3 */}
           <div className="bg-card border border-border rounded-xl p-6">
             <div className="flex items-start gap-4">
               <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold flex-shrink-0">
                 3
               </div>
               <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-foreground text-lg">Create a task</h3>
-                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">1 min</span>
-                </div>
+                <h3 className="font-semibold text-foreground text-lg mb-1">Optional: Install the VS Code extension</h3>
                 <p className="text-muted-foreground">
-                  Open <Link to="/dashboard" className="text-primary hover:underline">workermill.com/dashboard</Link> and click "Run Task", or add the <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">workermill</code> label to an issue in your tracker.
+                  See worker logs, coordination feed, and live diffs directly in your editor.
                 </p>
+                <a
+                  href="https://marketplace.visualstudio.com/items?itemName=workermill.workermill"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-sm text-primary hover:underline mt-2"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  VS Code Marketplace
+                </a>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Webhook Integration (for advanced users) */}
+      {/* Webhook Integration */}
       <section className="space-y-4">
-        <h2 className="text-2xl font-semibold text-foreground">Advanced: Issue Tracker Integration</h2>
+        <h2 className="text-2xl font-semibold text-foreground">Issue Tracker Webhooks</h2>
         <p className="text-muted-foreground">
-          Optionally, trigger builds directly from your issue tracker by adding the <code className="bg-muted px-1.5 py-0.5 rounded">workermill</code> label.
+          For the cloud platform, trigger builds from your issue tracker by adding the <code className="bg-muted px-1.5 py-0.5 rounded">workermill</code> label.
         </p>
         <div className="space-y-4">
           <div className="bg-muted/50 rounded-lg p-4">
@@ -383,168 +378,51 @@ export default function QuickStart() {
         </div>
       </section>
 
-      {/* Labels Reference */}
-      <section className="space-y-4">
-        <h2 className="text-2xl font-semibold text-foreground">Label Reference</h2>
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="text-left px-4 py-3 text-sm font-medium text-foreground">Label</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-foreground">Description</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {labels.map((label) => (
-                <tr key={label.name}>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`px-2 py-0.5 rounded text-xs font-mono ${
-                        label.required
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {label.name}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">
-                    {label.description}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {/* Task States */}
-      <section className="space-y-4">
-        <h2 className="text-2xl font-semibold text-foreground">Understanding Task States</h2>
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-cyan-500 animate-pulse"></div>
-              <span className="font-medium text-foreground">Planning</span>
-            </div>
-            <p className="text-sm text-muted-foreground">Planner agent decomposing the task into stories</p>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-              <span className="font-medium text-foreground">Queued</span>
-            </div>
-            <p className="text-sm text-muted-foreground">Plan approved, waiting for a worker to pick it up</p>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></div>
-              <span className="font-medium text-foreground">Executing</span>
-            </div>
-            <p className="text-sm text-muted-foreground">Worker is implementing changes</p>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-purple-500"></div>
-              <span className="font-medium text-foreground">Review Requested</span>
-            </div>
-            <p className="text-sm text-muted-foreground">PR created, waiting for your approval</p>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-green-500"></div>
-              <span className="font-medium text-foreground">Completed</span>
-            </div>
-            <p className="text-sm text-muted-foreground">Task finished with no code changes needed</p>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-green-500"></div>
-              <span className="font-medium text-foreground">Deployed</span>
-            </div>
-            <p className="text-sm text-muted-foreground">Merged and deployed successfully</p>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-orange-500"></div>
-              <span className="font-medium text-foreground">Escalated</span>
-            </div>
-            <p className="text-sm text-muted-foreground">Worker needs clarification — respond to unblock</p>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-red-500"></div>
-              <span className="font-medium text-foreground">Failed</span>
-            </div>
-            <p className="text-sm text-muted-foreground">Task encountered an error — check logs and retry</p>
-          </div>
-        </div>
-      </section>
-
-      {/* Handling Issues */}
-      <section className="space-y-4">
-        <h2 className="text-2xl font-semibold text-foreground">If Something Goes Wrong</h2>
-        <div className="bg-card border border-amber-500/30 rounded-xl p-6">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
-            <div className="space-y-3">
-              <h3 className="font-medium text-foreground">Escalated Tasks</h3>
-              <p className="text-sm text-muted-foreground">
-                When a worker encounters a blocker it cannot auto-fix, the task is escalated with a summary explaining the issue.
-                You can retry, skip the blocked story, or abort from the dashboard.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* Next Steps */}
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold text-foreground">Next Steps</h2>
         <div className="grid md:grid-cols-2 gap-4">
           <Link
-            to="/docs/agent"
+            to="/docs/cli"
             className="bg-primary/10 border border-primary/30 rounded-xl p-5 hover:bg-primary/20 transition-colors group"
           >
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="font-semibold text-primary">
-                  Agent Setup
-                </h3>
+                <h3 className="font-semibold text-primary">CLI Documentation</h3>
                 <p className="text-sm text-primary/70">
-                  Install and configure the local agent
+                  Full reference — configuration, personas, MCP servers
                 </p>
               </div>
               <ArrowRight className="w-5 h-5 text-primary" />
             </div>
           </Link>
           <Link
-            to="/docs/task-lifecycle"
+            to="/docs/vscode-extension"
             className="bg-card border border-border rounded-xl p-5 hover:border-primary/50 transition-colors group"
           >
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">
-                  Task Lifecycle
+                  VS Code Extension
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  Deep dive into how tasks flow
+                  Live logs, coordination feed, and diffs in your editor
                 </p>
               </div>
               <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
             </div>
           </Link>
           <Link
-            to="/docs/integrations"
+            to="/docs/agent"
             className="bg-card border border-border rounded-xl p-5 hover:border-primary/50 transition-colors group"
           >
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">
-                  Integrations
+                  Remote Agent
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  Connect more tools and platforms
+                  Run workers on your machine connected to the cloud dashboard
                 </p>
               </div>
               <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
@@ -560,7 +438,7 @@ export default function QuickStart() {
                   MCP Integration
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  Manage from Claude Code or other MCP tools
+                  Manage WorkerMill from Claude Code or other MCP clients
                 </p>
               </div>
               <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />

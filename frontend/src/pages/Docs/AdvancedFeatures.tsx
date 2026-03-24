@@ -1570,7 +1570,7 @@ export default function AdvancedFeatures() {
           </div>
           <div>
             <h2 className="text-2xl font-bold text-foreground">Warm Container Pool</h2>
-            <p className="text-sm text-muted-foreground">Pre-warmed ECS containers for faster task execution</p>
+            <p className="text-sm text-muted-foreground">Pre-warmed containers for faster task execution</p>
           </div>
         </div>
 
@@ -1578,7 +1578,7 @@ export default function AdvancedFeatures() {
         <div className="bg-orange-500/5 border border-orange-500/20 rounded-xl p-6">
           <h3 className="font-semibold text-foreground mb-3">What is the Warm Container Pool?</h3>
           <p className="text-muted-foreground mb-4">
-            The Warm Container Pool maintains pre-warmed ECS containers ready to execute tasks immediately.
+            The Warm Container Pool maintains pre-warmed containers ready to execute tasks immediately.
             This eliminates cold start latency, reducing MTTA (Mean Time to Acknowledge) significantly.
           </p>
           <div className="grid md:grid-cols-4 gap-4">

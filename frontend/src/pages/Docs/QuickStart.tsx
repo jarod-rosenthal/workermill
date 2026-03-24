@@ -76,7 +76,7 @@ export default function QuickStart() {
             Multi-expert AI coding agent in your terminal. Works with Ollama, Anthropic, OpenAI, and Google.
           </p>
           <div className="text-sm text-muted-foreground">
-            <strong className="text-foreground">Requires:</strong> Node.js 18+ and an LLM provider (Ollama for free local, or a cloud API key)
+            <strong className="text-foreground">Requires:</strong> Node.js 20+ and an LLM provider (Ollama for free local, or a cloud API key)
           </div>
         </div>
 
@@ -296,12 +296,13 @@ export default function QuickStart() {
                 2
               </div>
               <div className="flex-1">
-                <h3 className="font-semibold text-foreground text-lg mb-1">Create a task</h3>
+                <h3 className="font-semibold text-foreground text-lg mb-1">Start a build</h3>
                 <p className="text-muted-foreground mb-3">
-                  Click <strong className="text-foreground">"Run Task"</strong> on the dashboard, or add the <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">workermill</code> label to an issue in Jira, Linear, or GitHub Issues.
+                  Two ways to start: <strong className="text-foreground">Full Build</strong> (paste or upload a spec, it decomposes into a board of cards) or <strong className="text-foreground">Run Task</strong> (single task from the dashboard). You can also add the <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">workermill</code> label to an issue in Jira, Linear, or GitHub Issues.
                 </p>
                 <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
-                  <li>The Planning Agent decomposes your task into stories</li>
+                  <li>Spec validation checks for dependency conflicts and quality issues</li>
+                  <li>The Planning Agent decomposes your spec into stories</li>
                   <li>Parallel workers execute stories in Docker sandboxes</li>
                   <li>Tech Lead reviews the work and creates a pull request</li>
                   <li>You review and merge</li>

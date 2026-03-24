@@ -14,6 +14,259 @@ import "./article.css";
 
 // Content for each blog post
 const postContent: Record<string, React.ReactNode> = {
+  "ai-coding-agents-2026-honest-assessment": (
+    <>
+      <p className="article-lead">
+        Six months ago, the AI coding tool market had clear lines. Copilot did
+        autocomplete. Cursor was the AI-native IDE. Claude Code was the power
+        user's terminal. Everything else was a demo. Those lines are gone. Every
+        tool now calls itself an "agent," every company claims autonomous
+        development, and engineering leaders are drowning in options that all
+        sound the same.
+      </p>
+
+      <p>
+        We've been building WorkerMill — an open-source operations layer for AI
+        coding agents — for over a year. We've tested every major tool, spent
+        real money, and shipped real production code through them. This is what
+        we've actually seen.
+      </p>
+
+      <h2>The Three Tiers Nobody Talks About</h2>
+      <p>
+        The market wants you to think all these tools compete with each other.
+        They don't. They operate in three distinct tiers, and conflating them is
+        how engineering teams waste months evaluating the wrong category.
+      </p>
+
+      <h3>Tier 1: IDE Assistants</h3>
+      <p>
+        <strong>Cursor</strong>, <strong>GitHub Copilot</strong>,{" "}
+        <strong>Windsurf</strong>. These live inside your editor. They
+        autocomplete, they chat, they've added "agent mode" for multi-file edits.
+        They're good at what they do — making individual developers faster at
+        writing code they already understand. Cursor has 360K paying users for a
+        reason. Copilot has 15 million.
+      </p>
+      <p>
+        But here's the thing: these tools optimize for the moment of writing.
+        They don't think about what happens after the commit. They don't run your
+        CI pipeline. They don't coordinate multiple specialists working on
+        different parts of a codebase. They don't know if the code they just
+        generated will break the build.
+      </p>
+
+      <h3>Tier 2: Terminal Agents</h3>
+      <p>
+        <strong>Claude Code</strong>, <strong>OpenCode</strong>,{" "}
+        <strong>Aider</strong>, <strong>WorkerMill CLI</strong>. These run in
+        your terminal with full filesystem access, bash execution, and git
+        integration. They can read your entire codebase, run tests, and commit
+        changes. Claude Code is the clear leader here — Opus 4.6 with 1M token
+        context is genuinely better at complex reasoning than anything else
+        available.
+      </p>
+      <p>
+        The gap in this tier is provider flexibility. Claude Code only works with
+        Anthropic. OpenCode claims 75+ providers but has{" "}
+        <strong>broken tool calling with local models</strong> — it routes Ollama
+        through the OpenAI compatibility layer, which silently drops tool calls
+        during streaming. We tested it extensively. If you need local models that
+        actually execute tools, the options thin out fast.
+      </p>
+
+      <h3>Tier 3: Autonomous Orchestration</h3>
+      <p>
+        <strong>Devin</strong>, <strong>Amazon Kiro</strong>,{" "}
+        <strong>Google Jules</strong>, <strong>Augment</strong>,{" "}
+        <strong>WorkerMill</strong>. These are the platforms that take a spec and
+        produce a working system — with planning, decomposition, parallel
+        execution, review, and deployment. This is where the real architectural
+        differences emerge.
+      </p>
+
+      <h2>The Autonomous Agent Reality Check</h2>
+
+      <p>
+        Let's be direct about each one.
+      </p>
+
+      <h3>Devin</h3>
+      <p>
+        Devin was the first to market with full autonomy. You describe a task,
+        it plans, codes, tests, and opens a PR. The 2.0 release added
+        Interactive Planning (you validate the approach before execution) and
+        Devin Wiki (auto-generated architecture docs). The price dropped from
+        $500/month to $20 + $2.25/ACU, which makes it accessible.
+      </p>
+      <p>
+        The limitation: Devin is a black box. You hand it a task and hope. When
+        it works, it's impressive. When it doesn't, debugging why is painful.
+        There's no quality gate enforcement, no provider choice, and no way to
+        inspect the orchestration in real-time. For teams that need governance
+        and auditability, that's a dealbreaker.
+      </p>
+
+      <h3>Amazon Kiro</h3>
+      <p>
+        Kiro is the most interesting new entrant. Spec-driven development is the
+        right idea — you write a detailed spec, Kiro decomposes it, and
+        autonomous agents build it. 200K+ developers in its first week tells you
+        the market wants this. Kiro's enterprise DNA (AWS integration, persistent
+        context, PR monitoring) makes it the obvious choice for teams already
+        deep in the AWS ecosystem.
+      </p>
+      <p>
+        The catch: it's locked to AWS and Claude. You can't bring your own model.
+        You can't run it with a local LLM. And it's closed-source, so when the
+        spec decomposition makes a bad decision, you can't see why or fix the
+        prompt.
+      </p>
+
+      <h3>Google Jules</h3>
+      <p>
+        Jules takes a different approach: async, VM-based execution. You kick off
+        a task and come back later. It's powered by Gemini 2.5 Pro and runs in
+        Google's cloud. The async model is genuinely useful for long-running
+        tasks — you don't have to babysit it.
+      </p>
+      <p>
+        But Jules is Gemini-only. No Claude, no GPT, no local models. And
+        "come back later" means you're trusting the agent to make good decisions
+        without your input. For simple tasks, fine. For anything architectural,
+        you want to be in the loop.
+      </p>
+
+      <div className="article-callout">
+        <strong>The Pattern:</strong>
+        {" "}Every autonomous platform locks you to their provider. Devin uses its own
+        models. Kiro is Claude-on-AWS. Jules is Gemini. The model you want for
+        planning might not be the model you want for implementation. The model
+        that's best today might not be best next month. Provider lock-in in a
+        market moving this fast is a strategic risk, not a feature.
+      </div>
+
+      <h2>Where WorkerMill Fits</h2>
+
+      <p>
+        WorkerMill is the only tool that spans Tier 2 and Tier 3 — a CLI for
+        single-developer work and a full orchestration platform for autonomous
+        multi-expert builds. But the real differentiators aren't features. They're
+        architectural decisions.
+      </p>
+
+      <h3>Provider-Agnostic by Design</h3>
+      <p>
+        Every LLM call in WorkerMill goes through the Vercel AI SDK. Anthropic,
+        OpenAI, Google, Ollama (local), OpenRouter, Groq, DeepSeek, Mistral, xAI,
+        AWS Bedrock, Azure — eleven providers, all working, all with tool calling.
+        Including Ollama with working tool calling via the native API, which is
+        something OpenCode and others have failed to solve.
+      </p>
+      <p>
+        You can route different personas to different providers. Your planner
+        runs on Claude Opus because it's the best at reasoning. Your workers run
+        on Sonnet because it's fast and cheap. Your local testing uses Ollama
+        with qwen3-coder because it's free. This isn't theoretical — it's how
+        WorkerMill runs in production today.
+      </p>
+
+      <h3>Spec Validation Before Decomposition</h3>
+      <p>
+        We just shipped something none of the other platforms have: a
+        pre-decomposition validation gate. Before your spec gets broken into
+        epics and stories, an LLM reviews it for dependency incompatibilities,
+        version conflicts, ecosystem mismatches, port collisions, and content
+        quality issues. If it finds problems, you see them — with severity
+        levels, suggestions, and affected packages — and you choose to proceed,
+        let the system fix the spec, or go back and edit.
+      </p>
+      <p>
+        This matters because the #1 cause of failed autonomous builds is bad
+        specs, not bad code generation. React 19 with React Router v5. Node 14
+        with packages that need Node 18. Both yarn.lock and package-lock.json.
+        These are the mistakes that waste hours of agent compute before anyone
+        notices. Catching them before decomposition is obvious in hindsight — but
+        nobody else does it.
+      </p>
+
+      <h3>Open Source as Operating Principle</h3>
+      <p>
+        WorkerMill is open source. Not "open-core with the good stuff behind a
+        paywall." The orchestrator, the worker, the quality gates, the spec
+        validation, the multi-expert coordination — all of it. When the spec
+        decomposer makes a bad decision, you can read the prompt, see the logic,
+        and fix it. When a quality gate catches a false positive, you can tune it.
+      </p>
+      <p>
+        This isn't an ideological stance. It's practical. In a market where
+        the best model changes every quarter, being able to swap your entire LLM
+        layer without vendor permission is survival. And your team needs to trust
+        the system that's autonomously shipping code to production. Trust
+        requires visibility.
+      </p>
+
+      <h2>What We've Learned Building This</h2>
+
+      <p>
+        After a year of running AI agents in production, here's what actually
+        matters:
+      </p>
+
+      <h3>1. Quality Gates Are Worth More Than Better Models</h3>
+      <p>
+        A mediocre model with good quality gates produces better code than a
+        brilliant model with no guardrails. Pre-commit lint, typecheck, and tests.
+        Post-push CI polling. Auto-fix on failure. This two-gate system catches
+        95% of problems before any human sees the PR. The model matters, but the
+        process around it matters more.
+      </p>
+
+      <h3>2. Specs Fail More Often Than Code Generation</h3>
+      <p>
+        When a build fails, the instinct is to blame the coding agent. In our
+        data, the majority of failures trace back to the spec — missing
+        dependencies, conflicting versions, ambiguous requirements, or
+        repetitive content that wastes context tokens. That's why we built the
+        spec validation gate. Fix the input, and the output gets dramatically
+        better.
+      </p>
+
+      <h3>3. Multi-Expert Beats Single-Agent</h3>
+      <p>
+        A single agent working through a 30-deliverable epic makes progressively
+        worse decisions as its context fills up. Multiple specialized agents
+        working in parallel worktrees — each focused on a small scope with fresh
+        context — produce measurably better code. The coordination overhead is
+        worth it.
+      </p>
+
+      <h3>4. Provider Lock-In Is the Hidden Cost</h3>
+      <p>
+        The model landscape shifts every few months. Teams locked to one provider
+        can't take advantage of the next breakthrough. Multi-provider
+        architecture isn't a nice-to-have — it's how you avoid being stranded
+        when the market moves.
+      </p>
+
+      <h2>Where This Goes</h2>
+
+      <p>
+        The AI coding agent market is consolidating around a clear pattern:
+        spec-driven development with autonomous execution and human oversight at
+        decision points. The tools that get this right — clear specs in, working
+        code out, with visibility and control at every step — will win.
+      </p>
+      <p>
+        The tools that try to be autonomous black boxes will hit a ceiling.
+        Developers will use them for simple tasks and reach for something with
+        more control when the work gets serious. That's already happening.
+      </p>
+      <p>
+        We're building WorkerMill for the serious work.
+      </p>
+    </>
+  ),
   "ai-coding-governance-gap": (
     <>
       <p className="article-lead">

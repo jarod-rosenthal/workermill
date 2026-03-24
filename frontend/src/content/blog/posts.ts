@@ -13,6 +13,29 @@ const authors: Record<string, Author> = {
 
 export const blogPosts: BlogPost[] = [
   {
+    slug: "ai-coding-agents-2026-honest-assessment",
+    title: "Every AI Coding Agent Wants to Replace Your Developer. Here's What Actually Happens.",
+    excerpt:
+      "Devin, Kiro, Jules, Claude Code, Cursor, Copilot — the market is flooded with AI coding agents. We tested them all, spent real money, and shipped real code. Here's the honest breakdown of what works, what doesn't, and where the industry is headed.",
+    date: "2026-03-23",
+    category: "ai-automation",
+    author: authors.jarod,
+    thumbnail:
+      "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1200&h=600&fit=crop&q=80",
+    featured: true,
+    readingTime: 14,
+    tags: [
+      "ai-agents",
+      "comparison",
+      "claude-code",
+      "devin",
+      "kiro",
+      "cursor",
+      "open-source",
+      "multi-agent",
+    ],
+  },
+  {
     slug: "ai-coding-governance-gap",
     title:
       "The Governance Layer Your AI Coding Agents Are Missing",
@@ -23,7 +46,6 @@ export const blogPosts: BlogPost[] = [
     author: authors.jarod,
     thumbnail:
       "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=1200&h=600&fit=crop&q=80",
-    featured: true,
     readingTime: 9,
     tags: [
       "governance",

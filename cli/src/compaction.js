@@ -1,20 +1,21 @@
 import { generateText } from "ai";
 // Context limits by model family (tokens)
 const CONTEXT_LIMITS = {
-    // Anthropic
+    // Anthropic (Claude 4.5/4.6)
     "claude-opus": 200000,
     "claude-sonnet": 200000,
     "claude-haiku": 200000,
-    // OpenAI
-    "gpt-4o": 128000,
-    "gpt-4o-mini": 128000,
-    "o3": 200000,
-    "o3-mini": 128000,
-    // Google
-    "gemini-2.5-pro": 1000000,
-    "gemini-2.5-flash": 1000000,
-    // Ollama (conservative default)
-    "default": 32000,
+    // OpenAI (GPT-5.x)
+    "gpt-5.4": 400000,
+    "gpt-5.3": 400000,
+    "gpt-5.2": 200000,
+    "gpt-5.4-mini": 200000,
+    // Google (Gemini 3.x)
+    "gemini-3.1": 1000000,
+    "gemini-3.0": 1000000,
+    "gemini-2.5": 1000000,
+    // Ollama — uses configured contextLength, this is just fallback
+    "default": 65536,
 };
 export function getContextLimit(model) {
     for (const [prefix, limit] of Object.entries(CONTEXT_LIMITS)) {
@@ -23,8 +24,8 @@ export function getContextLimit(model) {
     }
     return CONTEXT_LIMITS["default"];
 }
-export function shouldCompact(totalTokens, model) {
-    const limit = getContextLimit(model);
+export function shouldCompact(totalTokens, model, configuredContextLength) {
+    const limit = configuredContextLength || getContextLimit(model);
     if (totalTokens >= limit * 0.95)
         return "hard";
     if (totalTokens >= limit * 0.80)

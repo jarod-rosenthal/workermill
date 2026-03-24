@@ -38,19 +38,9 @@ const STEPS = [
 // ─── Epic data (FlagDeck showcase) ──────────────────────────────────────────
 
 const EPIC_NAMES = [
-  { name: "Project Setup & Dev Environment", shortName: "Project Setup", persona: "devops_engineer" },
-  { name: "Database & Cache Connectivity Layer", shortName: "DB & Cache", persona: "backend_developer" },
-  { name: "Domain Models & Authentication System", shortName: "Models & Auth", persona: "backend_developer" },
-  { name: "Flag CRUD & Environment Management API", shortName: "Flag CRUD API", persona: "backend_developer" },
-  { name: "Flag Evaluation Engine & Targeting System", shortName: "Eval Engine", persona: "backend_developer" },
-  { name: "Segments, Experiments & Statistics API", shortName: "Segments & Exp", persona: "backend_developer" },
-  { name: "Seed Data & Backend Integration Verification", shortName: "Seed & Verify", persona: "backend_developer" },
-  { name: "Dashboard Layout, Auth UI & Navigation", shortName: "Dashboard UI", persona: "frontend_developer" },
-  { name: "Flag Management Dashboard Pages", shortName: "Flag Mgmt UI", persona: "frontend_developer" },
-  { name: "Experiments, Segments, Audit & Settings Pages", shortName: "Settings Pages", persona: "frontend_developer" },
-  { name: "Comprehensive Test Suite & Quality Assurance", shortName: "Test Suite", persona: "qa_engineer" },
-  { name: "Documentation: README, API Docs & CLAUDE.md", shortName: "Documentation", persona: "tech_writer" },
-  { name: "Production Deploy & Validation", shortName: "Deploy & Valid", persona: "devops_engineer" },
+  { name: "Foundation — Backend API, Seed Data, CI & Docker", shortName: "Backend & API", persona: "backend_developer" },
+  { name: "Frontend — SvelteKit UI, Components & Auth Flow", shortName: "Frontend UI", persona: "frontend_developer" },
+  { name: "Deployment — Docker Infrastructure & Go-Live", shortName: "Deploy & Valid", persona: "devops_engineer" },
 ];
 
 // ─── Frame durations ────────────────────────────────────────────────────────
@@ -102,7 +92,7 @@ function VsCodeSidebar({ epics }: { epics: Epic[] }) {
                   <Shield className="w-3 h-3 text-violet-400 flex-shrink-0" />
                 )}
                 <span className="truncate">
-                  FDPFB-{e.idx + 1}: {e.shortName}
+                  FDFBS-{e.idx + 1}: {e.shortName}
                 </span>
               </div>
             ))}
@@ -131,7 +121,7 @@ function VsCodeSidebar({ epics }: { epics: Epic[] }) {
                   <Lock className="w-2.5 h-2.5 text-slate-700 flex-shrink-0" />
                 )}
                 <span className="truncate flex-1">
-                  FDPFB-{e.idx + 1}: {e.shortName}
+                  FDFBS-{e.idx + 1}: {e.shortName}
                 </span>
                 {e.status === "locked" && (
                   <span className="text-[8px] text-slate-700 flex-shrink-0">
@@ -167,7 +157,7 @@ function VsCodeSidebar({ epics }: { epics: Epic[] }) {
               >
                 <CheckCircle2 className="w-3 h-3 text-emerald-500 flex-shrink-0" />
                 <span className="truncate">
-                  FDPFB-{e.idx + 1}: {e.shortName}
+                  FDFBS-{e.idx + 1}: {e.shortName}
                 </span>
               </div>
             ))}
@@ -304,40 +294,40 @@ function DecomposingContent() {
         </div>
         <div className="h-1" />
         <div className="text-slate-300">
-          &gt; 📋 title: Project Setup &amp; Dev Environment
+          &gt; 📋 title: Foundation — Backend API, Seed Data, CI &amp; Docker
         </div>
         <div className="text-slate-500">
-          &gt;&nbsp;&nbsp;&nbsp;description: Bootstrap the FlagDeck monorepo
-          with Go backend scaffolding...
-        </div>
-        <div className="text-slate-500">
-          &gt; 👤 persona: devops_engineer
-        </div>
-        <div className="text-slate-500">&gt; ⚡ priority: urgent</div>
-        <div className="text-slate-500">&gt; 🔗 deps: []</div>
-        <div className="text-slate-500">
-          &gt; 🏷️ labels: [&ldquo;setup&rdquo;, &ldquo;docker&rdquo;,
-          &ldquo;ci-cd&rdquo;, &ldquo;go&rdquo;, &ldquo;sveltekit&rdquo;]
-        </div>
-        <div className="text-slate-300">
-          &gt; 📋 title: Database &amp; Cache Connectivity Layer
+          &gt;&nbsp;&nbsp;&nbsp;description: Complete Go/Fiber backend with all
+          models, endpoints, seed data, and CI pipeline...
         </div>
         <div className="text-slate-500">
           &gt; 👤 persona: backend_developer
         </div>
+        <div className="text-slate-500">&gt; ⚡ priority: urgent</div>
+        <div className="text-slate-500">&gt; 🔗 deps: []</div>
+        <div className="text-slate-500">
+          &gt; 🏷️ labels: [&ldquo;backend&rdquo;, &ldquo;api&rdquo;,
+          &ldquo;docker&rdquo;, &ldquo;ci-cd&rdquo;, &ldquo;go&rdquo;]
+        </div>
+        <div className="text-slate-300">
+          &gt; 📋 title: Frontend — SvelteKit UI, Components &amp; Auth Flow
+        </div>
+        <div className="text-slate-500">
+          &gt; 👤 persona: frontend_developer
+        </div>
         <div className="text-slate-500">&gt; ⚡ priority: high</div>
         <div className="text-slate-500">&gt; 🔗 deps: [0]</div>
-        <div className="text-slate-600">&gt; ... 11 more cards</div>
+        <div className="text-slate-600">&gt; ... 1 more card</div>
         <div className="h-1" />
         <div className="text-emerald-400">
           &gt; ✅ Generation complete. Finalizing board...
         </div>
         <div className="text-slate-400">
-          &gt; 📊 Parsed 13 cards for board &ldquo;FlagDeck&rdquo;
+          &gt; 📊 Parsed 3 cards for board &ldquo;FlagDeck&rdquo;
         </div>
         <div className="text-emerald-400">
           ✓ Created board &ldquo;FlagDeck PRD — Full Build
-          Specification&rdquo; with 13 cards
+          Specification&rdquo; with 3 cards
           <span className="animate-pulse"> _</span>
         </div>
       </div>
@@ -385,7 +375,7 @@ function PlanningContent() {
           [💡 planning_agent 🤖] Exploring codebase (4 files examined, 47s)
         </div>
         <div className="text-amber-300">
-          [💡 planning_agent 🤖] Plan generated: 7 stories (49s). Running
+          [💡 planning_agent 🤖] Plan generated: 8 stories (49s). Running
           critic validation...
         </div>
         <div className="h-2" />
@@ -397,7 +387,7 @@ function PlanningContent() {
           story-4...
         </div>
         <div className="text-emerald-400">
-          [💡 planning_agent 🤖] Plan validated: 7 stories. Task queued for
+          [💡 planning_agent 🤖] Plan validated: 8 stories. Task queued for
           execution.
           <span className="animate-pulse"> _</span>
         </div>
@@ -419,15 +409,15 @@ function ExecutingContent() {
 
       <div className="flex-1 p-4 font-mono text-[10px] leading-[1.6] overflow-hidden">
         <div className="text-emerald-400">
-          [🔧 devops_engineer 🤖] Starting Root project files and Docker
-          Compose
+          [🔧 devops_engineer 🤖] Starting Docker Compose &amp; CI Pipeline
         </div>
         <div className="text-blue-400">
-          [💻 backend_developer 🤖] Starting Go module, config, and database
-          layer
+          [💻 backend_developer 🤖] Starting Go module, models &amp;
+          database layer
         </div>
-        <div className="text-purple-400">
-          [🎨 frontend_developer 🤖] Starting SvelteKit frontend scaffolding
+        <div className="text-orange-400">
+          [🛡️ security_engineer 🤖] Starting Auth middleware &amp; JWT
+          system
         </div>
         <div className="text-emerald-400">
           [🔧 devops_engineer 🤖] Target repo: workermill-examples/flagdeck
@@ -435,21 +425,21 @@ function ExecutingContent() {
         <div className="text-blue-400">
           [💻 backend_developer 🤖] Target repo: workermill-examples/flagdeck
         </div>
-        <div className="text-purple-400">
-          [🎨 frontend_developer 🤖] Target repo:
+        <div className="text-orange-400">
+          [🛡️ security_engineer 🤖] Target repo:
           workermill-examples/flagdeck
         </div>
         <div className="text-emerald-400">
           [🔧 devops_engineer 🤖] Created branch:
-          story/fdpfb-1/0-root-project-files-and-docker
+          story/fdfbs-1/0-docker-compose-ci
         </div>
         <div className="text-blue-400">
           [💻 backend_developer 🤖] Created branch:
-          story/fdpfb-1/1-go-module-config-and-database
+          story/fdfbs-1/1-go-module-models-database
         </div>
-        <div className="text-purple-400">
-          [🎨 frontend_developer 🤖] Created branch:
-          story/fdpfb-1/4-sveltekit-frontend-scaffolding
+        <div className="text-orange-400">
+          [🛡️ security_engineer 🤖] Created branch:
+          story/fdfbs-1/2-auth-middleware-jwt
         </div>
         <div className="text-emerald-400">
           [🔧 devops_engineer 🤖] Worktree: /workspace/worktrees/story-0
@@ -457,8 +447,8 @@ function ExecutingContent() {
         <div className="text-blue-400">
           [💻 backend_developer 🤖] Worktree: /workspace/worktrees/story-1
         </div>
-        <div className="text-purple-400">
-          [🎨 frontend_developer 🤖] Worktree: /workspace/worktrees/story-4
+        <div className="text-orange-400">
+          [🛡️ security_engineer 🤖] Worktree: /workspace/worktrees/story-2
         </div>
         <div className="text-emerald-400">
           [🔧 devops_engineer 🤖] Pushed branch (initial checkpoint)
@@ -466,8 +456,8 @@ function ExecutingContent() {
         <div className="text-blue-400">
           [💻 backend_developer 🤖] Pushed branch (initial checkpoint)
         </div>
-        <div className="text-purple-400">
-          [🎨 frontend_developer 🤖] Pushed branch (initial checkpoint)
+        <div className="text-orange-400">
+          [🛡️ security_engineer 🤖] Pushed branch (initial checkpoint)
         </div>
         <div className="text-emerald-400">
           [🔧 devops_engineer 🤖] Executing story with Claude CLI
@@ -477,8 +467,8 @@ function ExecutingContent() {
           [💻 backend_developer 🤖] Executing story with Claude CLI
           (claude-sonnet-4-6)...
         </div>
-        <div className="text-purple-400">
-          [🎨 frontend_developer 🤖] Executing story with Claude CLI
+        <div className="text-orange-400">
+          [🛡️ security_engineer 🤖] Executing story with Claude CLI
           (claude-sonnet-4-6)...
           <span className="animate-pulse"> _</span>
         </div>
@@ -489,9 +479,9 @@ function ExecutingContent() {
 
 function ReviewContent() {
   const stories = [
-    { name: "Root project files and Docker Compose", status: "approved" },
-    { name: "Go server entrypoint and router", status: "approved" },
-    { name: "SvelteKit frontend scaffolding", status: "approved" },
+    { name: "Docker Compose & CI Pipeline", status: "approved" },
+    { name: "Go module, models & database layer", status: "approved" },
+    { name: "Auth middleware & JWT system", status: "approved" },
   ];
 
   return (
@@ -531,11 +521,11 @@ function ReviewContent() {
             PR...
           </div>
           <div className="text-slate-500">
-            [👑 manager_reviewer 🤖] Merging story/fdpfb-1/0-root-project-files
+            [👑 manager_reviewer 🤖] Merging story/fdfbs-1/0-docker-compose-ci
             → main
           </div>
           <div className="text-slate-500">
-            [👑 manager_reviewer 🤖] Merging story/fdpfb-1/1-go-module-config →
+            [👑 manager_reviewer 🤖] Merging story/fdfbs-1/1-go-module-models →
             main
           </div>
           <div className="text-emerald-400">
@@ -570,7 +560,7 @@ function ReviewContent() {
               Epic 1 complete — merged to main
             </div>
             <div className="text-[10px] text-emerald-400/60">
-              Unlocking: Database &amp; Cache Connectivity Layer
+              Unlocking: Frontend — SvelteKit UI &amp; Auth Flow
             </div>
           </div>
         </div>
@@ -581,19 +571,9 @@ function ReviewContent() {
 
 function MontageContent() {
   const epicProgress = [
-    { name: "Project Setup", status: "done" as const },
-    { name: "DB & Cache", status: "done" as const },
-    { name: "Models & Auth", status: "done" as const },
-    { name: "Flag CRUD API", status: "done" as const },
-    { name: "Eval Engine", status: "done" as const },
-    { name: "Segments & Exp", status: "done" as const },
-    { name: "Seed & Verify", status: "done" as const },
-    { name: "Dashboard UI", status: "done" as const },
-    { name: "Flag Mgmt UI", status: "done" as const },
-    { name: "Settings Pages", status: "executing" as const },
-    { name: "Test Suite", status: "locked" as const },
-    { name: "Documentation", status: "locked" as const },
-    { name: "Deploy & Valid", status: "locked" as const },
+    { name: "Backend & API", status: "done" as const },
+    { name: "Frontend UI", status: "done" as const },
+    { name: "Deploy & Valid", status: "executing" as const },
   ];
 
   return (
@@ -602,13 +582,13 @@ function MontageContent() {
       <div className="flex items-center justify-between bg-[#1a1a1c] border-b border-white/[0.06] px-5 py-2.5">
         <div className="text-[11px] text-white font-medium">Build Progress</div>
         <div className="text-[10px] text-emerald-400 font-mono">
-          10/13 epics
+          2/3 epics
         </div>
       </div>
 
       <div className="flex-1 p-4 overflow-hidden flex gap-4">
-        {/* Epic list — two columns to fit 13 */}
-        <div className="flex-1 grid grid-cols-2 gap-1.5 content-start">
+        {/* Epic list */}
+        <div className="flex-1 flex flex-col gap-1.5 justify-start">
           {epicProgress.map((epic, i) => (
             <div
               key={i}
@@ -645,10 +625,10 @@ function MontageContent() {
         {/* Stats panel */}
         <div className="w-[140px] flex flex-col gap-2.5">
           {[
-            { label: "Elapsed", value: "6h 47m", color: "text-white" },
-            { label: "Stories", value: "89", color: "text-blue-400" },
-            { label: "Tests", value: "347 pass", color: "text-emerald-400" },
-            { label: "API cost", value: "$412", color: "text-amber-400" },
+            { label: "Elapsed", value: "3h 55m", color: "text-white" },
+            { label: "Stories", value: "16/21", color: "text-blue-400" },
+            { label: "Tests", value: "passing", color: "text-emerald-400" },
+            { label: "API cost", value: "$52", color: "text-amber-400" },
           ].map((stat) => (
             <div
               key={stat.label}
@@ -677,7 +657,7 @@ function CompleteContent() {
           Build complete
         </div>
         <div className="text-sm text-slate-500 text-center mt-1">
-          13 epics &middot; 89 stories &middot; 347 tests passing
+          3 epics &middot; 21 stories &middot; tests passing
         </div>
       </div>
       <div className="flex items-center gap-3 px-6 py-3 bg-emerald-500/[0.08] border border-emerald-500/20 rounded-xl">
@@ -693,9 +673,9 @@ function CompleteContent() {
       </div>
       <div className="flex gap-6 mt-2 text-center">
         {[
-          { label: "Time", value: "8h 14m" },
-          { label: "Cost", value: "$412" },
-          { label: "Files", value: "156" },
+          { label: "Time", value: "4h 45m" },
+          { label: "Cost", value: "$64" },
+          { label: "Files", value: "110" },
         ].map((s) => (
           <div key={s.label}>
             <div className="text-sm font-bold text-slate-300">{s.value}</div>
@@ -762,14 +742,14 @@ function buildFrames(): Frame[] {
       content: <ReviewContent />,
     },
 
-    // Frame 5: Progress — cascade: 9 done, FDPFB-10 executing, 3 locked
+    // Frame 5: Progress — 2 done, FDFBS-3 executing
     {
       epics: base.map((e, i) => ({
         ...e,
         status:
-          i < 9
+          i < 2
             ? ("done" as const)
-            : i === 9
+            : i === 2
               ? ("executing" as const)
               : ("locked" as const),
       })),

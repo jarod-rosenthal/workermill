@@ -1,12 +1,18 @@
 export declare function incrementToolCount(toolName: string): void;
 export declare function printHeader(version: string, provider?: string, model?: string, cwd?: string): void;
+/**
+ * Format a tool call message — matches worker/epic/collaboration-detector.ts exactly.
+ * Format: Tool: toolname → path/command/pattern
+ */
+export declare function formatToolCall(toolName: string, toolInput: Record<string, unknown>): string;
 export declare function printToolCall(toolName: string, toolInput: Record<string, unknown>): void;
 export declare function getPersonaEmoji(persona: string): string;
 /**
- * Print tool result — compact format like WorkerMill's worker.
- * Only shows errors and brief summaries, NOT raw file contents.
+ * Print tool result — matches WorkerMill worker output (collaboration-detector.ts).
+ * Worker only prints "Tool result received" — no content dump.
+ * Tool contents stay in logs; the console shows tool calls + agent text only.
  */
-export declare function printToolResult(toolName: string, result: string): void;
+export declare function printToolResult(_toolName: string, _result: string): void;
 /**
  * Print a WorkerMill-style log line.
  * Format: [emoji persona_slug 🏠] message
@@ -26,4 +32,4 @@ export declare function wmCoordinatorLog(message: string): void;
 export declare function printAgentText(text: string): void;
 export declare function printError(message: string): void;
 export declare function printSuccess(message: string): void;
-export declare function printStatusBar(provider: string, model: string, tokens: number, permissionMode: string, cost?: number): string;
+export declare function printStatusBar(provider: string, model: string, tokens: number, permissionMode: string, cost?: number, maxContext?: number): string;

@@ -5,11 +5,11 @@ import chalk from "chalk";
 import ora from "ora";
 import { execSync } from "child_process";
 import { streamText, stepCountIs } from "ai";
-import { createModel } from "../../packages/engine/src/model-factory.js";
+import { createModel, buildOllamaOptions } from "../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
 import { PermissionManager } from "./permissions.js";
 import { killActiveProcess } from "../../packages/engine/src/tools/bash.js";
-import { printToolCall, printToolResult, printError, printStatusBar, printHeader } from "./tui.js";
+import { printError, printStatusBar, printHeader, wmLog, formatToolCall } from "./tui.js";
 import { handleCommand as handleSlashCommand } from "./commands.js";
 import { CostTracker } from "./cost-tracker.js";
 import { initTerminal, exitTerminal, setStatusBar, showStatusBar } from "./terminal.js";
@@ -52,7 +52,7 @@ function completer(line) {
     return [[], line];
 }
 export async function runAgent(config, trustAll, resume, startInPlanMode, fullDisk) {
-    const { provider, model: modelName, apiKey, host } = getProviderForPersona(config);
+    const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(config);
     // Set API keys in env if provided
     if (apiKey) {
         const envMap = {
@@ -66,7 +66,7 @@ export async function runAgent(config, trustAll, resume, startInPlanMode, fullDi
         }
     }
     const aiProvider = provider;
-    const model = createModel(aiProvider, modelName, host);
+    const model = createModel(aiProvider, modelName, host, contextLength);
     const workingDir = process.cwd();
     const sandboxed = !fullDisk;
     const tools = createToolDefinitions(workingDir, model, sandboxed);
@@ -123,13 +123,11 @@ export async function runAgent(config, trustAll, resume, startInPlanMode, fullDi
                     return "Tool execution denied by user.";
                 }
                 logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
-                printToolCall(name, input);
+                wmLog(singleAgentPersona, formatToolCall(name, input));
                 agentState = "tool_executing";
                 const result = await td.execute(input);
                 agentState = "streaming";
-                const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-                logger.debug("Tool result", { tool: name, result: resultStr.slice(0, 200) });
-                printToolResult(name, resultStr);
+                logger.debug("Tool result", { tool: name, result: (typeof result === "string" ? result : JSON.stringify(result)).slice(0, 200) });
                 return result;
             },
         };
@@ -137,9 +135,9 @@ export async function runAgent(config, trustAll, resume, startInPlanMode, fullDi
     logger.info("Session started", { provider, model: modelName, workingDir, trustAll });
     initTerminal();
     // Show header
-    printHeader("0.1.0", provider, modelName, workingDir);
+    printHeader("0.1.9", provider, modelName, workingDir);
     // Set initial status bar
-    const statusText = printStatusBar(provider, modelName, 0, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), 0);
+    const statusText = printStatusBar(provider, modelName, 0, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), 0, contextLength);
     setStatusBar(statusText);
     const rl = readline.createInterface({
         input: process.stdin,
@@ -202,18 +200,41 @@ export async function runAgent(config, trustAll, resume, startInPlanMode, fullDi
             promptWithStatus();
         }
     });
-    const systemPrompt = `You are WorkerMill, an AI coding agent running in the user's terminal.
-You have access to tools for reading, writing, and editing files, running bash commands, searching code, and fetching web content.
+    const singleAgentPersona = "backend_developer";
+    const systemPrompt = `You are a senior developer in WorkerMill, an AI coding agent running in the user's terminal.
+
+Your specialties:
+- Full-stack development (Node.js, TypeScript, React, databases)
+- System design and architecture
+- Testing and quality assurance
+- DevOps and deployment
 
 Working directory: ${workingDir}
 
-Guidelines:
-- Be concise and direct in your responses
+## Communication Style
+
+Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!", or similar. Start with the substance — what you did, what you found, or what you need. Be concise and informative. Do NOT repeat what you said in previous steps — each response should add new information only.
+
+## Guidelines
 - Use tools proactively to explore the codebase before making changes
 - When editing files, read them first to understand context
 - Prefer editing existing files over creating new ones
 - Run tests after making changes when test infrastructure exists
 - Use glob and grep to find relevant files before reading them
+
+## Critical rules
+- NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, nodemon, tsc --watch, etc.)
+- NEVER run interactive commands that wait for user input
+- Only run commands that complete and exit
+
+## Reporting Learnings
+
+When you discover something specific and actionable about this codebase, emit a learning marker:
+::learning::The test suite requires DATABASE_URL env var or tests silently pass without running
+
+## Technology Versions — Trust the Spec
+
+If the task specifies a dependency version, USE THAT VERSION. Do NOT downgrade or "fix" versions you don't recognize.
 
 Focus on writing clean, production-ready code.`;
     promptWithStatus();
@@ -277,40 +298,41 @@ Focus on writing clean, production-ready code.`;
                     tools: getActiveTools(),
                     stopWhen: stepCountIs(100),
                     abortSignal: currentAbortController.signal,
+                    ...buildOllamaOptions(aiProvider, contextLength),
+                    onStepFinish({ text }) {
+                        if (text) {
+                            thinkingSpinner.stop();
+                            const lines = text.split("\n").filter(l => l.trim());
+                            for (const line of lines) {
+                                if (line.includes("::learning::"))
+                                    continue;
+                                wmLog(singleAgentPersona, line);
+                            }
+                        }
+                    },
                 });
-                let fullText = "";
-                let spinnerStopped = false;
-                for await (const chunk of stream.textStream) {
-                    if (!spinnerStopped) {
-                        thinkingSpinner.stop();
-                        spinnerStopped = true;
-                        process.stdout.write("\n");
-                    }
-                    process.stdout.write(chalk.white(chunk));
-                    fullText += chunk;
-                }
+                // Drive the stream — onStepFinish handles display
+                for await (const _chunk of stream.textStream) { /* consumed */ }
                 clearTimeout(timeoutId);
                 agentState = "idle";
                 currentAbortController = null;
-                if (!spinnerStopped) {
-                    thinkingSpinner.stop();
-                    process.stdout.write("\n");
-                }
-                if (fullText.trim()) {
-                    process.stdout.write("\n");
-                }
+                thinkingSpinner.stop();
                 const usage = await stream.totalUsage;
-                const tokens = (usage?.inputTokens || 0) + (usage?.outputTokens || 0);
+                const inputTokens = usage?.inputTokens || 0;
+                const outputTokens = usage?.outputTokens || 0;
+                const tokens = inputTokens + outputTokens;
                 session.totalTokens += tokens;
-                costTracker.addUsage("agent", provider, modelName, usage?.inputTokens || 0, usage?.outputTokens || 0);
+                costTracker.addUsage("agent", provider, modelName, inputTokens, outputTokens);
+                // Track last input tokens — this is the actual context window usage
+                const lastContextUsage = inputTokens;
                 // Store assistant response
                 const finalText = await stream.text;
                 logger.info("Response complete", { tokens, textLength: finalText.length });
                 addMessage(session, "assistant", finalText);
                 // Auto-save session after each exchange
                 saveSession(session);
-                // Check for auto-compaction
-                const compactionLevel = shouldCompact(session.totalTokens, modelName);
+                // Check for auto-compaction — use actual context usage, not cumulative spend
+                const compactionLevel = shouldCompact(lastContextUsage, modelName, contextLength);
                 if (compactionLevel !== "none") {
                     const spinner = ora({ stream: process.stdout, text: `Compacting conversation (${compactionLevel})...`, prefixText: "  " }).start();
                     const plainMessages = session.messages.map(m => ({ role: m.role, content: m.content }));
@@ -324,8 +346,8 @@ Focus on writing clean, production-ready code.`;
                     saveSession(session);
                     spinner.succeed("Conversation compacted");
                 }
-                // Update pinned status bar
-                const bar = printStatusBar(provider, modelName, session.totalTokens, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), costTracker.getTotalCost());
+                // Update pinned status bar — context bar shows actual window usage, not cumulative spend
+                const bar = printStatusBar(provider, modelName, lastContextUsage, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), costTracker.getTotalCost(), contextLength);
                 setStatusBar(bar);
             }
             catch (err) {

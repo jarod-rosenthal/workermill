@@ -10,7 +10,9 @@ import * as fetchTool from "./fetch.js";
 import * as patchTool from "./patch.js";
 import * as subAgentTool from "./sub-agent.js";
 import * as gitTool from "./git.js";
-export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool, subAgentTool, gitTool };
+import * as webSearchTool from "./web-search.js";
+import * as todoTool from "./todo.js";
+export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool, subAgentTool, gitTool, webSearchTool, todoTool };
 /**
  * Creates Vercel AI SDK tool definitions for use with generateText().
  * All file paths are resolved relative to workingDir.
@@ -75,5 +77,15 @@ export declare function createToolDefinitions(workingDir: string, model?: Langua
     git: import("ai").Tool<{
         action: "add" | "status" | "diff" | "log" | "commit" | "branch" | "checkout" | "stash";
         args?: string | undefined;
+    }, string>;
+    web_search: import("ai").Tool<{
+        query: string;
+        maxResults?: number | undefined;
+    }, string>;
+    todo: import("ai").Tool<{
+        action: "add" | "update" | "list" | "clear";
+        text?: string | undefined;
+        id?: string | undefined;
+        status?: "pending" | "in_progress" | "completed" | undefined;
     }, string>;
 };

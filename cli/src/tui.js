@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { execSync } from "child_process";
+import * as logger from "./logger.js";
 // Track tool usage counts for status bar
 const toolCounts = {};
 // Cache git branch — updated periodically
@@ -33,8 +34,33 @@ export function printHeader(version, provider, model, cwd) {
     console.log(chalk.dim(`  /help`) + chalk.dim(` for commands, `) + chalk.dim(`Ctrl+C`) + chalk.dim(` to cancel`));
     console.log();
 }
+/**
+ * Format a tool call message — matches worker/epic/collaboration-detector.ts exactly.
+ * Format: Tool: toolname → path/command/pattern
+ */
+export function formatToolCall(toolName, toolInput) {
+    let msg = `Tool: ${toolName}`;
+    if (toolInput) {
+        if (toolInput.file_path)
+            msg += ` → ${toolInput.file_path}`;
+        else if (toolInput.path)
+            msg += ` → ${toolInput.path}`;
+        else if (toolInput.command)
+            msg += ` → ${String(toolInput.command).substring(0, 500)}`;
+        else if (toolInput.pattern)
+            msg += ` → pattern: ${toolInput.pattern}`;
+        else {
+            const keys = Object.keys(toolInput).slice(0, 3);
+            if (keys.length > 0) {
+                msg += ` → ${keys.map(k => `${k}: ${String(toolInput[k]).substring(0, 200)}`).join(", ")}`;
+            }
+        }
+    }
+    return msg;
+}
 export function printToolCall(toolName, toolInput) {
     incrementToolCount(toolName);
+    logger.tool(toolName, toolInput);
     // Claude Code style: ↓ ToolName path/detail
     const arrow = chalk.dim("  ↓ ");
     const label = chalk.cyan;
@@ -116,70 +142,15 @@ export function getPersonaEmoji(persona) {
     return PERSONA_EMOJIS[persona] || "🤖";
 }
 /**
- * Print tool result — compact format like WorkerMill's worker.
- * Only shows errors and brief summaries, NOT raw file contents.
+ * Print tool result — matches WorkerMill worker output (collaboration-detector.ts).
+ * Worker only prints "Tool result received" — no content dump.
+ * Tool contents stay in logs; the console shows tool calls + agent text only.
  */
-export function printToolResult(toolName, result) {
-    const isError = result.startsWith("Error:") || result.startsWith("error:");
-    const lines = result.split("\n").filter(l => l.trim());
-    if (isError) {
-        // Show errors in full (up to 5 lines)
-        const errLines = lines.slice(0, 5);
-        for (const line of errLines) {
-            console.log(chalk.red(`    ${line}`));
-        }
-        if (lines.length > 5)
-            console.log(chalk.red(`    ... ${lines.length - 5} more lines`));
-        return;
-    }
-    // Compact summaries by tool type
-    switch (toolName) {
-        case "read_file":
-            console.log(chalk.dim(`    (${lines.length} lines)`));
-            break;
-        case "write_file":
-        case "edit_file":
-        case "patch":
-            // Show the "File written successfully" or similar one-liner
-            if (lines.length === 1) {
-                console.log(chalk.dim(`    ${lines[0]}`));
-            }
-            else {
-                console.log(chalk.dim(`    (${lines.length} lines changed)`));
-            }
-            break;
-        case "bash": {
-            // Show first 5 lines of bash output, skip if empty
-            if (lines.length === 0)
-                break;
-            const shown = lines.slice(0, 5);
-            for (const line of shown) {
-                console.log(chalk.dim(`    ${line}`));
-            }
-            if (lines.length > 5)
-                console.log(chalk.dim(`    ... ${lines.length - 5} more lines`));
-            break;
-        }
-        case "glob":
-        case "grep":
-        case "ls":
-            // Show first 8 lines for search/listing results
-            const searchShown = lines.slice(0, 8);
-            for (const line of searchShown) {
-                console.log(chalk.dim(`    ${line}`));
-            }
-            if (lines.length > 8)
-                console.log(chalk.dim(`    ... ${lines.length - 8} more`));
-            break;
-        default:
-            if (lines.length <= 3) {
-                for (const line of lines)
-                    console.log(chalk.dim(`    ${line}`));
-            }
-            else {
-                console.log(chalk.dim(`    (${lines.length} lines)`));
-            }
-    }
+export function printToolResult(_toolName, _result) {
+    // Worker pattern: console.log(`${prefix} Tool result received`)
+    // The CLI already prints the tool call via wmLog() — matching the worker,
+    // we don't dump tool result contents to the terminal. The agent's own text
+    // output (printed via printAgentText/wmLog) provides the necessary context.
 }
 /**
  * Print a WorkerMill-style log line.
@@ -189,6 +160,7 @@ export function printToolResult(toolName, result) {
 export function wmLog(persona, message) {
     const emoji = getPersonaEmoji(persona);
     console.log(chalk.cyan(`[${emoji} ${persona} 🏠] `) + chalk.white(message));
+    logger.info(`[${persona}] ${message}`);
 }
 /**
  * Write a WorkerMill-style prefix for streaming text.
@@ -204,6 +176,7 @@ export function wmLogPrefix(persona) {
  */
 export function wmCoordinatorLog(message) {
     console.log(chalk.cyan("[coordinator] ") + chalk.white(message));
+    logger.info(`[coordinator] ${message}`);
 }
 function renderTable(lines) {
     const rows = lines.map(line => line.split("|").map(cell => cell.trim()).filter(Boolean));
@@ -375,14 +348,13 @@ function contextBar(tokens, maxContext) {
     const color = usage < 0.5 ? chalk.green : usage < 0.8 ? chalk.yellow : chalk.red;
     return color("\u2588".repeat(filled)) + chalk.dim("\u2591".repeat(empty));
 }
-export function printStatusBar(provider, model, tokens, permissionMode, cost) {
+export function printStatusBar(provider, model, tokens, permissionMode, cost, maxContext) {
     const width = process.stdout.columns || 80;
     const bg = chalk.bgRgb(30, 30, 30);
     // Model display — compact like Claude Code: [model]
     const modelDisplay = ` ${model} `;
-    // Context bar + token count
-    const maxCtx = 128_000; // reasonable default for most models
-    const bar = contextBar(tokens, maxCtx);
+    // Context bar — uses configured context length or provider default
+    const bar = contextBar(tokens, maxContext || 128_000);
     const tokStr = formatTokens(tokens);
     // Tool counts — compact: Bash x3 | Read x5
     const shortNames = {

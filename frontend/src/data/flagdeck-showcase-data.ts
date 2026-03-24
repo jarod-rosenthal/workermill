@@ -900,14 +900,7 @@ Build the complete Go/Fiber backend API with all data models, endpoints, middlew
 - Requires MongoDB 7 on port 27017 (provided by docker-compose)
 - Requires Redis 7 on port 6379 (provided by docker-compose)
 - docker-compose.yml at repo root launches both services with healthchecks`,
-    buildLog: `🔄 **Retry Scenario Detected**
-
-Found existing branch: \`feature/fdfbs-1\`
-Previous commits: 19
-
----
-
-**Docker Compose & CI Pipeline** — completed by devops_engineer
+    buildLog: `**Docker Compose & CI Pipeline** — completed by devops_engineer
 
 ## Summary
 

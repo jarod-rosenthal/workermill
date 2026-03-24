@@ -2,6 +2,8 @@ export interface ProviderConfig {
     model: string;
     apiKey?: string;
     host?: string;
+    /** Ollama context window size (num_ctx). Default: 2048 by Ollama. Set to e.g. 65536 for 64K. */
+    contextLength?: number;
 }
 export interface MCPServerConfig {
     command: string;
@@ -34,4 +36,5 @@ export declare function getProviderForPersona(config: CliConfig, persona?: strin
     model: string;
     apiKey?: string;
     host?: string;
+    contextLength?: number;
 };

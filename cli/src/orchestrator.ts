@@ -1,5 +1,3 @@
-import chalk from "chalk";
-import ora from "ora";
 import { streamText, generateObject, generateText, stepCountIs, type ToolSet } from "ai";
 import { z } from "zod";
 import { createModel, buildOllamaOptions } from "../../packages/engine/src/model-factory.js";
@@ -7,10 +5,25 @@ import { createToolDefinitions } from "../../packages/engine/src/tools/index.js"
 import type { AIProvider } from "../../packages/engine/src/types.js";
 import { loadPersona } from "./personas.js";
 import { CostTracker } from "./cost-tracker.js";
-import { PermissionManager } from "./permissions.js";
-import { printToolCall, printToolResult, printError, getPersonaEmoji, wmLog, wmLogPrefix, wmCoordinatorLog } from "./tui.js";
 import type { CliConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
+
+export interface OrchestrationOutput {
+  /** Log a message from a persona */
+  log: (persona: string, message: string) => void;
+  /** Log a coordinator message */
+  coordinatorLog: (message: string) => void;
+  /** Log an error */
+  error: (message: string) => void;
+  /** Show a status/spinner message (replaces ora) */
+  status: (message: string) => void;
+  /** Stop the spinner/status */
+  statusDone: (message?: string) => void;
+  /** Ask the user a yes/no question. Returns true for yes. */
+  confirm: (prompt: string) => Promise<boolean>;
+  /** Log a tool call */
+  toolCall: (persona: string, toolName: string, toolInput: Record<string, unknown>) => void;
+}
 
 /**
  * Learning instructions — from worker/epic/experts.ts lines 50-69.
@@ -102,6 +115,7 @@ function isTransientError(error: unknown): boolean {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = any;
 
+
 export interface Story {
   id: string;       // Short kebab-case slug
   title: string;
@@ -117,9 +131,90 @@ interface SharedContext {
   learnings: string[];
 }
 
+/** Read-only tool names that are auto-approved without user confirmation */
+const READ_TOOLS = new Set(["read_file", "glob", "grep", "ls", "sub_agent"]);
+
+/** Dangerous command patterns — kept in sync with permissions.ts */
+const DANGEROUS_PATTERNS = [
+  { pattern: /rm\s+(-[a-z]*f|-[a-z]*r|--force|--recursive)/i, label: "recursive/forced delete" },
+  { pattern: /git\s+reset\s+--hard/i, label: "hard reset" },
+  { pattern: /git\s+push\s+.*--force/i, label: "force push" },
+  { pattern: /git\s+clean\s+-[a-z]*f/i, label: "git clean" },
+  { pattern: /drop\s+table/i, label: "drop table" },
+  { pattern: /truncate\s+/i, label: "truncate" },
+  { pattern: /DELETE\s+FROM\s+\w+\s*;/i, label: "DELETE without WHERE" },
+  { pattern: /chmod\s+777/i, label: "chmod 777" },
+  { pattern: />(\/dev\/sda|\/dev\/disk)/i, label: "write to disk device" },
+];
+
+function isDangerous(command: string): string | null {
+  for (const { pattern, label } of DANGEROUS_PATTERNS) {
+    if (pattern.test(command)) return label;
+  }
+  return null;
+}
+
+/**
+ * Check tool permission using output.confirm() instead of readline.
+ * Mirrors the logic from PermissionManager but uses the callback-based output interface.
+ */
+async function checkToolPermission(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  trustAll: boolean,
+  sessionAllow: Set<string>,
+  output: OrchestrationOutput,
+): Promise<boolean> {
+  // Dangerous command check
+  if (toolName === "bash") {
+    const cmd = String(toolInput.command || "");
+    const danger = isDangerous(cmd);
+    if (danger) {
+      if (trustAll) return true;
+      output.error(`DANGEROUS: ${danger}`);
+      output.error(`Command: ${cmd}`);
+      const confirmed = await output.confirm("This is a dangerous operation. Are you sure?");
+      return confirmed;
+    }
+  }
+
+  if (trustAll) return true;
+  if (READ_TOOLS.has(toolName)) return true;
+  if (sessionAllow.has(toolName)) return true;
+
+  // Prompt user via output.confirm
+  const display = formatToolCallDisplay(toolName, toolInput);
+  output.log("system", `Tool: ${toolName} -- ${display}`);
+  const confirmed = await output.confirm(`Allow ${toolName}?`);
+  if (confirmed) {
+    // Auto-allow this tool for the rest of the session (equivalent to "always" in the old y/n/a/t prompt)
+    sessionAllow.add(toolName);
+  }
+  return confirmed;
+}
+
+/** Format a tool call for display (replaces the imported formatToolCall from tui.js) */
+function formatToolCallDisplay(toolName: string, toolInput: Record<string, unknown>): string {
+  let msg = `Tool: ${toolName}`;
+  if (toolInput) {
+    if (toolInput.file_path) msg += ` -> ${toolInput.file_path}`;
+    else if (toolInput.path) msg += ` -> ${toolInput.path}`;
+    else if (toolInput.command) msg += ` -> ${String(toolInput.command).substring(0, 500)}`;
+    else if (toolInput.pattern) msg += ` -> pattern: ${toolInput.pattern}`;
+    else {
+      const keys = Object.keys(toolInput).slice(0, 3);
+      if (keys.length > 0) {
+        msg += ` -> ${keys.map(k => `${k}: ${String(toolInput[k]).substring(0, 200)}`).join(", ")}`;
+      }
+    }
+  }
+  return msg;
+}
+
 export async function classifyComplexity(
   config: CliConfig,
-  userInput: string
+  userInput: string,
+  output: OrchestrationOutput,
 ): Promise<{ isMulti: boolean; reason: string }> {
   const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(config);
 
@@ -175,7 +270,8 @@ function topologicalSort(stories: Story[]): Story[] {
   function visit(id: string): void {
     if (visited.has(id)) return;
     if (visiting.has(id)) {
-      console.log(chalk.yellow(`  ⚠ Circular dependency at ${id}, using input order`));
+      // Circular dependency — logged via output would require passing output here,
+      // but this is a pure function. The warning is non-critical so we skip it.
       return;
     }
     visiting.add(id);
@@ -200,7 +296,8 @@ async function planStories(
   config: CliConfig,
   userTask: string,
   workingDir: string,
-  sandboxed = true,
+  sandboxed: boolean,
+  output: OrchestrationOutput,
 ): Promise<Story[]> {
   const planner = loadPersona("planner");
 
@@ -228,10 +325,8 @@ async function planStories(
         readOnlyTools[toolName] = {
           ...toolDef,
           execute: async (input: Record<string, unknown>) => {
-            wmLog("planner", `Tool: ${toolName}`);
+            output.toolCall("planner", toolName, input);
             const result = await toolDef.execute(input);
-            const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-            printToolResult(toolName, resultStr);
             return result;
           },
         };
@@ -275,8 +370,8 @@ Return ONLY a JSON code block with this structure:
 
 Available personas: backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, tech_lead`;
 
-  wmLog("planner", `Starting planning agent using ${pModel}`);
-  wmLog("planner", "Reading repository structure...");
+  output.log("planner", `Starting planning agent using ${pModel}`);
+  output.log("planner", "Reading repository structure...");
 
   // Use onStepFinish — same pattern as worker/ai-clients/ai-sdk-client.ts
   let planText = "";
@@ -296,7 +391,7 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
           if (line.trim().startsWith("{") || line.trim().startsWith("}") ||
               line.trim().startsWith('"') || line.trim().startsWith("[") ||
               line.trim().startsWith("]") || line.includes("```")) continue;
-          wmLog("planner", line);
+          output.log("planner", line);
         }
       }
     },
@@ -310,10 +405,10 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
     planText = finalText;
   }
 
-  let stories = parseStoriesFromText(planText);
+  let stories = parseStoriesFromText(planText, output);
 
   if (stories.length === 0) {
-    console.log(chalk.yellow("  ⚠ Planner didn't produce structured stories, falling back to single story"));
+    output.log("system", "Planner didn't produce structured stories, falling back to single story");
     stories = [{
       id: "implement",
       title: userTask.slice(0, 60),
@@ -326,7 +421,7 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
 }
 
 /** Parse stories JSON from planner output text */
-function parseStoriesFromText(text: string): Story[] {
+function parseStoriesFromText(text: string, output: OrchestrationOutput): Story[] {
   // Strategy 1: JSON code block (```json ... ```)
   // Use greedy match and try multiple code blocks if first fails
   const codeBlocks = [...text.matchAll(/```(?:json)?\s*\n?([\s\S]*?)```/g)];
@@ -365,7 +460,7 @@ function parseStoriesFromText(text: string): Story[] {
 
   // Log what we couldn't parse for debugging
   const preview = text.slice(0, 500);
-  console.log(chalk.dim(`  (planner output preview: ${preview}${text.length > 500 ? "..." : ""})`));
+  output.log("system", `(planner output preview: ${preview}${text.length > 500 ? "..." : ""})`);
 
   return [];
 }
@@ -494,8 +589,8 @@ export async function runOrchestration(
   config: CliConfig,
   userTask: string,
   trustAll: boolean,
-  sandboxed = true,
-  agentRl?: import("readline").Interface,
+  sandboxed: boolean,
+  output: OrchestrationOutput,
 ): Promise<void> {
   const costTracker = new CostTracker();
   const context: SharedContext = {
@@ -504,21 +599,19 @@ export async function runOrchestration(
     decisions: [],
     learnings: [],
   };
-  const permissions = new PermissionManager(trustAll);
-  if (agentRl) permissions.setReadline(agentRl);
+  const sessionAllow = new Set<string>();
   const workingDir = process.cwd();
 
   // Planner explores codebase and produces stories
-  const plannerStories = await planStories(config, userTask, workingDir, sandboxed);
+  const plannerStories = await planStories(config, userTask, workingDir, sandboxed, output);
 
   // Show the plan — WorkerMill format
-  wmLog("planner", `Plan generated: ${plannerStories.length} stories`);
+  output.log("planner", `Plan generated: ${plannerStories.length} stories`);
   plannerStories.forEach((s, i) => {
-    const emoji = getPersonaEmoji(s.persona);
-    wmLog("planner", `Step ${i + 1}: [${s.persona}] ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`);
+    output.log("planner", `Step ${i + 1}: [${s.persona}] ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`);
   });
-  wmLog("planner", `Plan validated: ${plannerStories.length} stories. Task queued for execution.`);
-  console.log();
+  output.log("planner", `Plan validated: ${plannerStories.length} stories. Task queued for execution.`);
+  output.log("system", "");
 
   // Optional critic pass (--critic or config.review.useCritic)
   if (config.review?.useCritic) {
@@ -534,17 +627,15 @@ export async function runOrchestration(
           criticReadOnly[name] = {
             ...toolDef,
             execute: async (input: Record<string, unknown>) => {
-              wmLog("critic", `Tool: ${name}`);
+              output.log("critic", formatToolCallDisplay(name, input));
               const result = await toolDef.execute(input);
-              const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-              printToolResult(name, resultStr);
               return result;
             },
           };
         }
       }
 
-      const criticSpinner = ora({ stream: process.stdout, text: chalk.white("Critic reviewing plan..."), prefixText: "  " }).start();
+      output.status("Critic reviewing plan...");
       const criticStream = streamText({
         model: criticModel,
         system: critic.systemPrompt,
@@ -556,12 +647,12 @@ export async function runOrchestration(
       });
       for await (const _chunk of criticStream.textStream) { /* drive */ }
       const criticText = await criticStream.text;
-      criticSpinner.stop();
+      output.statusDone();
 
       const score = extractScore(criticText);
-      wmLog("critic", `::review_score::${score}`);
-      wmLog("critic", score >= 80 ? "Plan approved" : "Plan needs revision");
-      console.log();
+      output.log("critic", `::review_score::${score}`);
+      output.log("critic", score >= 80 ? "Plan approved" : "Plan needs revision");
+      output.log("system", "");
     }
   }
 
@@ -570,24 +661,24 @@ export async function runOrchestration(
 
   // Prompt user to proceed (unless --trust mode)
   if (!trustAll) {
-    let answer = "n";
+    let proceed = false;
     try {
-      answer = await permissions.askUser(chalk.dim("  Execute this plan? (y/n): "));
+      proceed = await output.confirm("Execute this plan?");
     } catch {
-      // readline closed — default to no
+      // confirm failed — default to no
     }
-    if (answer.trim().toLowerCase() !== "y" && answer.trim().toLowerCase() !== "yes") {
-      console.log(chalk.dim("  Plan cancelled.\n"));
+    if (!proceed) {
+      output.log("system", "Plan cancelled.");
       return;
     }
-    console.log();
+    output.log("system", "");
   }
 
   for (let i = 0; i < sorted.length; i++) {
     const story = sorted[i];
     const persona = loadPersona(story.persona);
     if (!persona) {
-      printError(`Unknown persona: ${story.persona}`);
+      output.error(`Unknown persona: ${story.persona}`);
       continue;
     }
 
@@ -604,17 +695,12 @@ export async function runOrchestration(
       if (envVar && !process.env[envVar]) process.env[envVar] = apiKey;
     }
 
-    console.log(chalk.bold(`\n  ─── Story ${i + 1}/${sorted.length} ───\n`));
-    wmCoordinatorLog(`Task claimed by orchestrator`);
-    wmLog(story.persona, `Starting ${story.title}`);
-    wmLog(story.persona, `Executing story with AIClient (model: ${modelName})...`);
+    output.log("system", `--- Story ${i + 1}/${sorted.length} ---`);
+    output.coordinatorLog(`Task claimed by orchestrator`);
+    output.log(story.persona, `Starting ${story.title}`);
+    output.log(story.persona, `Executing story with AIClient (model: ${modelName})...`);
 
-    const spinner = ora({
-      stream: process.stdout,
-      text: "",
-      prefixText: "",
-      spinner: "dots",
-    }).start();
+    output.status("");
 
     const model = createModel(provider as AIProvider, modelName, host, contextLength);
 
@@ -628,25 +714,19 @@ export async function runOrchestration(
         personaTools[toolName] = {
           ...toolDef,
           execute: async (input: Record<string, unknown>) => {
-            const allowed = await permissions.checkPermission(toolName, input);
+            const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output);
             if (!allowed) return "Tool execution denied by user.";
 
-            // Dedup: skip printing if identical to last call
-            const callKey = `${toolName}:${JSON.stringify(input)}`;
-            const isDuplicate = callKey === lastToolCall;
-            lastToolCall = callKey;
+            const sig = `${toolName}:${JSON.stringify(input)}`;
+            const isDuplicate = sig === lastToolCall;
+            lastToolCall = sig;
 
             if (!isDuplicate) {
-              spinner.stop();
-              // WorkerMill format: [emoji persona 🏠] Tool: tool_name
-              wmLog(story.persona, `Tool: ${toolName}`);
+              output.statusDone();
+              output.toolCall(story.persona, toolName, input);
             }
             const result = await toolDef.execute(input);
-            const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-            if (!isDuplicate) {
-              printToolResult(toolName, resultStr);
-            }
-            spinner.start();
+            output.status("");
             return result;
           },
         };
@@ -713,12 +793,12 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
         ...buildOllamaOptions(provider as AIProvider, contextLength),
         onStepFinish({ text }) {
           if (text) {
-            spinner.stop();
+            output.statusDone();
             const lines = text.split("\n").filter(l => l.trim());
             for (const line of lines) {
               if (line.includes("::decision::") || line.includes("::learning::") ||
                   line.includes("::file_created::") || line.includes("::file_modified::")) continue;
-              wmLog(story.persona, line);
+              output.log(story.persona, line);
             }
           }
         },
@@ -731,7 +811,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
       allText = text;
       const usage = await stream.totalUsage;
 
-      spinner.stop();
+      output.statusDone();
 
       // Extract markers and display as WorkerMill-style persona activity
       const decisionMatches = text.match(/::decision::(.*?)(?=::\w+::|$)/gs);
@@ -739,7 +819,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
         for (const m of decisionMatches) {
           const decision = m.replace("::decision::", "").trim();
           context.decisions.push(decision);
-          wmLog(story.persona, decision);
+          output.log(story.persona, decision);
         }
       }
 
@@ -769,20 +849,20 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
       const outTokens = usage?.outputTokens || 0;
       costTracker.addUsage(persona.name, provider, modelName, inTokens, outTokens);
 
-      wmLog(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
-      console.log();
+      output.log(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
+      output.log("system", "");
       break; // Story succeeded, exit revision loop
     } catch (err) {
-      spinner.stop();
+      output.statusDone();
       const errMsg = err instanceof Error ? err.message : String(err);
 
       // Retry on transient errors (network, 5xx) — from coordinator-utils.ts
       if (isTransientError(err) && revision < 2) {
-        wmLog(story.persona, `Transient error: ${errMsg} — retrying...`);
+        output.log(story.persona, `Transient error: ${errMsg} — retrying...`);
         continue; // retry this revision
       }
 
-      printError(`Story ${i + 1} failed: ${errMsg}`);
+      output.error(`Story ${i + 1} failed: ${errMsg}`);
       break;
     }
 
@@ -813,7 +893,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
     const reviewModel = createModel(revProvider as AIProvider, revModel, revHost, revCtx);
     const reviewTools = createToolDefinitions(workingDir, reviewModel, sandboxed);
 
-    // Read-only tools for reviewer — wrapped with wmLog output
+    // Read-only tools for reviewer — wrapped with output.log
     const reviewerTools: Record<string, AnyToolDef> = {};
     for (const toolName of reviewer.tools) {
       const toolDef = reviewTools[toolName as keyof typeof reviewTools] as AnyToolDef;
@@ -821,10 +901,8 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
         reviewerTools[toolName] = {
           ...toolDef,
           execute: async (input: Record<string, unknown>) => {
-            wmLog("tech_lead", `Tool: ${toolName}`);
+            output.log("tech_lead", formatToolCallDisplay(toolName, input));
             const result = await toolDef.execute(input);
-            const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-            printToolResult(toolName, resultStr);
             return result;
           },
         };
@@ -834,14 +912,10 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
     let previousReviewFeedback = "";
     for (let reviewRound = 0; reviewRound <= maxRevisions; reviewRound++) {
       const isRevision = reviewRound > 0;
-      wmCoordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound}/${maxRevisions})...` : "Starting Tech Lead review...");
-      wmLog("tech_lead", "Starting agent execution");
+      output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound}/${maxRevisions})...` : "Starting Tech Lead review...");
+      output.log("tech_lead", "Starting agent execution");
 
-      const reviewSpinner = ora({
-        stream: process.stdout,
-        text: chalk.white(isRevision ? "Reviewer — Re-checking after revisions" : "Reviewer — Checking code quality"),
-        prefixText: "  ",
-      }).start();
+      output.status(isRevision ? "Reviewer -- Re-checking after revisions" : "Reviewer -- Checking code quality");
 
       try {
         // Build review prompt with full context — matches WorkerMill's inline-reviewer.ts buildReviewPrompt()
@@ -922,11 +996,11 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           ...buildOllamaOptions(revProvider as AIProvider, revCtx),
           onStepFinish({ text }) {
             if (text) {
-              reviewSpinner.stop();
+              output.statusDone();
               const lines = text.split("\n").filter(l => l.trim());
               for (const line of lines) {
                 if (line.includes("::review_score::") || line.includes("::review_verdict::")) continue;
-                wmLog("tech_lead", line);
+                output.log("tech_lead", line);
               }
             }
           },
@@ -937,19 +1011,19 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         const reviewText = finalReviewText && finalReviewText.length > allReviewText.length ? finalReviewText : allReviewText;
         const reviewUsage = await reviewStream.totalUsage;
 
-        reviewSpinner.stop();
+        output.statusDone();
 
         // Extract review markers (with fallback parsing)
         const score = extractScore(reviewText);
         const approved = score >= approvalThreshold;
 
         // Display review result — WorkerMill format
-        wmLog("tech_lead", `::code_quality_score::${score}`);
-        wmLog("tech_lead", `::review_decision::${approved ? "approved" : "needs_revision"}`);
-        wmCoordinatorLog(approved ? `Review approved (score: ${score}/100)` : `Review needs revision (score: ${score}/100)`);
+        output.log("tech_lead", `::code_quality_score::${score}`);
+        output.log("tech_lead", `::review_decision::${approved ? "approved" : "needs_revision"}`);
+        output.coordinatorLog(approved ? `Review approved (score: ${score}/100)` : `Review needs revision (score: ${score}/100)`);
         // Save feedback for next review round — so tech_lead can check if issues were addressed
         previousReviewFeedback = reviewText;
-        console.log();
+        output.log("system", "");
 
         // Track reviewer cost
         costTracker.addUsage(`Reviewer (round ${reviewRound + 1})`, revProvider, revModel,
@@ -958,7 +1032,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         // If approved or out of revision attempts, done
         if (approved) break;
         if (reviewRound >= maxRevisions) {
-          console.log(chalk.yellow(`  ⚠ Max review revisions (${maxRevisions}) reached`));
+          output.log("system", `Max review revisions (${maxRevisions}) reached`);
           break;
         }
 
@@ -966,19 +1040,16 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         let shouldRevise = autoRevise;
         if (!autoRevise) {
           try {
-            const answer = await permissions.askUser(
-              chalk.dim("  Revise and re-review? ") + chalk.white(`(y/n, ${maxRevisions - reviewRound} attempt${maxRevisions - reviewRound > 1 ? "s" : ""} left): `)
-            );
-            shouldRevise = answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
+            shouldRevise = await output.confirm(`Revise and re-review? (${maxRevisions - reviewRound} attempt${maxRevisions - reviewRound > 1 ? "s" : ""} left)`);
           } catch {
             shouldRevise = false; // cancelled
           }
         } else {
-          console.log(chalk.dim(`  Auto-revising (${maxRevisions - reviewRound} attempt${maxRevisions - reviewRound > 1 ? "s" : ""} left)...`));
+          output.log("system", `Auto-revising (${maxRevisions - reviewRound} attempt${maxRevisions - reviewRound > 1 ? "s" : ""} left)...`);
         }
 
         if (!shouldRevise) {
-          console.log(chalk.dim("  Skipping revision, proceeding to commit."));
+          output.log("system", "Skipping revision, proceeding to commit.");
           break;
         }
 
@@ -988,24 +1059,24 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
 
         if (affected) {
           const selectiveInfo = `stories ${affected.stories.join(", ")}`;
-          wmCoordinatorLog(`Selective revision: ${selectiveInfo}`);
+          output.coordinatorLog(`Selective revision: ${selectiveInfo}`);
           if (Object.keys(affected.reasons).length > 0) {
             for (const [idx, reason] of Object.entries(affected.reasons)) {
-              wmCoordinatorLog(`  Story ${idx}: ${reason}`);
+              output.coordinatorLog(`  Story ${idx}: ${reason}`);
             }
           }
         } else {
-          wmCoordinatorLog("Full revision (all stories)");
+          output.coordinatorLog("Full revision (all stories)");
         }
 
-        console.log(chalk.bold("\n  ─── Revision Pass ───\n"));
+        output.log("system", "--- Revision Pass ---");
 
         for (let i = 0; i < sorted.length; i++) {
           const story = sorted[i];
 
           // Skip stories not affected by the review (selective revision)
           if (affectedSet && !affectedSet.has(i + 1)) {
-            wmCoordinatorLog(`Skipping story ${i + 1}/${sorted.length} — not affected`);
+            output.coordinatorLog(`Skipping story ${i + 1}/${sorted.length} — not affected`);
             continue;
           }
 
@@ -1027,15 +1098,10 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
             }
           }
 
-          wmCoordinatorLog(`Revision pass for story ${i + 1}/${sorted.length}`);
-          wmLog(story.persona, `Starting revision: ${story.title}`);
+          output.coordinatorLog(`Revision pass for story ${i + 1}/${sorted.length}`);
+          output.log(story.persona, `Starting revision: ${story.title}`);
 
-          const revSpinner = ora({
-            stream: process.stdout,
-            text: "",
-            prefixText: "",
-            spinner: "dots",
-          }).start();
+          output.status("");
 
           const storyModel = createModel(sProvider as AIProvider, sModel, sHost, sCtx);
           const storyAllTools = createToolDefinitions(workingDir, storyModel, sandboxed);
@@ -1046,14 +1112,12 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
               storyTools[toolName] = {
                 ...toolDef,
                 execute: async (input: Record<string, unknown>) => {
-                  const allowed = await permissions.checkPermission(toolName, input);
+                  const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output);
                   if (!allowed) return "Tool execution denied by user.";
-                  revSpinner.stop();
-                  wmLog(story.persona, `Tool: ${toolName}`);
+                  output.statusDone();
+                  output.log(story.persona, formatToolCallDisplay(toolName, input));
                   const result = await toolDef.execute(input);
-                  const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-                  printToolResult(toolName, resultStr);
-                  revSpinner.start();
+                  output.status("");
                   return result;
                 },
               };
@@ -1090,11 +1154,11 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
               ...buildOllamaOptions(sProvider as AIProvider, sCtx),
               onStepFinish({ text }) {
                 if (text) {
-                  revSpinner.stop();
+                  output.statusDone();
                   const lines = text.split("\n").filter(l => l.trim());
                   for (const line of lines) {
                     if (line.includes("::")) continue;
-                    wmLog(story.persona, line);
+                    output.log(story.persona, line);
                   }
                 }
               },
@@ -1102,23 +1166,23 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
 
             for await (const _chunk of revStream.textStream) { /* drive */ }
             const revUsage = await revStream.totalUsage;
-            revSpinner.stop();
+            output.statusDone();
 
             costTracker.addUsage(`${storyPersona.name} (revision)`, sProvider, sModel,
               revUsage?.inputTokens || 0, revUsage?.outputTokens || 0);
 
-            wmLog(story.persona, `${story.title} — revision complete!`);
+            output.log(story.persona, `${story.title} — revision complete!`);
           } catch (err) {
-            revSpinner.stop();
-            console.log(chalk.yellow(`  ⚠ Revision failed for story ${i + 1}: ${err instanceof Error ? err.message : String(err)}`));
+            output.statusDone();
+            output.log("system", `Revision failed for story ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
-        console.log();
+        output.log("system", "");
         // Loop back to review again
       } catch (err) {
-        reviewSpinner.stop();
-        console.log(chalk.yellow(`  ⚠ Review skipped: ${err instanceof Error ? err.message : String(err)}`));
-        console.log();
+        output.statusDone();
+        output.log("system", `Review skipped: ${err instanceof Error ? err.message : String(err)}`);
+        output.log("system", "");
         break;
       }
     } // end review loop
@@ -1132,7 +1196,7 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
     try {
       execSync("git rev-parse --git-dir", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
     } catch {
-      wmCoordinatorLog("Initializing git repository...");
+      output.coordinatorLog("Initializing git repository...");
       execSync("git init", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
       // Create default .gitignore if none exists
       const fs = await import("fs");
@@ -1140,7 +1204,7 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
       if (!fs.existsSync(gitignorePath)) {
         fs.writeFileSync(gitignorePath, "node_modules/\ndist/\n.env\n.workermill/\n*.log\n", "utf-8");
       }
-      wmCoordinatorLog("Git repo initialized");
+      output.coordinatorLog("Git repo initialized");
     }
 
     const diff = execSync("git diff --stat", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
@@ -1149,22 +1213,22 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
     const hasChanges = diff || untracked;
 
     if (hasChanges) {
-      console.log(chalk.bold("  ─── Changes ───"));
+      output.log("system", "--- Changes ---");
       if (diff) {
-        console.log(chalk.dim("  " + diff.split("\n").join("\n  ")));
+        output.log("system", diff);
       }
       if (untracked) {
         const untrackedFiles = untracked.split("\n");
-        console.log(chalk.dim("  New files:"));
+        output.log("system", "New files:");
         for (const f of untrackedFiles) {
-          console.log(chalk.dim(`    + ${f}`));
+          output.log("system", `  + ${f}`);
         }
       }
-      console.log();
+      output.log("system", "");
 
       if (!trustAll) {
-        const answer = await permissions.askUser(chalk.dim("  Commit these changes? (y/n): "));
-        if (answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes") {
+        const commitConfirmed = await output.confirm("Commit these changes?");
+        if (commitConfirmed) {
           // Stage specific files from context (NOT git add -A)
           const filesToStage = [...context.filesCreated, ...context.filesModified].filter(Boolean);
           if (filesToStage.length > 0) {
@@ -1180,7 +1244,7 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
           const storyTitles = sorted.map(s => s.title).join(", ");
           const msg = `feat: ${storyTitles}`.slice(0, 72);
           execSync(`git commit -m "${msg.replace(/"/g, '\\"')}"`, { cwd: workingDir, stdio: "pipe" });
-          console.log(chalk.green("  ✓ Changes committed"));
+          output.log("system", "Changes committed");
         }
       }
     }
@@ -1189,8 +1253,8 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
   }
 
   // Print cost summary
-  console.log(chalk.bold("  ─── Session Complete ───"));
-  console.log();
-  console.log(chalk.dim("  " + costTracker.getSummary().split("\n").join("\n  ")));
-  console.log();
+  output.log("system", "--- Session Complete ---");
+  output.log("system", "");
+  output.log("system", costTracker.getSummary());
+  output.log("system", "");
 }

@@ -1,28 +1,24 @@
 #!/usr/bin/env node
+import React from "react";
+import { render } from "ink";
 import { Command } from "commander";
-import { loadConfig } from "./config.js";
+import { loadConfig, getProviderForPersona } from "./config.js";
 import { runSetup } from "./setup.js";
-import { runAgent } from "./agent.js";
-import { printHeader } from "./tui.js";
+import { Root } from "./ui/Root.js";
 
-const VERSION = "0.1.9";
+const VERSION = "0.2.0";
 
 const program = new Command()
   .name("workermill")
-  .description("AI coding agent with multi-expert orchestration")
+  .description("AI coding agent with multi-provider support")
   .version(VERSION)
   .option("--provider <provider>", "Override default provider")
   .option("--model <model>", "Override model")
   .option("--trust", "Skip all tool permission prompts")
   .option("--resume", "Resume the last conversation")
   .option("--plan", "Start in plan mode (read-only tools)")
-  .option("--auto-revise", "Auto-revise on failed reviews without prompting")
-  .option("--max-revisions <n>", "Max review→revise cycles (default: 2)", parseInt)
-  .option("--critic", "Run separate critic pass on plan before execution")
-  .option("--full-disk", "Allow tools to access files outside working directory (default: restricted to cwd)")
+  .option("--full-disk", "Allow tools to access files outside working directory")
   .action(async (options) => {
-    // Header is shown by runAgent after config is loaded (so it can show provider info)
-
     // Load or create config
     let config = loadConfig();
     if (!config) {
@@ -40,19 +36,26 @@ const program = new Command()
       }
     }
 
-    // Apply review overrides
-    if (options.autoRevise || options.maxRevisions || options.critic) {
-      config.review = {
-        ...config.review,
-        ...(options.autoRevise ? { autoRevise: true } : {}),
-        ...(options.maxRevisions ? { maxRevisions: options.maxRevisions } : {}),
-        ...(options.critic ? { useCritic: true } : {}),
-      };
-    }
+    const { provider, model, apiKey, host, contextLength } = getProviderForPersona(config);
+    const workingDir = process.cwd();
 
-    // Run interactive agent
-    const fullDisk = options.fullDisk || false;
-    await runAgent(config, options.trust || false, options.resume || false, options.plan || false, fullDisk);
+    // Render the Ink application
+    const { waitUntilExit } = render(
+      React.createElement(Root, {
+        provider,
+        model,
+        apiKey,
+        host,
+        contextLength,
+        trustAll: options.trust || false,
+        planMode: options.plan || false,
+        sandboxed: !options.fullDisk,
+        resume: options.resume || false,
+        workingDir,
+      }),
+    );
+
+    await waitUntilExit();
   });
 
 program.parse();

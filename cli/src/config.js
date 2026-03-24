@@ -60,5 +60,6 @@ export function getProviderForPersona(config, persona) {
             ? process.env[providerConfig.apiKey.slice(5, -1)] || undefined
             : providerConfig.apiKey,
         host: providerConfig.host,
+        contextLength: providerConfig.contextLength,
     };
 }

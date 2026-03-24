@@ -5,8 +5,8 @@ import { saveConfig } from "./config.js";
 const PROVIDERS = [
     { name: "ollama", display: "Ollama (local, no API key needed)", needsKey: false, defaultModel: "qwen3-coder:30b" },
     { name: "anthropic", display: "Anthropic (Claude)", needsKey: true, defaultModel: "claude-sonnet-4-6", envVar: "ANTHROPIC_API_KEY" },
-    { name: "openai", display: "OpenAI (GPT)", needsKey: true, defaultModel: "gpt-4o", envVar: "OPENAI_API_KEY" },
-    { name: "google", display: "Google (Gemini)", needsKey: true, defaultModel: "gemini-2.5-pro", envVar: "GOOGLE_API_KEY" },
+    { name: "openai", display: "OpenAI (GPT)", needsKey: true, defaultModel: "gpt-5.4", envVar: "OPENAI_API_KEY" },
+    { name: "google", display: "Google (Gemini)", needsKey: true, defaultModel: "gemini-3.1-pro", envVar: "GOOGLE_API_KEY" },
 ];
 function ask(rl, question) {
     return new Promise((resolve) => rl.question(question, resolve));
@@ -79,9 +79,12 @@ export async function runSetup() {
                 continue;
             }
         }
+        // Default context length for Ollama — 64K
+        providerConfig.contextLength = 65536;
         if (connectedHost) {
             providerConfig.host = connectedHost;
             console.log(chalk.green(`  ✓ Connected to Ollama at ${connectedHost}`));
+            console.log(chalk.dim(`  Context window: ${providerConfig.contextLength.toLocaleString()} tokens`));
             if (models.length > 0) {
                 console.log(chalk.dim(`  Available models: ${models.map(m => m.name).join(", ")}`));
             }

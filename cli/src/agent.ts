@@ -13,7 +13,7 @@ import type { AIProvider } from "../../packages/engine/src/types.js";
 type AnyToolDef = any;
 import { PermissionManager } from "./permissions.js";
 import { killActiveProcess } from "../../packages/engine/src/tools/bash.js";
-import { printToolCall, printToolResult, printError, printStatusBar, printHeader, wmLog, wmLogPrefix } from "./tui.js";
+import { printToolCall, printError, printStatusBar, printHeader, wmLog, wmLogPrefix, formatToolCall } from "./tui.js";
 import { handleCommand as handleSlashCommand, type CommandContext } from "./commands.js";
 import { CostTracker } from "./cost-tracker.js";
 import { initTerminal, exitTerminal, setStatusBar, showStatusBar } from "./terminal.js";
@@ -138,13 +138,11 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
           return "Tool execution denied by user.";
         }
         logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
-        wmLog(singleAgentPersona, `Tool: ${name}`);
+        wmLog(singleAgentPersona, formatToolCall(name, input));
         agentState = "tool_executing";
         const result = await td.execute(input);
         agentState = "streaming";
-        const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-        logger.debug("Tool result", { tool: name, result: resultStr.slice(0, 200) });
-        printToolResult(name, resultStr);
+        logger.debug("Tool result", { tool: name, result: (typeof result === "string" ? result : JSON.stringify(result)).slice(0, 200) });
         return result;
       },
     };

@@ -78,12 +78,12 @@ export async function execute({ command, cwd, timeout = 120000, }) {
         let killed = false;
         // Use shell to execute the command
         // Use /bin/bash explicitly to ensure it's found in container environments
+        // Use the user's actual PATH — don't override it.
+        // The hardcoded PATH was for Docker containers; in CLI mode the user's
+        // local tools (nvm, homebrew, cargo, etc.) must be available.
         const child = spawn("/bin/bash", ["-c", command], {
             cwd: cwd || process.cwd(),
-            env: {
-                ...process.env,
-                PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-            },
+            env: process.env,
             stdio: ["pipe", "pipe", "pipe"],
             detached: true,
         });

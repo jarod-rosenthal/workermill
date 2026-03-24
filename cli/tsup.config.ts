@@ -19,6 +19,12 @@ export default defineConfig({
     "chalk",
     "commander",
     "ora",
+    "ink",
+    "react",
+    "react/jsx-runtime",
+    "ink-text-input",
+    "marked",
+    "marked-terminal",
     // Node.js builtins
     "readline",
     "fs",

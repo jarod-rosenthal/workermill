@@ -3,7 +3,7 @@ import { Command } from "commander";
 import { loadConfig } from "./config.js";
 import { runSetup } from "./setup.js";
 import { runAgent } from "./agent.js";
-const VERSION = "0.1.0";
+const VERSION = "0.1.9";
 const program = new Command()
     .name("workermill")
     .description("AI coding agent with multi-expert orchestration")

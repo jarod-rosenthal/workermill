@@ -8,8 +8,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "jsx": "react-jsx"
   },
-  "include": ["src/**/*.ts", "../packages/engine/src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../packages/engine/src/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

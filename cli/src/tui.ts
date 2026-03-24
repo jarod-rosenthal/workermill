@@ -36,6 +36,27 @@ export function printHeader(version: string, provider?: string, model?: string, 
   console.log();
 }
 
+/**
+ * Format a tool call message — matches worker/epic/collaboration-detector.ts exactly.
+ * Format: Tool: toolname → path/command/pattern
+ */
+export function formatToolCall(toolName: string, toolInput: Record<string, unknown>): string {
+  let msg = `Tool: ${toolName}`;
+  if (toolInput) {
+    if (toolInput.file_path) msg += ` → ${toolInput.file_path}`;
+    else if (toolInput.path) msg += ` → ${toolInput.path}`;
+    else if (toolInput.command) msg += ` → ${String(toolInput.command).substring(0, 500)}`;
+    else if (toolInput.pattern) msg += ` → pattern: ${toolInput.pattern}`;
+    else {
+      const keys = Object.keys(toolInput).slice(0, 3);
+      if (keys.length > 0) {
+        msg += ` → ${keys.map(k => `${k}: ${String(toolInput[k]).substring(0, 200)}`).join(", ")}`;
+      }
+    }
+  }
+  return msg;
+}
+
 export function printToolCall(toolName: string, toolInput: Record<string, unknown>): void {
   incrementToolCount(toolName);
   logger.tool(toolName, toolInput);
@@ -134,65 +155,15 @@ export function getPersonaEmoji(persona: string): string {
 }
 
 /**
- * Print tool result — compact format like WorkerMill's worker.
- * Only shows errors and brief summaries, NOT raw file contents.
+ * Print tool result — matches WorkerMill worker output (collaboration-detector.ts).
+ * Worker only prints "Tool result received" — no content dump.
+ * Tool contents stay in logs; the console shows tool calls + agent text only.
  */
-export function printToolResult(toolName: string, result: string): void {
-  const isError = result.startsWith("Error:") || result.startsWith("error:");
-  const lines = result.split("\n").filter(l => l.trim());
-
-  if (isError) {
-    // Show errors in full (up to 5 lines)
-    const errLines = lines.slice(0, 5);
-    for (const line of errLines) {
-      console.log(chalk.red(`    ${line}`));
-    }
-    if (lines.length > 5) console.log(chalk.red(`    ... ${lines.length - 5} more lines`));
-    return;
-  }
-
-  // Compact summaries by tool type
-  switch (toolName) {
-    case "read_file":
-      console.log(chalk.dim(`    (${lines.length} lines)`));
-      break;
-    case "write_file":
-    case "edit_file":
-    case "patch":
-      // Show the "File written successfully" or similar one-liner
-      if (lines.length === 1) {
-        console.log(chalk.dim(`    ${lines[0]}`));
-      } else {
-        console.log(chalk.dim(`    (${lines.length} lines changed)`));
-      }
-      break;
-    case "bash": {
-      // Show first 5 lines of bash output, skip if empty
-      if (lines.length === 0) break;
-      const shown = lines.slice(0, 5);
-      for (const line of shown) {
-        console.log(chalk.dim(`    ${line}`));
-      }
-      if (lines.length > 5) console.log(chalk.dim(`    ... ${lines.length - 5} more lines`));
-      break;
-    }
-    case "glob":
-    case "grep":
-    case "ls":
-      // Show first 8 lines for search/listing results
-      const searchShown = lines.slice(0, 8);
-      for (const line of searchShown) {
-        console.log(chalk.dim(`    ${line}`));
-      }
-      if (lines.length > 8) console.log(chalk.dim(`    ... ${lines.length - 8} more`));
-      break;
-    default:
-      if (lines.length <= 3) {
-        for (const line of lines) console.log(chalk.dim(`    ${line}`));
-      } else {
-        console.log(chalk.dim(`    (${lines.length} lines)`));
-      }
-  }
+export function printToolResult(_toolName: string, _result: string): void {
+  // Worker pattern: console.log(`${prefix} Tool result received`)
+  // The CLI already prints the tool call via wmLog() — matching the worker,
+  // we don't dump tool result contents to the terminal. The agent's own text
+  // output (printed via printAgentText/wmLog) provides the necessary context.
 }
 
 /**

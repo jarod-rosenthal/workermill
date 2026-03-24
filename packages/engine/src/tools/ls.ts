@@ -48,7 +48,7 @@ interface LsResult {
   error?: string;
 }
 
-const DEFAULT_IGNORE = ["node_modules", ".git", "__pycache__", ".next", ".nuxt"];
+const DEFAULT_IGNORE = ["node_modules", ".git", "__pycache__", ".next", ".nuxt", ".workermill"];
 
 function shouldIgnore(name: string, ignorePatterns: string[]): boolean {
   return ignorePatterns.some((pattern) => {

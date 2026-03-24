@@ -93,6 +93,7 @@ function walkDir(
       if (entry.name === "node_modules") continue;
       if (entry.name === "__pycache__") continue;
       if (entry.name === ".git") continue;
+      if (entry.name === ".workermill") continue;
 
       const fullPath = path.join(dir, entry.name);
 

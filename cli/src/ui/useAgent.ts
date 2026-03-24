@@ -18,6 +18,7 @@ import {
 import { shouldCompact, compactMessages } from "../compaction.js";
 import { CostTracker } from "../cost-tracker.js";
 import { killActiveProcess } from "../../../packages/engine/src/tools/bash.js";
+import * as logger from "../logger.js";
 import type {
   Message,
   ToolCallInfo,
@@ -186,7 +187,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       const envMap: Record<string, string> = {
         anthropic: "ANTHROPIC_API_KEY",
         openai: "OPENAI_API_KEY",
-        google: "GOOGLE_API_KEY",
+        google: "GOOGLE_GENERATIVE_AI_API_KEY",
       };
       const envVar = envMap[options.provider];
       if (envVar && !process.env[envVar]) {
@@ -393,9 +394,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           setStatus("tool_running");
 
           try {
+            logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
             const result = await td.execute(input);
             const resultStr =
               typeof result === "string" ? result : JSON.stringify(result);
+            logger.debug("Tool result", { tool: name, result: resultStr.slice(0, 200) });
 
             // Mark as done with result.
             setStreamingToolCalls((prev) =>
@@ -456,6 +459,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
         // Add user message to session and committed messages.
         addMessage(session, "user", input);
+        logger.info("User message", { length: input.length, preview: input.slice(0, 100) });
         if (!session.name) {
           session.name = input.slice(0, 50).replace(/\n/g, " ");
         }
@@ -538,6 +542,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           // Persist assistant text in the session.
           addMessage(session, "assistant", finalText);
           session.totalTokens += inputTokens + outputTokens;
+          logger.info("Response complete", { inputTokens, outputTokens, textLength: finalText.length });
 
           // Cost tracking.
           costTrackerRef.current.addUsage(
@@ -593,6 +598,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           // Surface the error as an assistant message so the user sees it.
           const errText =
             err instanceof Error ? err.message : String(err);
+          logger.error("Agent error", { error: errText });
           const errorMsg: Message = {
             id: crypto.randomUUID(),
             role: "assistant",

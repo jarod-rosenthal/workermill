@@ -70,7 +70,7 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
     const envMap: Record<string, string> = {
       anthropic: "ANTHROPIC_API_KEY",
       openai: "OPENAI_API_KEY",
-      google: "GOOGLE_API_KEY",
+      google: "GOOGLE_GENERATIVE_AI_API_KEY",
     };
     const envVar = envMap[provider];
     if (envVar && !process.env[envVar]) {
@@ -154,7 +154,7 @@ export async function runAgent(config: CliConfig, trustAll: boolean, resume?: bo
   initTerminal();
 
   // Show header
-  printHeader("0.2.0", provider, modelName, workingDir);
+  printHeader("0.3.0", provider, modelName, workingDir);
 
   // Set initial status bar
   const statusText = printStatusBar(provider, modelName, 0, planMode ? "PLAN" : (trustAll ? "trust all" : "ask"), 0, contextLength);

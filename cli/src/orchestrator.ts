@@ -219,7 +219,7 @@ export async function classifyComplexity(
   const { provider, model: modelName, apiKey, host, contextLength } = getProviderForPersona(config);
 
   if (apiKey) {
-    const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
+    const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
     const envVar = envMap[provider];
     if (envVar && !process.env[envVar]) process.env[envVar] = apiKey;
   }
@@ -305,7 +305,7 @@ async function planStories(
   if (pProvider) {
     const pApiKey = config.providers[pProvider]?.apiKey;
     if (pApiKey) {
-      const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
+      const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
       const envVar = envMap[pProvider];
       if (envVar && !process.env[envVar]) {
         const key = pApiKey.startsWith("{env:") ? process.env[pApiKey.slice(5, -1)] : pApiKey;
@@ -524,21 +524,22 @@ function extractBalancedJSON(text: string, start: number): string | null {
 
 /** Extract a numeric score from critic output — tries markers, then natural language patterns */
 function extractScore(text: string): number {
-  // 1. Try ::review_score:: marker
-  const markerMatch = text.match(/::review_score::(\d+)/);
-  if (markerMatch) return parseInt(markerMatch[1], 10);
+  // 1. Try ::review_score:: marker — use LAST match (final verdict, not echoed feedback)
+  const markerMatches = [...text.matchAll(/::review_score::(\d+)/g)];
+  if (markerMatches.length > 0) {
+    return parseInt(markerMatches[markerMatches.length - 1][1], 10);
+  }
 
-  // 2. Try "Score: N/100" or "score: N" patterns
+  // 2. Try "Score: N/100" or "score: N" patterns — use LAST match
   const scorePatterns = [
-    /\bscore[:\s]+(\d+)\s*\/\s*100/i,
-    /\b(\d+)\s*\/\s*100/,
-    /\bscore[:\s]+(\d+)/i,
-    /\brating[:\s]+(\d+)/i,
+    /\bscore[:\s]+(\d+)\s*\/\s*100/gi,
+    /\bscore[:\s]+(\d+)/gi,
+    /\brating[:\s]+(\d+)/gi,
   ];
   for (const pattern of scorePatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      const n = parseInt(match[1], 10);
+    const matches = [...text.matchAll(pattern)];
+    if (matches.length > 0) {
+      const n = parseInt(matches[matches.length - 1][1], 10);
       if (n >= 0 && n <= 100) return n;
     }
   }
@@ -690,7 +691,7 @@ export async function runOrchestration(
 
     // Set API key
     if (apiKey) {
-      const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
+      const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
       const envVar = envMap[provider];
       if (envVar && !process.env[envVar]) process.env[envVar] = apiKey;
     }
@@ -875,16 +876,16 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback
   const approvalThreshold = config.review?.approvalThreshold ?? 80;
 
   // Run inline review with revision loop
-  const reviewer = loadPersona("reviewer");
+  const reviewer = loadPersona("tech_lead");
   if (reviewer) {
     const { provider: revProvider, model: revModel, host: revHost, contextLength: revCtx } = getProviderForPersona(
       config,
-      reviewer.provider || "reviewer"
+      "tech_lead"
     );
 
     const revApiKey = config.providers[revProvider]?.apiKey;
     if (revApiKey) {
-      const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
+      const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
       const envVar = envMap[revProvider];
       const key = revApiKey.startsWith("{env:") ? process.env[revApiKey.slice(5, -1)] : revApiKey;
       if (envVar && key && !process.env[envVar]) process.env[envVar] = key;
@@ -985,7 +986,8 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
 - Be specific in AFFECTED_REASONS so developers know exactly what to fix`;
 
         // Use onStepFinish for reviewer — same as WorkerMill ai-sdk-client.ts
-        let allReviewText = "";
+        // Accumulate only the reviewer's NEW output (not the echoed prompt/previous feedback)
+        let reviewerOutput = "";
         const reviewStream = streamText({
           model: reviewModel,
           system: reviewer.systemPrompt,
@@ -996,6 +998,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           ...buildOllamaOptions(revProvider as AIProvider, revCtx),
           onStepFinish({ text }) {
             if (text) {
+              reviewerOutput += text + "\n";
               output.statusDone();
               const lines = text.split("\n").filter(l => l.trim());
               for (const line of lines) {
@@ -1007,8 +1010,8 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         });
         for await (const _chunk of reviewStream.textStream) { /* consumed */ }
 
-        const finalReviewText = await reviewStream.text;
-        const reviewText = finalReviewText && finalReviewText.length > allReviewText.length ? finalReviewText : allReviewText;
+        // Use accumulated step output (reviewer's own words only, no echoed prompt)
+        const reviewText = reviewerOutput;
         const reviewUsage = await reviewStream.totalUsage;
 
         output.statusDone();
@@ -1089,7 +1092,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           if (sProvider) {
             const sApiKey = config.providers[sProvider]?.apiKey;
             if (sApiKey) {
-              const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
+              const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
               const envVar = envMap[sProvider];
               if (envVar && !process.env[envVar]) {
                 const key = sApiKey.startsWith("{env:") ? process.env[sApiKey.slice(5, -1)] : sApiKey;

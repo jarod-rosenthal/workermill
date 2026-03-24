@@ -1,3 +1,5 @@
+import { getPricingEngine } from "../../api/src/providers/index.js";
+
 export interface CostEntry {
   persona: string;
   provider: string;
@@ -6,23 +8,6 @@ export interface CostEntry {
   outputTokens: number;
   cost: number;
 }
-
-// Prices per 1M tokens (input/output)
-const PRICING: Record<string, { input: number; output: number }> = {
-  // Anthropic (Claude 4.5/4.6)
-  "claude-opus-4-6": { input: 15, output: 75 },
-  "claude-sonnet-4-6": { input: 3, output: 15 },
-  "claude-haiku-4-5": { input: 0.80, output: 4 },
-  // OpenAI (GPT-5.x)
-  "gpt-5.4": { input: 0.75, output: 4.50 },
-  "gpt-5.4-mini": { input: 0.15, output: 0.60 },
-  "gpt-5.4-pro": { input: 5, output: 20 },
-  "gpt-5.3": { input: 1, output: 5 },
-  // Google (Gemini 3.x)
-  "gemini-3.1-pro": { input: 1.25, output: 10 },
-  "gemini-3.1-flash-lite": { input: 0.15, output: 0.60 },
-  // Ollama (free, local)
-};
 
 export class CostTracker {
   private entries: CostEntry[] = [];
@@ -34,10 +19,11 @@ export class CostTracker {
     inputTokens: number,
     outputTokens: number
   ): void {
-    const pricing = PRICING[model] || { input: 0, output: 0 };
-    const cost =
-      (inputTokens / 1_000_000) * pricing.input +
-      (outputTokens / 1_000_000) * pricing.output;
+    const engine = getPricingEngine(provider);
+    const cost = engine.calculateTokenCost(
+      { inputTokens, outputTokens, cacheCreationTokens: 0, cacheReadTokens: 0 },
+      model,
+    );
 
     this.entries.push({
       persona,

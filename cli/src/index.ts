@@ -23,7 +23,7 @@ function printWelcome(provider: string, model: string, workingDir: string): void
   console.log();
 }
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {
@@ -118,7 +118,7 @@ const buildCmd = program
       const envMap: Record<string, string> = {
         anthropic: "ANTHROPIC_API_KEY",
         openai: "OPENAI_API_KEY",
-        google: "GOOGLE_API_KEY",
+        google: "GOOGLE_GENERATIVE_AI_API_KEY",
       };
       const envVar = envMap[provider];
       if (envVar && !process.env[envVar]) {

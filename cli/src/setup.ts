@@ -340,13 +340,12 @@ function codingScore(name: string): number {
   return score;
 }
 
-/** Format a model name for display. */
+/** Format a model name for display, including the tag to distinguish variants. */
 function formatModelLabel(name: string): string {
-  // Extract size if present
-  const sizeMatch = name.match(/(\d+\.?\d*)b/i);
-  const size = sizeMatch ? ` (${sizeMatch[1]}B)` : "";
-  const base = name.split(":")[0].replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-  return `${base}${size}`;
+  const [base, tag] = name.split(":");
+  const prettyBase = base.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  const prettyTag = tag && tag !== "latest" ? ` (${tag})` : "";
+  return `${prettyBase}${prettyTag}`;
 }
 
 /** Fetch available models from a cloud provider's API. */

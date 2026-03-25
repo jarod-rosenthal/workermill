@@ -42,14 +42,12 @@ That's it. First run walks you through provider setup — pick models for worker
 For complex tasks, use `/build` — WorkerMill decomposes work into stories and assigns specialist personas (backend, frontend, devops, security), each executing their part with your full spec, followed by a tech lead code review with revision cycles.
 
 ```bash
-# Build software with multi-expert AI
-wm build "REST API with auth, React dashboard, Docker"
-
-# Or from a spec file
-wm build spec.md
-
 # Check your setup
 wm doctor
+
+# Then use /build inside the CLI for multi-expert orchestration
+# /build REST API with auth, React dashboard, Docker
+# /build spec.md
 ```
 
 **Features:** WORKERMILL.md project instructions, MCP servers, hooks, custom commands, persistent learnings, @file/@folder/@url/@image mentions, `/undo`, `/diff`, `/permissions`, `/settings`, `/retry`, code review with actual diffs, bash guardrails, Tab-cycling permissions, ESC ESC rollback, auto-update notifications.

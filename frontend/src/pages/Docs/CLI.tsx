@@ -83,13 +83,13 @@ export default function CLI() {
       {/* Usage */}
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">Usage</h2>
-        <CopyBlock code={`# Interactive chat\nworkermill\n\n# Skip permission prompts\nworkermill --trust\n\n# Read-only research mode\nworkermill --plan\n\n# Resume last conversation\nworkermill --resume\n\n# Cap output tokens\nworkermill --max-tokens 4096\n\n# Build from a spec file\nwm build spec.md\n\n# Build from inline description\nwm build "REST API with auth, React dashboard, Docker"`} />
+        <CopyBlock code={`# Interactive chat\nworkermill\n\n# Skip permission prompts\nworkermill --trust\n\n# Read-only research mode\nworkermill --plan\n\n# Resume last conversation\nworkermill --resume\n\n# Cap output tokens\nworkermill --max-tokens 4096\n\n# Then use /build inside the CLI for multi-expert orchestration\n# /build spec.md\n# /build REST API with auth, React dashboard, Docker`} />
       </section>
 
       {/* Multi-Expert Orchestration */}
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">Multi-Expert Orchestration</h2>
-        <p className="text-muted-foreground">Use <code className="text-primary">/build</code> or <code className="text-primary">wm build</code> to trigger multi-expert mode:</p>
+        <p className="text-muted-foreground">Use <code className="text-primary">/build</code> to trigger multi-expert mode:</p>
         <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
           <li><strong className="text-foreground">Plans</strong> — Explores the codebase, designs stories with dependencies and persona assignments</li>
           <li><strong className="text-foreground">Executes</strong> — Each story assigned to a specialist with the full original spec</li>

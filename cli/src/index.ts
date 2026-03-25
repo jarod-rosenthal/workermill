@@ -59,7 +59,7 @@ function printWelcome(roleModels: { worker: string; planner: string; reviewer: s
   });
 }
 
-const VERSION = "0.8.3";
+const VERSION = "0.8.4";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {
@@ -128,67 +128,6 @@ const defaultCmd = program
     await waitUntilExit();
   });
 addSharedOptions(defaultCmd);
-
-// ── Build command: multi-expert orchestration ──
-const buildCmd = program
-  .command("build [task...]")
-  .description("Build software with multi-expert orchestration")
-  .option("--critic", "Run critic pass on plan before execution")
-  .action(async (taskParts: string[], options) => {
-    const task = taskParts.join(" ");
-    if (!task) {
-      console.log("\n  Usage: wm build \"<task description>\"\n");
-      console.log("  Example:");
-      console.log("    wm build \"REST API with auth, tests, and Docker\"");
-      console.log("    wm build \"Add search feature to the React frontend\"\n");
-      process.exit(0);
-    }
-
-    const config = await resolveConfig(options);
-    if (options.critic) {
-      config.review = { ...config.review, useCritic: true };
-    }
-
-    const { provider, model, apiKey, host, contextLength } = getProviderForPersona(config);
-    const roleModels = getRoleModelsFromConfig(config);
-    const trustAll = options.trust || false;
-    const sandboxed = !options.fullDisk;
-
-    // Set API keys
-    if (apiKey) {
-      const envMap: Record<string, string> = {
-        anthropic: "ANTHROPIC_API_KEY",
-        openai: "OPENAI_API_KEY",
-        google: "GOOGLE_GENERATIVE_AI_API_KEY",
-      };
-      const envVar = envMap[provider];
-      if (envVar && !process.env[envVar]) {
-        process.env[envVar] = apiKey;
-      }
-    }
-
-    // Render the Ink app with the build task pre-loaded
-    const { waitUntilExit } = render(
-      React.createElement(Root, {
-        provider,
-        model,
-        apiKey,
-        host,
-        contextLength,
-        trustAll,
-        planMode: false,
-        sandboxed,
-        resume: false,
-        maxTokens: options.maxTokens,
-        workingDir: process.cwd(),
-        initialBuildTask: task,
-        roleModels,
-      }),
-    );
-
-    await waitUntilExit();
-  });
-addSharedOptions(buildCmd);
 
 // ── Doctor command: check setup health ──
 program

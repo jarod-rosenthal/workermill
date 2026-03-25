@@ -135,8 +135,6 @@ Or from the command line: \`wm build "your task"\`
 
 interface RootProps extends UseAgentOptions {
   workingDir: string;
-  /** If set, auto-starts orchestration with this task on mount (from `wm build`). */
-  initialBuildTask?: string;
   /** Display strings for each role (e.g. "ollama/qwen3-coder:30b"). */
   roleModels?: { worker: string; planner: string; reviewer: string };
 }
@@ -169,17 +167,6 @@ export function Root(props: RootProps): React.ReactElement {
 
   // Track the last build task for /retry
   const lastBuildTask = useRef<string | null>(null);
-
-  // Auto-start build if launched via `wm build "task"`
-  const buildStarted = useRef(false);
-  useEffect(() => {
-    if (props.initialBuildTask && !buildStarted.current) {
-      buildStarted.current = true;
-      lastBuildTask.current = props.initialBuildTask;
-      agent.addUserMessage(`/build ${props.initialBuildTask}`);
-      orchestrator.start(props.initialBuildTask, props.trustAll, props.sandboxed);
-    }
-  }, [props.initialBuildTask, props.trustAll, props.sandboxed, agent, orchestrator]);
 
   const [inputHistory, setInputHistory] = useState<string[]>(() => loadHistory());
   const [gitBranch, setGitBranch] = useState(() => getGitBranch());

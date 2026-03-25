@@ -49,11 +49,9 @@ workermill --provider anthropic --model claude-sonnet-4-6
 # Cap output tokens
 workermill --max-tokens 4096
 
-# Build from a spec file
-wm build spec.md
-
-# Build from inline description
-wm build "REST API with auth, React dashboard, Docker"
+# Then use /build inside the CLI for multi-expert orchestration
+# /build spec.md
+# /build REST API with auth, React dashboard, Docker
 ```
 
 ## Features
@@ -102,7 +100,7 @@ wm build "REST API with auth, React dashboard, Docker"
 
 ## Multi-Expert Orchestration
 
-`/build` or `wm build` triggers multi-expert mode:
+`/build` triggers multi-expert mode:
 
 1. **Plans** — Explores the codebase, designs stories with dependencies and persona assignments
 2. **Executes** — Each story assigned to a specialist with the full original spec

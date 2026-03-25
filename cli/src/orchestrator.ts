@@ -5,6 +5,7 @@ import { createToolDefinitions } from "../../packages/engine/src/tools/index.js"
 import type { AIProvider } from "../../packages/engine/src/types.js";
 import fs from "fs";
 import path from "path";
+import { execSync } from "child_process";
 import { loadPersona } from "./personas.js";
 import * as logger from "./logger.js";
 import { CostTracker } from "./cost-tracker.js";
@@ -1038,6 +1039,41 @@ ${previousReviewFeedback}
           return `| ${idx + 1} | ${s.persona} | ${s.title} | ${files} |`;
         }).join("\n");
 
+        // Gather actual code for the reviewer — don't make the model guess
+        let codeDiff = "";
+        try {
+          // Try git diff first (for tracked repos)
+          const diff = execSync("git diff HEAD 2>/dev/null || git diff 2>/dev/null", {
+            cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 10_000,
+          }).trim();
+          if (diff) codeDiff = diff;
+        } catch { /* not a git repo or no changes staged */ }
+
+        // If no diff (new repo, untracked files), read key files directly
+        if (!codeDiff) {
+          const allFiles = [...new Set([...context.filesCreated, ...context.filesModified])].filter(Boolean);
+          const fileContents: string[] = [];
+          let totalSize = 0;
+          const MAX_REVIEW_SIZE = 100_000; // ~100K chars to stay within context
+
+          for (const f of allFiles) {
+            if (totalSize > MAX_REVIEW_SIZE) {
+              fileContents.push(`\n--- ${f} ---\n(skipped — review size limit reached)`);
+              break;
+            }
+            try {
+              const fullPath = path.isAbsolute(f) ? f : path.join(workingDir, f);
+              const content = fs.readFileSync(fullPath, "utf-8");
+              const trimmed = content.length > 5000 ? content.slice(0, 5000) + "\n... (truncated)" : content;
+              fileContents.push(`\n--- ${f} ---\n${trimmed}`);
+              totalSize += trimmed.length;
+            } catch { /* file may not exist */ }
+          }
+          if (fileContents.length > 0) {
+            codeDiff = fileContents.join("\n");
+          }
+        }
+
         const reviewPrompt = `${previousFeedbackSection}## Original Task
 
 ${userTask}
@@ -1054,16 +1090,22 @@ Files created: ${context.filesCreated.join(", ") || "none"}
 Files modified: ${context.filesModified.join(", ") || "none"}
 ${context.decisions.length > 0 ? `\nDecisions made:\n${context.decisions.map(d => `- ${d}`).join("\n")}` : ""}
 
+## Actual Code
+
+The following is the actual code that was written. Review THIS, not the summary above.
+
+\`\`\`
+${codeDiff || "(no code changes detected)"}
+\`\`\`
+
 ## Review Instructions
 
-Use read_file, glob, grep, and git tools to examine the actual code. Check:
+Review the actual code above. You also have tools (read_file, glob, grep) to examine files in more detail if needed. Check:
 - Does the code correctly implement the original task requirements?
 - Are there bugs, logic errors, or security issues?
 - Does the code follow existing project conventions?
 - Is error handling appropriate?
 - Are there missing pieces from the task requirements?
-
-Use \`git diff\` or read individual files to see the actual changes.
 
 Provide a review with a quality score (0-100) using ::review_score:: marker and a verdict using ::review_verdict::approved or ::review_verdict::needs_revision.
 
@@ -1280,16 +1322,12 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
 
   // Git commit step
   try {
-    const { execSync } = await import("child_process");
-
     // Auto-init git if not a repo
     try {
       execSync("git rev-parse --git-dir", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
     } catch {
       output.coordinatorLog("Initializing git repository...");
       execSync("git init", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
-      // Create default .gitignore if none exists
-      const fs = await import("fs");
       const gitignorePath = `${workingDir}/.gitignore`;
       if (!fs.existsSync(gitignorePath)) {
         fs.writeFileSync(gitignorePath, "node_modules/\ndist/\n.env\n.workermill/\n*.log\n", "utf-8");

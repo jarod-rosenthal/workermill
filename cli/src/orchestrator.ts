@@ -1,6 +1,6 @@
 import { streamText, generateObject, generateText, stepCountIs, type ToolSet } from "ai";
 import { z } from "zod";
-import { createModel, buildOllamaOptions } from "../../packages/engine/src/model-factory.js";
+import { createModel, buildOllamaOptions, ensureOllamaContext } from "../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../packages/engine/src/tools/index.js";
 import type { AIProvider } from "../../packages/engine/src/types.js";
 import fs from "fs";
@@ -667,6 +667,17 @@ export async function runOrchestration(
 ): Promise<void> {
   // Resolve file references so "/build spec.md" becomes the full spec content
   userTask = resolveTaskInput(userTask, process.cwd());
+
+  // Ensure Ollama models are loaded with the correct context length
+  const defaultProvider = getProviderForPersona(config);
+  if (defaultProvider.provider === "ollama" || config.providers[defaultProvider.provider]?.host) {
+    const host = defaultProvider.host || config.providers[defaultProvider.provider]?.host || "http://localhost:11434";
+    const ctx = config.providers[defaultProvider.provider]?.contextLength;
+    if (ctx) {
+      await ensureOllamaContext(host, defaultProvider.model, ctx);
+    }
+  }
+
   const costTracker = new CostTracker();
   const context: SharedContext = {
     filesCreated: [],

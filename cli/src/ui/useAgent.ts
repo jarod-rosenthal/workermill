@@ -5,6 +5,7 @@ import crypto from "crypto";
 import {
   createModel,
   buildOllamaOptions,
+  ensureOllamaContext,
 } from "../../../packages/engine/src/model-factory.js";
 import { createToolDefinitions } from "../../../packages/engine/src/tools/index.js";
 import type { AIProvider } from "../../../packages/engine/src/types.js";
@@ -198,6 +199,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     }
 
     aiProviderRef.current = options.provider as AIProvider;
+
+    // Ensure Ollama context length matches config (fire-and-forget —
+    // unload completes before the first user prompt in practice)
+    if (aiProviderRef.current === "ollama" && options.host && options.contextLength) {
+      void ensureOllamaContext(options.host, options.model, options.contextLength);
+    }
+
     modelRef.current = createModel(
       aiProviderRef.current,
       options.model,

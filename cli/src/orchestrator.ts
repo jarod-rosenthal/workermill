@@ -470,17 +470,27 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
     stopWhen: stepCountIs(100),
     timeout: { totalMs: 3 * 60 * 1000, chunkMs: 120_000 },
     ...buildOllamaOptions(pProvider as AIProvider, pCtx),
-    onStepFinish({ text }) {
-      if (text) {
-        const lines = text.split("\n").filter(l => l.trim());
-        for (const line of lines) {
-          output.log("planner", line);
-        }
-      }
+    onStepFinish() {
+      // Text already streamed line-by-line below — just update status between steps
+      output.status("planner: thinking...");
     },
   });
-  // Drive the stream
-  for await (const _chunk of planStream.textStream) { /* consumed */ }
+  // Stream planner output line-by-line as it arrives
+  let lineBuffer = "";
+  for await (const chunk of planStream.textStream) {
+    lineBuffer += chunk;
+    const lines = lineBuffer.split("\n");
+    lineBuffer = lines.pop() || ""; // keep incomplete last line in buffer
+    for (const line of lines) {
+      if (line.trim()) {
+        output.log("planner", line);
+      }
+    }
+  }
+  // Flush remaining buffer
+  if (lineBuffer.trim()) {
+    output.log("planner", lineBuffer);
+  }
 
   const planText = await planStream.text;
 

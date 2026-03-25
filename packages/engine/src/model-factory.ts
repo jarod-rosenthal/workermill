@@ -17,7 +17,9 @@ export function buildOllamaOptions(
   return {
     providerOptions: {
       ollama: {
-        num_ctx: contextLength,
+        options: {
+          num_ctx: contextLength,
+        },
       },
     },
   };

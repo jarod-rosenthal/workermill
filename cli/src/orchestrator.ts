@@ -1147,7 +1147,6 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           onStepFinish({ text }) {
             if (text) {
               reviewerOutput += text + "\n";
-              output.statusDone();
               const lines = text.split("\n").filter(l => l.trim());
               for (const line of lines) {
                 if (line.includes("::review_score::") || line.includes("::review_verdict::")) continue;
@@ -1249,9 +1248,9 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           }
 
           output.coordinatorLog(`Revision pass for story ${i + 1}/${sorted.length}`);
-          output.log(story.persona, `Starting revision: ${story.title} (model: ${sModel})`);
+          output.log(story.persona, `Starting revision: ${story.title} (${sProvider}/${sModel})`);
 
-          output.status("");
+          output.status(`${story.persona}: revising...`);
 
           const storyModel = createModel(sProvider as AIProvider, sModel, sHost, sCtx);
           const storyAllTools = createToolDefinitions(workingDir, storyModel, sandboxed);
@@ -1264,8 +1263,8 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
                 execute: async (input: Record<string, unknown>) => {
                   const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output);
                   if (!allowed) return "Tool execution denied by user.";
-                  output.statusDone();
                   output.log(story.persona, formatToolCallDisplay(toolName, input));
+                  output.status(`${story.persona}: working...`);
                   const result = await toolDef.execute(input);
                   output.status("");
                   return result;
@@ -1305,19 +1304,18 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
               ...buildOllamaOptions(sProvider as AIProvider, sCtx),
               onStepFinish({ text }) {
                 if (text) {
-                  output.statusDone();
                   const lines = text.split("\n").filter(l => l.trim());
                   for (const line of lines) {
                     if (line.includes("::")) continue;
                     output.log(story.persona, line);
                   }
                 }
+                output.status(`${story.persona}: thinking...`);
               },
             });
 
             for await (const _chunk of revStream.textStream) { /* drive */ }
             const revUsage = await revStream.totalUsage;
-            output.statusDone();
 
             costTracker.addUsage(`${storyPersona.name} (revision)`, sProvider, sModel,
               revUsage?.inputTokens || 0, revUsage?.outputTokens || 0);

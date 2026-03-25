@@ -291,6 +291,66 @@ function formatModelLabel(name: string): string {
   return `${base}${size}`;
 }
 
+/** Fetch available models from a cloud provider's API. */
+async function fetchCloudModels(
+  provider: ProviderOption,
+  apiKey: string,
+): Promise<void> {
+  if (!apiKey || apiKey.startsWith("{env:")) return;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    let models: { id: string; label: string }[] = [];
+
+    if (provider.name === "openai") {
+      const res = await globalThis.fetch("https://api.openai.com/v1/models", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (res.ok) {
+        const data = (await res.json()) as { data?: { id: string }[] };
+        const allModels = (data.data || []).map(m => m.id).sort();
+        // Filter to GPT models, prioritize latest
+        const gptModels = allModels.filter(m =>
+          m.startsWith("gpt-") && !m.includes("instruct") && !m.includes("realtime") && !m.includes("audio")
+        );
+        if (gptModels.length > 0) {
+          models = gptModels.slice(0, 10).map(id => ({ id, label: id }));
+        }
+      }
+    } else if (provider.name === "google") {
+      const res = await globalThis.fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+        { signal: controller.signal },
+      );
+      clearTimeout(timeout);
+      if (res.ok) {
+        const data = (await res.json()) as { models?: { name: string; displayName: string; supportedGenerationMethods?: string[] }[] };
+        const genModels = (data.models || [])
+          .filter(m => m.supportedGenerationMethods?.includes("generateContent"))
+          .map(m => ({
+            id: m.name.replace("models/", ""),
+            label: m.displayName || m.name.replace("models/", ""),
+          }))
+          .filter(m => m.id.includes("gemini"))
+          .slice(0, 10);
+        if (genModels.length > 0) {
+          models = genModels;
+        }
+      }
+    }
+
+    if (models.length > 0) {
+      provider.detectedModels = models;
+      console.log(chalk.green(`  ✓ Found ${models.length} available models`));
+    }
+  } catch {
+    // Network error or invalid key — fall back to hardcoded defaults
+  }
+}
+
 /** Detect Ollama and configure host/context. */
 async function configureOllama(providerConfig: ProviderConfig, ollamaProvider?: ProviderOption): Promise<void> {
   const hostsToTry = ["http://localhost:11434"];
@@ -360,14 +420,26 @@ export async function runSetup(): Promise<CliConfig> {
   console.log();
   const workerProvider = await pickProvider(p, "Provider for workers", PROVIDERS);
 
-  // Detect Ollama models before asking user to pick one
   const workerConfig: ProviderConfig = { model: "" };
-  if (workerProvider.name === "ollama") await configureOllama(workerConfig, workerProvider);
+  if (workerProvider.name === "ollama") {
+    // Detect Ollama models before asking user to pick one
+    await configureOllama(workerConfig, workerProvider);
+  } else if (workerProvider.needsKey) {
+    // Cloud providers: get API key first so we can fetch available models
+    const workerKey = await getApiKey(p, workerProvider, apiKeys);
+    if (workerKey) {
+      workerConfig.apiKey = workerKey;
+      await fetchCloudModels(workerProvider, workerKey.startsWith("{env:") ? (process.env[workerKey.slice(5, -1)] || "") : workerKey);
+    }
+  }
 
   const workerModel = await pickModel(p, workerProvider);
   workerConfig.model = workerModel;
-  const workerKey = await getApiKey(p, workerProvider, apiKeys);
-  if (workerKey) workerConfig.apiKey = workerKey;
+  // Only ask for key if we haven't already (Ollama or key already obtained above)
+  if (!workerConfig.apiKey) {
+    const workerKey = await getApiKey(p, workerProvider, apiKeys);
+    if (workerKey) workerConfig.apiKey = workerKey;
+  }
 
   console.log();
 
@@ -381,8 +453,13 @@ export async function runSetup(): Promise<CliConfig> {
 
   if (sameForPlanner.trim().toLowerCase() === "n") {
     const plannerProvider = await pickProvider(p, "Provider for planner", PROVIDERS);
-    plannerModel = await pickModel(p, plannerProvider);
+    // Get key first for cloud providers so we can fetch their model list
     const plannerKey = await getApiKey(p, plannerProvider, apiKeys);
+    if (plannerKey && plannerProvider.needsKey && !plannerProvider.detectedModels) {
+      const rawKey = plannerKey.startsWith("{env:") ? (process.env[plannerKey.slice(5, -1)] || "") : plannerKey;
+      await fetchCloudModels(plannerProvider, rawKey);
+    }
+    plannerModel = await pickModel(p, plannerProvider);
     plannerProviderName = plannerProvider.name;
     if (plannerKey && plannerProvider.name !== workerProvider.name) {
       // Will be added to providers below
@@ -405,8 +482,12 @@ export async function runSetup(): Promise<CliConfig> {
 
   if (sameForReviewer.trim().toLowerCase() === "n") {
     const reviewerProvider = await pickProvider(p, "Provider for reviewer", PROVIDERS);
-    reviewerModel = await pickModel(p, reviewerProvider);
     const reviewerKey = await getApiKey(p, reviewerProvider, apiKeys);
+    if (reviewerKey && reviewerProvider.needsKey && !reviewerProvider.detectedModels) {
+      const rawKey = reviewerKey.startsWith("{env:") ? (process.env[reviewerKey.slice(5, -1)] || "") : reviewerKey;
+      await fetchCloudModels(reviewerProvider, rawKey);
+    }
+    reviewerModel = await pickModel(p, reviewerProvider);
     reviewerProviderName = reviewerProvider.name;
     if (reviewerKey && reviewerProvider.name !== workerProvider.name) {
       // Will be added to providers below

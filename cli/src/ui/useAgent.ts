@@ -19,7 +19,12 @@ import {
 import { shouldCompact, compactMessages } from "../compaction.js";
 import { CostTracker } from "../cost-tracker.js";
 import { killActiveProcess } from "../../../packages/engine/src/tools/bash.js";
+import { loadLearnings } from "../learnings.js";
+import { formatProjectInstructions } from "../instructions.js";
+import { parseImageReferences, toMessageContent } from "../image-support.js";
 import * as logger from "../logger.js";
+import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers } from "../mcp-client.js";
+import { resolveConfig } from "../config.js";
 import type {
   Message,
   ToolCallInfo,
@@ -113,7 +118,7 @@ export interface UseAgentReturn {
 // ---------------------------------------------------------------------------
 
 function buildSystemPrompt(workingDir: string): string {
-  return `You are WorkerMill, an AI coding agent running in the user's terminal.
+  const base = `You are WorkerMill, an AI coding agent running in the user's terminal.
 
 Working directory: ${workingDir}
 
@@ -143,6 +148,15 @@ Do NOT list your capabilities unless asked. Do NOT offer menus of options unprom
 
 When you discover something non-obvious about this codebase, emit:
 ::learning::The test suite requires DATABASE_URL or tests silently skip`;
+
+  const projectInstructions = formatProjectInstructions(workingDir);
+  let prompt = base + projectInstructions;
+
+  const learnings = loadLearnings();
+  if (learnings.length > 0) {
+    prompt += `\n\n## Project Learnings (from previous builds)\n\n${learnings.map(l => `- ${l}`).join("\n")}`;
+  }
+  return prompt;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +265,17 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       modelRef.current,
       options.sandboxed,
     );
+
+    // Start MCP servers if configured (fire-and-forget — tools available
+    // by the time the user sends their first prompt in practice).
+    try {
+      const cliConfig = resolveConfig();
+      if (cliConfig?.mcp && Object.keys(cliConfig.mcp).length > 0) {
+        void startAllMCPServers(cliConfig.mcp);
+      }
+    } catch {
+      // No config or resolveConfig threw — MCP not available, that's fine.
+    }
 
     // Session: resume or create fresh.
     if (options.resume) {
@@ -379,8 +404,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     const raw = toolsRef.current;
     if (!raw) return {};
 
+    // Merge MCP tools (dynamically resolved each call so tools from
+    // servers that finish starting after init are picked up).
+    const allRawTools: Record<string, AnyToolDef> = { ...raw, ...getMCPToolDefinitions() };
+
     const wrapped: Record<string, AnyToolDef> = {};
-    for (const [name, toolDef] of Object.entries(raw)) {
+    for (const [name, toolDef] of Object.entries(allRawTools)) {
       const td = toolDef as AnyToolDef;
       wrapped[name] = {
         ...td,
@@ -536,10 +565,15 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           const stream = streamText({
             model,
             system: systemPrompt,
-            messages: session.messages.map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
+            messages: session.messages.map((m) => {
+              if (m.role === "user") {
+                const { parts, hasImages } = parseImageReferences(m.content, workingDirRef.current);
+                if (hasImages) {
+                  return { role: "user" as const, content: toMessageContent(parts) as any };
+                }
+              }
+              return { role: m.role as "user" | "assistant", content: m.content };
+            }),
             tools: getActiveTools() as ToolSet,
             stopWhen: stepCountIs(100),
             abortSignal: controller.signal,

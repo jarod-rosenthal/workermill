@@ -7,10 +7,12 @@ import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
 import { loadPersona } from "./personas.js";
+import { formatProjectInstructions } from "./instructions.js";
 import * as logger from "./logger.js";
 import { CostTracker } from "./cost-tracker.js";
 import type { CliConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
+import { loadLearnings, saveLearnings, mergeLearnings } from "./learnings.js";
 
 /**
  * If the task string looks like a file path (e.g. "spec.md", "docs/prd.yaml"),
@@ -401,8 +403,9 @@ async function planStories(
     }
   }
 
+  const plannerProjectInstructions = formatProjectInstructions(workingDir);
   const plannerPrompt = `You are an expert implementation planner. Analyze this task and create a high-quality implementation plan.
-
+${plannerProjectInstructions}
 ## Task
 ${userTask}
 ${inlinedFileContext ? `\n## Referenced Files\n${inlinedFileContext}` : ""}
@@ -684,12 +687,14 @@ export async function runOrchestration(
   }
 
   const costTracker = new CostTracker();
+  const persistedLearnings = loadLearnings();
   const context: SharedContext = {
     filesCreated: [],
     filesModified: [],
     decisions: [],
     learnings: [],
   };
+  context.learnings.push(...persistedLearnings);
   const sessionAllow = new Set<string>();
   const workingDir = process.cwd();
 
@@ -848,7 +853,8 @@ export async function runOrchestration(
       ? `\n\n## Context from prior experts\n${contextParts.join("\n")}`
       : "";
 
-    const systemPrompt = `${persona.systemPrompt}${contextBlock}
+    const projectInstructions = formatProjectInstructions(workingDir);
+    const systemPrompt = `${persona.systemPrompt}${projectInstructions}${contextBlock}
 
 ## Original Specification
 
@@ -1083,7 +1089,8 @@ ${previousReviewFeedback}
           }
         }
 
-        const reviewPrompt = `${previousFeedbackSection}## Original Task
+        const reviewerProjectInstructions = formatProjectInstructions(workingDir);
+        const reviewPrompt = `${previousFeedbackSection}${reviewerProjectInstructions ? `${reviewerProjectInstructions}\n\n` : ""}## Original Task
 
 ${userTask}
 
@@ -1335,6 +1342,9 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
       }
     } // end review loop
   }
+
+  // Persist learnings for future sessions
+  saveLearnings(mergeLearnings(persistedLearnings, context.learnings));
 
   // Git commit step
   try {

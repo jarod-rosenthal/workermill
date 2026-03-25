@@ -6,6 +6,7 @@ import { PermissionPrompt } from "./PermissionPrompt.js";
 import { StatusBar } from "./StatusBar.js";
 import { Input } from "./Input.js";
 import { theme } from "./theme.js";
+import { stopAllMCPServers } from "../mcp-client.js";
 import type {
   Message,
   PermissionRequest,
@@ -102,6 +103,7 @@ export function App(props: AppProps): React.ReactElement {
     if (key.ctrl && input === "c") {
       const now = Date.now();
       if (props.status === "idle" && now - lastCtrlCRef.current < 500) {
+        stopAllMCPServers();
         exit();
         setTimeout(() => process.exit(0), 100);
         return;

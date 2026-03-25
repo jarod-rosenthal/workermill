@@ -9,6 +9,8 @@ import { useOrchestrator } from "./useOrchestrator.js";
 import { App } from "./App.js";
 import { listSessions } from "../session.js";
 import { loadConfig, saveConfig } from "../config.js";
+import { loadCustomCommands } from "../custom-commands.js";
+import { stopAllMCPServers } from "../mcp-client.js";
 import type { UseAgentOptions } from "./useAgent.js";
 
 // ---------------------------------------------------------------------------
@@ -214,6 +216,13 @@ export function Root(props: RootProps): React.ReactElement {
         case "h":
         case "?": {
           agent.addSystemMessage(HELP_TEXT);
+          const customCmds = loadCustomCommands();
+          if (customCmds.length > 0) {
+            const customTable = customCmds.map(c => `| \`/${c.name}\` | ${c.description} |`).join("\n");
+            agent.addSystemMessage(
+              `**Custom Commands**\n\n| Command | Description |\n|---|---|\n${customTable}`
+            );
+          }
           break;
         }
 
@@ -499,6 +508,7 @@ export function Root(props: RootProps): React.ReactElement {
         case "quit":
         case "exit":
         case "q": {
+          stopAllMCPServers();
           exit();
           // Force process exit — Ink's exit() only stops rendering but
           // dangling listeners (stdin, timers) can keep the process alive.
@@ -506,8 +516,16 @@ export function Root(props: RootProps): React.ReactElement {
           break;
         }
 
-        // ---- Unknown slash command ----
+        // ---- Unknown slash command (or custom command) ----
         default: {
+          // Check custom commands before reporting unknown
+          const customCommands = loadCustomCommands();
+          const customCmd = customCommands.find(c => c.name === cmd);
+          if (customCmd) {
+            agent.addUserMessage(`/${cmd}${arg ? " " + arg : ""}`);
+            agent.submit(customCmd.prompt + (arg ? `\n\nAdditional context: ${arg}` : ""));
+            break;
+          }
           agent.addSystemMessage(
             `Unknown command: \`/${cmd}\`\n\nType \`/help\` to see all available commands.`
           );

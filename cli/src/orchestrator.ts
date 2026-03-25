@@ -968,10 +968,13 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
   }
 
   // Review config
+  const reviewEnabled = config.review?.enabled !== false; // default: true
+  const maxRevisions = config.review?.maxRevisions ?? 3;
+  const autoRevise = config.review?.autoRevise ?? false;
   const approvalThreshold = config.review?.approvalThreshold ?? 80;
 
   // Run inline review with revision loop
-  const reviewer = loadPersona("tech_lead");
+  const reviewer = reviewEnabled ? loadPersona("tech_lead") : null;
   if (reviewer) {
     const { provider: revProvider, model: revModel, host: revHost, contextLength: revCtx } = getProviderForPersona(
       config,
@@ -1006,11 +1009,11 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
     }
 
     let previousReviewFeedback = "";
-    logger.info("Starting review loop", { approvalThreshold, provider: revProvider, model: revModel });
-    for (let reviewRound = 0; ; reviewRound++) {
+    logger.info("Starting review loop", { maxRevisions, approvalThreshold, provider: revProvider, model: revModel });
+    for (let reviewRound = 0; reviewRound <= maxRevisions; reviewRound++) {
       const isRevision = reviewRound > 0;
-      logger.info(`Review round ${reviewRound}`, { isRevision });
-      output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
+      logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
+      output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound}/${maxRevisions}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
       output.log("tech_lead", `Starting agent execution (model: ${revModel})`);
 
       output.status(isRevision ? "Reviewer -- Re-checking after revisions" : "Reviewer -- Checking code quality");
@@ -1172,15 +1175,23 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           reviewUsage?.inputTokens || 0, reviewUsage?.outputTokens || 0);
         output.updateCost?.(costTracker.getTotalCost());
 
-        // If approved, done
+        // If approved or out of revision attempts, done
         if (approved) break;
+        if (reviewRound >= maxRevisions) {
+          output.coordinatorLog(`Max revisions (${maxRevisions}) reached, proceeding to commit.`);
+          break;
+        }
 
-        // Ask user whether to revise
-        let shouldRevise = false;
-        try {
-          shouldRevise = await output.confirm("Revise and re-review?");
-        } catch {
-          shouldRevise = false; // cancelled
+        // Ask user or auto-revise
+        let shouldRevise = autoRevise;
+        if (!autoRevise) {
+          try {
+            shouldRevise = await output.confirm(`Revise and re-review? (${maxRevisions - reviewRound} left)`);
+          } catch {
+            shouldRevise = false; // cancelled
+          }
+        } else {
+          output.coordinatorLog(`Auto-revising (${maxRevisions - reviewRound} left)...`);
         }
 
         if (!shouldRevise) break;

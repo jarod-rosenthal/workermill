@@ -8,6 +8,7 @@ import { useAgent } from "./useAgent.js";
 import { useOrchestrator } from "./useOrchestrator.js";
 import { App } from "./App.js";
 import { listSessions } from "../session.js";
+import { loadConfig, saveConfig } from "../config.js";
 import type { UseAgentOptions } from "./useAgent.js";
 
 // ---------------------------------------------------------------------------
@@ -107,6 +108,7 @@ Or from the command line: \`wm build "your task"\`
 |---|---|
 | \`/build <task>\` | Multi-expert orchestration — the main feature |
 | \`/retry\` | Re-plan and re-run the last build task |
+| \`/settings\` | View/change settings (review, ollama, etc.) |
 | \`/plan\` | Toggle plan mode (read-only, explore before committing) |
 | \`/trust\` | Auto-approve all tool calls for this session |
 | \`/model\` | Show current provider and model |
@@ -379,6 +381,95 @@ export function Root(props: RootProps): React.ReactElement {
             agent.addSystemMessage(`Failed to open editor (\`${editor}\`): ${errMsg}`);
           } finally {
             try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+          }
+          break;
+        }
+
+        // ---- /settings ----
+        case "settings":
+        case "config": {
+          const config = loadConfig();
+          if (!config) {
+            agent.addSystemMessage("No config found. Run setup first.");
+            break;
+          }
+
+          if (!arg) {
+            // Show current settings
+            const ollamaHost = config.providers?.ollama?.host || "http://localhost:11434";
+            const ollamaCtx = config.providers?.ollama?.contextLength || 65536;
+            const reviewEnabled = config.review?.enabled !== false;
+            const maxRevisions = config.review?.maxRevisions ?? 3;
+            const approvalThreshold = config.review?.approvalThreshold ?? 80;
+            const autoRevise = config.review?.autoRevise ?? false;
+            const useCritic = config.review?.useCritic ?? false;
+
+            agent.addSystemMessage(
+              `**Settings** (\`~/.workermill/cli.json\`)\n\n` +
+              `| Setting | Value | Command |\n` +
+              `|---|---|---|\n` +
+              `| Ollama host | \`${ollamaHost}\` | \`/settings ollama.host <url>\` |\n` +
+              `| Ollama context | ${ollamaCtx} | \`/settings ollama.context <n>\` |\n` +
+              `| Review enabled | ${reviewEnabled} | \`/settings review.enabled <true/false>\` |\n` +
+              `| Max revisions | ${maxRevisions} | \`/settings review.maxRevisions <n>\` |\n` +
+              `| Approval threshold | ${approvalThreshold} | \`/settings review.threshold <n>\` |\n` +
+              `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
+              `| Critic pass | ${useCritic} | \`/settings review.critic <true/false>\` |`
+            );
+          } else {
+            // Parse key=value or key value
+            const parts = arg.split(/[\s=]+/);
+            const key = parts[0];
+            const value = parts.slice(1).join(" ");
+
+            if (!value) {
+              agent.addSystemMessage(`Usage: \`/settings ${key} <value>\``);
+              break;
+            }
+
+            const boolVal = (v: string) => v === "true" || v === "1" || v === "on" || v === "yes";
+            const numVal = (v: string) => parseInt(v, 10);
+
+            switch (key) {
+              case "ollama.host": {
+                if (!config.providers.ollama) config.providers.ollama = { model: "qwen3-coder:30b" };
+                config.providers.ollama.host = value;
+                break;
+              }
+              case "ollama.context": {
+                if (!config.providers.ollama) config.providers.ollama = { model: "qwen3-coder:30b" };
+                config.providers.ollama.contextLength = numVal(value);
+                break;
+              }
+              case "review.enabled": {
+                config.review = { ...config.review, enabled: boolVal(value) };
+                break;
+              }
+              case "review.maxRevisions": {
+                config.review = { ...config.review, maxRevisions: numVal(value) };
+                break;
+              }
+              case "review.threshold": {
+                config.review = { ...config.review, approvalThreshold: numVal(value) };
+                break;
+              }
+              case "review.autoRevise": {
+                config.review = { ...config.review, autoRevise: boolVal(value) };
+                break;
+              }
+              case "review.critic": {
+                config.review = { ...config.review, useCritic: boolVal(value) };
+                break;
+              }
+              default:
+                agent.addSystemMessage(`Unknown setting: \`${key}\`. Type \`/settings\` to see all options.`);
+                break;
+            }
+
+            if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.critic"].includes(key)) {
+              saveConfig(config);
+              agent.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
+            }
           }
           break;
         }

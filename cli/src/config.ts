@@ -17,7 +17,9 @@ export interface MCPServerConfig {
 }
 
 export interface ReviewConfig {
-  /** Max review→revise cycles before giving up (default: 2) */
+  /** Enable tech lead review after build (default: true) */
+  enabled?: boolean;
+  /** Max review→revise cycles before giving up (default: 3) */
   maxRevisions?: number;
   /** Auto-revise without prompting user (default: false — prompts each time) */
   autoRevise?: boolean;

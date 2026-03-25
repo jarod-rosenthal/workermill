@@ -16,7 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        dir: [api, frontend, cli]
+        include:
+          - dir: api
+            install_args: ""
+          - dir: frontend
+            install_args: ""
+          - dir: cli
+            install_args: "--legacy-peer-deps"
     steps:
       - uses: actions/checkout@v4
 
@@ -27,5 +33,5 @@ jobs:
       - name: Install and audit
         working-directory: ${{ matrix.dir }}
         run: |
-          npm ci --ignore-scripts
+          npm ci --ignore-scripts ${{ matrix.install_args }}
           npm audit --omit=dev --audit-level=high

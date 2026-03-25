@@ -60,6 +60,15 @@ const READ_TOOLS = new Set<string>([
   "sub_agent",
 ]);
 
+/** Tools auto-approved in "auto-edit" mode (everything except bash and destructive ops). */
+const AUTO_EDIT_TOOLS = new Set<string>([
+  "read_file", "write_file", "edit_file", "patch",
+  "glob", "grep", "ls", "fetch", "git", "web_search", "todo", "sub_agent",
+]);
+
+const PERMISSION_MODES = ["ask", "auto-edit", "trust all"] as const;
+type PermissionMode = typeof PERMISSION_MODES[number];
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = any;
 
@@ -119,6 +128,10 @@ export interface UseAgentReturn {
   allowTool: (name: string) => void;
   /** Add a tool to the denied set (blocked for this session). */
   denyTool: (name: string) => void;
+  /** Current permission mode label. */
+  permissionMode: string;
+  /** Cycle to the next permission mode (ask → auto-edit → trust all → ask). */
+  cyclePermissionMode: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +235,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const [cost, setCost] = useState(0);
   const [trustAll, setTrustAllState] = useState(options.trustAll);
   const [planMode, setPlanModeState] = useState(options.planMode);
+  const [permMode, setPermMode] = useState<PermissionMode>(options.trustAll ? "trust all" : "ask");
 
   // ------- Refs for mutable state -------- //
   const abortRef = useRef<AbortController | null>(null);
@@ -231,6 +245,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const deniedToolsRef = useRef(new Set<string>());
   const trustAllRef = useRef(options.trustAll);
   const planModeRef = useRef(options.planMode);
+  const permModeRef = useRef<PermissionMode>(options.trustAll ? "trust all" : "ask");
   const workingDirRef = useRef(process.cwd());
   const hooksConfigRef = useRef<HooksConfig | undefined>(undefined);
   const initDoneRef = useRef(false);
@@ -378,6 +393,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
       // Trust-all bypasses all prompts for non-dangerous tools.
       if (trustAllRef.current) {
+        return Promise.resolve({ allowed: true });
+      }
+
+      // Auto-edit mode: auto-approve everything except bash.
+      if (permModeRef.current === "auto-edit" && AUTO_EDIT_TOOLS.has(toolName)) {
         return Promise.resolve({ allowed: true });
       }
 
@@ -781,6 +801,17 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     planModeRef.current = v;
   }, []);
 
+  const cyclePermissionMode = useCallback(() => {
+    const idx = PERMISSION_MODES.indexOf(permModeRef.current);
+    const next = PERMISSION_MODES[(idx + 1) % PERMISSION_MODES.length];
+    setPermMode(next);
+    permModeRef.current = next;
+    // Sync trustAll state
+    const isTrust = next === "trust all";
+    setTrustAllState(isTrust);
+    trustAllRef.current = isTrust;
+  }, []);
+
   // ------- Per-tool permission helpers -------- //
 
   const allowTool = useCallback((name: string) => {
@@ -837,5 +868,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     setCost,
     allowTool,
     denyTool,
+    permissionMode: permMode,
+    cyclePermissionMode,
   };
 }

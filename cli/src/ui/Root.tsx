@@ -926,6 +926,8 @@ export function Root(props: RootProps): React.ReactElement {
       onSubmit={handleSubmit}
       onCancel={orchestrator.running ? orchestrator.cancel : agent.cancel}
       onRollback={agent.rollback}
+      onCyclePermissionMode={agent.cyclePermissionMode}
+      permissionMode={agent.permissionMode}
       messages={agent.messages}
       status={orchestrator.running ? "tool_running" : agent.status}
       statusDetail={orchestrator.running ? orchestrator.statusMessage : agent.statusDetail}

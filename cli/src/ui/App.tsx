@@ -26,6 +26,10 @@ interface AppProps {
   onCancel: () => void;
   /** Called on double-ESC to roll back the last exchange. */
   onRollback: () => boolean;
+  /** Called when user cycles permission mode with Shift+Tab. */
+  onCyclePermissionMode: () => void;
+  /** Current permission mode label for status bar. */
+  permissionMode: string;
   /** Committed (finalized) messages for the conversation history. */
   messages: Message[];
   /** Current agent status. */
@@ -117,6 +121,12 @@ export function App(props: AppProps): React.ReactElement {
       return;
     }
 
+    // Shift+Tab: cycle permission mode (ask → auto-edit → trust all)
+    if (key.tab && key.shift && props.status === "idle") {
+      props.onCyclePermissionMode();
+      return;
+    }
+
     // Double Ctrl+C when idle to exit
     if (key.ctrl && input === "c") {
       const now = Date.now();
@@ -132,9 +142,7 @@ export function App(props: AppProps): React.ReactElement {
 
   const mode = props.planMode
     ? "PLAN"
-    : props.trustAll
-      ? "trust all"
-      : "ask";
+    : props.permissionMode;
 
   return (
     <Box flexDirection="column" width="100%">

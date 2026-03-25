@@ -1,6 +1,10 @@
 # WorkerMill CLI
 
-AI coding agent with multi-expert orchestration. Works with any LLM provider — Ollama, Anthropic, OpenAI, Google.
+The lightweight, zero-setup version of [WorkerMill](https://github.com/jarod-rosenthal/workermill) — the open-source orchestration platform for AI coding agents.
+
+The full WorkerMill platform includes a web dashboard, Kanban boards, VS Code extension, CI/CD integration, and managed worker infrastructure. The CLI gives you the same multi-expert orchestration engine directly in your terminal — no server, no Docker, no account. Just `npx workermill` and you're coding.
+
+Works with any LLM provider: Ollama (fully local), Anthropic, OpenAI, Google.
 
 ## Quick Start
 

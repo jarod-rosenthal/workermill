@@ -692,116 +692,116 @@ export function Root(props: RootProps): React.ReactElement {
 
         // ---- /init ----
         case "init": {
-          const instructionsPath = path.join(props.workingDir, "WORKERMILL.md");
-          if (fs.existsSync(instructionsPath) && !arg?.includes("--force")) {
-            agent.addSystemMessage(`\`WORKERMILL.md\` already exists. Use \`/init --force\` to overwrite.`);
-            break;
+          const wmPath = path.join(props.workingDir, "WORKERMILL.md");
+          const exists = fs.existsSync(wmPath);
+          const isForce = arg?.includes("--force");
+
+          if (exists && !isForce) {
+            // Re-run: review and suggest improvements
+            agent.addSystemMessage("**Reviewing WORKERMILL.md...** I'll analyze your project and suggest improvements.");
+            agent.submit(
+              `Read the existing WORKERMILL.md file and review it against the current state of the codebase.
+
+Use your tools to explore — read key source files, check directory structure, look at configs, tests, and dependencies. Then compare what WORKERMILL.md says vs what actually exists.
+
+Evaluate the WORKERMILL.md on these criteria:
+- **Accuracy** — Does it match the current codebase? Are file paths, commands, and patterns still correct?
+- **Completeness** — Is anything important missing? New modules, changed architecture, added dependencies?
+- **Specificity** — Does it reference actual file paths and commands, or is it generic boilerplate?
+- **Actionability** — Would an AI agent reading this know exactly how to work in this codebase?
+- **Conciseness** — Is it under ~200 lines? Are there redundant sections?
+
+Then either:
+1. If improvements are needed, update the file directly with write_file and explain what you changed.
+2. If it's already good, say so and suggest any minor additions.
+
+Do NOT rewrite from scratch unless it's severely outdated — preserve the user's custom sections.`
+            );
+          } else {
+            // First run: generate from scratch
+            agent.addSystemMessage("**Analyzing codebase...** I'll explore your project and generate `WORKERMILL.md`.");
+            agent.submit(
+              `Explore this codebase thoroughly and create a WORKERMILL.md file in the project root. This file will be read by ALL AI agents working on this project — it's the single source of truth for how to work in this codebase.
+
+Use your tools aggressively — list directories, read package.json/requirements.txt/Cargo.toml/go.mod/pyproject.toml, read key source files, check test structure, look at CI configs, read existing docs. Understand the project before writing.
+
+Write a WORKERMILL.md with these sections:
+
+## 1. Project Overview
+- What this project does in 1-2 sentences
+- Who it's for and what problem it solves
+
+## 2. Tech Stack
+- Languages and versions (be specific: "TypeScript 5.x with strict mode", not just "TypeScript")
+- Frameworks (Express 4.x, React 19, Next.js 15, etc.)
+- Database, ORM, cache, message queue
+- Key libraries that shape how code is written
+
+## 3. Architecture
+- Directory structure with purpose of each top-level directory
+- Architectural pattern (monolith, microservices, monorepo, MVC, clean architecture)
+- Data flow — how a request moves through the system
+- Key abstractions and patterns used throughout
+
+## 4. Quick Reference
+Build a command table:
+| Task | Command |
+|------|---------|
+| Install | \`npm install\` |
+| Dev server | \`npm run dev\` |
+| Test | \`npm test\` |
+| Build | \`npm run build\` |
+| Lint | \`npm run lint\` |
+| Type check | \`npx tsc --noEmit\` |
+
+Include ALL available scripts, not just the obvious ones.
+
+## 5. Coding Standards
+Observe the actual code and document what you see:
+- Naming conventions (camelCase, snake_case, file naming)
+- File structure patterns (one component per file, barrel exports, etc.)
+- Import ordering conventions
+- Error handling patterns
+- How state is managed
+- Comment style and when comments are used
+
+## 6. Key Files & Entry Points
+List the most important files an agent should know about:
+- Main entry point(s)
+- Route definitions
+- Database schema/models
+- Config files
+- Environment variables (.env structure)
+
+## 7. Testing
+- Test framework and runner
+- Where tests live (co-located, separate directory)
+- How to run a single test
+- Test patterns used (unit, integration, e2e)
+- Any test fixtures or helpers
+
+## 8. Common Pitfalls
+Things that would trip up an AI agent:
+- Gotchas specific to this codebase
+- Environment requirements (specific Node version, Docker needed, etc.)
+- Files that should NOT be modified
+- Patterns that look wrong but are intentional
+
+## 9. Git & Workflow
+- Branch naming conventions
+- Commit message format
+- PR process if any
+
+Rules for writing:
+- Be SPECIFIC — reference actual file paths, actual commands, actual patterns
+- Be CONCISE — target under 200 lines, no filler
+- Every line should help an AI agent work better in this codebase
+- If you can't determine something from the code, leave it out rather than guessing
+- Use code blocks for commands and file paths
+
+Write the file with write_file to WORKERMILL.md in the project root.`
+            );
           }
-
-          // Gather project info and track what was detected
-          const initParts: string[] = ["# Project Instructions\n"];
-          const detectedItems: string[] = [];
-
-          // Package.json
-          try {
-            const pkg = JSON.parse(fs.readFileSync(path.join(props.workingDir, "package.json"), "utf-8"));
-            const deps = Object.keys((pkg.dependencies || {}) as Record<string, string>);
-            const notable = deps.filter(d => ["express", "react", "next", "vue", "angular", "fastify", "nestjs", "pg", "mysql", "mongodb", "prisma", "typeorm", "sequelize", "django", "flask", "postgresql", "redis"].some(k => d.toLowerCase().includes(k)));
-            detectedItems.push(`- package.json: ${notable.length > 0 ? notable.join(", ") : deps.slice(0, 5).join(", ")}`);
-
-            initParts.push(`## Project: ${pkg.name || "unknown"}`);
-            if (pkg.description) initParts.push(pkg.description);
-            initParts.push("");
-            if (pkg.scripts) {
-              initParts.push("## Available Scripts");
-              for (const [name, scriptCmd] of Object.entries(pkg.scripts)) {
-                initParts.push(`- \`npm run ${name}\` — ${scriptCmd}`);
-              }
-              initParts.push("");
-            }
-            if (pkg.dependencies) {
-              initParts.push(`## Key Dependencies`);
-              initParts.push(Object.keys(pkg.dependencies as Record<string, string>).slice(0, 20).map(d => `- ${d}`).join("\n"));
-              initParts.push("");
-            }
-          } catch { /* no package.json */ }
-
-          // Python
-          try {
-            if (fs.existsSync(path.join(props.workingDir, "requirements.txt"))) {
-              const reqs = fs.readFileSync(path.join(props.workingDir, "requirements.txt"), "utf-8").trim();
-              detectedItems.push("- requirements.txt found");
-              initParts.push("## Python Dependencies");
-              initParts.push("```");
-              initParts.push(reqs.split("\n").slice(0, 20).join("\n"));
-              initParts.push("```\n");
-            }
-          } catch { /* ignore */ }
-
-          // pyproject.toml
-          try {
-            if (fs.existsSync(path.join(props.workingDir, "pyproject.toml"))) {
-              detectedItems.push("- pyproject.toml found");
-              initParts.push("## Python Project");
-              initParts.push("Uses pyproject.toml for configuration.\n");
-            }
-          } catch { /* ignore */ }
-
-          // Docker
-          try {
-            const hasDockerfile = fs.existsSync(path.join(props.workingDir, "Dockerfile"));
-            const hasCompose = fs.existsSync(path.join(props.workingDir, "docker-compose.yml"));
-            if (hasDockerfile || hasCompose) {
-              const dockerParts: string[] = [];
-              if (hasDockerfile) dockerParts.push("Dockerfile");
-              if (hasCompose) dockerParts.push("docker-compose.yml");
-              detectedItems.push(`- ${dockerParts.join(", ")} found`);
-              initParts.push("## Docker");
-              initParts.push("This project uses Docker for containerization.\n");
-            }
-          } catch { /* ignore */ }
-
-          // Git info
-          try {
-            const remoteUrl = execSync("git remote get-url origin 2>/dev/null", {
-              cwd: props.workingDir, encoding: "utf-8", timeout: 3000,
-            }).trim();
-            if (remoteUrl) {
-              detectedItems.push(`- Git remote: ${remoteUrl}`);
-              initParts.push(`## Repository\n${remoteUrl}\n`);
-            }
-          } catch { /* ignore */ }
-
-          // Directory structure
-          try {
-            const tree = execSync("find . -maxdepth 2 -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.workermill/*' -not -path '*/dist/*' -not -path '*/build/*' | head -30", {
-              cwd: props.workingDir, encoding: "utf-8", timeout: 5000,
-            }).trim();
-            if (tree) {
-              initParts.push("## File Structure (top-level)");
-              initParts.push("```");
-              initParts.push(tree);
-              initParts.push("```\n");
-            }
-          } catch { /* ignore */ }
-
-          initParts.push("## Coding Standards\n");
-          initParts.push("<!-- Add your project-specific rules here -->");
-          initParts.push("<!-- Examples: -->");
-          initParts.push("<!-- - Use TypeScript strict mode -->");
-          initParts.push("<!-- - Always write tests for new features -->");
-          initParts.push("<!-- - Use conventional commits -->\n");
-
-          // Write the file
-          fs.writeFileSync(instructionsPath, initParts.join("\n"), "utf-8");
-
-          agent.addSystemMessage(
-            `**Created** \`WORKERMILL.md\`\n\n` +
-            `Detected:\n` +
-            (detectedItems.length > 0 ? detectedItems.join("\n") : "- (no specific frameworks detected)") + "\n\n" +
-            "Edit this file to add coding standards, architecture notes, and project-specific rules. " +
-            "All WorkerMill agents read it automatically."
-          );
           break;
         }
 

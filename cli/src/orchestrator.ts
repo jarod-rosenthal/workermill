@@ -450,10 +450,6 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
       if (text) {
         const lines = text.split("\n").filter(l => l.trim());
         for (const line of lines) {
-          // Skip raw JSON lines — just show the planner's thinking
-          if (line.trim().startsWith("{") || line.trim().startsWith("}") ||
-              line.trim().startsWith('"') || line.trim().startsWith("[") ||
-              line.trim().startsWith("]") || line.includes("```")) continue;
           output.log("planner", line);
         }
       }

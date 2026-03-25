@@ -967,8 +967,6 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
   }
 
   // Review config
-  const maxRevisions = config.review?.maxRevisions ?? 3;
-  const autoRevise = config.review?.autoRevise ?? false;
   const approvalThreshold = config.review?.approvalThreshold ?? 80;
 
   // Run inline review with revision loop
@@ -1007,11 +1005,11 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
     }
 
     let previousReviewFeedback = "";
-    logger.info("Starting review loop", { maxRevisions, approvalThreshold, provider: revProvider, model: revModel });
-    for (let reviewRound = 0; reviewRound <= maxRevisions; reviewRound++) {
+    logger.info("Starting review loop", { approvalThreshold, provider: revProvider, model: revModel });
+    for (let reviewRound = 0; ; reviewRound++) {
       const isRevision = reviewRound > 0;
-      logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
-      output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound}/${maxRevisions}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
+      logger.info(`Review round ${reviewRound}`, { isRevision });
+      output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
       output.log("tech_lead", `Starting agent execution (model: ${revModel})`);
 
       output.status(isRevision ? "Reviewer -- Re-checking after revisions" : "Reviewer -- Checking code quality");
@@ -1019,7 +1017,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
       try {
         // Build review prompt with full context — matches WorkerMill's inline-reviewer.ts buildReviewPrompt()
         const previousFeedbackSection = isRevision && previousReviewFeedback
-          ? `## Previous Review Feedback (Review ${reviewRound}/${maxRevisions})
+          ? `## Previous Review Feedback (Round ${reviewRound + 1})
 This is a revision attempt. The previous code was reviewed and these issues were identified:
 
 ${previousReviewFeedback}
@@ -1132,29 +1130,18 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           reviewUsage?.inputTokens || 0, reviewUsage?.outputTokens || 0);
         output.updateCost?.(costTracker.getTotalCost());
 
-        // If approved or out of revision attempts, done
+        // If approved, done
         if (approved) break;
-        if (reviewRound >= maxRevisions) {
-          output.log("system", `Max review revisions (${maxRevisions}) reached`);
-          break;
+
+        // Ask user whether to revise
+        let shouldRevise = false;
+        try {
+          shouldRevise = await output.confirm("Revise and re-review?");
+        } catch {
+          shouldRevise = false; // cancelled
         }
 
-        // Ask user or auto-revise
-        let shouldRevise = autoRevise;
-        if (!autoRevise) {
-          try {
-            shouldRevise = await output.confirm(`Revise and re-review? (${maxRevisions - reviewRound} attempt${maxRevisions - reviewRound > 1 ? "s" : ""} left)`);
-          } catch {
-            shouldRevise = false; // cancelled
-          }
-        } else {
-          output.log("system", `Auto-revising (${maxRevisions - reviewRound} attempt${maxRevisions - reviewRound > 1 ? "s" : ""} left)...`);
-        }
-
-        if (!shouldRevise) {
-          output.log("system", "Skipping revision, proceeding to commit.");
-          break;
-        }
+        if (!shouldRevise) break;
 
         // Parse which stories need revision (selective revision from inline-reviewer.ts)
         const affected = parseAffectedStories(reviewText);

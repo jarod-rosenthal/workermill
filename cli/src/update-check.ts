@@ -10,6 +10,17 @@ interface CheckData {
   latestVersion?: string;
 }
 
+/** Compare semver strings. Returns true if b is newer than a. */
+function isNewer(current: string, latest: string): boolean {
+  const a = current.split(".").map(Number);
+  const b = latest.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((b[i] || 0) > (a[i] || 0)) return true;
+    if ((b[i] || 0) < (a[i] || 0)) return false;
+  }
+  return false;
+}
+
 /**
  * Check npm registry for a newer version. Returns the latest version string
  * if an update is available, null otherwise. Checks at most once per 24h.
@@ -26,7 +37,7 @@ export async function checkForUpdate(currentVersion: string): Promise<string | n
 
     // Skip if checked recently
     if (Date.now() - data.lastCheck < CHECK_INTERVAL) {
-      if (data.latestVersion && data.latestVersion !== currentVersion) {
+      if (data.latestVersion && isNewer(currentVersion, data.latestVersion)) {
         return data.latestVersion;
       }
       return null;
@@ -50,11 +61,11 @@ export async function checkForUpdate(currentVersion: string): Promise<string | n
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(CHECK_FILE, JSON.stringify({ lastCheck: Date.now(), latestVersion: latest }), "utf-8");
 
-    if (latest !== currentVersion) {
+    if (isNewer(currentVersion, latest)) {
       return latest;
     }
     return null;
   } catch {
-    return null; // Network error, npm down, etc. — don't bother the user
+    return null;
   }
 }

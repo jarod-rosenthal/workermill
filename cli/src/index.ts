@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+// Orchestration creates many concurrent streams — raise the listener limit
+// to avoid spurious MaxListenersExceededWarning from Node.
+import { EventEmitter } from "events";
+EventEmitter.defaultMaxListeners = 30;
+
 import React from "react";
 import { render } from "ink";
 import chalk from "chalk";
@@ -46,7 +51,7 @@ function printWelcome(roleModels: { worker: string; planner: string; reviewer: s
   console.log();
 }
 
-const VERSION = "0.4.16";
+const VERSION = "0.4.17";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {

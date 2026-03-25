@@ -767,8 +767,18 @@ export async function runOrchestration(
         }
   }
 
+  // Ensure every story has a unique ID (some planners output stories without IDs)
+  const seenIds = new Set<string>();
+  for (let i = 0; i < plannerStories.length; i++) {
+    if (!plannerStories[i].id || seenIds.has(plannerStories[i].id)) {
+      plannerStories[i].id = `${i + 1}-${(plannerStories[i].title || "story").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40)}`;
+    }
+    seenIds.add(plannerStories[i].id);
+  }
+
   // Sort by dependencies
   const sorted = topologicalSort(plannerStories);
+  logger.info("Topological sort result", { input: plannerStories.length, output: sorted.length, ids: sorted.map(s => s.id) });
 
   // Prompt user to proceed (unless --trust mode)
   if (!trustAll) {

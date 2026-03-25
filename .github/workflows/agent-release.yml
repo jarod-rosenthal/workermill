@@ -121,19 +121,9 @@ jobs:
             ghcr.io/jarod-rosenthal/api:${{ steps.version.outputs.version }}
             ghcr.io/jarod-rosenthal/api:latest
 
-      - name: Build and push Frontend image
-        uses: docker/build-push-action@v7
-        with:
-          context: ./frontend
-          file: frontend/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/jarod-rosenthal/frontend:${{ steps.version.outputs.version }}
-            ghcr.io/jarod-rosenthal/frontend:latest
-
       - name: Make GHCR packages public
         run: |
-          for pkg in worker api frontend; do
+          for pkg in worker api; do
             curl -s -X PATCH \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github+json" \

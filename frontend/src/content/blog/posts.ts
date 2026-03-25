@@ -3,7 +3,7 @@ import type { Author, BlogPost } from "../../types/blog";
 const authors: Record<string, Author> = {
   jarod: {
     name: "Jarod Rosenthal",
-    role: "Founder & CEO",
+    role: "Founder",
   },
   engineering: {
     name: "WorkerMill Engineering",

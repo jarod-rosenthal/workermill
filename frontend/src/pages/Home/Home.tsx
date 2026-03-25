@@ -152,6 +152,9 @@ export default function Home() {
               </span>
             </div>
             <div className="flex items-center gap-6 text-sm text-muted-foreground">
+              <a href="mailto:jarod.rosenthal@workermill.com" className="hover:text-foreground transition-colors">
+                Contact
+              </a>
               <Link to="/privacy" className="hover:text-foreground transition-colors">
                 Privacy
               </Link>

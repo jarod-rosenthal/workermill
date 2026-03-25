@@ -10,7 +10,7 @@ import { getSESClient, EMAIL_CONFIG } from "./helpers.js";
 import { logEmailSend } from "./rate-limit.js";
 
 /**
- * Generate HTML email template for welcome email from CEO
+ * Generate HTML email template for welcome email from founder
  */
 function generateWelcomeEmailHtml(
   user: User,
@@ -135,7 +135,7 @@ function generateWelcomeEmailHtml(
               <div style="margin-bottom: 32px;">
                 <p style="margin: 0; font-size: 16px; color: #3f3f46;">Best,</p>
                 <p style="margin: 4px 0 0; font-size: 16px; font-weight: 600; color: #18181b;">Jarod Rosenthal</p>
-                <p style="margin: 0; font-size: 14px; color: #71717a;">CEO & Founder, WorkerMill</p>
+                <p style="margin: 0; font-size: 14px; color: #71717a;">Founder, WorkerMill</p>
               </div>
 
               <!-- CTA Button -->
@@ -224,7 +224,7 @@ I'd love to hear how WorkerMill works for you. Drop me a note anytime!
 
 Best,
 Jarod Rosenthal
-CEO & Founder, WorkerMill
+Founder, WorkerMill
 
 Go to Dashboard: ${dashboardUrl}
 
@@ -236,7 +236,7 @@ Real-time monitoring and orchestration for autonomous AI coding agents.
 }
 
 /**
- * Send welcome email from CEO to new users
+ * Send welcome email from founder to new users
  *
  * @param user - The User who just became active
  * @param organization - The Organization they belong to

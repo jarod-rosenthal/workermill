@@ -51,7 +51,7 @@ function printWelcome(roleModels: { worker: string; planner: string; reviewer: s
   console.log();
 }
 
-const VERSION = "0.6.2";
+const VERSION = "0.7.0";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {
@@ -59,7 +59,8 @@ function addSharedOptions(cmd: Command): Command {
     .option("--provider <provider>", "Override default provider")
     .option("--model <model>", "Override model")
     .option("--trust", "Skip all tool permission prompts")
-    .option("--full-disk", "Allow tools to access files outside working directory");
+    .option("--full-disk", "Allow tools to access files outside working directory")
+    .option("--max-tokens <n>", "Maximum output tokens per response", parseInt);
 }
 
 /** Load config, apply CLI overrides, run setup if needed. */
@@ -110,6 +111,7 @@ const defaultCmd = program
         planMode: options.plan || false,
         sandboxed: !options.fullDisk,
         resume: options.resume || false,
+        maxTokens: options.maxTokens,
         workingDir,
         roleModels,
       }),
@@ -169,6 +171,7 @@ const buildCmd = program
         planMode: false,
         sandboxed,
         resume: false,
+        maxTokens: options.maxTokens,
         workingDir: process.cwd(),
         initialBuildTask: task,
         roleModels,

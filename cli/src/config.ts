@@ -29,12 +29,27 @@ export interface ReviewConfig {
   useCritic?: boolean;
 }
 
+export interface HookConfig {
+  /** Shell command to run */
+  command: string;
+  /** Which tool(s) this hook applies to. "*" for all. */
+  tools?: string[];
+}
+
+export interface HooksConfig {
+  /** Run before tool execution */
+  pre?: HookConfig[];
+  /** Run after tool execution */
+  post?: HookConfig[];
+}
+
 export interface CliConfig {
   providers: Record<string, ProviderConfig>;
   default: string;
   routing?: Record<string, string>;
   mcp?: Record<string, MCPServerConfig>;
   review?: ReviewConfig;
+  hooks?: HooksConfig;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".workermill");
@@ -83,6 +98,10 @@ export function resolveConfig(): CliConfig {
     routing: { ...global.routing, ...(project?.routing || {}) },
     mcp: { ...global.mcp, ...(project?.mcp || {}) },
     review: { ...global.review, ...(project?.review || {}) },
+    hooks: {
+      pre: [...(global.hooks?.pre || []), ...(project?.hooks?.pre || [])],
+      post: [...(global.hooks?.post || []), ...(project?.hooks?.post || [])],
+    },
   };
 }
 

@@ -21,10 +21,11 @@ import { CostTracker } from "../cost-tracker.js";
 import { killActiveProcess } from "../../../packages/engine/src/tools/bash.js";
 import { loadLearnings } from "../learnings.js";
 import { formatProjectInstructions } from "../instructions.js";
-import { parseImageReferences, toMessageContent, resolveFileReferences } from "../image-support.js";
+import { parseImageReferences, toMessageContent, resolveFileReferences, resolveFolderReferences, resolveUrlReferences } from "../image-support.js";
 import * as logger from "../logger.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers } from "../mcp-client.js";
-import { resolveConfig } from "../config.js";
+import { resolveConfig, type HooksConfig } from "../config.js";
+import { runHooks } from "../hooks.js";
 import type {
   Message,
   ToolCallInfo,
@@ -76,6 +77,7 @@ export interface UseAgentOptions {
   planMode: boolean;
   sandboxed: boolean;
   resume: boolean;
+  maxTokens?: number;
 }
 
 export interface UseAgentReturn {
@@ -225,6 +227,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const trustAllRef = useRef(options.trustAll);
   const planModeRef = useRef(options.planMode);
   const workingDirRef = useRef(process.cwd());
+  const hooksConfigRef = useRef<HooksConfig | undefined>(undefined);
   const initDoneRef = useRef(false);
 
   // Keep refs in sync with state so callbacks see fresh values.
@@ -275,6 +278,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       if (cliConfig?.mcp && Object.keys(cliConfig.mcp).length > 0) {
         void startAllMCPServers(cliConfig.mcp);
       }
+      hooksConfigRef.current = cliConfig?.hooks;
     } catch {
       // No config or resolveConfig threw — MCP not available, that's fine.
     }
@@ -471,7 +475,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
           try {
             logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
+            runHooks("pre", name, hooksConfigRef.current, workingDirRef.current);
             const result = await td.execute(input);
+            runHooks("post", name, hooksConfigRef.current, workingDirRef.current);
             const resultStr =
               typeof result === "string" ? result : JSON.stringify(result);
             logger.debug("Tool result", { tool: name, result: resultStr.slice(0, 200) });
@@ -533,8 +539,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       void (async () => {
         const session = sessionRef.current;
 
-        // Resolve @file references (text files inlined into the prompt)
-        const resolvedInput = resolveFileReferences(input, workingDirRef.current);
+        // Resolve @file, @folder/, and @url references
+        let resolvedInput = resolveFileReferences(input, workingDirRef.current);
+        resolvedInput = resolveFolderReferences(resolvedInput, workingDirRef.current);
+        resolvedInput = await resolveUrlReferences(resolvedInput);
+
+        const turnStartTime = Date.now();
 
         // Add user message to session and committed messages.
         addMessage(session, "user", resolvedInput);
@@ -580,6 +590,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               return { role: m.role as "user" | "assistant", content: m.content };
             }),
             tools: getActiveTools() as ToolSet,
+            maxOutputTokens: options.maxTokens,
             stopWhen: stepCountIs(100),
             abortSignal: controller.signal,
             ...buildOllamaOptions(
@@ -671,6 +682,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
           setStatus("idle");
           abortRef.current = null;
+
+          // Ring terminal bell for long operations (>10s)
+          if (Date.now() - turnStartTime > 10_000) {
+            process.stdout.write("\x07");
+          }
         } catch (err) {
           clearTimeout(timeoutId);
           abortRef.current = null;

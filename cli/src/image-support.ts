@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { execSync } from "child_process";
 
 interface ContentPart {
   type: "text" | "image";
@@ -137,6 +138,120 @@ export function resolveFileReferences(input: string, workingDir: string): string
       }
     } catch {
       result = result.replace(match[0], `(failed to read: ${filePath})`);
+    }
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Folder skip list for directory listings
+// ---------------------------------------------------------------------------
+
+const SKIP_DIRS = new Set(["node_modules", ".git", ".workermill", "__pycache__", ".next", "dist", ".cache"]);
+
+/**
+ * Recursively list directory contents up to a given depth.
+ * Returns an indented tree string.
+ */
+function listDirTree(dirPath: string, prefix: string, depth: number, maxDepth: number): string[] {
+  if (depth > maxDepth) return [];
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  // Sort: directories first, then files, both alphabetical
+  entries.sort((a, b) => {
+    if (a.isDirectory() && !b.isDirectory()) return -1;
+    if (!a.isDirectory() && b.isDirectory()) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  const lines: string[] = [];
+  for (const entry of entries) {
+    if (SKIP_DIRS.has(entry.name)) continue;
+    if (entry.name.startsWith(".") && entry.isDirectory()) continue;
+    const isDir = entry.isDirectory();
+    lines.push(`${prefix}${isDir ? entry.name + "/" : entry.name}`);
+    if (isDir && depth < maxDepth) {
+      lines.push(...listDirTree(path.join(dirPath, entry.name), prefix + "  ", depth + 1, maxDepth));
+    }
+  }
+  return lines;
+}
+
+/**
+ * Resolve @folder/ references in user input.
+ * Matches `@path/to/dir/` patterns (must end with `/`).
+ * Replaces each match with a code block showing the directory tree (max depth 2).
+ * Paths must be within workingDir.
+ */
+export function resolveFolderReferences(input: string, workingDir: string): string {
+  // Match @some/path/ — must end with / followed by whitespace or end of input
+  const folderPattern = /@([\w./-]+\/)(?=\s|$)/g;
+  const matches = [...input.matchAll(folderPattern)];
+
+  if (matches.length === 0) return input;
+
+  let result = input;
+  for (const match of matches) {
+    const dirRef = match[1];
+    const fullPath = path.isAbsolute(dirRef)
+      ? dirRef
+      : path.resolve(workingDir, dirRef);
+
+    // Path traversal guard
+    const normalizedWork = path.resolve(workingDir);
+    if (!path.resolve(fullPath).startsWith(normalizedWork)) {
+      result = result.replace(match[0], `(blocked: ${dirRef} is outside working directory)`);
+      continue;
+    }
+
+    try {
+      if (fs.existsSync(fullPath) && fs.statSync(fullPath).isDirectory()) {
+        const tree = listDirTree(fullPath, "  ", 0, 2);
+        const truncated = tree.length > 200
+          ? tree.slice(0, 200).join("\n") + "\n  ... (truncated at 200 entries)"
+          : tree.join("\n");
+        result = result.replace(match[0], `\n\`\`\`\n// ${dirRef}\n${truncated}\n\`\`\`\n`);
+      } else {
+        result = result.replace(match[0], `(directory not found: ${dirRef})`);
+      }
+    } catch {
+      result = result.replace(match[0], `(failed to read: ${dirRef})`);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Resolve @https://... and @http://... references in user input.
+ * Fetches URL content (10s timeout, max 10KB) and inlines it.
+ */
+export async function resolveUrlReferences(input: string): Promise<string> {
+  const urlPattern = /@(https?:\/\/[^\s]+)/g;
+  const matches = [...input.matchAll(urlPattern)];
+
+  if (matches.length === 0) return input;
+
+  let result = input;
+  for (const match of matches) {
+    const url = match[1];
+    try {
+      // Use curl for fetching — avoids adding HTTP dependencies
+      const content = execSync(
+        `curl -sL --max-time 10 --max-filesize 10240 ${JSON.stringify(url)}`,
+        { encoding: "utf-8", timeout: 12_000 },
+      ).trim();
+      const truncated = content.length > 10240
+        ? content.slice(0, 10240) + "\n... (truncated at 10KB)"
+        : content;
+      result = result.replace(match[0], `\n\`\`\`\n// fetched from ${url}\n${truncated}\n\`\`\`\n`);
+    } catch {
+      result = result.replace(match[0], `(failed to fetch: ${url})`);
     }
   }
 

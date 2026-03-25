@@ -10,8 +10,9 @@ import { loadPersona } from "./personas.js";
 import { formatProjectInstructions } from "./instructions.js";
 import * as logger from "./logger.js";
 import { CostTracker } from "./cost-tracker.js";
-import type { CliConfig } from "./config.js";
+import type { CliConfig, HooksConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
+import { runHooks } from "./hooks.js";
 import { loadLearnings, saveLearnings, mergeLearnings } from "./learnings.js";
 
 /**
@@ -823,7 +824,9 @@ export async function runOrchestration(
               output.statusDone();
               output.toolCall(story.persona, toolName, input);
             }
+            runHooks("pre", toolName, config.hooks, workingDir);
             const result = await toolDef.execute(input);
+            runHooks("post", toolName, config.hooks, workingDir);
             output.status("");
             return result;
           },

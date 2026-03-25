@@ -115,11 +115,13 @@ Or from the command line: \`wm build "your task"\`
 | \`/diff\` | Preview uncommitted changes |
 | \`/plan\` | Toggle plan mode (read-only, explore before committing) |
 | \`/trust\` | Auto-approve all tool calls for this session |
-| \`/model\` | Show current provider and model |
+| \`/init\` | Generate \`.workermill/instructions.md\` for this project |
+| \`/model\` | Show or switch model (\`/model provider/model\`) |
 | \`/cost\` | Session cost and token usage |
 | \`/status\` | Session info |
 | \`/git\` | Git branch and status |
 | \`/sessions\` | List/switch sessions |
+| \`/hooks\` | Show configured pre/post tool hooks |
 | \`/editor\` | Open \\$EDITOR for longer input |
 | \`/quit\` | Exit |
 
@@ -230,15 +232,43 @@ export function Root(props: RootProps): React.ReactElement {
 
         // ---- /model ----
         case "model": {
-          agent.addSystemMessage(
-            `**Current model:** ${props.provider}/${props.model}\n\n` +
-            "**Supported model families:**\n" +
-            "- Anthropic: claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5\n" +
-            "- OpenAI: gpt-5.4, gpt-5.4-mini\n" +
-            "- Google: gemini-3.1-pro, gemini-3.1-flash-lite\n" +
-            "- Ollama: any locally-hosted model\n\n" +
-            "To change: edit `~/.workermill/cli.json` or restart with `--provider` / `--model` flags."
-          );
+          if (!arg) {
+            agent.addSystemMessage(
+              `**Current model:** ${props.provider}/${props.model}\n\n` +
+              "To switch: `/model <provider>/<model>` (e.g., `/model anthropic/claude-sonnet-4-6`)\n\n" +
+              "**Supported providers:** ollama, anthropic, openai, google"
+            );
+          } else {
+            // Parse provider/model
+            const modelParts = arg.split("/");
+            let newProvider: string;
+            let newModel: string;
+            if (modelParts.length >= 2) {
+              newProvider = modelParts[0];
+              newModel = modelParts.slice(1).join("/");
+            } else {
+              // Just a model name — keep current provider
+              newProvider = props.provider;
+              newModel = arg;
+            }
+
+            // Update config
+            const modelConfig = loadConfig();
+            if (modelConfig) {
+              if (!modelConfig.providers[newProvider]) {
+                modelConfig.providers[newProvider] = { model: newModel };
+              } else {
+                modelConfig.providers[newProvider].model = newModel;
+              }
+              modelConfig.default = newProvider;
+              saveConfig(modelConfig);
+            }
+
+            agent.addSystemMessage(
+              `**Model switched** to \`${newProvider}/${newModel}\`\n\n` +
+              "Note: takes effect on the next prompt. The current conversation continues with the new model."
+            );
+          }
           break;
         }
 
@@ -572,6 +602,27 @@ export function Root(props: RootProps): React.ReactElement {
           break;
         }
 
+        // ---- /hooks ----
+        case "hooks": {
+          const hooksConfig = loadConfig();
+          const hooks = hooksConfig?.hooks;
+          if (!hooks || (!hooks.pre?.length && !hooks.post?.length)) {
+            agent.addSystemMessage("No hooks configured. Add hooks to `~/.workermill/cli.json`:\n\n```json\n\"hooks\": {\n  \"pre\": [{ \"command\": \"echo before\", \"tools\": [\"write_file\"] }],\n  \"post\": [{ \"command\": \"npx eslint --fix\", \"tools\": [\"write_file\", \"edit_file\"] }]\n}\n```");
+          } else {
+            const lines: string[] = [];
+            if (hooks.pre?.length) {
+              lines.push("**Pre-tool hooks:**");
+              for (const h of hooks.pre) lines.push(`- \`${h.command}\` (tools: ${h.tools?.join(", ") || "*"})`);
+            }
+            if (hooks.post?.length) {
+              lines.push("**Post-tool hooks:**");
+              for (const h of hooks.post) lines.push(`- \`${h.command}\` (tools: ${h.tools?.join(", ") || "*"})`);
+            }
+            agent.addSystemMessage(lines.join("\n"));
+          }
+          break;
+        }
+
         // ---- /quit, /exit ----
         case "quit":
         case "exit":
@@ -581,6 +632,101 @@ export function Root(props: RootProps): React.ReactElement {
           // Force process exit — Ink's exit() only stops rendering but
           // dangling listeners (stdin, timers) can keep the process alive.
           setTimeout(() => process.exit(0), 100);
+          break;
+        }
+
+        // ---- /init ----
+        case "init": {
+          const instructionsPath = path.join(props.workingDir, ".workermill", "instructions.md");
+          if (fs.existsSync(instructionsPath) && !arg?.includes("--force")) {
+            agent.addSystemMessage(`\`.workermill/instructions.md\` already exists. Use \`/init --force\` to overwrite.`);
+            break;
+          }
+
+          // Gather project info
+          const initParts: string[] = ["# Project Instructions\n"];
+
+          // Package.json
+          try {
+            const pkg = JSON.parse(fs.readFileSync(path.join(props.workingDir, "package.json"), "utf-8"));
+            initParts.push(`## Project: ${pkg.name || "unknown"}`);
+            if (pkg.description) initParts.push(pkg.description);
+            initParts.push("");
+            if (pkg.scripts) {
+              initParts.push("## Available Scripts");
+              for (const [name, scriptCmd] of Object.entries(pkg.scripts)) {
+                initParts.push(`- \`npm run ${name}\` — ${scriptCmd}`);
+              }
+              initParts.push("");
+            }
+            if (pkg.dependencies) {
+              initParts.push(`## Key Dependencies`);
+              initParts.push(Object.keys(pkg.dependencies as Record<string, string>).slice(0, 20).map(d => `- ${d}`).join("\n"));
+              initParts.push("");
+            }
+          } catch { /* no package.json */ }
+
+          // Python
+          try {
+            if (fs.existsSync(path.join(props.workingDir, "requirements.txt"))) {
+              const reqs = fs.readFileSync(path.join(props.workingDir, "requirements.txt"), "utf-8").trim();
+              initParts.push("## Python Dependencies");
+              initParts.push("```");
+              initParts.push(reqs.split("\n").slice(0, 20).join("\n"));
+              initParts.push("```\n");
+            }
+          } catch { /* ignore */ }
+
+          // pyproject.toml
+          try {
+            if (fs.existsSync(path.join(props.workingDir, "pyproject.toml"))) {
+              initParts.push("## Python Project");
+              initParts.push("Uses pyproject.toml for configuration.\n");
+            }
+          } catch { /* ignore */ }
+
+          // Docker
+          try {
+            if (fs.existsSync(path.join(props.workingDir, "Dockerfile")) || fs.existsSync(path.join(props.workingDir, "docker-compose.yml"))) {
+              initParts.push("## Docker");
+              initParts.push("This project uses Docker for containerization.\n");
+            }
+          } catch { /* ignore */ }
+
+          // Git info
+          try {
+            const remoteUrl = execSync("git remote get-url origin 2>/dev/null", {
+              cwd: props.workingDir, encoding: "utf-8", timeout: 3000,
+            }).trim();
+            if (remoteUrl) initParts.push(`## Repository\n${remoteUrl}\n`);
+          } catch { /* ignore */ }
+
+          // Directory structure
+          try {
+            const tree = execSync("find . -maxdepth 2 -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.workermill/*' -not -path '*/dist/*' -not -path '*/build/*' | head -30", {
+              cwd: props.workingDir, encoding: "utf-8", timeout: 5000,
+            }).trim();
+            if (tree) {
+              initParts.push("## File Structure (top-level)");
+              initParts.push("```");
+              initParts.push(tree);
+              initParts.push("```\n");
+            }
+          } catch { /* ignore */ }
+
+          initParts.push("## Coding Standards\n");
+          initParts.push("<!-- Add your project-specific rules here -->");
+          initParts.push("<!-- Examples: -->");
+          initParts.push("<!-- - Use TypeScript strict mode -->");
+          initParts.push("<!-- - Always write tests for new features -->");
+          initParts.push("<!-- - Use conventional commits -->\n");
+
+          // Write the file
+          const initDir = path.dirname(instructionsPath);
+          if (!fs.existsSync(initDir)) fs.mkdirSync(initDir, { recursive: true });
+          fs.writeFileSync(instructionsPath, initParts.join("\n"), "utf-8");
+
+          agent.addSystemMessage(`**Created** \`.workermill/instructions.md\`\n\nEdit it to add your coding standards and project-specific rules. All agents will read this file automatically.`);
           break;
         }
 

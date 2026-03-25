@@ -241,6 +241,8 @@ export function useOrchestrator(
           setRunning(false);
           setStatusMessage("");
           setConfirmRequest(null);
+          // Ring terminal bell when build completes
+          process.stdout.write("\x07");
         }
       })();
     },

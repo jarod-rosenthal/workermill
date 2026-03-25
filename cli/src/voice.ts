@@ -11,7 +11,7 @@
 import { execSync, exec, type ChildProcess } from "child_process";
 import * as logger from "./logger.js";
 
-const MAX_MAX_LISTEN_SECONDS = 60; // safety cap — most speech is under 30s
+const MAX_LISTEN_SECONDS = 60; // safety cap — most speech is under 30s
 
 interface VoiceResult {
   text: string;
@@ -72,7 +72,7 @@ async function transcribeWithHear(): Promise<VoiceResult> {
     // hear -i -l en — interactive mode, stops on silence, outputs transcribed text
     const text = execSync(`hear -i -l en 2>/dev/null`, {
       encoding: "utf-8",
-      timeout: (MAX_MAX_LISTEN_SECONDS + 5) * 1000,
+      timeout: (MAX_LISTEN_SECONDS + 5) * 1000,
     }).trim();
     return { text };
   } catch (err) {
@@ -87,7 +87,7 @@ Add-Type -AssemblyName System.Speech
 $r = New-Object System.Speech.Recognition.SpeechRecognitionEngine
 $r.SetInputToDefaultAudioDevice()
 $r.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))
-$r.InitialSilenceTimeout = [TimeSpan]::FromSeconds(${MAX_MAX_LISTEN_SECONDS})
+$r.InitialSilenceTimeout = [TimeSpan]::FromSeconds(${MAX_LISTEN_SECONDS})
 $r.EndSilenceTimeout = [TimeSpan]::FromSeconds(3)
 $result = $r.Recognize()
 if ($result) { Write-Output $result.Text } else { Write-Output "" }

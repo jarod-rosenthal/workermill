@@ -127,6 +127,7 @@ Or from the command line: \`wm build "your task"\`
 | \`/skills\` | List custom commands |
 | \`/personas\` | List, show, or create personas |
 | \`/mcp\` | Show MCP server status |
+| \`/chrome\` | Open/close headless Chrome browser |
 | \`/voice\` | Voice input — speak instead of type |
 | \`/update\` | Update to latest version |
 | \`/release-notes\` | Show changelog |
@@ -840,6 +841,24 @@ export function Root(props: RootProps): React.ReactElement {
               agent.addSystemMessage(`**Update failed:** ${msg.slice(0, 200)}\n\nTry manually: \`npm install -g workermill@latest\``);
             }
           }
+          break;
+        }
+
+        // ---- /chrome ----
+        case "chrome":
+        case "browser": {
+          void (async () => {
+            const { browserOpen, browserClose, isBrowserOpen } = await import("../browser.js");
+            if (arg === "close" || arg === "stop") {
+              const result = await browserClose();
+              agent.addSystemMessage(result);
+            } else if (isBrowserOpen()) {
+              agent.addSystemMessage("**Browser already open.** The agent can use `browser_navigate`, `browser_screenshot`, etc.\n\nUse `/chrome close` to shut it down.");
+            } else {
+              const result = await browserOpen();
+              agent.addSystemMessage(`${result}\n\nThe agent now has browser tools: \`browser_navigate\`, \`browser_screenshot\`, \`browser_click\`, \`browser_fill\`, \`browser_evaluate\`, \`browser_console\`.`);
+            }
+          })();
           break;
         }
 

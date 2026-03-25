@@ -139,6 +139,22 @@ export default function Home() {
         </section>
       </main>
 
+      {/* Contact */}
+      <section className="py-20 border-t border-border">
+        <div className="max-w-6xl mx-auto px-6 text-center">
+          <h2 className="text-2xl font-bold mb-4">Get in Touch</h2>
+          <p className="text-muted-foreground mb-6">
+            Questions, feedback, or partnership inquiries — I'd love to hear from you.
+          </p>
+          <a
+            href="mailto:jarod.rosenthal@workermill.com"
+            className="inline-flex items-center gap-2 px-6 py-3 text-sm font-medium rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300"
+          >
+            jarod.rosenthal@workermill.com
+          </a>
+        </div>
+      </section>
+
       {/* Footer */}
       <footer className="border-t border-border py-12">
         <div className="max-w-6xl mx-auto px-6">
@@ -152,9 +168,6 @@ export default function Home() {
               </span>
             </div>
             <div className="flex items-center gap-6 text-sm text-muted-foreground">
-              <a href="mailto:jarod.rosenthal@workermill.com" className="hover:text-foreground transition-colors">
-                Contact
-              </a>
               <Link to="/privacy" className="hover:text-foreground transition-colors">
                 Privacy
               </Link>

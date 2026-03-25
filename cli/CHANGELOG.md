@@ -4,6 +4,99 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.3] - 2026-03-25
+
+### Fixed
+- **Ollama context length never applied** — `num_ctx` was at the wrong nesting level in `providerOptions`. Ollama always loaded at 32K default regardless of config. Now correctly sends `providerOptions.ollama.options.num_ctx`.
+
+## [0.9.2] - 2026-03-25
+
+### Fixed
+- `/model` message correctly says "restart CLI" (model can't hot-swap mid-session)
+- `/status` reads live permission mode instead of stale launch props
+- `/personas` works for npm users (was only scanning monorepo path)
+- Bell doesn't ring on cancelled builds
+- MCP client version string updated
+
+## [0.9.1] - 2026-03-25
+
+### Added
+- `/release-notes` command (also `/changelog`) — shows CHANGELOG.md or links to GitHub
+
+## [0.9.0] - 2026-03-25
+
+### Added
+- `/skills` command — lists custom commands with setup instructions
+- `/personas` command — list all personas, show prompt details, create custom personas
+- `/mcp` command — shows configured MCP servers with setup instructions
+- All three added to `/help` and autocomplete
+
+## [0.8.9] - 2026-03-25
+
+### Changed
+- Planner output streams line-by-line in real time instead of dumping on step finish
+
+## [0.8.8] - 2026-03-25
+
+### Fixed
+- Normalize planner output field names (`index`→`id`, `steps`→`stories`, `depends_on`→`dependsOn`) for cross-model compatibility
+
+## [0.8.7] - 2026-03-25
+
+### Fixed
+- Ensure unique story IDs before topological sort (planners without IDs collapsed all stories into one)
+
+## [0.8.6] - 2026-03-25
+
+### Changed
+- Build permission prompts support `(y)es (a)lways (t)rust all (n)o`
+- `/build` and `/retry` read current permission mode from Shift+Tab cycling
+
+## [0.8.5] - 2026-03-25
+
+### Fixed
+- Google model names: `gemini-3.1-pro-preview` (was `gemini-3.1-flash-lite` which doesn't exist in API)
+
+## [0.8.4] - 2026-03-25
+
+### Removed
+- `wm build` subcommand — use `/build` inside the CLI instead
+
+## [0.8.3] - 2026-03-25
+
+### Fixed
+- Semver comparison for update check (was string compare, told users to downgrade)
+
+## [0.8.2] - 2026-03-25
+
+### Added
+- Shift+Tab cycles permission modes: ask → auto-edit → trust all
+- Auto-edit mode: auto-approves file tools, prompts only for bash
+
+## [0.8.1] - 2026-03-25
+
+### Added
+- Slash command autocomplete — type `/` to see filtered list, arrows to navigate, Tab to accept
+
+## [0.8.0] - 2026-03-25
+
+### Added
+- `/init` creates `WORKERMILL.md` in repo root (visible, committable) with project detection
+- `/clear` resets conversation (clears messages and tokens)
+- `/permissions` command with granular per-tool allow/deny
+- Tab/Shift+Tab cycling in permission prompts
+- Instructions loader checks `WORKERMILL.md` first
+
+## [0.7.2] - 2026-03-25
+
+### Fixed
+- Dangerous commands always prompt even in trust mode (was auto-approving rm -rf, force push during builds)
+- Dead `planText`/`allText` variables removed
+- MCP client version updated
+
+### Added
+- CHANGELOG.md
+
 ## [0.7.1] - 2026-03-25
 
 ### Added

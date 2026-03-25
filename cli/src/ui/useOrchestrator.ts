@@ -214,9 +214,8 @@ export function useOrchestrator(
               addMessage(
                 `[${emoji} ${persona}] \u{2193} ${toolName}${detail ? " " + detail : ""}`,
               );
-              // Update status line so the user sees activity
-              const shortDetail = detail.length > 50 ? detail.slice(0, 47) + "..." : detail;
-              setStatusMessage(`${persona} → ${toolName}${shortDetail ? " " + shortDetail : ""}`);
+              // Keep status line simple — the tool call is already in the message list
+              setStatusMessage(`${persona}: working...`);
             },
 
             updateCost(cost: number): void {

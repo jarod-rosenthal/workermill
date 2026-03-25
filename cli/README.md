@@ -8,29 +8,17 @@ AI coding agent with multi-expert orchestration. Works with any LLM provider —
 npx workermill
 ```
 
-First run walks you through provider setup (Ollama auto-detected). Then just describe what you want built.
+First run launches a setup wizard — pick your providers, models, and API keys. Ollama is auto-detected for fully local use. Config is saved to `~/.workermill/cli.json` so you only do this once.
+
+Then just describe what you want built.
 
 ## Install
 
 ```bash
-# Run without installing
-npx workermill
-
-# Or install globally
 npm install -g workermill
-workermill
 ```
 
-## Features
-
-- **Multi-expert orchestration** — Complex tasks automatically decomposed into stories, each assigned to a specialist persona (backend, frontend, devops, security, etc.)
-- **Any LLM provider** — Ollama (local), Anthropic, OpenAI, Google. Per-persona model routing.
-- **13 built-in tools** — bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, sub_agent
-- **Plan mode** — Read-only research phase before making changes (`/plan` or `--plan`)
-- **Session management** — Persistent conversations with resume (`--resume`, `/sessions`)
-- **Cost tracking** — Per-model token pricing with `/cost` breakdown
-- **Quality gates** — Dangerous command warnings, permission prompts, review cycles
-- **Git integration** — Auto-init repos, branch awareness, commit after orchestration
+Or run without installing: `npx workermill`
 
 ## Usage
 
@@ -41,18 +29,26 @@ workermill
 # Skip permission prompts
 workermill --trust
 
-# Start in read-only plan mode
+# Start in read-only research mode
 workermill --plan
 
 # Resume last conversation
 workermill --resume
 
-# Override provider/model
+# Override the default provider/model for this session
 workermill --provider anthropic --model claude-sonnet-4-6
-
-# Auto-revise on failed reviews
-workermill --trust --auto-revise
 ```
+
+## Features
+
+- **Multi-expert orchestration** — Complex tasks automatically decomposed into stories, each assigned to a specialist persona (backend, frontend, devops, security, etc.)
+- **Any LLM provider** — Ollama (local), Anthropic, OpenAI, Google. The setup wizard configures per-role model routing (e.g. Ollama for workers, Claude for planning, GPT for review).
+- **13 built-in tools** — bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, sub_agent
+- **Plan mode** — Read-only research phase before making changes (`/plan` or `--plan`)
+- **Session management** — Persistent conversations with resume (`--resume`, `/sessions`)
+- **Cost tracking** — Estimated per-model token costs with `/cost` breakdown
+- **Quality gates** — Dangerous command warnings, permission prompts, review cycles
+- **Git integration** — Auto-init repos, branch awareness, commit after orchestration
 
 ## Slash Commands
 
@@ -61,7 +57,7 @@ workermill --trust --auto-revise
 | `/help` | Show all commands |
 | `/plan` | Toggle read-only plan mode |
 | `/git` | Show git branch and status |
-| `/cost` | Token cost breakdown |
+| `/cost` | Estimated token cost breakdown |
 | `/sessions` | List, switch, or delete sessions |
 | `/editor` | Open $EDITOR for multiline input |
 | `/compact` | Compress conversation history |
@@ -83,7 +79,9 @@ For complex tasks, WorkerMill automatically:
 
 ## Configuration
 
-Config stored at `~/.workermill/cli.json` (global) and `.workermill/config.json` (per-project).
+First-run setup wizard configures everything interactively. Config saved to `~/.workermill/cli.json`.
+
+You can configure separate providers and models for each role — for example, use a fast local model for workers, a stronger cloud model for planning, and a different one for code review:
 
 ```json
 {
@@ -98,26 +96,23 @@ Config stored at `~/.workermill/cli.json` (global) and `.workermill/config.json`
       "apiKey": "{env:ANTHROPIC_API_KEY}"
     },
     "openai": {
-      "model": "gpt-5.4",
+      "model": "gpt-5.3-codex",
       "apiKey": "{env:OPENAI_API_KEY}"
     },
     "google": {
-      "model": "gemini-3.1-pro",
+      "model": "gemini-2.5-pro",
       "apiKey": "{env:GOOGLE_API_KEY}"
     }
   },
   "default": "ollama",
   "routing": {
-    "tech_lead": "anthropic",
-    "planner": "anthropic"
-  },
-  "review": {
-    "maxRevisions": 2,
-    "autoRevise": false,
-    "approvalThreshold": 80
+    "planner": "google",
+    "tech_lead": "openai"
   }
 }
 ```
+
+Per-project overrides can be placed in `.workermill/config.json` in any repo.
 
 ## 12 Built-in Personas
 

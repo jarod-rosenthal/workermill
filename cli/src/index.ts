@@ -48,11 +48,12 @@ function printWelcome(roleModels: { worker: string; planner: string; reviewer: s
   console.log(dim(`  cwd: ${workingDir}`));
   console.log();
   console.log(dim("  Ask me anything, or use ") + brand("/build") + dim(" to create software with multi-expert AI."));
+  console.log(dim("  Use ") + brand("/retry") + dim(" to re-plan and re-run the last build."));
   console.log(dim("  Type ") + white("/help") + dim(" for all commands."));
   console.log();
 }
 
-const VERSION = "0.4.26";
+const VERSION = "0.4.27";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {

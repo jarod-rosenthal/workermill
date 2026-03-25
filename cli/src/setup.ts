@@ -368,13 +368,22 @@ async function fetchCloudModels(
       clearTimeout(timeout);
       if (res.ok) {
         const data = (await res.json()) as { data?: { id: string }[] };
-        const allModels = (data.data || []).map(m => m.id).sort();
-        // Filter to GPT models, prioritize latest
-        const gptModels = allModels.filter(m =>
-          m.startsWith("gpt-") && !m.includes("instruct") && !m.includes("realtime") && !m.includes("audio")
+        const allModels = (data.data || []).map(m => m.id);
+        // Filter to GPT/o-series models, exclude old junk
+        const relevant = allModels.filter(m =>
+          (m.startsWith("gpt-") || m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4")) &&
+          !m.includes("instruct") && !m.includes("realtime") && !m.includes("audio") &&
+          !m.includes("gpt-3.5") && !m.includes("gpt-4-") && !m.includes("gpt-4o-mini-") &&
+          !m.includes("-0") // skip dated snapshots like gpt-5.4-0325
         );
-        if (gptModels.length > 0) {
-          models = gptModels.slice(0, 10).map(id => ({ id, label: id }));
+        // Sort by version number descending (gpt-5.4 before gpt-4o)
+        relevant.sort((a, b) => {
+          const va = parseFloat(a.match(/(\d+\.?\d*)/)?.[1] || "0");
+          const vb = parseFloat(b.match(/(\d+\.?\d*)/)?.[1] || "0");
+          return vb - va;
+        });
+        if (relevant.length > 0) {
+          models = relevant.slice(0, 10).map(id => ({ id, label: id }));
         }
       }
     } else if (provider.name === "google") {
@@ -391,10 +400,21 @@ async function fetchCloudModels(
             id: m.name.replace("models/", ""),
             label: m.displayName || m.name.replace("models/", ""),
           }))
-          .filter(m => m.id.includes("gemini"))
-          .slice(0, 10);
-        if (genModels.length > 0) {
-          models = genModels;
+          .filter(m => m.id.includes("gemini"));
+
+        // Sort: preview models first, then by version descending
+        genModels.sort((a, b) => {
+          const aPreview = a.id.includes("preview") ? 1 : 0;
+          const bPreview = b.id.includes("preview") ? 1 : 0;
+          if (bPreview !== aPreview) return bPreview - aPreview;
+          const va = parseFloat(a.id.match(/(\d+\.?\d*)/)?.[1] || "0");
+          const vb = parseFloat(b.id.match(/(\d+\.?\d*)/)?.[1] || "0");
+          return vb - va;
+        });
+
+        const trimmed = genModels.slice(0, 10);
+        if (trimmed.length > 0) {
+          models = trimmed;
         }
       }
     }

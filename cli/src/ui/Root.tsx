@@ -389,6 +389,9 @@ export function Root(props: RootProps): React.ReactElement {
         case "exit":
         case "q": {
           exit();
+          // Force process exit — Ink's exit() only stops rendering but
+          // dangling listeners (stdin, timers) can keep the process alive.
+          setTimeout(() => process.exit(0), 100);
           break;
         }
 

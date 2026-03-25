@@ -101,6 +101,7 @@ export function App(props: AppProps): React.ReactElement {
       const now = Date.now();
       if (props.status === "idle" && now - lastCtrlCRef.current < 500) {
         exit();
+        setTimeout(() => process.exit(0), 100);
         return;
       }
       lastCtrlCRef.current = now;

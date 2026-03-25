@@ -592,31 +592,31 @@ export async function runSetup(): Promise<CliConfig> {
 
   // Build routing — only add entries that differ from default
   const routing: Record<string, string> = {};
-  if (plannerProviderName !== workerProvider.name) {
+  if (plannerProviderName !== workerConfigKey) {
     routing.planner = plannerProviderName;
     routing.critic = plannerProviderName;
   }
-  if (reviewerProviderName !== workerProvider.name) {
+  if (reviewerProviderName !== workerConfigKey) {
     routing.tech_lead = reviewerProviderName;
   }
 
   // Handle model overrides — if planner/reviewer use the same provider as workers
   // but a different model, we need a separate provider entry with a unique key
-  if (plannerProviderName === workerProvider.name && plannerModel !== workerModel) {
-    const altKey = `${plannerProviderName}_planner`;
-    providers[altKey] = { ...providers[plannerProviderName], model: plannerModel };
+  if (plannerProviderName === workerConfigKey && plannerModel !== workerModel) {
+    const altKey = `${workerConfigKey}_planner`;
+    providers[altKey] = { ...providers[workerConfigKey], model: plannerModel };
     routing.planner = altKey;
     routing.critic = altKey;
   }
-  if (reviewerProviderName === workerProvider.name && reviewerModel !== workerModel) {
-    const altKey = `${reviewerProviderName}_reviewer`;
-    providers[altKey] = { ...providers[reviewerProviderName], model: reviewerModel };
+  if (reviewerProviderName === workerConfigKey && reviewerModel !== workerModel) {
+    const altKey = `${workerConfigKey}_reviewer`;
+    providers[altKey] = { ...providers[workerConfigKey], model: reviewerModel };
     routing.tech_lead = altKey;
   }
 
   const config: CliConfig = {
     providers,
-    default: workerProvider.name,
+    default: workerConfigKey,
     ...(Object.keys(routing).length > 0 ? { routing } : {}),
   };
 
@@ -625,7 +625,7 @@ export async function runSetup(): Promise<CliConfig> {
   console.log();
   console.log(chalk.green("  ✓ Config saved to ~/.workermill/cli.json"));
   console.log();
-  console.log(chalk.dim("  Workers:  ") + `${workerProvider.name}/${workerModel}`);
+  console.log(chalk.dim("  Workers:  ") + `${workerConfigKey}/${workerModel}`);
   console.log(chalk.dim("  Planner:  ") + `${plannerProviderName}/${plannerModel}`);
   console.log(chalk.dim("  Reviewer: ") + `${reviewerProviderName}/${reviewerModel}`);
   console.log();

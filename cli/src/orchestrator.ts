@@ -108,6 +108,17 @@ If the ticket, PRD, or task description specifies a dependency version, USE THAT
 `;
 
 /**
+ * Ignore the internal .workermill directory — it stores sessions, logs, and
+ * config. It is not part of the user's project.
+ */
+const IGNORE_WORKERMILL = `
+
+## Ignored Directories
+
+NEVER explore, read, or modify files in \`.workermill/\` — it is an internal WorkerMill system directory.
+`;
+
+/**
  * Build provider-specific reasoning options — from worker/ai-clients/model-factory.ts lines 127-175.
  */
 function buildReasoningOptions(provider: string, modelName: string): Record<string, unknown> {
@@ -847,7 +858,7 @@ When summarizing your work at the end, describe decisions in plain language. The
 When you make a decision that affects other parts of the system, include ::decision:: markers in your output.
 When you create a file, include ::file_created::path markers.
 When you modify a file, include ::file_modified::path markers.
-${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
+${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
 
     try {
       // Use onStepFinish to capture text between tool calls — same pattern as

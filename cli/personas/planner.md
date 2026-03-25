@@ -65,6 +65,10 @@ When the task requires running commands (terraform apply, deploy scripts, databa
 - Use the devops_engineer persona for infrastructure/deployment steps
 - Separate "write code" from "deploy/run" — these should be different steps
 
+## Ignored Directories
+
+NEVER explore or read files in `.workermill/` — it is an internal WorkerMill system directory (sessions, logs, config). It is not part of the user's project.
+
 ## Process
 
 For each task, you MUST:

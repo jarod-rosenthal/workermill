@@ -53,23 +53,40 @@ const PROVIDERS: ProviderOption[] = [
   },
 ];
 
-function ask(rl: readline.Interface, question: string): Promise<string> {
-  return new Promise((resolve) => rl.question(question, resolve));
+/** Mutable readline holder — allows close/recreate without breaking callers. */
+class Prompter {
+  rl: readline.Interface;
+  constructor() {
+    this.rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  }
+  ask(question: string): Promise<string> {
+    return new Promise((resolve) => this.rl.question(question, resolve));
+  }
+  /** Close current rl, return a cleanup function that recreates it. */
+  suspend(): () => void {
+    this.rl.close();
+    return () => {
+      this.rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    };
+  }
+  close(): void {
+    this.rl.close();
+  }
 }
 
 /** Prompt user to pick a provider. Returns the ProviderOption. */
 async function pickProvider(
-  rl: readline.Interface,
+  p: Prompter,
   label: string,
   providers: ProviderOption[],
 ): Promise<ProviderOption> {
   console.log(`  ${chalk.bold(label)}:`);
-  providers.forEach((p, i) => {
-    console.log(`    ${chalk.cyan(`${i + 1}`)}. ${p.display}`);
+  providers.forEach((prov, i) => {
+    console.log(`    ${chalk.cyan(`${i + 1}`)}. ${prov.display}`);
   });
   console.log();
 
-  const choiceStr = await ask(rl, chalk.dim(`  Choose (1-${providers.length}): `));
+  const choiceStr = await p.ask(chalk.dim(`  Choose (1-${providers.length}): `));
   const choice = parseInt(choiceStr.trim(), 10) - 1;
   const selected = providers[choice] || providers[0];
   console.log(chalk.dim(`  → ${selected.display}`));
@@ -78,7 +95,7 @@ async function pickProvider(
 
 /** Prompt user to pick a model from the provider's defaults, or type custom. */
 async function pickModel(
-  rl: readline.Interface,
+  p: Prompter,
   provider: ProviderOption,
 ): Promise<string> {
   console.log();
@@ -88,7 +105,7 @@ async function pickModel(
   console.log(`    ${chalk.cyan(`${provider.models.length + 1}`)}. Custom model`);
   console.log();
 
-  const choiceStr = await ask(rl, chalk.dim(`  Choose (1-${provider.models.length + 1}): `));
+  const choiceStr = await p.ask(chalk.dim(`  Choose (1-${provider.models.length + 1}): `));
   const choice = parseInt(choiceStr.trim(), 10) - 1;
 
   if (choice >= 0 && choice < provider.models.length) {
@@ -98,7 +115,7 @@ async function pickModel(
   }
 
   // Custom model
-  const custom = await ask(rl, chalk.dim("  Model name: "));
+  const custom = await p.ask(chalk.dim("  Model name: "));
   const model = custom.trim() || provider.models[0].id;
   console.log(chalk.dim(`  → ${model}`));
   return model;
@@ -112,7 +129,7 @@ function maskKey(key: string): string {
 
 /** Get API key for a provider — check env first, then prompt. */
 async function getApiKey(
-  rl: readline.Interface,
+  p: Prompter,
   provider: ProviderOption,
   existingKeys: Map<string, string>,
 ): Promise<string | undefined> {
@@ -133,10 +150,10 @@ async function getApiKey(
     return key;
   }
 
-  // Pause readline so it doesn't echo the key in plaintext while we capture in raw mode
-  rl.pause();
+  // Suspend readline so it doesn't echo the key in plaintext, then recreate after
+  const resume = p.suspend();
   const key = await readKeyMasked(chalk.dim(`  ${provider.display} API key: `));
-  rl.resume();
+  resume();
   const trimmed = key.trim();
   existingKeys.set(provider.name, trimmed);
   return trimmed;
@@ -146,6 +163,9 @@ async function getApiKey(
  * Read an API key from stdin with masked display.
  * Shows first 6 chars as typed, then masks the middle, shows last 4 on Enter.
  * Press Tab to toggle reveal/mask the full key.
+ *
+ * Must be called AFTER the readline interface is closed (via Prompter.suspend())
+ * to prevent readline from echoing keystrokes in plaintext.
  */
 function readKeyMasked(prompt: string): Promise<string> {
   return new Promise((resolve) => {
@@ -282,7 +302,7 @@ async function configureOllama(providerConfig: ProviderConfig): Promise<void> {
 }
 
 export async function runSetup(): Promise<CliConfig> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const p = new Prompter();
   const apiKeys = new Map<string, string>();
 
   console.log();
@@ -295,9 +315,9 @@ export async function runSetup(): Promise<CliConfig> {
   // ── Step 1: Workers (expert personas — the default provider) ──
   console.log(chalk.hex("#D77757").bold("  ① Workers") + chalk.dim(" — expert personas that write code"));
   console.log();
-  const workerProvider = await pickProvider(rl, "Provider for workers", PROVIDERS);
-  const workerModel = await pickModel(rl, workerProvider);
-  const workerKey = await getApiKey(rl, workerProvider, apiKeys);
+  const workerProvider = await pickProvider(p, "Provider for workers", PROVIDERS);
+  const workerModel = await pickModel(p, workerProvider);
+  const workerKey = await getApiKey(p, workerProvider, apiKeys);
 
   const workerConfig: ProviderConfig = { model: workerModel };
   if (workerKey) workerConfig.apiKey = workerKey;
@@ -309,14 +329,14 @@ export async function runSetup(): Promise<CliConfig> {
   console.log(chalk.hex("#D77757").bold("  ② Planner") + chalk.dim(" — plans stories and validates the approach"));
   console.log();
 
-  const sameForPlanner = await ask(rl, chalk.dim(`  Same as workers (${workerProvider.display} / ${workerModel})? [Y/n] `));
+  const sameForPlanner = await p.ask(chalk.dim(`  Same as workers (${workerProvider.display} / ${workerModel})? [Y/n] `));
   let plannerProviderName: string;
   let plannerModel: string;
 
   if (sameForPlanner.trim().toLowerCase() === "n") {
-    const plannerProvider = await pickProvider(rl, "Provider for planner", PROVIDERS);
-    plannerModel = await pickModel(rl, plannerProvider);
-    const plannerKey = await getApiKey(rl, plannerProvider, apiKeys);
+    const plannerProvider = await pickProvider(p, "Provider for planner", PROVIDERS);
+    plannerModel = await pickModel(p, plannerProvider);
+    const plannerKey = await getApiKey(p, plannerProvider, apiKeys);
     plannerProviderName = plannerProvider.name;
     if (plannerKey && plannerProvider.name !== workerProvider.name) {
       // Will be added to providers below
@@ -333,14 +353,14 @@ export async function runSetup(): Promise<CliConfig> {
   console.log(chalk.hex("#D77757").bold("  ③ Reviewer") + chalk.dim(" — tech lead that reviews code quality"));
   console.log();
 
-  const sameForReviewer = await ask(rl, chalk.dim(`  Same as workers (${workerProvider.display} / ${workerModel})? [Y/n] `));
+  const sameForReviewer = await p.ask(chalk.dim(`  Same as workers (${workerProvider.display} / ${workerModel})? [Y/n] `));
   let reviewerProviderName: string;
   let reviewerModel: string;
 
   if (sameForReviewer.trim().toLowerCase() === "n") {
-    const reviewerProvider = await pickProvider(rl, "Provider for reviewer", PROVIDERS);
-    reviewerModel = await pickModel(rl, reviewerProvider);
-    const reviewerKey = await getApiKey(rl, reviewerProvider, apiKeys);
+    const reviewerProvider = await pickProvider(p, "Provider for reviewer", PROVIDERS);
+    reviewerModel = await pickModel(p, reviewerProvider);
+    const reviewerKey = await getApiKey(p, reviewerProvider, apiKeys);
     reviewerProviderName = reviewerProvider.name;
     if (reviewerKey && reviewerProvider.name !== workerProvider.name) {
       // Will be added to providers below
@@ -351,7 +371,7 @@ export async function runSetup(): Promise<CliConfig> {
     console.log(chalk.dim(`  → ${workerProvider.display} / ${workerModel}`));
   }
 
-  rl.close();
+  p.close();
 
   // ── Build config ──
   const providers: Record<string, ProviderConfig> = {

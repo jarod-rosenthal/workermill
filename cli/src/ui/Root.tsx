@@ -679,6 +679,7 @@ export function Root(props: RootProps): React.ReactElement {
         case "exit":
         case "q": {
           stopAllMCPServers();
+          void import("../browser.js").then(m => m.browserClose());
           exit();
           // Force process exit — Ink's exit() only stops rendering but
           // dangling listeners (stdin, timers) can keep the process alive.

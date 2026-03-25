@@ -26,6 +26,7 @@ import * as logger from "../logger.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers } from "../mcp-client.js";
 import { resolveConfig, type HooksConfig } from "../config.js";
 import { runHooks } from "../hooks.js";
+import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
 import type {
   Message,
   ToolCallInfo,
@@ -206,6 +207,22 @@ function toolStatusLabel(toolName: string, input: Record<string, unknown>): stri
       return `Git ${input.action || ""}...`;
     case "sub_agent":
       return "Running sub-agent...";
+    case "browser_open":
+      return "Opening browser...";
+    case "browser_navigate":
+      return `Navigating to ${input.url || "page"}...`;
+    case "browser_screenshot":
+      return "Taking screenshot...";
+    case "browser_click":
+      return `Clicking ${input.selector || "element"}...`;
+    case "browser_fill":
+      return `Filling ${input.selector || "field"}...`;
+    case "browser_evaluate":
+      return "Running JavaScript...";
+    case "browser_console":
+      return "Reading console...";
+    case "browser_close":
+      return "Closing browser...";
     default:
       return `Running ${toolName}...`;
   }
@@ -443,6 +460,54 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     // Merge MCP tools (dynamically resolved each call so tools from
     // servers that finish starting after init are picked up).
     const allRawTools: Record<string, AnyToolDef> = { ...raw, ...getMCPToolDefinitions() };
+
+    // Add browser tools (always available — they check if browser is open internally)
+    allRawTools.browser_open = {
+      description: "Open a headless Chrome browser for navigating websites, taking screenshots, and verifying UI.",
+      parameters: { type: "object", properties: {}, required: [] },
+      execute: async () => browserOpen(),
+    };
+    allRawTools.browser_navigate = {
+      description: "Navigate the browser to a URL. Returns the page title.",
+      parameters: { type: "object", properties: { url: { type: "string", description: "URL to navigate to" } }, required: ["url"] },
+      execute: async ({ url }: { url: string }) => browserNavigate(url),
+    };
+    allRawTools.browser_screenshot = {
+      description: "Take a screenshot of the current browser page. Returns the image for visual inspection.",
+      parameters: { type: "object", properties: {}, required: [] },
+      execute: async () => {
+        const { base64, description } = await browserScreenshot();
+        if (base64) {
+          return `${description}\n[Screenshot captured — image data available for analysis]`;
+        }
+        return description;
+      },
+    };
+    allRawTools.browser_click = {
+      description: "Click an element on the page by CSS selector.",
+      parameters: { type: "object", properties: { selector: { type: "string", description: "CSS selector (e.g., 'button.submit', '#login')" } }, required: ["selector"] },
+      execute: async ({ selector }: { selector: string }) => browserClick(selector),
+    };
+    allRawTools.browser_fill = {
+      description: "Fill a form field by CSS selector with a value.",
+      parameters: { type: "object", properties: { selector: { type: "string", description: "CSS selector for the input field" }, value: { type: "string", description: "Value to fill" } }, required: ["selector", "value"] },
+      execute: async ({ selector, value }: { selector: string; value: string }) => browserFill(selector, value),
+    };
+    allRawTools.browser_evaluate = {
+      description: "Execute JavaScript in the browser and return the result.",
+      parameters: { type: "object", properties: { expression: { type: "string", description: "JavaScript expression to evaluate" } }, required: ["expression"] },
+      execute: async ({ expression }: { expression: string }) => browserEvaluate(expression),
+    };
+    allRawTools.browser_console = {
+      description: "Get console messages (log, error, warn) from the browser.",
+      parameters: { type: "object", properties: {}, required: [] },
+      execute: async () => browserConsole(),
+    };
+    allRawTools.browser_close = {
+      description: "Close the headless Chrome browser.",
+      parameters: { type: "object", properties: {}, required: [] },
+      execute: async () => browserClose(),
+    };
 
     const wrapped: Record<string, AnyToolDef> = {};
     for (const [name, toolDef] of Object.entries(allRawTools)) {

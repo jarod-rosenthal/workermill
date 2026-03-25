@@ -1,0 +1,31 @@
+name: npm audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  npm-audit:
+    name: Audit (${{ matrix.dir }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dir: [api, frontend, cli]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install and audit
+        working-directory: ${{ matrix.dir }}
+        run: |
+          npm ci --ignore-scripts
+          npm audit --omit=dev --audit-level=high

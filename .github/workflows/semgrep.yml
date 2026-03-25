@@ -1,4 +1,4 @@
-name: Security Scan
+name: Semgrep
 
 on:
   push:
@@ -9,26 +9,10 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
-  gitleaks:
-    name: Secret Detection (Gitleaks)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: --config .gitleaks.toml
-
   semgrep:
-    name: Static Analysis (Semgrep)
+    name: Static Analysis
     runs-on: ubuntu-latest
     container:
       image: semgrep/semgrep
@@ -58,37 +42,3 @@ jobs:
             --exclude-rule yaml.github-actions.security.run-shell-injection.run-shell-injection \
             --exclude-rule dockerfile.security.missing-user.missing-user \
             .
-
-  trivy:
-    name: Dependency Scan (Trivy)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run Trivy (filesystem)
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: fs
-          scan-ref: .
-          severity: HIGH,CRITICAL
-          exit-code: 1
-          ignore-unfixed: true
-
-  npm-audit:
-    name: npm audit
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        dir: [api, frontend, cli]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install and audit (${{ matrix.dir }})
-        working-directory: ${{ matrix.dir }}
-        run: |
-          npm ci --ignore-scripts
-          npm audit --omit=dev --audit-level=high

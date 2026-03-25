@@ -22,7 +22,43 @@ import { ECS_FARGATE_SPOT_RATE_PER_HOUR } from "../../config/pricing.js";
  * Prices are per 1K tokens
  */
 const GOOGLE_MODELS: Record<string, ModelInfo> = {
-  // Gemini 2.5 Pro (latest powerful model) - $1.25/$5.00 per MTok (≤200K context)
+  // Gemini 3.1 Pro (latest flagship) - $1.25/$10.00 per MTok
+  "gemini-3.1-pro": {
+    id: "gemini-3.1-pro",
+    displayName: "Gemini 3.1 Pro",
+    tier: "powerful",
+    inputRate: 0.00125, // $1.25 per 1M
+    outputRate: 0.01, // $10 per 1M
+    cacheReadRate: 0.0003125,
+    contextWindow: 1000000,
+    supportsStreaming: true,
+    supportsCaching: true,
+  },
+  // Gemini 3.1 Flash Lite - $0.25/$1.50 per MTok
+  "gemini-3.1-flash-lite": {
+    id: "gemini-3.1-flash-lite",
+    displayName: "Gemini 3.1 Flash Lite",
+    tier: "budget",
+    inputRate: 0.00025, // $0.25 per 1M
+    outputRate: 0.0015, // $1.50 per 1M
+    cacheReadRate: 0.0000625,
+    contextWindow: 1000000,
+    supportsStreaming: true,
+    supportsCaching: true,
+  },
+  // Gemini 3 Flash - $0.10/$0.40 per MTok
+  "gemini-3-flash": {
+    id: "gemini-3-flash",
+    displayName: "Gemini 3 Flash",
+    tier: "balanced",
+    inputRate: 0.0001, // $0.10 per 1M
+    outputRate: 0.0004, // $0.40 per 1M
+    cacheReadRate: 0.000025,
+    contextWindow: 1000000,
+    supportsStreaming: true,
+    supportsCaching: true,
+  },
+  // Gemini 2.5 Pro (legacy) - $1.25/$5.00 per MTok (≤200K context)
   "gemini-2.5-pro": {
     id: "gemini-2.5-pro",
     displayName: "Gemini 2.5 Pro",
@@ -111,10 +147,10 @@ const GOOGLE_MODELS: Record<string, ModelInfo> = {
  * Alias mappings for convenience
  */
 const MODEL_ALIASES: Record<string, string> = {
-  "gemini-flash": "gemini-2.5-flash",
-  "gemini-pro": "gemini-2.5-pro",
-  flash: "gemini-2.5-flash",
-  pro: "gemini-2.5-pro",
+  "gemini-flash": "gemini-3.1-flash-lite",
+  "gemini-pro": "gemini-3.1-pro",
+  flash: "gemini-3.1-flash-lite",
+  pro: "gemini-3.1-pro",
 };
 
 /**
@@ -141,6 +177,12 @@ export class GooglePricingEngine implements ProviderPricingEngine {
 
     // Try pattern matching for versioned model names
     const modelLower = modelId.toLowerCase();
+    if (modelLower.includes("3.1") && modelLower.includes("pro")) {
+      return GOOGLE_MODELS["gemini-3.1-pro"];
+    }
+    if (modelLower.includes("3.1") && modelLower.includes("flash")) {
+      return GOOGLE_MODELS["gemini-3.1-flash-lite"];
+    }
     if (modelLower.includes("flash") && modelLower.includes("2.5")) {
       return GOOGLE_MODELS["gemini-2.5-flash"];
     }
@@ -148,7 +190,7 @@ export class GooglePricingEngine implements ProviderPricingEngine {
       return GOOGLE_MODELS["gemini-2.0-flash"];
     }
     if (modelLower.includes("flash")) {
-      return GOOGLE_MODELS["gemini-2.5-flash"]; // Default to latest flash
+      return GOOGLE_MODELS["gemini-3.1-flash-lite"]; // Default to latest flash
     }
     if (modelLower.includes("pro") && modelLower.includes("2.5")) {
       return GOOGLE_MODELS["gemini-2.5-pro"];
@@ -157,7 +199,7 @@ export class GooglePricingEngine implements ProviderPricingEngine {
       return GOOGLE_MODELS["gemini-1.5-pro"];
     }
     if (modelLower.includes("pro")) {
-      return GOOGLE_MODELS["gemini-2.5-pro"]; // Default to latest pro
+      return GOOGLE_MODELS["gemini-3.1-pro"]; // Default to latest pro
     }
 
     return undefined;

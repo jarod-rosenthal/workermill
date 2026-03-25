@@ -441,11 +441,21 @@ async function configureOllama(providerConfig: ProviderConfig, ollamaProvider?: 
         if (models.length > 0) {
           console.log(chalk.dim(`  Available: ${models.map(m => m.name).join(", ")}`));
 
-          // Build dynamic model list sorted by coding relevance
+          // Build dynamic model list — deduplicate by base name, prefer largest context variant
           if (ollamaProvider && models.length > 0) {
-            const sorted = [...models]
-              .sort((a, b) => codingScore(b.name) - codingScore(a.name))
-              .slice(0, 8); // Show top 8
+            const byBase = new Map<string, { name: string; score: number }>();
+            for (const m of models) {
+              const base = m.name.split(":")[0];
+              const existing = byBase.get(base);
+              const score = codingScore(m.name);
+              // Keep the variant with the highest context or first seen
+              if (!existing || score > existing.score) {
+                byBase.set(base, { name: m.name, score });
+              }
+            }
+            const sorted = [...byBase.values()]
+              .sort((a, b) => b.score - a.score)
+              .slice(0, 8);
             ollamaProvider.detectedModels = sorted.map((m, i) => ({
               id: m.name,
               label: `${formatModelLabel(m.name)}${i === 0 ? " (recommended)" : ""}`,

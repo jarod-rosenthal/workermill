@@ -367,6 +367,23 @@ export default function LandingV0() {
             <InstallSection />
           </div>
 
+          {/* Contact */}
+          <section className="relative py-20 px-6">
+            <div className="max-w-3xl mx-auto text-center">
+              <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">
+                Get in Touch
+              </h2>
+              <p className="text-slate-400 max-w-xl mx-auto leading-relaxed mb-8">
+                Questions, feedback, or partnership inquiries — I'd love to hear from you.
+              </p>
+              <a
+                href="mailto:jarod.rosenthal@workermill.com"
+                className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl border border-white/10 bg-white/[0.03] text-slate-300 text-sm font-medium hover:bg-white/[0.06] hover:text-white transition-colors"
+              >
+                jarod.rosenthal@workermill.com
+              </a>
+            </div>
+          </section>
 
         </div>
       </div>

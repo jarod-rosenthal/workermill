@@ -374,7 +374,7 @@ export default function LandingV0() {
                 Get in Touch
               </h2>
               <p className="text-slate-400 max-w-xl mx-auto leading-relaxed mb-8">
-                Questions, feedback, or partnership inquiries — I'd love to hear from you.
+                Questions, feedback, or inquiries — I'd love to hear from you.
               </p>
               <a
                 href="mailto:jarod.rosenthal@workermill.com"

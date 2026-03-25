@@ -55,6 +55,17 @@ const PROVIDERS: ProviderOption[] = [
   },
 ];
 
+/** OpenAI-compatible providers that work via the OpenAI SDK with a custom baseURL. */
+const COMPATIBLE_PROVIDERS: Array<{ name: string; display: string; baseURL: string; envVar: string; defaultModel: string }> = [
+  { name: "groq", display: "Groq (fast inference)", baseURL: "https://api.groq.com/openai/v1", envVar: "GROQ_API_KEY", defaultModel: "llama-3.3-70b-versatile" },
+  { name: "deepseek", display: "DeepSeek", baseURL: "https://api.deepseek.com/v1", envVar: "DEEPSEEK_API_KEY", defaultModel: "deepseek-chat" },
+  { name: "mistral", display: "Mistral AI", baseURL: "https://api.mistral.ai/v1", envVar: "MISTRAL_API_KEY", defaultModel: "mistral-large-latest" },
+  { name: "openrouter", display: "OpenRouter (any model)", baseURL: "https://openrouter.ai/api/v1", envVar: "OPENROUTER_API_KEY", defaultModel: "anthropic/claude-sonnet-4" },
+  { name: "together", display: "Together AI", baseURL: "https://api.together.xyz/v1", envVar: "TOGETHER_API_KEY", defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo" },
+  { name: "xai", display: "xAI (Grok)", baseURL: "https://api.x.ai/v1", envVar: "XAI_API_KEY", defaultModel: "grok-3" },
+  { name: "fireworks", display: "Fireworks AI", baseURL: "https://api.fireworks.ai/inference/v1", envVar: "FIREWORKS_API_KEY", defaultModel: "accounts/fireworks/models/llama-v3p3-70b-instruct" },
+];
+
 /** Mutable readline holder — allows close/recreate without breaking callers. */
 class Prompter {
   rl: readline.Interface;
@@ -86,10 +97,57 @@ async function pickProvider(
   providers.forEach((prov, i) => {
     console.log(`    ${chalk.cyan(`${i + 1}`)}. ${prov.display}`);
   });
+  console.log(`    ${chalk.cyan(`${providers.length + 1}`)}. More providers...`);
   console.log();
 
-  const choiceStr = await p.ask(chalk.dim(`  Choose (1-${providers.length}): `));
+  const choiceStr = await p.ask(chalk.dim(`  Choose (1-${providers.length + 1}): `));
   const choice = parseInt(choiceStr.trim(), 10) - 1;
+
+  // "More providers..." selected — show OpenAI-compatible providers
+  if (choice === providers.length) {
+    console.log();
+    console.log(chalk.dim("  These providers use an OpenAI-compatible API:"));
+    console.log();
+    COMPATIBLE_PROVIDERS.forEach((cp, i) => {
+      console.log(`    ${chalk.cyan(`${i + 1}`)}. ${cp.display}`);
+    });
+    console.log(`    ${chalk.cyan(`${COMPATIBLE_PROVIDERS.length + 1}`)}. Custom (enter base URL)`);
+    console.log();
+
+    const cpChoice = await p.ask(chalk.dim(`  Choose (1-${COMPATIBLE_PROVIDERS.length + 1}): `));
+    const cpIdx = parseInt(cpChoice.trim(), 10) - 1;
+
+    if (cpIdx >= 0 && cpIdx < COMPATIBLE_PROVIDERS.length) {
+      const cp = COMPATIBLE_PROVIDERS[cpIdx];
+      console.log(chalk.dim(`  → ${cp.display}`));
+      // Return as an OpenAI-compatible provider with custom baseURL stored in host
+      return {
+        name: "openai",
+        display: cp.display,
+        needsKey: true,
+        envVar: cp.envVar,
+        models: [{ id: cp.defaultModel, label: `${cp.defaultModel} (default)` }],
+        // Store baseURL in a way that gets picked up by config
+        detectedModels: undefined,
+        _baseURL: cp.baseURL,
+        _providerName: cp.name,
+      } as ProviderOption & { _baseURL: string; _providerName: string };
+    }
+
+    // Custom OpenAI-compatible provider
+    const baseURL = await p.ask(chalk.dim("  Base URL (e.g., https://api.example.com/v1): "));
+    const customName = await p.ask(chalk.dim("  Provider name: "));
+    console.log(chalk.dim(`  → ${customName.trim() || "custom"} (${baseURL.trim()})`));
+    return {
+      name: "openai",
+      display: customName.trim() || "Custom Provider",
+      needsKey: true,
+      models: [{ id: "default", label: "Enter model name" }],
+      _baseURL: baseURL.trim(),
+      _providerName: customName.trim().toLowerCase().replace(/\s+/g, "-") || "custom",
+    } as ProviderOption & { _baseURL: string; _providerName: string };
+  }
+
   const selected = providers[choice] || providers[0];
   console.log(chalk.dim(`  → ${selected.display}`));
   return selected;
@@ -501,8 +559,15 @@ export async function runSetup(): Promise<CliConfig> {
   p.close();
 
   // ── Build config ──
+  // Handle OpenAI-compatible providers — store baseURL as host, use real provider name as key
+  const wpExt = workerProvider as ProviderOption & { _baseURL?: string; _providerName?: string };
+  if (wpExt._baseURL) {
+    workerConfig.host = wpExt._baseURL;
+  }
+  const workerConfigKey = wpExt._providerName || workerProvider.name;
+
   const providers: Record<string, ProviderConfig> = {
-    [workerProvider.name]: workerConfig,
+    [workerConfigKey]: workerConfig,
   };
 
   // Add planner provider if different

@@ -1,6 +1,6 @@
 import { type LanguageModel } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { openai } from "@ai-sdk/openai";
+import { openai, createOpenAI } from "@ai-sdk/openai";
 import { google } from "@ai-sdk/google";
 import { createOllama } from "ollama-ai-provider-v2";
 import type { AIProvider } from "./types.js";
@@ -63,20 +63,26 @@ export async function ensureOllamaContext(
 export function createModel(
   provider: AIProvider,
   modelName: string,
-  ollamaHost?: string,
-  ollamaContextLength?: number
+  host?: string,
+  contextLength?: number
 ): LanguageModel {
   switch (provider) {
     case "anthropic":
       return anthropic(modelName);
-    case "openai":
+    case "openai": {
+      if (host) {
+        // OpenAI-compatible provider with custom baseURL (Groq, DeepSeek, Mistral, etc.)
+        const customOpenAI = createOpenAI({ baseURL: host });
+        return customOpenAI(modelName);
+      }
       return openai(modelName);
+    }
     case "google":
     case "gemini":
       return google(modelName);
     case "ollama": {
-      const host = ollamaHost || "http://localhost:11434";
-      const ollamaProvider = createOllama({ baseURL: `${host}/api` });
+      const ollamaHost = host || "http://localhost:11434";
+      const ollamaProvider = createOllama({ baseURL: `${ollamaHost}/api` });
       return ollamaProvider(modelName);
     }
     default:

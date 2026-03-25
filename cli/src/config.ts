@@ -116,8 +116,14 @@ export function getProviderForPersona(
     throw new Error(`Provider "${providerName}" not found in configuration.`);
   }
 
+  // Map OpenAI-compatible providers to "openai" for the model factory
+  const knownProviders = new Set(["ollama", "anthropic", "openai", "google", "gemini"]);
+  const resolvedProvider = knownProviders.has(providerName) || knownProviders.has(providerName.replace(/_.*$/, ""))
+    ? providerName.replace(/_.*$/, "") // strip _planner/_reviewer suffix
+    : providerConfig.host ? "openai" : providerName; // has baseURL → OpenAI-compatible
+
   return {
-    provider: providerName,
+    provider: resolvedProvider,
     model: providerConfig.model,
     apiKey: providerConfig.apiKey?.startsWith("{env:")
       ? process.env[providerConfig.apiKey.slice(5, -1)] || undefined

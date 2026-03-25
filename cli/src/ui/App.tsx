@@ -27,6 +27,8 @@ interface AppProps {
   messages: Message[];
   /** Current agent status. */
   status: AgentStatus;
+  /** Human-readable detail for the current status. */
+  statusDetail?: string;
   /** Active permission request, if any. */
   permissionRequest: PermissionRequest | null;
   /** Orchestrator confirm request (yes/no) */
@@ -154,7 +156,7 @@ export function App(props: AppProps): React.ReactElement {
         ) : props.status === "streaming" ? (
           <Text color={theme.brand}><Spinner color={theme.brand} /> Streaming response...</Text>
         ) : props.status === "tool_running" ? (
-          <Text color={theme.warning}><Spinner color={theme.warning} /> Running tool...</Text>
+          <Text color={theme.warning}><Spinner color={theme.warning} /> {props.statusDetail || "Running tool..."}</Text>
         ) : props.status === "permission" ? (
           <Text color={theme.permission}>● Waiting for permission...</Text>
         ) : (

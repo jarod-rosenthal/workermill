@@ -82,6 +82,8 @@ export interface UseAgentReturn {
   streamingToolCalls: ToolCallInfo[];
   /** High-level status of the agent loop. */
   status: AgentStatus;
+  /** Human-readable detail for the current status (e.g. "Reading codebase..."). */
+  statusDetail: string;
   /** Non-null when the agent is waiting for a permission decision. */
   permissionRequest: PermissionRequest | null;
   /** Last observed input-token context usage. */
@@ -144,6 +146,37 @@ When you discover something non-obvious about this codebase, emit:
 }
 
 // ---------------------------------------------------------------------------
+// Tool status labels
+// ---------------------------------------------------------------------------
+
+function toolStatusLabel(toolName: string, input: Record<string, unknown>): string {
+  switch (toolName) {
+    case "read_file":
+      return `Reading ${input.file_path || "file"}...`;
+    case "write_file":
+      return `Writing ${input.file_path || "file"}...`;
+    case "edit_file":
+      return `Editing ${input.file_path || "file"}...`;
+    case "glob":
+      return `Searching files${input.pattern ? ` (${input.pattern})` : ""}...`;
+    case "grep":
+      return `Searching code${input.pattern ? ` for "${String(input.pattern).slice(0, 30)}"` : ""}...`;
+    case "ls":
+      return `Listing ${input.path || "directory"}...`;
+    case "bash": {
+      const cmd = String(input.command || "").slice(0, 40);
+      return `Running ${cmd}${String(input.command || "").length > 40 ? "..." : ""}`;
+    }
+    case "git":
+      return `Git ${input.action || ""}...`;
+    case "sub_agent":
+      return "Running sub-agent...";
+    default:
+      return `Running ${toolName}...`;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
@@ -160,6 +193,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     [],
   );
   const [status, setStatus] = useState<AgentStatus>("idle");
+  const [statusDetail, setStatusDetail] = useState("");
   const [permissionRequest, setPermissionRequest] =
     useState<PermissionRequest | null>(null);
   const [tokens, setTokens] = useState(0);
@@ -402,6 +436,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             ),
           );
           setStatus("tool_running");
+          setStatusDetail(toolStatusLabel(name, input));
 
           try {
             logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
@@ -486,6 +521,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         setStreamingText("");
         setStreamingToolCalls([]);
         setStatus("thinking");
+        setStatusDetail("");
 
         const controller = new AbortController();
         abortRef.current = controller;
@@ -576,6 +612,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           );
           if (compactionLevel !== "none") {
             setStatus("thinking");
+        setStatusDetail("");
             const plainMessages = session.messages.map((m) => ({
               role: m.role,
               content: m.content,
@@ -680,6 +717,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     streamingText,
     streamingToolCalls,
     status,
+    statusDetail,
     permissionRequest,
     tokens,
     cost,

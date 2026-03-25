@@ -487,6 +487,7 @@ export function Root(props: RootProps): React.ReactElement {
       onCancel={orchestrator.running ? orchestrator.cancel : agent.cancel}
       messages={agent.messages}
       status={orchestrator.running ? "tool_running" : agent.status}
+      statusDetail={orchestrator.running ? "" : agent.statusDetail}
       permissionRequest={agent.permissionRequest}
       orchestratorConfirm={orchestrator.confirmRequest}
       orchestratorStatus={orchestrator.statusMessage}

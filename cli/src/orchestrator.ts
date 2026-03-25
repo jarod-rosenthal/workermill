@@ -850,6 +850,12 @@ export async function runOrchestration(
 
     const systemPrompt = `${persona.systemPrompt}${contextBlock}
 
+## Original Specification
+
+${userTask}
+
+---
+
 Working directory: ${workingDir}
 
 Your task: ${story.description}

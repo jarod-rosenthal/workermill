@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { Box, Text, Static, useApp, useInput, useStdout } from "ink";
 import { Markdown } from "./Markdown.js";
 import { ToolCallDisplay } from "./ToolCall.js";
@@ -43,6 +43,18 @@ interface AppProps {
   inputHistory: string[];
   /** Display strings for each role. */
   roleModels?: { worker: string; planner: string; reviewer: string };
+}
+
+/** Braille spinner that animates every 80ms to show the terminal is alive. */
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+function Spinner({ color }: { color: string }): React.ReactElement {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 80);
+    return () => clearInterval(id);
+  }, []);
+  return <Text color={color}>{SPINNER_FRAMES[frame]}</Text>;
 }
 
 /** Simple yes/no confirm for orchestrator prompts. */
@@ -135,13 +147,13 @@ export function App(props: AppProps): React.ReactElement {
       {/* Line 1: Activity indicator (always exactly 1 line) */}
       <Box marginLeft={2} height={1}>
         {props.orchestratorStatus ? (
-          <Text color={theme.warning}>● {props.orchestratorStatus}</Text>
+          <Text color={theme.warning}><Spinner color={theme.warning} /> {props.orchestratorStatus}</Text>
         ) : props.status === "thinking" ? (
-          <Text color={theme.subtle}>● Thinking...</Text>
+          <Text color={theme.subtle}><Spinner color={theme.subtle} /> Thinking...</Text>
         ) : props.status === "streaming" ? (
-          <Text color={theme.brand}>● Streaming response...</Text>
+          <Text color={theme.brand}><Spinner color={theme.brand} /> Streaming response...</Text>
         ) : props.status === "tool_running" ? (
-          <Text color={theme.warning}>● Running tool...</Text>
+          <Text color={theme.warning}><Spinner color={theme.warning} /> Running tool...</Text>
         ) : props.status === "permission" ? (
           <Text color={theme.permission}>● Waiting for permission...</Text>
         ) : (

@@ -10,6 +10,7 @@ import { App } from "./App.js";
 import { listSessions, saveSession } from "../session.js";
 import { loadConfig, saveConfig } from "../config.js";
 import { loadCustomCommands } from "../custom-commands.js";
+import { loadPersona, listAvailablePersonas } from "../personas.js";
 import { stopAllMCPServers } from "../mcp-client.js";
 import type { UseAgentOptions } from "./useAgent.js";
 
@@ -123,6 +124,9 @@ Or from the command line: \`wm build "your task"\`
 | \`/git\` | Git branch and status |
 | \`/sessions\` | List/switch sessions |
 | \`/log\` | Show recent CLI log entries |
+| \`/skills\` | List custom commands |
+| \`/personas\` | List, show, or create personas |
+| \`/mcp\` | Show MCP server status |
 | \`/hooks\` | Show configured pre/post tool hooks |
 | \`/editor\` | Open \\$EDITOR for longer input |
 | \`/quit\` | Exit |
@@ -810,6 +814,121 @@ export function Root(props: RootProps): React.ReactElement {
             agent.addSystemMessage(`**Last 20 log entries:**\n\n\`\`\`\n${tail}\n\`\`\``);
           } catch (err) {
             agent.addSystemMessage(`Failed to read log: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          break;
+        }
+
+        // ---- /skills ----
+        case "skills": {
+          const customCmds = loadCustomCommands();
+          const lines: string[] = ["**Skills & Custom Commands**\n"];
+
+          if (customCmds.length > 0) {
+            lines.push("**Custom Commands** (`.workermill/commands/` or `~/.workermill/commands/`):\n");
+            lines.push("| Command | Description |");
+            lines.push("|---|---|");
+            for (const c of customCmds) {
+              lines.push(`| \`/${c.name}\` | ${c.description} |`);
+            }
+          } else {
+            lines.push("No custom commands found.\n");
+            lines.push("Create `.workermill/commands/deploy.md` to add `/deploy`:\n");
+            lines.push("```markdown");
+            lines.push("---");
+            lines.push("name: deploy");
+            lines.push("description: Deploy to production");
+            lines.push("---");
+            lines.push("Run the deploy script and report results.");
+            lines.push("```");
+          }
+
+          agent.addSystemMessage(lines.join("\n"));
+          break;
+        }
+
+        // ---- /personas ----
+        case "personas": {
+          const allPersonas = listAvailablePersonas();
+
+          if (!arg) {
+            // List all personas with source
+            const lines: string[] = ["**Personas**\n"];
+            const projectDir = path.join(props.workingDir, ".workermill", "personas");
+            const userDir = path.join(os.homedir(), ".workermill", "personas");
+
+            for (const slug of allPersonas) {
+              const p = loadPersona(slug);
+              if (!p) continue;
+              let source = "built-in";
+              if (fs.existsSync(path.join(projectDir, `${slug.replace(/_/g, "-")}.md`)) ||
+                  fs.existsSync(path.join(projectDir, `${slug}.md`))) {
+                source = "project";
+              } else if (fs.existsSync(path.join(userDir, `${slug.replace(/_/g, "-")}.md`)) ||
+                         fs.existsSync(path.join(userDir, `${slug}.md`))) {
+                source = "user";
+              }
+              lines.push(`- **${p.name}** (\`${slug}\`) — ${p.description} [${source}]`);
+            }
+
+            lines.push("\n**Customize:**");
+            lines.push("- `/personas show <name>` — view a persona's prompt");
+            lines.push("- `/personas create <name>` — scaffold a custom persona");
+            lines.push("- Override built-ins by placing a file in `.workermill/personas/` or `~/.workermill/personas/`");
+
+            agent.addSystemMessage(lines.join("\n"));
+          } else if (arg.startsWith("show ")) {
+            const slug = arg.slice(5).trim().replace(/-/g, "_");
+            const p = loadPersona(slug);
+            if (!p) {
+              agent.addSystemMessage(`Persona \`${slug}\` not found. Use \`/personas\` to list all.`);
+            } else {
+              agent.addSystemMessage(
+                `**${p.name}** (\`${p.slug}\`)\n\n` +
+                `**Description:** ${p.description}\n` +
+                `**Tools:** ${p.tools.join(", ")}\n\n` +
+                `**System Prompt:**\n\`\`\`\n${p.systemPrompt.slice(0, 2000)}${p.systemPrompt.length > 2000 ? "\n... (truncated)" : ""}\n\`\`\``
+              );
+            }
+          } else if (arg.startsWith("create ")) {
+            const slug = arg.slice(7).trim().replace(/\s+/g, "_").toLowerCase();
+            const personaDir = path.join(props.workingDir, ".workermill", "personas");
+            const personaPath = path.join(personaDir, `${slug}.md`);
+
+            if (fs.existsSync(personaPath)) {
+              agent.addSystemMessage(`Persona \`${slug}\` already exists at \`${personaPath}\`. Edit it directly.`);
+            } else {
+              if (!fs.existsSync(personaDir)) fs.mkdirSync(personaDir, { recursive: true });
+              const template = `---\nname: ${slug.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}\nslug: ${slug}\ndescription: Custom ${slug.replace(/_/g, " ")} persona\ntools: [bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, sub_agent]\n---\n\nYou are a senior ${slug.replace(/_/g, " ")}. Write clean, production-ready code.\n\n<!-- Customize this prompt for your project -->\n`;
+              fs.writeFileSync(personaPath, template, "utf-8");
+              agent.addSystemMessage(
+                `**Created** \`.workermill/personas/${slug}.md\`\n\n` +
+                "Edit the file to customize the system prompt, tools, and description. " +
+                "This persona will override the built-in one with the same name, or be available as a new persona for the planner to assign."
+              );
+            }
+          } else {
+            agent.addSystemMessage("Usage: `/personas`, `/personas show <name>`, `/personas create <name>`");
+          }
+          break;
+        }
+
+        // ---- /mcp ----
+        case "mcp": {
+          const config = loadConfig();
+          const mcpConfig = config?.mcp;
+          if (!mcpConfig || Object.keys(mcpConfig).length === 0) {
+            agent.addSystemMessage(
+              "**No MCP servers configured.**\n\n" +
+              "Add MCP servers to `~/.workermill/cli.json`:\n\n" +
+              "```json\n\"mcp\": {\n  \"my-server\": {\n    \"command\": \"npx\",\n    \"args\": [\"-y\", \"my-mcp-server\"]\n  }\n}\n```\n\n" +
+              "Servers start automatically when the CLI launches."
+            );
+          } else {
+            const lines: string[] = ["**MCP Servers**\n"];
+            for (const [name, cfg] of Object.entries(mcpConfig)) {
+              lines.push(`- **${name}** — \`${cfg.command}${cfg.args ? " " + cfg.args.join(" ") : ""}\``);
+            }
+            agent.addSystemMessage(lines.join("\n"));
           }
           break;
         }

@@ -777,12 +777,10 @@ export async function runOrchestration(
     }
 
     output.log("system", `--- Story ${i + 1}/${sorted.length} ---`);
-    output.coordinatorLog(`Task claimed by orchestrator`);
     output.log(story.persona, `Starting ${story.title}`);
-    output.log(story.persona, `Executing story with AIClient (model: ${modelName})...`);
     logger.info(`Story ${i + 1}/${sorted.length} started`, { persona: story.persona, title: story.title, provider, model: modelName });
 
-    output.status("");
+    output.status(`${story.persona}: ${story.title.slice(0, 60)}`);
 
     const model = createModel(provider as AIProvider, modelName, host, contextLength);
 
@@ -876,7 +874,6 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
         ...buildOllamaOptions(provider as AIProvider, contextLength),
         onStepFinish({ text }) {
           if (text) {
-            output.statusDone();
             const lines = text.split("\n").filter(l => l.trim());
             for (const line of lines) {
               if (line.includes("::decision::") || line.includes("::learning::") ||
@@ -884,6 +881,8 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
               output.log(story.persona, line);
             }
           }
+          // Show thinking status between steps
+          output.status(`${story.persona}: thinking...`);
         },
       });
 

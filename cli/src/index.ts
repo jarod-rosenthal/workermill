@@ -46,7 +46,7 @@ function printWelcome(roleModels: { worker: string; planner: string; reviewer: s
   console.log();
 }
 
-const VERSION = "0.4.11";
+const VERSION = "0.4.12";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {

@@ -89,10 +89,6 @@ This starts PostgreSQL (:5432), Redis (:6379), the API server (http://localhost:
 
 Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=workermill.workermill) for a sidebar with task management, real-time log streaming, and live code diffs as workers write. Sign in with GitHub, Google, or email.
 
-### WorkerMill Cloud (Coming Soon)
-
-Cloud registration at [workermill.com](https://workermill.com) is coming soon. The cloud platform provides managed infrastructure, so you don't need to run the stack yourself — just install the VS Code extension and connect.
-
 ## How It Works
 
 ### What Happens When You Create a Task
@@ -186,8 +182,8 @@ Bring your own API keys. The execution pipeline is identical regardless of provi
 | Provider | Models | Integration |
 |----------|--------|-------------|
 | **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | Claude CLI (default) |
-| **OpenAI** | GPT-4o, o3-mini, o1 | Vercel AI SDK |
-| **Google** | Gemini 3 Pro, Gemini 2.0 Flash | Vercel AI SDK |
+| **OpenAI** | GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex | Vercel AI SDK |
+| **Google** | Gemini 2.5 Pro, Gemini 2.5 Flash | Vercel AI SDK |
 | **Ollama** | Local/self-hosted models | Vercel AI SDK + codebase RAG |
 
 ### Worker Personas (13 built-in roles)

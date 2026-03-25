@@ -189,7 +189,7 @@ function App() {
           <Route path="/" element={<DarkRoute><LandingV0 /></DarkRoute>} />
           <Route path="/product" element={<Navigate to="/#how-it-works" replace />} />
           <Route path="/solutions" element={<Navigate to="/#showcase" replace />} />
-          {/* Pricing route removed — cloud services coming soon */}
+          {/* Pricing route removed */}
           <Route path="/blog" element={<DarkRoute><BlogList /></DarkRoute>} />
           <Route path="/blog/:slug" element={<DarkRoute><BlogPost /></DarkRoute>} />
           <Route path="/status" element={<StatusPage />} />

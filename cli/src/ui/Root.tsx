@@ -260,7 +260,7 @@ export function Root(props: RootProps): React.ReactElement {
 
             agent.addSystemMessage(
               `**Model switched** to \`${newProvider}/${newModel}\`\n\n` +
-              "Note: takes effect on the next prompt. The current conversation continues with the new model."
+              "Restart the CLI to use the new model. Config saved to `~/.workermill/cli.json`."
             );
           }
           break;
@@ -288,7 +288,7 @@ export function Root(props: RootProps): React.ReactElement {
         case "status": {
           const session = agent.session;
           const msgCount = session.messages.length;
-          const mode = props.planMode ? "PLAN (read-only)" : props.trustAll ? "TRUST ALL" : "ask";
+          const mode = agent.permissionMode === "trust all" ? "TRUST ALL" : agent.permissionMode;
           agent.addSystemMessage(
             `**Session Status**\n\n` +
             `| Field | Value |\n` +

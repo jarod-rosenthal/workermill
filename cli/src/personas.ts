@@ -86,17 +86,22 @@ export function loadPersona(slug: string): Persona | null {
 export function listAvailablePersonas(): string[] {
   const slugs = new Set<string>();
 
-  // Check built-in personas
-  const builtinDir = path.join(import.meta.dirname || process.cwd(), "../../packages/engine/src/personas");
-  try {
-    if (fs.existsSync(builtinDir)) {
-      for (const file of fs.readdirSync(builtinDir)) {
-        if (file.endsWith(".md")) {
-          slugs.add(file.replace(".md", "").replace(/-/g, "_"));
+  // Check built-in personas (multiple paths for monorepo vs npm install)
+  const builtinDirs = [
+    path.join(import.meta.dirname || __dirname, "../personas"),  // npm: cli/dist/../personas = cli/personas
+    path.join(import.meta.dirname || process.cwd(), "../../packages/engine/src/personas"),  // monorepo
+  ];
+  for (const builtinDir of builtinDirs) {
+    try {
+      if (fs.existsSync(builtinDir)) {
+        for (const file of fs.readdirSync(builtinDir)) {
+          if (file.endsWith(".md")) {
+            slugs.add(file.replace(".md", "").replace(/-/g, "_"));
+          }
         }
       }
-    }
-  } catch { /* ignore */ }
+    } catch { /* ignore */ }
+  }
 
   // Check user personas
   const userDir = path.join(os.homedir(), ".workermill", "personas");

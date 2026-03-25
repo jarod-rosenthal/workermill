@@ -103,7 +103,7 @@ export async function startMCPServer(name: string, config: MCPServerConfig): Pro
     await sendRequest(server, "initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "workermill-cli", version: "0.7.1" },
+      clientInfo: { name: "workermill-cli", version: "0.9.1" },
     });
 
     // Send initialized notification (no response expected)

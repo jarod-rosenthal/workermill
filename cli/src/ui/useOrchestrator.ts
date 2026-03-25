@@ -245,8 +245,10 @@ export function useOrchestrator(
           setRunning(false);
           setStatusMessage("");
           setConfirmRequest(null);
-          // Ring terminal bell when build completes
-          process.stdout.write("\x07");
+          // Ring terminal bell when build completes (not on cancel)
+          if (!controller.signal.aborted) {
+            process.stdout.write("\x07");
+          }
         }
       })();
     },

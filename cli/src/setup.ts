@@ -47,8 +47,8 @@ const PROVIDERS: ProviderOption[] = [
     needsKey: true,
     envVar: "GOOGLE_GENERATIVE_AI_API_KEY",
     models: [
-      { id: "gemini-3.1-pro", label: "Gemini 3.1 Pro (latest flagship)" },
-      { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite (fast, good value)" },
+      { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview (latest flagship)" },
+      { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash (fast, good value)" },
     ],
   },
 ];

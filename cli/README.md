@@ -139,7 +139,7 @@ Use `/retry` to re-plan the same task — the planner sees existing code and fil
       "apiKey": "{env:ANTHROPIC_API_KEY}"
     },
     "google": {
-      "model": "gemini-3.1-pro",
+      "model": "gemini-3.1-pro-preview",
       "apiKey": "{env:GOOGLE_API_KEY}"
     }
   },

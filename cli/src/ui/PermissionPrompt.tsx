@@ -51,6 +51,15 @@ export function PermissionPrompt({ request }: PermissionPromptProps): React.Reac
     (input, key) => {
       if (resolved) return;
 
+      // Tab / Shift+Tab to cycle (Claude Code style) + arrow keys
+      if (key.tab) {
+        if (key.shift) {
+          setSelected((s) => (s - 1 + options.length) % options.length);
+        } else {
+          setSelected((s) => (s + 1) % options.length);
+        }
+        return;
+      }
       if (key.upArrow) {
         setSelected((s) => Math.max(0, s - 1));
         return;
@@ -134,6 +143,11 @@ export function PermissionPrompt({ request }: PermissionPromptProps): React.Reac
           </Box>
         );
       })}
+
+      {/* Hint */}
+      <Text color={theme.subtle} dimColor>
+        {"  "}Tab to cycle, Enter to confirm
+      </Text>
     </Box>
   );
 }

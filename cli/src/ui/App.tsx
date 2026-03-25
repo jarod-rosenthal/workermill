@@ -24,6 +24,8 @@ interface AppProps {
   onSubmit: (input: string) => void;
   /** Called when the user presses ESC to cancel the running agent. */
   onCancel: () => void;
+  /** Called on double-ESC to roll back the last exchange. */
+  onRollback: () => boolean;
   /** Committed (finalized) messages for the conversation history. */
   messages: Message[];
   /** Current agent status. */
@@ -90,12 +92,28 @@ export function App(props: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const lastCtrlCRef = useRef(0);
+  const lastEscRef = useRef(0);
   const width = stdout?.columns || 80;
 
   useInput((input, key) => {
-    // ESC cancels the running agent or build
-    if (key.escape && props.status !== "idle") {
-      props.onCancel();
+    if (key.escape) {
+      const now = Date.now();
+
+      if (props.status !== "idle") {
+        // First ESC while running — cancel the current operation
+        props.onCancel();
+        lastEscRef.current = now;
+        return;
+      }
+
+      // Double ESC while idle — roll back last exchange
+      if (props.status === "idle" && now - lastEscRef.current < 1500) {
+        props.onRollback();
+        lastEscRef.current = 0; // reset so triple ESC doesn't keep rolling back
+        return;
+      }
+
+      lastEscRef.current = now;
       return;
     }
 

@@ -101,6 +101,8 @@ export interface UseAgentReturn {
   submit: (input: string) => void;
   /** Cancel the running stream / tool execution. */
   cancel: () => void;
+  /** Roll back the last user+assistant exchange from the conversation. */
+  rollback: () => boolean;
   /** Toggle trust-all mode at runtime. */
   setTrustAll: (v: boolean) => void;
   /** Toggle plan (read-only) mode at runtime. */
@@ -713,6 +715,34 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     setPermissionRequest(null);
   }, []);
 
+  /** Remove the last user+assistant exchange from the session. Returns true if rolled back. */
+  const rollback = useCallback((): boolean => {
+    const session = sessionRef.current;
+    if (session.messages.length < 2) return false;
+
+    // Remove trailing assistant message(s) and the last user message
+    while (session.messages.length > 0 && session.messages[session.messages.length - 1].role === "assistant") {
+      session.messages.pop();
+    }
+    if (session.messages.length > 0 && session.messages[session.messages.length - 1].role === "user") {
+      session.messages.pop();
+    }
+    saveSession(session);
+
+    // Also remove from the committed messages UI list
+    setMessages((prev) => {
+      // Find the last user message index and remove everything from there
+      let lastUserIdx = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i].role === "user") { lastUserIdx = i; break; }
+      }
+      if (lastUserIdx >= 0) return prev.slice(0, lastUserIdx);
+      return prev;
+    });
+
+    return true;
+  }, []);
+
   // ------- Setters exposed to the UI -------- //
 
   const setTrustAll = useCallback((v: boolean) => {
@@ -761,6 +791,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     session: sessionRef.current,
     submit,
     cancel,
+    rollback,
     setTrustAll,
     setPlanMode,
     addSystemMessage,

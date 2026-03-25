@@ -1,10 +1,10 @@
 # WorkerMill CLI
 
-The lightweight, zero-setup version of [WorkerMill](https://github.com/jarod-rosenthal/workermill) — the open-source orchestration platform for AI coding agents.
+AI coding agent with multi-expert orchestration. Works with any LLM provider.
 
-The full WorkerMill platform includes a web dashboard, Kanban boards, VS Code extension, CI/CD integration, and managed worker infrastructure. The CLI gives you the same multi-expert orchestration engine directly in your terminal — no server, no Docker, no account. Just `npx workermill` and you're coding.
+The lightweight, zero-setup version of [WorkerMill](https://workermill.com) — the open-source orchestration platform for AI coding agents. Same multi-expert engine, directly in your terminal. No server, no Docker, no account.
 
-Works with any LLM provider: Ollama (fully local), Anthropic, OpenAI, Google.
+Works with **Ollama** (fully local), **Anthropic**, **OpenAI**, **Google**.
 
 ## Quick Start
 
@@ -12,80 +12,121 @@ Works with any LLM provider: Ollama (fully local), Anthropic, OpenAI, Google.
 npx workermill
 ```
 
-First run launches a setup wizard — pick your providers, models, and API keys. Ollama is auto-detected for fully local use. Config is saved to `~/.workermill/cli.json` so you only do this once.
-
-Then just describe what you want built.
+First run launches a setup wizard — pick providers for workers, planner, and reviewer independently. Ollama is auto-detected (including WSL). Config saved to `~/.workermill/cli.json`.
 
 ## Install
 
 ```bash
-npm install -g workermill
-```
+# Run without installing
+npx workermill
 
-Or run without installing: `npx workermill`
+# Or install globally
+npm install -g workermill
+workermill
+
+# Check your setup
+wm doctor
+```
 
 ## Usage
 
 ```bash
-# Interactive mode
+# Interactive chat
 workermill
 
 # Skip permission prompts
 workermill --trust
 
-# Start in read-only research mode
+# Read-only research mode
 workermill --plan
 
 # Resume last conversation
 workermill --resume
 
-# Override the default provider/model for this session
+# Override provider/model
 workermill --provider anthropic --model claude-sonnet-4-6
+
+# Cap output tokens
+workermill --max-tokens 4096
+
+# Build from a spec file
+wm build spec.md
+
+# Build from inline description
+wm build "REST API with auth, React dashboard, Docker"
 ```
 
 ## Features
 
-- **Multi-expert orchestration** — Complex tasks automatically decomposed into stories, each assigned to a specialist persona (backend, frontend, devops, security, etc.)
-- **Any LLM provider** — Ollama (local), Anthropic, OpenAI, Google. The setup wizard configures per-role model routing (e.g. Ollama for workers, Claude for planning, GPT for review).
+- **Multi-expert orchestration** — `/build` decomposes tasks into stories, each assigned to a specialist persona
+- **Role-based model routing** — Different models for workers, planner, and reviewer (e.g., Ollama for workers, Gemini for planning, Claude for review)
 - **13 built-in tools** — bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, sub_agent
-- **Plan mode** — Read-only research phase before making changes (`/plan` or `--plan`)
-- **Session management** — Persistent conversations with resume (`--resume`, `/sessions`)
-- **Cost tracking** — Estimated per-model token costs with `/cost` breakdown
-- **Quality gates** — Dangerous command warnings, permission prompts, review cycles
-- **Git integration** — Auto-init repos, branch awareness, commit after orchestration
+- **WORKERMILL.md** — Project instructions file read by all agents. Also supports CLAUDE.md, .cursorrules
+- **MCP servers** — Connect external tools via Model Context Protocol
+- **Hooks** — Pre/post tool execution hooks for linting, formatting, etc.
+- **Custom commands** — Drop `.md` files in `.workermill/commands/` for custom slash commands
+- **Persistent learnings** — `::learning::` markers saved across sessions
+- **@mentions** — `@file.ts` inlines code, `@dir/` inlines tree, `@https://url` fetches content, `@image.png` sends multimodal
+- **Code review** — Tech lead reads actual code diffs, with configurable revision cycles
+- **Bash guardrails** — Blocks destructive commands and writes outside the project directory
+- **Permissions** — Tab to cycle: Allow → Deny → Always allow → Trust all
+- **Session management** — Persistent conversations with resume
+- **Cost tracking** — Live in status bar with per-model pricing
+- **Auto-update** — Notifies when a newer version is available
 
-## Slash Commands
+## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/help` | Show all commands |
+| `/build <task>` | Multi-expert orchestration — plans, executes, reviews |
+| `/retry` | Re-plan and re-run the last build task |
+| `/init` | Generate `WORKERMILL.md` for this project |
+| `/settings` | View/change settings (review, ollama, etc.) |
+| `/permissions` | Manage tool permissions (trust/ask/allow/deny) |
+| `/undo` | Revert last build's changes (git stash or reset) |
+| `/diff` | Preview uncommitted changes |
+| `/model` | Show or switch model (`/model provider/model`) |
 | `/plan` | Toggle read-only plan mode |
-| `/git` | Show git branch and status |
-| `/cost` | Estimated token cost breakdown |
-| `/sessions` | List, switch, or delete sessions |
-| `/editor` | Open $EDITOR for multiline input |
-| `/compact` | Compress conversation history |
-| `/model` | Show current model |
-| `/status` | Session stats |
+| `/trust` | Auto-approve all tools for this session |
+| `/hooks` | View configured pre/post tool hooks |
+| `/cost` | Session cost and token usage |
+| `/status` | Session info |
+| `/log` | Show recent CLI log entries |
+| `/git` | Git branch and status |
+| `/sessions` | List/switch sessions |
+| `/editor` | Open $EDITOR for longer input |
+| `/clear` | Reset conversation |
 | `/quit` | Exit |
 
-Prefix `!` for direct bash: `!git status`, `!npm test`
+**Shortcuts:** `!command` runs shell directly, `ESC` cancels, `ESC ESC` rolls back last exchange, `Ctrl+C Ctrl+C` exits.
 
 ## Multi-Expert Orchestration
 
-For complex tasks, WorkerMill automatically:
+`/build` or `wm build` triggers multi-expert mode:
 
-1. **Classifies** — Detects if the task needs multiple specialists
-2. **Plans** — Explores the codebase, designs stories with dependencies
-3. **Executes** — Each story assigned to a persona (backend_developer, frontend_developer, devops_engineer, etc.)
-4. **Reviews** — Tech lead reviews all changes, with optional revision cycles
-5. **Commits** — Stages changes and commits (with your approval)
+1. **Plans** — Explores the codebase, designs stories with dependencies and persona assignments
+2. **Executes** — Each story assigned to a specialist with the full original spec
+3. **Reviews** — Tech lead reads actual code diffs, scores quality, requests revisions
+4. **Commits** — Stages changes and commits (with your approval)
+
+Use `/retry` to re-plan the same task — the planner sees existing code and fills gaps.
 
 ## Configuration
 
-First-run setup wizard configures everything interactively. Config saved to `~/.workermill/cli.json`.
+### Files
 
-You can configure separate providers and models for each role — for example, use a fast local model for workers, a stronger cloud model for planning, and a different one for code review:
+| File | Purpose |
+|------|---------|
+| `WORKERMILL.md` | Project instructions — read by all agents (committed to repo) |
+| `~/.workermill/cli.json` | Global config (providers, routing, review, hooks, MCP) |
+| `.workermill/config.json` | Per-project config overrides |
+| `.workermill/commands/*.md` | Custom slash commands |
+| `.workermill/personas/*.md` | Custom persona overrides |
+| `.workermill/learnings.json` | Persistent learnings from builds |
+| `.workermill/sessions/` | Conversation sessions |
+| `.workermill/cli.log` | Debug log |
+
+### Example Config
 
 ```json
 {
@@ -99,10 +140,6 @@ You can configure separate providers and models for each role — for example, u
       "model": "claude-sonnet-4-6",
       "apiKey": "{env:ANTHROPIC_API_KEY}"
     },
-    "openai": {
-      "model": "gpt-5.3-codex",
-      "apiKey": "{env:OPENAI_API_KEY}"
-    },
     "google": {
       "model": "gemini-3.1-pro",
       "apiKey": "{env:GOOGLE_API_KEY}"
@@ -111,26 +148,41 @@ You can configure separate providers and models for each role — for example, u
   "default": "ollama",
   "routing": {
     "planner": "google",
-    "tech_lead": "openai"
+    "tech_lead": "anthropic"
+  },
+  "review": {
+    "enabled": true,
+    "maxRevisions": 3,
+    "approvalThreshold": 80
+  },
+  "hooks": {
+    "post": [
+      { "command": "npx eslint --fix", "tools": ["write_file", "edit_file"] }
+    ]
+  },
+  "mcp": {
+    "my-server": { "command": "npx", "args": ["-y", "my-mcp-server"] }
   }
 }
 ```
 
-Per-project overrides can be placed in `.workermill/config.json` in any repo.
+### Settings
+
+Change settings at runtime with `/settings`:
+
+| Setting | Default | Command |
+|---------|---------|---------|
+| Ollama host | auto-detected | `/settings ollama.host <url>` |
+| Ollama context | 65536 | `/settings ollama.context <n>` |
+| Review enabled | true | `/settings review.enabled true/false` |
+| Max revisions | 3 | `/settings review.maxRevisions <n>` |
+| Approval threshold | 80 | `/settings review.threshold <n>` |
 
 ## 12 Built-in Personas
 
 backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, architect, tech_lead, planner, critic
 
-All worker personas include production-hardened rules:
-- **Real services, not mocks** — Docker containers for databases, caches, queues. Tests run against real services.
-- **Version trust** — Never downgrades language/runtime versions (training data is outdated)
-- **Learning markers** — Reports codebase discoveries with `::learning::` markers for team visibility
-- **Right-sized plans** — Planner matches plan complexity to task complexity (1 step for simple, 3-5 for complex)
-- **Approval bias** — Tech lead only blocks on real functional/security issues, not cosmetic preferences
-- **File overlap detection** — Critic catches parallel merge conflicts before they happen
-
-Custom personas can be added per-project in `.workermill/personas/` or globally in `~/.workermill/personas/`.
+Custom personas: add `.workermill/personas/my_persona.md` to your project or `~/.workermill/personas/` globally.
 
 ## Requirements
 

@@ -39,10 +39,11 @@ export default function CLI() {
         <CopyBlock code="npx workermill" />
         <p className="text-muted-foreground">
           First run walks you through provider setup — choose providers for workers, planner, and reviewer independently.
-          Ollama is auto-detected (including WSL). Then just describe what you want built.
+          Ollama is auto-detected (including WSL). Only Node.js required.
         </p>
-        <p className="text-muted-foreground">
-          Works with <strong className="text-foreground">Ollama</strong> (local), <strong className="text-foreground">Anthropic</strong>, <strong className="text-foreground">OpenAI</strong>, and <strong className="text-foreground">Google</strong>. Only Node.js required.
+        <CopyBlock code="wm doctor" />
+        <p className="text-muted-foreground text-sm">
+          Run <code className="text-primary">wm doctor</code> to verify your setup — checks Node.js, git, Ollama, API keys, and project config.
         </p>
       </section>
 
@@ -57,17 +58,19 @@ export default function CLI() {
         <h2 className="text-2xl font-semibold">Features</h2>
         <div className="grid gap-3">
           {[
-            { title: "Multi-expert orchestration", desc: "Complex tasks decomposed into stories, each assigned to a specialist persona (backend, frontend, devops, security, etc.)" },
-            { title: "Any LLM provider", desc: "Ollama (local), Anthropic, OpenAI, Google. Per-role model routing — use different models for workers, planner, and reviewer." },
-            { title: "Role-based setup", desc: "Choose providers independently for workers (build code), planner (design stories), and reviewer (check quality)." },
-            { title: "13 built-in tools", desc: "bash, read/write/edit files, patch, glob, grep, ls, fetch, git, web search, todo tracking, sub-agent" },
-            { title: "Live status bar", desc: "Animated spinner with persona activity, context usage, live cost tracking, and git branch." },
-            { title: "In-app settings", desc: "Change Ollama host, review thresholds, revision limits, and more with /settings — no config file editing needed." },
-            { title: "Session management", desc: "Persistent conversations with resume (--resume, /sessions)" },
-            { title: "Cost tracking", desc: "Per-model token pricing in the status bar with /cost breakdown" },
-            { title: "Code review with revisions", desc: "Tech lead reviews actual code (not summaries), with configurable revision cycles and approval threshold." },
-            { title: "Bash guardrails", desc: "Blocks destructive commands (rm -rf /, sudo, git push --force) and writes outside the project directory." },
-            { title: "Git integration", desc: "Auto-init repos, branch awareness, commit after orchestration" },
+            { title: "Multi-expert orchestration", desc: "/build decomposes tasks into stories, each assigned to a specialist persona." },
+            { title: "Role-based model routing", desc: "Different models for workers, planner, and reviewer. Mix local and cloud providers." },
+            { title: "WORKERMILL.md", desc: "Project instructions file read by all agents. Also supports CLAUDE.md and .cursorrules." },
+            { title: "MCP servers", desc: "Connect external tools via Model Context Protocol. Configure in cli.json." },
+            { title: "Hooks", desc: "Pre/post tool execution hooks for linting, formatting, and custom workflows." },
+            { title: "Custom commands", desc: "Drop .md files in .workermill/commands/ to create custom slash commands." },
+            { title: "Persistent learnings", desc: "::learning:: markers saved across sessions and injected into future builds." },
+            { title: "@mentions", desc: "@file.ts inlines code, @dir/ lists tree, @https://url fetches content, @image.png sends multimodal." },
+            { title: "Code review", desc: "Tech lead reads actual code diffs (not summaries), with configurable revision cycles." },
+            { title: "Permissions", desc: "Tab to cycle: Allow → Deny → Always allow → Trust all. Per-tool allow/deny via /permissions." },
+            { title: "Bash guardrails", desc: "Blocks destructive commands and writes outside the project directory." },
+            { title: "13 built-in tools", desc: "bash, read/write/edit files, patch, glob, grep, ls, fetch, git, web search, todo, sub-agent." },
+            { title: "Auto-update", desc: "Checks npm once per 24h and notifies when a newer version is available." },
           ].map((f) => (
             <div key={f.title} className="p-3 rounded-lg border border-border bg-card/50">
               <span className="font-medium text-foreground">{f.title}</span>
@@ -80,27 +83,27 @@ export default function CLI() {
       {/* Usage */}
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">Usage</h2>
-        <CopyBlock code={`# Interactive mode\nworkermill\n\n# Skip permission prompts\nworkermill --trust\n\n# Start in read-only plan mode\nworkermill --plan\n\n# Resume last conversation\nworkermill --resume\n\n# Override provider/model\nworkermill --provider anthropic --model claude-sonnet-4-6\n\n# Build from a spec file\nwm build spec.md\n\n# Build from inline description\nwm build "REST API with auth, React dashboard, Docker"`} />
+        <CopyBlock code={`# Interactive chat\nworkermill\n\n# Skip permission prompts\nworkermill --trust\n\n# Read-only research mode\nworkermill --plan\n\n# Resume last conversation\nworkermill --resume\n\n# Cap output tokens\nworkermill --max-tokens 4096\n\n# Build from a spec file\nwm build spec.md\n\n# Build from inline description\nwm build "REST API with auth, React dashboard, Docker"`} />
       </section>
 
       {/* Multi-Expert Orchestration */}
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">Multi-Expert Orchestration</h2>
-        <p className="text-muted-foreground">Use <code className="text-primary">/build</code> to trigger multi-expert mode. WorkerMill:</p>
+        <p className="text-muted-foreground">Use <code className="text-primary">/build</code> or <code className="text-primary">wm build</code> to trigger multi-expert mode:</p>
         <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
           <li><strong className="text-foreground">Plans</strong> — Explores the codebase, designs stories with dependencies and persona assignments</li>
-          <li><strong className="text-foreground">Executes</strong> — Each story assigned to a specialist persona with the full original spec</li>
-          <li><strong className="text-foreground">Reviews</strong> — Tech lead reads the actual code and scores it, with revision cycles</li>
+          <li><strong className="text-foreground">Executes</strong> — Each story assigned to a specialist with the full original spec</li>
+          <li><strong className="text-foreground">Reviews</strong> — Tech lead reads actual code diffs, scores quality, requests revisions</li>
           <li><strong className="text-foreground">Commits</strong> — Stages changes and commits (with your approval)</li>
         </ol>
         <p className="text-muted-foreground mt-2">
-          Use <code className="text-primary">/retry</code> to re-plan and re-run the same task — the planner sees what already exists and fills in the gaps.
+          Use <code className="text-primary">/retry</code> to re-plan the same task — the planner sees existing code and fills in gaps.
         </p>
       </section>
 
-      {/* Slash Commands */}
+      {/* Commands */}
       <section className="space-y-4">
-        <h2 className="text-2xl font-semibold">Slash Commands</h2>
+        <h2 className="text-2xl font-semibold">Commands</h2>
         <div className="border border-border rounded-lg overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
@@ -113,16 +116,22 @@ export default function CLI() {
               {[
                 ["/build <task>", "Multi-expert orchestration — plans, executes, reviews"],
                 ["/retry", "Re-plan and re-run the last build task"],
+                ["/init", "Generate WORKERMILL.md for this project"],
                 ["/settings", "View/change settings (review, ollama, etc.)"],
-                ["/help", "Show all commands"],
+                ["/permissions", "Manage tool permissions (trust/ask/allow/deny)"],
+                ["/undo", "Revert last build's changes (git stash or reset)"],
+                ["/diff", "Preview uncommitted changes"],
+                ["/model", "Show or switch model (/model provider/model)"],
                 ["/plan", "Toggle read-only plan mode"],
-                ["/trust", "Auto-approve all tool calls for this session"],
-                ["/git", "Show git branch and status"],
-                ["/cost", "Token cost breakdown"],
-                ["/model", "Show current provider and model"],
-                ["/sessions", "List, switch, or delete sessions"],
-                ["/editor", "Open $EDITOR for multiline input"],
-                ["/status", "Session stats"],
+                ["/trust", "Auto-approve all tools for this session"],
+                ["/hooks", "View configured pre/post tool hooks"],
+                ["/cost", "Session cost and token usage"],
+                ["/status", "Session info"],
+                ["/log", "Show recent CLI log entries"],
+                ["/git", "Git branch and status"],
+                ["/sessions", "List/switch sessions"],
+                ["/editor", "Open $EDITOR for longer input"],
+                ["/clear", "Reset conversation"],
                 ["/quit", "Exit"],
               ].map(([cmd, desc]) => (
                 <tr key={cmd}>
@@ -134,8 +143,9 @@ export default function CLI() {
           </table>
         </div>
         <p className="text-sm text-muted-foreground">
-          Prefix <code className="text-primary">!</code> for direct bash: <code>!git status</code>, <code>!npm test</code>.
-          Press <strong>ESC</strong> to cancel a running agent or build.
+          <strong>Shortcuts:</strong> <code className="text-primary">!command</code> runs shell directly.
+          <strong> ESC</strong> cancels. <strong>ESC ESC</strong> rolls back last exchange.
+          <strong> Tab</strong> cycles permission options. <strong>Ctrl+C Ctrl+C</strong> exits.
         </p>
       </section>
 
@@ -177,10 +187,36 @@ export default function CLI() {
 
       {/* Configuration */}
       <section className="space-y-4">
-        <h2 className="text-2xl font-semibold">Configuration File</h2>
-        <p className="text-muted-foreground">
-          Config stored at <code className="text-primary">~/.workermill/cli.json</code> (global) and <code className="text-primary">.workermill/config.json</code> (per-project override).
-        </p>
+        <h2 className="text-2xl font-semibold">Configuration</h2>
+
+        <h3 className="text-lg font-semibold mt-4">Files</h3>
+        <div className="border border-border rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left p-3 font-medium">File</th>
+                <th className="text-left p-3 font-medium">Purpose</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {[
+                ["WORKERMILL.md", "Project instructions — read by all agents (committed to repo)"],
+                ["~/.workermill/cli.json", "Global config (providers, routing, review, hooks, MCP)"],
+                [".workermill/config.json", "Per-project config overrides"],
+                [".workermill/commands/*.md", "Custom slash commands"],
+                [".workermill/personas/*.md", "Custom persona overrides"],
+                [".workermill/learnings.json", "Persistent learnings from builds"],
+              ].map(([file, purpose]) => (
+                <tr key={file}>
+                  <td className="p-3 font-mono text-primary text-xs">{file}</td>
+                  <td className="p-3 text-muted-foreground">{purpose}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <h3 className="text-lg font-semibold mt-4">Example Config</h3>
         <CopyBlock code={`{
   "providers": {
     "ollama": {
@@ -191,10 +227,6 @@ export default function CLI() {
     "anthropic": {
       "model": "claude-sonnet-4-6",
       "apiKey": "{env:ANTHROPIC_API_KEY}"
-    },
-    "openai": {
-      "model": "gpt-5.4",
-      "apiKey": "{env:OPENAI_API_KEY}"
     },
     "google": {
       "model": "gemini-3.1-pro",
@@ -209,8 +241,15 @@ export default function CLI() {
   "review": {
     "enabled": true,
     "maxRevisions": 3,
-    "autoRevise": false,
     "approvalThreshold": 80
+  },
+  "hooks": {
+    "post": [
+      { "command": "npx eslint --fix", "tools": ["write_file", "edit_file"] }
+    ]
+  },
+  "mcp": {
+    "my-server": { "command": "npx", "args": ["-y", "my-mcp-server"] }
   }
 }`} />
       </section>
@@ -240,15 +279,15 @@ export default function CLI() {
         </div>
         <div className="space-y-2 mt-4">
           <p className="text-sm text-muted-foreground">
-            All personas include production-hardened rules from WorkerMill's cloud platform:
+            All personas include production-hardened rules:
           </p>
           <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
             <li><strong className="text-foreground">Full spec context</strong> — Every worker sees the complete original specification</li>
             <li><strong className="text-foreground">Real services, not mocks</strong> — Docker containers for databases, caches, queues</li>
             <li><strong className="text-foreground">Version trust</strong> — Never downgrades language/runtime versions</li>
-            <li><strong className="text-foreground">Right-sized plans</strong> — Planner matches complexity to task scope</li>
             <li><strong className="text-foreground">Code-level review</strong> — Tech lead reads actual diffs, not summaries</li>
             <li><strong className="text-foreground">Sandboxed execution</strong> — Workers stay in the project directory, destructive commands blocked</li>
+            <li><strong className="text-foreground">Persistent learnings</strong> — Codebase discoveries saved and shared across sessions</li>
           </ul>
           <p className="text-sm text-muted-foreground">
             Custom personas: add <code className="text-primary">.workermill/personas/my_persona.md</code> to your project.

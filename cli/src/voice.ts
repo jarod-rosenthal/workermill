@@ -82,20 +82,23 @@ async function transcribeWithHear(): Promise<VoiceResult> {
 
 async function transcribeWithPowerShell(): Promise<VoiceResult> {
   const psCommand = process.platform === "win32" ? "powershell" : "powershell.exe";
-  const script = `
-Add-Type -AssemblyName System.Speech
-$r = New-Object System.Speech.Recognition.SpeechRecognitionEngine
-$r.SetInputToDefaultAudioDevice()
-$r.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))
-$r.InitialSilenceTimeout = [TimeSpan]::FromSeconds(${MAX_LISTEN_SECONDS})
-$r.EndSilenceTimeout = [TimeSpan]::FromSeconds(3)
-$result = $r.Recognize()
-if ($result) { Write-Output $result.Text } else { Write-Output "" }
-$r.Dispose()
-`.trim().replace(/\n/g, "; ");
+  const script = [
+    "Add-Type -AssemblyName System.Speech",
+    "$r = New-Object System.Speech.Recognition.SpeechRecognitionEngine",
+    "$r.SetInputToDefaultAudioDevice()",
+    "$r.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))",
+    `$r.InitialSilenceTimeout = [TimeSpan]::FromSeconds(${MAX_LISTEN_SECONDS})`,
+    "$r.EndSilenceTimeout = [TimeSpan]::FromSeconds(3)",
+    "$result = $r.Recognize()",
+    "if ($result) { Write-Output $result.Text } else { Write-Output '' }",
+    "$r.Dispose()",
+  ].join("; ");
+
+  // Use -EncodedCommand to avoid quote escaping issues
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
 
   try {
-    const text = execSync(`${psCommand} -NoProfile -Command "${script}"`, {
+    const text = execSync(`${psCommand} -NoProfile -EncodedCommand ${encoded}`, {
       encoding: "utf-8",
       timeout: (MAX_LISTEN_SECONDS + 10) * 1000,
     }).trim();

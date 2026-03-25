@@ -335,7 +335,7 @@ export function Root(props: RootProps): React.ReactElement {
           } else {
             lastBuildTask.current = arg;
             agent.addUserMessage(`/build ${arg}`);
-            orchestrator.start(arg, props.trustAll, props.sandboxed);
+            orchestrator.start(arg, agent.permissionMode === "trust all", props.sandboxed);
           }
           break;
         }
@@ -349,7 +349,7 @@ export function Root(props: RootProps): React.ReactElement {
           } else {
             const task = lastBuildTask.current;
             agent.addUserMessage(`/retry ${task.slice(0, 60)}...`);
-            orchestrator.start(task, props.trustAll, props.sandboxed);
+            orchestrator.start(task, agent.permissionMode === "trust all", props.sandboxed);
           }
           break;
         }

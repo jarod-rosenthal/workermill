@@ -66,18 +66,20 @@ function Spinner({ color }: { color: string }): React.ReactElement {
   return <Text color={color}>{SPINNER_FRAMES[frame]}</Text>;
 }
 
-/** Simple yes/no confirm for orchestrator prompts. */
-function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: (yes: boolean) => void } }): React.ReactElement {
+/** Permission confirm for orchestrator tool calls. */
+function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: (yes: boolean, mode?: "always" | "trust") => void } }): React.ReactElement {
   const [answered, setAnswered] = React.useState(false);
   useInput((input) => {
     if (answered) return;
     if (input === "y" || input === "Y") { setAnswered(true); request.resolve(true); }
     if (input === "n" || input === "N") { setAnswered(true); request.resolve(false); }
+    if (input === "a" || input === "A") { setAnswered(true); request.resolve(true, "always"); }
+    if (input === "t" || input === "T") { setAnswered(true); request.resolve(true, "trust"); }
   }, { isActive: !answered });
   return (
     <Box marginLeft={2} marginY={1}>
       <Text color={theme.permission}>{request.prompt} </Text>
-      <Text dimColor>(y/n)</Text>
+      <Text dimColor>(y)es (a)lways (t)rust all (n)o</Text>
     </Box>
   );
 }

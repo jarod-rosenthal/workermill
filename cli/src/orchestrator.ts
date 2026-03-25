@@ -47,7 +47,7 @@ export interface OrchestrationOutput {
   /** Stop the spinner/status */
   statusDone: (message?: string) => void;
   /** Ask the user a yes/no question. Returns true for yes. */
-  confirm: (prompt: string) => Promise<boolean>;
+  confirm: (prompt: string) => Promise<boolean | { allowed: boolean; mode?: "always" | "trust" }>;
   /** Log a tool call */
   toolCall: (persona: string, toolName: string, toolInput: Record<string, unknown>) => void;
   /** Update running cost in the UI (optional — noop if not provided) */
@@ -217,8 +217,8 @@ async function checkToolPermission(
       // Always prompt for dangerous commands — even in trust mode
       output.error(`DANGEROUS: ${danger}`);
       output.error(`Command: ${cmd}`);
-      const confirmed = await output.confirm("This is a dangerous operation. Are you sure?");
-      return confirmed;
+      const result = await output.confirm("This is a dangerous operation. Are you sure?");
+      return typeof result === "object" ? result.allowed : result;
     }
   }
 
@@ -226,15 +226,30 @@ async function checkToolPermission(
   if (READ_TOOLS.has(toolName)) return true;
   if (sessionAllow.has(toolName)) return true;
 
-  // Prompt user via output.confirm
+  // Prompt user — supports y/a/t/n like the single-agent permission prompt
   const display = formatToolCallDisplay(toolName, toolInput);
   output.log("system", `Tool: ${toolName} -- ${display}`);
-  const confirmed = await output.confirm(`Allow ${toolName}?`);
-  if (confirmed) {
-    // Auto-allow this tool for the rest of the session (equivalent to "always" in the old y/n/a/t prompt)
+  const result = await output.confirm(`Allow ${toolName}?`);
+
+  if (typeof result === "object") {
+    if (result.mode === "trust") {
+      // Trust all — add all common tools to session allow
+      for (const t of ["bash", "write_file", "edit_file", "patch", "git", "fetch", "web_search"]) {
+        sessionAllow.add(t);
+      }
+      return result.allowed;
+    }
+    if (result.mode === "always") {
+      sessionAllow.add(toolName);
+    }
+    return result.allowed;
+  }
+
+  // Simple boolean response
+  if (result) {
     sessionAllow.add(toolName);
   }
-  return confirmed;
+  return result;
 }
 
 /** Format a tool call for display (replaces the imported formatToolCall from tui.js) */
@@ -759,7 +774,8 @@ export async function runOrchestration(
   if (!trustAll) {
     let proceed = false;
     try {
-      proceed = await output.confirm("Execute this plan?");
+      const r = await output.confirm("Execute this plan?");
+      proceed = typeof r === "object" ? r.allowed : r;
     } catch {
       // confirm failed — default to no
     }
@@ -1195,7 +1211,8 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         let shouldRevise = autoRevise;
         if (!autoRevise) {
           try {
-            shouldRevise = await output.confirm(`Revise and re-review? (${revisionsLeft} left)`);
+            const rv = await output.confirm(`Revise and re-review? (${revisionsLeft} left)`);
+            shouldRevise = typeof rv === "object" ? rv.allowed : rv;
           } catch {
             shouldRevise = false; // cancelled
           }
@@ -1372,7 +1389,8 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
       output.coordinatorLog(`${parts.join(", ")} files`);
 
       if (!trustAll) {
-        const commitConfirmed = await output.confirm("Commit these changes?");
+        const cr = await output.confirm("Commit these changes?");
+        const commitConfirmed = typeof cr === "object" ? cr.allowed : cr;
         if (commitConfirmed) {
           // Stage specific files from context (NOT git add -A)
           const filesToStage = [...context.filesCreated, ...context.filesModified].filter(Boolean);

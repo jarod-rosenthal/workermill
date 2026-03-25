@@ -53,7 +53,7 @@ function getEmoji(persona: string): string {
 /** Pending confirmation request surfaced to the UI layer. */
 export interface OrchestratorConfirmRequest {
   prompt: string;
-  resolve: (yes: boolean) => void;
+  resolve: (yes: boolean, mode?: "always" | "trust") => void;
 }
 
 export interface UseOrchestratorReturn {
@@ -164,13 +164,17 @@ export function useOrchestrator(
               setStatusMessage("");
             },
 
-            confirm(prompt: string): Promise<boolean> {
-              return new Promise<boolean>((resolve) => {
+            confirm(prompt: string): Promise<boolean | { allowed: boolean; mode?: "always" | "trust" }> {
+              return new Promise((resolve) => {
                 setConfirmRequest({
                   prompt,
-                  resolve: (yes: boolean) => {
+                  resolve: (yes: boolean, mode?: "always" | "trust") => {
                     setConfirmRequest(null);
-                    resolve(yes);
+                    if (mode) {
+                      resolve({ allowed: yes, mode });
+                    } else {
+                      resolve(yes);
+                    }
                   },
                 });
               });

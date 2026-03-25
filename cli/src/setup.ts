@@ -9,6 +9,8 @@ interface ProviderOption {
   needsKey: boolean;
   envVar?: string;
   models: { id: string; label: string }[];
+  /** Dynamically detected models (set by configureOllama). Overrides `models` in pickModel. */
+  detectedModels?: { id: string; label: string }[];
 }
 
 const PROVIDERS: ProviderOption[] = [
@@ -98,25 +100,30 @@ async function pickModel(
   p: Prompter,
   provider: ProviderOption,
 ): Promise<string> {
+  // Use dynamically detected models if available (Ollama), otherwise hardcoded defaults
+  const models = provider.detectedModels && provider.detectedModels.length > 0
+    ? provider.detectedModels
+    : provider.models;
+
   console.log();
-  provider.models.forEach((m, i) => {
+  models.forEach((m, i) => {
     console.log(`    ${chalk.cyan(`${i + 1}`)}. ${m.label}`);
   });
-  console.log(`    ${chalk.cyan(`${provider.models.length + 1}`)}. Custom model`);
+  console.log(`    ${chalk.cyan(`${models.length + 1}`)}. Custom model`);
   console.log();
 
-  const choiceStr = await p.ask(chalk.dim(`  Choose (1-${provider.models.length + 1}): `));
+  const choiceStr = await p.ask(chalk.dim(`  Choose (1-${models.length + 1}): `));
   const choice = parseInt(choiceStr.trim(), 10) - 1;
 
-  if (choice >= 0 && choice < provider.models.length) {
-    const model = provider.models[choice].id;
+  if (choice >= 0 && choice < models.length) {
+    const model = models[choice].id;
     console.log(chalk.dim(`  → ${model}`));
     return model;
   }
 
   // Custom model
   const custom = await p.ask(chalk.dim("  Model name: "));
-  const model = custom.trim() || provider.models[0].id;
+  const model = custom.trim() || models[0].id;
   console.log(chalk.dim(`  → ${model}`));
   return model;
 }
@@ -259,8 +266,33 @@ function readKeyMasked(prompt: string): Promise<string> {
   });
 }
 
+/** Keywords that indicate a model is good for coding. Higher score = better for code. */
+function codingScore(name: string): number {
+  const lower = name.toLowerCase();
+  let score = 0;
+  if (lower.includes("coder") || lower.includes("codex")) score += 10;
+  if (lower.includes("code")) score += 5;
+  if (lower.includes("devstral") || lower.includes("starcoder")) score += 8;
+  if (lower.includes("deepseek")) score += 3;
+  if (lower.includes("qwen")) score += 2;
+  if (lower.includes("llama")) score += 1;
+  // Prefer larger models
+  const sizeMatch = lower.match(/(\d+)b/);
+  if (sizeMatch) score += Math.min(parseInt(sizeMatch[1], 10) / 5, 10);
+  return score;
+}
+
+/** Format a model name for display. */
+function formatModelLabel(name: string): string {
+  // Extract size if present
+  const sizeMatch = name.match(/(\d+\.?\d*)b/i);
+  const size = sizeMatch ? ` (${sizeMatch[1]}B)` : "";
+  const base = name.split(":")[0].replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  return `${base}${size}`;
+}
+
 /** Detect Ollama and configure host/context. */
-async function configureOllama(providerConfig: ProviderConfig): Promise<void> {
+async function configureOllama(providerConfig: ProviderConfig, ollamaProvider?: ProviderOption): Promise<void> {
   const hostsToTry = ["http://localhost:11434"];
 
   // Detect WSL → Windows host IP
@@ -291,6 +323,17 @@ async function configureOllama(providerConfig: ProviderConfig): Promise<void> {
         const models = data.models || [];
         if (models.length > 0) {
           console.log(chalk.dim(`  Available: ${models.map(m => m.name).join(", ")}`));
+
+          // Build dynamic model list sorted by coding relevance
+          if (ollamaProvider && models.length > 0) {
+            const sorted = [...models]
+              .sort((a, b) => codingScore(b.name) - codingScore(a.name))
+              .slice(0, 8); // Show top 8
+            ollamaProvider.detectedModels = sorted.map((m, i) => ({
+              id: m.name,
+              label: `${formatModelLabel(m.name)}${i === 0 ? " (recommended)" : ""}`,
+            }));
+          }
         }
         return;
       }
@@ -316,12 +359,15 @@ export async function runSetup(): Promise<CliConfig> {
   console.log(chalk.hex("#D77757").bold("  ① Workers") + chalk.dim(" — expert personas that write code"));
   console.log();
   const workerProvider = await pickProvider(p, "Provider for workers", PROVIDERS);
-  const workerModel = await pickModel(p, workerProvider);
-  const workerKey = await getApiKey(p, workerProvider, apiKeys);
 
-  const workerConfig: ProviderConfig = { model: workerModel };
+  // Detect Ollama models before asking user to pick one
+  const workerConfig: ProviderConfig = { model: "" };
+  if (workerProvider.name === "ollama") await configureOllama(workerConfig, workerProvider);
+
+  const workerModel = await pickModel(p, workerProvider);
+  workerConfig.model = workerModel;
+  const workerKey = await getApiKey(p, workerProvider, apiKeys);
   if (workerKey) workerConfig.apiKey = workerKey;
-  if (workerProvider.name === "ollama") await configureOllama(workerConfig);
 
   console.log();
 

@@ -92,7 +92,7 @@ export function App(props: AppProps): React.ReactElement {
   const width = stdout?.columns || 80;
 
   useInput((input, key) => {
-    // ESC cancels the running agent
+    // ESC cancels the running agent or build
     if (key.escape && props.status !== "idle") {
       props.onCancel();
       return;
@@ -108,7 +108,7 @@ export function App(props: AppProps): React.ReactElement {
       }
       lastCtrlCRef.current = now;
     }
-  });
+  }, { isActive: true });
 
   const mode = props.planMode
     ? "PLAN"

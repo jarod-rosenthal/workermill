@@ -17,6 +17,7 @@ const BUILTIN_COMMANDS = [
   { name: "/skills", desc: "Custom commands" },
   { name: "/personas", desc: "List/create personas" },
   { name: "/mcp", desc: "MCP server status" },
+  { name: "/voice", desc: "Voice input" },
   { name: "/update", desc: "Update to latest" },
   { name: "/release-notes", desc: "Changelog" },
   { name: "/cost", desc: "Token costs" },

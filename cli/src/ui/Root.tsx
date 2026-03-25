@@ -127,6 +127,7 @@ Or from the command line: \`wm build "your task"\`
 | \`/skills\` | List custom commands |
 | \`/personas\` | List, show, or create personas |
 | \`/mcp\` | Show MCP server status |
+| \`/voice\` | Voice input — speak instead of type |
 | \`/update\` | Update to latest version |
 | \`/release-notes\` | Show changelog |
 | \`/hooks\` | Show configured pre/post tool hooks |
@@ -839,6 +840,32 @@ export function Root(props: RootProps): React.ReactElement {
               agent.addSystemMessage(`**Update failed:** ${msg.slice(0, 200)}\n\nTry manually: \`npm install -g workermill@latest\``);
             }
           }
+          break;
+        }
+
+        // ---- /voice ----
+        case "voice": {
+          void (async () => {
+            const { isVoiceAvailable, listenForVoice } = await import("../voice.js");
+            const { available, tool, installHint } = isVoiceAvailable();
+
+            if (!available) {
+              agent.addSystemMessage(`**Voice input not available.**\n\n${installHint}`);
+              return;
+            }
+
+            agent.addSystemMessage(`**Listening...** (${tool}, 10s) — speak now.`);
+
+            const result = await listenForVoice();
+            if (result.error) {
+              agent.addSystemMessage(`**Voice error:** ${result.error}`);
+            } else if (!result.text) {
+              agent.addSystemMessage("**No speech detected.** Try again with `/voice`.");
+            } else {
+              agent.addSystemMessage(`**Heard:** "${result.text}"`);
+              agent.submit(result.text);
+            }
+          })();
           break;
         }
 

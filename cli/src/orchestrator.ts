@@ -432,8 +432,9 @@ Return ONLY a JSON code block with this structure:
 
 Available personas: backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, tech_lead`;
 
+  logger.info("Planner started", { provider: pProvider, model: pModel });
   output.log("planner", `Starting planning agent using ${pModel}`);
-  output.log("planner", "Reading repository structure...");
+  output.status("Planner reading repository...");
 
   // Use onStepFinish — same pattern as worker/ai-clients/ai-sdk-client.ts
   let planText = "";
@@ -468,7 +469,10 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
 
   let stories = parseStoriesFromText(planText, output);
 
+  logger.info("Planner completed", { storiesFound: stories.length, planTextLength: planText.length });
+
   if (stories.length === 0) {
+    logger.info("Plan parsing failed, falling back to single story", { planTextPreview: planText.slice(0, 500) });
     output.log("system", "Planner didn't produce structured stories, falling back to single story");
     stories = [{
       id: "implement",

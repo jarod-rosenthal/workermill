@@ -131,7 +131,7 @@ export function useOrchestrator(
           }
 
           // ---- Dynamic import to avoid circular deps -----------------
-          const { classifyComplexity, runOrchestration } = await import(
+          const { runOrchestration } = await import(
             "../orchestrator.js"
           );
 
@@ -221,22 +221,8 @@ export function useOrchestrator(
             },
           };
 
-          // ---- Classify complexity -----------------------------------
-          addMessage("Analyzing task complexity\u{2026}");
-          const classification = await classifyComplexity(config, task, output, controller.signal);
-
-          if (!classification.isMulti) {
-            addMessage(
-              `Task classified as single-agent (${classification.reason}). ` +
-                "Use a normal prompt instead of /build for single tasks.",
-            );
-            setRunning(false);
-            return;
-          }
-
-          addMessage(
-            `Task classified as multi-expert: ${classification.reason}`,
-          );
+          // Skip classification — user explicitly invoked /build, so go
+          // straight to multi-expert orchestration.
 
           // ---- Run full orchestration --------------------------------
           await runOrchestration(config, task, trustAll, sandboxed, output, controller.signal);

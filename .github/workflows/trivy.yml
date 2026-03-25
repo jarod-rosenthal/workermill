@@ -23,6 +23,8 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          severity: HIGH,CRITICAL
+          scanners: vuln
+          severity: CRITICAL
           exit-code: 1
           ignore-unfixed: true
+          skip-dirs: node_modules

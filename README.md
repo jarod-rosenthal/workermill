@@ -27,26 +27,41 @@
   </a>
 </p>
 
-## Why WorkerMill?
-
-Most AI coding tools are single-agent, single-file, one-shot. WorkerMill is an **orchestration layer** — it coordinates multiple AI experts working in parallel on your codebase, with real quality enforcement.
-
-- **Full pipeline, not a chatbot** — Planning, decomposition, parallel expert execution, quality gates, and PR delivery. Submit a task or an entire product spec.
-- **13+ worker personas** — Backend, frontend, devops, security, QA, and more. Auto-assigned based on task content, or manually selected. Create custom personas for your org.
-- **Two-phase quality gates** — Pre-commit (lint, typecheck, test, build) + post-push CI polling. Gate failures trigger automatic fix agents.
-- **Any provider, any SCM** — Anthropic, OpenAI, Google, Ollama. GitHub, GitLab, Bitbucket. Mix and match per role.
-
-## WorkerMill CLI
-
-The fastest way to use WorkerMill. Run any LLM provider locally — no API server, no Docker, no account needed.
+## Get Started in 60 Seconds
 
 ```bash
 npx workermill
 ```
 
-First run auto-detects Ollama and walks you through setup. Then just describe what you want built — simple tasks get a single agent, complex tasks get multi-expert orchestration with planning, review, and git integration.
+That's it. First run walks you through provider setup — Ollama auto-detected for fully local use, or bring your own API keys for Anthropic, OpenAI, or Google. Describe what you want built and WorkerMill handles the rest.
 
-Works with Ollama (local), Anthropic, OpenAI, and Google. [Full CLI documentation →](cli/README.md)
+For simple tasks, you get a single AI agent. For complex tasks, WorkerMill automatically decomposes the work into stories and assigns specialist personas — backend, frontend, devops, security — each executing their part, followed by a tech lead review.
+
+```bash
+# Skip permission prompts
+npx workermill --trust
+
+# Start in read-only research mode
+npx workermill --plan
+
+# Install globally for repeated use
+npm install -g workermill
+```
+
+**Requirements:** Node.js 20+ and an LLM provider (Ollama for local, or an API key).
+
+[Full CLI documentation →](cli/README.md)
+
+## Why WorkerMill?
+
+Most AI coding tools are single-agent, single-file, one-shot. WorkerMill is an **orchestration layer** — it coordinates multiple AI experts working in parallel on your codebase, with real quality enforcement.
+
+The CLI above is the lightweight entry point — no server, no Docker, no account. When you need the full platform (web dashboard, Kanban boards, Jira/Slack integrations, managed worker infrastructure), everything below scales up from the same engine.
+
+- **Full pipeline, not a chatbot** — Planning, decomposition, parallel expert execution, quality gates, and PR delivery. Submit a task or an entire product spec.
+- **13 worker personas** — Backend, frontend, devops, security, QA, and more. Auto-assigned based on task content, or manually selected. Create custom personas for your org.
+- **Two-phase quality gates** — Pre-commit (lint, typecheck, test, build) + post-push CI polling. Gate failures trigger automatic fix agents.
+- **Any provider, any SCM** — Anthropic, OpenAI, Google, Ollama. GitHub, GitLab, Bitbucket. Mix and match per role.
 
 ## WorkerMill Platform
 
@@ -82,7 +97,7 @@ Cloud registration at [workermill.com](https://workermill.com) is coming soon. T
 
 ### What Happens When You Create a Task
 
-1. You create a task (VS Code sidebar, dashboard, or submit a PRD for a full product build)
+1. You create a task (CLI, VS Code sidebar, dashboard, or submit a PRD for a full product build)
 2. A planner agent decomposes the task into stories with target files
 3. A critic validates the plan (score threshold, up to 3 iterations)
 4. Persona-matched experts execute stories in parallel, each in an isolated git worktree

@@ -10,6 +10,12 @@ interface Demo {
 
 const demos: Demo[] = [
   {
+    id: "k-waKjWQBf4",
+    title: "WorkerMill CLI — Multi-Expert AI Coding Agent in Action",
+    thumbnail: "https://img.youtube.com/vi/k-waKjWQBf4/maxresdefault.jpg",
+    url: "https://youtu.be/k-waKjWQBf4",
+  },
+  {
     id: "fLS1tWfItzY",
     title: "AI Agents Build a Full-Stack SaaS App in 5 Hours — 27,000 Lines of Code",
     thumbnail: "https://img.youtube.com/vi/fLS1tWfItzY/maxresdefault.jpg",

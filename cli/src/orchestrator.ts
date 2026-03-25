@@ -116,6 +116,10 @@ const IGNORE_WORKERMILL = `
 ## Ignored Directories
 
 NEVER explore, read, or modify files in \`.workermill/\` — it is an internal WorkerMill system directory.
+
+## Sandbox — Stay in the Working Directory
+
+ALL files you create, read, or modify MUST be within the current working directory. Do NOT use /tmp, /var, /home, or any path outside the project root. Temporary files, test fixtures, build output — everything goes inside the project directory. This is non-negotiable.
 `;
 
 /**

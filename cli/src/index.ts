@@ -59,7 +59,7 @@ function printWelcome(roleModels: { worker: string; planner: string; reviewer: s
   });
 }
 
-const VERSION = "0.11.4";
+const VERSION = "0.11.5";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {
@@ -67,6 +67,7 @@ function addSharedOptions(cmd: Command): Command {
     .option("--provider <provider>", "Override default provider")
     .option("--model <model>", "Override model")
     .option("--trust", "Skip all tool permission prompts")
+    .option("--auto-revise", "Auto-approve revisions during /build reviews")
     .option("--full-disk", "Allow tools to access files outside working directory")
     .option("--max-tokens <n>", "Maximum output tokens per response", parseInt);
 }
@@ -85,6 +86,9 @@ async function resolveConfig(options: Record<string, unknown>) {
     if (providerConfig) {
       providerConfig.model = options.model as string;
     }
+  }
+  if (options.autoRevise) {
+    config.review = { ...config.review, autoRevise: true };
   }
   return config;
 }

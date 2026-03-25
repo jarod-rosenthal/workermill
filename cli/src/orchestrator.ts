@@ -1035,7 +1035,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
   // Review config
   const reviewEnabled = config.review?.enabled !== false; // default: true
   const maxRevisions = config.review?.maxRevisions ?? 3;
-  const autoRevise = config.review?.autoRevise ?? false;
+  let autoRevise = config.review?.autoRevise ?? false;
   const approvalThreshold = config.review?.approvalThreshold ?? 80;
 
   // Run inline review with revision loop
@@ -1275,7 +1275,16 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         if (!autoRevise) {
           try {
             const rv = await output.confirm(`Revise and re-review? (${revisionsLeft} left)`);
-            shouldRevise = typeof rv === "object" ? rv.allowed : rv;
+            if (typeof rv === "object") {
+              shouldRevise = rv.allowed;
+              if (rv.mode === "always") {
+                // Switch to auto-revise for remaining rounds
+                autoRevise = true;
+                output.coordinatorLog("Auto-revise enabled for remaining rounds.");
+              }
+            } else {
+              shouldRevise = rv;
+            }
           } catch {
             shouldRevise = false; // cancelled
           }

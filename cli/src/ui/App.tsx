@@ -67,21 +67,28 @@ function Spinner({ color }: { color: string }): React.ReactElement {
   return <Text color={color}>{SPINNER_FRAMES[frame]}</Text>;
 }
 
-/** Confirm prompt for orchestrator — shows permission options only for tool approvals. */
+/** Confirm prompt for orchestrator — context-aware options. */
 function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: (yes: boolean, mode?: "always" | "trust") => void } }): React.ReactElement {
   const [answered, setAnswered] = React.useState(false);
   const isToolPrompt = request.prompt.startsWith("Allow ");
+  const isRevisionPrompt = request.prompt.startsWith("Revise ");
+  const hasAlways = isToolPrompt || isRevisionPrompt;
   useInput((input) => {
     if (answered) return;
     if (input === "y" || input === "Y") { setAnswered(true); request.resolve(true); }
     if (input === "n" || input === "N") { setAnswered(true); request.resolve(false); }
-    if (isToolPrompt && (input === "a" || input === "A")) { setAnswered(true); request.resolve(true, "always"); }
+    if (hasAlways && (input === "a" || input === "A")) { setAnswered(true); request.resolve(true, "always"); }
     if (isToolPrompt && (input === "t" || input === "T")) { setAnswered(true); request.resolve(true, "trust"); }
   }, { isActive: !answered });
+
+  let hint = "(y/n)";
+  if (isToolPrompt) hint = "(y)es (a)lways (t)rust all (n)o";
+  else if (isRevisionPrompt) hint = "(y)es (a)lways (n)o";
+
   return (
     <Box marginLeft={2} marginY={1}>
       <Text color={theme.permission}>{request.prompt} </Text>
-      <Text dimColor>{isToolPrompt ? "(y)es (a)lways (t)rust all (n)o" : "(y/n)"}</Text>
+      <Text dimColor>{hint}</Text>
     </Box>
   );
 }

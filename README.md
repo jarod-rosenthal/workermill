@@ -37,20 +37,22 @@
 npx workermill
 ```
 
-That's it. First run walks you through provider setup — Ollama auto-detected for fully local use, or bring your own API keys for Anthropic, OpenAI, or Google. Describe what you want built and WorkerMill handles the rest.
+That's it. First run walks you through provider setup — pick models for workers, planner, and reviewer independently. Ollama auto-detected (including WSL), or bring API keys for Anthropic, OpenAI, or Google.
 
-For simple tasks, you get a single AI agent. For complex tasks, WorkerMill automatically decomposes the work into stories and assigns specialist personas — backend, frontend, devops, security — each executing their part, followed by a tech lead review.
+For complex tasks, use `/build` — WorkerMill decomposes work into stories and assigns specialist personas (backend, frontend, devops, security), each executing their part with your full spec, followed by a tech lead code review with revision cycles.
 
 ```bash
-# Skip permission prompts
-npx workermill --trust
+# Build software with multi-expert AI
+wm build "REST API with auth, React dashboard, Docker"
 
-# Start in read-only research mode
-npx workermill --plan
+# Or from a spec file
+wm build spec.md
 
-# Install globally for repeated use
-npm install -g workermill
+# Check your setup
+wm doctor
 ```
+
+**Features:** WORKERMILL.md project instructions, MCP servers, hooks, custom commands, persistent learnings, @file/@folder/@url/@image mentions, `/undo`, `/diff`, `/permissions`, `/settings`, `/retry`, code review with actual diffs, bash guardrails, Tab-cycling permissions, ESC ESC rollback, auto-update notifications.
 
 **Requirements:** Node.js 20+ and an LLM provider (Ollama for local, or an API key).
 

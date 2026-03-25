@@ -127,6 +127,7 @@ Or from the command line: \`wm build "your task"\`
 | \`/skills\` | List custom commands |
 | \`/personas\` | List, show, or create personas |
 | \`/mcp\` | Show MCP server status |
+| \`/update\` | Update to latest version |
 | \`/release-notes\` | Show changelog |
 | \`/hooks\` | Show configured pre/post tool hooks |
 | \`/editor\` | Open \\$EDITOR for longer input |
@@ -816,6 +817,27 @@ export function Root(props: RootProps): React.ReactElement {
             agent.addSystemMessage(`**Last 20 log entries:**\n\n\`\`\`\n${tail}\n\`\`\``);
           } catch (err) {
             agent.addSystemMessage(`Failed to read log: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          break;
+        }
+
+        // ---- /update ----
+        case "update": {
+          agent.addSystemMessage("**Updating WorkerMill CLI...**");
+          try {
+            const result = execSync("npm install -g workermill@latest 2>&1", {
+              encoding: "utf-8", timeout: 60_000,
+            }).trim();
+            const versionMatch = result.match(/workermill@([\d.]+)/);
+            const newVersion = versionMatch ? versionMatch[1] : "latest";
+            agent.addSystemMessage(`**Updated to v${newVersion}.** Restart the CLI to use the new version.`);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes("EACCES") || msg.includes("permission")) {
+              agent.addSystemMessage("**Permission denied.** Try:\n\n```\nsudo npm install -g workermill@latest\n```\n\nOr use npx which always gets the latest:\n```\nnpx workermill@latest\n```");
+            } else {
+              agent.addSystemMessage(`**Update failed:** ${msg.slice(0, 200)}\n\nTry manually: \`npm install -g workermill@latest\``);
+            }
           }
           break;
         }

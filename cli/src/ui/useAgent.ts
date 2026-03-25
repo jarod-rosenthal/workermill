@@ -21,7 +21,7 @@ import { CostTracker } from "../cost-tracker.js";
 import { killActiveProcess } from "../../../packages/engine/src/tools/bash.js";
 import { loadLearnings } from "../learnings.js";
 import { formatProjectInstructions } from "../instructions.js";
-import { parseImageReferences, toMessageContent } from "../image-support.js";
+import { parseImageReferences, toMessageContent, resolveFileReferences } from "../image-support.js";
 import * as logger from "../logger.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers } from "../mcp-client.js";
 import { resolveConfig } from "../config.js";
@@ -531,9 +531,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       void (async () => {
         const session = sessionRef.current;
 
+        // Resolve @file references (text files inlined into the prompt)
+        const resolvedInput = resolveFileReferences(input, workingDirRef.current);
+
         // Add user message to session and committed messages.
-        addMessage(session, "user", input);
-        logger.info("User message", { length: input.length, preview: input.slice(0, 100) });
+        addMessage(session, "user", resolvedInput);
+        logger.info("User message", { length: resolvedInput.length, preview: input.slice(0, 100) });
         if (!session.name) {
           session.name = input.slice(0, 50).replace(/\n/g, " ");
         }

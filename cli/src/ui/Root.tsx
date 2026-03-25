@@ -111,6 +111,8 @@ Or from the command line: \`wm build "your task"\`
 | \`/build <task>\` | Multi-expert orchestration — the main feature |
 | \`/retry\` | Re-plan and re-run the last build task |
 | \`/settings\` | View/change settings (review, ollama, etc.) |
+| \`/undo\` | Revert last build's changes (git stash or reset) |
+| \`/diff\` | Preview uncommitted changes |
 | \`/plan\` | Toggle plan mode (read-only, explore before committing) |
 | \`/trust\` | Auto-approve all tool calls for this session |
 | \`/model\` | Show current provider and model |
@@ -329,6 +331,72 @@ export function Root(props: RootProps): React.ReactElement {
             const task = lastBuildTask.current;
             agent.addUserMessage(`/retry ${task.slice(0, 60)}...`);
             orchestrator.start(task, props.trustAll, props.sandboxed);
+          }
+          break;
+        }
+
+        // ---- /undo ----
+        case "undo": {
+          try {
+            // Check if there are uncommitted changes
+            const status = execSync("git status --porcelain 2>/dev/null", {
+              cwd: props.workingDir, encoding: "utf-8", timeout: 5000,
+            }).trim();
+
+            if (!status) {
+              // No uncommitted changes — try undoing last commit
+              try {
+                const lastMsg = execSync("git log -1 --format=%s 2>/dev/null", {
+                  cwd: props.workingDir, encoding: "utf-8", timeout: 5000,
+                }).trim();
+                execSync("git reset HEAD~1", { cwd: props.workingDir, encoding: "utf-8", timeout: 5000 });
+                agent.addSystemMessage(`**Undone** last commit: "${lastMsg}"\n\nChanges are now unstaged. Run \`/undo\` again to discard them.`);
+              } catch {
+                agent.addSystemMessage("Nothing to undo — no uncommitted changes and no commits to reset.");
+              }
+            } else {
+              // Has uncommitted changes — stash them
+              const fileCount = status.split("\n").length;
+              execSync("git stash push -m 'workermill-undo'", {
+                cwd: props.workingDir, encoding: "utf-8", timeout: 10000,
+              });
+              agent.addSystemMessage(`**Undone** — stashed ${fileCount} changed files.\n\nRecover with \`!git stash pop\` if needed.`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            agent.addSystemMessage(`**Undo failed:** ${msg}\n\nMake sure you're in a git repository.`);
+          }
+          break;
+        }
+
+        // ---- /diff ----
+        case "diff": {
+          try {
+            const diffStat = execSync("git diff --stat 2>/dev/null", {
+              cwd: props.workingDir, encoding: "utf-8", timeout: 5000,
+            }).trim();
+            const untracked = execSync("git ls-files --others --exclude-standard 2>/dev/null", {
+              cwd: props.workingDir, encoding: "utf-8", timeout: 5000,
+            }).trim();
+            const diff = execSync("git diff 2>/dev/null", {
+              cwd: props.workingDir, encoding: "utf-8", timeout: 10000,
+            }).trim();
+
+            const parts: string[] = [];
+            if (diffStat) parts.push(`**Changes:**\n\`\`\`\n${diffStat}\n\`\`\``);
+            if (untracked) parts.push(`**New files:**\n${untracked.split("\n").map(f => `- \`${f}\``).join("\n")}`);
+            if (diff) {
+              const truncated = diff.length > 3000 ? diff.slice(0, 3000) + "\n... (truncated, use !git diff for full output)" : diff;
+              parts.push(`**Diff:**\n\`\`\`diff\n${truncated}\n\`\`\``);
+            }
+
+            if (parts.length === 0) {
+              agent.addSystemMessage("No changes. Working tree is clean.");
+            } else {
+              agent.addSystemMessage(parts.join("\n\n"));
+            }
+          } catch {
+            agent.addSystemMessage("Not a git repository, or git is not installed.");
           }
           break;
         }

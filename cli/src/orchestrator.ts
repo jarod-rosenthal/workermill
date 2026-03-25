@@ -691,7 +691,6 @@ export async function runOrchestration(
     output.log("planner", `Step ${i + 1}: [${s.persona}] ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`);
   });
   output.log("planner", `Plan validated: ${plannerStories.length} stories. Task queued for execution.`);
-  output.log("system", "");
 
   // Optional critic pass (--critic or config.review.useCritic)
   if (config.review?.useCritic) {
@@ -733,8 +732,7 @@ export async function runOrchestration(
       const score = extractScore(criticText);
       output.log("critic", `::review_score::${score}`);
       output.log("critic", score >= 80 ? "Plan approved" : "Plan needs revision");
-      output.log("system", "");
-    }
+        }
   }
 
   // Sort by dependencies
@@ -752,8 +750,7 @@ export async function runOrchestration(
       output.log("system", "Plan cancelled.");
       return;
     }
-    output.log("system", "");
-  }
+    }
 
   for (let i = 0; i < sorted.length; i++) {
     const story = sorted[i];
@@ -934,8 +931,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
 
       output.log(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
       logger.info(`Story ${i + 1} completed`, { persona: story.persona, inputTokens: inTokens, outputTokens: outTokens });
-      output.log("system", "");
-      break; // Story succeeded, exit revision loop
+          break; // Story succeeded, exit revision loop
     } catch (err) {
       output.statusDone();
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -1115,8 +1111,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         output.coordinatorLog(approved ? `Review approved (score: ${score}/100)` : `Review needs revision (score: ${score}/100)`);
         // Save feedback for next review round — so tech_lead can check if issues were addressed
         previousReviewFeedback = reviewText;
-        output.log("system", "");
-
+      
         // Track reviewer cost
         costTracker.addUsage(`Reviewer (round ${reviewRound + 1})`, revProvider, revModel,
           reviewUsage?.inputTokens || 0, reviewUsage?.outputTokens || 0);
@@ -1272,13 +1267,11 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
             output.log("system", `Revision failed for story ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
-        output.log("system", "");
-        // Loop back to review again
+              // Loop back to review again
       } catch (err) {
         output.statusDone();
         output.log("system", `Review skipped: ${err instanceof Error ? err.message : String(err)}`);
-        output.log("system", "");
-        break;
+              break;
       }
     } // end review loop
   }

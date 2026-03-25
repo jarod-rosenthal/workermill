@@ -785,7 +785,7 @@ export async function runOrchestration(
     }
 
     output.log("system", `--- Story ${i + 1}/${sorted.length} ---`);
-    output.log(story.persona, `Starting ${story.title}`);
+    output.log(story.persona, `Starting ${story.title} (${provider}/${modelName})`);
     logger.info(`Story ${i + 1}/${sorted.length} started`, { persona: story.persona, title: story.title, provider, model: modelName });
 
     output.status(`${story.persona}: ${story.title.slice(0, 60)}`);
@@ -1007,7 +1007,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
     for (let reviewRound = 0; reviewRound <= maxRevisions; reviewRound++) {
       const isRevision = reviewRound > 0;
       logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
-      output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound}/${maxRevisions})...` : "Starting Tech Lead review...");
+      output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound}/${maxRevisions}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
       output.log("tech_lead", `Starting agent execution (model: ${revModel})`);
 
       output.status(isRevision ? "Reviewer -- Re-checking after revisions" : "Reviewer -- Checking code quality");

@@ -854,7 +854,7 @@ export function Root(props: RootProps): React.ReactElement {
               return;
             }
 
-            agent.addSystemMessage(`**Listening...** (${tool}, 10s) — speak now.`);
+            agent.addSystemMessage(`**Listening...** (${tool}) — speak now, stops on silence.`);
 
             const result = await listenForVoice();
             if (result.error) {

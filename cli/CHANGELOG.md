@@ -4,6 +4,23 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.6] - 2026-03-25
+
+### Added
+- `/voice` command — speak instead of type. Uses platform-native speech recognition (Mac: `hear`, Windows: PowerShell, Linux: whisper). Listens until silence, no arbitrary time limit.
+- `/update` command — pulls latest version via `npm install -g workermill@latest`
+- `/skills`, `/personas`, `/mcp` commands — manage custom commands, personas, and MCP servers
+- `/release-notes` command — shows changelog
+- Built-in browser automation via Chrome DevTools Protocol — `browser_open`, `browser_navigate`, `browser_screenshot`, `browser_click`, `browser_fill`, `browser_evaluate`, `browser_console`, `browser_close`
+
+### Fixed
+- Dangerous command detection too aggressive — `rm -rf prisma` (relative path) no longer triggers. Only flags root/home paths.
+- Reviewer confirm shows `(y/n)` not `(y)es (a)lways (t)rust all (n)o` for revision/plan/commit prompts
+- Reviewer gets actual code via `git ls-files` fallback when `::file_created::` markers missing
+- Story parser normalizes field names (`index`→`id`, `steps`→`stories`, `depends_on`→`dependsOn`)
+- Unique story IDs enforced before topological sort
+- Planner output streams line-by-line in real time
+
 ## [0.9.3] - 2026-03-25
 
 ### Fixed

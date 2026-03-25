@@ -11,7 +11,7 @@
 import { execSync, exec, type ChildProcess } from "child_process";
 import * as logger from "./logger.js";
 
-const LISTEN_SECONDS = 10;
+const MAX_MAX_LISTEN_SECONDS = 60; // safety cap — most speech is under 30s
 
 interface VoiceResult {
   text: string;
@@ -69,10 +69,10 @@ function detectVoiceTool(): { tool: "hear" | "powershell" | "whisper" | null; in
  */
 async function transcribeWithHear(): Promise<VoiceResult> {
   try {
-    // hear -d <seconds> -l en — listen for N seconds, output transcribed text
-    const text = execSync(`hear -d ${LISTEN_SECONDS} -l en 2>/dev/null`, {
+    // hear -i -l en — interactive mode, stops on silence, outputs transcribed text
+    const text = execSync(`hear -i -l en 2>/dev/null`, {
       encoding: "utf-8",
-      timeout: (LISTEN_SECONDS + 5) * 1000,
+      timeout: (MAX_MAX_LISTEN_SECONDS + 5) * 1000,
     }).trim();
     return { text };
   } catch (err) {
@@ -87,8 +87,8 @@ Add-Type -AssemblyName System.Speech
 $r = New-Object System.Speech.Recognition.SpeechRecognitionEngine
 $r.SetInputToDefaultAudioDevice()
 $r.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))
-$r.InitialSilenceTimeout = [TimeSpan]::FromSeconds(${LISTEN_SECONDS})
-$r.EndSilenceTimeout = [TimeSpan]::FromSeconds(2)
+$r.InitialSilenceTimeout = [TimeSpan]::FromSeconds(${MAX_MAX_LISTEN_SECONDS})
+$r.EndSilenceTimeout = [TimeSpan]::FromSeconds(3)
 $result = $r.Recognize()
 if ($result) { Write-Output $result.Text } else { Write-Output "" }
 $r.Dispose()
@@ -97,7 +97,7 @@ $r.Dispose()
   try {
     const text = execSync(`${psCommand} -NoProfile -Command "${script}"`, {
       encoding: "utf-8",
-      timeout: (LISTEN_SECONDS + 10) * 1000,
+      timeout: (MAX_LISTEN_SECONDS + 10) * 1000,
     }).trim();
     return { text };
   } catch (err) {
@@ -116,8 +116,8 @@ async function transcribeWithWhisper(): Promise<VoiceResult> {
 
   try {
     const text = execSync(
-      `arecord -q -f cd -t wav -d ${LISTEN_SECONDS} /tmp/wm-voice.wav 2>/dev/null && whisper /tmp/wm-voice.wav --language en --output_format txt --output_dir /tmp 2>/dev/null && cat /tmp/wm-voice.txt && rm -f /tmp/wm-voice.wav /tmp/wm-voice.txt`,
-      { encoding: "utf-8", timeout: (LISTEN_SECONDS + 30) * 1000 },
+      `arecord -q -f cd -t wav -d ${MAX_LISTEN_SECONDS} /tmp/wm-voice.wav 2>/dev/null && whisper /tmp/wm-voice.wav --language en --output_format txt --output_dir /tmp 2>/dev/null && cat /tmp/wm-voice.txt && rm -f /tmp/wm-voice.wav /tmp/wm-voice.txt`,
+      { encoding: "utf-8", timeout: (MAX_LISTEN_SECONDS + 30) * 1000 },
     ).trim();
     return { text };
   } catch (err) {

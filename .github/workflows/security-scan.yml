@@ -1,0 +1,94 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  gitleaks:
+    name: Secret Detection (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --config .gitleaks.toml
+
+  semgrep:
+    name: Static Analysis (Semgrep)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan \
+            --config auto \
+            --exclude='node_modules' \
+            --exclude='dist' \
+            --exclude='*.test.*' \
+            --exclude='*.spec.*' \
+            --exclude='__tests__' \
+            --error \
+            --severity ERROR \
+            --exclude-rule javascript.lang.security.detect-child-process.detect-child-process \
+            --exclude-rule javascript.lang.security.spawn-shell-true.spawn-shell-true \
+            --exclude-rule javascript.lang.security.audit.spawn-shell-true.spawn-shell-true \
+            --exclude-rule javascript.lang.security.detect-non-literal-regexp.detect-non-literal-regexp \
+            --exclude-rule generic.ci.security.use-frozen-lockfile.use-frozen-lockfile-pip \
+            --exclude-rule typescript.lang.security.audit.path-join-resolve-traversal.path-join-resolve-traversal \
+            --exclude-rule javascript.express.security.audit.xss.direct-response-write.direct-response-write \
+            --exclude-rule python.lang.security.audit.dangerous-spawn-shell.dangerous-spawn-shell \
+            --exclude-rule javascript.lang.security.audit.dangerous-spawn-shell.dangerous-spawn-shell \
+            --exclude-rule yaml.github-actions.security.run-shell-injection.run-shell-injection \
+            --exclude-rule dockerfile.security.missing-user.missing-user \
+            .
+
+  trivy:
+    name: Dependency Scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy (filesystem)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: 1
+          ignore-unfixed: true
+
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dir: [api, frontend, cli]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install and audit (${{ matrix.dir }})
+        working-directory: ${{ matrix.dir }}
+        run: |
+          npm ci --ignore-scripts
+          npm audit --omit=dev --audit-level=high

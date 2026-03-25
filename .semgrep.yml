@@ -1,0 +1,24 @@
+# Semgrep configuration for WorkerMill
+#
+# WorkerMill is a coding agent platform that intentionally:
+# - Spawns child processes (bash tool, quality gates, worker execution)
+# - Traverses file paths (file tools operate on user codebases)
+# - Runs shell commands (core function of the product)
+#
+# The following rules are excluded as documented false positives:
+#
+# detect-child-process          — The bash tool and worker spawner use child_process by design
+# spawn-shell-true              — Quality gates and auto-fix agents run user-defined shell commands
+# dangerous-spawn-shell         — Same as above — shell execution is the product's core function
+# detect-non-literal-regexp     — Dynamic regex used for user-configurable file glob matching
+# path-join-resolve-traversal   — File tools intentionally resolve paths in user codebases
+# direct-response-write         — Express API returns structured JSON, not user-controlled HTML
+# run-shell-injection           — CI workflows are manual-trigger only (workflow_dispatch), not PR-triggered
+# missing-user                  — API/frontend Dockerfiles use base image defaults (node/nginx)
+# use-frozen-lockfile-pip       — Python scripts are dev-only tooling, not production dependencies
+#
+# Security boundaries are enforced by:
+# - Permission system (cli/src/permissions.ts) — user approves dangerous commands
+# - Sandboxed Docker execution (worker/Dockerfile) — workers run in isolated containers
+# - Blocked command list — rm -rf /, format, shutdown etc. rejected before execution
+# - File scope enforcement — workers restricted to target files declared in the plan

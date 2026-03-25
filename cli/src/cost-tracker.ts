@@ -68,12 +68,12 @@ export class CostTracker {
     const totalOut = this.entries.reduce((s, e) => s + e.outputTokens, 0);
 
     const lines = [
-      `Session cost: $${total.toFixed(4)} (${totalIn.toLocaleString()} in / ${totalOut.toLocaleString()} out)`,
+      `Session cost (est.): ~$${total.toFixed(2)} (${totalIn.toLocaleString()} in / ${totalOut.toLocaleString()} out)`,
     ];
 
     for (const entry of this.entries) {
       lines.push(
-        `  * ${entry.persona}: $${entry.cost.toFixed(4)} (${entry.provider}/${entry.model})`
+        `  * ${entry.persona}: ~$${entry.cost.toFixed(2)} (${entry.provider}/${entry.model})`
       );
     }
 

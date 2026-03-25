@@ -81,7 +81,7 @@ export async function handleCommand(
       console.log(chalk.bold("  Session Status:"));
       console.log(chalk.dim("  Messages: ") + ctx.session.messages.length);
       console.log(chalk.dim("  Tokens: ") + ctx.session.totalTokens.toLocaleString());
-      console.log(chalk.dim("  Cost: ") + `$${ctx.costTracker.getTotalCost().toFixed(4)}`);
+      console.log(chalk.dim("  Cost (est.): ") + `~$${ctx.costTracker.getTotalCost().toFixed(2)}`);
       console.log(chalk.dim("  Mode: ") + (ctx.planMode ? chalk.cyan("PLAN (read-only)") : "normal"));
       console.log();
       break;

@@ -431,7 +431,7 @@ export function printStatusBar(
   const cwd = process.cwd().split("/").pop() || "";
 
   // Cost string
-  const costStr = cost !== undefined && cost > 0 ? `$${cost.toFixed(4)} | ` : "";
+  const costStr = cost !== undefined && cost > 0 ? `~$${cost.toFixed(2)} | ` : "";
 
   // Time + mode
   const elapsed = formatElapsed();

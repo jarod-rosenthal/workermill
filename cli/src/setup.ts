@@ -394,13 +394,23 @@ async function fetchCloudModels(
       clearTimeout(timeout);
       if (res.ok) {
         const data = (await res.json()) as { models?: { name: string; displayName: string; supportedGenerationMethods?: string[] }[] };
+        // Filter to Gemini text models suitable for coding — exclude image/video/embedding/experimental
+        const EXCLUDE_PATTERNS = [
+          "image", "video", "veo", "imagen", "nano", "banana",
+          "embedding", "embed", "aqa", "attribution",
+          "thinking-exp", "learnlm", "text-",
+        ];
         const genModels = (data.models || [])
           .filter(m => m.supportedGenerationMethods?.includes("generateContent"))
           .map(m => ({
             id: m.name.replace("models/", ""),
             label: m.displayName || m.name.replace("models/", ""),
           }))
-          .filter(m => m.id.includes("gemini"));
+          .filter(m => {
+            if (!m.id.includes("gemini")) return false;
+            const lower = m.id.toLowerCase();
+            return !EXCLUDE_PATTERNS.some(p => lower.includes(p));
+          });
 
         // Sort: preview models first, then by version descending
         genModels.sort((a, b) => {

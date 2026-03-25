@@ -11,6 +11,7 @@ import { Command } from "commander";
 import { loadConfig, getProviderForPersona } from "./config.js";
 import { runSetup } from "./setup.js";
 import { Root } from "./ui/Root.js";
+import { checkForUpdate } from "./update-check.js";
 
 /** Resolve display strings for all 3 roles from the full config. */
 function getRoleModelsFromConfig(config: import("./config.js").CliConfig): {
@@ -49,9 +50,16 @@ function printWelcome(roleModels: { worker: string; planner: string; reviewer: s
   console.log();
   console.log(dim("  ") + brand("/build") + dim(" to create  ") + brand("/retry") + dim(" to re-run  ") + white("/help") + dim(" for all commands"));
   console.log();
+
+  // Non-blocking update check
+  void checkForUpdate(VERSION).then((latest) => {
+    if (latest) {
+      console.log(chalk.yellow(`  Update available: ${VERSION} → ${latest} — run: npm i -g workermill`));
+    }
+  });
 }
 
-const VERSION = "0.7.0";
+const VERSION = "0.7.1";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {
@@ -181,5 +189,145 @@ const buildCmd = program
     await waitUntilExit();
   });
 addSharedOptions(buildCmd);
+
+// ── Doctor command: check setup health ──
+program
+  .command("doctor")
+  .description("Check your WorkerMill setup for issues")
+  .action(async () => {
+    const chalk = (await import("chalk")).default;
+    const { execSync } = await import("child_process");
+    const fs = (await import("fs")).default;
+    const path = (await import("path")).default;
+    const os = (await import("os")).default;
+
+    console.log();
+    console.log(chalk.bold("  WorkerMill Doctor"));
+    console.log();
+
+    let issues = 0;
+
+    // Check Node.js version
+    const nodeVersion = process.version;
+    const major = parseInt(nodeVersion.slice(1), 10);
+    if (major >= 20) {
+      console.log(chalk.green("  ✓") + ` Node.js ${nodeVersion}`);
+    } else {
+      console.log(chalk.red("  ✗") + ` Node.js ${nodeVersion} — requires 20+`);
+      issues++;
+    }
+
+    // Check git
+    try {
+      const gitVersion = execSync("git --version", { encoding: "utf-8" }).trim();
+      console.log(chalk.green("  ✓") + ` ${gitVersion}`);
+    } catch {
+      console.log(chalk.red("  ✗") + " git not found — install git for full functionality");
+      issues++;
+    }
+
+    // Check config
+    const configPath = path.join(os.homedir(), ".workermill", "cli.json");
+    if (fs.existsSync(configPath)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+        console.log(chalk.green("  ✓") + ` Config found (default: ${config.default})`);
+
+        // Check each provider
+        for (const [name, prov] of Object.entries(config.providers || {})) {
+          const p = prov as any;
+          if (name === "ollama" || name.includes("ollama")) {
+            const host = p.host || "http://localhost:11434";
+            try {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 3000);
+              const res = await globalThis.fetch(`${host}/api/tags`, { signal: controller.signal });
+              clearTimeout(timeout);
+              if (res.ok) {
+                const data = await res.json() as { models?: { name: string }[] };
+                const models = data.models || [];
+                console.log(chalk.green("  ✓") + ` Ollama connected at ${host} (${models.length} models)`);
+                if (p.model && !models.find((m: any) => m.name === p.model)) {
+                  console.log(chalk.yellow("  ⚠") + ` Model "${p.model}" not found in Ollama — pull it with: ollama pull ${p.model}`);
+                  issues++;
+                }
+              } else {
+                console.log(chalk.red("  ✗") + ` Ollama not responding at ${host}`);
+                issues++;
+              }
+            } catch {
+              console.log(chalk.red("  ✗") + ` Ollama not reachable at ${host}`);
+              issues++;
+            }
+          } else if (p.apiKey) {
+            if (p.apiKey.startsWith("{env:")) {
+              const envVar = p.apiKey.slice(5, -1);
+              if (process.env[envVar]) {
+                console.log(chalk.green("  ✓") + ` ${name}: API key from ${envVar}`);
+              } else {
+                console.log(chalk.red("  ✗") + ` ${name}: ${envVar} not set`);
+                issues++;
+              }
+            } else {
+              console.log(chalk.green("  ✓") + ` ${name}: API key configured`);
+            }
+          }
+        }
+      } catch {
+        console.log(chalk.red("  ✗") + " Config file is invalid JSON");
+        issues++;
+      }
+    } else {
+      console.log(chalk.yellow("  ⚠") + " No config found — run `workermill` to set up");
+      issues++;
+    }
+
+    // Check project instructions
+    const cwd = process.cwd();
+    const instructionFiles = [".workermill/instructions.md", "CLAUDE.md", ".cursorrules", ".github/copilot-instructions.md"];
+    const found = instructionFiles.find(f => fs.existsSync(path.join(cwd, f)));
+    if (found) {
+      console.log(chalk.green("  ✓") + ` Project instructions: ${found}`);
+    } else {
+      console.log(chalk.dim("  ○") + " No project instructions — use /init to create one");
+    }
+
+    // Check learnings
+    const learningsPath = path.join(cwd, ".workermill", "learnings.json");
+    if (fs.existsSync(learningsPath)) {
+      try {
+        const learnings = JSON.parse(fs.readFileSync(learningsPath, "utf-8"));
+        console.log(chalk.green("  ✓") + ` ${learnings.length} project learnings saved`);
+      } catch {
+        console.log(chalk.dim("  ○") + " No learnings yet");
+      }
+    } else {
+      console.log(chalk.dim("  ○") + " No learnings yet");
+    }
+
+    // Check custom commands
+    const cmdDirs = [path.join(cwd, ".workermill", "commands"), path.join(os.homedir(), ".workermill", "commands")];
+    let cmdCount = 0;
+    for (const dir of cmdDirs) {
+      try {
+        if (fs.existsSync(dir)) {
+          cmdCount += fs.readdirSync(dir).filter(f => f.endsWith(".md")).length;
+        }
+      } catch { /* ignore */ }
+    }
+    if (cmdCount > 0) {
+      console.log(chalk.green("  ✓") + ` ${cmdCount} custom command${cmdCount > 1 ? "s" : ""}`);
+    } else {
+      console.log(chalk.dim("  ○") + " No custom commands");
+    }
+
+    console.log();
+    if (issues === 0) {
+      console.log(chalk.green("  All checks passed!"));
+    } else {
+      console.log(chalk.yellow(`  ${issues} issue${issues > 1 ? "s" : ""} found`));
+    }
+    console.log();
+  });
 
 program.parse();

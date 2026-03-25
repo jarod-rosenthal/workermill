@@ -121,6 +121,7 @@ Or from the command line: \`wm build "your task"\`
 | \`/status\` | Session info |
 | \`/git\` | Git branch and status |
 | \`/sessions\` | List/switch sessions |
+| \`/log\` | Show recent CLI log entries |
 | \`/hooks\` | Show configured pre/post tool hooks |
 | \`/editor\` | Open \\$EDITOR for longer input |
 | \`/quit\` | Exit |
@@ -727,6 +728,24 @@ export function Root(props: RootProps): React.ReactElement {
           fs.writeFileSync(instructionsPath, initParts.join("\n"), "utf-8");
 
           agent.addSystemMessage(`**Created** \`.workermill/instructions.md\`\n\nEdit it to add your coding standards and project-specific rules. All agents will read this file automatically.`);
+          break;
+        }
+
+        // ---- /log ----
+        case "log": {
+          const logPath = path.join(props.workingDir, ".workermill", "cli.log");
+          try {
+            if (!fs.existsSync(logPath)) {
+              agent.addSystemMessage("No log file found at `.workermill/cli.log`");
+              break;
+            }
+            const content = fs.readFileSync(logPath, "utf-8");
+            const lines = content.trim().split("\n");
+            const tail = lines.slice(-20).join("\n");
+            agent.addSystemMessage(`**Last 20 log entries:**\n\n\`\`\`\n${tail}\n\`\`\``);
+          } catch (err) {
+            agent.addSystemMessage(`Failed to read log: ${err instanceof Error ? err.message : String(err)}`);
+          }
           break;
         }
 

@@ -17,6 +17,7 @@ const BUILTIN_COMMANDS = [
   { name: "/skills", desc: "Custom commands" },
   { name: "/personas", desc: "List/create personas" },
   { name: "/mcp", desc: "MCP server status" },
+  { name: "/release-notes", desc: "Changelog" },
   { name: "/cost", desc: "Token costs" },
   { name: "/status", desc: "Session info" },
   { name: "/log", desc: "CLI log entries" },

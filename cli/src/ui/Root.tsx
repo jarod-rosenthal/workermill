@@ -127,6 +127,7 @@ Or from the command line: \`wm build "your task"\`
 | \`/skills\` | List custom commands |
 | \`/personas\` | List, show, or create personas |
 | \`/mcp\` | Show MCP server status |
+| \`/release-notes\` | Show changelog |
 | \`/hooks\` | Show configured pre/post tool hooks |
 | \`/editor\` | Open \\$EDITOR for longer input |
 | \`/quit\` | Exit |
@@ -814,6 +815,46 @@ export function Root(props: RootProps): React.ReactElement {
             agent.addSystemMessage(`**Last 20 log entries:**\n\n\`\`\`\n${tail}\n\`\`\``);
           } catch (err) {
             agent.addSystemMessage(`Failed to read log: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          break;
+        }
+
+        // ---- /release-notes ----
+        case "release-notes":
+        case "releasenotes":
+        case "changelog": {
+          try {
+            // Try to read CHANGELOG.md from the npm package
+            const changelogPaths = [
+              path.join(import.meta.dirname || __dirname, "../../CHANGELOG.md"),
+              path.join(import.meta.dirname || __dirname, "../CHANGELOG.md"),
+              path.join(process.cwd(), "node_modules/workermill/CHANGELOG.md"),
+            ];
+
+            let content: string | null = null;
+            for (const p of changelogPaths) {
+              try {
+                if (fs.existsSync(p)) {
+                  content = fs.readFileSync(p, "utf-8");
+                  break;
+                }
+              } catch { continue; }
+            }
+
+            if (content) {
+              // Show the most recent version section (first ~60 lines)
+              const lines = content.split("\n");
+              const truncated = lines.slice(0, 60).join("\n");
+              agent.addSystemMessage(truncated + (lines.length > 60 ? "\n\n*Use `!cat CHANGELOG.md` for full history.*" : ""));
+            } else {
+              agent.addSystemMessage(
+                "Changelog not found locally. View online:\nhttps://github.com/jarod-rosenthal/workermill/blob/main/cli/CHANGELOG.md"
+              );
+            }
+          } catch {
+            agent.addSystemMessage(
+              "Changelog not found. View online:\nhttps://github.com/jarod-rosenthal/workermill/blob/main/cli/CHANGELOG.md"
+            );
           }
           break;
         }

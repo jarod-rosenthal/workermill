@@ -214,7 +214,7 @@ async function checkToolPermission(
     const cmd = String(toolInput.command || "");
     const danger = isDangerous(cmd);
     if (danger) {
-      if (trustAll) return true;
+      // Always prompt for dangerous commands — even in trust mode
       output.error(`DANGEROUS: ${danger}`);
       output.error(`Command: ${cmd}`);
       const confirmed = await output.confirm("This is a dangerous operation. Are you sure?");
@@ -446,7 +446,6 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
   output.status("Planner reading repository...");
 
   // Use onStepFinish — same pattern as worker/ai-clients/ai-sdk-client.ts
-  let planText = "";
   const planStream = streamText({
     model: plannerModel,
     abortSignal,
@@ -468,11 +467,7 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
   // Drive the stream
   for await (const _chunk of planStream.textStream) { /* consumed */ }
 
-  // Also check stream.text in case the accumulated text missed something
-  const finalText = await planStream.text;
-  if (finalText && finalText.length > planText.length) {
-    planText = finalText;
-  }
+  const planText = await planStream.text;
 
   const planUsage = await planStream.totalUsage;
 
@@ -889,7 +884,6 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
     try {
       // Use onStepFinish to capture text between tool calls — same pattern as
       // worker/ai-clients/ai-sdk-client.ts (the battle-tested WorkerMill approach)
-      let allText = "";
       const stream = streamText({
         model,
         abortSignal,
@@ -918,7 +912,6 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
       for await (const _chunk of stream.textStream) { /* consumed */ }
 
       const text = await stream.text;
-      allText = text;
       const usage = await stream.totalUsage;
 
       output.statusDone();

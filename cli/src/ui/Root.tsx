@@ -106,6 +106,7 @@ Or from the command line: \`wm build "your task"\`
 | Command | Description |
 |---|---|
 | \`/build <task>\` | Multi-expert orchestration — the main feature |
+| \`/retry\` | Re-plan and re-run the last build task |
 | \`/plan\` | Toggle plan mode (read-only, explore before committing) |
 | \`/trust\` | Auto-approve all tool calls for this session |
 | \`/model\` | Show current provider and model |
@@ -156,11 +157,15 @@ export function Root(props: RootProps): React.ReactElement {
   );
   const orchestrator = useOrchestrator(addOrchestratorMessage, agent.setCost);
 
+  // Track the last build task for /retry
+  const lastBuildTask = useRef<string | null>(null);
+
   // Auto-start build if launched via `wm build "task"`
   const buildStarted = useRef(false);
   useEffect(() => {
     if (props.initialBuildTask && !buildStarted.current) {
       buildStarted.current = true;
+      lastBuildTask.current = props.initialBuildTask;
       agent.addUserMessage(`/build ${props.initialBuildTask}`);
       orchestrator.start(props.initialBuildTask, props.trustAll, props.sandboxed);
     }
@@ -296,8 +301,23 @@ export function Root(props: RootProps): React.ReactElement {
           } else if (orchestrator.running) {
             agent.addSystemMessage("Orchestration is already running. Wait for it to complete.");
           } else {
+            lastBuildTask.current = arg;
             agent.addUserMessage(`/build ${arg}`);
             orchestrator.start(arg, props.trustAll, props.sandboxed);
+          }
+          break;
+        }
+
+        // ---- /retry ----
+        case "retry": {
+          if (orchestrator.running) {
+            agent.addSystemMessage("Orchestration is already running. Wait for it to complete.");
+          } else if (!lastBuildTask.current) {
+            agent.addSystemMessage("No previous build to retry. Use `/build <task>` first.");
+          } else {
+            const task = lastBuildTask.current;
+            agent.addUserMessage(`/retry ${task.slice(0, 60)}...`);
+            orchestrator.start(task, props.trustAll, props.sandboxed);
           }
           break;
         }

@@ -35,6 +35,7 @@ function printWelcome(roleModels: { worker: string; planner: string; reviewer: s
   const white = chalk.white;
   console.log();
   console.log(`  ${brand("◆")} ${white.bold("WorkerMill")} ${dim("v" + VERSION)}`);
+  console.log(dim("  by Jarod Rosenthal"));
   console.log();
   if (roleModels.planner === roleModels.worker && roleModels.reviewer === roleModels.worker) {
     // All roles use the same model — show a single line
@@ -51,7 +52,7 @@ function printWelcome(roleModels: { worker: string; planner: string; reviewer: s
   console.log();
 }
 
-const VERSION = "0.4.19";
+const VERSION = "0.4.20";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {

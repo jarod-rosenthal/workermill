@@ -180,15 +180,15 @@ const READ_TOOLS = new Set(["read_file", "glob", "grep", "ls", "sub_agent"]);
 
 /** Dangerous command patterns — kept in sync with permissions.ts */
 const DANGEROUS_PATTERNS = [
-  { pattern: /rm\s+(-[a-z]*f|-[a-z]*r|--force|--recursive)/i, label: "recursive/forced delete" },
+  { pattern: /rm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\s+\/(?!\w)/i, label: "rm -rf with root path" },
+  { pattern: /rm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\s+~\//i, label: "rm -rf in home directory" },
   { pattern: /git\s+reset\s+--hard/i, label: "hard reset" },
   { pattern: /git\s+push\s+.*--force/i, label: "force push" },
   { pattern: /git\s+clean\s+-[a-z]*f/i, label: "git clean" },
   { pattern: /drop\s+table/i, label: "drop table" },
-  { pattern: /truncate\s+/i, label: "truncate" },
-  { pattern: /DELETE\s+FROM\s+\w+\s*;/i, label: "DELETE without WHERE" },
-  { pattern: /chmod\s+777/i, label: "chmod 777" },
+  { pattern: /chmod\s+777\s+\//i, label: "chmod 777 on root path" },
   { pattern: />(\/dev\/sda|\/dev\/disk)/i, label: "write to disk device" },
+  { pattern: /\bsudo\b/i, label: "sudo" },
 ];
 
 function isDangerous(command: string): string | null {

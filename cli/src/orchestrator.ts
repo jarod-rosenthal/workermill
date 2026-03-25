@@ -1016,10 +1016,10 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
 
     let previousReviewFeedback = "";
     logger.info("Starting review loop", { maxRevisions, approvalThreshold, provider: revProvider, model: revModel });
-    for (let reviewRound = 0; reviewRound <= maxRevisions; reviewRound++) {
-      const isRevision = reviewRound > 0;
+    for (let reviewRound = 1; reviewRound <= maxRevisions + 1; reviewRound++) {
+      const isRevision = reviewRound > 1;
       logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
-      output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound}/${maxRevisions}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
+      output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound - 1}/${maxRevisions}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
       output.log("tech_lead", `Starting agent execution (model: ${revModel})`);
 
       output.status(isRevision ? "Reviewer -- Re-checking after revisions" : "Reviewer -- Checking code quality");
@@ -1027,7 +1027,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
       try {
         // Build review prompt with full context — matches WorkerMill's inline-reviewer.ts buildReviewPrompt()
         const previousFeedbackSection = isRevision && previousReviewFeedback
-          ? `## Previous Review Feedback (Round ${reviewRound + 1})
+          ? `## Previous Review Feedback (Round ${reviewRound})
 This is a revision attempt. The previous code was reviewed and these issues were identified:
 
 ${previousReviewFeedback}
@@ -1177,13 +1177,14 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         previousReviewFeedback = reviewText;
       
         // Track reviewer cost
-        costTracker.addUsage(`Reviewer (round ${reviewRound + 1})`, revProvider, revModel,
+        costTracker.addUsage(`Reviewer (round ${reviewRound})`, revProvider, revModel,
           reviewUsage?.inputTokens || 0, reviewUsage?.outputTokens || 0);
         output.updateCost?.(costTracker.getTotalCost());
 
         // If approved or out of revision attempts, done
         if (approved) break;
-        if (reviewRound >= maxRevisions) {
+        const revisionsLeft = maxRevisions - (reviewRound - 1);
+        if (revisionsLeft <= 0) {
           output.coordinatorLog(`Max revisions (${maxRevisions}) reached, proceeding to commit.`);
           break;
         }
@@ -1192,12 +1193,12 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         let shouldRevise = autoRevise;
         if (!autoRevise) {
           try {
-            shouldRevise = await output.confirm(`Revise and re-review? (${maxRevisions - reviewRound} left)`);
+            shouldRevise = await output.confirm(`Revise and re-review? (${revisionsLeft} left)`);
           } catch {
             shouldRevise = false; // cancelled
           }
         } else {
-          output.coordinatorLog(`Auto-revising (${maxRevisions - reviewRound} left)...`);
+          output.coordinatorLog(`Auto-revising (${revisionsLeft} left)...`);
         }
 
         if (!shouldRevise) break;

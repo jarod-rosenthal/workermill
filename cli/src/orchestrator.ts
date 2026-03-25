@@ -1298,18 +1298,13 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
     const hasChanges = diff || untracked;
 
     if (hasChanges) {
-      output.log("system", "--- Changes ---");
-      if (diff) {
-        output.log("system", diff);
-      }
-      if (untracked) {
-        const untrackedFiles = untracked.split("\n");
-        output.log("system", "New files:");
-        for (const f of untrackedFiles) {
-          output.log("system", `  + ${f}`);
-        }
-      }
-      output.log("system", "");
+      // Count changes for a compact summary
+      const diffLines = diff ? diff.split("\n").length : 0;
+      const untrackedFiles = untracked ? untracked.split("\n").filter(Boolean) : [];
+      const parts: string[] = [];
+      if (diffLines > 0) parts.push(`${diffLines} modified`);
+      if (untrackedFiles.length > 0) parts.push(`${untrackedFiles.length} new`);
+      output.coordinatorLog(`${parts.join(", ")} files`);
 
       if (!trustAll) {
         const commitConfirmed = await output.confirm("Commit these changes?");

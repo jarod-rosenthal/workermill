@@ -1107,19 +1107,41 @@ ${previousReviewFeedback}
           return `| ${idx + 1} | ${s.persona} | ${s.title} | ${files} |`;
         }).join("\n");
 
-        // Gather actual code for the reviewer — don't make the model guess
+        // Gather actual code for the reviewer — don't depend on ::file_created:: markers
         let codeDiff = "";
         try {
-          // Try git diff first (for tracked repos)
+          // Try git diff first (for tracked repos with commits)
           const diff = execSync("git diff HEAD 2>/dev/null || git diff 2>/dev/null", {
             cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 10_000,
           }).trim();
           if (diff) codeDiff = diff;
         } catch { /* not a git repo or no changes staged */ }
 
-        // If no diff (new repo, untracked files), read key files directly
+        // If no diff, find all files via git status or filesystem scan
         if (!codeDiff) {
-          const allFiles = [...new Set([...context.filesCreated, ...context.filesModified])].filter(Boolean);
+          // Get files from git (untracked + modified) — more reliable than context markers
+          let allFiles: string[] = [...new Set([...context.filesCreated, ...context.filesModified])].filter(Boolean);
+
+          if (allFiles.length === 0) {
+            try {
+              const gitFiles = execSync(
+                "git ls-files --others --modified --exclude-standard 2>/dev/null",
+                { cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 5_000 },
+              ).trim();
+              if (gitFiles) allFiles = gitFiles.split("\n").filter(Boolean);
+            } catch { /* not a git repo */ }
+          }
+
+          // Still nothing? Scan for common source files
+          if (allFiles.length === 0) {
+            try {
+              const found = execSync(
+                "find . -maxdepth 4 -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.go' -o -name '*.json' -o -name '*.yml' -o -name '*.yaml' -o -name 'Dockerfile' \\) -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.workermill/*' -not -path '*/dist/*' | head -50",
+                { cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 5_000 },
+              ).trim();
+              if (found) allFiles = found.split("\n").filter(Boolean);
+            } catch { /* ignore */ }
+          }
           const fileContents: string[] = [];
           let totalSize = 0;
           const MAX_REVIEW_SIZE = 100_000; // ~100K chars to stay within context

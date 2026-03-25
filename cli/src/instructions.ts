@@ -6,6 +6,7 @@ import path from "path";
  * Supports WorkerMill native, Claude Code, Cursor, and GitHub Copilot formats.
  */
 const INSTRUCTION_FILES = [
+  "WORKERMILL.md",
   ".workermill/instructions.md",
   "CLAUDE.md",
   ".cursorrules",

@@ -115,6 +115,10 @@ export interface UseAgentReturn {
   addUserMessage: (content: string) => void;
   /** Update the displayed cost (used by orchestrator for live updates). */
   setCost: (cost: number) => void;
+  /** Add a tool to the session allow set. */
+  allowTool: (name: string) => void;
+  /** Add a tool to the denied set (blocked for this session). */
+  denyTool: (name: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +228,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const sessionRef = useRef<Session>(null as unknown as Session);
   const costTrackerRef = useRef(new CostTracker());
   const sessionAllowRef = useRef(new Set<string>());
+  const deniedToolsRef = useRef(new Set<string>());
   const trustAllRef = useRef(options.trustAll);
   const planModeRef = useRef(options.planMode);
   const workingDirRef = useRef(process.cwd());
@@ -348,6 +353,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       toolName: string,
       toolInput: Record<string, unknown>,
     ): Promise<{ allowed: boolean; mode?: "always" | "trust" }> => {
+      // Denied tools are always blocked.
+      if (deniedToolsRef.current.has(toolName)) {
+        return Promise.resolve({ allowed: false });
+      }
+
       const dangerLabel = detectDanger(toolName, toolInput);
 
       // Dangerous commands always require explicit confirmation.
@@ -771,6 +781,18 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     planModeRef.current = v;
   }, []);
 
+  // ------- Per-tool permission helpers -------- //
+
+  const allowTool = useCallback((name: string) => {
+    sessionAllowRef.current.add(name);
+    deniedToolsRef.current.delete(name);
+  }, []);
+
+  const denyTool = useCallback((name: string) => {
+    deniedToolsRef.current.add(name);
+    sessionAllowRef.current.delete(name);
+  }, []);
+
   // ------- Local message helpers (for slash commands) -------- //
 
   const addSystemMessage = useCallback((content: string) => {
@@ -813,5 +835,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     addSystemMessage,
     addUserMessage,
     setCost,
+    allowTool,
+    denyTool,
   };
 }

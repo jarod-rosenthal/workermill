@@ -7,7 +7,7 @@ import os from "os";
 import { useAgent } from "./useAgent.js";
 import { useOrchestrator } from "./useOrchestrator.js";
 import { App } from "./App.js";
-import { listSessions } from "../session.js";
+import { listSessions, saveSession } from "../session.js";
 import { loadConfig, saveConfig } from "../config.js";
 import { loadCustomCommands } from "../custom-commands.js";
 import { stopAllMCPServers } from "../mcp-client.js";
@@ -115,7 +115,8 @@ Or from the command line: \`wm build "your task"\`
 | \`/diff\` | Preview uncommitted changes |
 | \`/plan\` | Toggle plan mode (read-only, explore before committing) |
 | \`/trust\` | Auto-approve all tool calls for this session |
-| \`/init\` | Generate \`.workermill/instructions.md\` for this project |
+| \`/init\` | Generate \`WORKERMILL.md\` for this project |
+| \`/permissions\` | Manage tool permissions (trust/ask/allow/deny) |
 | \`/model\` | Show or switch model (\`/model provider/model\`) |
 | \`/cost\` | Session cost and token usage |
 | \`/status\` | Session info |
@@ -434,11 +435,12 @@ export function Root(props: RootProps): React.ReactElement {
 
         // ---- /clear ----
         case "clear": {
-          agent.addSystemMessage(
-            "Screen clearing is not fully supported in the Ink terminal framework. " +
-            "Previous messages rendered via `Static` cannot be removed. " +
-            "The conversation continues below."
-          );
+          // Reset the session — start fresh while keeping the UI
+          const session = agent.session;
+          session.messages = [];
+          session.totalTokens = 0;
+          saveSession(session);
+          agent.addSystemMessage("Conversation cleared. Starting fresh.");
           break;
         }
 
@@ -624,6 +626,62 @@ export function Root(props: RootProps): React.ReactElement {
           break;
         }
 
+        // ---- /permissions ----
+        case "permissions": {
+          if (!arg) {
+            // Show current permissions
+            const mode = props.trustAll ? "**trust all** — all tools auto-approved" : "**ask** — prompts for each tool";
+            agent.addSystemMessage(
+              `**Permission mode:** ${mode}\n\n` +
+              "Commands:\n" +
+              "- `/permissions trust` — auto-approve all tools\n" +
+              "- `/permissions ask` — prompt for each tool\n" +
+              "- `/permissions allow <tool>` — always allow a specific tool\n" +
+              "- `/permissions deny <tool>` — always deny a specific tool\n" +
+              "- `/permissions reset` — reset to default (ask mode)\n\n" +
+              "**Tools:** bash, read_file, write_file, edit_file, glob, grep, ls, fetch, git, patch, web_search, sub_agent, todo"
+            );
+          } else {
+            const parts = arg.split(/\s+/);
+            const action = parts[0];
+            const toolName = parts[1];
+
+            switch (action) {
+              case "trust":
+                agent.setTrustAll(true);
+                agent.addSystemMessage("**Trust mode ON.** All tools auto-approved.");
+                break;
+              case "ask":
+                agent.setTrustAll(false);
+                agent.addSystemMessage("**Ask mode ON.** Tools require approval.");
+                break;
+              case "allow":
+                if (!toolName) {
+                  agent.addSystemMessage("Usage: `/permissions allow <tool>`");
+                } else {
+                  agent.allowTool(toolName);
+                  agent.addSystemMessage(`**Allowed** \`${toolName}\` for this session.`);
+                }
+                break;
+              case "deny":
+                if (!toolName) {
+                  agent.addSystemMessage("Usage: `/permissions deny <tool>`");
+                } else {
+                  agent.denyTool(toolName);
+                  agent.addSystemMessage(`**Denied** \`${toolName}\` for this session. The tool will be blocked.`);
+                }
+                break;
+              case "reset":
+                agent.setTrustAll(false);
+                agent.addSystemMessage("**Permissions reset** to ask mode.");
+                break;
+              default:
+                agent.addSystemMessage("Unknown action. Use: trust, ask, allow, deny, reset");
+            }
+          }
+          break;
+        }
+
         // ---- /quit, /exit ----
         case "quit":
         case "exit":
@@ -638,18 +696,23 @@ export function Root(props: RootProps): React.ReactElement {
 
         // ---- /init ----
         case "init": {
-          const instructionsPath = path.join(props.workingDir, ".workermill", "instructions.md");
+          const instructionsPath = path.join(props.workingDir, "WORKERMILL.md");
           if (fs.existsSync(instructionsPath) && !arg?.includes("--force")) {
-            agent.addSystemMessage(`\`.workermill/instructions.md\` already exists. Use \`/init --force\` to overwrite.`);
+            agent.addSystemMessage(`\`WORKERMILL.md\` already exists. Use \`/init --force\` to overwrite.`);
             break;
           }
 
-          // Gather project info
+          // Gather project info and track what was detected
           const initParts: string[] = ["# Project Instructions\n"];
+          const detectedItems: string[] = [];
 
           // Package.json
           try {
             const pkg = JSON.parse(fs.readFileSync(path.join(props.workingDir, "package.json"), "utf-8"));
+            const deps = Object.keys((pkg.dependencies || {}) as Record<string, string>);
+            const notable = deps.filter(d => ["express", "react", "next", "vue", "angular", "fastify", "nestjs", "pg", "mysql", "mongodb", "prisma", "typeorm", "sequelize", "django", "flask", "postgresql", "redis"].some(k => d.toLowerCase().includes(k)));
+            detectedItems.push(`- package.json: ${notable.length > 0 ? notable.join(", ") : deps.slice(0, 5).join(", ")}`);
+
             initParts.push(`## Project: ${pkg.name || "unknown"}`);
             if (pkg.description) initParts.push(pkg.description);
             initParts.push("");
@@ -671,6 +734,7 @@ export function Root(props: RootProps): React.ReactElement {
           try {
             if (fs.existsSync(path.join(props.workingDir, "requirements.txt"))) {
               const reqs = fs.readFileSync(path.join(props.workingDir, "requirements.txt"), "utf-8").trim();
+              detectedItems.push("- requirements.txt found");
               initParts.push("## Python Dependencies");
               initParts.push("```");
               initParts.push(reqs.split("\n").slice(0, 20).join("\n"));
@@ -681,6 +745,7 @@ export function Root(props: RootProps): React.ReactElement {
           // pyproject.toml
           try {
             if (fs.existsSync(path.join(props.workingDir, "pyproject.toml"))) {
+              detectedItems.push("- pyproject.toml found");
               initParts.push("## Python Project");
               initParts.push("Uses pyproject.toml for configuration.\n");
             }
@@ -688,7 +753,13 @@ export function Root(props: RootProps): React.ReactElement {
 
           // Docker
           try {
-            if (fs.existsSync(path.join(props.workingDir, "Dockerfile")) || fs.existsSync(path.join(props.workingDir, "docker-compose.yml"))) {
+            const hasDockerfile = fs.existsSync(path.join(props.workingDir, "Dockerfile"));
+            const hasCompose = fs.existsSync(path.join(props.workingDir, "docker-compose.yml"));
+            if (hasDockerfile || hasCompose) {
+              const dockerParts: string[] = [];
+              if (hasDockerfile) dockerParts.push("Dockerfile");
+              if (hasCompose) dockerParts.push("docker-compose.yml");
+              detectedItems.push(`- ${dockerParts.join(", ")} found`);
               initParts.push("## Docker");
               initParts.push("This project uses Docker for containerization.\n");
             }
@@ -699,7 +770,10 @@ export function Root(props: RootProps): React.ReactElement {
             const remoteUrl = execSync("git remote get-url origin 2>/dev/null", {
               cwd: props.workingDir, encoding: "utf-8", timeout: 3000,
             }).trim();
-            if (remoteUrl) initParts.push(`## Repository\n${remoteUrl}\n`);
+            if (remoteUrl) {
+              detectedItems.push(`- Git remote: ${remoteUrl}`);
+              initParts.push(`## Repository\n${remoteUrl}\n`);
+            }
           } catch { /* ignore */ }
 
           // Directory structure
@@ -723,11 +797,15 @@ export function Root(props: RootProps): React.ReactElement {
           initParts.push("<!-- - Use conventional commits -->\n");
 
           // Write the file
-          const initDir = path.dirname(instructionsPath);
-          if (!fs.existsSync(initDir)) fs.mkdirSync(initDir, { recursive: true });
           fs.writeFileSync(instructionsPath, initParts.join("\n"), "utf-8");
 
-          agent.addSystemMessage(`**Created** \`.workermill/instructions.md\`\n\nEdit it to add your coding standards and project-specific rules. All agents will read this file automatically.`);
+          agent.addSystemMessage(
+            `**Created** \`WORKERMILL.md\`\n\n` +
+            `Detected:\n` +
+            (detectedItems.length > 0 ? detectedItems.join("\n") : "- (no specific frameworks detected)") + "\n\n" +
+            "Edit this file to add coding standards, architecture notes, and project-specific rules. " +
+            "All WorkerMill agents read it automatically."
+          );
           break;
         }
 

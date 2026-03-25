@@ -963,7 +963,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
   }
 
   // Review config
-  const maxRevisions = config.review?.maxRevisions ?? 2;
+  const maxRevisions = config.review?.maxRevisions ?? 3;
   const autoRevise = config.review?.autoRevise ?? false;
   const approvalThreshold = config.review?.approvalThreshold ?? 80;
 

@@ -556,15 +556,36 @@ function parseStoriesFromText(text: string, output: OrchestrationOutput): Story[
 }
 
 /** Try to parse text as a stories array or object containing stories */
+function normalizeStory(raw: Record<string, unknown>, index: number): Story {
+  return {
+    id: String(raw.id || raw.index || raw.step || raw.number || index + 1),
+    title: String(raw.title || raw.name || raw.summary || ""),
+    persona: String(raw.persona || raw.role || raw.agent || "backend_developer"),
+    description: String(raw.description || raw.details || raw.task || raw.title || ""),
+    dependsOn: Array.isArray(raw.dependsOn) ? raw.dependsOn.map(String)
+      : Array.isArray(raw.depends_on) ? raw.depends_on.map(String)
+      : Array.isArray(raw.dependencies) ? raw.dependencies.map(String)
+      : undefined,
+  };
+}
+
 function tryParseStories(text: string): Story[] | null {
   try {
     const parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) {
-      // Validate at least one item has persona field
-      if (parsed.length > 0 && parsed[0].persona) return parsed;
+    let rawStories: Record<string, unknown>[] | null = null;
+
+    if (Array.isArray(parsed) && parsed.length > 0 && (parsed[0].persona || parsed[0].role || parsed[0].agent)) {
+      rawStories = parsed;
+    } else if (parsed && Array.isArray(parsed.stories) && parsed.stories.length > 0) {
+      rawStories = parsed.stories;
+    } else if (parsed && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+      rawStories = parsed.steps;
+    } else if (parsed && Array.isArray(parsed.plan) && parsed.plan.length > 0) {
+      rawStories = parsed.plan;
     }
-    if (parsed && Array.isArray(parsed.stories)) {
-      if (parsed.stories.length > 0) return parsed.stories;
+
+    if (rawStories) {
+      return rawStories.map((s, i) => normalizeStory(s, i));
     }
   } catch { /* not valid JSON */ }
   return null;

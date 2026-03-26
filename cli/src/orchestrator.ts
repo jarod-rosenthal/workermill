@@ -441,6 +441,9 @@ ${workingDir}
    - Descriptions include enough detail for the persona to execute without ambiguity
 
 ## Output format
+
+Workers receive the FULL spec as their specification, so story descriptions define SCOPE (which files and area to work on), not specs (how to build it — the spec has those).
+
 Return ONLY a JSON code block with this structure:
 \`\`\`json
 {
@@ -449,7 +452,7 @@ Return ONLY a JSON code block with this structure:
       "id": "short-kebab-case-id",
       "title": "Brief title",
       "persona": "persona_name",
-      "description": "Detailed description: what to create/modify, which files, what approach, what to watch out for",
+      "description": "File scope: which files/directories this story owns and what area of the system it covers (2-3 lines). Do NOT rewrite the spec — workers read the full spec themselves.",
       "dependsOn": ["id-of-dependency"]
     }
   ]
@@ -917,15 +920,17 @@ export async function runOrchestration(
     const projectInstructions = formatProjectInstructions(workingDir);
     const systemPrompt = `${persona.systemPrompt}${projectInstructions}${contextBlock}
 
-## Original Specification
+## Ticket Requirements — THIS IS YOUR SPEC
 
 ${userTask}
 
----
+## Your File Scope
+
+${story.description}
+
+**The ticket requirements above are your ONLY spec. This scope identifies which files and area of the codebase you are responsible for. Do NOT invent requirements beyond what the ticket states.**
 
 Working directory: ${workingDir}
-
-Your task: ${story.description}
 
 ## Communication Style
 
@@ -1155,20 +1160,12 @@ ${previousReviewFeedback}
             }
           }
           const fileContents: string[] = [];
-          let totalSize = 0;
-          const MAX_REVIEW_SIZE = 100_000; // ~100K chars to stay within context
 
           for (const f of allFiles) {
-            if (totalSize > MAX_REVIEW_SIZE) {
-              fileContents.push(`\n--- ${f} ---\n(skipped — review size limit reached)`);
-              break;
-            }
             try {
               const fullPath = path.isAbsolute(f) ? f : path.join(workingDir, f);
               const content = fs.readFileSync(fullPath, "utf-8");
-              const trimmed = content;
-              fileContents.push(`\n--- ${f} ---\n${trimmed}`);
-              totalSize += trimmed.length;
+              fileContents.push(`\n--- ${f} ---\n${content}`);
             } catch {
               // File may have been deleted since listing — skip
             }
@@ -1205,14 +1202,53 @@ ${codeDiff || "(no code changes detected)"}
 
 ## Review Instructions
 
-Review the actual code above. You also have tools (read_file, glob, grep) to examine files in more detail if needed. Check:
-- Does the code correctly implement the original task requirements?
-- Are there bugs, logic errors, or security issues?
-- Does the code follow existing project conventions?
-- Is error handling appropriate?
-- Are there missing pieces from the task requirements?
+Review the actual code above. You also have tools (read_file, glob, grep) to examine files in more detail if needed.
 
-Provide a review with a quality score (0-100) using ::review_score:: marker and a verdict using ::review_verdict::approved or ::review_verdict::needs_revision.
+### APPROVE when:
+- Code correctly implements the requirements from the original spec
+- No obvious bugs or security issues
+- Code follows existing patterns in the codebase
+- Appropriate error handling is in place
+- Minor cosmetic issues (formatting, empty lines, comment style, variable naming) are NOT grounds for revision — mention them in feedback but still approve
+
+### REVISION_NEEDED when:
+- Code has functional bugs that affect correctness
+- Security vulnerabilities that must be fixed
+- Missing required functionality from the task spec
+- Broken imports, missing dependencies, or code that won't run
+
+### Do NOT request revision for:
+- Style preferences (extra/missing blank lines, comment formatting, quote style)
+- Minor naming differences that don't affect functionality
+- "Could be cleaner" refactoring suggestions
+- Missing tests for edge cases when core functionality is tested
+- Code that works correctly but isn't how you would have written it
+
+### REJECT when:
+- Fundamental approach is wrong and cannot be fixed with revisions
+- Security vulnerability that requires different architecture
+
+**Bias toward approval**: If the code works and implements the spec requirements, approve it. Every revision cycle costs significant time and tokens — only request revision for real functional or security issues. A score of 7+ should almost always be an approval.
+
+## Output Format
+
+\`\`\`
+REVIEW_DECISION: approved
+\`\`\`
+OR
+\`\`\`
+REVIEW_DECISION: revision_needed
+\`\`\`
+OR
+\`\`\`
+REVIEW_DECISION: rejected
+\`\`\`
+
+Then add:
+\`\`\`
+CODE_QUALITY_SCORE: 8
+FEEDBACK: Your detailed feedback
+\`\`\`
 
 ### For REVISION_NEEDED Decisions - Specify Affected Stories
 
@@ -1259,14 +1295,20 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
 
         output.statusDone();
 
-        // Extract review markers (with fallback parsing)
+        // Extract review decision — 3-tier system matching WorkerMill worker
+        const decisionMatch = reviewText.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
+        const decision = decisionMatch ? decisionMatch[1].toLowerCase() : null;
         const score = extractScore(reviewText);
-        const approved = score >= approvalThreshold;
-        logger.info(`Review round ${reviewRound} result`, { score, approved, threshold: approvalThreshold, reviewTextLength: reviewText.length });
+
+        // Decision logic: use REVIEW_DECISION if present, fall back to score threshold
+        const approved = decision
+          ? decision === "approved"
+          : score >= approvalThreshold;
+        logger.info(`Review round ${reviewRound} result`, { decision: decision || "score-fallback", score, approved, threshold: approvalThreshold, reviewTextLength: reviewText.length });
 
         // Display review result — WorkerMill format
         output.log("tech_lead", `::code_quality_score::${score}`);
-        output.log("tech_lead", `::review_decision::${approved ? "approved" : "needs_revision"}`);
+        output.log("tech_lead", `::review_decision::${approved ? "approved" : decision === "rejected" ? "rejected" : "needs_revision"}`);
         output.coordinatorLog(approved ? `Review approved (score: ${score}/100)` : `Review needs revision (score: ${score}/100)`);
         // Save feedback for next review round — so tech_lead can check if issues were addressed
         previousReviewFeedback = reviewText;

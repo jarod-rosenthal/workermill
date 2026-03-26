@@ -867,7 +867,11 @@ export async function runOrchestration(
     // Build tools filtered by persona's allowed tools
     const allTools = createToolDefinitions(workingDir, model, sandboxed);
     const personaTools: Record<string, AnyToolDef> = {};
-    let lastToolCall = "";  // Dedup consecutive identical tool calls
+    // Loop detection — matches worker/ai-clients/ai-sdk-client.ts
+    const LOOP_WINDOW = 6;
+    const LOOP_THRESHOLD = 4;
+    const recentToolSignatures: string[] = [];
+    const loopAbort = new AbortController();
     for (const toolName of persona.tools) {
       const toolDef = allTools[toolName as keyof typeof allTools] as AnyToolDef;
       if (toolDef) {
@@ -877,14 +881,23 @@ export async function runOrchestration(
             const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output);
             if (!allowed) return "Tool execution denied by user.";
 
-            const sig = `${toolName}:${JSON.stringify(input)}`;
-            const isDuplicate = sig === lastToolCall;
-            lastToolCall = sig;
-
-            if (!isDuplicate) {
-              output.statusDone();
-              output.toolCall(story.persona, toolName, input);
+            // Track for loop detection
+            const sig = `${toolName}:${JSON.stringify(input).substring(0, 200)}`;
+            recentToolSignatures.push(sig);
+            if (recentToolSignatures.length > LOOP_WINDOW) recentToolSignatures.shift();
+            if (recentToolSignatures.length >= LOOP_WINDOW) {
+              const counts: Record<string, number> = {};
+              for (const s of recentToolSignatures) counts[s] = (counts[s] || 0) + 1;
+              const maxCount = Math.max(...Object.values(counts));
+              if (maxCount >= LOOP_THRESHOLD) {
+                logger.error("Tool call loop detected", { persona: story.persona, maxCount, window: LOOP_WINDOW });
+                output.error(`Tool call loop detected (${maxCount}/${LOOP_WINDOW} identical calls) — aborting story`);
+                loopAbort.abort();
+                return "ABORTED: Tool call loop detected. Stop and report what you've accomplished so far.";
+              }
             }
+
+            output.toolCall(story.persona, toolName, input);
             runHooks("pre", toolName, config.hooks, workingDir);
             const result = await toolDef.execute(input);
             runHooks("post", toolName, config.hooks, workingDir);
@@ -950,11 +963,19 @@ When you modify a file, include ::file_modified::path markers.
 ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
 
     try {
-      // Use onStepFinish to capture text between tool calls — same pattern as
-      // worker/ai-clients/ai-sdk-client.ts (the battle-tested WorkerMill approach)
+      // Combine user abort with loop detection abort
+      const combinedAbort = new AbortController();
+      if (abortSignal) abortSignal.addEventListener("abort", () => combinedAbort.abort());
+      loopAbort.signal.addEventListener("abort", () => combinedAbort.abort());
+
+      // Text repetition detection — abort if the same text block repeats 3+ times
+      const recentTexts: string[] = [];
+      const TEXT_LOOP_WINDOW = 4;
+      const TEXT_LOOP_THRESHOLD = 3;
+
       const stream = streamText({
         model,
-        abortSignal,
+        abortSignal: combinedAbort.signal,
         system: systemPrompt,
         prompt: story.description,
         tools: personaTools as ToolSet,
@@ -964,6 +985,22 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
         ...buildOllamaOptions(provider as AIProvider, contextLength),
         onStepFinish({ text }) {
           if (text) {
+            // Text loop detection
+            const textSig = text.substring(0, 200);
+            recentTexts.push(textSig);
+            if (recentTexts.length > TEXT_LOOP_WINDOW) recentTexts.shift();
+            if (recentTexts.length >= TEXT_LOOP_WINDOW) {
+              const counts: Record<string, number> = {};
+              for (const t of recentTexts) counts[t] = (counts[t] || 0) + 1;
+              const maxCount = Math.max(...Object.values(counts));
+              if (maxCount >= TEXT_LOOP_THRESHOLD) {
+                logger.error("Text output loop detected", { persona: story.persona });
+                output.error("Text output loop detected — aborting story");
+                combinedAbort.abort();
+                return;
+              }
+            }
+
             const lines = text.split("\n").filter(l => l.trim());
             for (const line of lines) {
               if (line.includes("::decision::") || line.includes("::learning::") ||
@@ -971,7 +1008,6 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
               output.log(story.persona, line);
             }
           }
-          // Show thinking status between steps
           output.status(`${story.persona}: thinking...`);
         },
       });
@@ -1112,8 +1148,8 @@ ${previousReviewFeedback}
           : "";
 
         const storySummaryRows = sorted.map((s, idx) => {
-          const files = [...context.filesCreated, ...context.filesModified]
-            .slice(0, 3).join(", ") || "(none)";
+          const files = [...new Set([...context.filesCreated, ...context.filesModified])]
+            .join(", ") || "(none)";
           return `| ${idx + 1} | ${s.persona} | ${s.title} | ${files} |`;
         }).join("\n");
 
@@ -1150,7 +1186,7 @@ ${previousReviewFeedback}
           if (allFiles.length === 0) {
             try {
               const found = execSync(
-                "find . -maxdepth 4 -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.go' -o -name '*.json' -o -name '*.yml' -o -name '*.yaml' -o -name 'Dockerfile' \\) -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.workermill/*' -not -path '*/dist/*' | head -50",
+                "find . -maxdepth 4 -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.go' -o -name '*.json' -o -name '*.yml' -o -name '*.yaml' -o -name 'Dockerfile' \\) -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.workermill/*' -not -path '*/dist/*' | head -200",
                 { cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 5_000 },
               ).trim();
               if (found) allFiles = found.split("\n").filter(Boolean);

@@ -42,14 +42,14 @@ async function printWelcome(roleModels: { worker: string; planner: string; revie
     // All roles use the same model — show a single line
     console.log(dim(`  ${roleModels.worker}`));
   } else {
-    console.log(dim(`  worker:   ${roleModels.worker}`));
+    console.log(dim(`  workers:  ${roleModels.worker}`));
     console.log(dim(`  planner:  ${roleModels.planner}`));
     console.log(dim(`  reviewer: ${roleModels.reviewer}`));
   }
-  console.log(dim("  experts: ") + white("architect, backend, frontend, devops, qa, security") + dim(" + 6 more"));
+  console.log(dim("  12 experts available (") + brand("/build") + dim(" auto-assigns, ") + brand("/as") + dim(" to pick one)"));
   console.log(dim(`  cwd: ${workingDir}`));
   console.log();
-  console.log(dim("  ") + brand("/build") + dim(" auto-assigns experts  ") + brand("/as") + dim(" <persona> for one  ") + white("/help") + dim(" for all"));
+  console.log(dim("  ") + brand("/build") + dim(" orchestrates experts  ") + white("/help") + dim(" for all commands"));
   console.log();
 
   // Blocking update check — must print before Ink takes over stdout
@@ -60,7 +60,7 @@ async function printWelcome(roleModels: { worker: string; planner: string; revie
   }
 }
 
-const VERSION = "0.14.5";
+const VERSION = "0.14.6";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {
@@ -190,7 +190,6 @@ const defaultCmd = program
         roleModels,
         cliConfig: config,
       }),
-      { patchConsole: false },
     );
 
     await waitUntilExit();

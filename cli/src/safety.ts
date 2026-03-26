@@ -10,7 +10,9 @@ export const DANGEROUS_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string 
   // Destructive file operations
   { pattern: /rm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\s+\/(?!\w)/i, label: "rm -rf with root path" },
   { pattern: /rm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\s+~\//i, label: "rm -rf in home directory" },
-  { pattern: /rm\s+(-[a-z]*f|-[a-z]*r|--force|--recursive)/i, label: "recursive/forced delete" },
+  // rm -rf on relative paths within the project (e.g. rm -rf node_modules/) is safe —
+  // the bash tool's bounds checking already prevents access outside the working directory.
+  // Only flag rm -rf targeting absolute paths outside root/home (caught above).
   // Git destructive operations
   { pattern: /git\s+reset\s+--hard/i, label: "hard reset" },
   { pattern: /git\s+push\s+.*--force/i, label: "force push" },

@@ -190,8 +190,8 @@ export function App(props: AppProps): React.ReactElement {
         )}
       </Static>
 
-      {/* Dynamic area — fixed height keeps Ink on the efficient render path */}
-      <Box flexDirection="column" height={9}>
+      {/* Dynamic area */}
+      <Box flexDirection="column">
         {/* Latest tool call — always 1 row (empty placeholder when idle) */}
         <Box marginLeft={2} height={1}>
           {props.streamingToolCalls && props.streamingToolCalls.length > 0 ? (

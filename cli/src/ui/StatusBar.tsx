@@ -139,7 +139,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
       </Box>
 
       {/* Row 2: Tool usage stats + planner/reviewer roles */}
-      <Box>
+      <Box height={1}>
         {toolEntries.length > 0 ? (
           toolEntries.map(([name, count], i) => (
             <Text key={name}>
@@ -150,7 +150,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
             </Text>
           ))
         ) : (
-          <Text color={theme.subtle}>{"no tool calls yet"}</Text>
+          <Text color={theme.subtle}>{"no tool calls"}</Text>
         )}
         {rm && (rm.planner !== rm.worker || rm.reviewer !== rm.worker) ? (
           <>
@@ -158,8 +158,8 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
             {rm.planner !== rm.worker ? (
               <Text>
                 <Text color={theme.iceBlue} bold>{"plan"}</Text>
-                <Text color={theme.subtle}>{":"}</Text>
-                <Text color={theme.text}>{rm.planner}</Text>
+                <Text color={theme.subtle}>:</Text>
+                <Text color={theme.text}>{rm.planner.length > 25 ? rm.planner.slice(0, 22) + "..." : rm.planner}</Text>
               </Text>
             ) : null}
             {rm.planner !== rm.worker && rm.reviewer !== rm.worker ? (
@@ -168,8 +168,8 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
             {rm.reviewer !== rm.worker ? (
               <Text>
                 <Text color={theme.permission} bold>{"review"}</Text>
-                <Text color={theme.subtle}>{":"}</Text>
-                <Text color={theme.text}>{rm.reviewer}</Text>
+                <Text color={theme.subtle}>:</Text>
+                <Text color={theme.text}>{rm.reviewer.length > 25 ? rm.reviewer.slice(0, 22) + "..." : rm.reviewer}</Text>
               </Text>
             ) : null}
           </>

@@ -192,22 +192,22 @@ export function App(props: AppProps): React.ReactElement {
         </Box>
       ) : null}
 
-      {/* Activity indicator — only when running */}
-      {props.status !== "idle" || props.orchestratorStatus ? (
-        <Box marginLeft={2}>
-          {props.orchestratorStatus ? (
-            <Text color={theme.warning}><Spinner color={theme.warning} /> {props.orchestratorStatus}</Text>
-          ) : props.status === "thinking" ? (
-            <Text color={theme.subtle}><Spinner color={theme.subtle} /> Thinking...</Text>
-          ) : props.status === "streaming" ? (
-            <Text color={theme.brand}><Spinner color={theme.brand} /> Streaming response...</Text>
-          ) : props.status === "tool_running" ? (
-            <Text color={theme.warning}><Spinner color={theme.warning} /> {props.statusDetail || "Running tool..."}</Text>
-          ) : props.status === "permission" ? (
-            <Text color={theme.permission}>● Waiting for permission...</Text>
-          ) : null}
-        </Box>
-      ) : null}
+      {/* Activity indicator — always rendered to keep dynamic area height stable */}
+      <Box marginLeft={2} height={1}>
+        {props.orchestratorStatus ? (
+          <Text color={theme.warning}><Spinner color={theme.warning} /> {props.orchestratorStatus}</Text>
+        ) : props.status === "thinking" ? (
+          <Text color={theme.subtle}><Spinner color={theme.subtle} /> Thinking...</Text>
+        ) : props.status === "streaming" ? (
+          <Text color={theme.brand}><Spinner color={theme.brand} /> Streaming response...</Text>
+        ) : props.status === "tool_running" ? (
+          <Text color={theme.warning}><Spinner color={theme.warning} /> {props.statusDetail || "Running tool..."}</Text>
+        ) : props.status === "permission" ? (
+          <Text color={theme.permission}>● Waiting for permission...</Text>
+        ) : (
+          <Text>{" "}</Text>
+        )}
+      </Box>
 
       {/* Permission/confirm prompts — replace input when active */}
       {props.permissionRequest ? (

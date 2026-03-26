@@ -75,9 +75,12 @@ export function createModel(
         const customOpenAI = createOpenAI({ baseURL: host });
         return customOpenAI.chat(modelName);
       }
-      // Use Chat Completions API, not Responses API. The Responses API tracks
-      // conversation state server-side and returns 404 "Item not found" errors
-      // when referencing tool call results across multi-step interactions.
+      // Codex models (gpt-5-codex, gpt-5.1-codex, etc.) are Responses API only —
+      // they don't support /v1/chat/completions. Route them to .responses().
+      // All other models use .chat() to avoid Responses API state issues.
+      if (modelName.includes("codex")) {
+        return openai.responses(modelName);
+      }
       return openai.chat(modelName);
     }
     case "google":

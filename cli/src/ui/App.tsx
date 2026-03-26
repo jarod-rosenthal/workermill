@@ -219,7 +219,14 @@ export function App(props: AppProps): React.ReactElement {
         <OrchestratorConfirm request={props.orchestratorConfirm} />
       ) : (
         <>
-          {/* Line 2: Status bar */}
+          {/* User input — above status bar */}
+          <Input
+            onSubmit={props.onSubmit}
+            isActive={props.status === "idle" && !props.orchestratorStatus}
+            history={props.inputHistory}
+          />
+
+          {/* Status bar — pinned to bottom */}
           <StatusBar
             model={props.model}
             provider={props.provider}
@@ -234,13 +241,6 @@ export function App(props: AppProps): React.ReactElement {
             mcpCount={props.mcpCount}
             sessionStart={props.sessionStart}
             hasInstructions={props.hasInstructions}
-          />
-
-          {/* Line 3: User input */}
-          <Input
-            onSubmit={props.onSubmit}
-            isActive={props.status === "idle" && !props.orchestratorStatus}
-            history={props.inputHistory}
           />
         </>
       )}

@@ -527,7 +527,7 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
     prompt: plannerPrompt,
     tools: readOnlyTools as ToolSet,
     stopWhen: stepCountIs(100),
-    timeout: { totalMs: 3 * 60 * 1000, chunkMs: 120_000 },
+    timeout: { chunkMs: 120_000 },
     ...buildOllamaOptions(pProvider as AIProvider, pCtx),
     onStepFinish() {
       // Text already streamed line-by-line below — just update status between steps
@@ -873,7 +873,7 @@ export async function runOrchestration(
         prompt: `Review this implementation plan. Score it 0-100 using ::review_score::N marker.\n\nStories:\n${plannerStories.map(s => `- ${s.id}: ${s.title} (${s.persona}) — ${s.description}`).join("\n")}`,
         tools: criticReadOnly as ToolSet,
         stopWhen: stepCountIs(100),
-        timeout: { totalMs: 3 * 60 * 1000, chunkMs: 120_000 },
+        timeout: { chunkMs: 120_000 },
         ...buildOllamaOptions(cProvider as AIProvider, cCtx),
       });
       for await (const _chunk of criticStream.textStream) { /* drive */ }
@@ -1153,7 +1153,7 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
         prompt: story.description,
         tools: personaTools as ToolSet,
         stopWhen: stepCountIs(100),
-        timeout: { totalMs: 10 * 60 * 1000, chunkMs: 120_000 },
+        timeout: { chunkMs: 120_000 },
         ...buildReasoningOptions(provider, modelName),
         ...buildOllamaOptions(provider as AIProvider, contextLength),
         onStepFinish({ text }) {
@@ -1348,7 +1348,7 @@ VERIFICATION_SUMMARY: [overall summary of findings]`;
             prompt: `## Task Specification\n\n${userTask}\n\n## Story Scope\n\nStory ${i + 1}: "${story.title}" — ${story.description}\n\n## Instructions\n\nVerify that the implementation in ${workingDir} satisfies the requirements above. Read the relevant files and check each requirement.\n\nWorking directory: ${workingDir}`,
             tools: verifierTools as ToolSet,
             stopWhen: stepCountIs(30),
-            timeout: { totalMs: 3 * 60 * 1000, chunkMs: 120_000 },
+            timeout: { chunkMs: 120_000 },
             ...buildOllamaOptions(vProvider as AIProvider, vCtx),
             onStepFinish({ text }) {
               if (text) {
@@ -1606,7 +1606,7 @@ INTEGRATION_FIX_SUMMARY: <description of what you fixed or why it's unfixable>`;
           prompt: `## Integration Failures\n\nThe following quality gate commands failed after all stories were applied:\n\n${integrationIssues.join("\n\n---\n\n")}\n\n## Stories That Were Executed\n\n${completedStories.map((s, idx) => `${idx + 1}. ${s.persona}: ${s.title} — ${s.description}`).join("\n")}\n\nWorking directory: ${workingDir}\n\nFix the integration issues. Run the failing commands after each fix to verify.`,
           tools: ifTools as ToolSet,
           stopWhen: stepCountIs(50),
-          timeout: { totalMs: 5 * 60 * 1000, chunkMs: 120_000 },
+          timeout: { chunkMs: 120_000 },
           ...buildOllamaOptions(ifProvider as AIProvider, ifCtx),
           onStepFinish({ text }) {
             if (text) {
@@ -1888,7 +1888,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           prompt: reviewPrompt,
           tools: reviewerTools,
           stopWhen: stepCountIs(100),
-          timeout: { totalMs: 5 * 60 * 1000, chunkMs: 120_000 },
+          timeout: { chunkMs: 120_000 },
           ...buildOllamaOptions(revProvider as AIProvider, revCtx),
           onStepFinish({ text }) {
             if (text) {
@@ -2037,7 +2037,7 @@ REVIEW_FIX_SUMMARY: <why it cannot be surgically fixed>`;
               prompt: `## Reviewer Feedback — Fix These Issues\n\n${fixFeedback}\n\nWorking directory: ${workingDir}`,
               tools: fixTools as ToolSet,
               stopWhen: stepCountIs(50),
-              timeout: { totalMs: 5 * 60 * 1000, chunkMs: 120_000 },
+              timeout: { chunkMs: 120_000 },
               ...buildOllamaOptions(revProvider as AIProvider, revCtx),
               onStepFinish({ text }) {
                 if (text) {
@@ -2260,7 +2260,7 @@ Story ${i + 1}: "${story.title}" — ${story.description}
 6. Do NOT undo changes from previous revision rounds unless they were explicitly flagged`,
               tools: storyTools as ToolSet,
               stopWhen: stepCountIs(100),
-              timeout: { totalMs: 5 * 60 * 1000, chunkMs: 120_000 },
+              timeout: { chunkMs: 120_000 },
               ...buildReasoningOptions(sProvider, sModel),
               ...buildOllamaOptions(sProvider as AIProvider, sCtx),
               onStepFinish({ text }) {

@@ -55,21 +55,11 @@ async function printWelcome(roleModels: { worker: string; planner: string; revie
   const latest = await checkForUpdate(VERSION);
   if (latest) {
     console.log(chalk.yellow(`\n  Update available: ${VERSION} → ${latest}`));
-    console.log(chalk.yellow(`  Updating...`));
-    try {
-      const { execSync } = await import("child_process");
-      execSync("npm install -g workermill@latest 2>/dev/null || true", {
-        stdio: "pipe",
-        timeout: 30_000,
-      });
-      console.log(chalk.green(`  Updated to ${latest}. Restart to use the new version.\n`));
-    } catch {
-      console.log(chalk.yellow(`  Auto-update failed. Run: npx workermill@latest\n`));
-    }
+    console.log(chalk.yellow(`  Run: npx workermill@${latest}\n`));
   }
 }
 
-const VERSION = "0.13.2";
+const VERSION = "0.13.3";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {

@@ -1138,13 +1138,17 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
       if (abortSignal) abortSignal.addEventListener("abort", () => combinedAbort.abort());
       loopAbort.signal.addEventListener("abort", () => combinedAbort.abort());
 
-      // Text repetition detection — suppress display after 5 repeats, abort after 50
+      // Text repetition detection
       const recentTexts: string[] = [];
       const TEXT_LOOP_WINDOW = 8;
       const TEXT_SUPPRESS_THRESHOLD = 5;
       const TEXT_ABORT_THRESHOLD = 10;
       let textRepeatCount = 0;
       let textSuppressed = false;
+
+      // Summary rambling detection — model finishes work and keeps talking
+      let hadToolCalls = false;
+      let consecutiveTextOnlySteps = 0;
 
       const stream = streamText({
         model,
@@ -1156,7 +1160,21 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
         timeout: { chunkMs: 120_000 },
         ...buildReasoningOptions(provider, modelName),
         ...buildOllamaOptions(provider as AIProvider, contextLength),
-        onStepFinish({ text }) {
+        onStepFinish({ text, toolCalls }) {
+          // Track tool usage to detect summary rambling
+          if (toolCalls && toolCalls.length > 0) {
+            hadToolCalls = true;
+            consecutiveTextOnlySteps = 0;
+          } else if (text && hadToolCalls) {
+            consecutiveTextOnlySteps++;
+            if (consecutiveTextOnlySteps >= 3) {
+              // Model made tool calls, then produced 3 consecutive text-only steps — it's done, just rambling
+              logger.info("Summary rambling detected — stopping stream", { persona: story.persona, consecutiveTextOnlySteps });
+              combinedAbort.abort();
+              return;
+            }
+          }
+
           if (text) {
             // Text loop detection
             // Normalize signature: trim, collapse whitespace, lowercase first 200 chars

@@ -68,11 +68,11 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
       break;
     case "trust all":
       modeColor = theme.error;
-      modeIcon = "\u23E9"; // ⏩
+      modeIcon = "\u26A1"; // ⚡
       break;
     case "auto-edit":
       modeColor = theme.warning;
-      modeIcon = "\u23E9"; // ⏩
+      modeIcon = "\u270F\uFE0F"; // ✏️
       break;
     default:
       modeColor = theme.success;
@@ -197,7 +197,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
       {/* Row 3: Permission mode */}
       <Box>
         <Text color={modeColor} bold>
-          {` ${modeIcon}${modeIcon} ${props.mode} `}
+          {` ${modeIcon} ${props.mode} `}
         </Text>
         <Text color={theme.subtle} dimColor>
           {"(shift+tab to cycle)"}

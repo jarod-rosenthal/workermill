@@ -843,10 +843,11 @@ Write the file with write_file to WORKERMILL.md in the project root.`
 
         // ---- /log ----
         case "log": {
-          const logPath = path.join(props.workingDir, ".workermill", "cli.log");
+          const projectHash = require("crypto").createHash("md5").update(props.workingDir).digest("hex").slice(0, 8);
+          const logPath = path.join(os.homedir(), ".workermill", "logs", projectHash, "cli.log");
           try {
             if (!fs.existsSync(logPath)) {
-              agent.addSystemMessage("No log file found at `.workermill/cli.log`");
+              agent.addSystemMessage("No log file found. Logs are stored in `~/.workermill/logs/`");
               break;
             }
             const content = fs.readFileSync(logPath, "utf-8");

@@ -1,9 +1,13 @@
 import fs from "fs";
 import path from "path";
+import os from "os";
+import crypto from "crypto";
 import * as logger from "./logger.js";
 
 function learningsPath(): string {
-  return path.join(process.cwd(), ".workermill", "learnings.json");
+  // Per-project learnings in ~/.workermill/learnings/<project-hash>.json
+  const projectHash = crypto.createHash("md5").update(process.cwd()).digest("hex").slice(0, 8);
+  return path.join(os.homedir(), ".workermill", "learnings", `${projectHash}.json`);
 }
 
 export function loadLearnings(): string[] {

@@ -1,9 +1,11 @@
 import fs from "fs";
 import path from "path";
+import os from "os";
 import crypto from "crypto";
 import * as logger from "./logger.js";
 
-const SESSIONS_DIR = path.join(process.cwd(), ".workermill", "sessions");
+// Sessions stored in ~/.workermill/sessions/ (global, not per-project)
+const SESSIONS_DIR = path.join(os.homedir(), ".workermill", "sessions");
 
 export interface SessionMessage {
   role: "user" | "assistant";

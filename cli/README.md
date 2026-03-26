@@ -128,12 +128,12 @@ Use `/retry` to re-plan the same task — the planner sees existing code and fil
 |------|---------|
 | `WORKERMILL.md` | Project instructions — read by all agents (committed to repo) |
 | `~/.workermill/cli.json` | Global config (providers, routing, review, hooks, MCP) |
+| `~/.workermill/sessions/` | Conversation sessions |
+| `~/.workermill/logs/` | Debug logs (per-project) |
+| `~/.workermill/learnings/` | Persistent learnings (per-project) |
 | `.workermill/config.json` | Per-project config overrides |
 | `.workermill/commands/*.md` | Custom slash commands |
 | `.workermill/personas/*.md` | Custom persona overrides |
-| `.workermill/learnings.json` | Persistent learnings from builds |
-| `.workermill/sessions/` | Conversation sessions |
-| `.workermill/cli.log` | Debug log |
 
 ### Example Config
 

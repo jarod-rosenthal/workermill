@@ -1,7 +1,12 @@
 import fs from "fs";
 import path from "path";
+import os from "os";
+import crypto from "crypto";
 
-const LOG_DIR = path.join(process.cwd(), ".workermill");
+// Logs stored in ~/.workermill/logs/<project-hash>/cli.log
+// Keeps the working directory clean — matches Claude Code's ~/.claude/ pattern
+const projectHash = crypto.createHash("md5").update(process.cwd()).digest("hex").slice(0, 8);
+const LOG_DIR = path.join(os.homedir(), ".workermill", "logs", projectHash);
 const LOG_FILE = path.join(LOG_DIR, "cli.log");
 
 let logStream: fs.WriteStream | null = null;

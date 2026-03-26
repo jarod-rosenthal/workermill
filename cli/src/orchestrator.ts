@@ -1217,7 +1217,17 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
       });
 
       // Drive the stream (required for streamText) — onStepFinish handles display
-      for await (const _chunk of stream.textStream) { /* consumed */ }
+      try {
+        for await (const _chunk of stream.textStream) { /* consumed */ }
+      } catch {
+        // Stream may throw on abort (user ESC or rambling detector) — that's expected
+      }
+
+      // Check abort immediately after stream ends — user may have pressed ESC
+      if (abortSignal?.aborted) {
+        output.coordinatorLog("Build cancelled by user.");
+        return;
+      }
 
       const text = await stream.text;
       const usage = await stream.totalUsage;
@@ -1288,6 +1298,12 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
             continue;
           }
         }
+      }
+
+      // Check abort before verification
+      if (abortSignal?.aborted) {
+        output.coordinatorLog("Build cancelled by user.");
+        return;
       }
 
       // --- Inline Verifier (from worker/epic/inline-verifier.ts) ---

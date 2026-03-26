@@ -46,10 +46,10 @@ async function printWelcome(roleModels: { worker: string; planner: string; revie
     console.log(dim(`  planner:  ${roleModels.planner}`));
     console.log(dim(`  reviewer: ${roleModels.reviewer}`));
   }
-  console.log(dim("  12 experts available (") + brand("/build") + dim(" auto-assigns, ") + brand("/as") + dim(" to pick one, ") + brand("/personas") + dim(" to list)"));
+  console.log(dim("  12 experts available (") + brand("/ship") + dim(" auto-assigns, ") + brand("/as") + dim(" to pick one, ") + brand("/personas") + dim(" to list)"));
   console.log(dim(`  cwd: ${workingDir}`));
   console.log();
-  console.log(dim("  ") + brand("/build") + dim(" orchestrates experts  ") + brand("/setup") + dim(" to change providers  ") + white("/help") + dim(" for all"));
+  console.log(dim("  ") + brand("/ship") + dim(" orchestrates experts  ") + brand("/setup") + dim(" to change providers  ") + white("/help") + dim(" for all"));
   console.log();
 
   // Blocking update check — must print before Ink takes over stdout
@@ -68,7 +68,7 @@ function addSharedOptions(cmd: Command): Command {
     .option("--provider <provider>", "Override default provider")
     .option("--model <model>", "Override model")
     .option("--trust", "Skip all tool permission prompts")
-    .option("--auto-revise", "Auto-approve revisions during /build reviews")
+    .option("--auto-revise", "Auto-approve revisions during /ship reviews")
     .option("--full-disk", "Allow tools to access files outside working directory")
     .option("--max-tokens <n>", "Maximum output tokens per response", parseInt)
     .option("-p, --prompt <prompt>", "Run a single prompt headlessly and exit");

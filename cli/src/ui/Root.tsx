@@ -111,11 +111,9 @@ const HELP_TEXT = `**WorkerMill** — AI coding agent for your terminal.
 **Chat** — Ask anything. I'll read files, write code, run commands.
 Just type your question or task and press Enter.
 
-**Build** — Create software with multiple specialist AI agents.
-Type \`/build <description>\` and I'll plan stories, assign experts
-(backend, frontend, devops, security), execute, and review.
-
-Or from the command line: \`wm build "your task"\`
+**Ship** — Create software with multiple specialist AI agents.
+Type \`/ship <description>\` or \`/ship spec.md\` and I'll plan stories,
+assign experts (backend, frontend, devops, security), execute, and review.
 
 ---
 
@@ -123,8 +121,8 @@ Or from the command line: \`wm build "your task"\`
 
 | Command | Description |
 |---|---|
-| \`/build <task>\` | Multi-expert orchestration — the main feature |
-| \`/retry\` | Re-plan and re-run the last build task |
+| \`/ship <task>\` | Multi-expert orchestration — plan, execute, review, ship |
+| \`/retry\` | Re-plan and re-run the last task |
 | \`/settings\` | View/change settings (review, ollama, etc.) |
 | \`/undo\` | Revert last build's changes (git stash or reset) |
 | \`/diff\` | Preview uncommitted changes |
@@ -347,19 +345,20 @@ export function Root(props: RootProps): React.ReactElement {
           break;
         }
 
-        // ---- /build <task> ----
+        // ---- /ship (primary) and /build (alias) ----
+        case "ship":
         case "build": {
           if (!arg) {
             agent.addSystemMessage(
-              "**Usage:** `/build <task description>`\n\n" +
-              "Runs WorkerMill multi-expert orchestration: classifies complexity, plans stories, " +
-              "executes per-persona with tool calls, reviews, and revision loops."
+              "**Usage:** `/ship <task description>` or `/ship spec.md`\n\n" +
+              "Runs WorkerMill multi-expert orchestration: plans stories, assigns specialist personas, " +
+              "executes with tool calls, reviews, and ships."
             );
           } else if (orchestrator.running) {
             agent.addSystemMessage("Orchestration is already running. Wait for it to complete.");
           } else {
             lastBuildTask.current = arg;
-            agent.addUserMessage(`/build ${arg}`);
+            agent.addUserMessage(`/ship ${arg}`);
             orchestrator.start(arg, agent.permissionMode === "trust all", props.sandboxed);
           }
           break;
@@ -370,7 +369,7 @@ export function Root(props: RootProps): React.ReactElement {
           if (orchestrator.running) {
             agent.addSystemMessage("Orchestration is already running. Wait for it to complete.");
           } else if (!lastBuildTask.current) {
-            agent.addSystemMessage("No previous build to retry. Use `/build <task>` first.");
+            agent.addSystemMessage("No previous task to retry. Use `/ship <task>` first.");
           } else {
             const task = lastBuildTask.current;
             agent.addUserMessage(`/retry ${task.slice(0, 60)}...`);

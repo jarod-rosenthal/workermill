@@ -58,7 +58,7 @@ export default function CLI() {
         <h2 className="text-2xl font-semibold">Features</h2>
         <div className="grid gap-3">
           {[
-            { title: "Multi-expert orchestration", desc: "/build decomposes tasks into stories, each assigned to a specialist persona with dependency ordering." },
+            { title: "Multi-expert orchestration", desc: "/ship decomposes tasks into stories, each assigned to a specialist persona with dependency ordering." },
             { title: "Quality gates", desc: "Auto-runs typecheck and lint after each story. Failures feed back to the expert for automatic retry before review." },
             { title: "Surgical review fixer", desc: "When the reviewer requests changes, a lightweight fix agent applies targeted edits before falling back to full re-execution." },
             { title: "Spec verification", desc: "Independent QA agent verifies each story's output against the original specification before review." },
@@ -87,13 +87,13 @@ export default function CLI() {
       {/* Usage */}
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">Usage</h2>
-        <CopyBlock code={`# Interactive chat\nworkermill\n\n# Skip permission prompts\nworkermill --trust\n\n# Read-only research mode\nworkermill --plan\n\n# Resume last conversation\nworkermill --resume\n\n# Cap output tokens\nworkermill --max-tokens 4096\n\n# Then use /build inside the CLI for multi-expert orchestration\n# /build spec.md\n# /build REST API with auth, React dashboard, Docker`} />
+        <CopyBlock code={`# Interactive chat\nworkermill\n\n# Skip permission prompts\nworkermill --trust\n\n# Read-only research mode\nworkermill --plan\n\n# Resume last conversation\nworkermill --resume\n\n# Cap output tokens\nworkermill --max-tokens 4096\n\n# Then use /ship inside the CLI for multi-expert orchestration\n# /ship spec.md\n# /ship REST API with auth, React dashboard, Docker`} />
       </section>
 
       {/* Multi-Expert Orchestration */}
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">Multi-Expert Orchestration</h2>
-        <p className="text-muted-foreground">Use <code className="text-primary">/build</code> to trigger multi-expert mode:</p>
+        <p className="text-muted-foreground">Use <code className="text-primary">/ship</code> to trigger multi-expert mode:</p>
         <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
           <li><strong className="text-foreground">Plans</strong> — Explores the codebase, designs stories with dependencies and persona assignments</li>
           <li><strong className="text-foreground">Executes</strong> — Each story assigned to a specialist with the full original spec and context from prior stories</li>
@@ -121,7 +121,7 @@ export default function CLI() {
             </thead>
             <tbody className="divide-y divide-border">
               {[
-                ["/build <task>", "Multi-expert orchestration — plans, executes, reviews"],
+                ["/ship <task>", "Multi-expert orchestration — plans, executes, reviews"],
                 ["/retry", "Re-plan and re-run the last build task"],
                 ["/init", "Generate WORKERMILL.md for this project"],
                 ["/settings", "View/change settings (review, ollama, etc.)"],

@@ -14,6 +14,7 @@ import type { CliConfig, HooksConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
 import { runHooks } from "./hooks.js";
 import { loadLearnings, saveLearnings, mergeLearnings } from "./learnings.js";
+import { isDangerous, READ_TOOLS } from "./safety.js";
 
 /**
  * If the task string looks like a file path (e.g. "spec.md", "docs/prd.yaml"),
@@ -175,28 +176,7 @@ interface SharedContext {
   learnings: string[];
 }
 
-/** Read-only tool names that are auto-approved without user confirmation */
-const READ_TOOLS = new Set(["read_file", "glob", "grep", "ls", "sub_agent"]);
-
-/** Dangerous command patterns — kept in sync with permissions.ts */
-const DANGEROUS_PATTERNS = [
-  { pattern: /rm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\s+\/(?!\w)/i, label: "rm -rf with root path" },
-  { pattern: /rm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\s+~\//i, label: "rm -rf in home directory" },
-  { pattern: /git\s+reset\s+--hard/i, label: "hard reset" },
-  { pattern: /git\s+push\s+.*--force/i, label: "force push" },
-  { pattern: /git\s+clean\s+-[a-z]*f/i, label: "git clean" },
-  { pattern: /drop\s+table/i, label: "drop table" },
-  { pattern: /chmod\s+777\s+\//i, label: "chmod 777 on root path" },
-  { pattern: />(\/dev\/sda|\/dev\/disk)/i, label: "write to disk device" },
-  { pattern: /\bsudo\b/i, label: "sudo" },
-];
-
-function isDangerous(command: string): string | null {
-  for (const { pattern, label } of DANGEROUS_PATTERNS) {
-    if (pattern.test(command)) return label;
-  }
-  return null;
-}
+// DANGEROUS_PATTERNS, READ_TOOLS, AUTO_EDIT_TOOLS imported from ./safety.js
 
 /**
  * Check tool permission using output.confirm() instead of readline.
@@ -465,6 +445,13 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
   output.log("planner", `Starting planning agent using ${pModel}`);
   output.status("Planner reading repository...");
 
+  // Heartbeat — show elapsed time so users know it's still working
+  const planStart = Date.now();
+  const heartbeat = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - planStart) / 1000);
+    output.status(`Planner working... (${elapsed}s)`);
+  }, 5_000);
+
   // Use onStepFinish — same pattern as worker/ai-clients/ai-sdk-client.ts
   const planStream = streamText({
     model: plannerModel,
@@ -498,6 +485,7 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
   }
 
   const planText = await planStream.text;
+  clearInterval(heartbeat);
 
   const planUsage = await planStream.totalUsage;
 

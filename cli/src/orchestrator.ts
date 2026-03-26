@@ -320,7 +320,9 @@ Task: ${resolvedInput}`,
 
       const isMulti = /\bmulti\b/i.test(textResult.text);
       return { isMulti, reason: textResult.text.slice(0, 200) };
-    } catch { /* double fallback failed */ }
+    } catch (err2) {
+      logger.debug("Classification double fallback failed", { error: err2 instanceof Error ? err2.message : String(err2) });
+    }
 
     return { isMulti: false, reason: `Classification failed: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -597,7 +599,9 @@ function tryParseStories(text: string): Story[] | null {
     if (rawStories) {
       return rawStories.map((s, i) => normalizeStory(s, i));
     }
-  } catch { /* not valid JSON */ }
+  } catch {
+    // Not valid JSON — caller will try other parsing strategies
+  }
   return null;
 }
 
@@ -701,7 +705,9 @@ function parseAffectedStories(text: string): { stories: number[]; reasons: Recor
           reasons[storyIndex] = value;
         }
       }
-    } catch { /* continue without reasons */ }
+    } catch {
+      // Reasons JSON is malformed — non-critical, continue without reasons
+    }
   }
 
   return { stories, reasons };
@@ -817,8 +823,8 @@ export async function runOrchestration(
     try {
       const r = await output.confirm("Execute this plan?");
       proceed = typeof r === "object" ? r.allowed : r;
-    } catch {
-      // confirm failed — default to no
+    } catch (err) {
+      logger.debug("Plan confirmation failed", { error: err instanceof Error ? err.message : String(err) });
     }
     if (!proceed) {
       output.log("system", "Plan cancelled.");
@@ -1115,7 +1121,9 @@ ${previousReviewFeedback}
             cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 10_000,
           }).trim();
           if (diff) codeDiff = diff;
-        } catch { /* not a git repo or no changes staged */ }
+        } catch {
+          // Not a git repo or no changes staged — will try filesystem scan
+        }
 
         // If no diff, find all files via git status or filesystem scan
         if (!codeDiff) {
@@ -1129,7 +1137,9 @@ ${previousReviewFeedback}
                 { cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 5_000 },
               ).trim();
               if (gitFiles) allFiles = gitFiles.split("\n").filter(Boolean);
-            } catch { /* not a git repo */ }
+            } catch {
+              // Not a git repo — will try filesystem scan
+            }
           }
 
           // Still nothing? Scan for common source files
@@ -1140,7 +1150,9 @@ ${previousReviewFeedback}
                 { cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 5_000 },
               ).trim();
               if (found) allFiles = found.split("\n").filter(Boolean);
-            } catch { /* ignore */ }
+            } catch {
+              // find command failed — proceed with empty file list
+            }
           }
           const fileContents: string[] = [];
           let totalSize = 0;
@@ -1157,7 +1169,9 @@ ${previousReviewFeedback}
               const trimmed = content;
               fileContents.push(`\n--- ${f} ---\n${trimmed}`);
               totalSize += trimmed.length;
-            } catch { /* file may not exist */ }
+            } catch {
+              // File may have been deleted since listing — skip
+            }
           }
           if (fileContents.length > 0) {
             codeDiff = fileContents.join("\n");
@@ -1285,7 +1299,8 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
             } else {
               shouldRevise = rv;
             }
-          } catch {
+          } catch (err) {
+            logger.debug("Revision prompt cancelled", { error: err instanceof Error ? err.message : String(err) });
             shouldRevise = false; // cancelled
           }
         } else {
@@ -1470,7 +1485,9 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
             for (const f of filesToStage) {
               try {
                 execSync(`git add "${f}"`, { cwd: workingDir, stdio: "pipe" });
-              } catch { /* file may not exist */ }
+              } catch {
+                // File may have been deleted or moved — skip
+              }
             }
           } else {
             // Fallback: stage tracked modified + all new files from context
@@ -1484,7 +1501,7 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
       }
     }
   } catch (err) {
-    // Silently skip — don't dump git help text
+    logger.debug("Git commit step failed", { error: err instanceof Error ? err.message : String(err) });
   }
 
   // Final cost update — status bar shows the running total

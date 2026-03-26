@@ -11,7 +11,7 @@
 
 import { useState, useCallback, useRef } from "react";
 import type { OrchestrationOutput } from "../orchestrator.js";
-import { loadConfig } from "../config.js";
+import { loadConfig, type CliConfig } from "../config.js";
 
 // ---------------------------------------------------------------------------
 // Persona emoji map -- EXACT match from tui.ts (PERSONA_EMOJIS)
@@ -84,6 +84,8 @@ export interface UseOrchestratorReturn {
 export function useOrchestrator(
   addMessage: (content: string, role?: "user" | "assistant") => void,
   setCost?: (cost: number) => void,
+  /** Config with CLI overrides (e.g. --auto-revise) already applied. */
+  cliConfig?: CliConfig,
 ): UseOrchestratorReturn {
   const [running, setRunning] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
@@ -121,7 +123,9 @@ export function useOrchestrator(
       void (async () => {
         try {
           // ---- Config ------------------------------------------------
-          const config = loadConfig();
+          // Use the CLI-resolved config (has --auto-revise etc.) if available,
+          // otherwise fall back to loading from disk.
+          const config = cliConfig ?? loadConfig();
           if (!config) {
             addMessage(
               "No provider configured. Run `workermill` (setup) first.",
@@ -252,7 +256,7 @@ export function useOrchestrator(
         }
       })();
     },
-    [addMessage],
+    [addMessage, cliConfig],
   );
 
   // ------------------------------------------------------------------

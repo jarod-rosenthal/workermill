@@ -122,7 +122,9 @@ class CDPClient {
               for (const handler of handlers) handler(msg.params || {});
             }
           }
-        } catch { /* malformed message */ }
+        } catch (err) {
+          logger.debug("Malformed CDP WebSocket message", { error: err instanceof Error ? err.message : String(err) });
+        }
       };
     });
   }
@@ -377,6 +379,7 @@ export async function browserClose(): Promise<string> {
     try {
       process.kill(-chromeProcess.pid!, "SIGTERM");
     } catch {
+      // Process group kill failed (e.g., already exited) — try direct kill
       chromeProcess.kill();
     }
     chromeProcess = null;

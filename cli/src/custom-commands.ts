@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import * as logger from "./logger.js";
 
 export interface CustomCommand {
   name: string;
@@ -26,9 +27,15 @@ export function loadCustomCommands(): CustomCommand[] {
           if (cmd && !commands.find(c => c.name === cmd.name)) {
             commands.push(cmd);
           }
-        } catch { continue; }
+        } catch (err) {
+          logger.debug("Failed to read custom command file", { file, dir, error: err instanceof Error ? err.message : String(err) });
+          continue;
+        }
       }
-    } catch { continue; }
+    } catch {
+      // Directory doesn't exist or unreadable — skip
+      continue;
+    }
   }
 
   return commands;

@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
+import * as logger from "./logger.js";
 
 interface ContentPart {
   type: "text" | "image";
@@ -241,7 +242,8 @@ export async function resolveUrlReferences(input: string): Promise<string> {
         { encoding: "utf-8", timeout: 12_000 },
       ).trim();
       result = result.replace(match[0], `\n\`\`\`\n// fetched from ${url}\n${content}\n\`\`\`\n`);
-    } catch {
+    } catch (err) {
+      logger.debug("Failed to fetch URL reference", { url, error: err instanceof Error ? err.message : String(err) });
       result = result.replace(match[0], `(failed to fetch: ${url})`);
     }
   }

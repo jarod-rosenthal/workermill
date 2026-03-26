@@ -2,6 +2,7 @@ import readline from "readline";
 import { execSync } from "child_process";
 import chalk from "chalk";
 import { saveConfig, type CliConfig, type ProviderConfig } from "./config.js";
+import * as logger from "./logger.js";
 
 interface ProviderOption {
   name: string;
@@ -433,8 +434,8 @@ async function fetchCloudModels(
       provider.detectedModels = models;
       console.log(chalk.green(`  ✓ Found ${models.length} available models`));
     }
-  } catch {
-    // Network error or invalid key — fall back to hardcoded defaults
+  } catch (err) {
+    logger.debug("Failed to fetch cloud models", { provider: provider.name, error: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -494,7 +495,10 @@ async function configureOllama(providerConfig: ProviderConfig, ollamaProvider?: 
         }
         return;
       }
-    } catch { continue; }
+    } catch {
+      // Host not reachable — try next
+      continue;
+    }
   }
 
   providerConfig.host = "http://localhost:11434";

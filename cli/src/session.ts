@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import * as logger from "./logger.js";
 
 const SESSIONS_DIR = path.join(process.cwd(), ".workermill", "sessions");
 
@@ -67,7 +68,8 @@ export function loadLatestSession(): Session | null {
 
     const content = fs.readFileSync(path.join(SESSIONS_DIR, files[0].name), "utf-8");
     return JSON.parse(content) as Session;
-  } catch {
+  } catch (err) {
+    logger.error("Failed to load latest session", { error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }
@@ -104,7 +106,8 @@ export function listSessions(max = 20): SessionSummary[] {
         preview: firstUserMsg ? firstUserMsg.content.slice(0, 50) : "(empty)",
       };
     });
-  } catch {
+  } catch (err) {
+    logger.error("Failed to list sessions", { error: err instanceof Error ? err.message : String(err) });
     return [];
   }
 }
@@ -121,7 +124,9 @@ export function loadSessionById(id: string): Session | null {
     if (files.length === 1) {
       return JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, files[0]), "utf-8")) as Session;
     }
-  } catch { /* ignore */ }
+  } catch (err) {
+    logger.debug("Failed to load session by id", { id, error: err instanceof Error ? err.message : String(err) });
+  }
   return null;
 }
 
@@ -133,6 +138,8 @@ export function deleteSession(id: string): boolean {
       fs.unlinkSync(filePath);
       return true;
     }
-  } catch { /* ignore */ }
+  } catch (err) {
+    logger.debug("Failed to delete session", { id, error: err instanceof Error ? err.message : String(err) });
+  }
   return false;
 }

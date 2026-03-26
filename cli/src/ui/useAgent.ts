@@ -322,8 +322,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         void startAllMCPServers(cliConfig.mcp);
       }
       hooksConfigRef.current = cliConfig?.hooks;
-    } catch {
-      // No config or resolveConfig threw — MCP not available, that's fine.
+    } catch (err) {
+      logger.debug("Config/MCP init skipped", { error: err instanceof Error ? err.message : String(err) });
     }
 
     // Session: resume or create fresh.

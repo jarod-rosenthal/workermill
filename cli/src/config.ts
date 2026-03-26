@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import * as logger from "./logger.js";
 
 export interface ProviderConfig {
   model: string;
@@ -60,7 +61,8 @@ export function loadConfig(): CliConfig | null {
     if (!fs.existsSync(CONFIG_FILE)) return null;
     const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
     return JSON.parse(raw) as CliConfig;
-  } catch {
+  } catch (err) {
+    logger.error("Failed to load config", { path: CONFIG_FILE, error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }
@@ -78,7 +80,8 @@ export function loadProjectConfig(): Partial<CliConfig> | null {
     if (!fs.existsSync(projectConfig)) return null;
     const raw = fs.readFileSync(projectConfig, "utf-8");
     return JSON.parse(raw);
-  } catch {
+  } catch (err) {
+    logger.error("Failed to load project config", { error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }

@@ -54,7 +54,7 @@ function sendRequest(server: MCPServer, method: string, params?: unknown): Promi
             else resolve(msg.result);
           }
         } catch {
-          /* not valid JSON yet */
+          // Partial JSON — still accumulating data, not an error
         }
       }
     };
@@ -240,7 +240,7 @@ export function stopAllMCPServers(): void {
     try {
       server.process.kill();
     } catch {
-      /* ignore */
+      // Process already exited — safe to ignore
     }
     logger.info(`MCP ${name} stopped`);
   }

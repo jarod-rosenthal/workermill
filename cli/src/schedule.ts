@@ -20,7 +20,9 @@ function loadSchedules(): ScheduledTask[] {
     if (fs.existsSync(SCHEDULE_FILE)) {
       return JSON.parse(fs.readFileSync(SCHEDULE_FILE, "utf-8")) as ScheduledTask[];
     }
-  } catch { /* ignore */ }
+  } catch (err) {
+    logger.error("Failed to load schedules", { error: err instanceof Error ? err.message : String(err) });
+  }
   return [];
 }
 
@@ -141,7 +143,9 @@ function removeCron(taskId: string): void {
       const lines = existing.split("\n").filter(l => !l.includes(`WorkerMill:${taskId}`));
       const newCrontab = lines.filter(l => l.trim()).join("\n") + "\n";
       execSync(`echo "${newCrontab.replace(/"/g, '\\"')}" | crontab -`, { stdio: "pipe" });
-    } catch { /* ignore */ }
+    } catch (err) {
+      logger.debug("Failed to remove crontab entry", { taskId, error: err instanceof Error ? err.message : String(err) });
+    }
   }
 }
 

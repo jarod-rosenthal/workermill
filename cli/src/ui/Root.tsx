@@ -12,6 +12,7 @@ import { loadConfig, saveConfig } from "../config.js";
 import { loadCustomCommands } from "../custom-commands.js";
 import { loadPersona, listAvailablePersonas } from "../personas.js";
 import { stopAllMCPServers } from "../mcp-client.js";
+import * as logger from "../logger.js";
 import type { UseAgentOptions } from "./useAgent.js";
 
 // ---------------------------------------------------------------------------
@@ -436,7 +437,8 @@ export function Root(props: RootProps): React.ReactElement {
             } else {
               agent.addSystemMessage(parts.join("\n\n"));
             }
-          } catch {
+          } catch (err) {
+            logger.debug("/diff command failed", { error: err instanceof Error ? err.message : String(err) });
             agent.addSystemMessage("Not a git repository, or git is not installed.");
           }
           break;
@@ -931,7 +933,8 @@ Write the file with write_file to WORKERMILL.md in the project root.`
                 "Changelog not found locally. View online:\nhttps://github.com/jarod-rosenthal/workermill/blob/main/cli/CHANGELOG.md"
               );
             }
-          } catch {
+          } catch (err) {
+            logger.debug("Failed to read changelog", { error: err instanceof Error ? err.message : String(err) });
             agent.addSystemMessage(
               "Changelog not found. View online:\nhttps://github.com/jarod-rosenthal/workermill/blob/main/cli/CHANGELOG.md"
             );

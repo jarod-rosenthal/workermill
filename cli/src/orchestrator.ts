@@ -440,12 +440,13 @@ ${workingDir}
 
 ## Instructions
 1. Use your tools to explore the working directory and understand what exists. Stay within the working directory.${referencedFiles.length > 0 ? "\n   The referenced files above have been inlined for you. Read any additional files you need for context." : ""}
-2. Design a plan that breaks the task into focused stories, each assigned to a specialist persona.
-3. Each story should be a meaningful unit of work — not too granular, not too broad.
-4. Quality criteria:
-   - Every story has a clear, specific description
+2. Design a plan with the MINIMUM number of stories. Group ALL work for the same persona into ONE story.
+3. Aim for 5 stories or fewer. If you need more, look for same-persona work to combine first.
+4. Stories run SEQUENTIALLY in the same directory — not in parallel. Later stories see earlier stories' output. Overlapping files are fine.
+5. Quality criteria:
+   - ONE persona = ONE story (only split if there's a genuine dependency gate)
+   - Every story has a clear, specific description of its file scope
    - Stories are ordered correctly — dependencies satisfied before dependents
-   - Each story is scoped for ONE persona
    - Descriptions include enough detail for the persona to execute without ambiguity
 
 ## Output format

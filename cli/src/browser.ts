@@ -170,6 +170,19 @@ let chromeProcess: ChildProcess | null = null;
 let cdpClient: CDPClient | null = null;
 let debugPort = 9222;
 
+/** Get the host to connect to CDP — Windows host IP for WSL, localhost otherwise. */
+function getCDPHost(): string {
+  try {
+    const uname = execSync("uname -r 2>/dev/null", { encoding: "utf-8" });
+    if (uname.toLowerCase().includes("microsoft")) {
+      // WSL — Chrome runs on Windows side, connect via gateway IP
+      const gateway = execSync("ip route show default 2>/dev/null | awk '{print $3}'", { encoding: "utf-8" }).trim();
+      if (gateway) return gateway;
+    }
+  } catch { /* not WSL */ }
+  return "127.0.0.1";
+}
+
 export async function browserOpen(): Promise<string> {
   if (chromeProcess && cdpClient) {
     return "Browser already open.";
@@ -214,14 +227,17 @@ export async function browserOpen(): Promise<string> {
   });
 
   // Wait for Chrome to start and expose CDP
+  const cdpHost = getCDPHost();
   let wsUrl: string | null = null;
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 250));
     try {
-      const res = await globalThis.fetch(`http://127.0.0.1:${debugPort}/json/version`);
+      const res = await globalThis.fetch(`http://${cdpHost}:${debugPort}/json/version`);
       if (res.ok) {
         const data = (await res.json()) as { webSocketDebuggerUrl: string };
-        wsUrl = data.webSocketDebuggerUrl;
+        // Replace 127.0.0.1 in the WS URL with the actual CDP host
+        // (Chrome reports its own localhost, but WSL needs the gateway IP)
+        wsUrl = data.webSocketDebuggerUrl.replace("127.0.0.1", cdpHost);
         break;
       }
     } catch { /* not ready yet */ }

@@ -956,10 +956,13 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
       if (abortSignal) abortSignal.addEventListener("abort", () => combinedAbort.abort());
       loopAbort.signal.addEventListener("abort", () => combinedAbort.abort());
 
-      // Text repetition detection — abort if the same text block repeats 5+ times
+      // Text repetition detection — suppress display after 5 repeats, abort after 50
       const recentTexts: string[] = [];
       const TEXT_LOOP_WINDOW = 8;
-      const TEXT_LOOP_THRESHOLD = 5;
+      const TEXT_SUPPRESS_THRESHOLD = 5;
+      const TEXT_ABORT_THRESHOLD = 50;
+      let textRepeatCount = 0;
+      let textSuppressed = false;
 
       const stream = streamText({
         model,
@@ -981,12 +984,21 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
               const counts: Record<string, number> = {};
               for (const t of recentTexts) counts[t] = (counts[t] || 0) + 1;
               const maxCount = Math.max(...Object.values(counts));
-              if (maxCount >= TEXT_LOOP_THRESHOLD) {
-                logger.error("Text output loop detected", { persona: story.persona });
-                output.error("Text output loop detected — aborting story");
-                combinedAbort.abort();
+              if (maxCount >= TEXT_SUPPRESS_THRESHOLD) {
+                textRepeatCount++;
+                if (!textSuppressed) {
+                  textSuppressed = true;
+                  output.log(story.persona, "(repeating output suppressed)");
+                  logger.info("Text repetition suppressed", { persona: story.persona, count: textRepeatCount });
+                }
+                if (textRepeatCount >= TEXT_ABORT_THRESHOLD) {
+                  logger.error("Text output loop — aborting after 50 repeats", { persona: story.persona });
+                  output.error("Text output stuck in loop — aborting story");
+                  combinedAbort.abort();
+                }
                 return;
               }
+              textSuppressed = false;
             }
 
             const lines = text.split("\n").filter(l => l.trim());

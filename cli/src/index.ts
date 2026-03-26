@@ -60,7 +60,7 @@ async function printWelcome(roleModels: { worker: string; planner: string; revie
   }
 }
 
-const VERSION = "0.14.1";
+const VERSION = "0.14.2";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {
@@ -155,6 +155,25 @@ const defaultCmd = program
 
     await printWelcome(roleModels, workingDir);
 
+    // Enable synchronized output (DEC mode 2026) to prevent terminal tearing.
+    // Wraps each stdout.write in begin/end synchronized update sequences so the
+    // terminal renders each frame atomically instead of showing partial redraws.
+    if (process.stdout.isTTY) {
+      const BSU = "\x1b[?2026h";  // Begin Synchronized Update
+      const ESU = "\x1b[?2026l";  // End Synchronized Update
+      const origWrite = process.stdout.write.bind(process.stdout) as (chunk: string | Uint8Array, encoding?: BufferEncoding, cb?: (err?: Error | null) => void) => boolean;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (process.stdout as any).write = function (chunk: string | Uint8Array, encodingOrCb?: BufferEncoding | ((err?: Error | null) => void), cb?: (err?: Error | null) => void): boolean {
+        const str = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+        if (str.includes("\x1b[") && str.length > 20) {
+          if (typeof encodingOrCb === "function") return origWrite(BSU + str + ESU, undefined, encodingOrCb);
+          return origWrite(BSU + str + ESU, encodingOrCb, cb);
+        }
+        if (typeof encodingOrCb === "function") return origWrite(chunk, undefined, encodingOrCb);
+        return origWrite(chunk, encodingOrCb, cb);
+      };
+    }
+
     const { waitUntilExit } = render(
       React.createElement(Root, {
         provider,
@@ -171,7 +190,7 @@ const defaultCmd = program
         roleModels,
         cliConfig: config,
       }),
-      { incrementalRendering: true },
+      { patchConsole: false },
     );
 
     await waitUntilExit();

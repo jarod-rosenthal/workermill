@@ -6,8 +6,6 @@ export default defineConfig({
   target: "node20",
   clean: true,
   shims: true,
-  env: { NODE_ENV: "production" },
-  banner: { js: 'process.env.NODE_ENV = "production";' },
   // Bundle the monorepo imports (../../packages/engine/) into dist.
   // Keep npm dependencies external — users install them.
   external: [

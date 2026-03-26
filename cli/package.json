@@ -1,6 +1,6 @@
 {
   "name": "workermill",
-  "version": "0.15.11",
+  "version": "0.15.12",
   "description": "AI coding agent with multi-expert orchestration. Works with any LLM provider.",
   "type": "module",
   "bin": {
@@ -36,6 +36,9 @@
     "tsup": "^8.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.5.0"
+  },
+  "overrides": {
+    "picomatch": "^4.0.4"
   },
   "engines": {
     "node": ">=20"

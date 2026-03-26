@@ -956,10 +956,10 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
       if (abortSignal) abortSignal.addEventListener("abort", () => combinedAbort.abort());
       loopAbort.signal.addEventListener("abort", () => combinedAbort.abort());
 
-      // Text repetition detection — abort if the same text block repeats 3+ times
+      // Text repetition detection — abort if the same text block repeats 5+ times
       const recentTexts: string[] = [];
-      const TEXT_LOOP_WINDOW = 4;
-      const TEXT_LOOP_THRESHOLD = 3;
+      const TEXT_LOOP_WINDOW = 8;
+      const TEXT_LOOP_THRESHOLD = 5;
 
       const stream = streamText({
         model,
@@ -1142,20 +1142,19 @@ ${previousReviewFeedback}
         }).join("\n");
 
         // Gather actual code for the reviewer — don't depend on ::file_created:: markers
+        // Gather ALL code for the reviewer — tracked diffs AND untracked files
         let codeDiff = "";
         try {
-          // Try git diff first (for tracked repos with commits)
           const diff = execSync("git diff HEAD 2>/dev/null || git diff 2>/dev/null", {
             cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 10_000,
           }).trim();
-          if (diff) codeDiff = diff;
+          if (diff) codeDiff = diff + "\n\n";
         } catch {
-          // Not a git repo or no changes staged — will try filesystem scan
+          // Not a git repo or no changes staged
         }
 
-        // If no diff, find all files via git status or filesystem scan
-        if (!codeDiff) {
-          // Get files from git (untracked + modified) — more reliable than context markers
+        // ALWAYS check for untracked files — git diff misses new files entirely
+        {
           let allFiles: string[] = [...new Set([...context.filesCreated, ...context.filesModified])].filter(Boolean);
 
           if (allFiles.length === 0) {
@@ -1194,7 +1193,7 @@ ${previousReviewFeedback}
             }
           }
           if (fileContents.length > 0) {
-            codeDiff = fileContents.join("\n");
+            codeDiff += "\n## Untracked / New Files\n" + fileContents.join("\n");
           }
         }
 

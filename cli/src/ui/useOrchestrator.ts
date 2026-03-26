@@ -65,10 +65,8 @@ export interface UseOrchestratorReturn {
   cancel: () => void;
   /** Current status message (replaces ora spinner in the old TUI). */
   statusMessage: string;
-  /** Latest build output line. */
+  /** Latest build output line (shown in dynamic area). */
   previewLine: string;
-  /** All build output lines accumulated in the dynamic area. */
-  buildLines: string[];
   /** Non-null when the orchestrator is waiting for user confirmation. */
   confirmRequest: OrchestratorConfirmRequest | null;
 }
@@ -90,11 +88,12 @@ export function useOrchestrator(
   setCost?: (cost: number) => void,
   /** Config with CLI overrides (e.g. --auto-revise) already applied. */
   cliConfig?: CliConfig,
+  /** Increment a tool count in the status bar. */
+  incrementToolCount?: (toolName: string) => void,
 ): UseOrchestratorReturn {
   const [running, setRunning] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [previewLine, setPreviewLine] = useState("");
-  const [buildLines, setBuildLines] = useState<string[]>([]);
   const [confirmRequest, setConfirmRequest] =
     useState<OrchestratorConfirmRequest | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -124,28 +123,18 @@ export function useOrchestrator(
       setRunning(true);
       setStatusMessage("");
       setPreviewLine("");
-      setBuildLines([]);
       setConfirmRequest(null);
 
       // Fire-and-forget async work; errors are caught internally.
       void (async () => {
-        // emitLine: accumulate lines in the dynamic area during build.
-        // All lines stay in the dynamic area (growing downward from the
-        // /build command, same as chat responses). On build completion,
-        // everything commits to Static at once.
-        const allLines: string[] = [];
+        // emitLine: commit each line to Static immediately so it renders
+        // once and never re-renders. Only the latest line stays in the
+        // dynamic area as a preview.
         function emitLine(line: string): void {
-          allLines.push(line);
-          setBuildLines([...allLines]);
+          addMessage(line);
           setPreviewLine(line);
         }
         function flushLine(): void {
-          // Commit all accumulated lines to Static as one message
-          if (allLines.length > 0) {
-            addMessage(allLines.join("\n"));
-            allLines.length = 0;
-          }
-          setBuildLines([]);
           setPreviewLine("");
         }
 
@@ -250,6 +239,8 @@ export function useOrchestrator(
               emitLine(
                 `[${emoji} ${persona}] \u{2193} ${toolName}${detail ? " " + detail : ""}`,
               );
+              // Update status bar tool counts
+              incrementToolCount?.(toolName);
               // Keep status line simple — the tool call is already in the message list
               setStatusMessage(`${persona}: working...`);
             },
@@ -294,5 +285,5 @@ export function useOrchestrator(
   // Return
   // ------------------------------------------------------------------
 
-  return { running, start, cancel, statusMessage, previewLine, buildLines, confirmRequest };
+  return { running, start, cancel, statusMessage, previewLine, confirmRequest };
 }

@@ -187,7 +187,7 @@ export function Root(props: RootProps): React.ReactElement {
     },
     [agent],
   );
-  const orchestrator = useOrchestrator(addOrchestratorMessage, agent.setCost, props.cliConfig);
+  const orchestrator = useOrchestrator(addOrchestratorMessage, agent.setCost, props.cliConfig, agent.incrementToolCount);
 
   // Track the last build task for /retry
   const lastBuildTask = useRef<string | null>(null);
@@ -1242,7 +1242,6 @@ Write the file with write_file to WORKERMILL.md in the project root.`
       orchestratorConfirm={orchestrator.confirmRequest}
       orchestratorStatus={orchestrator.statusMessage}
       buildPreviewLine={orchestrator.previewLine}
-      buildLines={orchestrator.buildLines}
       streamingToolCalls={agent.streamingToolCalls}
       tokens={agent.tokens}
       cost={agent.cost}

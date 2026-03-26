@@ -64,22 +64,13 @@ interface AppProps {
   hasInstructions?: boolean;
   /** Latest build output line — rendered at cursor in dynamic area. */
   buildPreviewLine?: string;
-  /** All build output lines accumulated in dynamic area during build. */
-  buildLines?: string[];
   /** Streaming tool calls — only latest shown in dynamic area during execution. */
   streamingToolCalls?: ToolCallInfo[];
 }
 
-/** Braille spinner that animates every 80ms to show the terminal is alive. */
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
+/** Static activity dot — no animation, no re-renders. */
 function Spinner({ color }: { color: string }): React.ReactElement {
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 80);
-    return () => clearInterval(id);
-  }, []);
-  return <Text color={color}>{SPINNER_FRAMES[frame]}</Text>;
+  return <Text color={color}>●</Text>;
 }
 
 /** Confirm prompt for orchestrator — context-aware options. */
@@ -205,15 +196,6 @@ export function App(props: AppProps): React.ReactElement {
       {props.streamingToolCalls && props.streamingToolCalls.length > 0 ? (
         <Box marginLeft={2} height={1}>
           <ToolCallDisplay tool={props.streamingToolCalls[props.streamingToolCalls.length - 1]} />
-        </Box>
-      ) : null}
-
-      {/* Build output — accumulates in dynamic area during build, commits to Static when done */}
-      {props.buildLines && props.buildLines.length > 0 ? (
-        <Box flexDirection="column" marginLeft={2}>
-          {props.buildLines.map((line, i) => (
-            <Markdown key={i} content={line} />
-          ))}
         </Box>
       ) : null}
 

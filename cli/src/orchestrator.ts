@@ -1354,7 +1354,14 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
             }
           }
 
+          // Build per-story feedback: use AFFECTED_REASONS if available, otherwise full review text
+          const storyReason = affected?.reasons?.[i + 1];
+          const storyFeedback = storyReason
+            ? `Story ${i + 1} (${story.title}):\n${storyReason}`
+            : reviewText;
+
           output.coordinatorLog(`Revision pass for story ${i + 1}/${sorted.length}`);
+          logger.info(`Revision started`, { story: i + 1, persona: story.persona, title: story.title, hasSpecificFeedback: !!storyReason });
           output.log(story.persona, `Starting revision: ${story.title} (${sProvider}/${sModel})`);
 
           output.status(`${story.persona}: revising...`);
@@ -1370,7 +1377,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
                 execute: async (input: Record<string, unknown>) => {
                   const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output);
                   if (!allowed) return "Tool execution denied by user.";
-                  output.log(story.persona, formatToolCallDisplay(toolName, input));
+                  output.toolCall(story.persona, toolName, input);
                   output.status(`${story.persona}: working...`);
                   const result = await toolDef.execute(input);
                   output.status("");
@@ -1391,19 +1398,24 @@ Write in a professional, direct tone. Do NOT open messages with filler words or 
 ## Critical rules
 - NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, nodemon, tsc --watch, etc.)
 - NEVER run interactive commands that wait for user input
-- Only run commands that complete and exit
-
-## Reviewer feedback — fix these issues:
-${reviewText}
-
-Your task: Address the reviewer's feedback for "${story.title}". Fix the specific issues mentioned. Do not rewrite code that wasn't flagged.`;
+- Only run commands that complete and exit`;
 
           try {
             const revStream = streamText({
               model: storyModel,
               abortSignal,
               system: revisionSystemPrompt,
-              prompt: `Fix the reviewer's issues for: ${story.title}\n\n${story.description}`,
+              prompt: `## Reviewer feedback — fix these issues:
+
+${storyFeedback}
+
+## Your task
+
+Fix the reviewer's issues for story ${i + 1}: "${story.title}".
+
+Original description: ${story.description}
+
+Address each specific issue mentioned in the feedback. Read the relevant files first, then make targeted fixes. Do not rewrite code that wasn't flagged.`,
               tools: storyTools as ToolSet,
               stopWhen: stepCountIs(100),
               timeout: { totalMs: 5 * 60 * 1000, chunkMs: 120_000 },
@@ -1428,10 +1440,13 @@ Your task: Address the reviewer's feedback for "${story.title}". Fix the specifi
               revUsage?.inputTokens || 0, revUsage?.outputTokens || 0);
             output.updateCost?.(costTracker.getTotalCost());
 
+            logger.info(`Revision completed`, { story: i + 1, persona: story.persona, inputTokens: revUsage?.inputTokens || 0, outputTokens: revUsage?.outputTokens || 0 });
             output.log(story.persona, `${story.title} — revision complete!`);
           } catch (err) {
             output.statusDone();
-            output.log("system", `Revision failed for story ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
+            const errMsg = err instanceof Error ? err.message : String(err);
+            logger.error(`Revision failed`, { story: i + 1, persona: story.persona, error: errMsg });
+            output.log("system", `Revision failed for story ${i + 1}: ${errMsg}`);
           }
         }
               // Loop back to review again

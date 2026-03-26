@@ -937,6 +937,15 @@ export async function runOrchestration(
             const result = await toolDef.execute(input);
             runHooks("post", toolName, config.hooks, workingDir);
 
+            // Log tool result to cli.log — full output, no truncation
+            const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+            const isError = typeof result === "string" && result.startsWith("Error:");
+            if (isError) {
+              logger.error("Tool error", { persona: story.persona, tool: toolName, result: resultStr });
+            } else {
+              logger.debug("Tool result", { tool: toolName, result: resultStr });
+            }
+
             // Track docker compose services for auto-cleanup
             if (toolName === "bash") {
               const cmd = (input as { command?: string }).command || "";
@@ -1111,6 +1120,8 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
                   line.includes("::file_created::") || line.includes("::file_modified::")) continue;
               output.log(story.persona, line);
             }
+            // Always log full text to cli.log — terminal may suppress but logs show truth
+            logger.debug("Story output", { persona: story.persona, text });
           }
           output.status(`${story.persona}: thinking...`);
         },

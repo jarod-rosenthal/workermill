@@ -10,6 +10,7 @@ import { stopAllMCPServers } from "../mcp-client.js";
 import { browserClose } from "../browser.js";
 import type {
   Message,
+  ToolCallInfo,
   PermissionRequest,
   AgentStatus,
 } from "./types.js";
@@ -65,6 +66,10 @@ interface AppProps {
   buildPreviewLine?: string;
   /** All build output lines accumulated in dynamic area during build. */
   buildLines?: string[];
+  /** Streaming tool calls — shown in dynamic area during agent execution. */
+  streamingToolCalls?: ToolCallInfo[];
+  /** Streaming text — shown in dynamic area during agent execution. */
+  streamingText?: string;
 }
 
 /** Braille spinner that animates every 80ms to show the terminal is alive. */
@@ -197,6 +202,22 @@ export function App(props: AppProps): React.ReactElement {
       </Static>
 
       {/* === Dynamic area === */}
+
+      {/* Streaming tool calls — shown during agent execution */}
+      {props.streamingToolCalls && props.streamingToolCalls.length > 0 ? (
+        <Box flexDirection="column" marginLeft={2}>
+          {props.streamingToolCalls.map((tc) => (
+            <ToolCallDisplay key={tc.id} tool={tc} />
+          ))}
+        </Box>
+      ) : null}
+
+      {/* Streaming text — latest step text shown during agent execution */}
+      {props.streamingText ? (
+        <Box flexDirection="column" marginLeft={2}>
+          <Markdown content={props.streamingText} />
+        </Box>
+      ) : null}
 
       {/* Build output — accumulates in dynamic area during build, commits to Static when done */}
       {props.buildLines && props.buildLines.length > 0 ? (

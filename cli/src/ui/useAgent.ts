@@ -244,9 +244,18 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   // ------- React state -------- //
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
-  const [streamingToolCalls, setStreamingToolCalls] = useState<ToolCallInfo[]>(
+  const [streamingToolCalls, _setStreamingToolCalls] = useState<ToolCallInfo[]>(
     [],
   );
+  const streamingToolCallsRef = useRef<ToolCallInfo[]>([]);
+  // Wrapper that keeps ref in sync with state for finalization.
+  const setStreamingToolCalls: typeof _setStreamingToolCalls = (action) => {
+    _setStreamingToolCalls((prev) => {
+      const next = typeof action === "function" ? action(prev) : action;
+      streamingToolCallsRef.current = next;
+      return next;
+    });
+  };
   const [status, setStatus] = useState<AgentStatus>("idle");
   const [statusDetail, setStatusDetail] = useState("");
   const [permissionRequest, setPermissionRequest] =
@@ -487,18 +496,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             status: "pending",
           };
           setStreamingToolCalls((prev) => [...prev, info]);
-
-          // Push tool call to Static immediately
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `tc-${callId}`,
-              role: "assistant" as const,
-              content: "",
-              toolCalls: [{ ...info, status: "running" as const }],
-              timestamp: new Date().toISOString(),
-            },
-          ]);
           setStatus("permission");
 
           const { allowed, mode } = await checkPermission(name, input);
@@ -656,17 +653,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             ),
             onStepFinish({ text }) {
               if (text) {
-                // Push step text directly to Static (committed messages)
-                // so it scrolls up naturally — no dynamic area jumping.
-                setMessages((prev) => [
-                  ...prev,
-                  {
-                    id: crypto.randomUUID(),
-                    role: "assistant" as const,
-                    content: text,
-                    timestamp: new Date().toISOString(),
-                  },
-                ]);
+                // Keep step text in the dynamic area via streamingText.
+                // It will be committed to Static when the full response completes.
                 setStreamingText(text);
                 setStatus("streaming");
               }
@@ -687,8 +675,37 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           const inputTokens = usage?.inputTokens ?? 0;
           const outputTokens = usage?.outputTokens ?? 0;
 
-          // Clear streaming state — text was already pushed to Static
-          // via onStepFinish, so no need to add another message.
+          // Commit the full response to Static as one message.
+          // Tool calls and text were kept in the dynamic area until now.
+          setMessages((prev) => {
+            const newMessages: Message[] = [];
+
+            // Commit accumulated tool calls
+            const currentToolCalls = streamingToolCallsRef.current;
+            if (currentToolCalls.length > 0) {
+              newMessages.push({
+                id: crypto.randomUUID(),
+                role: "assistant" as const,
+                content: "",
+                toolCalls: currentToolCalls,
+                timestamp: new Date().toISOString(),
+              });
+            }
+
+            // Commit final text
+            if (finalText) {
+              newMessages.push({
+                id: crypto.randomUUID(),
+                role: "assistant" as const,
+                content: finalText,
+                timestamp: new Date().toISOString(),
+              });
+            }
+
+            return [...prev, ...newMessages];
+          });
+
+          // Clear streaming state
           setStreamingToolCalls([]);
           setStreamingText("");
 
@@ -754,17 +771,31 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             return;
           }
 
-          // Surface the error as an assistant message so the user sees it.
+          // Commit any tool calls to Static before showing error.
+          const errToolCalls = streamingToolCallsRef.current;
           const errText =
             err instanceof Error ? err.message : String(err);
           logger.error("Agent error", { error: errText });
-          const errorMsg: Message = {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: `Error: ${errText}`,
-            timestamp: new Date().toISOString(),
-          };
-          setMessages((prev) => [...prev, errorMsg]);
+
+          setMessages((prev) => {
+            const newMsgs: Message[] = [];
+            if (errToolCalls.length > 0) {
+              newMsgs.push({
+                id: crypto.randomUUID(),
+                role: "assistant" as const,
+                content: "",
+                toolCalls: errToolCalls,
+                timestamp: new Date().toISOString(),
+              });
+            }
+            newMsgs.push({
+              id: crypto.randomUUID(),
+              role: "assistant" as const,
+              content: `Error: ${errText}`,
+              timestamp: new Date().toISOString(),
+            });
+            return [...prev, ...newMsgs];
+          });
           setStreamingText("");
           setStreamingToolCalls([]);
           setStatus("idle");
@@ -781,6 +812,20 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       abortRef.current.abort();
       abortRef.current = null;
       killActiveProcess();
+    }
+    // Commit any completed tool calls to Static before clearing.
+    const currentToolCalls = streamingToolCallsRef.current;
+    if (currentToolCalls.length > 0) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant" as const,
+          content: "",
+          toolCalls: currentToolCalls,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
     }
     setStatus("idle");
     setStreamingText("");

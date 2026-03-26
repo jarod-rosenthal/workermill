@@ -82,7 +82,7 @@ export function createModel(
       return google(modelName);
     case "ollama": {
       const ollamaHost = host || "http://localhost:11434";
-      const ollamaProvider = createOllama({ baseURL: `${ollamaHost}/api` });
+      const ollamaProvider = createOllama({ baseURL: `${ollamaHost}/api`, keepAlive: "-1" });
       return ollamaProvider(modelName);
     }
     default:

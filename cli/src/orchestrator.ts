@@ -1007,7 +1007,7 @@ ${MEMORY_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}
       const recentTexts: string[] = [];
       const TEXT_LOOP_WINDOW = 8;
       const TEXT_SUPPRESS_THRESHOLD = 5;
-      const TEXT_ABORT_THRESHOLD = 20;
+      const TEXT_ABORT_THRESHOLD = 10;
       let textRepeatCount = 0;
       let textSuppressed = false;
 
@@ -1039,7 +1039,7 @@ ${MEMORY_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}
                   logger.info("Text repetition suppressed", { persona: story.persona, count: textRepeatCount });
                 }
                 if (textRepeatCount >= TEXT_ABORT_THRESHOLD) {
-                  logger.error("Text output loop — aborting after 50 repeats", { persona: story.persona });
+                  logger.error("Text output loop — aborting after repeated output", { persona: story.persona });
                   output.error("Text output stuck in loop — aborting story");
                   combinedAbort.abort();
                 }

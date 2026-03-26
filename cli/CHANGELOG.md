@@ -4,6 +4,40 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.13.3] - 2026-03-26
+
+### Fixed
+- Auto-update no longer attempts `npm install -g` which fails without sudo. Shows `npx workermill@X.Y.Z` instead.
+- Browser tools removed from agent tool set — raw JSON schemas broke ALL tool definitions, causing models to fake tool calls in text output.
+- Update check cache stale after user upgrades — now re-fetches from npm when cached version is older than current.
+- Removed all content truncation from user-facing output (file contents, diffs, changelogs, persona prompts).
+- 68 silent `catch {}` blocks replaced with proper error logging.
+- Git branch detection works on repos with no commits (symbolic-ref fallback).
+- `/personas show` displays full prompt without truncation.
+- Status bar rows 2 and 3 no longer render giant black background blocks.
+
+### Added
+- Three-row status bar: model/context/project, tool usage stats, permission mode with shift+tab hint.
+- `/chrome` command to open/close headless Chrome browser.
+- `/schedule` command — create recurring tasks with cron schedules.
+- Headless mode (`-p` flag) — run single prompt without TUI, streams to stdout.
+- `/voice` listens until silence (no arbitrary time limit).
+- Auto-revise option: press (a)lways at revision prompt, `--auto-revise` flag, or `/settings review.autoRevise true`.
+- Distinct permission mode icons: ▶ ask, ✏️ auto-edit, ⚡ trust all.
+- Agent identity includes "created by Jarod Rosenthal" (answers if asked).
+- Dynamic model selection for OpenAI and Google — fetches available models from API after key entry.
+- 7 additional providers via OpenAI-compatible API (Groq, DeepSeek, Mistral, OpenRouter, Together, xAI, Fireworks).
+- Ollama model list deduplicated by base name, sorted by coding relevance.
+- Google model list filtered to coding-capable Gemini models only.
+- Build output accumulates in dynamic area during build, commits to Static on completion.
+- `/init` uses the AI agent to explore codebase and generate WORKERMILL.md (not static scanning).
+- `/init` on existing file reviews and suggests improvements instead of overwriting.
+
+### Changed
+- `WORKERMILL.md` in repo root is now the primary instructions file (was `.workermill/instructions.md`).
+- `/clear` actually resets the session (was showing "not supported").
+- Update check interval reduced from 24h to 4h.
+
 ## [0.10.6] - 2026-03-25
 
 ### Added

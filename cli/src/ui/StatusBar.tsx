@@ -167,12 +167,12 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
 
       {/* Row 2: Tool usage stats */}
       <Box>
-        <Text backgroundColor={bgColor} color={theme.subtle}>
+        <Text color={theme.subtle}>
           {" "}
         </Text>
         {toolEntries.length > 0 ? (
           toolEntries.map(([name, count], i) => (
-            <Text key={name} backgroundColor={bgColor}>
+            <Text key={name}>
               <Text color={theme.success}>{"✓ "}</Text>
               <Text color={theme.text}>{name.replace(/_/g, " ")}</Text>
               <Text color={theme.subtle}>{` ×${count}`}</Text>
@@ -180,30 +180,28 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
             </Text>
           ))
         ) : (
-          <Text backgroundColor={bgColor} color={theme.subtle}>
+          <Text color={theme.subtle}>
             {"no tool calls yet"}
           </Text>
         )}
         {/* Planner/reviewer roles */}
         {rm && (rm.planner !== rm.worker || rm.reviewer !== rm.worker) ? (
-          <Text backgroundColor={bgColor} color={theme.subtle}>
+          <Text color={theme.subtle}>
             {"  "}
             {rm.planner !== rm.worker ? `plan:${rm.planner} ` : ""}
             {rm.reviewer !== rm.worker ? `review:${rm.reviewer}` : ""}
           </Text>
         ) : null}
-        <Text backgroundColor={bgColor}>{" ".repeat(Math.max(0, width - 2))}{/* fill */}</Text>
       </Box>
 
       {/* Row 3: Permission mode */}
       <Box>
-        <Text backgroundColor={bgColor} color={modeColor} bold>
+        <Text color={modeColor} bold>
           {` ${modeIcon}${modeIcon} ${props.mode} `}
         </Text>
-        <Text backgroundColor={bgColor} color={theme.subtle} dimColor>
+        <Text color={theme.subtle} dimColor>
           {"(shift+tab to cycle)"}
         </Text>
-        <Text backgroundColor={bgColor}>{" ".repeat(Math.max(0, width - props.mode.length - 25))}</Text>
       </Box>
     </Box>
   );

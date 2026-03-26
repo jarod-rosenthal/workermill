@@ -1462,31 +1462,41 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
 
 Working directory: ${workingDir}
 
+## Ticket Requirements — THIS IS YOUR SPEC
+
+${userTask}
+
 ## Communication Style
 
-Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!", or similar. Start with the substance — what you did, what you found, or what you need. Be concise and informative. Do NOT repeat what you said in previous steps — each response should add new information only.
+Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries. Start with the substance. Be concise.
 
 ## Critical rules
 - NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, nodemon, tsc --watch, etc.)
 - NEVER run interactive commands that wait for user input
-- Only run commands that complete and exit`;
+- Only run commands that complete and exit
+- You are making TARGETED FIXES to existing code. Do NOT rewrite files from scratch.
+- READ each file BEFORE editing it. The code already works — you are fixing specific issues.`;
 
           try {
             const revStream = streamText({
               model: storyModel,
               abortSignal,
               system: revisionSystemPrompt,
-              prompt: `## Reviewer feedback — fix these issues:
+              prompt: `## Reviewer feedback — fix these specific issues:
 
 ${storyFeedback}
 
-## Your task
+## Your scope
 
-Fix the reviewer's issues for story ${i + 1}: "${story.title}".
+Story ${i + 1}: "${story.title}" — ${story.description}
 
-Original description: ${story.description}
+## Instructions
 
-Address each specific issue mentioned in the feedback. Read the relevant files first, then make targeted fixes. Do not rewrite code that wasn't flagged.`,
+1. READ the files mentioned in the feedback first
+2. Make TARGETED edits to fix ONLY the issues the reviewer flagged
+3. Do NOT delete or rewrite files — use edit_file for surgical changes
+4. Do NOT add features or refactor code that wasn't flagged
+5. If the reviewer says something is missing, add it — don't restructure what exists`,
               tools: storyTools as ToolSet,
               stopWhen: stepCountIs(100),
               timeout: { totalMs: 5 * 60 * 1000, chunkMs: 120_000 },

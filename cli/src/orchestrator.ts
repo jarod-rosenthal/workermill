@@ -156,6 +156,35 @@ function isTransientError(error: unknown): boolean {
   return false;
 }
 
+/**
+ * Classify an error to determine if it's auto-fixable and provide fix context.
+ * Pattern from worker/epic/types.ts ErrorCategory + worker-decision-engine.ts.
+ */
+function classifyError(errMsg: string): { category: string; fixable: boolean; fixHint: string } {
+  if (/type\s?error|cannot find name|is not assignable|has no exported member|property .+ does not exist/i.test(errMsg)) {
+    return { category: "typescript", fixable: true, fixHint: "Fix the TypeScript type errors shown above. Run `npx tsc --noEmit` to verify." };
+  }
+  if (/eslint|lint|prettier|formatting/i.test(errMsg)) {
+    return { category: "lint", fixable: true, fixHint: "Fix the linting/formatting errors shown above. Run `npm run lint` to verify." };
+  }
+  if (/test.*fail|assertion.*error|expect\(.*\)\.to|FAIL\s+src\//i.test(errMsg)) {
+    return { category: "test", fixable: true, fixHint: "Fix the failing tests shown above. Run the test command to verify." };
+  }
+  if (/build.*fail|compilation.*error|syntax\s?error|unexpected token|cannot find module/i.test(errMsg)) {
+    return { category: "build", fixable: true, fixHint: "Fix the build/compilation errors shown above." };
+  }
+  if (/status code (502|503|504)|socket hang up|ECONNRESET|ETIMEDOUT|ECONNREFUSED/i.test(errMsg)) {
+    return { category: "transient", fixable: false, fixHint: "" };
+  }
+  if (/auth|unauthorized|forbidden|401|403|api.?key/i.test(errMsg)) {
+    return { category: "auth", fixable: false, fixHint: "" };
+  }
+  if (/rate.?limit|too many requests|429/i.test(errMsg)) {
+    return { category: "rate_limit", fixable: false, fixHint: "" };
+  }
+  return { category: "unknown", fixable: false, fixHint: "" };
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = any;
 
@@ -908,24 +937,28 @@ export async function runOrchestration(
     let revisionFeedback = "";
     for (let revision = 0; revision <= 2; revision++) {
 
-    // Build system prompt with context from prior stories
+    // Build enriched context from prior stories — mirrors worker/epic/prompt-builder.ts
     const contextParts: string[] = [];
+
+    // Sibling files warning — DO NOT DELETE (from worker prompt-builder.ts)
     if (context.filesCreated.length > 0) {
-      contextParts.push(`Files created: ${context.filesCreated.join(", ")}`);
+      contextParts.push(`\n## Files Created by Prior Stories — DO NOT DELETE\n${context.filesCreated.map(f => `- ${f}`).join("\n")}\nThese files were created by other experts. You may import or reference them but NEVER delete or overwrite them.`);
     }
     if (context.filesModified.length > 0) {
-      contextParts.push(`Files modified: ${context.filesModified.join(", ")}`);
-    }
-    if (context.decisions.length > 0) {
-      contextParts.push(`Decisions: ${context.decisions.join("; ")}`);
-    }
-    if (context.learnings.length > 0) {
-      contextParts.push(`Learnings: ${context.learnings.join("; ")}`);
+      contextParts.push(`\n## Files Modified by Prior Stories\n${context.filesModified.map(f => `- ${f}`).join("\n")}\nBe aware these files have been changed. Read them before making assumptions about their contents.`);
     }
 
-    const contextBlock = contextParts.length > 0
-      ? `\n\n## Context from prior experts\n${contextParts.join("\n")}`
-      : "";
+    // Decisions as hard constraints (not informational — from worker coordinator pattern)
+    if (context.decisions.length > 0) {
+      contextParts.push(`\n## Architectural Decisions — FOLLOW THESE\n${context.decisions.map((d, idx) => `${idx + 1}. ${d}`).join("\n")}\nThese decisions were made by prior experts. Follow them — do not contradict or revisit unless the spec explicitly requires a different approach.`);
+    }
+
+    // Learnings as helpful context
+    if (context.learnings.length > 0) {
+      contextParts.push(`\n## Learnings from Prior Stories\n${context.learnings.map(l => `- ${l}`).join("\n")}`);
+    }
+
+    const contextBlock = contextParts.join("\n");
 
     const projectInstructions = formatProjectInstructions(workingDir);
     const systemPrompt = `${persona.systemPrompt}${projectInstructions}${contextBlock}
@@ -934,11 +967,16 @@ export async function runOrchestration(
 
 ${userTask}
 
-## Your File Scope
+## Your File Scope — STAY IN YOUR LANE
 
 ${story.description}
 
 **The ticket requirements above are your ONLY spec. This scope identifies which files and area of the codebase you are responsible for. Do NOT invent requirements beyond what the ticket states.**
+Do NOT modify files outside this scope unless absolutely necessary for shared types/imports. If you must touch a file owned by another story, note it with a ::file_modified:: marker so subsequent experts are aware.
+
+## Verification Before Completion
+
+Before you finish, verify your implementation addresses every point from your story description above. If anything described in your scope is NOT implemented, fix it before finishing. Do not leave partial work.
 
 Working directory: ${workingDir}
 
@@ -1078,6 +1116,193 @@ ${MEMORY_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}
         break;
       }
 
+      // --- Post-execution validation (from worker/epic/story-validator.ts) ---
+      {
+        const validationIssues: string[] = [];
+
+        // 1. Verify created files actually exist on disk
+        for (const f of context.filesCreated) {
+          const fullPath = path.isAbsolute(f) ? f : path.join(workingDir, f);
+          if (!fs.existsSync(fullPath)) {
+            validationIssues.push(`File declared as created but not found on disk: ${f}`);
+          }
+        }
+
+        // 2. Auto-detect typecheck — if .ts/.tsx files were touched and tsconfig.json exists
+        const touchedFiles = [...context.filesCreated, ...context.filesModified];
+        const hasTsFiles = touchedFiles.some(f => f.endsWith(".ts") || f.endsWith(".tsx"));
+        if (hasTsFiles && fs.existsSync(path.join(workingDir, "tsconfig.json"))) {
+          try {
+            execSync("npx tsc --noEmit 2>&1", { cwd: workingDir, timeout: 300_000, encoding: "utf-8" });
+            output.log(story.persona, "Typecheck passed");
+          } catch (tscErr) {
+            const tscOutput = tscErr instanceof Error && "stdout" in tscErr ? String((tscErr as any).stdout) : String(tscErr);
+            // Limit to first 40 lines to avoid bloating the retry prompt
+            const truncated = tscOutput.split("\n").slice(0, 40).join("\n");
+            validationIssues.push(`TypeScript errors:\n${truncated}`);
+          }
+        }
+
+        // 3. Auto-detect lint — if package.json has a lint script
+        try {
+          const pkgPath = path.join(workingDir, "package.json");
+          if (fs.existsSync(pkgPath)) {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+            if (pkg.scripts?.lint) {
+              try {
+                execSync("npm run lint 2>&1", { cwd: workingDir, timeout: 120_000, encoding: "utf-8" });
+                output.log(story.persona, "Lint passed");
+              } catch (lintErr) {
+                const lintOutput = lintErr instanceof Error && "stdout" in lintErr ? String((lintErr as any).stdout) : String(lintErr);
+                const truncated = lintOutput.split("\n").slice(0, 30).join("\n");
+                validationIssues.push(`Lint errors:\n${truncated}`);
+              }
+            }
+          }
+        } catch {
+          // package.json parse error — skip lint check
+        }
+
+        if (validationIssues.length > 0 && revision < 2) {
+          output.log(story.persona, `Validation found ${validationIssues.length} issue(s) — retrying with fix context`);
+          logger.info("Story validation failed, retrying", { persona: story.persona, issues: validationIssues.length });
+          revisionFeedback = `\n\n## Validation Errors — Fix These Before Completing\n\n${validationIssues.join("\n\n")}`;
+          continue; // retry with validation errors as context
+        }
+        if (validationIssues.length > 0) {
+          // Final attempt also had issues — log but proceed (don't block forever)
+          output.log(story.persona, `Validation issues remain after retries: ${validationIssues.length} issue(s)`);
+          logger.info("Story validation issues on final attempt", { persona: story.persona, issues: validationIssues });
+        }
+      }
+
+      // --- Inline Verifier (from worker/epic/inline-verifier.ts) ---
+      // Spec compliance check: does the implementation satisfy the story description?
+      // Read-only — no edits, just verification. If gaps found, feed back for one more pass.
+      if (revision < 2) {
+        try {
+          output.status(`${story.persona}: verifying spec compliance...`);
+          const { provider: vProvider, model: vModel, host: vHost, contextLength: vCtx } = getProviderForPersona(config, "tech_lead");
+          const vApiKey = config.providers[vProvider]?.apiKey;
+          if (vApiKey) {
+            const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
+            const envVar = envMap[vProvider];
+            const key = vApiKey.startsWith("{env:") ? process.env[vApiKey.slice(5, -1)] : vApiKey;
+            if (envVar && key && !process.env[envVar]) process.env[envVar] = key;
+          }
+
+          const verifierModel = createModel(vProvider as AIProvider, vModel, vHost, vCtx);
+          const verifierAllTools = createToolDefinitions(workingDir, verifierModel, sandboxed);
+          const verifierTools: Record<string, AnyToolDef> = {};
+          for (const toolName of ["read_file", "glob", "grep", "ls", "bash"]) {
+            const toolDef = verifierAllTools[toolName as keyof typeof verifierAllTools] as AnyToolDef;
+            if (toolDef) {
+              verifierTools[toolName] = {
+                ...toolDef,
+                execute: async (input: Record<string, unknown>) => {
+                  output.status(`verifier: checking...`);
+                  const result = await toolDef.execute(input);
+                  return result;
+                },
+              };
+            }
+          }
+
+          const verifierSystemPrompt = `You are an independent QA Verification Agent. You did NOT write the code you are reviewing.
+
+Your job: verify that the implementation satisfies every requirement from the original specification.
+
+## Rules
+
+- You are testing SPEC COMPLIANCE, not code quality. The code may be ugly but correct — that's a pass.
+- For each requirement, determine: does the code actually do what the spec says?
+- For API criteria: read the route handlers and verify the exact request/response shapes match.
+- For database criteria: read the models/migrations and verify exact field names and types.
+- For frontend criteria: read the components and verify exact UI elements and behavior.
+- For test criteria: check if the specified tests exist and cover the stated scenarios.
+- If you can verify a criterion by reading code alone, do that. Only run tests if reading isn't sufficient.
+- NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, etc.)
+
+## Communication Style
+
+Write in a professional, direct tone. No filler words. Start with substance.
+
+## Output Format
+
+After checking all criteria, output:
+
+VERIFICATION_DECISION: pass
+OR
+VERIFICATION_DECISION: partial_pass
+OR
+VERIFICATION_DECISION: fail
+
+Then for each criterion that FAILED:
+
+FAILED_CRITERION: [criterion text] | [reason for failure]
+
+Then:
+
+VERIFICATION_SUMMARY: [overall summary of findings]`;
+
+          let verifierOutput = "";
+          const verifierStream = streamText({
+            model: verifierModel,
+            abortSignal,
+            system: verifierSystemPrompt,
+            prompt: `## Task Specification\n\n${userTask}\n\n## Story Scope\n\nStory ${i + 1}: "${story.title}" — ${story.description}\n\n## Instructions\n\nVerify that the implementation in ${workingDir} satisfies the requirements above. Read the relevant files and check each requirement.\n\nWorking directory: ${workingDir}`,
+            tools: verifierTools as ToolSet,
+            stopWhen: stepCountIs(30),
+            timeout: { totalMs: 3 * 60 * 1000, chunkMs: 120_000 },
+            ...buildOllamaOptions(vProvider as AIProvider, vCtx),
+            onStepFinish({ text }) {
+              if (text) {
+                verifierOutput += text + "\n";
+              }
+              output.status(`verifier: checking...`);
+            },
+          });
+          for await (const _chunk of verifierStream.textStream) { /* consumed */ }
+          const verifierUsage = await verifierStream.totalUsage;
+          output.statusDone();
+
+          costTracker.addUsage("Verifier", vProvider, vModel,
+            verifierUsage?.inputTokens || 0, verifierUsage?.outputTokens || 0);
+          output.updateCost?.(costTracker.getTotalCost());
+
+          const vDecisionMatch = verifierOutput.match(/VERIFICATION_DECISION:\s*(pass|partial_pass|fail)/i);
+          const vDecision = vDecisionMatch ? vDecisionMatch[1].toLowerCase() : "pass";
+
+          if (vDecision === "pass") {
+            output.log(story.persona, "Spec verification passed");
+          } else {
+            // Extract failed criteria
+            const failedCriteria: string[] = [];
+            const fcPattern = /FAILED_CRITERION:\s*(.+)/gi;
+            let fcMatch;
+            while ((fcMatch = fcPattern.exec(verifierOutput)) !== null) {
+              failedCriteria.push(fcMatch[1].trim());
+            }
+            const vSummaryMatch = verifierOutput.match(/VERIFICATION_SUMMARY:\s*(.+)/i);
+            const vSummary = vSummaryMatch ? vSummaryMatch[1].trim() : "Spec gaps detected";
+
+            output.log(story.persona, `Spec verification: ${vDecision} — ${vSummary}`);
+            logger.info("Spec verification failed", { decision: vDecision, failedCriteria: failedCriteria.length, persona: story.persona });
+
+            // Feed gaps back to the executor for one more pass
+            const gapDetails = failedCriteria.length > 0
+              ? failedCriteria.map(c => `- ${c}`).join("\n")
+              : vSummary;
+            revisionFeedback = `\n\n## Spec Compliance Gaps — Fix These Before Completing\n\nThe QA verifier found that your implementation does not fully satisfy the spec:\n\n${gapDetails}\n\nFix these gaps. Do NOT rewrite what already works — only add what's missing.`;
+            continue; // retry with gap feedback
+          }
+        } catch (verifierErr) {
+          output.statusDone();
+          logger.debug("Verifier error (non-fatal)", { error: verifierErr instanceof Error ? verifierErr.message : String(verifierErr) });
+          // Verifier failure is non-fatal — proceed without it
+        }
+      }
+
       output.log(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
       logger.info(`Story ${i + 1} completed`, { persona: story.persona, inputTokens: inTokens, outputTokens: outTokens });
           break; // Story succeeded, exit revision loop
@@ -1086,14 +1311,35 @@ ${MEMORY_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}
       const errMsg = err instanceof Error ? err.message : String(err);
       logger.error(`Story ${i + 1} error`, { persona: story.persona, error: errMsg, revision });
 
-      // Retry on transient errors (network, 5xx) — from coordinator-utils.ts
-      if (isTransientError(err) && revision < 2) {
+      // Classify error — from worker/epic/types.ts + worker-decision-engine.ts
+      const errorClass = classifyError(errMsg);
+      logger.info(`Error classified`, { category: errorClass.category, fixable: errorClass.fixable, persona: story.persona });
+
+      // Transient errors — retry as-is
+      if (errorClass.category === "transient" && revision < 2) {
         output.log(story.persona, `Transient error: ${errMsg} — retrying...`);
         logger.info(`Story ${i + 1} retrying (transient)`, { revision });
-        continue; // retry this revision
+        continue;
       }
 
-      output.error(`Story ${i + 1} failed: ${errMsg}`);
+      // Fixable errors (typescript, lint, test, build) — retry with fix context
+      if (errorClass.fixable && revision < 2) {
+        output.log(story.persona, `${errorClass.category} error detected — retrying with fix context (${revision + 1}/3)`);
+        logger.info(`Story ${i + 1} retrying (fixable ${errorClass.category})`, { revision });
+        // Truncate error to avoid bloating the prompt
+        const truncatedErr = errMsg.split("\n").slice(0, 40).join("\n");
+        revisionFeedback = `\n\n## Error During Execution — Fix This\n\nCategory: ${errorClass.category}\n\n${truncatedErr}\n\n**${errorClass.fixHint}**`;
+        continue;
+      }
+
+      // Non-fixable or retries exhausted
+      if (errorClass.category === "rate_limit") {
+        output.error(`Story ${i + 1} hit rate limit — stopping (wait and retry later)`);
+      } else if (errorClass.category === "auth") {
+        output.error(`Story ${i + 1} auth error — check your API key/credentials`);
+      } else {
+        output.error(`Story ${i + 1} failed: ${errMsg}`);
+      }
       failedStories.add(story.id);
       break;
     }
@@ -1108,6 +1354,190 @@ ${MEMORY_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}
     if (failedNames.length > 0) output.coordinatorLog(`Failed stories: ${failedNames.join(", ")}`);
     if (skippedNames.length > 0) output.coordinatorLog(`Skipped (blocked by dependency): ${skippedNames.join(", ")}`);
     logger.info("Story execution summary", { failed: [...failedStories], skipped: [...skippedStories], completed: sorted.length - failedStories.size - skippedStories.size });
+  }
+
+  // --- Integration Check (from worker/epic/inline-integration-fixer.ts) ---
+  // For multi-story builds, run cross-story validation before review.
+  // Auto-detects quality gates (typecheck, lint), runs them, and if they fail
+  // spawns an integration fixer agent to resolve cross-story issues.
+  const completedStories = sorted.filter(s => !failedStories.has(s.id) && !skippedStories.has(s.id));
+  if (completedStories.length >= 2) {
+    output.coordinatorLog("Running integration check across stories...");
+    output.status("Integration check: validating cross-story compatibility...");
+    logger.info("Starting integration check", { stories: completedStories.length });
+
+    const integrationIssues: string[] = [];
+
+    // Run typecheck across the full project
+    if (fs.existsSync(path.join(workingDir, "tsconfig.json"))) {
+      try {
+        execSync("npx tsc --noEmit 2>&1", { cwd: workingDir, timeout: 300_000, encoding: "utf-8" });
+      } catch (tscErr) {
+        const tscOutput = tscErr instanceof Error && "stdout" in tscErr ? String((tscErr as any).stdout) : String(tscErr);
+        integrationIssues.push(`TypeScript errors (cross-story):\n${tscOutput.split("\n").slice(0, 50).join("\n")}`);
+      }
+    }
+
+    // Run lint across the full project
+    try {
+      const pkgPath = path.join(workingDir, "package.json");
+      if (fs.existsSync(pkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+        if (pkg.scripts?.lint) {
+          try {
+            execSync("npm run lint 2>&1", { cwd: workingDir, timeout: 120_000, encoding: "utf-8" });
+          } catch (lintErr) {
+            const lintOutput = lintErr instanceof Error && "stdout" in lintErr ? String((lintErr as any).stdout) : String(lintErr);
+            integrationIssues.push(`Lint errors (cross-story):\n${lintOutput.split("\n").slice(0, 30).join("\n")}`);
+          }
+        }
+      }
+    } catch { /* skip */ }
+
+    // Go quality gates
+    if (fs.existsSync(path.join(workingDir, "go.mod"))) {
+      for (const cmd of ["go vet ./...", "go build ./..."]) {
+        try {
+          execSync(`${cmd} 2>&1`, { cwd: workingDir, timeout: 120_000, encoding: "utf-8" });
+        } catch (goErr) {
+          const goOutput = goErr instanceof Error && "stdout" in goErr ? String((goErr as any).stdout) : String(goErr);
+          integrationIssues.push(`${cmd} errors:\n${goOutput.split("\n").slice(0, 30).join("\n")}`);
+        }
+      }
+    }
+
+    output.statusDone();
+
+    if (integrationIssues.length > 0) {
+      output.coordinatorLog(`Integration check found ${integrationIssues.length} issue(s) — spawning fixer...`);
+      logger.info("Integration issues detected", { count: integrationIssues.length });
+
+      try {
+        const { provider: ifProvider, model: ifModel, host: ifHost, contextLength: ifCtx } = getProviderForPersona(config, "tech_lead");
+        const ifApiKey = config.providers[ifProvider]?.apiKey;
+        if (ifApiKey) {
+          const envMap: Record<string, string> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY" };
+          const envVar = envMap[ifProvider];
+          const key = ifApiKey.startsWith("{env:") ? process.env[ifApiKey.slice(5, -1)] : ifApiKey;
+          if (envVar && key && !process.env[envVar]) process.env[envVar] = key;
+        }
+
+        const ifModel_ = createModel(ifProvider as AIProvider, ifModel, ifHost, ifCtx);
+        const ifAllTools = createToolDefinitions(workingDir, ifModel_, sandboxed);
+        const ifTools: Record<string, AnyToolDef> = {};
+        for (const toolName of ["read_file", "write_file", "edit_file", "patch", "glob", "grep", "ls", "bash"]) {
+          const toolDef = ifAllTools[toolName as keyof typeof ifAllTools] as AnyToolDef;
+          if (toolDef) {
+            ifTools[toolName] = {
+              ...toolDef,
+              execute: async (input: Record<string, unknown>) => {
+                const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output);
+                if (!allowed) return "Tool execution denied by user.";
+                output.toolCall("integration_fixer", toolName, input);
+                output.status("integration_fixer: working...");
+                const result = await toolDef.execute(input);
+                output.status("");
+                return result;
+              },
+            };
+          }
+        }
+
+        const ifSystemPrompt = `You are an Integration Fix Agent. Multiple AI experts worked on separate stories in the same codebase. Their combined changes introduced integration issues.
+
+Fix ALL quality gate failures. You have access to ALL files in the repository.
+
+## Common Integration Issues
+
+- Missing props/types from one story expected by another
+- Duplicate test query selectors or test IDs
+- Conflicting imports or re-exports
+- Incompatible function signatures across story boundaries
+- Missing dependencies that one story assumed another would provide
+- Service startup failures (missing env vars, wrong port bindings)
+- Middleware configuration errors (wrong order, missing CORS, auth misconfiguration)
+
+## Rules
+
+- Fix EVERY failing command, not just the first
+- Run each command after fixing to verify
+- Do NOT refactor beyond what's needed to pass gates
+- NEVER change language versions (Go, Node.js, Python version pins are intentional)
+- NEVER change framework or dependency major versions unless explicitly incompatible
+- NEVER modify configuration files (tsconfig.json, .eslintrc, etc.) to suppress errors — fix the CODE
+- NEVER start long-running processes (dev servers, watch modes, npm start, etc.)
+
+## Communication Style
+
+Write in a professional, direct tone. No filler words. Start with substance.
+
+## Output Format
+
+After fixing (or determining it's unfixable), you MUST output:
+
+INTEGRATION_FIX_DECISION: passed
+OR
+INTEGRATION_FIX_DECISION: fixed
+OR
+INTEGRATION_FIX_DECISION: unfixable
+
+Then:
+
+INTEGRATION_FIX_SUMMARY: <description of what you fixed or why it's unfixable>`;
+
+        let ifOutput = "";
+        output.status("integration_fixer: resolving cross-story issues...");
+        const ifStream = streamText({
+          model: ifModel_,
+          abortSignal,
+          system: ifSystemPrompt,
+          prompt: `## Integration Failures\n\nThe following quality gate commands failed after all stories were applied:\n\n${integrationIssues.join("\n\n---\n\n")}\n\n## Stories That Were Executed\n\n${completedStories.map((s, idx) => `${idx + 1}. ${s.persona}: ${s.title} — ${s.description}`).join("\n")}\n\nWorking directory: ${workingDir}\n\nFix the integration issues. Run the failing commands after each fix to verify.`,
+          tools: ifTools as ToolSet,
+          stopWhen: stepCountIs(50),
+          timeout: { totalMs: 5 * 60 * 1000, chunkMs: 120_000 },
+          ...buildOllamaOptions(ifProvider as AIProvider, ifCtx),
+          onStepFinish({ text }) {
+            if (text) {
+              ifOutput += text + "\n";
+              const lines = text.split("\n").filter(l => l.trim());
+              for (const line of lines) {
+                if (line.includes("INTEGRATION_FIX_DECISION") || line.includes("INTEGRATION_FIX_SUMMARY")) continue;
+                output.log("integration_fixer", line);
+              }
+            }
+            output.status("integration_fixer: working...");
+          },
+        });
+        for await (const _chunk of ifStream.textStream) { /* consumed */ }
+        const ifUsage = await ifStream.totalUsage;
+        output.statusDone();
+
+        costTracker.addUsage("Integration Fixer", ifProvider, ifModel,
+          ifUsage?.inputTokens || 0, ifUsage?.outputTokens || 0);
+        output.updateCost?.(costTracker.getTotalCost());
+
+        const ifDecisionMatch = ifOutput.match(/INTEGRATION_FIX_DECISION:\s*(passed|fixed|unfixable)/i);
+        const ifDecision = ifDecisionMatch ? ifDecisionMatch[1].toLowerCase() : "unfixable";
+        const ifSummaryMatch = ifOutput.match(/INTEGRATION_FIX_SUMMARY:\s*(.+)/i);
+        const ifSummary = ifSummaryMatch ? ifSummaryMatch[1].trim() : "";
+
+        if (ifDecision === "fixed") {
+          output.coordinatorLog(`Integration issues resolved: ${ifSummary}`);
+        } else if (ifDecision === "unfixable") {
+          output.coordinatorLog(`Integration fixer could not resolve all issues: ${ifSummary}`);
+        } else {
+          output.coordinatorLog("Integration check passed after fixes");
+        }
+        logger.info("Integration fix result", { decision: ifDecision, summary: ifSummary });
+      } catch (ifErr) {
+        output.statusDone();
+        logger.debug("Integration fixer error (non-fatal)", { error: ifErr instanceof Error ? ifErr.message : String(ifErr) });
+        output.coordinatorLog("Integration fixer encountered an error — proceeding to review");
+      }
+    } else {
+      output.coordinatorLog("Integration check passed — no cross-story issues");
+      logger.info("Integration check passed");
+    }
   }
 
   // Review config
@@ -1416,6 +1846,124 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
 
         if (!shouldRevise) break;
 
+        // --- Inline Review Fix (from worker/epic/inline-review-fixer.ts) ---
+        // Try a lightweight surgical fix before full story re-execution.
+        // If the fix succeeds, skip the expensive full revision and go straight back to review.
+        {
+          output.coordinatorLog("Attempting inline review fix (surgical)...");
+          output.status("Inline fix: applying reviewer feedback...");
+          logger.info("Attempting inline review fix", { reviewRound });
+
+          const fixFeedback = reviewText;
+          const fixModel = reviewModel; // reuse reviewer's model for the fix pass
+          const fixTools: Record<string, AnyToolDef> = {};
+          // Use full tool set (not read-only) since we need to edit files
+          const fixAllTools = createToolDefinitions(workingDir, fixModel, sandboxed);
+          const fixToolNames = ["read_file", "write_file", "edit_file", "patch", "glob", "grep", "ls", "bash", "git"];
+          for (const toolName of fixToolNames) {
+            const toolDef = fixAllTools[toolName as keyof typeof fixAllTools] as AnyToolDef;
+            if (toolDef) {
+              fixTools[toolName] = {
+                ...toolDef,
+                execute: async (input: Record<string, unknown>) => {
+                  const allowed = await checkToolPermission(toolName, input, trustAll, sessionAllow, output);
+                  if (!allowed) return "Tool execution denied by user.";
+                  output.toolCall("review_fixer", toolName, input);
+                  output.status("review_fixer: working...");
+                  const result = await toolDef.execute(input);
+                  output.status("");
+                  return result;
+                },
+              };
+            }
+          }
+
+          const fixSystemPrompt = `You are a Review Fix Agent. A Tech Lead reviewed the implementation and requested changes.
+Your job is to apply ONLY the requested changes — do not rewrite unrelated code.
+
+## Rules
+
+- Only fix what the Tech Lead asked for. Do NOT refactor or improve other code.
+- Read the feedback carefully — apply every requested change.
+- If the feedback references specific files or lines, start there.
+- Run any relevant build/lint/test commands to verify your changes don't break anything.
+- You are making TARGETED FIXES to existing code. Do NOT rewrite files from scratch.
+- READ each file BEFORE editing it.
+
+## Communication Style
+
+Write in a professional, direct tone. No filler words. Start with substance.
+
+## Critical rules
+- NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, etc.)
+- NEVER run interactive commands that wait for user input
+- Only run commands that complete and exit
+
+## Output Format
+
+After fixing (or determining it's unfixable), you MUST output one of these markers:
+
+REVIEW_FIX_DECISION: fixed
+REVIEW_FIX_SUMMARY: <what you fixed>
+
+OR
+
+REVIEW_FIX_DECISION: unfixable
+REVIEW_FIX_SUMMARY: <why it cannot be surgically fixed>`;
+
+          try {
+            let fixOutput = "";
+            const fixStream = streamText({
+              model: fixModel,
+              abortSignal,
+              system: fixSystemPrompt,
+              prompt: `## Reviewer Feedback — Fix These Issues\n\n${fixFeedback}\n\nWorking directory: ${workingDir}`,
+              tools: fixTools as ToolSet,
+              stopWhen: stepCountIs(50),
+              timeout: { totalMs: 5 * 60 * 1000, chunkMs: 120_000 },
+              ...buildOllamaOptions(revProvider as AIProvider, revCtx),
+              onStepFinish({ text }) {
+                if (text) {
+                  fixOutput += text + "\n";
+                  const lines = text.split("\n").filter(l => l.trim());
+                  for (const line of lines) {
+                    if (line.includes("REVIEW_FIX_DECISION") || line.includes("REVIEW_FIX_SUMMARY")) continue;
+                    output.log("review_fixer", line);
+                  }
+                }
+                output.status("review_fixer: thinking...");
+              },
+            });
+            for await (const _chunk of fixStream.textStream) { /* drive */ }
+            const fixUsage = await fixStream.totalUsage;
+            output.statusDone();
+
+            costTracker.addUsage("Review Fixer", revProvider, revModel,
+              fixUsage?.inputTokens || 0, fixUsage?.outputTokens || 0);
+            output.updateCost?.(costTracker.getTotalCost());
+
+            const fixDecisionMatch = fixOutput.match(/REVIEW_FIX_DECISION:\s*(fixed|unfixable)/i);
+            const fixDecision = fixDecisionMatch ? fixDecisionMatch[1].toLowerCase() : null;
+
+            if (fixDecision === "fixed") {
+              output.coordinatorLog("Inline fix succeeded — skipping full revision, re-reviewing...");
+              logger.info("Inline review fix succeeded", { reviewRound });
+              continue; // go straight back to the review loop
+            }
+
+            // unfixable or no marker — fall through to full revision
+            const summaryMatch = fixOutput.match(/REVIEW_FIX_SUMMARY:\s*(.+)/i);
+            const reason = summaryMatch ? summaryMatch[1].trim() : "no decision marker";
+            output.coordinatorLog(`Inline fix could not resolve all issues (${reason}) — falling back to full revision`);
+            logger.info("Inline review fix fell through", { fixDecision, reason });
+          } catch (fixErr) {
+            output.statusDone();
+            const fixErrMsg = fixErr instanceof Error ? fixErr.message : String(fixErr);
+            logger.debug("Inline review fix error", { error: fixErrMsg });
+            output.coordinatorLog(`Inline fix failed (${fixErrMsg}) — falling back to full revision`);
+          }
+        }
+
         // Parse which stories need revision (selective revision from inline-reviewer.ts)
         const affected = parseAffectedStories(reviewText);
         const affectedSet = affected ? new Set(affected.stories) : null;
@@ -1433,6 +1981,31 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         }
 
         output.log("system", "--- Revision Pass ---");
+
+        // Capture prior work context before revision — prevents oscillation
+        // (from worker/epic/coordinator-review.ts captureStoryBranchSummaries pattern)
+        let priorWorkSummary = "";
+        try {
+          const diffStat = execSync("git diff --stat HEAD 2>/dev/null || true", { cwd: workingDir, encoding: "utf-8", timeout: 10_000 }).trim();
+          const diffContent = execSync("git diff HEAD 2>/dev/null || true", { cwd: workingDir, encoding: "utf-8", timeout: 15_000 }).trim();
+          // Also capture any recent commits on this session
+          const recentCommits = execSync("git log --oneline -5 2>/dev/null || true", { cwd: workingDir, encoding: "utf-8", timeout: 5_000 }).trim();
+          if (diffStat || recentCommits) {
+            const parts: string[] = [];
+            if (recentCommits) parts.push(`**Recent commits:**\n${recentCommits}`);
+            if (diffStat) parts.push(`**Uncommitted changes:**\n${diffStat}`);
+            // Include truncated diff for context (cap at 4K chars to avoid blowing up prompt)
+            if (diffContent) {
+              const truncatedDiff = diffContent.length > 4000
+                ? diffContent.slice(0, 4000) + `\n... (${diffContent.length - 4000} chars truncated)`
+                : diffContent;
+              parts.push(`**Current diff (what exists now):**\n\`\`\`diff\n${truncatedDiff}\n\`\`\``);
+            }
+            priorWorkSummary = parts.join("\n\n");
+          }
+        } catch {
+          // Non-fatal — proceed without prior work context
+        }
 
         for (let i = 0; i < sorted.length; i++) {
           const story = sorted[i];
@@ -1514,11 +2087,26 @@ Write in a professional, direct tone. Do NOT open messages with filler words or 
 - READ each file BEFORE editing it. The code already works — you are fixing specific issues.`;
 
           try {
+            // Build prior work section — prevents oscillation across revision rounds
+            const priorWorkSection = priorWorkSummary
+              ? `## What Was Done Before This Revision
+
+The following work already exists from previous attempts. Do NOT undo or rewrite this work
+unless the reviewer specifically flagged it as wrong. Build on what's there.
+
+${priorWorkSummary}
+
+**CRITICAL: If previous revisions already addressed an issue, do NOT redo or revert that work.
+Only fix the specific issues the reviewer flagged below.**
+
+`
+              : "";
+
             const revStream = streamText({
               model: storyModel,
               abortSignal,
               system: revisionSystemPrompt,
-              prompt: `## Reviewer feedback — fix these specific issues:
+              prompt: `${priorWorkSection}## Reviewer feedback — fix these specific issues:
 
 ${storyFeedback}
 
@@ -1532,7 +2120,8 @@ Story ${i + 1}: "${story.title}" — ${story.description}
 2. Make TARGETED edits to fix ONLY the issues the reviewer flagged
 3. Do NOT delete or rewrite files — use edit_file for surgical changes
 4. Do NOT add features or refactor code that wasn't flagged
-5. If the reviewer says something is missing, add it — don't restructure what exists`,
+5. If the reviewer says something is missing, add it — don't restructure what exists
+6. Do NOT undo changes from previous revision rounds unless they were explicitly flagged`,
               tools: storyTools as ToolSet,
               stopWhen: stepCountIs(100),
               timeout: { totalMs: 5 * 60 * 1000, chunkMs: 120_000 },

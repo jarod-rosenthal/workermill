@@ -1161,18 +1161,19 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
         ...buildReasoningOptions(provider, modelName),
         ...buildOllamaOptions(provider as AIProvider, contextLength),
         onStepFinish({ text, toolCalls }) {
-          // Track tool usage to detect summary rambling
+          // Once the model has used tools, text-only steps are just summaries — skip display, stop after 2
           if (toolCalls && toolCalls.length > 0) {
             hadToolCalls = true;
             consecutiveTextOnlySteps = 0;
           } else if (text && hadToolCalls) {
             consecutiveTextOnlySteps++;
-            if (consecutiveTextOnlySteps >= 3) {
-              // Model made tool calls, then produced 3 consecutive text-only steps — it's done, just rambling
-              logger.info("Summary rambling detected — stopping stream", { persona: story.persona, consecutiveTextOnlySteps });
+            // Log but don't display — summaries are noise in the CLI
+            logger.debug("Story output (summary, not displayed)", { persona: story.persona, text });
+            if (consecutiveTextOnlySteps >= 2) {
+              logger.info("Post-work summary detected — stopping stream", { persona: story.persona });
               combinedAbort.abort();
-              return;
             }
+            return; // skip display for all post-tool text
           }
 
           if (text) {

@@ -125,6 +125,10 @@ export interface UseAgentReturn {
   addUserMessage: (content: string) => void;
   /** Update the displayed cost (used by orchestrator for live updates). */
   setCost: (cost: number) => void;
+  /** Tool usage counts for status bar. */
+  toolCounts: Record<string, number>;
+  /** Session start time (ms). */
+  sessionStart: number;
   /** Add a tool to the session allow set. */
   allowTool: (name: string) => void;
   /** Add a tool to the denied set (blocked for this session). */
@@ -250,6 +254,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     useState<PermissionRequest | null>(null);
   const [tokens, setTokens] = useState(0);
   const [cost, setCost] = useState(0);
+  const [toolCounts, setToolCounts] = useState<Record<string, number>>({});
+  const sessionStartRef = useRef(Date.now());
   const [trustAll, setTrustAllState] = useState(options.trustAll);
   const [planMode, setPlanModeState] = useState(options.planMode);
   const [permMode, setPermMode] = useState<PermissionMode>(options.trustAll ? "trust all" : "ask");
@@ -570,6 +576,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
           try {
             logger.info("Tool call", { tool: name, input: JSON.stringify(input).slice(0, 200) });
+            setToolCounts(prev => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
             runHooks("pre", name, hooksConfigRef.current, workingDirRef.current);
             const result = await td.execute(input);
             runHooks("post", name, hooksConfigRef.current, workingDirRef.current);
@@ -935,5 +942,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     denyTool,
     permissionMode: permMode,
     cyclePermissionMode,
+    toolCounts,
+    sessionStart: sessionStartRef.current,
   };
 }

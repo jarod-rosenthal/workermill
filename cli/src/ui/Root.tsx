@@ -52,13 +52,25 @@ function appendHistory(line: string): void {
 
 function getGitBranch(): string {
   try {
-    return execSync("git rev-parse --abbrev-ref HEAD 2>/dev/null", {
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", {
       encoding: "utf-8",
       timeout: 2000,
+      stdio: ["pipe", "pipe", "pipe"],
     }).trim();
-  } catch {
-    return "";
-  }
+    if (branch && branch !== "HEAD") return branch;
+  } catch { /* not a git repo or no commits */ }
+
+  // Fallback for repos with no commits — read HEAD ref directly
+  try {
+    const head = execSync("git symbolic-ref --short HEAD", {
+      encoding: "utf-8",
+      timeout: 2000,
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+    if (head) return head;
+  } catch { /* ignore */ }
+
+  return "";
 }
 
 function getGitStatus(cwd: string): string {
@@ -1235,6 +1247,8 @@ Write the file with write_file to WORKERMILL.md in the project root.`
       gitBranch={gitBranch}
       inputHistory={inputHistory}
       roleModels={props.roleModels}
+      toolCounts={agent.toolCounts}
+      sessionStart={agent.sessionStart}
     />
   );
 }

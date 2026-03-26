@@ -53,6 +53,14 @@ interface AppProps {
   inputHistory: string[];
   /** Display strings for each role. */
   roleModels?: { worker: string; planner: string; reviewer: string };
+  /** Tool usage counts. */
+  toolCounts?: Record<string, number>;
+  /** Number of MCP server connections. */
+  mcpCount?: number;
+  /** Session start time (ms). */
+  sessionStart?: number;
+  /** Whether project instructions are loaded. */
+  hasInstructions?: boolean;
 }
 
 /** Braille spinner that animates every 80ms to show the terminal is alive. */
@@ -222,6 +230,10 @@ export function App(props: AppProps): React.ReactElement {
             gitBranch={props.gitBranch}
             cwd={props.workingDir.split("/").pop() || ""}
             roleModels={props.roleModels}
+            toolCounts={props.toolCounts}
+            mcpCount={props.mcpCount}
+            sessionStart={props.sessionStart}
+            hasInstructions={props.hasInstructions}
           />
 
           {/* Line 3: User input */}

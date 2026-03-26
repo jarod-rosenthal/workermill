@@ -851,6 +851,13 @@ export async function runOrchestration(
   const skippedStories = new Set<string>();
 
   for (let i = 0; i < sorted.length; i++) {
+    // Check if user cancelled (ESC) before starting next story
+    if (abortSignal?.aborted) {
+      output.coordinatorLog("Build cancelled by user.");
+      logger.info("Build cancelled by user before story start", { storyIndex: i });
+      return;
+    }
+
     const story = sorted[i];
 
     // Check if any dependency failed — block this story (cascade failure)
@@ -1308,6 +1315,14 @@ VERIFICATION_SUMMARY: [overall summary of findings]`;
           break; // Story succeeded, exit revision loop
     } catch (err) {
       output.statusDone();
+
+      // If user cancelled (ESC), exit immediately — don't retry or classify
+      if (abortSignal?.aborted) {
+        output.coordinatorLog("Build cancelled by user.");
+        logger.info("Build cancelled by user during story execution", { story: i + 1, persona: story.persona });
+        return;
+      }
+
       const errMsg = err instanceof Error ? err.message : String(err);
       logger.error(`Story ${i + 1} error`, { persona: story.persona, error: errMsg, revision });
 
@@ -1581,6 +1596,11 @@ INTEGRATION_FIX_SUMMARY: <description of what you fixed or why it's unfixable>`;
     }
 
     let previousReviewFeedback = "";
+    // Check if user cancelled before starting review
+    if (abortSignal?.aborted) {
+      output.coordinatorLog("Build cancelled by user.");
+      return;
+    }
     logger.info("Starting review loop", { maxRevisions, provider: revProvider, model: revModel });
     for (let reviewRound = 1; reviewRound <= maxRevisions + 1; reviewRound++) {
       const isRevision = reviewRound > 1;

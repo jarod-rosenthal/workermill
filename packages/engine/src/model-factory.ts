@@ -73,9 +73,12 @@ export function createModel(
       if (host) {
         // OpenAI-compatible provider with custom baseURL (Groq, DeepSeek, Mistral, etc.)
         const customOpenAI = createOpenAI({ baseURL: host });
-        return customOpenAI(modelName);
+        return customOpenAI.chat(modelName);
       }
-      return openai(modelName);
+      // Use Chat Completions API, not Responses API. The Responses API tracks
+      // conversation state server-side and returns 404 "Item not found" errors
+      // when referencing tool call results across multi-step interactions.
+      return openai.chat(modelName);
     }
     case "google":
     case "gemini":

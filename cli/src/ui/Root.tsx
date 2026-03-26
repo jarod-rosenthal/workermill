@@ -1011,7 +1011,7 @@ Write the file with write_file to WORKERMILL.md in the project root.`
                 `**${p.name}** (\`${p.slug}\`)\n\n` +
                 `**Description:** ${p.description}\n` +
                 `**Tools:** ${p.tools.join(", ")}\n\n` +
-                `**System Prompt:**\n\`\`\`\n${p.systemPrompt.slice(0, 2000)}${p.systemPrompt.length > 2000 ? "\n... (truncated)" : ""}\n\`\`\``
+                `**System Prompt:**\n\`\`\`\n${p.systemPrompt}\n\`\`\``
               );
             }
           } else if (arg.startsWith("create ")) {

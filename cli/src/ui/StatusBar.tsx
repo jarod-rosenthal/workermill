@@ -98,7 +98,6 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
   return (
     <Box
       flexDirection="column"
-      marginTop={1}
       borderStyle="round"
       borderColor={theme.subtle}
       paddingLeft={1}

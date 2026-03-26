@@ -960,7 +960,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
       const recentTexts: string[] = [];
       const TEXT_LOOP_WINDOW = 8;
       const TEXT_SUPPRESS_THRESHOLD = 5;
-      const TEXT_ABORT_THRESHOLD = 50;
+      const TEXT_ABORT_THRESHOLD = 20;
       let textRepeatCount = 0;
       let textSuppressed = false;
 

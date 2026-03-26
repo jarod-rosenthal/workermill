@@ -4,7 +4,7 @@ import os from "os";
 import * as logger from "./logger.js";
 
 const CHECK_FILE = path.join(os.homedir(), ".workermill", "last-update-check.json");
-const CHECK_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours
+const CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 
 interface CheckData {
   lastCheck: number;

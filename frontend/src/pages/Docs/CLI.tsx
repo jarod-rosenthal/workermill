@@ -58,15 +58,19 @@ export default function CLI() {
         <h2 className="text-2xl font-semibold">Features</h2>
         <div className="grid gap-3">
           {[
-            { title: "Multi-expert orchestration", desc: "/build decomposes tasks into stories, each assigned to a specialist persona." },
+            { title: "Multi-expert orchestration", desc: "/build decomposes tasks into stories, each assigned to a specialist persona with dependency ordering." },
+            { title: "Quality gates", desc: "Auto-runs typecheck and lint after each story. Failures feed back to the expert for automatic retry before review." },
+            { title: "Surgical review fixer", desc: "When the reviewer requests changes, a lightweight fix agent applies targeted edits before falling back to full re-execution." },
+            { title: "Spec verification", desc: "Independent QA agent verifies each story's output against the original specification before review." },
+            { title: "Error classification", desc: "Categorizes failures (typescript, lint, test, build, transient) with targeted fix hints for automatic retry." },
             { title: "Role-based model routing", desc: "Different models for workers, planner, and reviewer. Mix local and cloud providers." },
             { title: "WORKERMILL.md", desc: "Project instructions file read by all agents. Also supports CLAUDE.md and .cursorrules." },
             { title: "MCP servers", desc: "Connect external tools via Model Context Protocol. Configure in cli.json." },
             { title: "Hooks", desc: "Pre/post tool execution hooks for linting, formatting, and custom workflows." },
             { title: "Custom commands", desc: "Drop .md files in .workermill/commands/ to create custom slash commands." },
-            { title: "Persistent learnings", desc: "::learning:: markers saved across sessions and injected into future builds." },
+            { title: "Project memory", desc: "Learnings, preferences, and context persisted across sessions and injected into future builds." },
             { title: "@mentions", desc: "@file.ts inlines code, @dir/ lists tree, @https://url fetches content, @image.png sends multimodal." },
-            { title: "Code review", desc: "Tech lead reads actual code diffs (not summaries), with configurable revision cycles." },
+            { title: "Code review", desc: "Tech lead reads actual code diffs (not summaries), with selective revision of only affected stories." },
             { title: "Permissions", desc: "Tab to cycle: Allow → Deny → Always allow → Trust all. Per-tool allow/deny via /permissions." },
             { title: "Bash guardrails", desc: "Blocks destructive commands and writes outside the project directory." },
             { title: "13 built-in tools", desc: "bash, read/write/edit files, patch, glob, grep, ls, fetch, git, web search, todo, sub-agent." },
@@ -92,8 +96,11 @@ export default function CLI() {
         <p className="text-muted-foreground">Use <code className="text-primary">/build</code> to trigger multi-expert mode:</p>
         <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
           <li><strong className="text-foreground">Plans</strong> — Explores the codebase, designs stories with dependencies and persona assignments</li>
-          <li><strong className="text-foreground">Executes</strong> — Each story assigned to a specialist with the full original spec</li>
-          <li><strong className="text-foreground">Reviews</strong> — Tech lead reads actual code diffs, scores quality, requests revisions</li>
+          <li><strong className="text-foreground">Executes</strong> — Each story assigned to a specialist with the full original spec and context from prior stories</li>
+          <li><strong className="text-foreground">Validates</strong> — Auto-runs typecheck and lint after each story, retries with fix context on failure</li>
+          <li><strong className="text-foreground">Verifies</strong> — Independent QA agent checks each story against the spec before review</li>
+          <li><strong className="text-foreground">Reviews</strong> — Tech lead reads actual code diffs, requests targeted revisions on specific stories</li>
+          <li><strong className="text-foreground">Fixes</strong> — Surgical fixer applies reviewer feedback directly; falls back to full re-execution only if needed</li>
           <li><strong className="text-foreground">Commits</strong> — Stages changes and commits (with your approval)</li>
         </ol>
         <p className="text-muted-foreground mt-2">
@@ -205,7 +212,7 @@ export default function CLI() {
                 [".workermill/config.json", "Per-project config overrides"],
                 [".workermill/commands/*.md", "Custom slash commands"],
                 [".workermill/personas/*.md", "Custom persona overrides"],
-                [".workermill/learnings.json", "Persistent learnings from builds"],
+                ["~/.workermill/memory/", "Project memory — learnings, preferences, context (per-project)"],
               ].map(([file, purpose]) => (
                 <tr key={file}>
                   <td className="p-3 font-mono text-primary text-xs">{file}</td>
@@ -283,11 +290,13 @@ export default function CLI() {
           </p>
           <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
             <li><strong className="text-foreground">Full spec context</strong> — Every worker sees the complete original specification</li>
+            <li><strong className="text-foreground">Quality gates</strong> — Typecheck and lint run automatically after each story, with auto-retry on failure</li>
+            <li><strong className="text-foreground">Sibling awareness</strong> — Workers see files created and decisions made by prior experts</li>
             <li><strong className="text-foreground">Real services, not mocks</strong> — Docker containers for databases, caches, queues</li>
             <li><strong className="text-foreground">Version trust</strong> — Never downgrades language/runtime versions</li>
-            <li><strong className="text-foreground">Code-level review</strong> — Tech lead reads actual diffs, not summaries</li>
+            <li><strong className="text-foreground">Code-level review</strong> — Tech lead reads actual diffs, requests changes on specific stories only</li>
             <li><strong className="text-foreground">Sandboxed execution</strong> — Workers stay in the project directory, destructive commands blocked</li>
-            <li><strong className="text-foreground">Persistent learnings</strong> — Codebase discoveries saved and shared across sessions</li>
+            <li><strong className="text-foreground">Project memory</strong> — Learnings and context persisted across sessions</li>
           </ul>
           <p className="text-sm text-muted-foreground">
             Custom personas: add <code className="text-primary">.workermill/personas/my_persona.md</code> to your project.

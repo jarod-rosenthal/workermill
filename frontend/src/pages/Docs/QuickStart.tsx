@@ -179,7 +179,7 @@ export default function QuickStart() {
                   Type your task. Simple tasks run in single-agent mode. Complex tasks are automatically decomposed into stories and assigned to specialist personas.
                 </p>
                 <div className="bg-muted/30 rounded-lg p-4 font-mono text-xs text-muted-foreground space-y-1">
-                  <div className="text-white">  WorkerMill <span className="text-muted-foreground">v0.2.0</span></div>
+                  <div className="text-white">  WorkerMill <span className="text-muted-foreground">v0.15.23</span></div>
                   <div>  ollama/<span className="text-white">qwen3-coder:30b</span></div>
                   <div>  cwd: <span className="text-white">~/projects/myapp</span></div>
                   <div />

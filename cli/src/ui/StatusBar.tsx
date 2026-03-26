@@ -48,7 +48,6 @@ function formatElapsed(startMs: number): string {
 export function StatusBar(props: StatusBarProps): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns || 80;
-  const bgColor = theme.subtleDark;
 
   // Context usage bar
   const barLen = 10;
@@ -97,94 +96,64 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
   const instructionsStr = props.hasInstructions ? " WORKERMILL.md" : "";
   const mcpStr = props.mcpCount && props.mcpCount > 0 ? ` ${props.mcpCount} MCP` : "";
 
-  // Row 1 padding
-  const row1Left = ` [${workerStr}] `.length + barLen + ` ${pct}% `.length;
-  const row1Right = ` ${props.cwd}`.length
-    + (props.gitBranch ? ` git:(${props.gitBranch})`.length : 0)
-    + (instructionsStr ? ` |${instructionsStr}`.length : 0)
-    + (mcpStr ? ` |${mcpStr}`.length : 0)
-    + ` | ${costStr}`.length
-    + (timeStr ? ` | ${timeStr}`.length : 0)
-    + 1;
-  const row1Pad = Math.max(0, width - row1Left - row1Right);
-
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box
+      flexDirection="column"
+      marginTop={1}
+      borderStyle="round"
+      borderColor={theme.subtle}
+      paddingLeft={1}
+      paddingRight={1}
+      width={width}
+    >
       {/* Row 1: Model + context + project info */}
       <Box>
-        <Text backgroundColor={bgColor} color={theme.text}>
-          {" ["}
-        </Text>
-        <Text backgroundColor={bgColor} color={theme.brand} bold>
-          {workerStr}
-        </Text>
-        <Text backgroundColor={bgColor} color={theme.text}>
-          {"] "}
-        </Text>
-        <Text backgroundColor={bgColor} color={barColor}>
+        <Text color={theme.text}>{"["}</Text>
+        <Text color={theme.brand} bold>{workerStr}</Text>
+        <Text color={theme.text}>{"] "}</Text>
+        <Text color={barColor}>
           {"█".repeat(filled)}{"░".repeat(empty)}
         </Text>
-        <Text backgroundColor={bgColor} color={theme.text}>
-          {` ${pct}% `}
-        </Text>
-        <Text backgroundColor={bgColor}>
-          {" ".repeat(row1Pad)}
-        </Text>
-        <Text backgroundColor={bgColor} color={theme.text}>
-          {" "}{props.cwd}
-        </Text>
+        <Text color={theme.text}>{` ${pct}%`}</Text>
+        <Box flexGrow={1} />
+        <Text color={theme.text}>{props.cwd}</Text>
         {props.gitBranch ? (
-          <Text backgroundColor={bgColor}>
+          <Text>
             <Text color={theme.text}>{" git:("}</Text>
             <Text color={theme.success}>{props.gitBranch}</Text>
             <Text color={theme.text}>{")"}</Text>
           </Text>
         ) : null}
         {instructionsStr ? (
-          <Text backgroundColor={bgColor} color={theme.subtle}>
-            {" |"}{instructionsStr}
-          </Text>
+          <Text color={theme.subtle}>{" │"}{instructionsStr}</Text>
         ) : null}
         {mcpStr ? (
-          <Text backgroundColor={bgColor} color={theme.subtle}>
-            {" |"}{mcpStr}
-          </Text>
+          <Text color={theme.subtle}>{" │"}{mcpStr}</Text>
         ) : null}
-        <Text backgroundColor={bgColor} color={theme.subtle}>
-          {" | "}
-        </Text>
-        <Text backgroundColor={bgColor} color={theme.text}>
-          {costStr}
-        </Text>
+        <Text color={theme.subtle}>{" │ "}</Text>
+        <Text color={theme.text}>{costStr}</Text>
         {timeStr ? (
           <>
-            <Text backgroundColor={bgColor} color={theme.subtle}>{" | "}</Text>
-            <Text backgroundColor={bgColor} color={theme.subtle}>{timeStr}</Text>
+            <Text color={theme.subtle}>{" │ "}</Text>
+            <Text color={theme.subtle}>{timeStr}</Text>
           </>
         ) : null}
-        <Text backgroundColor={bgColor}>{" "}</Text>
       </Box>
 
-      {/* Row 2: Tool usage stats */}
+      {/* Row 2: Tool usage stats + planner/reviewer roles */}
       <Box>
-        <Text color={theme.subtle}>
-          {" "}
-        </Text>
         {toolEntries.length > 0 ? (
           toolEntries.map(([name, count], i) => (
             <Text key={name}>
               <Text color={theme.success}>{"✓ "}</Text>
               <Text color={theme.text}>{name.replace(/_/g, " ")}</Text>
               <Text color={theme.subtle}>{` ×${count}`}</Text>
-              {i < toolEntries.length - 1 ? <Text color={theme.subtle}>{" | "}</Text> : null}
+              {i < toolEntries.length - 1 ? <Text color={theme.subtle}>{" │ "}</Text> : null}
             </Text>
           ))
         ) : (
-          <Text color={theme.subtle}>
-            {"no tool calls yet"}
-          </Text>
+          <Text color={theme.subtle}>{"no tool calls yet"}</Text>
         )}
-        {/* Planner/reviewer roles */}
         {rm && (rm.planner !== rm.worker || rm.reviewer !== rm.worker) ? (
           <Text color={theme.subtle}>
             {"  "}
@@ -196,12 +165,8 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
 
       {/* Row 3: Permission mode */}
       <Box>
-        <Text color={modeColor} bold>
-          {` ${modeIcon} ${props.mode} `}
-        </Text>
-        <Text color={theme.subtle} dimColor>
-          {"(shift+tab to cycle)"}
-        </Text>
+        <Text color={modeColor} bold>{`${modeIcon} ${props.mode}`}</Text>
+        <Text color={theme.subtle} dimColor>{" (shift+tab to cycle)"}</Text>
       </Box>
     </Box>
   );

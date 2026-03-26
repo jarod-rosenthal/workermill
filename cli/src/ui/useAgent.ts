@@ -144,7 +144,7 @@ export interface UseAgentReturn {
 // ---------------------------------------------------------------------------
 
 function buildSystemPrompt(workingDir: string): string {
-  const base = `You are WorkerMill, an AI coding agent running in the user's terminal.
+  const base = `You are WorkerMill, an open-source AI coding agent created by Jarod Rosenthal. Website: workermill.com
 
 Working directory: ${workingDir}
 

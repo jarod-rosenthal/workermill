@@ -1025,7 +1025,14 @@ Do NOT modify files outside this scope unless absolutely necessary for shared ty
 
 ## Verification Before Completion
 
-Before you finish, verify your implementation addresses every point from your story description above. If anything described in your scope is NOT implemented, fix it before finishing. Do not leave partial work.
+Before you finish:
+1. Verify your implementation addresses every point from your story description above
+2. Run the project's build/compile command to confirm your code compiles (e.g. \`npx tsc --noEmit\`, \`go build ./...\`)
+3. Run the project's test command if tests exist (e.g. \`npm test\`, \`go test ./...\`)
+4. Run lint if configured (e.g. \`npm run lint\`)
+5. Fix any errors you find — do not leave broken code for the next expert
+
+If anything described in your scope is NOT implemented, fix it before finishing. Do not leave partial work.
 
 Working directory: ${workingDir}
 
@@ -1044,7 +1051,7 @@ When summarizing your work at the end, describe decisions in plain language. The
 When you make a decision that affects other parts of the system, include ::decision:: markers in your output.
 When you create a file, include ::file_created::path markers.
 When you modify a file, include ::file_modified::path markers.
-${MEMORY_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
+${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
 
     try {
       // Combine user abort with loop detection abort
@@ -1127,12 +1134,9 @@ ${MEMORY_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}
         }
       }
 
-      // Extract and save memories from worker output
-      const storyMemories = extractMemoryMarkers(text);
-      for (const m of storyMemories) {
-        addMemory(m.type, m.content);
-        if (m.type === "learning") context.learnings.push(m.content);
-      }
+      // Learning extraction disabled — smaller models spam generic platitudes
+      // ("follows best practices", "implementation is production-ready") that
+      // pollute the memory system. Re-enable when we have quality filtering.
 
       const fileCreatedMatches = text.match(/::file_created::(.*?)(?=::\w+::|$)/gs);
       if (fileCreatedMatches) {
@@ -1166,70 +1170,23 @@ ${MEMORY_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}
         break;
       }
 
-      // --- Post-execution validation (from worker/epic/story-validator.ts) ---
+      // --- Post-execution validation ---
+      // File existence check only. Build/lint/test verification is the expert's
+      // responsibility — they have bash and verify tools. Auto-detecting and
+      // running quality gates caused cascading failures when earlier stories
+      // created broken configs that later stories couldn't fix.
       {
-        const validationIssues: string[] = [];
-
-        // 1. Verify created files actually exist on disk
-        for (const f of context.filesCreated) {
+        const missingFiles = context.filesCreated.filter(f => {
           const fullPath = path.isAbsolute(f) ? f : path.join(workingDir, f);
-          if (!fs.existsSync(fullPath)) {
-            validationIssues.push(`File declared as created but not found on disk: ${f}`);
+          return !fs.existsSync(fullPath);
+        });
+        if (missingFiles.length > 0) {
+          logger.info("Missing declared files", { persona: story.persona, files: missingFiles });
+          if (revision < 2) {
+            output.log(story.persona, `${missingFiles.length} declared file(s) missing — retrying`);
+            revisionFeedback = `\n\n## Missing Files\nThese files were declared as created but don't exist on disk:\n${missingFiles.map(f => `- ${f}`).join("\n")}\n\nCreate them or remove the declarations.`;
+            continue;
           }
-        }
-
-        // 2. Auto-detect typecheck — if .ts/.tsx files were touched and tsconfig.json exists
-        const touchedFiles = [...context.filesCreated, ...context.filesModified];
-        const hasTsFiles = touchedFiles.some(f => f.endsWith(".ts") || f.endsWith(".tsx"));
-        if (hasTsFiles && fs.existsSync(path.join(workingDir, "tsconfig.json"))) {
-          try {
-            execSync("npx tsc --noEmit 2>&1", { cwd: workingDir, timeout: 300_000, encoding: "utf-8" });
-            output.log(story.persona, "Typecheck passed");
-          } catch (tscErr) {
-            const tscOutput = tscErr instanceof Error && "stdout" in tscErr ? String((tscErr as any).stdout) : String(tscErr);
-            // Limit to first 40 lines to avoid bloating the retry prompt
-            const truncated = tscOutput.split("\n").slice(0, 40).join("\n");
-            validationIssues.push(`TypeScript errors:\n${truncated}`);
-          }
-        }
-
-        // 3. Auto-detect lint — if package.json has a lint script
-        try {
-          const pkgPath = path.join(workingDir, "package.json");
-          if (fs.existsSync(pkgPath)) {
-            const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
-            if (pkg.scripts?.lint) {
-              try {
-                execSync("npm run lint 2>&1", { cwd: workingDir, timeout: 120_000, encoding: "utf-8" });
-                output.log(story.persona, "Lint passed");
-              } catch (lintErr) {
-                const lintOutput = lintErr instanceof Error && "stdout" in lintErr ? String((lintErr as any).stdout) : String(lintErr);
-                const truncated = lintOutput.split("\n").slice(0, 30).join("\n");
-                validationIssues.push(`Lint errors:\n${truncated}`);
-              }
-            }
-          }
-        } catch {
-          // package.json parse error — skip lint check
-        }
-
-        if (validationIssues.length > 0 && revision < 2) {
-          output.log(story.persona, `Validation found ${validationIssues.length} issue(s) — retrying with fix context`);
-          logger.info("Story validation failed, retrying", { persona: story.persona, issues: validationIssues.length });
-          revisionFeedback = `\n\n## Validation Errors — Fix These Before Completing\n\n${validationIssues.join("\n\n")}`;
-          if (Object.keys(storyHealth).length > 0) {
-            const healthParts: string[] = [];
-            if (storyHealth.testResults) healthParts.push(`Test results:\n${storyHealth.testResults}`);
-            if (storyHealth.buildErrors) healthParts.push(`Build errors:\n${storyHealth.buildErrors}`);
-            if (storyHealth.servicesRunning) healthParts.push(`Running services:\n${storyHealth.servicesRunning.join("\n")}`);
-            revisionFeedback += `\n\n## Environment Health\n${healthParts.join("\n\n")}`;
-          }
-          continue; // retry with validation errors as context
-        }
-        if (validationIssues.length > 0) {
-          // Final attempt also had issues — log but proceed (don't block forever)
-          output.log(story.persona, `Validation issues remain after retries: ${validationIssues.length} issue(s)`);
-          logger.info("Story validation issues on final attempt", { persona: story.persona, issues: validationIssues });
         }
       }
 

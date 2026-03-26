@@ -82,7 +82,9 @@ export function createModel(
       return google(modelName);
     case "ollama": {
       const ollamaHost = host || "http://localhost:11434";
-      const ollamaProvider = createOllama({ baseURL: `${ollamaHost}/api`, keepAlive: "-1" });
+      // keepAlive: "-1" prevents model unload during long tool calls (CLAUDE.md rule).
+      // Type cast needed — property works at runtime but missing from package types.
+      const ollamaProvider = createOllama({ baseURL: `${ollamaHost}/api`, keepAlive: "-1" } as any);
       return ollamaProvider(modelName);
     }
     default:

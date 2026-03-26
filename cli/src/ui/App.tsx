@@ -162,11 +162,11 @@ export function App(props: AppProps): React.ReactElement {
     ? "PLAN"
     : props.permissionMode;
 
-  return (
-    <Box flexDirection="column" width="100%">
-      {/* Header is printed by printWelcome() in index.ts via console.log
-         before Ink takes over — no Static header needed here. */}
+  // Pin the layout to the terminal height so the dynamic area stays at the bottom.
+  const termHeight = stdout?.rows || 24;
 
+  return (
+    <Box flexDirection="column" width="100%" height={termHeight}>
       {/* Committed messages — rendered once via Static as they arrive */}
       <Static items={props.messages}>
         {(message) => (
@@ -190,7 +190,10 @@ export function App(props: AppProps): React.ReactElement {
         )}
       </Static>
 
-      {/* Dynamic area */}
+      {/* Spacer pushes dynamic area to bottom of terminal */}
+      <Box flexGrow={1} />
+
+      {/* Dynamic area — pinned to bottom */}
       <Box flexDirection="column">
         {/* Latest tool call — only when active */}
         {props.streamingToolCalls && props.streamingToolCalls.length > 0 ? (

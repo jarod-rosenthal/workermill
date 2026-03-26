@@ -22,12 +22,6 @@ const demos: Demo[] = [
     url: "https://youtu.be/fLS1tWfItzY",
   },
   {
-    id: "DoRqXG6zOI0",
-    title: "AI Coding Agents Build a Full-Stack App in 4.5 Hours — 21,000 Lines of Code",
-    thumbnail: "https://img.youtube.com/vi/DoRqXG6zOI0/maxresdefault.jpg",
-    url: "https://youtu.be/DoRqXG6zOI0",
-  },
-  {
     id: "sa0lug-G-cg",
     title: "WorkerMill in Action — Autonomously plan, code, and ship a feature in real-time",
     thumbnail: "https://img.youtube.com/vi/sa0lug-G-cg/maxresdefault.jpg",

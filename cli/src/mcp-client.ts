@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "child_process";
 import { jsonSchema } from "ai";
 import type { MCPServerConfig } from "./config.js";
 import * as logger from "./logger.js";
+import { VERSION } from "./version.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -103,7 +104,7 @@ export async function startMCPServer(name: string, config: MCPServerConfig): Pro
     await sendRequest(server, "initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "workermill-cli", version: "0.9.1" },
+      clientInfo: { name: "workermill-cli", version: VERSION },
     });
 
     // Send initialized notification (no response expected)

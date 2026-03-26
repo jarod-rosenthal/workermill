@@ -1,26 +1,6 @@
 import readline from "readline";
 import chalk from "chalk";
-
-const READ_TOOLS = new Set(["read_file", "glob", "grep", "ls", "sub_agent"]);
-
-const DANGEROUS_PATTERNS = [
-  { pattern: /rm\s+(-[a-z]*f|-[a-z]*r|--force|--recursive)/i, label: "recursive/forced delete" },
-  { pattern: /git\s+reset\s+--hard/i, label: "hard reset" },
-  { pattern: /git\s+push\s+.*--force/i, label: "force push" },
-  { pattern: /git\s+clean\s+-[a-z]*f/i, label: "git clean" },
-  { pattern: /drop\s+table/i, label: "drop table" },
-  { pattern: /truncate\s+/i, label: "truncate" },
-  { pattern: /DELETE\s+FROM\s+\w+\s*;/i, label: "DELETE without WHERE" },
-  { pattern: /chmod\s+777/i, label: "chmod 777" },
-  { pattern: />(\/dev\/sda|\/dev\/disk)/i, label: "write to disk device" },
-];
-
-function isDangerous(command: string): string | null {
-  for (const { pattern, label } of DANGEROUS_PATTERNS) {
-    if (pattern.test(command)) return label;
-  }
-  return null;
-}
+import { isDangerous, READ_TOOLS } from "./safety.js";
 
 export class PermissionManager {
   private sessionAllow = new Set<string>();

@@ -19,23 +19,21 @@ import { loadConfig, type CliConfig } from "../config.js";
 // ---------------------------------------------------------------------------
 
 const PERSONA_EMOJIS: Record<string, string> = {
+  // Must match worker/epic/experts.ts — no invented personas
   frontend_developer: "\u{1F3A8}",   // 🎨
   backend_developer: "\u{1F4BB}",    // 💻
-  fullstack_developer: "\u{1F4BB}",  // 💻
   devops_engineer: "\u{1F527}",      // 🔧
   security_engineer: "\u{1F512}",    // 🔐
   qa_engineer: "\u{1F9EA}",          // 🧪
   tech_writer: "\u{1F4DD}",          // 📝
   project_manager: "\u{1F4CB}",      // 📋
   architect: "\u{1F3D7}\uFE0F",      // 🏗️
-  database_engineer: "\u{1F4CA}",    // 📊
-  data_engineer: "\u{1F4CA}",        // 📊
   data_ml_engineer: "\u{1F4CA}",     // 📊
-  ml_engineer: "\u{1F4CA}",          // 📊
   mobile_developer: "\u{1F4F1}",     // 📱
   tech_lead: "\u{1F451}",            // 👑
   manager: "\u{1F454}",              // 👔
   support_agent: "\u{1F4AC}",        // 💬
+  // CLI-specific roles (used by orchestrator, not in worker expert configs)
   planner: "\u{1F4A1}",              // 💡
   coordinator: "\u{1F3AF}",          // 🎯
   critic: "\u{1F50D}",               // 🔍

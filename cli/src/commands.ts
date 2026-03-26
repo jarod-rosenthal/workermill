@@ -203,8 +203,6 @@ export async function handleCommand(
 
     case "quit":
     case "exit": {
-      const { exitTerminal } = await import("./terminal.js");
-      exitTerminal();
       console.log(chalk.dim("  Goodbye!"));
       process.exit(0);
       break;

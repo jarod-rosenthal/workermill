@@ -26,15 +26,15 @@ if [[ "${1:-}" == "--bump" ]]; then
   NEW="${MAJOR}.${MINOR}.${PATCH}"
 
   sed -i "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW\"/" package.json
-  sed -i "s/const VERSION = \"$CURRENT\"/const VERSION = \"$NEW\"/" src/index.ts
+  sed -i "s/const VERSION = \"$CURRENT\"/const VERSION = \"$NEW\"/" src/version.ts
   echo "Bumped $CURRENT → $NEW"
 fi
 
 VERSION=$(node -p "require('./package.json').version")
-INDEX_VERSION=$(grep 'const VERSION' src/index.ts | grep -oP '"[^"]*"' | tr -d '"')
+VERSION_TS=$(grep 'const VERSION' src/version.ts | grep -oP '"[^"]*"' | tr -d '"')
 
 # 1. Version sync check
-[[ "$VERSION" == "$INDEX_VERSION" ]] || fail "Version mismatch: package.json=$VERSION, index.ts=$INDEX_VERSION"
+[[ "$VERSION" == "$VERSION_TS" ]] || fail "Version mismatch: package.json=$VERSION, version.ts=$VERSION_TS"
 pass "Version sync: $VERSION"
 
 # 2. Type check

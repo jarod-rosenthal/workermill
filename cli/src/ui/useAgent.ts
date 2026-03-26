@@ -27,45 +27,13 @@ import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers } from "..
 import { resolveConfig, type HooksConfig } from "../config.js";
 import { runHooks } from "../hooks.js";
 import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
+import { isDangerous, READ_TOOLS, AUTO_EDIT_TOOLS } from "../safety.js";
 import type {
   Message,
   ToolCallInfo,
   PermissionRequest,
   AgentStatus,
 } from "./types.js";
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** Command patterns that require explicit confirmation even under trust-all. */
-const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
-  {
-    pattern: /rm\s+(-[a-z]*r[a-z]*|--recursive|--force)/i,
-    label: "recursive/forced delete",
-  },
-  { pattern: /git\s+reset\s+--hard/i, label: "hard reset" },
-  { pattern: /git\s+push\s+.*--force/i, label: "force push" },
-  { pattern: /git\s+clean\s+-[a-z]*f/i, label: "git clean" },
-  { pattern: /drop\s+table/i, label: "drop table" },
-  { pattern: /truncate\s+/i, label: "truncate" },
-  { pattern: /chmod\s+777/i, label: "chmod 777" },
-];
-
-/** Tools that are read-only and always allowed without prompting. */
-const READ_TOOLS = new Set<string>([
-  "read_file",
-  "glob",
-  "grep",
-  "ls",
-  "sub_agent",
-]);
-
-/** Tools auto-approved in "auto-edit" mode (everything except bash and destructive ops). */
-const AUTO_EDIT_TOOLS = new Set<string>([
-  "read_file", "write_file", "edit_file", "patch",
-  "glob", "grep", "ls", "fetch", "git", "web_search", "todo", "sub_agent",
-]);
 
 const PERMISSION_MODES = ["ask", "auto-edit", "trust all"] as const;
 type PermissionMode = typeof PERMISSION_MODES[number];
@@ -386,11 +354,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     toolInput: Record<string, unknown>,
   ): string | null {
     if (toolName !== "bash") return null;
-    const command = String(toolInput.command ?? "");
-    for (const { pattern, label } of DANGEROUS_PATTERNS) {
-      if (pattern.test(command)) return label;
-    }
-    return null;
+    return isDangerous(String(toolInput.command ?? ""));
   }
 
   // ------- Permission system -------- //

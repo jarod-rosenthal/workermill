@@ -192,31 +192,31 @@ export function App(props: AppProps): React.ReactElement {
 
       {/* Dynamic area */}
       <Box flexDirection="column">
-        {/* Latest tool call — always 1 row (empty placeholder when idle) */}
-        <Box marginLeft={2} height={1}>
-          {props.streamingToolCalls && props.streamingToolCalls.length > 0 ? (
+        {/* Latest tool call — only when active */}
+        {props.streamingToolCalls && props.streamingToolCalls.length > 0 ? (
+          <Box marginLeft={2} height={1}>
             <ToolCallDisplay tool={props.streamingToolCalls[props.streamingToolCalls.length - 1]} />
-          ) : (
-            <Text>{" "}</Text>
-          )}
-        </Box>
+          </Box>
+        ) : null}
 
-        {/* Activity indicator — always 1 row */}
-        <Box marginLeft={2} height={1}>
-          {props.orchestratorStatus ? (
-            <Text color={theme.warning}><Spinner color={theme.warning} /> {props.orchestratorStatus}</Text>
-          ) : props.status === "thinking" ? (
-            <Text color={theme.subtle}><Spinner color={theme.subtle} /> Thinking...</Text>
-          ) : props.status === "streaming" ? (
-            <Text color={theme.brand}><Spinner color={theme.brand} /> Streaming response...</Text>
-          ) : props.status === "tool_running" ? (
-            <Text color={theme.warning}><Spinner color={theme.warning} /> {props.statusDetail || "Running tool..."}</Text>
-          ) : props.status === "permission" ? (
-            <Text color={theme.permission}>● Waiting for permission...</Text>
-          ) : (
-            <Text>{" "}</Text>
-          )}
-        </Box>
+        {/* Activity indicator — only when active */}
+        {props.status !== "idle" || props.orchestratorStatus ? (
+          <Box marginLeft={2} height={1}>
+            {props.orchestratorStatus ? (
+              <Text color={theme.warning}><Spinner color={theme.warning} /> {props.orchestratorStatus}</Text>
+            ) : props.status === "thinking" ? (
+              <Text color={theme.subtle}><Spinner color={theme.subtle} /> Thinking...</Text>
+            ) : props.status === "streaming" ? (
+              <Text color={theme.brand}><Spinner color={theme.brand} /> Streaming response...</Text>
+            ) : props.status === "tool_running" ? (
+              <Text color={theme.warning}><Spinner color={theme.warning} /> {props.statusDetail || "Running tool..."}</Text>
+            ) : props.status === "permission" ? (
+              <Text color={theme.permission}>● Waiting for permission...</Text>
+            ) : (
+              <Text>{" "}</Text>
+            )}
+          </Box>
+        ) : null}
 
         {/* Permission/confirm prompts — replace input when active */}
         {props.permissionRequest ? (

@@ -900,6 +900,7 @@ export async function runOrchestration(
 
     // Build tools filtered by persona's allowed tools
     const allTools = createToolDefinitions(workingDir, model, sandboxed);
+    const storyHealth: { testResults?: string; buildErrors?: string; servicesRunning?: string[] } = {};
     const personaTools: Record<string, AnyToolDef> = {};
     // Loop detection — matches worker/ai-clients/ai-sdk-client.ts
     const LOOP_WINDOW = 6;
@@ -935,12 +936,52 @@ export async function runOrchestration(
             runHooks("pre", toolName, config.hooks, workingDir);
             const result = await toolDef.execute(input);
             runHooks("post", toolName, config.hooks, workingDir);
+
+            // Track docker compose services for auto-cleanup
+            if (toolName === "bash") {
+              const cmd = (input as { command?: string }).command || "";
+              if (/docker[\s-]compose\s+up/i.test(cmd)) {
+                const resolvedCwd = (input as { cwd?: string }).cwd || workingDir;
+                startedDockerCompose.add(resolvedCwd);
+              }
+            }
+
+            // Parse structured bash output for story health context
+            if (toolName === "bash" && typeof result === "string") {
+              // Test results: jest/vitest/pytest/go test/playwright
+              const testMatch = result.match(/(\d+)\s+(?:tests?\s+)?passed|(\d+)\s+(?:tests?\s+)?failed|Tests:\s+(\d+)\s+passed/i);
+              if (testMatch) {
+                storyHealth.testResults = result.split("\n").filter(l =>
+                  /pass|fail|error|PASS|FAIL|ERROR|Tests:|test result/i.test(l)
+                ).slice(-5).join("\n");
+              }
+
+              // Build errors: tsc, eslint, go build
+              const errorLines = result.split("\n").filter(l =>
+                /error\s+TS\d|SyntaxError|Cannot find module|error:|ERROR/i.test(l)
+              );
+              if (errorLines.length > 0) {
+                storyHealth.buildErrors = errorLines.slice(0, 10).join("\n");
+              }
+
+              // Docker services
+              const bashCmd = (input as { command?: string }).command || "";
+              if (/docker.*(compose|ps)|CONTAINER\s+ID/i.test(bashCmd)) {
+                const serviceLines = result.split("\n").filter(l => /Up|running|healthy/i.test(l));
+                if (serviceLines.length > 0) {
+                  storyHealth.servicesRunning = serviceLines.map(l => l.trim());
+                }
+              }
+            }
+
             output.status("");
             return result;
           },
         };
       }
     }
+
+    const startedDockerCompose = new Set<string>(); // tracks cwd where compose was started
 
     let revisionFeedback = "";
     for (let revision = 0; revision <= 2; revision++) {
@@ -1176,6 +1217,13 @@ ${MEMORY_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}
           output.log(story.persona, `Validation found ${validationIssues.length} issue(s) — retrying with fix context`);
           logger.info("Story validation failed, retrying", { persona: story.persona, issues: validationIssues.length });
           revisionFeedback = `\n\n## Validation Errors — Fix These Before Completing\n\n${validationIssues.join("\n\n")}`;
+          if (Object.keys(storyHealth).length > 0) {
+            const healthParts: string[] = [];
+            if (storyHealth.testResults) healthParts.push(`Test results:\n${storyHealth.testResults}`);
+            if (storyHealth.buildErrors) healthParts.push(`Build errors:\n${storyHealth.buildErrors}`);
+            if (storyHealth.servicesRunning) healthParts.push(`Running services:\n${storyHealth.servicesRunning.join("\n")}`);
+            revisionFeedback += `\n\n## Environment Health\n${healthParts.join("\n\n")}`;
+          }
           continue; // retry with validation errors as context
         }
         if (validationIssues.length > 0) {
@@ -1362,6 +1410,15 @@ VERIFICATION_SUMMARY: [overall summary of findings]`;
     }
 
     } // end revision loop
+
+    // Auto-cleanup: stop any Docker Compose services started during this story
+    for (const composeDir of startedDockerCompose) {
+      try {
+        execSync("docker compose down --timeout 5 2>/dev/null", { cwd: composeDir, timeout: 15_000 });
+        output.log("system", "Auto-cleanup: stopped Docker services");
+        logger.info("Auto-cleanup docker compose", { cwd: composeDir });
+      } catch { /* non-fatal */ }
+    }
   }
 
   // Report failed/skipped stories before review
@@ -2089,13 +2146,32 @@ REVIEW_FIX_SUMMARY: <why it cannot be surgically fixed>`;
             }
           }
 
-          const revisionSystemPrompt = `${storyPersona.systemPrompt}
+          // Build enriched context for revision — same as main story prompt
+          const revContextParts: string[] = [];
+          if (context.filesCreated.length > 0) {
+            revContextParts.push(`\n## Files Created by Prior Stories — DO NOT DELETE\n${context.filesCreated.map(f => `- ${f}`).join("\n")}\nThese files were created by other experts. You may import or reference them but NEVER delete or overwrite them.`);
+          }
+          if (context.filesModified.length > 0) {
+            revContextParts.push(`\n## Files Modified by Prior Stories\n${context.filesModified.map(f => `- ${f}`).join("\n")}\nBe aware these files have been changed. Read them before making assumptions about their contents.`);
+          }
+          if (context.decisions.length > 0) {
+            revContextParts.push(`\n## Architectural Decisions — FOLLOW THESE\n${context.decisions.map((d, idx) => `${idx + 1}. ${d}`).join("\n")}\nThese decisions were made by prior experts. Follow them — do not contradict or revisit.`);
+          }
+          const revContextBlock = revContextParts.join("\n");
+
+          const revisionSystemPrompt = `${storyPersona.systemPrompt}${revContextBlock}
 
 Working directory: ${workingDir}
 
 ## Ticket Requirements — THIS IS YOUR SPEC
 
 ${userTask}
+
+## Your File Scope — STAY IN YOUR LANE
+
+${story.description}
+
+Do NOT modify files outside this scope unless absolutely necessary for shared types/imports.
 
 ## Communication Style
 

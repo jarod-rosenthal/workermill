@@ -16,9 +16,10 @@ import * as subAgentTool from "./sub-agent.js";
 import * as gitTool from "./git.js";
 import * as webSearchTool from "./web-search.js";
 import * as todoTool from "./todo.js";
+import * as verifyTool from "./verify.js";
 
 // Re-export all tool modules
-export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool, subAgentTool, gitTool, webSearchTool, todoTool };
+export { bashTool, readFileTool, writeFileTool, editFileTool, globTool, grepTool, lsTool, fetchTool, patchTool, subAgentTool, gitTool, webSearchTool, todoTool, verifyTool };
 
 /**
  * Validate that a resolved path is within the allowed working directory.
@@ -411,6 +412,39 @@ export function createToolDefinitions(workingDir: string, model?: LanguageModel,
           }
         }
         return result.error || "Unknown error";
+      },
+    }),
+
+    verify: tool({
+      description: verifyTool.description,
+      inputSchema: z.object({
+        command: z.string().describe("The verification command to run (e.g., 'npm test', 'npx tsc --noEmit', 'pytest')"),
+        cwd: z.string().optional().describe("Working directory for the command (optional)"),
+        timeout: z.number().optional().describe("Timeout in milliseconds (default: 120000 = 2 minutes)"),
+      }),
+      execute: async ({ command, cwd, timeout }) => {
+        const resolvedCwd = cwd
+          ? path.isAbsolute(cwd)
+            ? cwd
+            : path.resolve(workingDir, cwd)
+          : workingDir;
+        assertPathInBounds(resolvedCwd, workingDir, sandboxed);
+        const result = await verifyTool.execute({
+          command,
+          cwd: resolvedCwd,
+          timeout,
+        });
+        if (!result.success) {
+          return `Error: ${result.error || result.summary}`;
+        }
+        const parts: string[] = [
+          `Result: ${result.passed ? "PASSED" : "FAILED"}`,
+          `Summary: ${result.summary}`,
+        ];
+        if (result.raw) {
+          parts.push("---", result.raw);
+        }
+        return parts.join("\n");
       },
     }),
 

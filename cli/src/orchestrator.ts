@@ -1031,7 +1031,8 @@ ${MEMORY_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}
         onStepFinish({ text }) {
           if (text) {
             // Text loop detection
-            const textSig = text.substring(0, 200);
+            // Normalize signature: trim, collapse whitespace, lowercase first 200 chars
+            const textSig = text.trim().replace(/\s+/g, " ").substring(0, 200).toLowerCase();
             recentTexts.push(textSig);
             if (recentTexts.length > TEXT_LOOP_WINDOW) recentTexts.shift();
             if (recentTexts.length >= TEXT_LOOP_WINDOW) {

@@ -14,13 +14,6 @@ interface StatusBarProps {
   roleModels?: { worker: string; planner: string; reviewer: string };
 }
 
-/** Format a token count as a compact string: 1.2k, 45k, 1.2M. */
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
 /** Format a dollar cost as a short string. */
 function formatCost(c: number): string {
   if (c < 0.01) return "$0.00";
@@ -29,8 +22,7 @@ function formatCost(c: number): string {
 
 /**
  * Pinned status bar rendered at the bottom of the terminal.
- * Full-width colored background with model, context bar, tokens,
- * cwd, git branch, cost, and mode.
+ * Layout: [model] [context bar] [pct] [roles] --- [cwd] [branch] | [cost] [mode (shift+tab)]
  */
 export function StatusBar(props: StatusBarProps): React.ReactElement {
   const { stdout } = useStdout();
@@ -52,6 +44,9 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
     case "trust all":
       modeColor = theme.error;
       break;
+    case "auto-edit":
+      modeColor = theme.warning;
+      break;
     default:
       modeColor = theme.success;
       break;
@@ -59,25 +54,29 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
 
   const bgColor = theme.subtleDark;
 
-  // Build segments
+  // Build left segments
   const rm = props.roleModels;
   const workerStr = rm?.worker || `${props.provider}/${props.model}`;
   const modelStr = ` ${workerStr} `;
   const pct = props.maxContext > 0 ? Math.round(usage * 100) : 0;
   const tokenStr = ` ${pct}% `;
-  // Show planner/reviewer after context bar, only when they differ from worker
+
   const extraRoles: string[] = [];
   if (rm && rm.planner !== rm.worker) extraRoles.push(`plan:${rm.planner}`);
   if (rm && rm.reviewer !== rm.worker) extraRoles.push(`review:${rm.reviewer}`);
   const rolesStr = extraRoles.length > 0 ? `  ${extraRoles.join("  ")} ` : "";
-  const costStr = formatCost(props.cost);
-  const branchStr = props.gitBranch ? ` git:(${props.gitBranch})` : "";
-  const cwdStr = props.cwd ? ` ${props.cwd}` : "";
-  const rightStr = `${cwdStr}${branchStr} | ${costStr} `;
 
-  // Calculate padding needed to fill the terminal width
-  const fixedLen = modelStr.length + barLen + tokenStr.length + rolesStr.length + rightStr.length + props.mode.length + 2;
-  const padding = Math.max(0, width - fixedLen);
+  // Build right segments
+  const cwdName = props.cwd || "";
+  const costStr = formatCost(props.cost);
+  const modeStr = ` ${props.mode} `;
+  const hintStr = " shift+tab ";
+
+  // Calculate padding
+  const leftLen = modelStr.length + barLen + tokenStr.length + rolesStr.length;
+  const branchLen = props.gitBranch ? ` git:(${props.gitBranch})`.length : 0;
+  const rightLen = cwdName.length + 1 + branchLen + 3 + costStr.length + modeStr.length + hintStr.length + 1;
+  const padding = Math.max(0, width - leftLen - rightLen);
 
   return (
     <Box marginTop={1}>
@@ -90,11 +89,11 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
         {"█".repeat(filled)}
         {"░".repeat(empty)}
       </Text>
-      {/* Token count */}
+      {/* Token percentage */}
       <Text backgroundColor={bgColor} color={theme.text}>
         {tokenStr}
       </Text>
-      {/* Planner/reviewer roles (only when different from worker) */}
+      {/* Planner/reviewer roles */}
       {rolesStr ? (
         <Text backgroundColor={bgColor} color={theme.subtle}>
           {rolesStr}
@@ -106,7 +105,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
       </Text>
       {/* CWD */}
       <Text backgroundColor={bgColor} color={theme.text}>
-        {cwdStr}
+        {" "}{cwdName}
       </Text>
       {/* Git branch */}
       {props.gitBranch ? (
@@ -123,12 +122,13 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
       <Text backgroundColor={bgColor} color={theme.text}>
         {costStr}
       </Text>
-      <Text backgroundColor={bgColor} color={theme.text}>
-        {" "}
-      </Text>
       {/* Mode badge */}
       <Text backgroundColor={bgColor} color={modeColor} bold>
-        {props.mode}
+        {modeStr}
+      </Text>
+      {/* Shift+Tab hint */}
+      <Text backgroundColor={bgColor} color={theme.subtle} dimColor>
+        {"shift+tab"}
       </Text>
       <Text backgroundColor={bgColor}>
         {" "}

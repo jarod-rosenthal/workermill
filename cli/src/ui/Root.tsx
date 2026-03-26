@@ -129,6 +129,7 @@ Or from the command line: \`wm build "your task"\`
 | \`/mcp\` | Show MCP server status |
 | \`/chrome\` | Open/close headless Chrome browser |
 | \`/voice\` | Voice input — speak instead of type |
+| \`/schedule\` | Create/list/delete scheduled tasks |
 | \`/update\` | Update to latest version |
 | \`/release-notes\` | Show changelog |
 | \`/hooks\` | Show configured pre/post tool hooks |
@@ -145,6 +146,8 @@ interface RootProps extends UseAgentOptions {
   workingDir: string;
   /** Display strings for each role (e.g. "ollama/qwen3-coder:30b"). */
   roleModels?: { worker: string; planner: string; reviewer: string };
+  /** Resolved CLI config (includes --auto-revise and other CLI overrides). */
+  cliConfig?: import("../config.js").CliConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,7 +174,7 @@ export function Root(props: RootProps): React.ReactElement {
     },
     [agent],
   );
-  const orchestrator = useOrchestrator(addOrchestratorMessage, agent.setCost);
+  const orchestrator = useOrchestrator(addOrchestratorMessage, agent.setCost, props.cliConfig);
 
   // Track the last build task for /retry
   const lastBuildTask = useRef<string | null>(null);
@@ -1040,6 +1043,83 @@ Write the file with write_file to WORKERMILL.md in the project root.`
             }
             agent.addSystemMessage(lines.join("\n"));
           }
+          break;
+        }
+
+        // ---- /schedule ----
+        case "schedule": {
+          void (async () => {
+            const { createSchedule, listSchedules, deleteSchedule } = await import("../schedule.js") as any;
+
+            if (!arg) {
+              // List schedules
+              const schedules = listSchedules();
+              if (schedules.length === 0) {
+                agent.addSystemMessage(
+                  "**No scheduled tasks.**\n\n" +
+                  "Usage:\n" +
+                  "- `/schedule \"review PRs\" every day at 9am`\n" +
+                  "- `/schedule \"dep audit\" every monday`\n" +
+                  "- `/schedule list`\n" +
+                  "- `/schedule delete <name>`"
+                );
+              } else {
+                const rows = schedules.map((s: any) =>
+                  `| ${s.name} | \`${s.cron}\` | \`${s.prompt.slice(0, 40)}\` | ${new Date(s.createdAt).toLocaleDateString()} |`
+                ).join("\n");
+                agent.addSystemMessage(
+                  `**Scheduled Tasks**\n\n| Name | Schedule | Prompt | Created |\n|---|---|---|---|\n${rows}\n\n` +
+                  "Use `/schedule delete <name>` to remove."
+                );
+              }
+            } else if (arg.startsWith("delete ")) {
+              const name = arg.slice(7).trim();
+              const result = deleteSchedule(name);
+              agent.addSystemMessage(result.message);
+            } else if (arg === "list") {
+              // Same as no arg — list schedules
+              const schedules = listSchedules();
+              if (schedules.length === 0) {
+                agent.addSystemMessage("No scheduled tasks.");
+              } else {
+                const rows = schedules.map((s: any) =>
+                  `- **${s.name}** — \`${s.cron}\` — "${s.prompt.slice(0, 50)}"`
+                ).join("\n");
+                agent.addSystemMessage(`**Scheduled Tasks**\n\n${rows}`);
+              }
+            } else {
+              // Parse: /schedule "name" <schedule>
+              // or: /schedule <prompt> <schedule>
+              const quoteMatch = arg.match(/^"([^"]+)"\s+(.+)$/);
+              if (quoteMatch) {
+                const [, name, schedule] = quoteMatch;
+                const result = createSchedule(name, name, schedule, props.workingDir);
+                agent.addSystemMessage(result.message);
+              } else {
+                // Try to split at known schedule keywords
+                const scheduleKeywords = ["every", "daily", "weekly", "hourly", "at "];
+                let splitIdx = -1;
+                for (const kw of scheduleKeywords) {
+                  const idx = arg.toLowerCase().indexOf(kw);
+                  if (idx > 0) { splitIdx = idx; break; }
+                }
+
+                if (splitIdx > 0) {
+                  const prompt = arg.slice(0, splitIdx).trim();
+                  const schedule = arg.slice(splitIdx).trim();
+                  const result = createSchedule(prompt, prompt, schedule, props.workingDir);
+                  agent.addSystemMessage(result.message);
+                } else {
+                  agent.addSystemMessage(
+                    "**Usage:**\n" +
+                    "- `/schedule \"review PRs\" every day at 9am`\n" +
+                    "- `/schedule check CI failures every hour`\n" +
+                    "- `/schedule dep audit weekly`"
+                  );
+                }
+              }
+            }
+          })();
           break;
         }
 

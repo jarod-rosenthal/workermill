@@ -59,7 +59,7 @@ function printWelcome(roleModels: { worker: string; planner: string; reviewer: s
   });
 }
 
-const VERSION = "0.12.0";
+const VERSION = "0.12.1";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {
@@ -69,7 +69,8 @@ function addSharedOptions(cmd: Command): Command {
     .option("--trust", "Skip all tool permission prompts")
     .option("--auto-revise", "Auto-approve revisions during /build reviews")
     .option("--full-disk", "Allow tools to access files outside working directory")
-    .option("--max-tokens <n>", "Maximum output tokens per response", parseInt);
+    .option("--max-tokens <n>", "Maximum output tokens per response", parseInt)
+    .option("-p, --prompt <prompt>", "Run a single prompt headlessly and exit");
 }
 
 /** Load config, apply CLI overrides, run setup if needed. */
@@ -109,6 +110,47 @@ const defaultCmd = program
     const { provider, model, apiKey, host, contextLength } = getProviderForPersona(config);
     const workingDir = process.cwd();
     const roleModels = getRoleModelsFromConfig(config);
+
+    if (options.prompt) {
+      // Headless mode — run single prompt, print result, exit
+      const { streamText, stepCountIs } = await import("ai");
+      const { createModel, buildOllamaOptions } = await import("../../packages/engine/src/model-factory.js");
+      const { createToolDefinitions } = await import("../../packages/engine/src/tools/index.js");
+      const { formatProjectInstructions } = await import("./instructions.js");
+      const { loadLearnings } = await import("./learnings.js");
+
+      const aiModel = createModel(provider as any, model, host, contextLength);
+      const tools = createToolDefinitions(workingDir, aiModel, !options.fullDisk);
+
+      let systemPrompt = `You are WorkerMill, an AI coding agent. Working directory: ${workingDir}\n`;
+      const instructions = formatProjectInstructions(workingDir);
+      if (instructions) systemPrompt += instructions;
+      const learnings = loadLearnings();
+      if (learnings.length > 0) {
+        systemPrompt += `\n\n## Project Learnings\n${learnings.map(l => `- ${l}`).join("\n")}`;
+      }
+
+      const stream = streamText({
+        model: aiModel,
+        system: systemPrompt,
+        prompt: options.prompt as string,
+        tools: tools as any,
+        stopWhen: stepCountIs(50),
+        ...buildOllamaOptions(provider as any, contextLength),
+      });
+
+      for await (const chunk of stream.textStream) {
+        process.stdout.write(chunk);
+      }
+
+      const finalText = await stream.text;
+      if (!finalText) {
+        // If no text was streamed (tool-only response), check tool results
+        console.log("(completed with tool calls only)");
+      }
+      console.log(); // newline at end
+      process.exit(0);
+    }
 
     printWelcome(roleModels, workingDir);
 

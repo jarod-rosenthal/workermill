@@ -19,6 +19,7 @@ const BUILTIN_COMMANDS = [
   { name: "/mcp", desc: "MCP server status" },
   { name: "/chrome", desc: "Open/close browser" },
   { name: "/voice", desc: "Voice input" },
+  { name: "/schedule", desc: "Scheduled tasks" },
   { name: "/update", desc: "Update to latest" },
   { name: "/release-notes", desc: "Changelog" },
   { name: "/cost", desc: "Token costs" },

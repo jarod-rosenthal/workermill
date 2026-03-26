@@ -86,8 +86,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
   const counts = props.toolCounts || {};
   const toolEntries = Object.entries(counts)
     .filter(([, c]) => c > 0)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8);
+    .sort((a, b) => b[1] - a[1]);
 
   // Row 1 right side
   const costStr = formatCost(props.cost);
@@ -165,7 +164,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
               <Text>
                 <Text color={theme.iceBlue} bold>{"plan"}</Text>
                 <Text color={theme.subtle}>:</Text>
-                <Text color={theme.text}>{rm.planner.length > 25 ? rm.planner.slice(0, 22) + "..." : rm.planner}</Text>
+                <Text color={theme.text}>{rm.planner}</Text>
               </Text>
             ) : null}
             {rm.planner !== rm.worker && rm.reviewer !== rm.worker ? (
@@ -175,7 +174,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
               <Text>
                 <Text color={theme.permission} bold>{"review"}</Text>
                 <Text color={theme.subtle}>:</Text>
-                <Text color={theme.text}>{rm.reviewer.length > 25 ? rm.reviewer.slice(0, 22) + "..." : rm.reviewer}</Text>
+                <Text color={theme.text}>{rm.reviewer}</Text>
               </Text>
             ) : null}
           </>

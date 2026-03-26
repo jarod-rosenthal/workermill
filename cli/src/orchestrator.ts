@@ -756,7 +756,7 @@ export async function runOrchestration(
     decisions: [],
     learnings: [],
   };
-  context.learnings.push(...persistedLearnings);
+  context.learnings.push(...persistedMemories.filter(m => m.type === "learning").map(m => m.content));
   const sessionAllow = new Set<string>();
   const workingDir = process.cwd();
 

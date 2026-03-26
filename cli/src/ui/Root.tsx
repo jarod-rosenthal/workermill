@@ -1244,7 +1244,6 @@ Write the file with write_file to WORKERMILL.md in the project root.`
       buildPreviewLine={orchestrator.previewLine}
       buildLines={orchestrator.buildLines}
       streamingToolCalls={agent.streamingToolCalls}
-      streamingText={agent.streamingText}
       tokens={agent.tokens}
       cost={agent.cost}
       gitBranch={gitBranch}

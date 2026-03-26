@@ -66,10 +66,8 @@ interface AppProps {
   buildPreviewLine?: string;
   /** All build output lines accumulated in dynamic area during build. */
   buildLines?: string[];
-  /** Streaming tool calls — shown in dynamic area during agent execution. */
+  /** Streaming tool calls — only latest shown in dynamic area during execution. */
   streamingToolCalls?: ToolCallInfo[];
-  /** Streaming text — shown in dynamic area during agent execution. */
-  streamingText?: string;
 }
 
 /** Braille spinner that animates every 80ms to show the terminal is alive. */
@@ -201,21 +199,12 @@ export function App(props: AppProps): React.ReactElement {
         )}
       </Static>
 
-      {/* === Dynamic area === */}
+      {/* === Dynamic area — FIXED HEIGHT to prevent terminal jumping === */}
 
-      {/* Streaming tool calls — shown during agent execution */}
+      {/* Latest tool call only — full history commits to Static when done */}
       {props.streamingToolCalls && props.streamingToolCalls.length > 0 ? (
-        <Box flexDirection="column" marginLeft={2}>
-          {props.streamingToolCalls.map((tc) => (
-            <ToolCallDisplay key={tc.id} tool={tc} />
-          ))}
-        </Box>
-      ) : null}
-
-      {/* Streaming text — latest step text shown during agent execution */}
-      {props.streamingText ? (
-        <Box flexDirection="column" marginLeft={2}>
-          <Markdown content={props.streamingText} />
+        <Box marginLeft={2} height={1}>
+          <ToolCallDisplay tool={props.streamingToolCalls[props.streamingToolCalls.length - 1]} />
         </Box>
       ) : null}
 

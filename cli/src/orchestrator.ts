@@ -638,36 +638,31 @@ function extractBalancedJSON(text: string, start: number): string | null {
   return null; // Unbalanced
 }
 
-/** Extract a numeric score from critic output — tries markers, then natural language patterns */
+/**
+ * Extract quality score from reviewer output.
+ * Returns a 1-10 score. Handles both CODE_QUALITY_SCORE (1-10) and
+ * legacy ::review_score:: (0-100, converted to 1-10).
+ */
 function extractScore(text: string): number {
-  // 1. Try ::review_score:: marker — use LAST match (final verdict, not echoed feedback)
+  // 1. CODE_QUALITY_SCORE: N (1-10 scale) — preferred format
+  const cqsMatches = [...text.matchAll(/CODE_QUALITY_SCORE:\s*(\d+)/gi)];
+  if (cqsMatches.length > 0) {
+    const n = parseInt(cqsMatches[cqsMatches.length - 1][1], 10);
+    return Math.max(1, Math.min(10, n));
+  }
+
+  // 2. Legacy ::review_score:: (0-100) — convert to 1-10
   const markerMatches = [...text.matchAll(/::review_score::(\d+)/g)];
   if (markerMatches.length > 0) {
-    return parseInt(markerMatches[markerMatches.length - 1][1], 10);
+    const n = parseInt(markerMatches[markerMatches.length - 1][1], 10);
+    return Math.max(1, Math.min(10, Math.round(n / 10)));
   }
 
-  // 2. Try "Score: N/100" or "score: N" patterns — use LAST match
-  const scorePatterns = [
-    /\bscore[:\s]+(\d+)\s*\/\s*100/gi,
-    /\bscore[:\s]+(\d+)/gi,
-    /\brating[:\s]+(\d+)/gi,
-  ];
-  for (const pattern of scorePatterns) {
-    const matches = [...text.matchAll(pattern)];
-    if (matches.length > 0) {
-      const n = parseInt(matches[matches.length - 1][1], 10);
-      if (n >= 0 && n <= 100) return n;
-    }
-  }
+  // 3. Fallback from decision text
+  if (/\bapprove/i.test(text)) return 8;
+  if (/\brevis/i.test(text)) return 5;
 
-  // 3. If text contains "approve" but no score, assume 85
-  if (/\bapprove/i.test(text)) return 85;
-
-  // 4. If text contains "revise" or "revision" but no score, assume 60
-  if (/\brevis/i.test(text)) return 60;
-
-  // 5. No score found — default to 75 (proceed with caution rather than block)
-  return 75;
+  return 7; // No score found — default to decent
 }
 
 /**
@@ -1317,7 +1312,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
               reviewerOutput += text + "\n";
               const lines = text.split("\n").filter(l => l.trim());
               for (const line of lines) {
-                if (line.includes("::review_score::") || line.includes("::review_verdict::")) continue;
+                if (line.includes("::review_score::") || line.includes("::review_verdict::") || line.includes("::code_quality_score::")) continue;
                 output.log("tech_lead", line);
               }
             }
@@ -1341,9 +1336,9 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         logger.info(`Review round ${reviewRound} result`, { decision: decision || "no-marker-approved", score, approved, reviewTextLength: reviewText.length });
 
         // Display review result — WorkerMill format
-        output.log("tech_lead", `::code_quality_score::${score}`);
+        output.log("tech_lead", `::code_quality_score::${score}/10`);
         output.log("tech_lead", `::review_decision::${approved ? "approved" : decision === "rejected" ? "rejected" : "needs_revision"}`);
-        output.coordinatorLog(approved ? `Review approved (score: ${score}/100)` : `Review needs revision (score: ${score}/100)`);
+        output.coordinatorLog(approved ? `Review approved (${score}/10)` : `Review needs revision (${score}/10)`);
         // Save feedback for next review round — so tech_lead can check if issues were addressed
         previousReviewFeedback = reviewText;
       

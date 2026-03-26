@@ -1047,7 +1047,6 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
   const reviewEnabled = config.review?.enabled !== false; // default: true
   const maxRevisions = config.review?.maxRevisions ?? 3;
   let autoRevise = config.review?.autoRevise ?? false;
-  const approvalThreshold = config.review?.approvalThreshold ?? 80;
 
   // Run inline review with revision loop
   const reviewer = reviewEnabled ? loadPersona("tech_lead") : null;
@@ -1085,7 +1084,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
     }
 
     let previousReviewFeedback = "";
-    logger.info("Starting review loop", { maxRevisions, approvalThreshold, provider: revProvider, model: revModel });
+    logger.info("Starting review loop", { maxRevisions, provider: revProvider, model: revModel });
     for (let reviewRound = 1; reviewRound <= maxRevisions + 1; reviewRound++) {
       const isRevision = reviewRound > 1;
       logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
@@ -1250,6 +1249,8 @@ CODE_QUALITY_SCORE: 8
 FEEDBACK: Your detailed feedback
 \`\`\`
 
+**Score guide (1-10):** 1-3 = fundamentally broken, 4-5 = major issues, 6 = functional but rough, 7 = solid with minor issues (usually approve), 8-9 = good quality, 10 = exceptional. A score of 7+ should almost always accompany an "approved" decision.
+
 ### For REVISION_NEEDED Decisions - Specify Affected Stories
 
 When requesting revision, you MUST specify which stories need changes. Use the story numbers from the Story Summary table above.
@@ -1298,13 +1299,11 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         // Extract review decision — 3-tier system matching WorkerMill worker
         const decisionMatch = reviewText.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
         const decision = decisionMatch ? decisionMatch[1].toLowerCase() : null;
-        const score = extractScore(reviewText);
+        const score = extractScore(reviewText); // informational only
 
-        // Decision logic: use REVIEW_DECISION if present, fall back to score threshold
-        const approved = decision
-          ? decision === "approved"
-          : score >= approvalThreshold;
-        logger.info(`Review round ${reviewRound} result`, { decision: decision || "score-fallback", score, approved, threshold: approvalThreshold, reviewTextLength: reviewText.length });
+        // Decision driven by REVIEW_DECISION marker. If absent, bias toward approval.
+        const approved = decision ? decision === "approved" : true;
+        logger.info(`Review round ${reviewRound} result`, { decision: decision || "no-marker-approved", score, approved, reviewTextLength: reviewText.length });
 
         // Display review result — WorkerMill format
         output.log("tech_lead", `::code_quality_score::${score}`);

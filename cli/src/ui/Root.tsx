@@ -1241,6 +1241,7 @@ Write the file with write_file to WORKERMILL.md in the project root.`
       permissionRequest={agent.permissionRequest}
       orchestratorConfirm={orchestrator.confirmRequest}
       orchestratorStatus={orchestrator.statusMessage}
+      buildPreviewLine={orchestrator.previewLine}
       tokens={agent.tokens}
       cost={agent.cost}
       gitBranch={gitBranch}

@@ -65,6 +65,8 @@ export interface UseOrchestratorReturn {
   cancel: () => void;
   /** Current status message (replaces ora spinner in the old TUI). */
   statusMessage: string;
+  /** Latest build output line — rendered in the dynamic area at cursor, then committed to Static. */
+  previewLine: string;
   /** Non-null when the orchestrator is waiting for user confirmation. */
   confirmRequest: OrchestratorConfirmRequest | null;
 }
@@ -89,6 +91,7 @@ export function useOrchestrator(
 ): UseOrchestratorReturn {
   const [running, setRunning] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const [previewLine, setPreviewLine] = useState("");
   const [confirmRequest, setConfirmRequest] =
     useState<OrchestratorConfirmRequest | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -117,10 +120,28 @@ export function useOrchestrator(
 
       setRunning(true);
       setStatusMessage("");
+      setPreviewLine("");
       setConfirmRequest(null);
 
       // Fire-and-forget async work; errors are caught internally.
       void (async () => {
+        // emitLine: show latest line in dynamic area, commit previous to Static
+        const prevLine = { current: "" };
+        function emitLine(line: string): void {
+          if (prevLine.current) {
+            addMessage(prevLine.current);
+          }
+          prevLine.current = line;
+          setPreviewLine(line);
+        }
+        function flushLine(): void {
+          if (prevLine.current) {
+            addMessage(prevLine.current);
+            prevLine.current = "";
+          }
+          setPreviewLine("");
+        }
+
         try {
           // ---- Config ------------------------------------------------
           // Use the CLI-resolved config (has --auto-revise etc.) if available,
@@ -145,16 +166,16 @@ export function useOrchestrator(
               const emoji = getEmoji(persona);
               const trimmed = message.trim();
               if (trimmed) {
-                addMessage(`[${emoji} ${persona}] ${trimmed}`);
+                emitLine(`[${emoji} ${persona}] ${trimmed}`);
               }
             },
 
             coordinatorLog(message: string): void {
-              addMessage(`[${getEmoji("coordinator")} coordinator] ${message}`);
+              emitLine(`[${getEmoji("coordinator")} coordinator] ${message}`);
             },
 
             error(message: string): void {
-              addMessage(`**Error:** ${message}`);
+              emitLine(`**Error:** ${message}`);
             },
 
             status(message: string): void {
@@ -163,7 +184,7 @@ export function useOrchestrator(
 
             statusDone(message?: string): void {
               if (message) {
-                addMessage(message);
+                emitLine(message);
               }
               setStatusMessage("");
             },
@@ -219,7 +240,7 @@ export function useOrchestrator(
               }
 
               const emoji = getEmoji(persona);
-              addMessage(
+              emitLine(
                 `[${emoji} ${persona}] \u{2193} ${toolName}${detail ? " " + detail : ""}`,
               );
               // Keep status line simple — the tool call is already in the message list
@@ -237,8 +258,10 @@ export function useOrchestrator(
           // ---- Run full orchestration --------------------------------
           await runOrchestration(config, task, trustAll, sandboxed, output, controller.signal);
 
+          flushLine();
           addMessage("**Orchestration complete.**");
         } catch (err: unknown) {
+          flushLine();
           if (controller.signal.aborted) {
             addMessage("**Build cancelled.**");
           } else {
@@ -248,6 +271,7 @@ export function useOrchestrator(
         } finally {
           setRunning(false);
           setStatusMessage("");
+          setPreviewLine("");
           setConfirmRequest(null);
           // Ring terminal bell when build completes (not on cancel)
           if (!controller.signal.aborted) {
@@ -263,5 +287,5 @@ export function useOrchestrator(
   // Return
   // ------------------------------------------------------------------
 
-  return { running, start, cancel, statusMessage, confirmRequest };
+  return { running, start, cancel, statusMessage, previewLine, confirmRequest };
 }

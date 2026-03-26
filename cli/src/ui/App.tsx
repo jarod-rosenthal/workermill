@@ -61,6 +61,8 @@ interface AppProps {
   sessionStart?: number;
   /** Whether project instructions are loaded. */
   hasInstructions?: boolean;
+  /** Latest build output line — rendered at cursor in dynamic area. */
+  buildPreviewLine?: string;
 }
 
 /** Braille spinner that animates every 80ms to show the terminal is alive. */
@@ -192,10 +194,16 @@ export function App(props: AppProps): React.ReactElement {
         )}
       </Static>
 
-      {/* === Dynamic area — FIXED HEIGHT, never changes === */}
-      {/* Only 3 lines ever: activity indicator + status bar + input */}
+      {/* === Dynamic area === */}
 
-      {/* Line 1: Activity indicator (always exactly 1 line) */}
+      {/* Build preview — latest line appears at cursor, previous lines scroll up into Static */}
+      {props.buildPreviewLine ? (
+        <Box marginLeft={2}>
+          <Markdown content={props.buildPreviewLine} />
+        </Box>
+      ) : null}
+
+      {/* Activity indicator */}
       <Box marginLeft={2} height={1}>
         {props.orchestratorStatus ? (
           <Text color={theme.warning}><Spinner color={theme.warning} /> {props.orchestratorStatus}</Text>

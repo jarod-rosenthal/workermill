@@ -4,6 +4,42 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.8] - 2026-03-26
+
+### Added
+- `/as <persona> <task>` command — run a single task with a specific expert persona (e.g. `/as security_engineer review the auth middleware`).
+- Splash screen shows expert count and discovery: `12 experts available (/build auto-assigns, /as to pick one, /personas to list)`.
+- Orchestrator tool calls now tracked in the status bar during `/build` and `/retry`.
+- `build.sh` script — verified builds with `--bump patch|minor|major`. Checks version sync, browser tools, tool definitions, synchronized output, and status bar presence.
+- Synchronized terminal output (DEC mode 2026) — wraps Ink renders in begin/end synchronized update sequences for atomic frame rendering. Eliminates tearing during rapid redraws.
+
+### Changed
+- **Workers receive the full original spec** as `## Ticket Requirements — THIS IS YOUR SPEC`, matching the WorkerMill platform pattern from `prompt-builder.ts`. Workers no longer rely on the planner's interpretation.
+- **Planner creates scope labels, not rewritten specs.** Story descriptions are file scope identifiers — workers read the full spec themselves.
+- **Three-tier review system** matching the WorkerMill platform: `REVIEW_DECISION: approved | revision_needed | rejected`. Score (1-10) is informational with a guide (7+ = approve). Replaces the harsh 0-100 numeric threshold.
+- **Review bias toward approval** — cosmetic issues don't block, only functional/security bugs trigger revision. Copied criteria directly from `worker/epic/inline-reviewer.ts`.
+- **Revision prompt includes per-story feedback** — workers get their specific `AFFECTED_REASONS` instead of the full review dump for all stories.
+- Splash screen simplified: `/build orchestrates experts  /help for all commands`.
+- `workers:` label (plural) in splash screen.
+- Plan/review model labels moved to status bar row 3 (with permission mode) — row 2 is tools only.
+- Status bar timer shows minutes only (`<1m`, `1m`, `2m`) to reduce unnecessary re-renders.
+- Natural greeting — agent doesn't introduce itself as WorkerMill unless asked.
+
+### Fixed
+- **Restored browser tools** — their presence in the tool set is required for Ollama tool calling. Removing them broke ALL tool serialization (model output XML instead of structured calls). Documented in CLAUDE.md as load-bearing.
+- Compaction summary emitted as `user` + `assistant` pair instead of bare `assistant` — prevents API 400 error on next prompt.
+- Trust-all from permission prompt updates `trustAllRef` immediately — subsequent tool calls in the same turn no longer re-prompt.
+- `rm -f <file>` no longer triggers dangerous-command warning — only `-r`/`--recursive`/`--force` flagged.
+- Input history shows most recent entry first on Up arrow.
+- CDP timer leak — `clearTimeout` on successful browser commands.
+- Status bar mode icons use single-width Unicode (▸ ◆ ◈) instead of emojis that caused line wrapping on Windows Terminal.
+- Long plan/review model names truncated at 25 chars to prevent row overflow.
+- Removed artificial 100K character limit on review content — no truncation.
+- `patchConsole: false` removed (was interfering with Ink rendering).
+
+### Removed
+- `approvalThreshold` config setting — review approval now driven by `REVIEW_DECISION` marker, not a numeric score gate.
+
 ## [0.13.3] - 2026-03-26
 
 ### Fixed

@@ -39,7 +39,9 @@ npx workermill
 
 That's it. First run walks you through provider setup — pick models for workers, planner, and reviewer independently. Ollama auto-detected (including WSL), or bring API keys for Anthropic, OpenAI, or Google.
 
-For complex tasks, use `/build` — WorkerMill decomposes work into stories and assigns specialist personas (backend, frontend, devops, security), each executing their part with your full spec, followed by a tech lead code review with revision cycles.
+For complex tasks, use `/build` — WorkerMill decomposes work into stories and assigns 12 specialist personas (backend, frontend, devops, security, etc.), each executing their part with your full spec, followed by a tech lead code review with revision cycles.
+
+For single-expert tasks, use `/as <persona> <task>` — e.g. `/as security_engineer review the auth middleware`. Use `/personas` to list all available experts.
 
 ```bash
 # Check your setup
@@ -48,9 +50,12 @@ wm doctor
 # Then use /build inside the CLI for multi-expert orchestration
 # /build REST API with auth, React dashboard, Docker
 # /build spec.md
+
+# Or target a specific expert
+# /as architect design the database schema
 ```
 
-**Features:** WORKERMILL.md project instructions, MCP servers, hooks, custom commands, persistent learnings, @file/@folder/@url/@image mentions, `/undo`, `/diff`, `/permissions`, `/settings`, `/retry`, code review with actual diffs, bash guardrails, Tab-cycling permissions, ESC ESC rollback, auto-update notifications.
+**Features:** WORKERMILL.md project instructions, MCP servers, hooks, custom commands, persistent learnings, @file/@folder/@url/@image mentions, `/undo`, `/diff`, `/permissions`, `/settings`, `/retry`, `/as`, `/personas`, headless Chrome (`/chrome`), voice input (`/voice`), scheduled tasks (`/schedule`), code review with actual diffs, bash guardrails, Shift+Tab permission cycling, ESC ESC rollback, auto-update notifications.
 
 **Requirements:** Node.js 20+ and an LLM provider (Ollama for local, or an API key).
 

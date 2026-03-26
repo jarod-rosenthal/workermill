@@ -77,7 +77,9 @@ workermill --max-tokens 4096
 | Command | Description |
 |---------|-------------|
 | `/build <task>` | Multi-expert orchestration — plans, executes, reviews |
-| `/retry` | Re-plan and re-run the last build task |
+| `/as <persona> <task>` | Run a task with a specific expert (e.g. `/as security_engineer review auth`) |
+| `/retry` | Re-run the last build task |
+| `/personas` | List all available experts, view/create custom personas |
 | `/init` | Generate `WORKERMILL.md` for this project |
 | `/settings` | View/change settings (review, ollama, etc.) |
 | `/permissions` | Manage tool permissions (trust/ask/allow/deny) |
@@ -87,6 +89,12 @@ workermill --max-tokens 4096
 | `/plan` | Toggle read-only plan mode |
 | `/trust` | Auto-approve all tools for this session |
 | `/hooks` | View configured pre/post tool hooks |
+| `/skills` | Custom slash commands from `.workermill/commands/` |
+| `/chrome` | Open/close headless Chrome browser |
+| `/voice` | Voice input — speaks until silence |
+| `/schedule` | Scheduled recurring tasks |
+| `/update` | Check for updates |
+| `/release-notes` | Show changelog |
 | `/cost` | Session cost and token usage |
 | `/status` | Session info |
 | `/log` | Show recent CLI log entries |
@@ -96,16 +104,19 @@ workermill --max-tokens 4096
 | `/clear` | Reset conversation |
 | `/quit` | Exit |
 
-**Shortcuts:** `!command` runs shell directly, `ESC` cancels, `ESC ESC` rolls back last exchange, `Ctrl+C Ctrl+C` exits.
+**Shortcuts:** `!command` runs shell directly, `ESC` cancels, `ESC ESC` rolls back last exchange, `Shift+Tab` cycles permission mode, `Ctrl+C Ctrl+C` exits.
 
 ## Multi-Expert Orchestration
 
 `/build` triggers multi-expert mode:
 
-1. **Plans** — Explores the codebase, designs stories with dependencies and persona assignments
-2. **Executes** — Each story assigned to a specialist with the full original spec
-3. **Reviews** — Tech lead reads actual code diffs, scores quality, requests revisions
-4. **Commits** — Stages changes and commits (with your approval)
+1. **Plans** — Explores the codebase, designs stories as scope labels with dependencies and persona assignments. Workers receive the full original spec — the planner scopes, not rewrites.
+2. **Executes** — Each story assigned to a specialist persona. Workers see `## Ticket Requirements — THIS IS YOUR SPEC` with your full task, plus their file scope.
+3. **Reviews** — Tech lead reviews actual code with a 3-tier decision: `approved`, `revision_needed`, or `rejected`. Bias toward approval — cosmetic issues don't block. Quality score (1-10) is informational.
+4. **Revises** — If revision needed, only affected stories re-run with per-story feedback from the reviewer.
+5. **Commits** — Stages changes and commits (with your approval).
+
+For single-expert tasks, use `/as <persona> <task>` — runs one expert with the full tool set and their specialized prompt.
 
 Use `/retry` to re-plan the same task — the planner sees existing code and fills gaps.
 
@@ -150,8 +161,7 @@ Use `/retry` to re-plan the same task — the planner sees existing code and fil
   },
   "review": {
     "enabled": true,
-    "maxRevisions": 3,
-    "approvalThreshold": 80
+    "maxRevisions": 3
   },
   "hooks": {
     "post": [
@@ -174,13 +184,28 @@ Change settings at runtime with `/settings`:
 | Ollama context | 65536 | `/settings ollama.context <n>` |
 | Review enabled | true | `/settings review.enabled true/false` |
 | Max revisions | 3 | `/settings review.maxRevisions <n>` |
-| Approval threshold | 80 | `/settings review.threshold <n>` |
+| Auto-revise | false | `/settings review.autoRevise true/false` |
 
-## 12 Built-in Personas
+## 12 Expert Personas
 
-backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, architect, tech_lead, planner, critic
+| Persona | Role |
+|---------|------|
+| `architect` | System design and architecture |
+| `backend_developer` | APIs, databases, server logic |
+| `frontend_developer` | React, UI components, styling |
+| `devops_engineer` | Docker, CI/CD, infrastructure |
+| `qa_engineer` | Testing, quality gates |
+| `security_engineer` | Auth, vulnerabilities, hardening |
+| `data_ml_engineer` | Data pipelines, ML integration |
+| `mobile_developer` | Mobile apps and responsive design |
+| `tech_writer` | Documentation and API docs |
+| `tech_lead` | Code review (used automatically) |
+| `planner` | Task decomposition (used automatically) |
+| `critic` | Plan quality review (used automatically) |
 
-Custom personas: add `.workermill/personas/my_persona.md` to your project or `~/.workermill/personas/` globally.
+Use `/personas` to list all available personas. Use `/as <persona> <task>` to run a task with a specific expert.
+
+Custom personas: add `.workermill/personas/my_persona.md` to your project or `~/.workermill/personas/` globally. Project personas override built-ins with the same name.
 
 ## Requirements
 

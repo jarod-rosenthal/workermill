@@ -1154,7 +1154,7 @@ ${previousReviewFeedback}
             try {
               const fullPath = path.isAbsolute(f) ? f : path.join(workingDir, f);
               const content = fs.readFileSync(fullPath, "utf-8");
-              const trimmed = content.length > 5000 ? content.slice(0, 5000) + "\n... (truncated)" : content;
+              const trimmed = content;
               fileContents.push(`\n--- ${f} ---\n${trimmed}`);
               totalSize += trimmed.length;
             } catch { /* file may not exist */ }

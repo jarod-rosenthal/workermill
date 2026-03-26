@@ -129,10 +129,7 @@ export function resolveFileReferences(input: string, workingDir: string): string
     try {
       if (fs.existsSync(fullPath)) {
         const content = fs.readFileSync(fullPath, "utf-8");
-        const truncated = content.length > 10000
-          ? content.slice(0, 10000) + "\n... (truncated at 10KB)"
-          : content;
-        result = result.replace(match[0], `\n\`\`\`${path.extname(filePath).slice(1)}\n// ${filePath}\n${truncated}\n\`\`\`\n`);
+        result = result.replace(match[0], `\n\`\`\`${path.extname(filePath).slice(1)}\n// ${filePath}\n${content}\n\`\`\`\n`);
       } else {
         result = result.replace(match[0], `(file not found: ${filePath})`);
       }
@@ -212,10 +209,7 @@ export function resolveFolderReferences(input: string, workingDir: string): stri
     try {
       if (fs.existsSync(fullPath) && fs.statSync(fullPath).isDirectory()) {
         const tree = listDirTree(fullPath, "  ", 0, 2);
-        const truncated = tree.length > 200
-          ? tree.slice(0, 200).join("\n") + "\n  ... (truncated at 200 entries)"
-          : tree.join("\n");
-        result = result.replace(match[0], `\n\`\`\`\n// ${dirRef}\n${truncated}\n\`\`\`\n`);
+        result = result.replace(match[0], `\n\`\`\`\n// ${dirRef}\n${tree.join("\n")}\n\`\`\`\n`);
       } else {
         result = result.replace(match[0], `(directory not found: ${dirRef})`);
       }
@@ -246,10 +240,7 @@ export async function resolveUrlReferences(input: string): Promise<string> {
         `curl -sL --max-time 10 --max-filesize 10240 ${JSON.stringify(url)}`,
         { encoding: "utf-8", timeout: 12_000 },
       ).trim();
-      const truncated = content.length > 10240
-        ? content.slice(0, 10240) + "\n... (truncated at 10KB)"
-        : content;
-      result = result.replace(match[0], `\n\`\`\`\n// fetched from ${url}\n${truncated}\n\`\`\`\n`);
+      result = result.replace(match[0], `\n\`\`\`\n// fetched from ${url}\n${content}\n\`\`\`\n`);
     } catch {
       result = result.replace(match[0], `(failed to fetch: ${url})`);
     }

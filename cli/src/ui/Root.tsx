@@ -428,8 +428,7 @@ export function Root(props: RootProps): React.ReactElement {
             if (diffStat) parts.push(`**Changes:**\n\`\`\`\n${diffStat}\n\`\`\``);
             if (untracked) parts.push(`**New files:**\n${untracked.split("\n").map(f => `- \`${f}\``).join("\n")}`);
             if (diff) {
-              const truncated = diff.length > 3000 ? diff.slice(0, 3000) + "\n... (truncated, use !git diff for full output)" : diff;
-              parts.push(`**Diff:**\n\`\`\`diff\n${truncated}\n\`\`\``);
+              parts.push(`**Diff:**\n\`\`\`diff\n${diff}\n\`\`\``);
             }
 
             if (parts.length === 0) {
@@ -926,10 +925,7 @@ Write the file with write_file to WORKERMILL.md in the project root.`
             }
 
             if (content) {
-              // Show the most recent version section (first ~60 lines)
-              const lines = content.split("\n");
-              const truncated = lines.slice(0, 60).join("\n");
-              agent.addSystemMessage(truncated + (lines.length > 60 ? "\n\n*Use `!cat CHANGELOG.md` for full history.*" : ""));
+              agent.addSystemMessage(content);
             } else {
               agent.addSystemMessage(
                 "Changelog not found locally. View online:\nhttps://github.com/jarod-rosenthal/workermill/blob/main/cli/CHANGELOG.md"

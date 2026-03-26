@@ -59,7 +59,7 @@ async function printWelcome(roleModels: { worker: string; planner: string; revie
   }
 }
 
-const VERSION = "0.12.8";
+const VERSION = "0.12.9";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {

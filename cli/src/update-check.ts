@@ -1,9 +1,10 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import * as logger from "./logger.js";
 
 const CHECK_FILE = path.join(os.homedir(), ".workermill", "last-update-check.json");
-const CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+const CHECK_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours
 
 interface CheckData {
   lastCheck: number;
@@ -23,27 +24,33 @@ function isNewer(current: string, latest: string): boolean {
 
 /**
  * Check npm registry for a newer version. Returns the latest version string
- * if an update is available, null otherwise. Checks at most once per 24h.
+ * if an update is available, null otherwise.
  */
 export async function checkForUpdate(currentVersion: string): Promise<string | null> {
   try {
-    // Read last check time
     let data: CheckData = { lastCheck: 0 };
     try {
       if (fs.existsSync(CHECK_FILE)) {
         data = JSON.parse(fs.readFileSync(CHECK_FILE, "utf-8"));
       }
-    } catch { /* ignore */ }
+    } catch {
+      // Corrupt cache — will re-fetch
+    }
 
-    // Skip if checked recently
-    if (Date.now() - data.lastCheck < CHECK_INTERVAL) {
-      if (data.latestVersion && isNewer(currentVersion, data.latestVersion)) {
-        return data.latestVersion;
-      }
+    // Use cache if fresh AND the cached version is still relevant
+    // (i.e., it's newer than current — meaning we already know there's an update)
+    const cacheFresh = Date.now() - data.lastCheck < CHECK_INTERVAL;
+    if (cacheFresh && data.latestVersion && isNewer(currentVersion, data.latestVersion)) {
+      return data.latestVersion;
+    }
+
+    // If cache is fresh and no update was found last time, skip the fetch
+    // UNLESS the cached version is stale (older than current = user updated)
+    if (cacheFresh && data.latestVersion === currentVersion) {
       return null;
     }
 
-    // Fetch latest version from npm
+    // Fetch from npm
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     const res = await globalThis.fetch("https://registry.npmjs.org/workermill/latest", {
@@ -56,7 +63,7 @@ export async function checkForUpdate(currentVersion: string): Promise<string | n
     const pkg = (await res.json()) as { version: string };
     const latest = pkg.version;
 
-    // Save check result
+    // Save result
     const dir = path.dirname(CHECK_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(CHECK_FILE, JSON.stringify({ lastCheck: Date.now(), latestVersion: latest }), "utf-8");
@@ -65,7 +72,8 @@ export async function checkForUpdate(currentVersion: string): Promise<string | n
       return latest;
     }
     return null;
-  } catch {
+  } catch (err) {
+    logger.debug("Update check failed", { error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }

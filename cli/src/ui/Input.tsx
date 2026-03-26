@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Box, Text, useInput } from "ink";
+import fs from "fs";
 import { theme } from "./theme.js";
 
 const BUILTIN_COMMANDS = [
@@ -56,7 +57,20 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
   const [completionIndex, setCompletionIndex] = useState(0);
 
   // Filter matching commands when input starts with /
+  // After "/build " or "/as ", complete with .md files from cwd
   const completions = useMemo(() => {
+    const buildMatch = value.match(/^\/build\s+(.*)/);
+    if (buildMatch) {
+      const partial = buildMatch[1].toLowerCase();
+      try {
+        const files = fs.readdirSync(process.cwd())
+          .filter(f => f.endsWith(".md") && !f.startsWith("."))
+          .sort();
+        return files
+          .filter(f => f.toLowerCase().startsWith(partial) && f.toLowerCase() !== partial)
+          .map(f => ({ name: `/build ${f}`, desc: "" }));
+      } catch { return []; }
+    }
     if (!value.startsWith("/") || value.includes(" ")) return [];
     const query = value.toLowerCase();
     return BUILTIN_COMMANDS.filter((c) => c.name.startsWith(query) && c.name !== query);

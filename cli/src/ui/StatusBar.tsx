@@ -138,8 +138,8 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
         ) : null}
       </Box>
 
-      {/* Row 2: Tool usage stats + planner/reviewer roles */}
-      <Box height={1}>
+      {/* Row 2: Tool usage stats */}
+      <Box>
         {toolEntries.length > 0 ? (
           toolEntries.map(([name, count], i) => (
             <Text key={name}>
@@ -152,6 +152,12 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
         ) : (
           <Text color={theme.subtle}>{"no tool calls"}</Text>
         )}
+      </Box>
+
+      {/* Row 3: Permission mode + planner/reviewer */}
+      <Box>
+        <Text color={modeColor} bold>{`${modeIcon} ${props.mode}`}</Text>
+        <Text color={theme.subtle} dimColor>{" (shift+tab)"}</Text>
         {rm && (rm.planner !== rm.worker || rm.reviewer !== rm.worker) ? (
           <>
             <Box flexGrow={1} />
@@ -174,12 +180,6 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
             ) : null}
           </>
         ) : null}
-      </Box>
-
-      {/* Row 3: Permission mode */}
-      <Box>
-        <Text color={modeColor} bold>{`${modeIcon} ${props.mode}`}</Text>
-        <Text color={theme.subtle} dimColor>{" (shift+tab to cycle)"}</Text>
       </Box>
     </Box>
   );

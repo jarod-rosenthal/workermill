@@ -137,8 +137,8 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
         ) : null}
       </Box>
 
-      {/* Row 2: Tool usage stats */}
-      <Box>
+      {/* Row 2: Tool usage stats — wraps to next line if too wide */}
+      <Box flexWrap="wrap">
         {toolEntries.length > 0 ? (
           toolEntries.map(([name, count], i) => (
             <Text key={name}>

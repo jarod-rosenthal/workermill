@@ -195,6 +195,10 @@ export interface Story {
   persona: string;
   description: string;
   dependsOn?: string[];  // References to other story IDs
+  // Enriched fields from planner's codebase analysis
+  targetFiles?: string[];      // Files to create or modify
+  referenceFiles?: string[];   // Existing files to read for patterns
+  implementationNotes?: string; // Planner's architectural guidance
 }
 
 interface SharedContext {
@@ -374,7 +378,7 @@ async function planStories(
   sandboxed: boolean,
   output: OrchestrationOutput,
   abortSignal?: AbortSignal,
-): Promise<{ stories: Story[]; provider: string; model: string; inputTokens: number; outputTokens: number }> {
+): Promise<{ stories: Story[]; provider: string; model: string; inputTokens: number; outputTokens: number; rejected?: boolean; rejectionReason?: string }> {
   const planner = loadPersona("planner");
 
   const { provider: pProvider, model: pModel, host: pHost, contextLength: pCtx } = getProviderForPersona(config, "planner");
@@ -430,7 +434,7 @@ async function planStories(
   }
 
   const plannerProjectInstructions = formatProjectInstructions(workingDir);
-  const plannerPrompt = `You are an expert implementation planner. Analyze this task and create a high-quality implementation plan.
+  const plannerPrompt = `You are a senior architect planning an implementation. Your job is to deeply analyze the codebase, understand its patterns, and produce a plan that sets each worker up for success.
 ${plannerProjectInstructions}
 ## Task
 ${userTask}
@@ -438,22 +442,44 @@ ${inlinedFileContext ? `\n## Referenced Files\n${inlinedFileContext}` : ""}
 ## Working directory
 ${workingDir}
 
-## Instructions
-1. Use your tools to explore the working directory and understand what exists. Stay within the working directory.${referencedFiles.length > 0 ? "\n   The referenced files above have been inlined for you. Read any additional files you need for context." : ""}
-2. Design a plan with the MINIMUM number of stories. Group ALL work for the same persona into ONE story.
-3. Aim for 5 stories or fewer. If you need more, look for same-persona work to combine first.
-4. Stories run SEQUENTIALLY in the same directory — not in parallel. Later stories see earlier stories' output. Overlapping files are fine.
-5. Quality criteria:
-   - ONE persona = ONE story (only split if there's a genuine dependency gate)
-   - Every story has a clear, specific description of its file scope
-   - Stories are ordered correctly — dependencies satisfied before dependents
-   - Descriptions include enough detail for the persona to execute without ambiguity
+## Phase 1: Deep Codebase Analysis
 
-## Output format
+Use your tools to thoroughly understand the existing codebase:
+${referencedFiles.length > 0 ? "The referenced files above have been inlined for you. Read any additional files you need." : ""}
 
-Workers receive the FULL spec as their specification, so story descriptions define SCOPE (which files and area to work on), not specs (how to build it — the spec has those).
+1. **Read the project structure** — ls, glob to understand the layout
+2. **Read key files** — package.json/pyproject.toml/go.mod for dependencies and scripts. Config files for conventions.
+3. **Read existing implementations** — Find 2-3 files that are most similar to what needs to be built. Read them fully. These become reference patterns.
+4. **Identify conventions** — How are models defined? How are routes structured? What's the naming convention? What ORM/framework patterns are used? What test framework?
+5. **Identify risks** — Are there transactions that webhook/event dispatch must respect? Are there shared types that need updating? Are there existing tests that will break?
 
-Return ONLY a JSON code block with this structure:
+## Phase 2: Evaluate Feasibility
+
+Before producing a plan, evaluate whether this task should proceed:
+
+- **Is the spec clear enough?** If the task is too vague to produce specific file-level guidance, REJECT with a reason explaining what's missing.
+- **Does it conflict with the existing codebase?** If the task asks to build something that already exists, or contradicts the project's architecture, REJECT and explain why.
+- **Is it achievable?** If the task requires external services/credentials that aren't configured, or depends on things outside the repo, note these as blockers.
+
+To REJECT a task, return:
+\`\`\`json
+{ "rejected": true, "reason": "The spec doesn't specify which database to use and the project has no existing database setup. Please clarify: PostgreSQL, MySQL, or SQLite?" }
+\`\`\`
+
+Only reject when proceeding would waste time. If the task is clear enough to produce specific implementation guidance, proceed.
+
+## Phase 3: Produce the Plan
+
+Design a plan with the MINIMUM number of stories:
+- ONE persona = ONE story (only split if there's a genuine dependency gate)
+- Aim for 5 stories or fewer — combine same-persona work
+- Stories run SEQUENTIALLY in the same directory — later stories see earlier output
+- Overlapping files between stories are fine
+
+## Output Format
+
+Return a JSON code block. The \`implementationNotes\` field is THE KEY VALUE YOU ADD — it carries your architectural analysis directly to the worker so they don't have to rediscover what you already learned.
+
 \`\`\`json
 {
   "stories": [
@@ -461,12 +487,24 @@ Return ONLY a JSON code block with this structure:
       "id": "short-kebab-case-id",
       "title": "Brief title",
       "persona": "persona_name",
-      "description": "File scope: which files/directories this story owns and what area of the system it covers (2-3 lines). Do NOT rewrite the spec — workers read the full spec themselves.",
+      "description": "Scope: which files/directories this story owns and what area it covers.",
+      "targetFiles": ["src/models/webhook.py", "src/routers/webhooks.py"],
+      "referenceFiles": ["src/models/product.py", "src/routers/products.py"],
+      "implementationNotes": "Follow the pattern in product.py for the model — use SQLAlchemy declarative with UUID primary key, org_id foreign key, and created_at timestamp. The router should mirror products.py structure: admin-only endpoints using get_current_admin dependency. Use FastAPI BackgroundTasks for async webhook delivery — do NOT dispatch inside the database transaction. The existing audit logger in middleware.py can be extended for delivery tracking.",
       "dependsOn": ["id-of-dependency"]
     }
   ]
 }
 \`\`\`
+
+**implementationNotes must include:**
+- Which existing files to use as patterns and WHY
+- Specific framework/ORM patterns to follow (with details from what you read)
+- Integration points with existing code (exact function names, imports, patterns)
+- Risks or gotchas you discovered while reading the code
+- Do NOT be generic ("follow best practices") — be specific ("use the Depends(get_db) pattern from dependencies.py")
+
+**Workers receive the full spec separately.** Do not rewrite the spec in descriptions or notes. Focus on HOW to implement within THIS codebase, not WHAT to implement.
 
 Available personas: backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, tech_lead`;
 
@@ -517,6 +555,24 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
   clearInterval(heartbeat);
 
   const planUsage = await planStream.totalUsage;
+
+  // Check for planner rejection before parsing stories
+  const rejectionMatch = planText.match(/"rejected"\s*:\s*true[\s\S]*?"reason"\s*:\s*"([^"]+)"/);
+  if (rejectionMatch) {
+    const reason = rejectionMatch[1];
+    logger.info("Planner rejected task", { reason });
+    output.coordinatorLog(`Planner rejected: ${reason}`);
+    output.error(`Task rejected by planner: ${reason}`);
+    return {
+      stories: [],
+      provider: pProvider,
+      model: pModel,
+      inputTokens: planUsage?.inputTokens || 0,
+      outputTokens: planUsage?.outputTokens || 0,
+      rejected: true,
+      rejectionReason: reason,
+    };
+  }
 
   let stories = parseStoriesFromText(planText, output);
 
@@ -763,18 +819,29 @@ export async function runOrchestration(
 
   // Planner explores codebase and produces stories
   const planResult = await planStories(config, userTask, workingDir, sandboxed, output, abortSignal);
-  const plannerStories = planResult.stories;
 
   // Track planner cost
   costTracker.addUsage("Planner", planResult.provider, planResult.model, planResult.inputTokens, planResult.outputTokens);
   output.updateCost?.(costTracker.getTotalCost());
 
+  // Handle planner rejection — task is too vague, contradictory, or infeasible
+  if (planResult.rejected) {
+    output.log("system", `The planner determined this task should not proceed: ${planResult.rejectionReason || "unspecified reason"}`);
+    output.log("system", "Refine your spec and try again.");
+    return;
+  }
+
+  const plannerStories = planResult.stories;
+
   // Show the plan — WorkerMill format
   output.log("planner", `Plan generated: ${plannerStories.length} stories`);
   plannerStories.forEach((s, i) => {
-    output.log("planner", `Step ${i + 1}: [${s.persona}] ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`);
+    output.log("planner", `Story ${i + 1}: [${s.persona}] ${s.title}${s.dependsOn?.length ? ` (after: ${s.dependsOn.join(", ")})` : ""}`);
+    if (s.targetFiles?.length) output.log("planner", `  files: ${s.targetFiles.join(", ")}`);
+    if (s.referenceFiles?.length) output.log("planner", `  patterns: ${s.referenceFiles.join(", ")}`);
+    if (s.implementationNotes) output.log("planner", `  guidance: ${s.implementationNotes.split("\n")[0].slice(0, 120)}...`);
   });
-  output.log("planner", `Plan validated: ${plannerStories.length} stories. Task queued for execution.`);
+  output.log("planner", `Plan ready: ${plannerStories.length} stories queued for execution.`);
 
   // Optional critic pass (--critic or config.review.useCritic)
   if (config.review?.useCritic) {
@@ -1028,6 +1095,9 @@ ${userTask}
 ## Your File Scope — STAY IN YOUR LANE
 
 ${story.description}
+${story.targetFiles?.length ? `\n**Target files:** ${story.targetFiles.join(", ")}` : ""}
+${story.referenceFiles?.length ? `\n**Reference files (read these first for patterns):** ${story.referenceFiles.join(", ")}` : ""}
+${story.implementationNotes ? `\n## Implementation Guidance from Architect\n\n${story.implementationNotes}\n\n**This guidance is based on actual analysis of the codebase. Follow it closely.**` : ""}
 
 **The ticket requirements above are your ONLY spec. This scope identifies which files and area of the codebase you are responsible for. Do NOT invent requirements beyond what the ticket states.**
 Do NOT modify files outside this scope unless absolutely necessary for shared types/imports. If you must touch a file owned by another story, note it with a ::file_modified:: marker so subsequent experts are aware.

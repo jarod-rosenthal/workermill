@@ -46,7 +46,7 @@ async function printWelcome(roleModels: { worker: string; planner: string; revie
     console.log(dim(`  planner:  ${roleModels.planner}`));
     console.log(dim(`  reviewer: ${roleModels.reviewer}`));
   }
-  console.log(dim("  12 experts available (") + brand("/build") + dim(" auto-assigns, ") + brand("/as") + dim(" to pick one)"));
+  console.log(dim("  12 experts available (") + brand("/build") + dim(" auto-assigns, ") + brand("/as") + dim(" to pick one, ") + brand("/personas") + dim(" to list)"));
   console.log(dim(`  cwd: ${workingDir}`));
   console.log();
   console.log(dim("  ") + brand("/build") + dim(" orchestrates experts  ") + white("/help") + dim(" for all commands"));
@@ -60,7 +60,7 @@ async function printWelcome(roleModels: { worker: string; planner: string; revie
   }
 }
 
-const VERSION = "0.15.7";
+const VERSION = "0.15.8";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {

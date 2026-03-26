@@ -40,7 +40,7 @@ import type {
 /** Command patterns that require explicit confirmation even under trust-all. */
 const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   {
-    pattern: /rm\s+(-[a-z]*f|-[a-z]*r|--force|--recursive)/i,
+    pattern: /rm\s+(-[a-z]*r[a-z]*|--recursive|--force)/i,
     label: "recursive/forced delete",
   },
   { pattern: /git\s+reset\s+--hard/i, label: "hard reset" },
@@ -136,6 +136,8 @@ export interface UseAgentReturn {
   permissionMode: string;
   /** Cycle to the next permission mode (ask → auto-edit → trust all → ask). */
   cyclePermissionMode: () => void;
+  /** Increment tool count for the status bar (used by orchestrator). */
+  incrementToolCount: (toolName: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -502,6 +504,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
           // Handle mode escalation from the permission prompt.
           if (mode === "trust") {
+            trustAllRef.current = true;
             setTrustAllState(true);
           } else if (mode === "always") {
             sessionAllowRef.current.add(name);
@@ -918,6 +921,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     setMessages((prev) => [...prev, msg]);
   }, []);
 
+  // ------- Tool count helper (for orchestrator) -------- //
+
+  const incrementToolCount = useCallback((toolName: string) => {
+    setToolCounts(prev => ({ ...prev, [toolName]: (prev[toolName] || 0) + 1 }));
+  }, []);
+
   // ------- Return -------- //
 
   return {
@@ -944,5 +953,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     cyclePermissionMode,
     toolCounts,
     sessionStart: sessionStartRef.current,
+    incrementToolCount,
   };
 }

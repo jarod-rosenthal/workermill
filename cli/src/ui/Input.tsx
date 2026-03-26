@@ -3,6 +3,7 @@ import { Box, Text, useInput } from "ink";
 import { theme } from "./theme.js";
 
 const BUILTIN_COMMANDS = [
+  { name: "/as", desc: "Run task as persona" },
   { name: "/build", desc: "Multi-expert orchestration" },
   { name: "/retry", desc: "Re-run last build" },
   { name: "/init", desc: "Generate WORKERMILL.md" },
@@ -95,23 +96,25 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         return;
       }
 
-      // History: up (only when no completions showing)
+      // History: up — navigate from most recent to oldest.
+      // historyIndex: -1 = not navigating, 0 = most recent, 1 = second most recent, etc.
       if (key.upArrow) {
         const newIdx = Math.min(historyIndex + 1, history.length - 1);
-        if (newIdx >= 0 && history[newIdx]) {
+        if (newIdx >= 0 && history.length > 0) {
           setHistoryIndex(newIdx);
-          setValue(history[newIdx]);
+          setValue(history[history.length - 1 - newIdx]);
         }
         return;
       }
 
-      // History: down
+      // History: down — navigate back toward most recent
       if (key.downArrow) {
         const newIdx = historyIndex - 1;
-        setHistoryIndex(newIdx);
-        if (newIdx >= 0 && history[newIdx]) {
-          setValue(history[newIdx]);
+        if (newIdx >= 0 && history.length > 0) {
+          setHistoryIndex(newIdx);
+          setValue(history[history.length - 1 - newIdx]);
         } else {
+          setHistoryIndex(-1);
           setValue("");
         }
         return;

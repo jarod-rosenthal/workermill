@@ -28,11 +28,10 @@ function formatCost(c: number): string {
   return `$${c.toFixed(2)}`;
 }
 
-/** Format elapsed time as Xh Ym */
+/** Format elapsed time — minutes only to avoid per-second re-renders. */
 function formatElapsed(startMs: number): string {
-  const elapsed = Math.floor((Date.now() - startMs) / 1000);
-  if (elapsed < 60) return `${elapsed}s`;
-  const mins = Math.floor(elapsed / 60);
+  const mins = Math.floor((Date.now() - startMs) / 60_000);
+  if (mins < 1) return "<1m";
   if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
   const remainMins = mins % 60;

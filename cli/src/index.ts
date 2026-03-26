@@ -46,9 +46,10 @@ async function printWelcome(roleModels: { worker: string; planner: string; revie
     console.log(dim(`  planner:  ${roleModels.planner}`));
     console.log(dim(`  reviewer: ${roleModels.reviewer}`));
   }
+  console.log(dim("  experts: ") + white("architect, backend, frontend, devops, qa, security") + dim(" + 6 more"));
   console.log(dim(`  cwd: ${workingDir}`));
   console.log();
-  console.log(dim("  ") + brand("/build") + dim(" to create  ") + brand("/retry") + dim(" to re-run  ") + white("/help") + dim(" for all commands"));
+  console.log(dim("  ") + brand("/build") + dim(" auto-assigns experts  ") + brand("/as") + dim(" <persona> for one  ") + white("/help") + dim(" for all"));
   console.log();
 
   // Blocking update check — must print before Ink takes over stdout
@@ -59,7 +60,7 @@ async function printWelcome(roleModels: { worker: string; planner: string; revie
   }
 }
 
-const VERSION = "0.13.8";
+const VERSION = "0.13.9";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {

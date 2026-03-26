@@ -61,6 +61,7 @@ export async function compactMessages(
     });
 
     return [
+      { role: "user" as const, content: "[Summarize the conversation so far]" },
       { role: "assistant" as const, content: `[Conversation summary]\n${result.text}` },
       ...toKeep,
     ];

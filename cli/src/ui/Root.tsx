@@ -970,6 +970,35 @@ Write the file with write_file to WORKERMILL.md in the project root.`
           break;
         }
 
+        // ---- /as <persona> <task> ----
+        case "as": {
+          if (!arg || !arg.includes(" ")) {
+            const allPersonas = listAvailablePersonas();
+            agent.addSystemMessage(
+              "**Usage:** `/as <persona> <task>`\n\n" +
+              "Run a task with a specific expert persona's system prompt.\n\n" +
+              `**Available:** ${allPersonas.join(", ")}\n\n` +
+              "**Example:** \`/as security_engineer review the auth middleware for vulnerabilities\`"
+            );
+          } else {
+            const spaceIdx2 = arg.indexOf(" ");
+            const personaSlug = arg.slice(0, spaceIdx2).replace(/-/g, "_");
+            const task = arg.slice(spaceIdx2 + 1).trim();
+            const p = loadPersona(personaSlug);
+            if (!p) {
+              agent.addSystemMessage(`Persona \`${personaSlug}\` not found. Use \`/personas\` to list all.`);
+            } else {
+              // Prepend persona context to the task so the agent adopts the role
+              const personaPrefix =
+                `[Acting as **${p.name}** — ${p.description}]\n\n` +
+                `## Expert Instructions\n\n${p.systemPrompt}\n\n` +
+                `## Task\n\n`;
+              agent.submit(personaPrefix + task);
+            }
+          }
+          break;
+        }
+
         // ---- /personas ----
         case "personas": {
           const allPersonas = listAvailablePersonas();

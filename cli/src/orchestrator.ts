@@ -818,11 +818,26 @@ export async function runOrchestration(
     }
     }
 
+  // Track failed and blocked stories — matches worker/epic/coordinator-stories.ts pattern
+  const failedStories = new Set<string>();
+  const skippedStories = new Set<string>();
+
   for (let i = 0; i < sorted.length; i++) {
     const story = sorted[i];
+
+    // Check if any dependency failed — block this story (cascade failure)
+    if (story.dependsOn?.some(dep => failedStories.has(dep) || skippedStories.has(dep))) {
+      const blockedBy = story.dependsOn.filter(dep => failedStories.has(dep) || skippedStories.has(dep));
+      skippedStories.add(story.id);
+      output.log("system", `Skipping story ${i + 1}/${sorted.length}: "${story.title}" — blocked by failed dependency: ${blockedBy.join(", ")}`);
+      logger.info(`Story ${i + 1} skipped (dependency failed)`, { story: story.id, blockedBy });
+      continue;
+    }
+
     const persona = loadPersona(story.persona);
     if (!persona) {
       output.error(`Unknown persona: ${story.persona}`);
+      failedStories.add(story.id);
       continue;
     }
 
@@ -1060,6 +1075,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
           continue; // retry this story
         }
         output.error(`Story ${i + 1} failed: model produced no output after 3 attempts`);
+        failedStories.add(story.id);
         break;
       }
 
@@ -1079,10 +1095,20 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
       }
 
       output.error(`Story ${i + 1} failed: ${errMsg}`);
+      failedStories.add(story.id);
       break;
     }
 
     } // end revision loop
+  }
+
+  // Report failed/skipped stories before review
+  if (failedStories.size > 0 || skippedStories.size > 0) {
+    const failedNames = sorted.filter(s => failedStories.has(s.id)).map(s => s.title);
+    const skippedNames = sorted.filter(s => skippedStories.has(s.id)).map(s => s.title);
+    if (failedNames.length > 0) output.coordinatorLog(`Failed stories: ${failedNames.join(", ")}`);
+    if (skippedNames.length > 0) output.coordinatorLog(`Skipped (blocked by dependency): ${skippedNames.join(", ")}`);
+    logger.info("Story execution summary", { failed: [...failedStories], skipped: [...skippedStories], completed: sorted.length - failedStories.size - skippedStories.size });
   }
 
   // Review config

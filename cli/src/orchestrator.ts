@@ -1767,58 +1767,38 @@ ${previousReviewFeedback}
         }).join("\n");
 
         // Gather actual code for the reviewer — don't depend on ::file_created:: markers
-        // Gather ALL code for the reviewer — tracked diffs AND untracked files
+        // Gather diff summary for the reviewer — NOT full file contents.
+        // The reviewer has read_file/glob/grep tools to inspect code on demand.
+        // Inlining 33MB of code into the prompt blows API limits.
         let codeDiff = "";
         try {
+          // git diff --stat for overview, full diff for actual changes
+          const diffStat = execSync("git diff --stat HEAD 2>/dev/null || git diff --stat 2>/dev/null", {
+            cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 10_000,
+          }).trim();
           const diff = execSync("git diff HEAD 2>/dev/null || git diff 2>/dev/null", {
             cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 10_000,
           }).trim();
-          if (diff) codeDiff = diff + "\n\n";
+          if (diffStat) codeDiff += `## Diff Summary\n${diffStat}\n\n`;
+          if (diff) codeDiff += diff;
         } catch {
           // Not a git repo or no changes staged
         }
 
-        // ALWAYS check for untracked files — git diff misses new files entirely
+        // List new/untracked files so the reviewer knows to read them
         {
-          let allFiles: string[] = [...new Set([...context.filesCreated, ...context.filesModified])].filter(Boolean);
-
-          if (allFiles.length === 0) {
+          let untrackedFiles: string[] = context.filesCreated.filter(Boolean);
+          if (untrackedFiles.length === 0) {
             try {
               const gitFiles = execSync(
-                "git ls-files --others --modified --exclude-standard 2>/dev/null",
+                "git ls-files --others --exclude-standard 2>/dev/null",
                 { cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 5_000 },
               ).trim();
-              if (gitFiles) allFiles = gitFiles.split("\n").filter(Boolean);
-            } catch {
-              // Not a git repo — will try filesystem scan
-            }
+              if (gitFiles) untrackedFiles = gitFiles.split("\n").filter(Boolean);
+            } catch { /* not a git repo */ }
           }
-
-          // Still nothing? Scan for common source files
-          if (allFiles.length === 0) {
-            try {
-              const found = execSync(
-                "find . -maxdepth 4 -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.go' -o -name '*.json' -o -name '*.yml' -o -name '*.yaml' -o -name 'Dockerfile' \\) -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.workermill/*' -not -path '*/dist/*' | head -200",
-                { cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 5_000 },
-              ).trim();
-              if (found) allFiles = found.split("\n").filter(Boolean);
-            } catch {
-              // find command failed — proceed with empty file list
-            }
-          }
-          const fileContents: string[] = [];
-
-          for (const f of allFiles) {
-            try {
-              const fullPath = path.isAbsolute(f) ? f : path.join(workingDir, f);
-              const content = fs.readFileSync(fullPath, "utf-8");
-              fileContents.push(`\n--- ${f} ---\n${content}`);
-            } catch {
-              // File may have been deleted since listing — skip
-            }
-          }
-          if (fileContents.length > 0) {
-            codeDiff += "\n## Untracked / New Files\n" + fileContents.join("\n");
+          if (untrackedFiles.length > 0) {
+            codeDiff += `\n\n## New Files (use read_file to inspect)\n${untrackedFiles.map(f => `- ${f}`).join("\n")}`;
           }
         }
 
@@ -1839,13 +1819,11 @@ Files created: ${context.filesCreated.join(", ") || "none"}
 Files modified: ${context.filesModified.join(", ") || "none"}
 ${context.decisions.length > 0 ? `\nDecisions made:\n${context.decisions.map(d => `- ${d}`).join("\n")}` : ""}
 
-## Actual Code
+## Code Changes
 
-The following is the actual code that was written. Review THIS, not the summary above.
+The diff below shows what was changed. For new files, use your read_file tool to inspect them.
 
-\`\`\`
 ${codeDiff || "(no code changes detected)"}
-\`\`\`
 
 ## Review Instructions
 

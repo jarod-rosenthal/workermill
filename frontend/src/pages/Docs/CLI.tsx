@@ -58,8 +58,9 @@ export default function CLI() {
         <h2 className="text-2xl font-semibold">Features</h2>
         <div className="grid gap-3">
           {[
-            { title: "Multi-expert orchestration", desc: "/ship decomposes tasks into stories, each assigned to a specialist persona with dependency ordering." },
-            { title: "Quality gates", desc: "Auto-runs typecheck and lint after each story. Failures feed back to the expert for automatic retry before review." },
+            { title: "Architect-led planning", desc: "The planner reads your codebase — patterns, conventions, architecture — then briefs each worker with specific files to follow, integration points, and risks. Workers write code that fits your project, not generic boilerplate." },
+            { title: "Multi-expert orchestration", desc: "/ship decomposes tasks into stories, each assigned to a specialist persona with the planner's architectural guidance." },
+            { title: "Feasibility gate", desc: "The planner rejects tasks that are too vague or contradictory before any worker tokens are spent." },
             { title: "Surgical review fixer", desc: "When the reviewer requests changes, a lightweight fix agent applies targeted edits before falling back to full re-execution." },
             { title: "Spec verification", desc: "Independent QA agent verifies each story's output against the original specification before review." },
             { title: "Error classification", desc: "Categorizes failures (typescript, lint, test, build, transient) with targeted fix hints for automatic retry." },
@@ -95,9 +96,9 @@ export default function CLI() {
         <h2 className="text-2xl font-semibold">Multi-Expert Orchestration</h2>
         <p className="text-muted-foreground">Use <code className="text-primary">/ship</code> to trigger multi-expert mode:</p>
         <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
-          <li><strong className="text-foreground">Plans</strong> — Explores the codebase, designs stories with dependencies and persona assignments</li>
-          <li><strong className="text-foreground">Executes</strong> — Each story assigned to a specialist with the full original spec and context from prior stories</li>
-          <li><strong className="text-foreground">Validates</strong> — Auto-runs typecheck and lint after each story, retries with fix context on failure</li>
+          <li><strong className="text-foreground">Analyzes</strong> — Planner reads your codebase deeply: patterns, conventions, frameworks, dependencies, risks</li>
+          <li><strong className="text-foreground">Plans</strong> — Decomposes the task into stories with specific files, reference patterns, and architectural guidance per worker</li>
+          <li><strong className="text-foreground">Executes</strong> — Each specialist gets the full spec plus the planner's brief: "follow this file, use this pattern, watch for this risk"</li>
           <li><strong className="text-foreground">Verifies</strong> — Independent QA agent checks each story against the spec before review</li>
           <li><strong className="text-foreground">Reviews</strong> — Tech lead reads actual code diffs, requests targeted revisions on specific stories</li>
           <li><strong className="text-foreground">Fixes</strong> — Surgical fixer applies reviewer feedback directly; falls back to full re-execution only if needed</li>

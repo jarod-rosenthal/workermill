@@ -176,20 +176,22 @@ export default function QuickStart() {
                   <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">That's it</span>
                 </div>
                 <p className="text-muted-foreground mb-4">
-                  Type your task. Simple tasks run in single-agent mode. Complex tasks are automatically decomposed into stories and assigned to specialist personas.
+                  Type your task or use <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">/ship spec.md</code> for multi-expert mode. The planner reads your codebase, understands your patterns, then briefs each specialist with exactly which files to follow and how to integrate.
                 </p>
                 <div className="bg-muted/30 rounded-lg p-4 font-mono text-xs text-muted-foreground space-y-1">
-                  <div className="text-white">  WorkerMill <span className="text-muted-foreground">v0.15.23</span></div>
+                  <div className="text-white">  WorkerMill <span className="text-muted-foreground">v0.15.31</span></div>
                   <div>  ollama/<span className="text-white">qwen3-coder:30b</span></div>
                   <div>  cwd: <span className="text-white">~/projects/myapp</span></div>
                   <div />
-                  <div className="text-white">  &gt; Add JWT authentication with refresh tokens to the Express API</div>
+                  <div className="text-white">  &gt; /ship add-webhooks.md</div>
                   <div />
-                  <div className="text-cyan-400">  [💡 planner 🏠] Starting planning agent...</div>
-                  <div className="text-cyan-400">  [💡 planner 🏠] Plan generated: 3 stories</div>
-                  <div className="text-cyan-400">  [🔐 security_engineer 🏠] Starting JWT auth implementation</div>
-                  <div className="text-cyan-400">  [🔐 security_engineer 🏠] Tool: bash → npm install jsonwebtoken bcrypt</div>
-                  <div className="text-cyan-400">  [🔐 security_engineer 🏠] Tool: write_file → src/middleware/auth.ts</div>
+                  <div className="text-cyan-400">  [💡 planner] Analyzing codebase: FastAPI, Pydantic, Alembic...</div>
+                  <div className="text-cyan-400">  [💡 planner] Story 1: [backend_developer] Webhook system</div>
+                  <div className="text-cyan-400">  [💡 planner]   patterns: src/models/product.py, src/routers/products.py</div>
+                  <div className="text-cyan-400">  [💡 planner]   guidance: Follow product.py model pattern with...</div>
+                  <div className="text-cyan-400">  [💻 backend_developer] Starting: Webhook system</div>
+                  <div className="text-cyan-400">  [💻 backend_developer] Tool: read_file → src/models/product.py</div>
+                  <div className="text-cyan-400">  [💻 backend_developer] Tool: write_file → src/models/webhook.py</div>
                 </div>
               </div>
             </div>

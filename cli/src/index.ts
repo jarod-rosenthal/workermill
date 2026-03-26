@@ -49,7 +49,7 @@ async function printWelcome(roleModels: { worker: string; planner: string; revie
   console.log(dim("  12 experts available (") + brand("/build") + dim(" auto-assigns, ") + brand("/as") + dim(" to pick one, ") + brand("/personas") + dim(" to list)"));
   console.log(dim(`  cwd: ${workingDir}`));
   console.log();
-  console.log(dim("  ") + brand("/build") + dim(" orchestrates experts  ") + white("/help") + dim(" for all commands"));
+  console.log(dim("  ") + brand("/build") + dim(" orchestrates experts  ") + brand("/setup") + dim(" to change providers  ") + white("/help") + dim(" for all"));
   console.log();
 
   // Blocking update check — must print before Ink takes over stdout

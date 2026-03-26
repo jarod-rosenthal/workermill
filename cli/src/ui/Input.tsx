@@ -7,6 +7,7 @@ const BUILTIN_COMMANDS = [
   { name: "/build", desc: "Multi-expert orchestration" },
   { name: "/retry", desc: "Re-run last build" },
   { name: "/init", desc: "Generate WORKERMILL.md" },
+  { name: "/setup", desc: "Re-run provider setup wizard" },
   { name: "/settings", desc: "View/change settings" },
   { name: "/permissions", desc: "Tool permissions" },
   { name: "/undo", desc: "Revert changes" },

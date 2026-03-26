@@ -693,6 +693,26 @@ export function Root(props: RootProps): React.ReactElement {
           break;
         }
 
+        // ---- /setup ----
+        case "setup": {
+          agent.addSystemMessage("**Launching setup wizard...**\nThe CLI will restart after setup completes.");
+          stopAllMCPServers();
+          void import("../browser.js").then(m => m.browserClose());
+          exit();
+          // Exit Ink, run setup wizard, then exit so user restarts fresh
+          setTimeout(async () => {
+            try {
+              const { runSetup } = await import("../setup.js");
+              await runSetup();
+              console.log("\n  Setup complete. Run `workermill` to start with the new config.\n");
+            } catch (err) {
+              console.error("Setup failed:", err instanceof Error ? err.message : String(err));
+            }
+            process.exit(0);
+          }, 200);
+          break;
+        }
+
         // ---- /quit, /exit ----
         case "quit":
         case "exit":

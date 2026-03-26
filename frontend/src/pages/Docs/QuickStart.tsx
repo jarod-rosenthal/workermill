@@ -3,7 +3,6 @@ import {
   ArrowRight,
   Copy,
   ExternalLink,
-  Monitor,
   Cloud,
   Terminal,
   Check,

@@ -31,7 +31,7 @@ export function GettingStartedChecklist() {
   });
   const navigate = useNavigate();
   const location = useLocation();
-  const organization = useAuthStore((state) => state.organization);
+  const _organization = useAuthStore((state) => state.organization);
   const user = useAuthStore((state) => state.user);
 
   // Sync server-side dismiss flag on mount

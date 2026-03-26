@@ -11,7 +11,6 @@ import {
   MessageCircle,
   Bell,
   Cloud,
-  Server,
   Monitor,
 } from "lucide-react";
 

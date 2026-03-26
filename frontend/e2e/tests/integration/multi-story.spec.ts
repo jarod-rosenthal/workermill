@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { APIClient } from "../../helpers/api-client";
 import { detectIntegrations } from "./helpers/integration-config";
 import { cleanupBranches } from "./helpers/github-helpers";
-import { waitForStatus, getRandomPrdTask, TERMINAL_STATUSES, SUCCESS_STATUSES } from "./helpers/task-helpers";
+import { waitForStatus, getRandomPrdTask, TERMINAL_STATUSES, SUCCESS_STATUSES as _SUCCESS_STATUSES } from "./helpers/task-helpers";
 
 const isLocal = !process.env.BASE_URL;
 

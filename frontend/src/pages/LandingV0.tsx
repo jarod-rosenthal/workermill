@@ -154,7 +154,7 @@ function OpenSourceBanner() {
 
 function InstallSection() {
   const [copied, setCopied] = useState<string | null>(null);
-  const [platform, setPlatform] = useState<"unix" | "windows">("unix");
+  const [_platform, _setPlatform] = useState<"unix" | "windows">("unix");
 
   const copyToClipboard = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
@@ -162,7 +162,7 @@ function InstallSection() {
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const installCommands = {
+  const _installCommands = {
     unix: "curl -fsSL https://workermill.com/install.sh | bash",
     windows: "irm https://workermill.com/install.ps1 | iex",
   };

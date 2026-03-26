@@ -75,7 +75,7 @@ export default function Dashboard() {
   const {
     data, setData, loading, error, fetchData,
     systemEnabled, systemToggleLoading, toggleSystem,
-    remoteAgentOnly, hasRemoteAgent, remoteAgentOnline,
+    remoteAgentOnly: _remoteAgentOnly, hasRemoteAgent: _hasRemoteAgent, remoteAgentOnline: _remoteAgentOnline,
     mainEventSourceRef, setSseConnected,
   } = useTaskDataFetching();
 
@@ -224,7 +224,7 @@ export default function Dashboard() {
     }
   };
 
-  const getPersonaInfo = (persona: string) =>
+  const _getPersonaInfo = (persona: string) =>
     PERSONA_CONFIG[persona] || { emoji: "\u{1F916}", title: persona, description: "AI Worker", skills: [] };
 
   function isEpicTask(task: ActiveTask): boolean {

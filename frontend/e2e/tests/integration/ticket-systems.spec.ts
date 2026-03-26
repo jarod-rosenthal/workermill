@@ -22,14 +22,14 @@ test.describe("Ticket System Integration", () => {
     api = new APIClient(request);
   });
 
-  test.afterAll(async ({ request }) => {
+  test.afterAll(async ({ request: _request }) => {
     // Cancel any running tasks we created
     for (const id of createdTaskIds) {
       try { await api.cancelTask(id); } catch { /* best effort */ }
     }
   });
 
-  test("Jira webhook creates task with correct metadata", async ({ request }) => {
+  test("Jira webhook creates task with correct metadata", async ({ request: _request }) => {
     test.skip(!config.hasJira, "Jira not configured");
     test.setTimeout(30_000);
 

@@ -128,7 +128,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function IntegrationTests() {
   const [report, setReport] = useState<PlaywrightReport | null>(null);
-  const [config, setConfig] = useState<IntegrationConfig | null>(null);
+  const [_config, setConfig] = useState<IntegrationConfig | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
   const [configDraft, setConfigDraft] = useState<IntegrationConfig | null>(null);
   const [saving, setSaving] = useState(false);

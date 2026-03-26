@@ -13,7 +13,7 @@ import { CostTracker } from "./cost-tracker.js";
 import type { CliConfig, HooksConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
 import { runHooks } from "./hooks.js";
-import { loadLearnings, saveLearnings, mergeLearnings } from "./learnings.js";
+import { loadMemories, addMemory, extractMemoryMarkers, formatMemoriesForPrompt } from "./memory.js";
 import { isDangerous, READ_TOOLS } from "./safety.js";
 
 /**
@@ -56,28 +56,27 @@ export interface OrchestrationOutput {
 }
 
 /**
- * Learning instructions — from worker/epic/experts.ts lines 50-69.
- * Teaches models what constitutes a valid learning.
+ * Memory instructions — teaches models to emit memory markers.
  */
-const LEARNING_INSTRUCTIONS = `
+const MEMORY_INSTRUCTIONS = `
 
-## Reporting Learnings
+## Memory
 
-When you discover something specific and actionable about this codebase, emit a learning marker:
+When you discover something specific and actionable, emit a marker to save it:
 
 \`\`\`
 ::learning::The test suite requires DATABASE_URL env var or tests silently pass without running
-::learning::New API routes must be registered in backend/src/routes/index.ts or they won't load
+::remember::This project uses Prisma with PostgreSQL, migrations are in prisma/migrations/
 \`\`\`
 
-**Emit a learning when you discover:**
+**Save when you discover:**
 - A non-obvious requirement (specific env vars, config files, build steps)
-- A codebase convention not documented elsewhere (naming patterns, file organization)
+- A codebase convention (naming patterns, file organization, frameworks used)
 - A gotcha you had to work around (unexpected failures, ordering dependencies)
 - Files that must be modified together (route + model + migration + test)
 
-**Do NOT emit generic advice** like "write tests" or "handle errors properly."
-Include file paths, commands, and exact details. Only emit when you genuinely discover something non-obvious.
+**Do NOT save** generic advice like "write tests" or "handle errors properly."
+Include file paths, commands, and exact details.
 `;
 
 /**
@@ -721,7 +720,7 @@ export async function runOrchestration(
   }
 
   const costTracker = new CostTracker();
-  const persistedLearnings = loadLearnings();
+  const persistedMemories = loadMemories();
   const context: SharedContext = {
     filesCreated: [],
     filesModified: [],
@@ -958,7 +957,7 @@ When summarizing your work at the end, describe decisions in plain language. The
 When you make a decision that affects other parts of the system, include ::decision:: markers in your output.
 When you create a file, include ::file_created::path markers.
 When you modify a file, include ::file_modified::path markers.
-${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
+${MEMORY_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
 
     try {
       // Combine user abort with loop detection abort
@@ -1013,7 +1012,7 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
 
             const lines = text.split("\n").filter(l => l.trim());
             for (const line of lines) {
-              if (line.includes("::decision::") || line.includes("::learning::") ||
+              if (line.includes("::decision::") || line.includes("::learning::") || line.includes("::remember::") ||
                   line.includes("::file_created::") || line.includes("::file_modified::")) continue;
               output.log(story.persona, line);
             }
@@ -1040,11 +1039,11 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
         }
       }
 
-      const learningMatches = text.match(/::learning::(.*?)(?=::\w+::|$)/gs);
-      if (learningMatches) {
-        for (const m of learningMatches) {
-          context.learnings.push(m.replace("::learning::", "").trim());
-        }
+      // Extract and save memories from worker output
+      const storyMemories = extractMemoryMarkers(text);
+      for (const m of storyMemories) {
+        addMemory(m.type, m.content);
+        if (m.type === "learning") context.learnings.push(m.content);
       }
 
       const fileCreatedMatches = text.match(/::file_created::(.*?)(?=::\w+::|$)/gs);
@@ -1468,7 +1467,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
             ? `Story ${i + 1} (${story.title}):\n${storyReason}`
             : reviewText;
 
-          output.coordinatorLog(`Revision pass for story ${i + 1}/${sorted.length}`);
+          output.coordinatorLog(`Revising story ${i + 1} of ${sorted.length}: ${story.title}`);
           logger.info(`Revision started`, { story: i + 1, persona: story.persona, title: story.title, hasSpecificFeedback: !!storyReason });
           output.log(story.persona, `Starting revision: ${story.title} (${sProvider}/${sModel})`);
 
@@ -1576,8 +1575,10 @@ Story ${i + 1}: "${story.title}" — ${story.description}
     } // end review loop
   }
 
-  // Persist learnings for future sessions
-  saveLearnings(mergeLearnings(persistedLearnings, context.learnings));
+  // Persist learnings as memories
+  for (const learning of context.learnings) {
+    addMemory("learning", learning);
+  }
 
   // Git commit step
   try {

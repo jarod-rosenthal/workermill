@@ -13,6 +13,7 @@ import { loadCustomCommands } from "../custom-commands.js";
 import { loadPersona, listAvailablePersonas } from "../personas.js";
 import { stopAllMCPServers } from "../mcp-client.js";
 import * as logger from "../logger.js";
+import { loadMemories, addMemory, removeMemory } from "../memory.js";
 import type { UseAgentOptions } from "./useAgent.js";
 
 // ---------------------------------------------------------------------------
@@ -1016,6 +1017,46 @@ Write the file with write_file to WORKERMILL.md in the project root.`
                 `## Task\n\n`;
               agent.submit(personaPrefix + task);
             }
+          }
+          break;
+        }
+
+        // ---- /remember ----
+        case "remember": {
+          if (!arg) {
+            agent.addSystemMessage("**Usage:** `/remember <text>` — save a memory for this project\n\nExamples:\n- `/remember This project uses Prisma, not Sequelize`\n- `/remember Always run migrations before tests`");
+          } else {
+            const mem = addMemory("preference", arg);
+            agent.addSystemMessage(`**Remembered:** ${mem.content}`);
+          }
+          break;
+        }
+
+        // ---- /forget ----
+        case "forget": {
+          if (!arg) {
+            agent.addSystemMessage("**Usage:** `/forget <text>` — remove a memory matching the text");
+          } else {
+            const removed = removeMemory(arg);
+            agent.addSystemMessage(removed ? `**Forgot:** memory matching "${arg}"` : `No memory found matching "${arg}". Use \`/memories\` to list all.`);
+          }
+          break;
+        }
+
+        // ---- /memories ----
+        case "memories":
+        case "memory": {
+          const memories = loadMemories();
+          if (memories.length === 0) {
+            agent.addSystemMessage("No memories saved for this project.\n\nMemories are saved automatically when the agent discovers something, or manually with `/remember <text>`.");
+          } else {
+            const lines = ["**Project Memories**\n"];
+            const typeLabels: Record<string, string> = { learning: "Learning", preference: "Preference", context: "Context", correction: "Correction" };
+            for (const m of memories) {
+              lines.push(`- **[${typeLabels[m.type] || m.type}]** ${m.content} \`(${m.id})\``);
+            }
+            lines.push(`\n${memories.length} memories. Use \`/forget <id or text>\` to remove.`);
+            agent.addSystemMessage(lines.join("\n"));
           }
           break;
         }

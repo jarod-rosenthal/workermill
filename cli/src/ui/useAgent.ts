@@ -19,7 +19,7 @@ import {
 import { shouldCompact, compactMessages } from "../compaction.js";
 import { CostTracker } from "../cost-tracker.js";
 import { killActiveProcess } from "../../../packages/engine/src/tools/bash.js";
-import { loadLearnings } from "../learnings.js";
+import { loadMemories, formatMemoriesForPrompt, extractMemoryMarkers, addMemory, migrateOldLearnings } from "../memory.js";
 import { formatProjectInstructions } from "../instructions.js";
 import { parseImageReferences, toMessageContent, resolveFileReferences, resolveFolderReferences, resolveUrlReferences } from "../image-support.js";
 import * as logger from "../logger.js";
@@ -146,16 +146,34 @@ Do NOT list your capabilities unless asked. Do NOT offer menus of options unprom
 
 ## Learnings
 
-When you discover something non-obvious about this codebase, emit:
-::learning::The test suite requires DATABASE_URL or tests silently skip`;
+## Memory
+
+You have persistent memory across conversations for this project. Save memories when appropriate:
+
+**Auto-save (emit these markers in your output):**
+- \`::learning::\` — codebase discovery (e.g. "The test suite requires DATABASE_URL or tests silently skip")
+- \`::remember::\` — anything worth persisting (e.g. "User prefers Prisma over Sequelize for this project")
+
+**When to save:**
+- You discover something non-obvious about this codebase
+- The user corrects your approach or states a preference
+- A build or test fails for a surprising reason
+- You find a pattern or convention the project follows
+
+**When NOT to save:**
+- Obvious things derivable from the code
+- Temporary state or in-progress work
+- Things already in WORKERMILL.md or project docs`;
 
   const projectInstructions = formatProjectInstructions(workingDir);
   let prompt = base + projectInstructions;
 
-  const learnings = loadLearnings();
-  if (learnings.length > 0) {
-    prompt += `\n\n## Project Learnings (from previous builds)\n\n${learnings.map(l => `- ${l}`).join("\n")}`;
-  }
+  // Migrate old learnings on first load
+  migrateOldLearnings();
+
+  const memories = loadMemories();
+  prompt += formatMemoriesForPrompt(memories);
+
   return prompt;
 }
 
@@ -690,6 +708,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           const usage = await stream.totalUsage;
           const inputTokens = usage?.inputTokens ?? 0;
           const outputTokens = usage?.outputTokens ?? 0;
+
+          // Extract and save memories from model output
+          const newMemories = extractMemoryMarkers(finalText);
+          for (const m of newMemories) {
+            addMemory(m.type, m.content);
+          }
 
           // Commit the full response to Static as one message.
           // Tool calls and text were kept in the dynamic area until now.

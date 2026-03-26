@@ -26,7 +26,6 @@ import * as logger from "../logger.js";
 import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers } from "../mcp-client.js";
 import { resolveConfig, type HooksConfig } from "../config.js";
 import { runHooks } from "../hooks.js";
-import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
 import type {
   Message,
   ToolCallInfo,

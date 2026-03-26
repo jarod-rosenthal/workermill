@@ -63,6 +63,8 @@ interface AppProps {
   hasInstructions?: boolean;
   /** Latest build output line — rendered at cursor in dynamic area. */
   buildPreviewLine?: string;
+  /** All build output lines accumulated in dynamic area during build. */
+  buildLines?: string[];
 }
 
 /** Braille spinner that animates every 80ms to show the terminal is alive. */
@@ -196,10 +198,12 @@ export function App(props: AppProps): React.ReactElement {
 
       {/* === Dynamic area === */}
 
-      {/* Build preview — latest line appears at cursor, previous lines scroll up into Static */}
-      {props.buildPreviewLine ? (
-        <Box marginLeft={2}>
-          <Markdown content={props.buildPreviewLine} />
+      {/* Build output — accumulates in dynamic area during build, commits to Static when done */}
+      {props.buildLines && props.buildLines.length > 0 ? (
+        <Box flexDirection="column" marginLeft={2}>
+          {props.buildLines.map((line, i) => (
+            <Markdown key={i} content={line} />
+          ))}
         </Box>
       ) : null}
 

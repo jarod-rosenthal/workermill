@@ -65,8 +65,10 @@ export interface UseOrchestratorReturn {
   cancel: () => void;
   /** Current status message (replaces ora spinner in the old TUI). */
   statusMessage: string;
-  /** Latest build output line — rendered in the dynamic area at cursor, then committed to Static. */
+  /** Latest build output line. */
   previewLine: string;
+  /** All build output lines accumulated in the dynamic area. */
+  buildLines: string[];
   /** Non-null when the orchestrator is waiting for user confirmation. */
   confirmRequest: OrchestratorConfirmRequest | null;
 }
@@ -92,6 +94,7 @@ export function useOrchestrator(
   const [running, setRunning] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [previewLine, setPreviewLine] = useState("");
+  const [buildLines, setBuildLines] = useState<string[]>([]);
   const [confirmRequest, setConfirmRequest] =
     useState<OrchestratorConfirmRequest | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -121,24 +124,28 @@ export function useOrchestrator(
       setRunning(true);
       setStatusMessage("");
       setPreviewLine("");
+      setBuildLines([]);
       setConfirmRequest(null);
 
       // Fire-and-forget async work; errors are caught internally.
       void (async () => {
-        // emitLine: show latest line in dynamic area, commit previous to Static
-        const prevLine = { current: "" };
+        // emitLine: accumulate lines in the dynamic area during build.
+        // All lines stay in the dynamic area (growing downward from the
+        // /build command, same as chat responses). On build completion,
+        // everything commits to Static at once.
+        const allLines: string[] = [];
         function emitLine(line: string): void {
-          if (prevLine.current) {
-            addMessage(prevLine.current);
-          }
-          prevLine.current = line;
+          allLines.push(line);
+          setBuildLines([...allLines]);
           setPreviewLine(line);
         }
         function flushLine(): void {
-          if (prevLine.current) {
-            addMessage(prevLine.current);
-            prevLine.current = "";
+          // Commit all accumulated lines to Static as one message
+          if (allLines.length > 0) {
+            addMessage(allLines.join("\n"));
+            allLines.length = 0;
           }
+          setBuildLines([]);
           setPreviewLine("");
         }
 
@@ -287,5 +294,5 @@ export function useOrchestrator(
   // Return
   // ------------------------------------------------------------------
 
-  return { running, start, cancel, statusMessage, previewLine, confirmRequest };
+  return { running, start, cancel, statusMessage, previewLine, buildLines, confirmRequest };
 }

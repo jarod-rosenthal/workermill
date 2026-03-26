@@ -1052,6 +1052,17 @@ ${LEARNING_INSTRUCTIONS}${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMIL
       costTracker.addUsage(persona.name, provider, modelName, inTokens, outTokens);
       output.updateCost?.(costTracker.getTotalCost());
 
+      // Detect empty story — model returned nothing
+      if (outTokens === 0 && !text.trim()) {
+        logger.error(`Story ${i + 1} produced no output`, { persona: story.persona });
+        if (revision < 2) {
+          output.log(story.persona, `Story produced no output — retrying (${revision + 1}/3)`);
+          continue; // retry this story
+        }
+        output.error(`Story ${i + 1} failed: model produced no output after 3 attempts`);
+        break;
+      }
+
       output.log(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
       logger.info(`Story ${i + 1} completed`, { persona: story.persona, inputTokens: inTokens, outputTokens: outTokens });
           break; // Story succeeded, exit revision loop

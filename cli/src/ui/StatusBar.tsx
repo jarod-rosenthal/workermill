@@ -63,19 +63,19 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
   switch (props.mode) {
     case "PLAN":
       modeColor = theme.bashBorder;
-      modeIcon = "\u25B6"; // ▶
+      modeIcon = "\u25B8"; // ▸
       break;
     case "trust all":
       modeColor = theme.error;
-      modeIcon = "\u26A1"; // ⚡
+      modeIcon = "\u25C8"; // ◈
       break;
     case "auto-edit":
       modeColor = theme.warning;
-      modeIcon = "\u270F\uFE0F"; // ✏️
+      modeIcon = "\u25C6"; // ◆
       break;
     default:
       modeColor = theme.success;
-      modeIcon = "\u25B6"; // ▶
+      modeIcon = "\u25B8"; // ▸
       break;
   }
 
@@ -155,11 +155,26 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
           <Text color={theme.subtle}>{"no tool calls yet"}</Text>
         )}
         {rm && (rm.planner !== rm.worker || rm.reviewer !== rm.worker) ? (
-          <Text color={theme.subtle}>
-            {"  "}
-            {rm.planner !== rm.worker ? `plan:${rm.planner} ` : ""}
-            {rm.reviewer !== rm.worker ? `review:${rm.reviewer}` : ""}
-          </Text>
+          <>
+            <Box flexGrow={1} />
+            {rm.planner !== rm.worker ? (
+              <Text>
+                <Text color={theme.iceBlue} bold>{"plan"}</Text>
+                <Text color={theme.subtle}>{":"}</Text>
+                <Text color={theme.text}>{rm.planner}</Text>
+              </Text>
+            ) : null}
+            {rm.planner !== rm.worker && rm.reviewer !== rm.worker ? (
+              <Text color={theme.subtle}>{" │ "}</Text>
+            ) : null}
+            {rm.reviewer !== rm.worker ? (
+              <Text>
+                <Text color={theme.permission} bold>{"review"}</Text>
+                <Text color={theme.subtle}>{":"}</Text>
+                <Text color={theme.text}>{rm.reviewer}</Text>
+              </Text>
+            ) : null}
+          </>
         ) : null}
       </Box>
 

@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { Box, Text, Static, useApp, useInput, useStdout } from "ink";
+import { Box, Text, Static, useApp, useInput } from "ink";
 import { Markdown } from "./Markdown.js";
 import { ToolCallDisplay } from "./ToolCall.js";
 import { PermissionPrompt } from "./PermissionPrompt.js";
@@ -111,10 +111,8 @@ function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: 
  */
 export function App(props: AppProps): React.ReactElement {
   const { exit } = useApp();
-  const { stdout } = useStdout();
   const lastCtrlCRef = useRef(0);
   const lastEscRef = useRef(0);
-  const width = stdout?.columns || 80;
 
   useInput((input, key) => {
     if (key.escape) {
@@ -162,12 +160,9 @@ export function App(props: AppProps): React.ReactElement {
     ? "PLAN"
     : props.permissionMode;
 
-  // Pin the layout to the terminal height so the dynamic area stays at the bottom.
-  const termHeight = stdout?.rows || 24;
-
   return (
-    <Box flexDirection="column" width="100%" height={termHeight}>
-      {/* Committed messages — rendered once via Static as they arrive */}
+    <Box flexDirection="column" width="100%">
+      {/* Committed messages — rendered once via Static */}
       <Static items={props.messages}>
         {(message) => (
           <Box key={message.id} flexDirection="column" marginTop={message.role === "user" ? 1 : 0}>
@@ -190,70 +185,59 @@ export function App(props: AppProps): React.ReactElement {
         )}
       </Static>
 
-      {/* Spacer pushes dynamic area to bottom of terminal */}
-      <Box flexGrow={1} />
+      {/* Tool call — only when running */}
+      {props.streamingToolCalls && props.streamingToolCalls.length > 0 ? (
+        <Box marginLeft={2}>
+          <ToolCallDisplay tool={props.streamingToolCalls[props.streamingToolCalls.length - 1]} />
+        </Box>
+      ) : null}
 
-      {/* Dynamic area — pinned to bottom */}
-      <Box flexDirection="column">
-        {/* Latest tool call — only when active */}
-        {props.streamingToolCalls && props.streamingToolCalls.length > 0 ? (
-          <Box marginLeft={2} height={1}>
-            <ToolCallDisplay tool={props.streamingToolCalls[props.streamingToolCalls.length - 1]} />
-          </Box>
-        ) : null}
+      {/* Activity indicator — only when running */}
+      {props.status !== "idle" || props.orchestratorStatus ? (
+        <Box marginLeft={2}>
+          {props.orchestratorStatus ? (
+            <Text color={theme.warning}><Spinner color={theme.warning} /> {props.orchestratorStatus}</Text>
+          ) : props.status === "thinking" ? (
+            <Text color={theme.subtle}><Spinner color={theme.subtle} /> Thinking...</Text>
+          ) : props.status === "streaming" ? (
+            <Text color={theme.brand}><Spinner color={theme.brand} /> Streaming response...</Text>
+          ) : props.status === "tool_running" ? (
+            <Text color={theme.warning}><Spinner color={theme.warning} /> {props.statusDetail || "Running tool..."}</Text>
+          ) : props.status === "permission" ? (
+            <Text color={theme.permission}>● Waiting for permission...</Text>
+          ) : null}
+        </Box>
+      ) : null}
 
-        {/* Activity indicator — only when active */}
-        {props.status !== "idle" || props.orchestratorStatus ? (
-          <Box marginLeft={2} height={1}>
-            {props.orchestratorStatus ? (
-              <Text color={theme.warning}><Spinner color={theme.warning} /> {props.orchestratorStatus}</Text>
-            ) : props.status === "thinking" ? (
-              <Text color={theme.subtle}><Spinner color={theme.subtle} /> Thinking...</Text>
-            ) : props.status === "streaming" ? (
-              <Text color={theme.brand}><Spinner color={theme.brand} /> Streaming response...</Text>
-            ) : props.status === "tool_running" ? (
-              <Text color={theme.warning}><Spinner color={theme.warning} /> {props.statusDetail || "Running tool..."}</Text>
-            ) : props.status === "permission" ? (
-              <Text color={theme.permission}>● Waiting for permission...</Text>
-            ) : (
-              <Text>{" "}</Text>
-            )}
-          </Box>
-        ) : null}
-
-        {/* Permission/confirm prompts — replace input when active */}
-        {props.permissionRequest ? (
-          <PermissionPrompt request={props.permissionRequest} />
-        ) : props.orchestratorConfirm ? (
-          <OrchestratorConfirm request={props.orchestratorConfirm} />
-        ) : (
-          <>
-            {/* User input */}
-            <Input
-              onSubmit={props.onSubmit}
-              isActive={props.status === "idle" && !props.orchestratorStatus}
-              history={props.inputHistory}
-            />
-
-            {/* Status bar */}
-            <StatusBar
-              model={props.model}
-              provider={props.provider}
-              tokens={props.tokens}
-              maxContext={props.maxContext}
-              cost={props.cost}
-              mode={mode}
-              gitBranch={props.gitBranch}
-              cwd={props.workingDir.split("/").pop() || ""}
-              roleModels={props.roleModels}
-              toolCounts={props.toolCounts}
-              mcpCount={props.mcpCount}
-              sessionStart={props.sessionStart}
-              hasInstructions={props.hasInstructions}
-            />
-          </>
-        )}
-      </Box>
+      {/* Permission/confirm prompts — replace input when active */}
+      {props.permissionRequest ? (
+        <PermissionPrompt request={props.permissionRequest} />
+      ) : props.orchestratorConfirm ? (
+        <OrchestratorConfirm request={props.orchestratorConfirm} />
+      ) : (
+        <>
+          <Input
+            onSubmit={props.onSubmit}
+            isActive={props.status === "idle" && !props.orchestratorStatus}
+            history={props.inputHistory}
+          />
+          <StatusBar
+            model={props.model}
+            provider={props.provider}
+            tokens={props.tokens}
+            maxContext={props.maxContext}
+            cost={props.cost}
+            mode={mode}
+            gitBranch={props.gitBranch}
+            cwd={props.workingDir.split("/").pop() || ""}
+            roleModels={props.roleModels}
+            toolCounts={props.toolCounts}
+            mcpCount={props.mcpCount}
+            sessionStart={props.sessionStart}
+            hasInstructions={props.hasInstructions}
+          />
+        </>
+      )}
     </Box>
   );
 }

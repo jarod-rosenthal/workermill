@@ -30,7 +30,7 @@ function getRoleModelsFromConfig(config: import("./config.js").CliConfig): {
 }
 
 /** Print the branded welcome header before Ink takes over the terminal. */
-function printWelcome(roleModels: { worker: string; planner: string; reviewer: string }, workingDir: string): void {
+async function printWelcome(roleModels: { worker: string; planner: string; reviewer: string }, workingDir: string): Promise<void> {
   const brand = chalk.hex("#D77757");
   const dim = chalk.dim;
   const white = chalk.white;
@@ -51,15 +51,15 @@ function printWelcome(roleModels: { worker: string; planner: string; reviewer: s
   console.log(dim("  ") + brand("/build") + dim(" to create  ") + brand("/retry") + dim(" to re-run  ") + white("/help") + dim(" for all commands"));
   console.log();
 
-  // Non-blocking update check
-  void checkForUpdate(VERSION).then((latest) => {
-    if (latest) {
-      console.log(chalk.yellow(`  Update available: ${VERSION} → ${latest} — run: npm i -g workermill`));
-    }
-  });
+  // Blocking update check — must print before Ink takes over stdout
+  const latest = await checkForUpdate(VERSION);
+  if (latest) {
+    console.log(chalk.yellow(`  Update available: ${VERSION} → ${latest}`));
+    console.log(chalk.yellow(`  Run: npx workermill@latest  or  /update`));
+  }
 }
 
-const VERSION = "0.12.5";
+const VERSION = "0.12.6";
 
 // Shared options applied to both the default command and `build`
 function addSharedOptions(cmd: Command): Command {
@@ -152,7 +152,7 @@ const defaultCmd = program
       process.exit(0);
     }
 
-    printWelcome(roleModels, workingDir);
+    await printWelcome(roleModels, workingDir);
 
     const { waitUntilExit } = render(
       React.createElement(Root, {

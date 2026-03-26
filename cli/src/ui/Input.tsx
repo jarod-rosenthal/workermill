@@ -160,34 +160,25 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
     { isActive },
   );
 
-  return (
-    <Box flexDirection="column">
-      {/* Completion list (above input) */}
-      {showCompletions && (
-        <Box flexDirection="column" marginLeft={2}>
-          {completions.slice(0, 8).map((cmd, i) => {
-            const isSelected = i === completionIndex % completions.length;
-            return (
-              <Box key={cmd.name}>
-                <Text color={isSelected ? theme.brand : theme.subtle} bold={isSelected}>
-                  {isSelected ? "> " : "  "}{cmd.name}
-                </Text>
-                <Text color={theme.subtle} dimColor> {cmd.desc}</Text>
-              </Box>
-            );
-          })}
-          <Text color={theme.subtle} dimColor>  Tab to complete, arrows to navigate</Text>
-        </Box>
-      )}
+  // Inline hint: show the best match after the cursor, no height change
+  const hint = showCompletions && completions.length > 0
+    ? completions[completionIndex % completions.length]
+    : null;
 
-      {/* Input line */}
-      <Box>
-        <Text color={isActive ? theme.brand : theme.inactive} bold>
-          {isActive ? "\u25C6 " : "\u25C7 "}
+  return (
+    <Box>
+      <Text color={isActive ? theme.brand : theme.inactive} bold>
+        {isActive ? "\u25C6 " : "\u25C7 "}
+      </Text>
+      <Text color={theme.text}>{value}</Text>
+      {isActive && !hint && <Text inverse>{" "}</Text>}
+      {hint ? (
+        <Text color={theme.subtle} dimColor>
+          {hint.name.slice(value.length)}{" "}
+          <Text color={theme.inactive}>{hint.desc}</Text>
+          {completions.length > 1 ? <Text color={theme.inactive}>{` (↑↓ ${completions.length} matches, tab)`}</Text> : <Text color={theme.inactive}>{" (tab)"}</Text>}
         </Text>
-        <Text color={theme.text}>{value}</Text>
-        {isActive && <Text inverse>{" "}</Text>}
-      </Box>
+      ) : null}
     </Box>
   );
 }

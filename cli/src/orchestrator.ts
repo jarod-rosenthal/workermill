@@ -1770,33 +1770,61 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
             }
           }
 
-          // Revision prompt is MINIMAL — just the feedback and the files.
-          // The original execution already built the code. The revision worker
-          // only needs to fix what the reviewer flagged. A huge prompt causes
-          // the model to re-implement instead of fix.
-          const revisionSystemPrompt = `You are a ${story.persona.replace(/_/g, " ")}. You are fixing specific issues flagged by a code reviewer.
+          // Revision prompt follows WorkerMill platform pattern (prompt-builder.ts):
+          // Per-story feedback + what was tried before + efficiency tips + scope enforcement.
+          // The worker gets enough context to fix its own mistakes without re-implementing.
 
-The code in ${workingDir} already works. The reviewer found problems. Fix ONLY those problems.
+          // Capture what the worker did last time — git diff of current state
+          let whatYouDidLastTime = "";
+          try {
+            const storyFiles = story.targetFiles?.length
+              ? story.targetFiles
+              : [...new Set([...context.filesCreated, ...context.filesModified])];
+            if (storyFiles.length > 0) {
+              const fileList = storyFiles.join("\n- ");
+              let fileDiffs = "";
+              for (const f of storyFiles) {
+                try {
+                  const fullPath = path.isAbsolute(f) ? f : path.join(workingDir, f);
+                  if (fs.existsSync(fullPath)) {
+                    const diffOut = execSync(`git diff HEAD -- "${f}" 2>/dev/null || true`, { cwd: workingDir, encoding: "utf-8", timeout: 5_000 }).trim();
+                    if (diffOut) fileDiffs += `\n--- ${f} ---\n${diffOut}\n`;
+                  }
+                } catch { /* skip */ }
+              }
+              whatYouDidLastTime = `\n## What You Did Last Time\nYour previous attempt modified these files:\n- ${fileList}\n${fileDiffs ? `\nChanges from your previous attempt:\n${fileDiffs}` : ""}\nUse this to understand what was already tried. Do NOT repeat the same approach if it was flagged by the reviewer.\n`;
+            }
+          } catch { /* non-fatal */ }
 
-## How to fix
-1. READ each file the reviewer mentions BEFORE editing
-2. Use edit_file for small changes — do NOT rewrite files
-3. After fixing, run a build/compile command to verify you didn't break anything
-4. Do NOT add features, refactor, or change code the reviewer didn't flag
+          const revisionSystemPrompt = `${storyPersona.systemPrompt}
 
-## Rules
-- NEVER start long-running processes (dev servers, watch modes, etc.)
-- NEVER delete or recreate files that already exist
-- NEVER restructure what's already working`;
+Working directory: ${workingDir}`;
 
           try {
             const revStream = streamText({
               model: storyModel,
               abortSignal,
               system: revisionSystemPrompt,
-              prompt: `## Reviewer feedback — fix these issues:
+              prompt: `## ⚠️ REVISION REQUIRED — Tech Lead Feedback
 
-${storyFeedback}`,
+### Your Story's Required Fix
+${storyFeedback}
+${whatYouDidLastTime}
+## Your Story Scope
+Story ${i + 1}: "${story.title}" — ${story.description}
+${story.targetFiles?.length ? `**Target files:** ${story.targetFiles.join(", ")}` : ""}
+${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementationNotes}` : ""}
+
+**IMPORTANT: Only fix issues that are YOUR story's responsibility.**
+- Fix the specific issues listed above
+- Do NOT fix issues in files that belong to other stories
+- Do NOT rewrite files from scratch — use edit_file for targeted changes
+- READ each file BEFORE editing it
+
+**EFFICIENCY TIP: Go straight to the files mentioned in the feedback.**
+- You already built this code in the previous attempt
+- Skip re-reading files unless they're directly relevant to the feedback
+- Focus on the specific issues, not re-implementation`,
               tools: storyTools as ToolSet,
               stopWhen: stepCountIs(100),
               timeout: { chunkMs: 120_000 },

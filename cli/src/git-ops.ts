@@ -76,16 +76,30 @@ export function getCurrentBranch(workingDir: string): string | null {
 /**
  * Create a feature branch for the /ship session.
  *
- * Branch format: workermill/ship-{timestamp}
- * From worker/epic/git-ops.ts:createStoryBranch() — simplified for CLI
- * (no worktrees, single branch instead of per-story branches).
+ * Branch format: workermill/{slugified-task-description}
+ * Falls back to workermill/ship-{short-hash} if no task provided.
+ * From worker/epic/git-ops.ts:createStoryBranch() — simplified for CLI.
  */
-export function createFeatureBranch(workingDir: string): string | null {
+export function createFeatureBranch(workingDir: string, taskDescription?: string): string | null {
   if (!isGitRepo(workingDir)) return null;
 
   try {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    const branchName = `workermill/ship-${timestamp}`;
+    let slug: string;
+    if (taskDescription) {
+      // Derive branch name from task: strip file extensions, take first 5 words, slugify
+      slug = taskDescription
+        .replace(/\.md$/i, "")
+        .replace(/[^a-zA-Z0-9\s-]/g, "")
+        .trim()
+        .split(/\s+/)
+        .slice(0, 5)
+        .join("-")
+        .toLowerCase()
+        .replace(/-+/g, "-");
+    } else {
+      slug = `ship-${Date.now().toString(36)}`;
+    }
+    const branchName = `workermill/${slug}`;
 
     // Create and checkout the feature branch from current HEAD
     execSync(`git checkout -b "${branchName}"`, { cwd: workingDir, stdio: "pipe" });

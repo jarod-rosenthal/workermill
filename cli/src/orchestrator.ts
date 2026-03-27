@@ -826,7 +826,7 @@ export async function runOrchestration(
   // Create feature branch for isolation — matches worker/epic/git-ops.ts pattern.
   // All story commits go on this branch. If cancelled, user can git checkout back.
   const originalBranch = getCurrentBranch(workingDir);
-  const featureBranch = createFeatureBranch(workingDir);
+  const featureBranch = createFeatureBranch(workingDir, userTask);
   if (featureBranch) {
     output.coordinatorLog(`Working on branch: ${featureBranch}`);
   }

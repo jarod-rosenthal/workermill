@@ -546,6 +546,7 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
   try {
     let lineBuffer = "";
     for await (const chunk of planStream.textStream) {
+      if (abortSignal?.aborted) break;
       lineBuffer += chunk;
       const lines = lineBuffer.split("\n");
       lineBuffer = lines.pop() || ""; // keep incomplete last line in buffer
@@ -563,6 +564,11 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
   } catch (planErr) {
     clearInterval(heartbeat);
     output.statusDone();
+    if (abortSignal?.aborted) {
+      logger.info("Planner cancelled by user");
+      output.coordinatorLog("Build cancelled by user.");
+      return { stories: [], provider: pProvider, model: pModel, inputTokens: 0, outputTokens: 0, rejected: true, rejectionReason: "Cancelled" };
+    }
     const msg = planErr instanceof Error ? planErr.message : String(planErr);
     logger.error("Planner failed", { error: msg });
     output.error(`Planner failed: ${msg}`);

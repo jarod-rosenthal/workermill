@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <img src="workermill-demo.webp" alt="WorkerMill CLI in action" width="100%" />
+  <video src="workermill-demo.mp4" width="100%" autoplay loop muted playsinline></video>
 </p>
 
 ## Get Started

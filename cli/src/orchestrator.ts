@@ -1437,10 +1437,11 @@ This is a revision attempt. The previous code was reviewed and these issues were
 
 ${previousReviewFeedback}
 
-**IMPORTANT: Check if ALL issues above have been addressed, not just some of them.**
-- The developer was instructed to fix every item
-- If ANY issue remains unaddressed, request another revision
-- Be specific about which items are still outstanding
+**Check if the code improved since last review.**
+- Focus on whether the MAJOR issues were addressed
+- If the code is meaningfully better, approve it — don't hold up progress for minor remaining items
+- Only request another revision if there are still functional bugs or security issues
+- Cosmetic issues, minor gaps, and edge cases are NOT grounds for another revision cycle
 
 ---
 
@@ -1608,6 +1609,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
 
         // Use accumulated step output (reviewer's own words only, no echoed prompt)
         const reviewText = reviewerOutput;
+        logger.debug("Reviewer output", { reviewRound, text: reviewText });
         const reviewUsage = await reviewStream.totalUsage;
 
         output.statusDone();
@@ -1783,26 +1785,31 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
 
 Working directory: ${workingDir}
 
-## Ticket Requirements — THIS IS YOUR SPEC
-
-${userTask}
-
-## Your File Scope — STAY IN YOUR LANE
+## Your Story Scope
 
 ${story.description}
+${story.targetFiles?.length ? `\n**Target files:** ${story.targetFiles.join(", ")}` : ""}
+${story.referenceFiles?.length ? `\n**Reference patterns:** ${story.referenceFiles.join(", ")}` : ""}
+${story.implementationNotes ? `\n## Architect's Guidance\n\n${story.implementationNotes}` : ""}
 
-Do NOT modify files outside this scope unless absolutely necessary for shared types/imports.
+## CRITICAL — You Are Fixing, Not Rebuilding
 
-## Communication Style
+The code in this directory ALREADY WORKS for most requirements. The reviewer found SPECIFIC issues.
+Your job is to fix ONLY those issues. Do NOT:
+- Rewrite files from scratch
+- Delete and recreate files that already exist
+- Change code that the reviewer did NOT flag
+- Restructure what's already working
 
-Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries. Start with the substance. Be concise.
+Instead:
+1. READ each file the reviewer mentioned BEFORE editing
+2. Make the MINIMUM change needed to address each issue
+3. Verify your change doesn't break what was already working
 
-## Critical rules
-- NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, nodemon, tsc --watch, etc.)
+## Rules
+- NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, etc.)
 - NEVER run interactive commands that wait for user input
-- Only run commands that complete and exit
-- You are making TARGETED FIXES to existing code. Do NOT rewrite files from scratch.
-- READ each file BEFORE editing it. The code already works — you are fixing specific issues.`;
+- Only run commands that complete and exit`;
 
           try {
             // Build prior work section — prevents oscillation across revision rounds

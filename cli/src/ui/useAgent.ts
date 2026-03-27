@@ -88,7 +88,7 @@ export interface UseAgentReturn {
   /** Toggle plan (read-only) mode at runtime. */
   setPlanMode: (v: boolean) => void;
   /** Push a local-only assistant message into the conversation (no LLM call). */
-  addSystemMessage: (content: string) => void;
+  addSystemMessage: (content: string, boxTitle?: string) => void;
   /** Push a local-only user message into the conversation (no LLM call). */
   addUserMessage: (content: string) => void;
   /** Update the displayed cost (used by orchestrator for live updates). */
@@ -938,12 +938,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
   // ------- Local message helpers (for slash commands) -------- //
 
-  const addSystemMessage = useCallback((content: string) => {
+  const addSystemMessage = useCallback((content: string, boxTitle?: string) => {
     const msg: Message = {
       id: crypto.randomUUID(),
       role: "assistant",
       content,
       timestamp: new Date().toISOString(),
+      ...(boxTitle ? { boxTitle } : {}),
     };
     setMessages((prev) => [...prev, msg]);
   }, []);

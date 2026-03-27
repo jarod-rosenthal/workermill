@@ -178,11 +178,11 @@ export function Root(props: RootProps): React.ReactElement {
 
   // Orchestrator for /build — pushes messages via agent.addSystemMessage
   const addOrchestratorMessage = useCallback(
-    (content: string, role?: "user" | "assistant") => {
+    (content: string, role?: "user" | "assistant", boxTitle?: string) => {
       if (role === "user") {
         agent.addUserMessage(content);
       } else {
-        agent.addSystemMessage(content);
+        agent.addSystemMessage(content, boxTitle);
       }
     },
     [agent],

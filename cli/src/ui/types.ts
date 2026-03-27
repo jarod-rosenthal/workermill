@@ -18,6 +18,8 @@ export interface Message {
   content: string;
   toolCalls?: ToolCallInfo[];
   timestamp: string;
+  /** When set, renders content inside a bordered box with this title. */
+  boxTitle?: string;
 }
 
 /** A permission request that the UI must present to the user. */

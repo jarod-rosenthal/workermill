@@ -1657,11 +1657,8 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           onStepFinish({ text }) {
             if (text) {
               reviewerOutput += text + "\n";
-              const lines = text.split("\n").filter(l => l.trim());
-              for (const line of lines) {
-                if (line.includes("::review_score::") || line.includes("::review_verdict::") || line.includes("::code_quality_score::")) continue;
-                output.log("tech_lead", line);
-              }
+              // Review content is displayed in the framed summary after completion.
+              // No live streaming — the status spinner shows the reviewer is working.
             }
           },
         });

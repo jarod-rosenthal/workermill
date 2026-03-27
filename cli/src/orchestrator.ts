@@ -1037,7 +1037,7 @@ export async function runOrchestration(
                 /error\s+TS\d|SyntaxError|Cannot find module|error:|ERROR/i.test(l)
               );
               if (errorLines.length > 0) {
-                storyHealth.buildErrors = errorLines.slice(0, 10).join("\n");
+                storyHealth.buildErrors = errorLines.join("\n");
               }
 
               // Docker services
@@ -1337,9 +1337,7 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
       if (errorClass.fixable && revision < 2) {
         output.log(story.persona, `${errorClass.category} error detected — retrying with fix context (${revision + 1}/3)`);
         logger.info(`Story ${i + 1} retrying (fixable ${errorClass.category})`, { revision });
-        // Truncate error to avoid bloating the prompt
-        const truncatedErr = errMsg.split("\n").slice(0, 40).join("\n");
-        revisionFeedback = `\n\n## Error During Execution — Fix This\n\nCategory: ${errorClass.category}\n\n${truncatedErr}\n\n**${errorClass.fixHint}**`;
+        revisionFeedback = `\n\n## Error During Execution — Fix This\n\nCategory: ${errorClass.category}\n\n${errMsg}\n\n**${errorClass.fixHint}**`;
         continue;
       }
 
@@ -1699,12 +1697,8 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
             const parts: string[] = [];
             if (recentCommits) parts.push(`**Recent commits:**\n${recentCommits}`);
             if (diffStat) parts.push(`**Uncommitted changes:**\n${diffStat}`);
-            // Include truncated diff for context (cap at 4K chars to avoid blowing up prompt)
             if (diffContent) {
-              const truncatedDiff = diffContent.length > 4000
-                ? diffContent.slice(0, 4000) + `\n... (${diffContent.length - 4000} chars truncated)`
-                : diffContent;
-              parts.push(`**Current diff (what exists now):**\n\`\`\`diff\n${truncatedDiff}\n\`\`\``);
+              parts.push(`**Current diff (what exists now):**\n\`\`\`diff\n${diffContent}\n\`\`\``);
             }
             priorWorkSummary = parts.join("\n\n");
           }

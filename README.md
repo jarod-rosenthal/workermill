@@ -1,14 +1,15 @@
-
-
-https://github.com/user-attachments/assets/ab931d38-68c5-4cc3-b210-4c0eaebf8c93
-
 <p align="center">
   <h1 align="center">WorkerMill</h1>
 </p>
 
 <p align="center">
-  AI coding agent with multi-expert orchestration. In your terminal. Under 60 seconds.<br/>
-  Say what you want built — WorkerMill plans it, assigns specialist experts, executes in parallel, reviews the code, and commits.
+  One command. A team of AI specialists plans it, builds it in parallel, reviews the code, and commits.<br/>
+  Not one agent doing everything — a coordinated team, each with a job.
+</p>
+
+<p align="center">
+  <em>This README covers the <strong>WorkerMill CLI</strong> — the fastest way to get started.<br/>
+  WorkerMill is also a <a href="PLATFORM.md">full platform</a> with a web dashboard, VS Code extension, Kanban boards, and managed infrastructure.</em>
 </p>
 
 <h3 align="center">
@@ -30,74 +31,88 @@ https://github.com/user-attachments/assets/ab931d38-68c5-4cc3-b210-4c0eaebf8c93
   <a href="https://github.com/jarod-rosenthal/workermill/stargazers"><img src="https://img.shields.io/github/stars/jarod-rosenthal/workermill?style=social" alt="GitHub stars"></a>
 </p>
 
+https://github.com/user-attachments/assets/ab931d38-68c5-4cc3-b210-4c0eaebf8c93
+
+## Here's What Happens
+
+You give WorkerMill a feature spec. Say: "add scheduled rollouts — flag scheduling with cron, a countdown timer UI, and audit logging."
+
+```
+$ npx workermill
+> /ship scheduled-rollouts.md
+
+ planner  Reading codebase... 47 files analyzed
+ planner  Decomposed into 2 stories:
+          Story 1: [backend_developer] Backend: scheduled rollouts model, handlers, and background scheduler
+          Story 2: [frontend_developer] Frontend: scheduled rollouts tab, countdown timers, and create/cancel forms
+
+ backend_developer  Starting — reading existing patterns, models, routes...
+ frontend_developer Starting — reading component structure, existing UI patterns...
+
+ backend_developer  Created api/internal/models/schedule.go
+ backend_developer  Created api/internal/handlers/schedules.go
+ backend_developer  Created api/internal/services/scheduler.go
+ frontend_developer Created web/src/components/ScheduledRollouts.svelte
+ frontend_developer Created web/src/routes/flags/[id]/+page.svelte (modified)
+ backend_developer  Running quality gates... go build ✓ go vet ✓ go test ✓
+
+ tech_lead  Reviewing diffs against original spec...
+ tech_lead  Assessment: The fixes are targeted and correct.
+ tech_lead  :code_quality_score: 8/10
+ tech_lead  :review_decision: approved
+
+ coordinator  Review approved (8/10)
+ system       Branch: workermill/scheduled-rollouts (8 commits)
+              16 files changed, 1419 insertions(+)
+              Push branch and open a pull request? (y/n)
+```
+
+Two specialists worked in parallel. A tech lead reviewed the actual diffs — not just the output, but whether it matched your spec. 16 files, committed to a branch, ready for PR. You approve or reject at every step.
+
+**That's the difference.** Every other AI coding tool is one agent trying to do everything. WorkerMill gives you a team.
+
 ## Get Started
 
 ```bash
 npx workermill
 ```
 
-That's it. No server. No Docker. No account. First run walks you through provider setup.
+No server. No Docker. No account. First run walks you through setup in 60 seconds.
 
-Works with **Ollama**, **Anthropic**, **OpenAI**, **Google**, and [any OpenAI-compatible provider](#ai-provider-support) — pick different models for workers, planner, and reviewer independently.
+Works with **Ollama** (fully local), **Anthropic**, **OpenAI**, **Google**, **LM Studio**, and [any OpenAI-compatible provider](#ai-provider-support) — Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, or your own endpoint.
 
-## What It Does
-
-You talk to WorkerMill like any AI coding tool. The difference is `/ship`:
+## How `/ship` Works
 
 ```bash
-# Inside the CLI, tell it what to build:
-/ship REST API with JWT auth, rate limiting, and Postgres
-
-# Or point it at a spec file:
-/ship spec.md
-
-# Or target a specific expert:
-/as security_engineer audit the auth middleware
+/ship REST API with JWT auth, rate limiting, and Postgres   # describe it
+/ship spec.md                                                # or point at a file
+/as security_engineer audit the auth middleware               # or target one expert
 ```
 
-`/ship` triggers **multi-expert orchestration** — not one model doing everything, but a coordinated team:
+`/ship` triggers the full orchestration pipeline:
 
-1. **Planner** reads your codebase, decomposes work into scoped stories with file targets and dependencies
-2. **Specialist experts** execute each story in parallel — backend, frontend, devops, security, etc.
-3. **Tech Lead** reviews actual code diffs with a 3-tier verdict: approved, revision needed, or rejected
-4. **Revision cycles** re-run only affected stories with targeted feedback until the review passes
-5. **Commits and pushes** with your approval — feature branch, one commit per story
+1. **Planner** reads your codebase — existing patterns, frameworks, file structure — and decomposes the work into scoped stories with specific file targets
+2. **Specialist experts** execute stories in parallel — each one gets a scoped ticket but sees your full original spec, so intent is never lost
+3. **Tech Lead** reviews the actual code diffs against your spec — approved, revision needed, or rejected
+4. **Revision cycles** re-run only the stories that failed review, with the reviewer's specific feedback — no starting over
+5. **You approve** the commit and push — feature branch, one commit per story
 
-The planner doesn't just split your prompt into parts. It reads the codebase first, understands existing patterns, identifies target files, and gives each expert a scoped ticket with context. Workers receive your **full original spec** — the planner scopes their work, it doesn't rewrite your intent.
+The planner doesn't just split your prompt into parts. It reads the codebase first, understands the patterns, and gives each expert a scoped assignment with context. That's why the output is coherent across files — it was planned, not improvised.
 
-## Why Not Just Use Claude/Cursor/Copilot?
+## Why This Beats Single-Agent Tools
 
-Those tools are great for single-file, single-agent work. WorkerMill is for when you need:
+When you ask one AI agent to build a feature that touches the backend, frontend, and infrastructure, it context-switches constantly, makes inconsistent decisions across files, and there's nobody checking its work.
 
-- **Multiple concerns handled simultaneously** — a backend expert building the API while a frontend expert wires the UI and a devops expert writes the Dockerfile, all seeing each other's work
-- **Real code review, not just generation** — the tech lead reads actual diffs against your spec, not just the final output
-- **Revision cycles that learn** — failed reviews don't restart from scratch; only the affected stories re-run with specific feedback from the reviewer
-- **Provider mixing** — use a cheap fast model for workers, a smart one for planning, and a different one for review. Run workers on Ollama locally while the planner uses Gemini and the reviewer uses Claude
+WorkerMill fixes all three problems:
 
-It's not a replacement for those tools. It's what you reach for when the task is bigger than a single agent can handle well.
-
-## 12 Expert Personas
-
-| Persona | What They Do |
-|---------|--------------|
-| `architect` | System design, architecture decisions |
-| `backend_developer` | APIs, databases, server logic |
-| `frontend_developer` | React, UI components, styling |
-| `devops_engineer` | Docker, CI/CD, infrastructure |
-| `qa_engineer` | Testing, quality gates |
-| `security_engineer` | Auth, vulnerabilities, hardening |
-| `data_ml_engineer` | Data pipelines, ML integration |
-| `mobile_developer` | Mobile apps and responsive design |
-| `tech_writer` | Documentation and API docs |
-| `tech_lead` | Code review (automatic after `/ship`) |
-| `planner` | Task decomposition (automatic on `/ship`) |
-| `critic` | Plan quality review (automatic) |
-
-Use `/personas` to list all. Use `/as <persona> <task>` to target one directly. Create custom personas in `.workermill/personas/`.
+- **Parallel execution** — a backend expert builds the API while a frontend expert wires the UI and a devops expert writes the Dockerfile, all from the same plan
+- **Built-in code review** — the tech lead reads actual diffs against your original spec, catches inconsistencies, and sends specific feedback
+- **Targeted revisions** — failed reviews don't restart from scratch; only the affected stories re-run with the reviewer's notes
+- **Provider mixing** — use a fast cheap model for workers, a smart one for planning, and a different one for review. Run workers on local Ollama while the planner uses Claude and the reviewer uses GPT
 
 ## AI Provider Support
 
-Bring your own keys. Mix and match per role. WorkerMill uses the [Vercel AI SDK](https://sdk.vercel.ai) — any compatible provider works out of the box.
+Bring your own keys. Mix and match per role.
 
 | Provider | Models | Notes |
 |----------|--------|-------|
@@ -107,7 +122,7 @@ Bring your own keys. Mix and match per role. WorkerMill uses the [Vercel AI SDK]
 | **OpenAI** | GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex | |
 | **Google** | Gemini 3.1 Pro, Gemini 2.5 Flash | |
 
-Any provider with an OpenAI-compatible API also works — Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, Fireworks, or your own custom endpoint. These are included in the setup wizard but are community-tested, not officially verified by us. If it speaks the OpenAI API, WorkerMill can use it.
+Any provider with an OpenAI-compatible API also works — Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, Fireworks, or your own custom endpoint. If it speaks the OpenAI API, WorkerMill can use it.
 
 ```json
 {
@@ -124,7 +139,49 @@ Any provider with an OpenAI-compatible API also works — Groq, DeepSeek, Mistra
 }
 ```
 
-## Features
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/ship <task>` | Plan, execute with experts, review, commit |
+| `/as <persona> <task>` | Run a task with a specific expert |
+| `/retry` | Re-plan the same task (planner sees existing code) |
+| `/personas` | List all 12 experts, view/create custom ones |
+| `/init` | Generate `WORKERMILL.md` project instructions |
+| `/undo` | Revert last build's changes |
+| `/diff` | Preview uncommitted changes |
+| `/model` | Show or switch model |
+| `/chrome` | Headless Chrome for testing and scraping |
+| `/voice` | Voice input — speak your task |
+| `/schedule` | Scheduled recurring tasks |
+| `/cost` | Session cost and token usage |
+
+**Shortcuts:** `!command` runs shell directly, `ESC` cancels, `ESC ESC` rolls back, `Shift+Tab` cycles permission mode.
+
+<details>
+<summary><strong>12 Expert Personas</strong></summary>
+
+| Persona | What They Do |
+|---------|--------------|
+| `architect` | System design, architecture decisions |
+| `backend_developer` | APIs, databases, server logic |
+| `frontend_developer` | React, UI components, styling |
+| `devops_engineer` | Docker, CI/CD, infrastructure |
+| `qa_engineer` | Testing, quality gates |
+| `security_engineer` | Auth, vulnerabilities, hardening |
+| `data_ml_engineer` | Data pipelines, ML integration |
+| `mobile_developer` | Mobile apps and responsive design |
+| `tech_writer` | Documentation and API docs |
+| `tech_lead` | Code review (automatic after `/ship`) |
+| `planner` | Task decomposition (automatic on `/ship`) |
+| `critic` | Plan quality review (automatic) |
+
+Use `/as <persona> <task>` to target one directly. Create custom personas in `.workermill/personas/`.
+
+</details>
+
+<details>
+<summary><strong>All Features</strong></summary>
 
 **Tools:** 13 built-in (bash, read/write/edit files, glob, grep, ls, fetch, git, web search, sub-agent, todo, think) + MCP server support for anything else.
 
@@ -138,46 +195,11 @@ Any provider with an OpenAI-compatible API also works — Groq, DeepSeek, Mistra
 
 **Persistent learnings:** `::learning::` markers saved across sessions so agents don't repeat mistakes.
 
-**Browser:** `/chrome` opens headless Chrome for testing, scraping, or debugging.
-
-**Voice:** `/voice` — speak your task, WorkerMill transcribes and executes.
-
-**Scheduling:** `/schedule` for recurring tasks.
-
 **Session management:** Persistent conversations, `/resume` to pick up where you left off.
-
-**Cost tracking:** Live in the status bar, per-model pricing.
 
 **Safety:** Bash guardrails block destructive commands. Permission system with Shift+Tab cycling (Allow/Deny/Always/Trust). ESC ESC rolls back the last exchange.
 
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `/ship <task>` | Multi-expert orchestration — plans, executes, reviews |
-| `/as <persona> <task>` | Run a task with a specific expert |
-| `/retry` | Re-plan the same task (planner sees existing code) |
-| `/personas` | List all experts, view/create custom personas |
-| `/init` | Generate `WORKERMILL.md` for this project |
-| `/settings` | View/change settings |
-| `/permissions` | Manage tool permissions |
-| `/undo` | Revert last build's changes |
-| `/diff` | Preview uncommitted changes |
-| `/model` | Show or switch model |
-| `/plan` | Toggle read-only research mode |
-| `/trust` | Auto-approve all tools for this session |
-| `/hooks` | View configured hooks |
-| `/skills` | Custom slash commands |
-| `/chrome` | Open/close headless Chrome |
-| `/voice` | Voice input |
-| `/schedule` | Scheduled recurring tasks |
-| `/cost` | Session cost and token usage |
-| `/sessions` | List/switch sessions |
-| `/editor` | Open $EDITOR for longer input |
-| `/clear` | Reset conversation |
-| `/quit` | Exit |
-
-**Shortcuts:** `!command` runs shell directly, `ESC` cancels, `ESC ESC` rolls back, `Shift+Tab` cycles permission mode, `Ctrl+C Ctrl+C` exits.
+</details>
 
 ## Install
 
@@ -201,9 +223,17 @@ wm doctor
 
 ---
 
-## WorkerMill Platform
+## Beyond the CLI: WorkerMill Platform
 
-The CLI is the fastest way to use WorkerMill. When you're ready for a web dashboard, Kanban boards, Jira/Slack/Linear integrations, managed worker infrastructure, and a VS Code extension — the full platform runs on the same engine.
+The CLI runs the same engine that powers the full WorkerMill platform. When you outgrow the terminal, everything scales up:
+
+- **Web Dashboard** — manage epics, monitor workers, view coordination feeds in real time
+- **VS Code Extension** — backlog, live diffs, worker logs, and settings without leaving your editor
+- **Kanban Boards** — drag-and-drop task management wired directly to agent execution
+- **Managed Infrastructure** — workers run in cloud containers so your laptop isn't the bottleneck
+- **Integrations** — Jira, Slack, Linear, GitHub/GitLab/Bitbucket — agents work inside your existing workflow
+
+Same experts. Same review pipeline. Same quality gates. Just more surface area.
 
 **[WorkerMill Platform →](PLATFORM.md)** — setup, architecture, contributing, and deployment.
 

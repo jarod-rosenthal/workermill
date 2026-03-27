@@ -25,6 +25,14 @@ const PROVIDERS: ProviderOption[] = [
     ],
   },
   {
+    name: "lmstudio",
+    display: "LM Studio (local, no API key)",
+    needsKey: false,
+    models: [
+      { id: "default", label: "Use loaded model" },
+    ],
+  },
+  {
     name: "anthropic",
     display: "Anthropic (Claude)",
     needsKey: true,
@@ -341,12 +349,15 @@ function codingScore(name: string): number {
   return score;
 }
 
-/** Format a model name for display, including the tag to distinguish variants. */
+/** Format a model name for display. Strips context-window suffixes (e.g. "-64k")
+ *  since context is a runtime setting, not an immutable model trait. */
 function formatModelLabel(name: string): string {
   const [base, tag] = name.split(":");
   const prettyBase = base.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-  const prettyTag = tag && tag !== "latest" ? ` (${tag})` : "";
-  return `${prettyBase}${prettyTag}`;
+  if (!tag || tag === "latest") return prettyBase;
+  // Strip context-window suffixes like "64k", "128k", "32k" from the tag
+  const cleanTag = tag.replace(/[-_]?\d+k$/i, "").trim();
+  return cleanTag ? `${prettyBase} (${cleanTag})` : prettyBase;
 }
 
 /** Fetch available models from a cloud provider's API. */
@@ -456,8 +467,6 @@ async function configureOllama(providerConfig: ProviderConfig, ollamaProvider?: 
     hostsToTry.unshift(envHost);
   }
 
-  providerConfig.contextLength = 65536;
-
   for (const host of hostsToTry) {
     try {
       const controller = new AbortController();
@@ -505,6 +514,47 @@ async function configureOllama(providerConfig: ProviderConfig, ollamaProvider?: 
   console.log(chalk.yellow("  ⚠ Could not connect to Ollama. Make sure it's running."));
 }
 
+/** Detect LM Studio and configure host + available models. */
+async function configureLmStudio(providerConfig: ProviderConfig, lmStudioProvider?: ProviderOption): Promise<void> {
+  const hostsToTry = ["http://localhost:1234"];
+
+  // Detect WSL → Windows host IP
+  try {
+    const gateway = execSync("ip route show default 2>/dev/null | awk '{print $3}'", { encoding: "utf-8" }).trim();
+    if (gateway) hostsToTry.push(`http://${gateway}:1234`);
+  } catch { /* not on WSL */ }
+
+  for (const host of hostsToTry) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const response = await globalThis.fetch(`${host}/v1/models`, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (response.ok) {
+        const data = (await response.json()) as { data?: { id: string }[] };
+        providerConfig.host = `${host}/v1`;
+        console.log(chalk.green(`  ✓ Connected to LM Studio at ${host}`));
+        const models = data.data || [];
+        if (models.length > 0) {
+          console.log(chalk.dim(`  Available: ${models.map(m => m.id).join(", ")}`));
+          if (lmStudioProvider && models.length > 0) {
+            lmStudioProvider.detectedModels = models.map((m, i) => ({
+              id: m.id,
+              label: `${m.id}${i === 0 ? " (loaded)" : ""}`,
+            }));
+          }
+        }
+        return;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  providerConfig.host = "http://localhost:1234/v1";
+  console.log(chalk.yellow("  ⚠ Could not connect to LM Studio. Make sure it's running."));
+}
+
 export async function runSetup(): Promise<CliConfig> {
   const p = new Prompter();
   const apiKeys = new Map<string, string>();
@@ -525,6 +575,8 @@ export async function runSetup(): Promise<CliConfig> {
   if (workerProvider.name === "ollama") {
     // Detect Ollama models before asking user to pick one
     await configureOllama(workerConfig, workerProvider);
+  } else if (workerProvider.name === "lmstudio") {
+    await configureLmStudio(workerConfig, workerProvider);
   } else if (workerProvider.needsKey) {
     // Cloud providers: get API key first so we can fetch available models
     const workerKey = await getApiKey(p, workerProvider, apiKeys);
@@ -540,6 +592,22 @@ export async function runSetup(): Promise<CliConfig> {
   if (!workerConfig.apiKey) {
     const workerKey = await getApiKey(p, workerProvider, apiKeys);
     if (workerKey) workerConfig.apiKey = workerKey;
+  }
+
+  // Context window size — Ollama only
+  if (workerProvider.name === "ollama") {
+    const ctxOptions = [
+      { label: "32K", value: 32768 },
+      { label: "64K", value: 65536 },
+      { label: "128K", value: 131072 },
+      { label: "256K", value: 262144 },
+    ];
+    console.log(chalk.dim(`  Context window: ${ctxOptions.map((o, i) => `${chalk.cyan(String(i + 1))}=${o.label}`).join("  ")}`) + chalk.dim("  (more = better, needs VRAM)"));
+    const ctxChoice = await p.ask(chalk.dim("  Choose [2]: "));
+    const ctxIdx = parseInt(ctxChoice.trim(), 10) - 1;
+    const selected = ctxOptions[ctxIdx] || ctxOptions[1]; // default: 64K
+    workerConfig.contextLength = selected.value;
+    console.log(chalk.dim(`  → ${selected.label} context`));
   }
 
   console.log();
@@ -607,7 +675,10 @@ export async function runSetup(): Promise<CliConfig> {
   if (wpExt._baseURL) {
     workerConfig.host = wpExt._baseURL;
   }
-  const workerConfigKey = wpExt._providerName || workerProvider.name;
+  // LM Studio uses the OpenAI SDK with a custom host
+  const workerConfigKey = workerProvider.name === "lmstudio"
+    ? "lmstudio"
+    : (wpExt._providerName || workerProvider.name);
 
   const providers: Record<string, ProviderConfig> = {
     [workerConfigKey]: workerConfig,
@@ -620,6 +691,7 @@ export async function runSetup(): Promise<CliConfig> {
     const key = apiKeys.get(plannerProviderName);
     if (key) cfg.apiKey = key;
     if (pProvider.name === "ollama") await configureOllama(cfg);
+    if (pProvider.name === "lmstudio") await configureLmStudio(cfg);
     providers[plannerProviderName] = cfg;
   }
 
@@ -630,6 +702,7 @@ export async function runSetup(): Promise<CliConfig> {
     const key = apiKeys.get(reviewerProviderName);
     if (key) cfg.apiKey = key;
     if (rProvider.name === "ollama") await configureOllama(cfg);
+    if (rProvider.name === "lmstudio") await configureLmStudio(cfg);
     providers[reviewerProviderName] = cfg;
   }
 

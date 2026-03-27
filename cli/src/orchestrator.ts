@@ -1494,7 +1494,8 @@ ${previousReviewFeedback}
 
 **Evaluate whether the revision addressed the issues you raised.**
 - If your major issues were fixed, approve — even if minor items remain
-- If the same issue persists after being flagged, note it in feedback but don't block on it again — the worker may not be able to fix it with the current model
+- If a cosmetic or minor issue persists after being flagged, note it in feedback but don't block on it again
+- If a functional bug, security issue, or missing requirement persists, you MUST block on it again — these are real problems regardless of how many times they've been flagged
 - If the revision introduced NEW bugs, request another revision for those specific issues
 - Score honestly based on current code quality, not relative to last round
 

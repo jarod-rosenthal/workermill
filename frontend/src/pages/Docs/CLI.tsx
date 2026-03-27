@@ -180,6 +180,45 @@ export default function CLI() {
         </div>
       </section>
 
+      {/* The Workers */}
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold">The Workers</h2>
+        <p className="text-muted-foreground">
+          Workers are the specialist personas that write the actual code — backend developers, frontend developers, DevOps engineers, and more.
+        </p>
+        <div className="space-y-3">
+          <div className="p-4 rounded-lg border border-border bg-card/50">
+            <h3 className="font-semibold text-foreground mb-2">Local models, flagship quality</h3>
+            <p className="text-sm text-muted-foreground">
+              The workers don{"'"}t need to be the smartest model in the room. They need to follow instructions, use tools, and write code.
+              A local model like Ollama{"'"}s Qwen Coder running on your machine can do that — especially when it{"'"}s been handed a clear brief
+              by a flagship planner and its output is held to a standard by a flagship reviewer.
+            </p>
+            <p className="text-sm text-muted-foreground mt-2">
+              This is the core insight: <strong className="text-foreground">the quality of the output is set by the planner and the reviewer, not the worker.</strong> The
+              planner tells the worker exactly which files to follow and which patterns to use. The reviewer holds the worker accountable to
+              that plan. A local model doing the work with a flagship model setting the direction and enforcing the standard produces better
+              results than a flagship model working alone with no plan and no review.
+            </p>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-card/50">
+            <h3 className="font-semibold text-foreground mb-2">Why this saves money</h3>
+            <p className="text-sm text-muted-foreground">
+              Workers consume the most tokens by far — they read files, write code, run commands, and iterate. Running that volume through a cloud
+              API adds up fast. With local models handling the heavy lifting and flagship models only running for planning (once) and review
+              (once per round), you get the quality ceiling of the flagship without paying flagship rates on every tool call.
+            </p>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-card/50">
+            <h3 className="font-semibold text-foreground mb-2">13 tools at their disposal</h3>
+            <p className="text-sm text-muted-foreground">
+              Workers have full access to your development environment: bash, read/write/edit files, glob, grep, git, web search, and more.
+              They can install dependencies, run tests, check compilation, and verify their own work — just like a developer at a terminal.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* Commands */}
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">Commands</h2>

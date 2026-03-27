@@ -695,27 +695,19 @@ export function Root(props: RootProps): React.ReactElement {
 
         // ---- /setup ----
         case "setup": {
-          agent.addSystemMessage("**Launching setup wizard...**\nThe CLI will restart after setup completes.");
+          // Can't run readline-based setup after Ink has taken over stdin.
+          // Delete config and exit — next run triggers fresh setup automatically.
+          try {
+            const configPath = path.join(os.homedir(), ".workermill", "cli.json");
+            if (fs.existsSync(configPath)) {
+              fs.unlinkSync(configPath);
+            }
+          } catch { /* non-fatal */ }
+          agent.addSystemMessage("**Config cleared.** Run `workermill` again to re-run setup.");
           stopAllMCPServers();
           void import("../browser.js").then(m => m.browserClose());
           exit();
-          // Exit Ink, run setup wizard, then exit so user restarts fresh.
-          // Ink needs time to restore stdin from raw mode before readline can use it.
-          setTimeout(async () => {
-            try {
-              // Ensure stdin is not in raw mode (Ink may leave it)
-              if (process.stdin.isTTY && process.stdin.setRawMode) {
-                process.stdin.setRawMode(false);
-              }
-              process.stdin.resume();
-              const { runSetup } = await import("../setup.js");
-              await runSetup();
-              console.log("\n  Setup complete. Run `workermill` to start with the new config.\n");
-            } catch (err) {
-              console.error("Setup failed:", err instanceof Error ? err.message : String(err));
-            }
-            process.exit(0);
-          }, 500);
+          setTimeout(() => process.exit(0), 200);
           break;
         }
 

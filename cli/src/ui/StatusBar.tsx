@@ -164,7 +164,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
               <Text>
                 <Text color={theme.iceBlue} bold>{"plan"}</Text>
                 <Text color={theme.subtle}>:</Text>
-                <Text color={theme.text}>{rm.planner}</Text>
+                <Text color={theme.iceBlue}>{rm.planner}</Text>
               </Text>
             ) : null}
             {rm.planner !== rm.worker && rm.reviewer !== rm.worker ? (
@@ -172,9 +172,9 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
             ) : null}
             {rm.reviewer !== rm.worker ? (
               <Text>
-                <Text color={theme.permission} bold>{"review"}</Text>
+                <Text color={theme.bashBorder} bold>{"review"}</Text>
                 <Text color={theme.subtle}>:</Text>
-                <Text color={theme.text}>{rm.reviewer}</Text>
+                <Text color={theme.bashBorder}>{rm.reviewer}</Text>
               </Text>
             ) : null}
           </>

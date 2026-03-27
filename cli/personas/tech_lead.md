@@ -79,7 +79,7 @@ If E2E tests exist:
 If the repo has Go code (`go.mod` exists), run these lightweight checks:
 - [ ] `go build ./...` compiles without errors
 - [ ] `go vet ./...` passes with no warnings
-- [ ] `gofmt -d ./...` produces no output (code is properly formatted)
+- [ ] `gofmt -d .` produces no output (code is properly formatted)
 
 Do NOT run `go test` or `golangci-lint` — check quality metrics for those results.
 

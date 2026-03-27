@@ -86,21 +86,52 @@ export async function execute({
 
     // Check if old_string exists in file
     if (!content.includes(old_string)) {
-      // Provide helpful debugging info
+      // Find the most similar region in the file — show the model what's actually there
+      // so it can correct its next attempt instead of guessing again.
       const lines = content.split("\n");
-      const preview = lines
-        .slice(0, 20)
-        .map((l, i) => `${i + 1}: ${l}`)
-        .join("\n");
+      const searchLines = old_string.split("\n");
+      const firstSearchLine = searchLines[0].trim();
+
+      let bestMatch = "";
+      let bestMatchLine = -1;
+
+      if (firstSearchLine.length > 5) {
+        // Find lines that partially match the first line of old_string
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].includes(firstSearchLine) || firstSearchLine.includes(lines[i].trim())) {
+            bestMatchLine = i;
+            break;
+          }
+        }
+
+        // If no partial match, try a looser search — longest common substring
+        if (bestMatchLine === -1) {
+          const searchWords = firstSearchLine.split(/\s+/).filter(w => w.length > 3);
+          let bestScore = 0;
+          for (let i = 0; i < lines.length; i++) {
+            const lineWords = lines[i].split(/\s+/);
+            const score = searchWords.filter(w => lineWords.some(lw => lw.includes(w))).length;
+            if (score > bestScore) {
+              bestScore = score;
+              bestMatchLine = i;
+            }
+          }
+        }
+      }
+
+      // Show context around the best match, or the top of file if no match found
+      const contextStart = bestMatchLine >= 0 ? Math.max(0, bestMatchLine - 3) : 0;
+      const contextEnd = bestMatchLine >= 0 ? Math.min(lines.length, bestMatchLine + searchLines.length + 3) : Math.min(lines.length, 30);
+      const contextLines = lines.slice(contextStart, contextEnd).map((l, i) => `${contextStart + i + 1}: ${l}`).join("\n");
+
+      const matchHint = bestMatchLine >= 0
+        ? `Closest match found near line ${bestMatchLine + 1}. Here is the actual content around that area:`
+        : `No similar text found. Here are the first ${contextEnd} lines of the file:`;
 
       return {
         success: false,
         error: `old_string not found in file. Make sure it matches exactly including whitespace and indentation.`,
-        hint: "Use read_file first to see the exact content.",
-        filePreview:
-          preview.length < 2000
-            ? preview
-            : preview.slice(0, 2000) + "\n... [truncated]",
+        hint: `${matchHint}\n\n${contextLines}\n\nRead the file content above carefully and use the EXACT text for old_string.`,
       };
     }
 

@@ -180,22 +180,6 @@ export function App(props: AppProps): React.ReactElement {
                 <Text color={theme.brand} bold>{"❱ "}</Text>
                 <Text color={theme.text}>{message.content}</Text>
               </Box>
-            ) : message.boxTitle ? (
-              <Box
-                flexDirection="column"
-                borderStyle="round"
-                borderColor={theme.subtle}
-                paddingLeft={1}
-                paddingRight={1}
-                marginLeft={2}
-                marginTop={1}
-              >
-                <Text color={theme.brand} bold>{message.boxTitle}</Text>
-                <Text>{""}</Text>
-                {message.content ? (
-                  <Markdown content={message.content} />
-                ) : null}
-              </Box>
             ) : (
               <Box flexDirection="column" marginLeft={2}>
                 {message.toolCalls?.map((tc) => (

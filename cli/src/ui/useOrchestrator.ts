@@ -82,7 +82,7 @@ export interface UseOrchestratorReturn {
  *   (defaults to `"assistant"`).
  */
 export function useOrchestrator(
-  addMessage: (content: string, role?: "user" | "assistant", boxTitle?: string) => void,
+  addMessage: (content: string, role?: "user" | "assistant") => void,
   setCost?: (cost: number) => void,
   /** Config with CLI overrides (e.g. --auto-revise) already applied. */
   cliConfig?: CliConfig,
@@ -168,12 +168,6 @@ export function useOrchestrator(
 
             coordinatorLog(message: string): void {
               emitLine(`[${getEmoji("coordinator")} coordinator] ${message}`);
-            },
-
-            frame(title: string, lines: string[]): void {
-              // Emit as a boxed message — rendered by Ink <Box borderStyle="round">
-              const content = lines.join("\n");
-              addMessage(content, "assistant", title);
             },
 
             error(message: string): void {

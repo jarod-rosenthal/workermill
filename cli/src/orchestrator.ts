@@ -57,8 +57,6 @@ export interface OrchestrationOutput {
   confirm: (prompt: string) => Promise<boolean | { allowed: boolean; mode?: "always" | "trust" }>;
   /** Log a tool call */
   toolCall: (persona: string, toolName: string, toolInput: Record<string, unknown>) => void;
-  /** Render lines inside a box-drawing frame */
-  frame: (title: string, lines: string[]) => void;
   /** Update the git branch displayed in the status bar */
   updateBranch?: (branch: string) => void;
   /** Update running cost in the UI (optional — noop if not provided) */
@@ -1657,8 +1655,11 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           onStepFinish({ text }) {
             if (text) {
               reviewerOutput += text + "\n";
-              // Review content is displayed in the framed summary after completion.
-              // No live streaming — the status spinner shows the reviewer is working.
+              const lines = text.split("\n").filter(l => l.trim());
+              for (const line of lines) {
+                if (line.includes("::review_score::") || line.includes("::review_verdict::") || line.includes("::code_quality_score::")) continue;
+                output.log("tech_lead", line);
+              }
             }
           },
         });
@@ -1683,24 +1684,11 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         const revOutputTokens = reviewUsage?.outputTokens || 0;
         logger.info(`Review round ${reviewRound} result`, { decision: decision || "no-marker-approved", score, approved, reviewTextLength: reviewText.length, inputTokens: revInputTokens, outputTokens: revOutputTokens });
 
-        // Display review result — framed summary
-        const reviewDecisionLabel = approved ? "approved" : decision === "rejected" ? "rejected" : "needs_revision";
-        const reviewFrameLines: string[] = [
-          `Decision:  ${reviewDecisionLabel}`,
-          `Score:     ${score}/10`,
-        ];
-        // Extract feedback body for the frame (skip markers and blank lines)
-        const feedbackLines = reviewText.split("\n").filter(l => {
-          const t = l.trim();
-          return t && !t.startsWith("REVIEW_DECISION") && !t.startsWith("CODE_QUALITY_SCORE")
-            && !t.includes("::review_score::") && !t.includes("::review_verdict::")
-            && !t.includes("::code_quality_score::") && !t.includes("::review_decision::");
-        });
-        if (feedbackLines.length > 0) {
-          reviewFrameLines.push("");
-          reviewFrameLines.push(...feedbackLines);
-        }
-        output.frame(`\u{1F451} Tech Lead Review`, reviewFrameLines);
+        // Display review result with horizontal rules
+        output.log("tech_lead", "\u2500".repeat(60));
+        output.log("tech_lead", `::code_quality_score::${score}/10`);
+        output.log("tech_lead", `::review_decision::${approved ? "approved" : decision === "rejected" ? "rejected" : "needs_revision"}`);
+        output.log("tech_lead", "\u2500".repeat(60));
         output.coordinatorLog(approved ? `Review approved (${score}/10)` : `Review needs revision (${score}/10)`);
         // Save feedback for next review round — so tech_lead can check if issues were addressed
         previousReviewFeedback = reviewText;

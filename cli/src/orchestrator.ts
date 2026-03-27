@@ -1444,6 +1444,7 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
       return;
     }
     logger.info("Starting review loop", { maxRevisions, provider: revProvider, model: revModel });
+    let preRevisionHash = ""; // Tracks HEAD before each revision — so reviewer sees only what changed
     for (let reviewRound = 1; reviewRound <= maxRevisions + 1; reviewRound++) {
       const isRevision = reviewRound > 1;
       logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
@@ -1482,11 +1483,19 @@ ${previousReviewFeedback}
         }).join("\n\n");
 
         // Get clean diff from feature branch vs main — matches worker's consolidated PR diff.
-        // The reviewer has read_file/glob/grep tools for deeper inspection.
+        // On revision rounds, ALSO show what changed since the last review so the reviewer
+        // can see progress instead of re-evaluating everything from scratch.
         let codeDiff = "";
         if (featureBranch) {
+          // On revision rounds, show the delta since last review FIRST
+          if (isRevision && preRevisionHash) {
+            const revisionDelta = getDiffSinceCommit(workingDir, preRevisionHash);
+            if (revisionDelta) {
+              codeDiff += `## What Changed Since Last Review\n\nThis diff shows ONLY what the revision workers changed. Focus your review here.\n\n${revisionDelta}\n\n---\n\n`;
+            }
+          }
           const { stat, diff } = getDiffForReview(workingDir, mainBranch);
-          if (stat) codeDiff += `## Diff Summary\n${stat}\n\n`;
+          if (stat) codeDiff += `## Full Branch Diff (all work vs ${mainBranch})\n${stat}\n\n`;
           if (diff) codeDiff += diff;
         } else {
           // Fallback: uncommitted changes diff
@@ -1696,6 +1705,11 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         }
 
         output.log("system", "--- Revision Pass ---");
+
+        // Capture HEAD before revision — so next review shows only what changed
+        if (featureBranch) {
+          preRevisionHash = getHeadHash(workingDir);
+        }
 
         // Capture prior work context before revision — prevents oscillation
         // (from worker/epic/coordinator-review.ts captureStoryBranchSummaries pattern)

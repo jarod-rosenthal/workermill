@@ -1467,6 +1467,7 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
     }
 
     let previousReviewFeedback = "";
+    let finalReviewText = ""; // Captures the approved review for use in PR body
     // Check if user cancelled before starting review
     if (abortSignal?.aborted) {
       output.coordinatorLog("Build cancelled by user.");
@@ -1490,12 +1491,11 @@ This is a revision attempt. The previous code was reviewed and these issues were
 
 ${previousReviewFeedback}
 
-**Check if the code improved since last review.**
-- Focus on whether the MAJOR issues were addressed
-- If the code is meaningfully better, approve it — don't hold up progress for remaining items
-- If an issue persists across multiple revision rounds, the worker likely CANNOT fix it with the available model — accept the best effort and approve
-- Only request another revision if there are NEW functional bugs introduced by the revision
-- Do NOT keep requesting revision for the same issue that wasn't fixed last time — that's a deadlock, not progress
+**Evaluate whether the revision addressed the issues you raised.**
+- If your major issues were fixed, approve — even if minor items remain
+- If the same issue persists after being flagged, note it in feedback but don't block on it again — the worker may not be able to fix it with the current model
+- If the revision introduced NEW bugs, request another revision for those specific issues
+- Score honestly based on current code quality, not relative to last round
 
 ---
 
@@ -1591,7 +1591,7 @@ Review the actual code above. You also have tools (read_file, glob, grep) to exa
 - Fundamental approach is wrong and cannot be fixed with revisions
 - Security vulnerability that requires different architecture
 
-**Bias toward approval**: If the code works and implements the spec requirements, approve it. Every revision cycle costs significant time and tokens — only request revision for real functional or security issues. A score of 7+ should almost always be an approval.
+**Be fair**: Approve code that correctly implements the plan and has no functional bugs or security issues. Request revision for real problems — missing functionality, broken code, security vulnerabilities. Cosmetic preferences and style differences belong in feedback comments, not revision requests. Score honestly — 8+ means ready to ship, below 8 means real issues remain.
 
 ## Output Format
 
@@ -1683,7 +1683,10 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         output.updateCost?.(costTracker.getTotalCost());
 
         // If approved or out of revision attempts, done
-        if (approved) break;
+        if (approved) {
+          finalReviewText = reviewText;
+          break;
+        }
         const revisionsLeft = maxRevisions - (reviewRound - 1);
         if (revisionsLeft <= 0) {
           output.coordinatorLog(`Max revisions (${maxRevisions}) reached, proceeding to commit.`);
@@ -1947,7 +1950,24 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             try {
               const storyTitles = sorted.map(s => s.title).join(", ");
               const prTitle = storyTitles.length > 70 ? storyTitles.slice(0, 67) + "..." : storyTitles;
-              const prBody = `## Summary\n\n${sorted.map((s, i) => `- **Story ${i + 1}** (${s.persona}): ${s.title}`).join("\n")}\n\n---\nShipped by [WorkerMill CLI](https://workermill.com)`;
+
+              // Build PR body: task overview + stories + tech lead review
+              const prParts: string[] = [];
+              prParts.push("## Task\n");
+              prParts.push(userTask);
+              prParts.push("\n## Stories\n");
+              prParts.push(sorted.map((s, i) => `- **Story ${i + 1}** (${s.persona}): ${s.title}`).join("\n"));
+              if (finalReviewText) {
+                // Extract just the FEEDBACK section from the review, not the markers
+                const feedbackMatch = finalReviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|REVIEW_DECISION|CODE_QUALITY|$)/i);
+                const feedback = feedbackMatch ? feedbackMatch[1].trim() : finalReviewText.split("\n").filter(l => !l.includes("REVIEW_DECISION") && !l.includes("CODE_QUALITY_SCORE") && !l.includes("AFFECTED_")).join("\n").trim();
+                if (feedback) {
+                  prParts.push("\n## Tech Lead Review\n");
+                  prParts.push(feedback);
+                }
+              }
+              prParts.push("\n---\nShipped by [WorkerMill CLI](https://workermill.com)");
+              const prBody = prParts.join("\n");
               const prUrl = execSync(
                 `gh pr create --title "${prTitle.replace(/"/g, '\\"')}" --body "${prBody.replace(/"/g, '\\"')}" --head "${featureBranch}" --base "${mainBranch}" 2>&1`,
                 { cwd: workingDir, encoding: "utf-8", stdio: "pipe" },

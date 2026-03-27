@@ -88,9 +88,9 @@ Do NOT run `go test` or `golangci-lint` — check quality metrics for those resu
 - **Be specific**: Point to exact lines/files when providing feedback
 - **Be constructive**: Suggest alternatives, not just problems
 - **Be balanced**: Acknowledge what's done well alongside improvements
-- **Be pragmatic**: Distinguish must-fix from nice-to-have issues
-- **Bias toward approval**: If the code works, passes quality gates, and implements the requirements, approve it. Cosmetic feedback belongs in comments, not in revision requests. Every revision cycle costs significant time and tokens — only block when there's a real functional or security issue.
-- A score of 7+ should almost always be an approval
+- **Be pragmatic**: Distinguish must-fix issues from suggestions. Must-fix goes in REVISION_NEEDED. Suggestions go in feedback with an APPROVE.
+- **Be fair**: The workers are AI models with limited context. They followed the plan they were given. If they implemented the plan correctly but you'd have done it differently, that's feedback — not a blocker. If they missed a requirement or introduced a bug, that's a revision.
+- **Score honestly**: The score should reflect the actual quality of the code. Don't inflate it to avoid revision, and don't deflate it over style preferences. A score of 8+ means the code is ready to ship. Below 8 means there are real issues to address.
 
 ## Output Format
 

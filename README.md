@@ -108,11 +108,38 @@ WorkerMill fixes all three problems:
 - **Parallel execution** — a backend expert builds the API while a frontend expert wires the UI and a devops expert writes the Dockerfile, all from the same plan
 - **Built-in code review** — the tech lead reads actual diffs against your original spec, catches inconsistencies, and sends specific feedback
 - **Targeted revisions** — failed reviews don't restart from scratch; only the affected stories re-run with the reviewer's notes
-- **Provider mixing** — use a fast cheap model for workers, a smart one for planning, and a different one for review. Run workers on local Ollama while the planner uses Claude and the reviewer uses GPT
+
+## Flagship Quality from Local Models
+
+Most AI coding tools force a choice: pay for a flagship API or run a local model and accept lower quality. WorkerMill eliminates that trade-off.
+
+The key insight is that **different roles need different levels of intelligence.** Planning and code review require deep reasoning — understanding architecture, catching subtle bugs, evaluating whether an implementation matches a spec. Writing code to a well-scoped ticket with clear instructions is a simpler task that smaller models handle well.
+
+WorkerMill lets you assign a different model to each role:
+
+```json
+{
+  "providers": {
+    "ollama": { "model": "qwen3-coder:30b" },
+    "anthropic": { "model": "claude-sonnet-4-6", "apiKey": "{env:ANTHROPIC_API_KEY}" }
+  },
+  "default": "ollama",
+  "routing": {
+    "planner": "anthropic",
+    "tech_lead": "anthropic"
+  }
+}
+```
+
+In this configuration, a flagship model handles planning and review — the high-judgment tasks — while a local Ollama model does the actual coding. The planner decomposes work into precise, scoped tickets. The workers execute them. The tech lead reviews every diff and sends failing stories back with specific feedback. The workers revise until the reviewer is satisfied.
+
+The result: **your local model produces output that meets the standards of the flagship model reviewing it.** The revision loop is the mechanism — it's not aspirational, it's how the system works. A smaller model writing code to a tight spec, reviewed by a larger model that catches mistakes and demands fixes, converges on quality that neither model would produce alone.
+
+This also means you can run workers entirely offline on Ollama while only the planner and reviewer make API calls — dramatically reducing cost while maintaining quality.
 
 ## AI Provider Support
 
-Bring your own keys. Mix and match per role.
+Bring your own keys. Mix and match per role. WorkerMill uses the [Vercel AI SDK](https://sdk.vercel.ai) — any compatible provider works out of the box.
 
 | Provider | Models | Notes |
 |----------|--------|-------|
@@ -123,21 +150,6 @@ Bring your own keys. Mix and match per role.
 | **Google** | Gemini 3.1 Pro, Gemini 2.5 Flash | |
 
 Any provider with an OpenAI-compatible API also works — Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, Fireworks, or your own custom endpoint. If it speaks the OpenAI API, WorkerMill can use it.
-
-```json
-{
-  "providers": {
-    "ollama": { "model": "qwen3-coder:30b" },
-    "anthropic": { "model": "claude-sonnet-4-6", "apiKey": "{env:ANTHROPIC_API_KEY}" },
-    "google": { "model": "gemini-3.1-pro-preview", "apiKey": "{env:GOOGLE_API_KEY}" }
-  },
-  "default": "ollama",
-  "routing": {
-    "planner": "google",
-    "tech_lead": "anthropic"
-  }
-}
-```
 
 ## Commands
 

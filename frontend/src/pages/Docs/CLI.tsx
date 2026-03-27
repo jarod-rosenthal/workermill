@@ -61,8 +61,8 @@ export default function CLI() {
             { title: "Architect-led planning", desc: "The planner reads your codebase — patterns, conventions, architecture — then briefs each worker with specific files to follow, integration points, and risks. Workers write code that fits your project, not generic boilerplate." },
             { title: "Multi-expert orchestration", desc: "/ship decomposes tasks into stories, each assigned to a specialist persona with the planner's architectural guidance." },
             { title: "Feasibility gate", desc: "The planner rejects tasks that are too vague or contradictory before any worker tokens are spent." },
-            { title: "Surgical review fixer", desc: "When the reviewer requests changes, a lightweight fix agent applies targeted edits before falling back to full re-execution." },
-            { title: "Spec verification", desc: "Independent QA agent verifies each story's output against the original specification before review." },
+            { title: "Git branch isolation", desc: "Each /ship session creates a feature branch with commits per story. Clean diffs for review, checkpoints for rollback." },
+            { title: "Revision with memory", desc: "When the reviewer requests changes, workers see what they tried last time via git history — no repeated mistakes." },
             { title: "Error classification", desc: "Categorizes failures (typescript, lint, test, build, transient) with targeted fix hints for automatic retry." },
             { title: "Role-based model routing", desc: "Different models for workers, planner, and reviewer. Mix local and cloud providers." },
             { title: "WORKERMILL.md", desc: "Project instructions file read by all agents. Also supports CLAUDE.md and .cursorrules." },
@@ -97,16 +97,50 @@ export default function CLI() {
         <p className="text-muted-foreground">Use <code className="text-primary">/ship</code> to trigger multi-expert mode:</p>
         <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
           <li><strong className="text-foreground">Analyzes</strong> — Planner reads your codebase deeply: patterns, conventions, frameworks, dependencies, risks</li>
-          <li><strong className="text-foreground">Plans</strong> — Decomposes the task into stories with specific files, reference patterns, and architectural guidance per worker</li>
-          <li><strong className="text-foreground">Executes</strong> — Each specialist gets the full spec plus the planner's brief: "follow this file, use this pattern, watch for this risk"</li>
-          <li><strong className="text-foreground">Verifies</strong> — Independent QA agent checks each story against the spec before review</li>
-          <li><strong className="text-foreground">Reviews</strong> — Tech lead reads actual code diffs, requests targeted revisions on specific stories</li>
-          <li><strong className="text-foreground">Fixes</strong> — Surgical fixer applies reviewer feedback directly; falls back to full re-execution only if needed</li>
-          <li><strong className="text-foreground">Commits</strong> — Stages changes and commits (with your approval)</li>
+          <li><strong className="text-foreground">Plans</strong> — Decomposes the task into stories with target files, reference patterns, and implementation guidance per worker</li>
+          <li><strong className="text-foreground">Executes</strong> — Each specialist gets the planner{"'"}s brief: which files to follow, which patterns to use, what risks to watch for. Each story is committed to the feature branch.</li>
+          <li><strong className="text-foreground">Reviews</strong> — Tech lead reviews the plan and the code. On revision rounds, sees what changed since the last review — not the full diff again.</li>
+          <li><strong className="text-foreground">Revises</strong> — Workers get per-story feedback plus their own git history from the previous attempt. They fix what was flagged without repeating the same mistakes.</li>
+          <li><strong className="text-foreground">Commits</strong> — All work is on a feature branch with per-story commits. Ready for your review.</li>
         </ol>
         <p className="text-muted-foreground mt-2">
           Use <code className="text-primary">/retry</code> to re-plan the same task — the planner sees existing code and fills in gaps.
         </p>
+      </section>
+
+      {/* The Planner */}
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold">The Planner</h2>
+        <p className="text-muted-foreground">
+          The planner is the most important step in <code className="text-primary">/ship</code>. It reads your codebase so your workers don{"'"}t have to.
+        </p>
+        <div className="space-y-3">
+          <div className="p-4 rounded-lg border border-border bg-card/50">
+            <h3 className="font-semibold text-foreground mb-2">What the planner does</h3>
+            <ul className="list-disc list-inside space-y-1.5 text-sm text-muted-foreground">
+              <li>Reads key files — models, routes, config, package.json — to understand how your project is built</li>
+              <li>Identifies 2-3 existing files that are most similar to what needs to be built. These become reference patterns.</li>
+              <li>Decomposes the task into the minimum number of stories, grouped by persona (one backend story, one frontend story — not ten tiny steps)</li>
+              <li>Writes <strong className="text-foreground">implementationNotes</strong> per story: {"\""}follow the pattern in products.py, use the Depends(get_db) middleware, dispatch webhooks after the transaction commits{"\""}  </li>
+              <li>Can <strong className="text-foreground">reject</strong> a task if the spec is too vague or contradicts the codebase — saving all downstream worker tokens</li>
+            </ul>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-card/50">
+            <h3 className="font-semibold text-foreground mb-2">Why this matters</h3>
+            <p className="text-sm text-muted-foreground">
+              Without the planner, each worker starts from zero — exploring the codebase, guessing at patterns, and writing code that doesn{"'"}t fit.
+              With the planner, workers get a specific brief: which files to read, which conventions to follow, and what risks to avoid.
+              The result is code that looks like your team wrote it, not generic AI output.
+            </p>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-card/50">
+            <h3 className="font-semibold text-foreground mb-2">Use a flagship model</h3>
+            <p className="text-sm text-muted-foreground">
+              The planner benefits most from a capable model. Use <code className="text-primary">/setup</code> to route the planner to a flagship model
+              (Claude Sonnet, GPT-5.4, Gemini Pro) while keeping workers on a local model like Ollama. The planner runs once per task — the investment pays for itself in better worker output.
+            </p>
+          </div>
+        </div>
       </section>
 
       {/* Commands */}

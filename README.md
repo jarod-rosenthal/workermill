@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/ab931d38-68c5-4cc3-b210-4c0eaebf8c93
+
 <p align="center">
   <h1 align="center">WorkerMill</h1>
 </p>
@@ -25,8 +29,6 @@
   <a href="https://github.com/jarod-rosenthal/workermill/discussions"><img src="https://img.shields.io/github/discussions/jarod-rosenthal/workermill?logo=github&color=blue" alt="GitHub Discussions"></a>
   <a href="https://github.com/jarod-rosenthal/workermill/stargazers"><img src="https://img.shields.io/github/stars/jarod-rosenthal/workermill?style=social" alt="GitHub stars"></a>
 </p>
-
-https://github.com/jarod-rosenthal/workermill/releases/download/assets-v1/workermill-demo.mp4
 
 ## Get Started
 

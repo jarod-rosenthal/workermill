@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  One command. A team of AI specialists plans it, builds it in parallel, reviews the code, and commits.<br/>
+  One command. A team of AI specialists plans it, builds it (in parallel on the cloud platform, sequentially via CLI), reviews the code, and commits.<br/>
   Not one agent doing everything — a coordinated team, each with a job.
 </p>
 
@@ -67,7 +67,7 @@ $ npx workermill
               Push branch and open a pull request? (y/n)
 ```
 
-Two specialists worked in parallel. A tech lead reviewed the actual diffs — not just the output, but whether it matched your spec. 16 files, committed to a branch, ready for PR. You approve or reject at every step.
+Two specialists worked sequentially, each scoped to their own files. A tech lead reviewed the actual diffs — not just the output, but whether it matched your spec. 16 files, committed to a branch, ready for PR. You approve or reject at every step.
 
 **That's the difference.** Every other AI coding tool is one agent trying to do everything. WorkerMill gives you a team.
 
@@ -92,7 +92,7 @@ Works with **Ollama** (fully local), **Anthropic**, **OpenAI**, **Google**, **LM
 `/ship` triggers the full orchestration pipeline:
 
 1. **Planner** reads your codebase — existing patterns, frameworks, file structure — and decomposes the work into scoped stories with specific file targets
-2. **Specialist experts** execute stories in parallel — each one gets a scoped ticket but sees your full original spec, so intent is never lost
+2. **Specialist experts** execute stories sequentially — each one gets a scoped ticket but sees your full original spec, so intent is never lost
 3. **Tech Lead** reviews the actual code diffs against your spec — approved, revision needed, or rejected
 4. **Revision cycles** re-run only the stories that failed review, with the reviewer's specific feedback — no starting over
 5. **You approve** the commit and push — feature branch, one commit per story
@@ -105,7 +105,7 @@ When you ask one AI agent to build a feature that touches the backend, frontend,
 
 WorkerMill fixes all three problems:
 
-- **Parallel execution** — a backend expert builds the API while a frontend expert wires the UI and a devops expert writes the Dockerfile, all from the same plan
+- **Specialist execution** — a backend expert builds the API, a frontend expert wires the UI, a devops expert writes the Dockerfile, each from the same plan
 - **Built-in code review** — the tech lead reads actual diffs against your original spec, catches inconsistencies, and sends specific feedback
 - **Targeted revisions** — failed reviews don't restart from scratch; only the affected stories re-run with the reviewer's notes
 

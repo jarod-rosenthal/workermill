@@ -564,9 +564,9 @@ export async function runSetup(): Promise<CliConfig> {
   console.log();
   console.log(chalk.bold("  WorkerMill CLI") + chalk.dim(" — AI coding agent"));
   console.log();
-  console.log(chalk.dim("  Three roles, each can use a different model."));
-  console.log(chalk.dim("  With a GPU: local workers (Ollama) + flagship planner/reviewer."));
-  console.log(chalk.dim("  Without: affordable workers (Haiku, GPT-5.4-mini) + flagship planner/reviewer."));
+  console.log(chalk.dim("  Three roles — workers, planner, reviewer — each can use a different model."));
+  console.log(chalk.dim("  Best: Ollama for workers (free, local), cloud models for planning/review."));
+  console.log(chalk.dim("  No local models? Haiku or Gemini Flash are low-cost cloud alternatives."));
   console.log();
 
   // ── Step 1: Workers (expert personas — the default provider) ──

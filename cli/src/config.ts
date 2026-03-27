@@ -26,6 +26,8 @@ export interface ReviewConfig {
   autoRevise?: boolean;
   /** Score threshold for auto-approval, 1-10 scale (default: 8) */
   approvalThreshold?: number;
+  /** Score threshold for critic plan approval, 1-10 scale (default: 8) */
+  criticThreshold?: number;
 }
 
 export interface HookConfig {
@@ -42,6 +44,11 @@ export interface HooksConfig {
   post?: HookConfig[];
 }
 
+export interface GitConfig {
+  /** Branch name prefix for /ship sessions (default: "workermill") */
+  branchPrefix?: string;
+}
+
 export interface CliConfig {
   providers: Record<string, ProviderConfig>;
   default: string;
@@ -49,6 +56,7 @@ export interface CliConfig {
   mcp?: Record<string, MCPServerConfig>;
   review?: ReviewConfig;
   hooks?: HooksConfig;
+  git?: GitConfig;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".workermill");

@@ -114,6 +114,7 @@ Just type your question or task and press Enter.
 **Ship** — Create software with multiple specialist AI agents.
 Type \`/ship <description>\` or \`/ship spec.md\` and I'll plan stories,
 assign experts (backend, frontend, devops, security), execute, and review.
+Creates a feature branch for all changes — your current branch stays clean.
 
 ---
 
@@ -352,7 +353,9 @@ export function Root(props: RootProps): React.ReactElement {
             agent.addSystemMessage(
               "**Usage:** `/ship <task description>` or `/ship spec.md`\n\n" +
               "Runs WorkerMill multi-expert orchestration: plans stories, assigns specialist personas, " +
-              "executes with tool calls, reviews, and ships."
+              "executes with tool calls, reviews, and ships.\n\n" +
+              "**Note:** Creates a feature branch (`workermill/<task>`) for all changes. " +
+              "Your current branch is restored when the session completes or is cancelled."
             );
           } else if (orchestrator.running) {
             agent.addSystemMessage("Orchestration is already running. Wait for it to complete.");
@@ -521,9 +524,11 @@ export function Root(props: RootProps): React.ReactElement {
             const ollamaCtx = config.providers?.ollama?.contextLength || 65536;
             const reviewEnabled = config.review?.enabled !== false;
             const maxRevisions = config.review?.maxRevisions ?? 3;
-            const approvalThreshold = config.review?.approvalThreshold ?? 80;
+            const approvalThreshold = config.review?.approvalThreshold ?? 8;
+            const criticThreshold = config.review?.criticThreshold ?? 8;
             const autoRevise = config.review?.autoRevise ?? false;
             const useCritic = config.review?.useCritic ?? false;
+            const branchPrefix = config.git?.branchPrefix || "workermill";
 
             agent.addSystemMessage(
               `**Settings** (\`~/.workermill/cli.json\`)\n\n` +
@@ -534,8 +539,10 @@ export function Root(props: RootProps): React.ReactElement {
               `| Review enabled | ${reviewEnabled} | \`/settings review.enabled <true/false>\` |\n` +
               `| Max revisions | ${maxRevisions} | \`/settings review.maxRevisions <n>\` |\n` +
               `| Approval threshold | ${approvalThreshold} | \`/settings review.threshold <n>\` |\n` +
+              `| Critic threshold | ${criticThreshold} | \`/settings review.criticThreshold <n>\` |\n` +
               `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
-              `| Critic pass | ${useCritic} | \`/settings review.critic <true/false>\` |`
+              `| Critic pass | ${useCritic} | \`/settings review.critic <true/false>\` |\n` +
+              `| Branch prefix | ${branchPrefix} | \`/settings git.branchPrefix <name>\` |`
             );
           } else {
             // Parse key=value or key value
@@ -578,8 +585,16 @@ export function Root(props: RootProps): React.ReactElement {
                 config.review = { ...config.review, autoRevise: boolVal(value) };
                 break;
               }
+              case "review.criticThreshold": {
+                config.review = { ...config.review, criticThreshold: numVal(value) };
+                break;
+              }
               case "review.critic": {
                 config.review = { ...config.review, useCritic: boolVal(value) };
+                break;
+              }
+              case "git.branchPrefix": {
+                config.git = { ...config.git, branchPrefix: value };
                 break;
               }
               default:
@@ -587,7 +602,7 @@ export function Root(props: RootProps): React.ReactElement {
                 break;
             }
 
-            if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise"].includes(key)) {
+            if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "git.branchPrefix"].includes(key)) {
               saveConfig(config);
               agent.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
             }

@@ -855,7 +855,7 @@ export async function runOrchestration(
   // Use the spec filename for the branch name if one was referenced, otherwise the task text
   const fileRefForBranch = userTask.match(/[\w./-]+\.(?:md|txt|yaml|yml|json)\b/i);
   const branchLabel = fileRefForBranch ? fileRefForBranch[0] : userTask;
-  const featureBranch = createFeatureBranch(workingDir, branchLabel);
+  const featureBranch = createFeatureBranch(workingDir, branchLabel, config.git?.branchPrefix);
   if (featureBranch) {
     output.coordinatorLog(`Working on branch: ${featureBranch}`);
   }
@@ -914,7 +914,7 @@ export async function runOrchestration(
         model: criticModel,
         abortSignal,
         system: critic.systemPrompt,
-        prompt: `Review this implementation plan. Score it 0-100 using ::review_score::N marker.\n\nStories:\n${plannerStories.map(s => `- ${s.id}: ${s.title} (${s.persona}) — ${s.description}`).join("\n")}`,
+        prompt: `Review this implementation plan. Score it 1-10 using CODE_QUALITY_SCORE: N marker.\n\nStories:\n${plannerStories.map(s => `- ${s.id}: ${s.title} (${s.persona}) — ${s.description}`).join("\n")}`,
         tools: criticReadOnly as ToolSet,
         stopWhen: stepCountIs(100),
         timeout: { chunkMs: 120_000 },
@@ -926,7 +926,8 @@ export async function runOrchestration(
 
       const score = extractScore(criticText);
       output.log("critic", `::review_score::${score}`);
-      output.log("critic", score >= 80 ? "Plan approved" : "Plan needs revision");
+      const criticThreshold = config.review?.criticThreshold ?? 8;
+      output.log("critic", score >= criticThreshold ? "Plan approved" : "Plan needs revision");
         }
   }
 

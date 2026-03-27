@@ -80,7 +80,7 @@ export function getCurrentBranch(workingDir: string): string | null {
  * Falls back to workermill/ship-{short-hash} if no task provided.
  * From worker/epic/git-ops.ts:createStoryBranch() — simplified for CLI.
  */
-export function createFeatureBranch(workingDir: string, taskDescription?: string): string | null {
+export function createFeatureBranch(workingDir: string, taskDescription?: string, branchPrefix?: string): string | null {
   if (!isGitRepo(workingDir)) return null;
 
   try {
@@ -99,7 +99,8 @@ export function createFeatureBranch(workingDir: string, taskDescription?: string
     } else {
       slug = `ship-${Date.now().toString(36)}`;
     }
-    const branchName = `workermill/${slug}`;
+    const prefix = branchPrefix || "workermill";
+    const branchName = `${prefix}/${slug}`;
 
     // Create and checkout the feature branch from current HEAD
     execSync(`git checkout -b "${branchName}"`, { cwd: workingDir, stdio: "pipe" });

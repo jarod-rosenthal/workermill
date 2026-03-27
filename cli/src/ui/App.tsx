@@ -81,10 +81,15 @@ function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: 
   const hasAlways = isToolPrompt || isRevisionPrompt;
   useInput((input) => {
     if (answered) return;
-    if (input === "y" || input === "Y") { setAnswered("y"); request.resolve(true); }
-    if (input === "n" || input === "N") { setAnswered("n"); request.resolve(false); }
-    if (hasAlways && (input === "a" || input === "A")) { setAnswered("a"); request.resolve(true, "always"); }
-    if (isToolPrompt && (input === "t" || input === "T")) { setAnswered("t"); request.resolve(true, "trust"); }
+    const resolve = (key: string, yes: boolean, mode?: "always" | "trust") => {
+      setAnswered(key);
+      // Delay resolve so React renders the answer before the orchestrator continues
+      setTimeout(() => request.resolve(yes, mode), 150);
+    };
+    if (input === "y" || input === "Y") resolve("y", true);
+    if (input === "n" || input === "N") resolve("n", false);
+    if (hasAlways && (input === "a" || input === "A")) resolve("a", true, "always");
+    if (isToolPrompt && (input === "t" || input === "T")) resolve("t", true, "trust");
   }, { isActive: !answered });
 
   let hint = "(y/n)";

@@ -1938,6 +1938,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
       } catch { /* no remote */ }
 
       if (hasRemote) {
+        output.log("system", `To review the full diff first, say no and use: /diff or \`!git diff ${mainBranch}..HEAD\``);
         const cr = await output.confirm("Push branch and open a pull request?");
         const confirmed = typeof cr === "object" ? cr.allowed : cr;
         if (confirmed) {

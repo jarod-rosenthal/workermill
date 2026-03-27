@@ -1516,16 +1516,22 @@ ${previousReviewFeedback}
         // can see progress instead of re-evaluating everything from scratch.
         let codeDiff = "";
         if (featureBranch) {
-          // On revision rounds, show the delta since last review FIRST
           if (isRevision && preRevisionHash) {
+            // Revision rounds: send ONLY what changed since last review.
+            // The reviewer already saw the full diff — sending it again wastes context
+            // and risks exceeding the model's context window on later rounds.
             const revisionDelta = getDiffSinceCommit(workingDir, preRevisionHash);
             if (revisionDelta) {
-              codeDiff += `## What Changed Since Last Review\n\nThis diff shows ONLY what the revision workers changed. Focus your review here.\n\n${revisionDelta}\n\n---\n\n`;
+              codeDiff += `## What Changed Since Last Review\n\nThis diff shows ONLY what the revision workers changed. Use read_file to inspect any file in full.\n\n${revisionDelta}`;
+            } else {
+              codeDiff += "(no changes detected since last review)";
             }
+          } else {
+            // First review: send the full branch diff
+            const { stat, diff } = getDiffForReview(workingDir, mainBranch);
+            if (stat) codeDiff += `## Branch Diff (${mainBranch}..HEAD)\n${stat}\n\n`;
+            if (diff) codeDiff += diff;
           }
-          const { stat, diff } = getDiffForReview(workingDir, mainBranch);
-          if (stat) codeDiff += `## Full Branch Diff (all work vs ${mainBranch})\n${stat}\n\n`;
-          if (diff) codeDiff += diff;
         } else {
           // Fallback: uncommitted changes diff
           try {

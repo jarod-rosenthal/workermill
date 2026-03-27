@@ -11,7 +11,7 @@
 
 import { useState, useCallback, useRef } from "react";
 import type { OrchestrationOutput } from "../orchestrator.js";
-import { loadConfig, type CliConfig } from "../config.js";
+import { resolveConfig, type CliConfig } from "../config.js";
 
 // ---------------------------------------------------------------------------
 // Persona emoji map -- EXACT match from tui.ts (PERSONA_EMOJIS)
@@ -140,7 +140,7 @@ export function useOrchestrator(
           // ---- Config ------------------------------------------------
           // Use the CLI-resolved config (has --auto-revise etc.) if available,
           // otherwise fall back to loading from disk.
-          const config = cliConfig ?? loadConfig();
+          const config = cliConfig ?? resolveConfig();
           if (!config) {
             addMessage(
               "No provider configured. Run `workermill` (setup) first.",

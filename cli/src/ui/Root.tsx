@@ -602,7 +602,7 @@ export function Root(props: RootProps): React.ReactElement {
                 break;
             }
 
-            if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "git.branchPrefix"].includes(key)) {
+            if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "git.branchPrefix"].includes(key)) {
               saveConfig(config);
               agent.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
             }

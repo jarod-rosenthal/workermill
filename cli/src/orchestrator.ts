@@ -13,6 +13,12 @@ import { CostTracker } from "./cost-tracker.js";
 import type { CliConfig, HooksConfig } from "./config.js";
 import { getProviderForPersona } from "./config.js";
 import { runHooks } from "./hooks.js";
+import {
+  isGitRepo, getCurrentBranch, createFeatureBranch,
+  commitStoryChanges, commitRevisionChanges,
+  captureStoryPriorWork, getDiffForReview, getDiffSinceCommit,
+  getHeadHash, returnToOriginalBranch,
+} from "./git-ops.js";
 import { loadMemories, addMemory, extractMemoryMarkers, formatMemoriesForPrompt } from "./memory.js";
 import { isDangerous, READ_TOOLS } from "./safety.js";
 
@@ -817,6 +823,15 @@ export async function runOrchestration(
   const sessionAllow = new Set<string>();
   const workingDir = process.cwd();
 
+  // Create feature branch for isolation — matches worker/epic/git-ops.ts pattern.
+  // All story commits go on this branch. If cancelled, user can git checkout back.
+  const originalBranch = getCurrentBranch(workingDir);
+  const featureBranch = createFeatureBranch(workingDir);
+  if (featureBranch) {
+    output.coordinatorLog(`Working on branch: ${featureBranch}`);
+  }
+  const mainBranch = originalBranch || "main";
+
   // Planner explores codebase and produces stories
   const planResult = await planStories(config, userTask, workingDir, sandboxed, output, abortSignal);
 
@@ -1308,6 +1323,14 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
 
       output.log(story.persona, `${story.title} — completed! (${i + 1}/${sorted.length})`);
       logger.info(`Story ${i + 1} completed`, { persona: story.persona, inputTokens: inTokens, outputTokens: outTokens });
+
+      // Commit story changes — creates a checkpoint on the feature branch
+      // From worker/epic/executor.ts post-execution commit pattern
+      if (featureBranch) {
+        const hash = commitStoryChanges(workingDir, i + 1, story.title, story.persona);
+        if (hash) output.coordinatorLog(`Committed story ${i + 1}: ${hash}`);
+      }
+
           break; // Story succeeded, exit revision loop
     } catch (err) {
       output.statusDone();
@@ -1458,40 +1481,25 @@ ${previousReviewFeedback}
           return parts.join("\n");
         }).join("\n\n");
 
-        // Gather actual code for the reviewer — don't depend on ::file_created:: markers
-        // Gather diff summary for the reviewer — NOT full file contents.
-        // The reviewer has read_file/glob/grep tools to inspect code on demand.
-        // Inlining 33MB of code into the prompt blows API limits.
+        // Get clean diff from feature branch vs main — matches worker's consolidated PR diff.
+        // The reviewer has read_file/glob/grep tools for deeper inspection.
         let codeDiff = "";
-        try {
-          // git diff --stat for overview, full diff for actual changes
-          const diffStat = execSync("git diff --stat HEAD 2>/dev/null || git diff --stat 2>/dev/null", {
-            cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 10_000,
-          }).trim();
-          const diff = execSync("git diff HEAD 2>/dev/null || git diff 2>/dev/null", {
-            cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 10_000,
-          }).trim();
-          if (diffStat) codeDiff += `## Diff Summary\n${diffStat}\n\n`;
+        if (featureBranch) {
+          const { stat, diff } = getDiffForReview(workingDir, mainBranch);
+          if (stat) codeDiff += `## Diff Summary\n${stat}\n\n`;
           if (diff) codeDiff += diff;
-        } catch {
-          // Not a git repo or no changes staged
-        }
-
-        // List new/untracked files so the reviewer knows to read them
-        {
-          let untrackedFiles: string[] = context.filesCreated.filter(Boolean);
-          if (untrackedFiles.length === 0) {
-            try {
-              const gitFiles = execSync(
-                "git ls-files --others --exclude-standard 2>/dev/null",
-                { cwd: workingDir, encoding: "utf-8", stdio: "pipe", timeout: 5_000 },
-              ).trim();
-              if (gitFiles) untrackedFiles = gitFiles.split("\n").filter(Boolean);
-            } catch { /* not a git repo */ }
-          }
-          if (untrackedFiles.length > 0) {
-            codeDiff += `\n\n## New Files (use read_file to inspect)\n${untrackedFiles.map(f => `- ${f}`).join("\n")}`;
-          }
+        } else {
+          // Fallback: uncommitted changes diff
+          try {
+            const stat = execSync("git diff --stat HEAD 2>/dev/null || git diff --stat 2>/dev/null", {
+              cwd: workingDir, encoding: "utf-8", stdio: "pipe",
+            }).trim();
+            const diff = execSync("git diff HEAD 2>/dev/null || git diff 2>/dev/null", {
+              cwd: workingDir, encoding: "utf-8", stdio: "pipe",
+            }).trim();
+            if (stat) codeDiff += `## Diff Summary\n${stat}\n\n`;
+            if (diff) codeDiff += diff;
+          } catch { /* not a git repo */ }
         }
 
         const reviewerProjectInstructions = formatProjectInstructions(workingDir);
@@ -1774,27 +1782,10 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
           // Per-story feedback + what was tried before + efficiency tips + scope enforcement.
           // The worker gets enough context to fix its own mistakes without re-implementing.
 
-          // Capture what the worker did last time — git diff of current state
-          let whatYouDidLastTime = "";
-          try {
-            const storyFiles = story.targetFiles?.length
-              ? story.targetFiles
-              : [...new Set([...context.filesCreated, ...context.filesModified])];
-            if (storyFiles.length > 0) {
-              const fileList = storyFiles.join("\n- ");
-              let fileDiffs = "";
-              for (const f of storyFiles) {
-                try {
-                  const fullPath = path.isAbsolute(f) ? f : path.join(workingDir, f);
-                  if (fs.existsSync(fullPath)) {
-                    const diffOut = execSync(`git diff HEAD -- "${f}" 2>/dev/null || true`, { cwd: workingDir, encoding: "utf-8", timeout: 5_000 }).trim();
-                    if (diffOut) fileDiffs += `\n--- ${f} ---\n${diffOut}\n`;
-                  }
-                } catch { /* skip */ }
-              }
-              whatYouDidLastTime = `\n## What You Did Last Time\nYour previous attempt modified these files:\n- ${fileList}\n${fileDiffs ? `\nChanges from your previous attempt:\n${fileDiffs}` : ""}\nUse this to understand what was already tried. Do NOT repeat the same approach if it was flagged by the reviewer.\n`;
-            }
-          } catch { /* non-fatal */ }
+          // Capture per-story prior work from git history — matches worker/epic/git-ops.ts:captureStoryBranchSummaries()
+          const whatYouDidLastTime = featureBranch
+            ? captureStoryPriorWork(workingDir, mainBranch, i + 1)
+            : "";
 
           const revisionSystemPrompt = `${storyPersona.systemPrompt}
 
@@ -1851,6 +1842,12 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 
             logger.info(`Revision completed`, { story: i + 1, persona: story.persona, inputTokens: revUsage?.inputTokens || 0, outputTokens: revUsage?.outputTokens || 0 });
             output.log(story.persona, `${story.title} — revision complete!`);
+
+            // Commit revision changes — checkpoint on the feature branch
+            if (featureBranch) {
+              const hash = commitRevisionChanges(workingDir, i + 1, story.title, story.persona, reviewRound);
+              if (hash) output.coordinatorLog(`Committed revision ${reviewRound} for story ${i + 1}: ${hash}`);
+            }
           } catch (err) {
             output.statusDone();
             const errMsg = err instanceof Error ? err.message : String(err);

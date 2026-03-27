@@ -26,11 +26,9 @@
   <a href="https://github.com/jarod-rosenthal/workermill/stargazers"><img src="https://img.shields.io/github/stars/jarod-rosenthal/workermill?style=social" alt="GitHub stars"></a>
 </p>
 
-<!-- TODO: drag-drop workermill-demo.mp4 into GitHub web editor to get a CDN URL, then uncomment:
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/PASTE-URL-HERE" width="100%" autoplay loop muted playsinline></video>
+  <video src="https://github.com/jarod-rosenthal/workermill/releases/download/assets-v1/workermill-demo.mp4" width="100%" autoplay loop muted playsinline></video>
 </p>
--->
 
 ## Get Started
 

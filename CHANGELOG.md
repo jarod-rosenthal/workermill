@@ -15,44 +15,53 @@ Component releases are tracked via git tags:
 - CLI: Architect-led planner — reads codebase deeply, produces `targetFiles`, `referenceFiles`, and `implementationNotes` per story so workers follow existing patterns
 - CLI: Planner feasibility gate — rejects tasks that are too vague or contradictory before worker tokens are spent
 - CLI: Git branch management ported from WorkerMill platform — feature branch per `/ship`, commits per story, revision delta tracking
-- CLI: Reviewer sees revision delta — "What Changed Since Last Review" diff so scores reflect progress, not full re-evaluation
-- CLI: Per-story prior work capture — revision workers see their own previous commits via git log, preventing repeated failed approaches
-- CLI: `verify` tool — runs test/build commands, returns structured pass/fail from jest/vitest/pytest/go/tsc/eslint
-- CLI: Structured bash output parsing — extracts test results, build errors, service health from tool output
+- CLI: Completion flow — branch summary, commit count, push & PR creation with task spec + story breakdown + tech lead review in the PR body
+- CLI: Reviewer sees revision delta — only what changed since last review, not the full diff again
+- CLI: Per-story prior work capture — revision workers see their own previous commits via git log
+- CLI: `verify` tool — runs test/build commands, returns structured pass/fail
+- CLI: Structured bash output parsing — extracts test results, build errors, service health
 - CLI: Docker auto-cleanup — tracks `docker compose up` per story, runs `docker compose down` after completion
 - CLI: `.md` file autocomplete after `/ship` command
 - CLI: LM Studio provider support + Ollama context window picker in setup wizard
+- CLI: Claude Haiku 4.5 added to Anthropic model picker
 - CLI: Error classification engine — categorizes failures with targeted fix hints for retry
+- CLI: Color-coded model names by role (planner: cyan, workers: yellow, reviewer: magenta)
+- CLI: Confirm prompts show typed key before proceeding
+- CLI: Setup wizard explains each role and why model choice matters
+- CLI: Cost shown as estimate (~$0.12) not exact billing
 - CLI: `/retry` command shown in welcome screen
 - CLI: Homebrew formula (`brew install workermill`)
-- CLI: Build permission prompts with `(a)lways` and `(t)rust all` options
-- Homepage: CLI demo video added to demos section
+- Homepage: dedicated Planner, Reviewer, and Workers documentation sections
 
 ### Fixed
-- CLI: Reviewer works from the plan (what workers were told to do), not just the raw spec
-- CLI: Score >= 7 auto-approves in code — no longer relies on model following prompt instructions
-- CLI: Revision prompt ported from WorkerMill platform — per-story feedback, "What You Did Last Time" from git history, efficiency tips, scope enforcement
-- CLI: Revision reviewer instructions break deadlocks — persistent issues accepted as best effort instead of infinite loop
-- CLI: Planner failure stops workflow — no more silent fallback to a single story when the planner errors
-- CLI: `/setup` stays in the app — clears config and tells user to restart, no more dumping to shell
-- CLI: Feature branch named from task description (workermill/add-scheduled-rollouts) not timestamps
-- CLI: Codex models (gpt-5.3-codex) routed to OpenAI Responses API; other models use Chat Completions
+- CLI: Reviewer works from the plan (same source of truth as workers), not the raw spec
+- CLI: Approval threshold configurable via `/settings review.threshold` (1-10 scale, default 8)
+- CLI: Reviewer prompt rewritten for fairness — "be fair" not "bias toward approval"
+- CLI: Revision prompt ported from WorkerMill platform — per-story feedback, "What You Did Last Time" from git history, scope enforcement
+- CLI: Revision reviews send only the delta — prevents context window overflow on later rounds
+- CLI: Revision reviewer breaks deadlocks — persistent issues accepted as best effort
+- CLI: Planner failure stops workflow — no more silent fallback to a single story
+- CLI: `/setup` clears config and stays in app — user restarts to re-run setup
+- CLI: Feature branch named from task description (workermill/scheduled-rollouts) not timestamps
+- CLI: edit_file shows actual file content at match location on failure — helps models correct their next attempt
+- CLI: Codex models routed to OpenAI Responses API; other models use Chat Completions
+- CLI: Google TTS/audio-only models filtered from setup wizard
+- CLI: `gofmt -d .` not `gofmt -d ./...` in reviewer instructions
 - CLI: Ollama `keepAlive: "-1"` prevents model unload during long tool calls
 - CLI: Text repetition detection with fuzzy matching + abort at 10 repeats
-- CLI: Worker summary output suppressed after tool calls complete — no more pages of repeated summaries
-- CLI: ESC cancel checks at every phase boundary (stream end, between stories, before review)
+- CLI: Worker summary output suppressed after tool calls complete
+- CLI: ESC cancel checks at every phase boundary including planner
 - CLI: `rm -rf` on relative project paths no longer triggers dangerous command warning
 - CLI: Planner minimizes stories — one persona = one story, aims for 5 or fewer
 - CLI: All logging goes to cli.log — tool results, tool errors, model output, reviewer output
-- CLI: Use `gemini-3.1-pro-preview` (actual API name) for Google provider
-- CLI: Semver comparison for update checks
 
 ### Removed
-- CLI: Auto-detected quality gates (tsc/lint) — caused cascading failures; workers self-verify with bash/verify tools
-- CLI: Inline verifier, integration fixer, review fixer — invented agents that don't exist as real personas
-- CLI: `::learning::` marker extraction and memory instructions — disabled until quality filtering exists
+- CLI: Auto-detected quality gates (tsc/lint) — caused cascading failures; workers self-verify
+- CLI: Invented agents (inline verifier, integration fixer, review fixer, critic)
+- CLI: `::learning::` marker instructions from all personas
+- CLI: `sub_agent` tool from planner and reviewer
 - CLI: All `totalMs` wall-clock timeouts on AI operations
-- CLI: Content truncation in revision feedback, error messages, and prior work context
+- CLI: All content truncation
 
 ---
 

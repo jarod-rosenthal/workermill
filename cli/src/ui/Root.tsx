@@ -699,9 +699,15 @@ export function Root(props: RootProps): React.ReactElement {
           stopAllMCPServers();
           void import("../browser.js").then(m => m.browserClose());
           exit();
-          // Exit Ink, run setup wizard, then exit so user restarts fresh
+          // Exit Ink, run setup wizard, then exit so user restarts fresh.
+          // Ink needs time to restore stdin from raw mode before readline can use it.
           setTimeout(async () => {
             try {
+              // Ensure stdin is not in raw mode (Ink may leave it)
+              if (process.stdin.isTTY && process.stdin.setRawMode) {
+                process.stdin.setRawMode(false);
+              }
+              process.stdin.resume();
               const { runSetup } = await import("../setup.js");
               await runSetup();
               console.log("\n  Setup complete. Run `workermill` to start with the new config.\n");
@@ -709,7 +715,7 @@ export function Root(props: RootProps): React.ReactElement {
               console.error("Setup failed:", err instanceof Error ? err.message : String(err));
             }
             process.exit(0);
-          }, 200);
+          }, 500);
           break;
         }
 

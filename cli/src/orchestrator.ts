@@ -1617,10 +1617,11 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         // Extract review decision — 3-tier system matching WorkerMill worker
         const decisionMatch = reviewText.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
         const decision = decisionMatch ? decisionMatch[1].toLowerCase() : null;
-        const score = extractScore(reviewText); // informational only
+        const score = extractScore(reviewText);
 
-        // Decision driven by REVIEW_DECISION marker. If absent, bias toward approval.
-        const approved = decision ? decision === "approved" : true;
+        // Score >= 7 auto-approves — matches WorkerMill platform behavior.
+        // Don't rely on the model following its own prompt instructions.
+        const approved = score >= 7 || (decision ? decision === "approved" : true);
         logger.info(`Review round ${reviewRound} result`, { decision: decision || "no-marker-approved", score, approved, reviewTextLength: reviewText.length });
 
         // Display review result — WorkerMill format
@@ -1768,85 +1769,33 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
             }
           }
 
-          // Build enriched context for revision — same as main story prompt
-          const revContextParts: string[] = [];
-          if (context.filesCreated.length > 0) {
-            revContextParts.push(`\n## Files Created by Prior Stories — DO NOT DELETE\n${context.filesCreated.map(f => `- ${f}`).join("\n")}\nThese files were created by other experts. You may import or reference them but NEVER delete or overwrite them.`);
-          }
-          if (context.filesModified.length > 0) {
-            revContextParts.push(`\n## Files Modified by Prior Stories\n${context.filesModified.map(f => `- ${f}`).join("\n")}\nBe aware these files have been changed. Read them before making assumptions about their contents.`);
-          }
-          if (context.decisions.length > 0) {
-            revContextParts.push(`\n## Architectural Decisions — FOLLOW THESE\n${context.decisions.map((d, idx) => `${idx + 1}. ${d}`).join("\n")}\nThese decisions were made by prior experts. Follow them — do not contradict or revisit.`);
-          }
-          const revContextBlock = revContextParts.join("\n");
+          // Revision prompt is MINIMAL — just the feedback and the files.
+          // The original execution already built the code. The revision worker
+          // only needs to fix what the reviewer flagged. A huge prompt causes
+          // the model to re-implement instead of fix.
+          const revisionSystemPrompt = `You are a ${story.persona.replace(/_/g, " ")}. You are fixing specific issues flagged by a code reviewer.
 
-          const revisionSystemPrompt = `${storyPersona.systemPrompt}${revContextBlock}
+The code in ${workingDir} already works. The reviewer found problems. Fix ONLY those problems.
 
-Working directory: ${workingDir}
-
-## Your Story Scope
-
-${story.description}
-${story.targetFiles?.length ? `\n**Target files:** ${story.targetFiles.join(", ")}` : ""}
-${story.referenceFiles?.length ? `\n**Reference patterns:** ${story.referenceFiles.join(", ")}` : ""}
-${story.implementationNotes ? `\n## Architect's Guidance\n\n${story.implementationNotes}` : ""}
-
-## CRITICAL — You Are Fixing, Not Rebuilding
-
-The code in this directory ALREADY WORKS for most requirements. The reviewer found SPECIFIC issues.
-Your job is to fix ONLY those issues. Do NOT:
-- Rewrite files from scratch
-- Delete and recreate files that already exist
-- Change code that the reviewer did NOT flag
-- Restructure what's already working
-
-Instead:
-1. READ each file the reviewer mentioned BEFORE editing
-2. Make the MINIMUM change needed to address each issue
-3. Verify your change doesn't break what was already working
+## How to fix
+1. READ each file the reviewer mentions BEFORE editing
+2. Use edit_file for small changes — do NOT rewrite files
+3. After fixing, run a build/compile command to verify you didn't break anything
+4. Do NOT add features, refactor, or change code the reviewer didn't flag
 
 ## Rules
-- NEVER start long-running processes (dev servers, watch modes, npm start, npm run dev, etc.)
-- NEVER run interactive commands that wait for user input
-- Only run commands that complete and exit`;
+- NEVER start long-running processes (dev servers, watch modes, etc.)
+- NEVER delete or recreate files that already exist
+- NEVER restructure what's already working`;
 
           try {
-            // Build prior work section — prevents oscillation across revision rounds
-            const priorWorkSection = priorWorkSummary
-              ? `## What Was Done Before This Revision
-
-The following work already exists from previous attempts. Do NOT undo or rewrite this work
-unless the reviewer specifically flagged it as wrong. Build on what's there.
-
-${priorWorkSummary}
-
-**CRITICAL: If previous revisions already addressed an issue, do NOT redo or revert that work.
-Only fix the specific issues the reviewer flagged below.**
-
-`
-              : "";
-
             const revStream = streamText({
               model: storyModel,
               abortSignal,
               system: revisionSystemPrompt,
-              prompt: `${priorWorkSection}## Reviewer feedback — fix these specific issues:
+              prompt: `## Reviewer feedback — fix these issues:
 
-${storyFeedback}
-
-## Your scope
-
-Story ${i + 1}: "${story.title}" — ${story.description}
-
-## Instructions
-
-1. READ the files mentioned in the feedback first
-2. Make TARGETED edits to fix ONLY the issues the reviewer flagged
-3. Do NOT delete or rewrite files — use edit_file for surgical changes
-4. Do NOT add features or refactor code that wasn't flagged
-5. If the reviewer says something is missing, add it — don't restructure what exists
-6. Do NOT undo changes from previous revision rounds unless they were explicitly flagged`,
+${storyFeedback}`,
               tools: storyTools as ToolSet,
               stopWhen: stepCountIs(100),
               timeout: { chunkMs: 120_000 },

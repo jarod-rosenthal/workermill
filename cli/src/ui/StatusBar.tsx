@@ -103,7 +103,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
       paddingRight={1}
       width={width}
     >
-      {/* Row 1: Model + context + project info */}
+      {/* Row 1: Model + context + project info — left-aligned with │ separators */}
       <Box>
         <Text color={theme.text}>{"["}</Text>
         <Text color={theme.brand} bold>{workerStr}</Text>
@@ -112,7 +112,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
           {"█".repeat(filled)}{"░".repeat(empty)}
         </Text>
         <Text color={theme.text}>{` ${pct}%`}</Text>
-        <Box flexGrow={1} />
+        <Text color={theme.subtle}>{" │ "}</Text>
         <Text color={theme.text}>{props.cwd}</Text>
         {props.gitBranch ? (
           <Text>

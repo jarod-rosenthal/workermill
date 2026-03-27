@@ -587,7 +587,7 @@ export function Root(props: RootProps): React.ReactElement {
                 break;
             }
 
-            if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise", "review.critic"].includes(key)) {
+            if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.autoRevise"].includes(key)) {
               saveConfig(config);
               agent.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
             }

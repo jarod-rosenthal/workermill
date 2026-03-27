@@ -24,10 +24,8 @@ export interface ReviewConfig {
   maxRevisions?: number;
   /** Auto-revise without prompting user (default: false — prompts each time) */
   autoRevise?: boolean;
-  /** Score threshold for approval (default: 80) */
+  /** Score threshold for auto-approval, 1-10 scale (default: 8) */
   approvalThreshold?: number;
-  /** Run separate critic pass on the plan before execution (default: false) */
-  useCritic?: boolean;
 }
 
 export interface HookConfig {

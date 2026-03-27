@@ -288,9 +288,8 @@ export default function CLI() {
                 ["Ollama context", "65536", "/settings ollama.context <n>"],
                 ["Review enabled", "true", "/settings review.enabled true/false"],
                 ["Max revisions", "3", "/settings review.maxRevisions <n>"],
-                ["Approval threshold", "80", "/settings review.threshold <n>"],
+                ["Approval threshold", "8", "/settings review.threshold <n> (1-10 scale)"],
                 ["Auto-revise", "false", "/settings review.autoRevise true/false"],
-                ["Critic pass", "false", "/settings review.critic true/false"],
               ].map(([setting, def, cmd]) => (
                 <tr key={setting}>
                   <td className="p-3 font-medium text-foreground">{setting}</td>

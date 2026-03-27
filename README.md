@@ -38,7 +38,7 @@ npx workermill
 
 That's it. No server. No Docker. No account. First run walks you through provider setup.
 
-Works with **Ollama** (fully local, auto-detected including WSL), **Anthropic**, **OpenAI**, and **Google** — pick different models for workers, planner, and reviewer independently.
+Works with **Ollama**, **Anthropic**, **OpenAI**, **Google**, and [any OpenAI-compatible provider](#ai-provider-support) — pick different models for workers, planner, and reviewer independently.
 
 ## What It Does
 
@@ -106,6 +106,7 @@ Bring your own keys. Mix and match per role. WorkerMill uses the [Vercel AI SDK]
 | **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | |
 | **OpenAI** | GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex | |
 | **Google** | Gemini 3.1 Pro, Gemini 2.5 Flash | |
+
 Any provider with an OpenAI-compatible API also works — Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, Fireworks, or your own custom endpoint. These are included in the setup wizard but are community-tested, not officially verified by us. If it speaks the OpenAI API, WorkerMill can use it.
 
 ```json

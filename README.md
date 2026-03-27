@@ -97,15 +97,16 @@ Use `/personas` to list all. Use `/as <persona> <task>` to target one directly. 
 
 ## AI Provider Support
 
-Bring your own keys. Mix and match per role.
+Bring your own keys. Mix and match per role. WorkerMill uses the [Vercel AI SDK](https://sdk.vercel.ai) — any compatible provider works out of the box.
 
 | Provider | Models | Notes |
 |----------|--------|-------|
 | **Ollama** | Any local model | Auto-detected, including WSL. Fully offline |
-| **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | Default |
+| **LM Studio** | Any local model | Auto-detected |
+| **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | |
 | **OpenAI** | GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex | |
-| **Google** | Gemini 2.5 Pro, Gemini 2.5 Flash | |
-| **LM Studio** | Any local model | Compatible provider |
+| **Google** | Gemini 3.1 Pro, Gemini 2.5 Flash | |
+Any provider with an OpenAI-compatible API also works — Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, Fireworks, or your own custom endpoint. These are included in the setup wizard but are community-tested, not officially verified by us. If it speaks the OpenAI API, WorkerMill can use it.
 
 ```json
 {

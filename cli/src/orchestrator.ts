@@ -1673,9 +1673,9 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         const decision = decisionMatch ? decisionMatch[1].toLowerCase() : null;
         const score = extractScore(reviewText);
 
-        // Score-based auto-approve. Don't rely on the model following its own prompt instructions.
+        // Score must meet threshold — the model's decision marker alone is not enough.
         const threshold = config.review?.approvalThreshold ?? 8;
-        const approved = score >= threshold || (decision ? decision === "approved" : true);
+        const approved = score >= threshold;
         logger.info(`Review round ${reviewRound} result`, { decision: decision || "no-marker-approved", score, approved, reviewTextLength: reviewText.length });
 
         // Display review result — WorkerMill format

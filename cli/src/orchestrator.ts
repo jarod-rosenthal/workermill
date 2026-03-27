@@ -1449,11 +1449,14 @@ ${previousReviewFeedback}
 `
           : "";
 
-        const storySummaryRows = sorted.map((s, idx) => {
-          const files = [...new Set([...context.filesCreated, ...context.filesModified])]
-            .join(", ") || "(none)";
-          return `| ${idx + 1} | ${s.persona} | ${s.title} | ${files} |`;
-        }).join("\n");
+        const storyPlanDetails = sorted.map((s, idx) => {
+          const parts = [`### Story ${idx + 1}: ${s.title} (${s.persona})`];
+          parts.push(s.description);
+          if (s.targetFiles?.length) parts.push(`**Target files:** ${s.targetFiles.join(", ")}`);
+          if (s.referenceFiles?.length) parts.push(`**Reference patterns:** ${s.referenceFiles.join(", ")}`);
+          if (s.implementationNotes) parts.push(`**Guidance:** ${s.implementationNotes}`);
+          return parts.join("\n");
+        }).join("\n\n");
 
         // Gather actual code for the reviewer — don't depend on ::file_created:: markers
         // Gather diff summary for the reviewer — NOT full file contents.
@@ -1492,27 +1495,27 @@ ${previousReviewFeedback}
         }
 
         const reviewerProjectInstructions = formatProjectInstructions(workingDir);
-        const reviewPrompt = `${previousFeedbackSection}${reviewerProjectInstructions ? `${reviewerProjectInstructions}\n\n` : ""}## Original Task
+        const reviewPrompt = `${previousFeedbackSection}${reviewerProjectInstructions ? `${reviewerProjectInstructions}\n\n` : ""}## Implementation Plan — THIS IS WHAT THE WORKERS WERE TOLD TO DO
 
-${userTask}
+Review the code against this plan. The planner analyzed the codebase and gave each worker specific guidance.
 
-## Story Summary
-
-| # | Persona | Title | Files |
-|---|---------|-------|-------|
-${storySummaryRows}
-
-## Changes Made
-
-Files created: ${context.filesCreated.join(", ") || "none"}
-Files modified: ${context.filesModified.join(", ") || "none"}
-${context.decisions.length > 0 ? `\nDecisions made:\n${context.decisions.map(d => `- ${d}`).join("\n")}` : ""}
+${storyPlanDetails}
 
 ## Code Changes
 
 The diff below shows what was changed. For new files, use your read_file tool to inspect them.
 
+Files created: ${context.filesCreated.join(", ") || "none"}
+Files modified: ${context.filesModified.join(", ") || "none"}
+${context.decisions.length > 0 ? `\nDecisions made:\n${context.decisions.map(d => `- ${d}`).join("\n")}` : ""}
+
 ${codeDiff || "(no code changes detected)"}
+
+## Original Spec (reference)
+
+The plan above was derived from this spec. Use it to check completeness, but the plan is the workers' source of truth.
+
+${userTask}
 
 ## Review Instructions
 

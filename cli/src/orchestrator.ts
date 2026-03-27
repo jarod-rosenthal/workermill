@@ -1666,9 +1666,8 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         const decision = decisionMatch ? decisionMatch[1].toLowerCase() : null;
         const score = extractScore(reviewText);
 
-        // Score >= 7 auto-approves — matches WorkerMill platform behavior.
-        // Don't rely on the model following its own prompt instructions.
-        const approved = score >= 7 || (decision ? decision === "approved" : true);
+        // Score >= 8 auto-approves. Don't rely on the model following its own prompt instructions.
+        const approved = score >= 8 || (decision ? decision === "approved" : true);
         logger.info(`Review round ${reviewRound} result`, { decision: decision || "no-marker-approved", score, approved, reviewTextLength: reviewText.length });
 
         // Display review result — WorkerMill format

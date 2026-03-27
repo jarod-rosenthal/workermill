@@ -1,4 +1,5 @@
 import { getPricingEngine, hasProvider } from "../../api/src/providers/index.js";
+import * as logger from "./logger.js";
 
 export interface CostEntry {
   persona: string;
@@ -44,6 +45,14 @@ export class CostTracker {
       inputTokens,
       outputTokens,
       cost,
+    });
+
+    const running = this.getTotalCost();
+    logger.info("Cost tracked", {
+      persona, provider, model,
+      inputTokens, outputTokens,
+      cost: `$${cost.toFixed(4)}`,
+      runningTotal: `$${running.toFixed(4)}`,
     });
   }
 

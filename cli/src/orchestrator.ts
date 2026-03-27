@@ -1679,7 +1679,9 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         // Score must meet threshold — the model's decision marker alone is not enough.
         const threshold = config.review?.approvalThreshold ?? 8;
         const approved = score >= threshold;
-        logger.info(`Review round ${reviewRound} result`, { decision: decision || "no-marker-approved", score, approved, reviewTextLength: reviewText.length });
+        const revInputTokens = reviewUsage?.inputTokens || 0;
+        const revOutputTokens = reviewUsage?.outputTokens || 0;
+        logger.info(`Review round ${reviewRound} result`, { decision: decision || "no-marker-approved", score, approved, reviewTextLength: reviewText.length, inputTokens: revInputTokens, outputTokens: revOutputTokens });
 
         // Display review result — framed summary
         const reviewDecisionLabel = approved ? "approved" : decision === "rejected" ? "rejected" : "needs_revision";
@@ -1705,7 +1707,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
       
         // Track reviewer cost
         costTracker.addUsage(`Reviewer (round ${reviewRound})`, revProvider, revModel,
-          reviewUsage?.inputTokens || 0, reviewUsage?.outputTokens || 0);
+          revInputTokens, revOutputTokens);
         output.updateCost?.(costTracker.getTotalCost());
 
         // If approved or out of revision attempts, done

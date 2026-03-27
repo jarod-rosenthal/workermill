@@ -564,12 +564,11 @@ export async function runSetup(): Promise<CliConfig> {
   console.log();
   console.log(chalk.bold("  WorkerMill CLI") + chalk.dim(" — AI coding agent"));
   console.log();
-  console.log(chalk.dim("  WorkerMill uses three roles. Each can use a different provider."));
-  console.log(chalk.dim("  Workers build code, the planner designs the plan, the reviewer checks quality."));
+  console.log(chalk.dim("  Three roles, each can use a different model. Local workers + flagship planner/reviewer is the sweet spot."));
   console.log();
 
   // ── Step 1: Workers (expert personas — the default provider) ──
-  console.log(chalk.hex("#D77757").bold("  ① Workers") + chalk.dim(" — expert personas that write code"));
+  console.log(chalk.hex("#D77757").bold("  ① Workers") + chalk.dim(" — write code (most tokens, local model recommended)"));
   console.log();
   const workerProvider = await pickProvider(p, "Provider for workers", PROVIDERS);
 
@@ -614,11 +613,11 @@ export async function runSetup(): Promise<CliConfig> {
 
   console.log();
 
-  // ── Step 2: Planner (also used for critic) ──
-  console.log(chalk.hex("#D77757").bold("  ② Planner") + chalk.dim(" — plans stories and validates the approach"));
+  // ── Step 2: Planner ──
+  console.log(chalk.hex("#D77757").bold("  ② Planner") + chalk.dim(" — reads codebase, designs the plan (runs once, flagship recommended)"));
   console.log();
 
-  const sameForPlanner = await p.ask(chalk.dim(`  Same as workers (${workerProvider.display} / ${workerModel})? [Y/n] `));
+  const sameForPlanner = await p.ask(chalk.dim(`  Use ${workerProvider.display} / ${workerModel}? [Y/n] `));
   let plannerProviderName: string;
   let plannerModel: string;
 
@@ -644,10 +643,10 @@ export async function runSetup(): Promise<CliConfig> {
   console.log();
 
   // ── Step 3: Reviewer (tech_lead) ──
-  console.log(chalk.hex("#D77757").bold("  ③ Reviewer") + chalk.dim(" — tech lead that reviews code quality"));
+  console.log(chalk.hex("#D77757").bold("  ③ Reviewer") + chalk.dim(" — reviews code, catches bugs (runs once, flagship recommended)"));
   console.log();
 
-  const sameForReviewer = await p.ask(chalk.dim(`  Same as workers (${workerProvider.display} / ${workerModel})? [Y/n] `));
+  const sameForReviewer = await p.ask(chalk.dim(`  Use ${workerProvider.display} / ${workerModel}? [Y/n] `));
   let reviewerProviderName: string;
   let reviewerModel: string;
 

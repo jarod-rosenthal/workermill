@@ -411,6 +411,7 @@ async function fetchCloudModels(
           "image", "video", "veo", "imagen", "nano", "banana",
           "embedding", "embed", "aqa", "attribution",
           "thinking-exp", "learnlm", "text-",
+          "tts", "audio", "speech", "voice",
         ];
         const genModels = (data.models || [])
           .filter(m => m.supportedGenerationMethods?.includes("generateContent"))

@@ -159,7 +159,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
         <Text color={theme.subtle} dimColor>{" (shift+tab)"}</Text>
         {rm && (rm.planner !== rm.worker || rm.reviewer !== rm.worker) ? (
           <>
-            <Box flexGrow={1} />
+            <Text color={theme.subtle}>{" │ "}</Text>
             {rm.planner !== rm.worker ? (
               <Text>
                 <Text color={theme.iceBlue} bold>{"plan"}</Text>

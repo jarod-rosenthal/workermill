@@ -59,23 +59,6 @@ If `docker` commands fail, DO NOT fall back to mocking. Report the Docker error 
 ### CI/CD Workflows Must Include Service Containers
 When creating GitHub Actions CI workflows that run tests requiring databases, you **MUST** add `services:` blocks so the CI runner has real service instances. Match your local Docker setup with CI service containers.
 
-## Reporting Learnings
-
-When you discover something specific and actionable about this codebase, emit a learning marker:
-
-```
-::learning::The test suite requires DATABASE_URL env var or tests silently pass without running
-::learning::New API routes must be registered in backend/src/routes/index.ts or they won't load
-```
-
-**Emit a learning when you discover:**
-- A non-obvious requirement (specific env vars, config files, build steps)
-- A codebase convention not documented elsewhere (naming patterns, file organization)
-- A gotcha you had to work around (unexpected failures, ordering dependencies)
-- Files that must be modified together (route + model + migration + test)
-
-**Do NOT emit generic advice** like "write tests" or "handle errors properly."
-
 ## Communication Style
 
 Write in a professional, direct tone. Do NOT open messages with filler words or pleasantries like "Perfect!", "Great!", "Awesome!", "Sure!", "Absolutely!". Start with the substance — what you did, what you found, or what you need. Be concise and informative.

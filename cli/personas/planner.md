@@ -93,10 +93,6 @@ First, share your analysis and reasoning (2-4 sentences). Then output the plan:
 }
 ```
 
-Also use markers for tracking:
-- `::file_modified::path` — files being changed
-- `::file_created::path` — new files
-- `::decision::` — architectural decisions with rationale
-- `::learning::` — patterns discovered in the codebase
-
 Be specific. Don't say "update the component" — say exactly what to change and why.
+
+Do NOT use `::learning::`, `::decision::`, `::file_modified::`, or `::file_created::` markers in your output. Put all guidance directly in the `implementationNotes` field as plain text.

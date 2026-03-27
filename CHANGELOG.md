@@ -31,8 +31,11 @@ Component releases are tracked via git tags:
 ### Fixed
 - CLI: Reviewer works from the plan (what workers were told to do), not just the raw spec
 - CLI: Score >= 7 auto-approves in code — no longer relies on model following prompt instructions
-- CLI: Revision workers get minimal focused prompt — just the feedback and their story scope, preventing re-implementation
+- CLI: Revision prompt ported from WorkerMill platform — per-story feedback, "What You Did Last Time" from git history, efficiency tips, scope enforcement
 - CLI: Revision reviewer instructions break deadlocks — persistent issues accepted as best effort instead of infinite loop
+- CLI: Planner failure stops workflow — no more silent fallback to a single story when the planner errors
+- CLI: `/setup` stays in the app — clears config and tells user to restart, no more dumping to shell
+- CLI: Feature branch named from task description (workermill/add-scheduled-rollouts) not timestamps
 - CLI: Codex models (gpt-5.3-codex) routed to OpenAI Responses API; other models use Chat Completions
 - CLI: Ollama `keepAlive: "-1"` prevents model unload during long tool calls
 - CLI: Text repetition detection with fuzzy matching + abort at 10 repeats

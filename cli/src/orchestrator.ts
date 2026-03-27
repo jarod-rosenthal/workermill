@@ -1439,9 +1439,10 @@ ${previousReviewFeedback}
 
 **Check if the code improved since last review.**
 - Focus on whether the MAJOR issues were addressed
-- If the code is meaningfully better, approve it — don't hold up progress for minor remaining items
-- Only request another revision if there are still functional bugs or security issues
-- Cosmetic issues, minor gaps, and edge cases are NOT grounds for another revision cycle
+- If the code is meaningfully better, approve it — don't hold up progress for remaining items
+- If an issue persists across multiple revision rounds, the worker likely CANNOT fix it with the available model — accept the best effort and approve
+- Only request another revision if there are NEW functional bugs introduced by the revision
+- Do NOT keep requesting revision for the same issue that wasn't fixed last time — that's a deadlock, not progress
 
 ---
 

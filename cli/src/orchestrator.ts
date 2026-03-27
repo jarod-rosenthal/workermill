@@ -585,14 +585,18 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
   logger.info("Planner completed", { storiesFound: stories.length, planTextLength: planText.length });
 
   if (stories.length === 0) {
-    logger.info("Plan parsing failed, falling back to single story", { planTextPreview: planText.slice(0, 500) });
-    output.log("system", "Planner didn't produce structured stories, falling back to single story");
-    stories = [{
-      id: "implement",
-      title: userTask.slice(0, 60),
-      persona: "backend_developer",
-      description: userTask,
-    }];
+    logger.error("Planner produced no stories", { planTextPreview: planText.slice(0, 500) });
+    output.error("Planner failed to produce a plan. This could be a rate limit, API error, or the task was too vague.");
+    output.log("system", "Check the planner provider is configured and has available quota. Use /setup to change providers.");
+    return {
+      stories: [],
+      provider: pProvider,
+      model: pModel,
+      inputTokens: planUsage?.inputTokens || 0,
+      outputTokens: planUsage?.outputTokens || 0,
+      rejected: true,
+      rejectionReason: "Planner produced no output",
+    };
   }
 
   return {

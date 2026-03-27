@@ -1,6 +1,6 @@
 {
   "name": "workermill",
-  "version": "0.15.45",
+  "version": "0.15.46",
   "description": "AI coding agent with multi-expert orchestration. Works with any LLM provider.",
   "type": "module",
   "bin": {

@@ -696,18 +696,18 @@ export function Root(props: RootProps): React.ReactElement {
         // ---- /setup ----
         case "setup": {
           // Can't run readline-based setup after Ink has taken over stdin.
-          // Delete config and exit — next run triggers fresh setup automatically.
+          // Clear config so next run triggers fresh setup automatically.
           try {
             const configPath = path.join(os.homedir(), ".workermill", "cli.json");
             if (fs.existsSync(configPath)) {
               fs.unlinkSync(configPath);
+              agent.addSystemMessage("**Config cleared.** Type `/quit` and run `workermill` again to re-run setup.");
+            } else {
+              agent.addSystemMessage("No config found. Type `/quit` and run `workermill` to start setup.");
             }
-          } catch { /* non-fatal */ }
-          agent.addSystemMessage("**Config cleared.** Run `workermill` again to re-run setup.");
-          stopAllMCPServers();
-          void import("../browser.js").then(m => m.browserClose());
-          exit();
-          setTimeout(() => process.exit(0), 200);
+          } catch (err) {
+            agent.addSystemMessage(`Failed to clear config: ${err instanceof Error ? err.message : String(err)}`);
+          }
           break;
         }
 

@@ -40,6 +40,7 @@ const PROVIDERS: ProviderOption[] = [
     models: [
       { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (recommended)" },
       { id: "claude-opus-4-6", label: "Claude Opus 4.6 (most powerful)" },
+      { id: "claude-haiku-4-5", label: "Claude Haiku 4.5 (fast, affordable)" },
     ],
   },
   {

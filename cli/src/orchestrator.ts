@@ -57,6 +57,10 @@ export interface OrchestrationOutput {
   confirm: (prompt: string) => Promise<boolean | { allowed: boolean; mode?: "always" | "trust" }>;
   /** Log a tool call */
   toolCall: (persona: string, toolName: string, toolInput: Record<string, unknown>) => void;
+  /** Render lines inside a box-drawing frame */
+  frame: (title: string, lines: string[]) => void;
+  /** Update the git branch displayed in the status bar */
+  updateBranch?: (branch: string) => void;
   /** Update running cost in the UI (optional — noop if not provided) */
   updateCost?: (cost: number) => void;
 }
@@ -858,6 +862,7 @@ export async function runOrchestration(
   const featureBranch = createFeatureBranch(workingDir, branchLabel, config.git?.branchPrefix);
   if (featureBranch) {
     output.coordinatorLog(`Working on branch: ${featureBranch}`);
+    output.updateBranch?.(featureBranch);
   }
   const mainBranch = originalBranch || "main";
 
@@ -1679,9 +1684,24 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         const approved = score >= threshold;
         logger.info(`Review round ${reviewRound} result`, { decision: decision || "no-marker-approved", score, approved, reviewTextLength: reviewText.length });
 
-        // Display review result — WorkerMill format
-        output.log("tech_lead", `::code_quality_score::${score}/10`);
-        output.log("tech_lead", `::review_decision::${approved ? "approved" : decision === "rejected" ? "rejected" : "needs_revision"}`);
+        // Display review result — framed summary
+        const reviewDecisionLabel = approved ? "approved" : decision === "rejected" ? "rejected" : "needs_revision";
+        const reviewFrameLines: string[] = [
+          `Decision:  ${reviewDecisionLabel}`,
+          `Score:     ${score}/10`,
+        ];
+        // Extract feedback body for the frame (skip markers and blank lines)
+        const feedbackLines = reviewText.split("\n").filter(l => {
+          const t = l.trim();
+          return t && !t.startsWith("REVIEW_DECISION") && !t.startsWith("CODE_QUALITY_SCORE")
+            && !t.includes("::review_score::") && !t.includes("::review_verdict::")
+            && !t.includes("::code_quality_score::") && !t.includes("::review_decision::");
+        });
+        if (feedbackLines.length > 0) {
+          reviewFrameLines.push("");
+          reviewFrameLines.push(...feedbackLines);
+        }
+        output.frame(`\u{1F451} Tech Lead Review`, reviewFrameLines);
         output.coordinatorLog(approved ? `Review approved (${score}/10)` : `Review needs revision (${score}/10)`);
         // Save feedback for next review round — so tech_lead can check if issues were addressed
         previousReviewFeedback = reviewText;
@@ -1923,12 +1943,8 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
     if (featureBranch) {
       // Show branch summary
       const commitCount = execSync(`git rev-list --count ${mainBranch}..HEAD 2>/dev/null || echo 0`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
-      const diffStat = execSync(`git diff --stat ${mainBranch}..HEAD 2>/dev/null || true`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
 
-      output.log("system", "");
-      output.log("system", `Branch: **${featureBranch}** (${commitCount} commits)`);
-      if (diffStat) output.log("system", diffStat);
-      output.log("system", "");
+      output.log("system", `Branch: ${featureBranch} (${commitCount} commits)`);
 
       // Commit any remaining uncommitted changes
       try {
@@ -1947,7 +1963,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
       } catch { /* no remote */ }
 
       if (hasRemote) {
-        output.log("system", `To review the full diff first, say no and use: /diff or \`!git diff ${mainBranch}..HEAD\``);
+        output.log("system", `To review the full diff first, say no and run: \`!git diff ${mainBranch}..HEAD\``);
         const cr = await output.confirm("Push branch and open a pull request?");
         const confirmed = typeof cr === "object" ? cr.allowed : cr;
         if (confirmed) {

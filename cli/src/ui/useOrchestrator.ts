@@ -88,6 +88,8 @@ export function useOrchestrator(
   cliConfig?: CliConfig,
   /** Increment a tool count in the status bar. */
   incrementToolCount?: (toolName: string) => void,
+  /** Update the git branch in the status bar. */
+  setGitBranch?: (branch: string) => void,
 ): UseOrchestratorReturn {
   const [running, setRunning] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
@@ -168,6 +170,34 @@ export function useOrchestrator(
               emitLine(`[${getEmoji("coordinator")} coordinator] ${message}`);
             },
 
+            frame(title: string, lines: string[]): void {
+              // Render a box-drawing frame around content
+              const contentLines = lines.flatMap(l => l.split("\n")).filter(l => l.trim());
+              const maxLen = Math.max(
+                title.length + 2,
+                ...contentLines.map(l => l.length),
+                40,
+              );
+              const w = Math.min(maxLen + 2, (process.stdout.columns || 80) - 4);
+              const pad = (s: string) => s + " ".repeat(Math.max(0, w - s.length));
+
+              emitLine(`  \u250C${ "\u2500".repeat(w + 2)}\u2510`);
+              emitLine(`  \u2502 ${pad(title)} \u2502`);
+              emitLine(`  \u2502 ${" ".repeat(w)} \u2502`);
+              for (const line of contentLines) {
+                // Word-wrap long lines
+                if (line.length <= w) {
+                  emitLine(`  \u2502 ${pad(line)} \u2502`);
+                } else {
+                  // Simple break at width
+                  for (let i = 0; i < line.length; i += w) {
+                    emitLine(`  \u2502 ${pad(line.slice(i, i + w))} \u2502`);
+                  }
+                }
+              }
+              emitLine(`  \u2514${ "\u2500".repeat(w + 2)}\u2518`);
+            },
+
             error(message: string): void {
               emitLine(`**Error:** ${message}`);
             },
@@ -241,6 +271,10 @@ export function useOrchestrator(
               incrementToolCount?.(toolName);
               // Keep status line simple — the tool call is already in the message list
               setStatusMessage(`${persona}: working...`);
+            },
+
+            updateBranch(branch: string): void {
+              setGitBranch?.(branch);
             },
 
             updateCost(cost: number): void {

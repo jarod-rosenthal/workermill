@@ -187,13 +187,13 @@ export function Root(props: RootProps): React.ReactElement {
     },
     [agent],
   );
-  const orchestrator = useOrchestrator(addOrchestratorMessage, agent.setCost, props.cliConfig, agent.incrementToolCount);
+  const [gitBranch, setGitBranch] = useState(() => getGitBranch());
+  const orchestrator = useOrchestrator(addOrchestratorMessage, agent.setCost, props.cliConfig, agent.incrementToolCount, setGitBranch);
 
   // Track the last build task for /retry
   const lastBuildTask = useRef<string | null>(null);
 
   const [inputHistory, setInputHistory] = useState<string[]>(() => loadHistory());
-  const [gitBranch, setGitBranch] = useState(() => getGitBranch());
   const lastBranchCheck = useRef(Date.now());
 
   // Refresh git branch periodically (every 10 seconds, on submit).
@@ -418,17 +418,40 @@ export function Root(props: RootProps): React.ReactElement {
         // ---- /diff ----
         case "diff": {
           try {
-            const diffStat = execSync("git diff --stat 2>/dev/null", {
+            // If on a feature branch, show committed changes vs main/master
+            const currentBr = execSync("git rev-parse --abbrev-ref HEAD 2>/dev/null", {
+              cwd: props.workingDir, encoding: "utf-8", timeout: 2000,
+            }).trim();
+            const isFeatureBranch = currentBr && currentBr !== "main" && currentBr !== "master";
+
+            // Determine the base to diff against
+            let baseBranch = "";
+            if (isFeatureBranch) {
+              // Find which of main/master exists
+              try {
+                execSync("git rev-parse --verify main 2>/dev/null", { cwd: props.workingDir, stdio: "pipe" });
+                baseBranch = "main";
+              } catch {
+                try {
+                  execSync("git rev-parse --verify master 2>/dev/null", { cwd: props.workingDir, stdio: "pipe" });
+                  baseBranch = "master";
+                } catch { /* neither exists */ }
+              }
+            }
+
+            const diffRange = baseBranch ? `${baseBranch}..HEAD` : "";
+            const diffStat = execSync(`git diff --stat ${diffRange} 2>/dev/null`, {
               cwd: props.workingDir, encoding: "utf-8", timeout: 5000,
             }).trim();
             const untracked = execSync("git ls-files --others --exclude-standard 2>/dev/null", {
               cwd: props.workingDir, encoding: "utf-8", timeout: 5000,
             }).trim();
-            const diff = execSync("git diff 2>/dev/null", {
+            const diff = execSync(`git diff ${diffRange} 2>/dev/null`, {
               cwd: props.workingDir, encoding: "utf-8", timeout: 10000,
             }).trim();
 
             const parts: string[] = [];
+            if (baseBranch) parts.push(`Comparing \`${currentBr}\` to \`${baseBranch}\``);
             if (diffStat) parts.push(`**Changes:**\n\`\`\`\n${diffStat}\n\`\`\``);
             if (untracked) parts.push(`**New files:**\n${untracked.split("\n").map(f => `- \`${f}\``).join("\n")}`);
             if (diff) {

@@ -3,8 +3,9 @@
 </p>
 
 <p align="center">
-  One command. A team of AI specialists plans it, builds it (in parallel on the cloud platform, sequentially via CLI), reviews the code, and commits.<br/>
-  Not one agent doing everything — a coordinated team, each with a job.
+  AI-generated code has 1.7x more major issues than human-written code.<br/>
+  The industry's answer: add guardrails around a single model.<br/>
+  WorkerMill takes a different approach — separate the roles, use different models, and make them check each other's work.
 </p>
 
 <p align="center">
@@ -32,6 +33,45 @@
 </p>
 
 https://github.com/user-attachments/assets/ab931d38-68c5-4cc3-b210-4c0eaebf8c93
+
+## The Problem Isn't the Model. It's the Architecture.
+
+Every major AI coding tool — Cursor, Claude Code, Codex, Kiro, Aider — runs one model
+doing everything: reading the codebase, planning the work, writing the code, and judging
+its own output. When that model hallucinates a package, loses context across files, or
+makes inconsistent decisions between the backend and frontend, nothing catches it.
+
+The industry response has been to add guardrails — sandboxing, permission prompts,
+confirmation dialogs. Those help prevent destructive commands, but they don't fix the
+code quality problem. A model that writes bad code and reviews its own bad code will
+approve its own bad code, regardless of how many "are you sure?" prompts you put in front of it.
+
+## What WorkerMill Does Differently
+
+WorkerMill separates planning, execution, and review into governed roles — and lets you
+assign a different model to each one:
+
+1. **A planner** reads your codebase and decomposes the task into tight, scoped tickets.
+   No vague instructions. Each worker gets a precise assignment with specific files and
+   clear acceptance criteria. This is the "no garbage in" gate — a flagship model does the
+   thinking so workers don't have to improvise.
+
+2. **Specialist workers** execute one ticket at a time. A backend expert builds the API.
+   A frontend expert wires the UI. They don't context-switch between 15 files. They don't
+   make architectural decisions. They follow the plan.
+
+3. **A reviewer** reads the actual diffs against your original spec. Different model,
+   different provider, different blind spots. It rejects bad work with specific feedback.
+   Failed stories re-run with the reviewer's notes until the code meets the standard.
+
+The revision loop is the key mechanism. A cheap model writing code to a tight spec,
+reviewed by a strong model that catches mistakes and demands fixes, converges on quality
+that neither model produces alone. This isn't aspirational — it's how the system works.
+
+**The cost implication:** you pay flagship prices for judgment (2 API calls), not for
+every line of code (200 tool calls). Run workers on Ollama for free, or on any budget
+model, while the planner and reviewer hold the quality bar. Flagship quality at a
+fraction of the cost.
 
 ## Here's What Happens
 

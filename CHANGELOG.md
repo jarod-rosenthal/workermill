@@ -11,22 +11,45 @@ Component releases are tracked via git tags:
 ## [Unreleased]
 
 ### Added
-- CLI: Post-execution quality gates — auto-runs `tsc --noEmit` and `npm run lint` after each story, retries up to 2x with fix context before proceeding to review
-- CLI: Inline spec verifier — independent QA agent checks spec compliance before review phase
-- CLI: Surgical review fixer (InlineReviewFixer) — attempts targeted fixes from reviewer feedback before falling back to full story re-execution
-- CLI: Error classification engine — categorizes failures (typescript, lint, test, build, transient, auth, rate_limit) with fix hints
-- CLI: Prior work context in revision prompts — captures git diff/log before revisions to prevent oscillation across rounds
-- CLI: Enriched story prompts — sibling file warnings, architectural decisions as hard constraints, verification-before-completion checklist
+- CLI: `/ship` command replaces `/build` — multi-expert orchestration (`/build` kept as alias)
+- CLI: Architect-led planner — reads codebase deeply, produces `targetFiles`, `referenceFiles`, and `implementationNotes` per story so workers follow existing patterns
+- CLI: Planner feasibility gate — rejects tasks that are too vague or contradictory before worker tokens are spent
+- CLI: Git branch management ported from WorkerMill platform — feature branch per `/ship`, commits per story, revision delta tracking
+- CLI: Reviewer sees revision delta — "What Changed Since Last Review" diff so scores reflect progress, not full re-evaluation
+- CLI: Per-story prior work capture — revision workers see their own previous commits via git log, preventing repeated failed approaches
+- CLI: `verify` tool — runs test/build commands, returns structured pass/fail from jest/vitest/pytest/go/tsc/eslint
+- CLI: Structured bash output parsing — extracts test results, build errors, service health from tool output
+- CLI: Docker auto-cleanup — tracks `docker compose up` per story, runs `docker compose down` after completion
+- CLI: `.md` file autocomplete after `/ship` command
+- CLI: LM Studio provider support + Ollama context window picker in setup wizard
+- CLI: Error classification engine — categorizes failures with targeted fix hints for retry
 - CLI: `/retry` command shown in welcome screen
 - CLI: Homebrew formula (`brew install workermill`)
 - CLI: Build permission prompts with `(a)lways` and `(t)rust all` options
 - Homepage: CLI demo video added to demos section
 
 ### Fixed
-- CLI: Revision death spiral — experts now see what prior revisions changed, preventing score degradation from undoing previous work
+- CLI: Reviewer works from the plan (what workers were told to do), not just the raw spec
+- CLI: Score >= 7 auto-approves in code — no longer relies on model following prompt instructions
+- CLI: Revision workers get minimal focused prompt — just the feedback and their story scope, preventing re-implementation
+- CLI: Revision reviewer instructions break deadlocks — persistent issues accepted as best effort instead of infinite loop
+- CLI: Codex models (gpt-5.3-codex) routed to OpenAI Responses API; other models use Chat Completions
+- CLI: Ollama `keepAlive: "-1"` prevents model unload during long tool calls
+- CLI: Text repetition detection with fuzzy matching + abort at 10 repeats
+- CLI: Worker summary output suppressed after tool calls complete — no more pages of repeated summaries
+- CLI: ESC cancel checks at every phase boundary (stream end, between stories, before review)
+- CLI: `rm -rf` on relative project paths no longer triggers dangerous command warning
+- CLI: Planner minimizes stories — one persona = one story, aims for 5 or fewer
+- CLI: All logging goes to cli.log — tool results, tool errors, model output, reviewer output
 - CLI: Use `gemini-3.1-pro-preview` (actual API name) for Google provider
 - CLI: Semver comparison for update checks
-- CLI: Remove `wm build` subcommand (use `/build` only)
+
+### Removed
+- CLI: Auto-detected quality gates (tsc/lint) — caused cascading failures; workers self-verify with bash/verify tools
+- CLI: Inline verifier, integration fixer, review fixer — invented agents that don't exist as real personas
+- CLI: `::learning::` marker extraction and memory instructions — disabled until quality filtering exists
+- CLI: All `totalMs` wall-clock timeouts on AI operations
+- CLI: Content truncation in revision feedback, error messages, and prior work context
 
 ---
 

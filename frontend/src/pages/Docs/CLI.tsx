@@ -143,6 +143,43 @@ export default function CLI() {
         </div>
       </section>
 
+      {/* The Reviewer */}
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold">The Reviewer</h2>
+        <p className="text-muted-foreground">
+          After all stories complete, the tech lead reviews the work. The reviewer is the quality gate between {"\""}code written{"\""} and {"\""}code shipped.{"\""}
+        </p>
+        <div className="space-y-3">
+          <div className="p-4 rounded-lg border border-border bg-card/50">
+            <h3 className="font-semibold text-foreground mb-2">What the reviewer does</h3>
+            <ul className="list-disc list-inside space-y-1.5 text-sm text-muted-foreground">
+              <li>Reviews against <strong className="text-foreground">the plan</strong>, not just the raw spec — the same source of truth the workers used</li>
+              <li>Reads the git diff from the feature branch, plus uses tools (read_file, grep, glob) to inspect specific files</li>
+              <li>Identifies which stories need revision and provides <strong className="text-foreground">per-story feedback</strong> — only affected stories re-run</li>
+              <li>On revision rounds, sees <strong className="text-foreground">what changed since the last review</strong> — evaluates progress, not the full codebase from scratch</li>
+              <li>Score of 7+ auto-approves — cosmetic issues go in feedback comments, not revision requests</li>
+              <li>Breaks deadlocks — if the same issue persists across rounds, accepts best effort instead of looping forever</li>
+            </ul>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-card/50">
+            <h3 className="font-semibold text-foreground mb-2">Why this matters</h3>
+            <p className="text-sm text-muted-foreground">
+              Without review, workers ship whatever they produce — broken imports, missing error handling, code that doesn{"'"}t match the plan.
+              The reviewer catches functional bugs and security issues before the code reaches you. And because it works from the same plan
+              the workers followed, it evaluates what was actually asked for — not an independent interpretation of the spec.
+            </p>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-card/50">
+            <h3 className="font-semibold text-foreground mb-2">Use a capable model</h3>
+            <p className="text-sm text-muted-foreground">
+              Like the planner, the reviewer benefits from a capable model. A stronger reviewer catches real issues on the first pass,
+              reducing revision cycles. Use <code className="text-primary">/setup</code> to route the reviewer to a flagship model independently.
+              The reviewer runs once per review round — fewer rounds means lower total cost.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* Commands */}
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">Commands</h2>

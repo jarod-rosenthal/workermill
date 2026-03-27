@@ -701,9 +701,9 @@ export function Root(props: RootProps): React.ReactElement {
             const configPath = path.join(os.homedir(), ".workermill", "cli.json");
             if (fs.existsSync(configPath)) {
               fs.unlinkSync(configPath);
-              agent.addSystemMessage("**Config cleared.** Type `/quit` and run `workermill` again to re-run setup.");
+              agent.addSystemMessage("**Config cleared.** Type `/exit` and run `workermill` again to re-run setup.");
             } else {
-              agent.addSystemMessage("No config found. Type `/quit` and run `workermill` to start setup.");
+              agent.addSystemMessage("No config found. Type `/exit` and run `workermill` to start setup.");
             }
           } catch (err) {
             agent.addSystemMessage(`Failed to clear config: ${err instanceof Error ? err.message : String(err)}`);

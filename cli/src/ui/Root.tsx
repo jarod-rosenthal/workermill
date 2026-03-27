@@ -290,11 +290,11 @@ export function Root(props: RootProps): React.ReactElement {
           const totalTokens = agent.tokens;
           const sessionMessages = agent.session.messages.length;
           agent.addSystemMessage(
-            `**Session Cost Summary**\n\n` +
+            `**Session Cost Estimate**\n\n` +
             `| Metric | Value |\n` +
             `|---|---|\n` +
             `| Model | ${props.provider}/${props.model} |\n` +
-            `| Total cost | $${costUsd.toFixed(4)} |\n` +
+            `| Est. cost | ~$${costUsd.toFixed(4)} |\n` +
             `| Last input tokens | ${totalTokens.toLocaleString()} |\n` +
             `| Session tokens | ${agent.session.totalTokens.toLocaleString()} |\n` +
             `| Messages | ${sessionMessages} |`

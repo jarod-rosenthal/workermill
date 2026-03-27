@@ -22,10 +22,10 @@ interface StatusBarProps {
   hasInstructions?: boolean;
 }
 
-/** Format a dollar cost as a short string. */
+/** Format a dollar cost as a short string. Prefixed with ~ to indicate estimate. */
 function formatCost(c: number): string {
-  if (c < 0.01) return "$0.00";
-  return `$${c.toFixed(2)}`;
+  if (c < 0.01) return "~$0.00";
+  return `~$${c.toFixed(2)}`;
 }
 
 /** Format elapsed time — minutes only to avoid per-second re-renders. */

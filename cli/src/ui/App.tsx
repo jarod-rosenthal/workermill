@@ -75,16 +75,16 @@ function Spinner({ color }: { color: string }): React.ReactElement {
 
 /** Confirm prompt for orchestrator — context-aware options. */
 function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: (yes: boolean, mode?: "always" | "trust") => void } }): React.ReactElement {
-  const [answered, setAnswered] = React.useState(false);
+  const [answered, setAnswered] = React.useState<string>("");
   const isToolPrompt = request.prompt.startsWith("Allow ");
   const isRevisionPrompt = request.prompt.startsWith("Revise ");
   const hasAlways = isToolPrompt || isRevisionPrompt;
   useInput((input) => {
     if (answered) return;
-    if (input === "y" || input === "Y") { setAnswered(true); request.resolve(true); }
-    if (input === "n" || input === "N") { setAnswered(true); request.resolve(false); }
-    if (hasAlways && (input === "a" || input === "A")) { setAnswered(true); request.resolve(true, "always"); }
-    if (isToolPrompt && (input === "t" || input === "T")) { setAnswered(true); request.resolve(true, "trust"); }
+    if (input === "y" || input === "Y") { setAnswered("y"); request.resolve(true); }
+    if (input === "n" || input === "N") { setAnswered("n"); request.resolve(false); }
+    if (hasAlways && (input === "a" || input === "A")) { setAnswered("a"); request.resolve(true, "always"); }
+    if (isToolPrompt && (input === "t" || input === "T")) { setAnswered("t"); request.resolve(true, "trust"); }
   }, { isActive: !answered });
 
   let hint = "(y/n)";
@@ -94,7 +94,11 @@ function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: 
   return (
     <Box marginLeft={2} marginY={1}>
       <Text color={theme.permission}>{request.prompt} </Text>
-      <Text dimColor>{hint}</Text>
+      {answered ? (
+        <Text color={theme.success} bold>{answered}</Text>
+      ) : (
+        <Text dimColor>{hint}</Text>
+      )}
     </Box>
   );
 }

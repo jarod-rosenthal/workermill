@@ -26,9 +26,7 @@
   <a href="https://github.com/jarod-rosenthal/workermill/stargazers"><img src="https://img.shields.io/github/stars/jarod-rosenthal/workermill?style=social" alt="GitHub stars"></a>
 </p>
 
-<p align="center">
-  <video src="https://github.com/jarod-rosenthal/workermill/releases/download/assets-v1/workermill-demo.mp4" width="100%" autoplay loop muted playsinline></video>
-</p>
+https://github.com/jarod-rosenthal/workermill/releases/download/assets-v1/workermill-demo.mp4
 
 ## Get Started
 

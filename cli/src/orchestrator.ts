@@ -515,7 +515,7 @@ Return a JSON code block. The \`implementationNotes\` field is THE KEY VALUE YOU
 Available personas: backend_developer, frontend_developer, devops_engineer, qa_engineer, security_engineer, data_ml_engineer, mobile_developer, tech_writer, tech_lead`;
 
   logger.info("Planner started", { provider: pProvider, model: pModel });
-  output.log("planner", `Starting planning agent using ${pModel}`);
+  output.log("planner", `Starting planning agent using \x1b[36m${pProvider}/${pModel}\x1b[0m`);
   output.status("Planner reading repository...");
 
   // Heartbeat — show elapsed time so users know it's still working
@@ -1002,7 +1002,7 @@ export async function runOrchestration(
     }
 
     output.log("system", `--- Story ${i + 1}/${sorted.length} ---`);
-    output.log(story.persona, `Starting ${story.title} (${provider}/${modelName})`);
+    output.log(story.persona, `Starting ${story.title} (\x1b[33m${provider}/${modelName}\x1b[0m)`);
     logger.info(`Story ${i + 1}/${sorted.length} started`, { persona: story.persona, title: story.title, provider, model: modelName });
 
     output.status(`${story.persona}: ${story.title.slice(0, 60)}`);
@@ -1479,7 +1479,7 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
       const isRevision = reviewRound > 1;
       logger.info(`Review round ${reviewRound}`, { isRevision, maxRevisions });
       output.coordinatorLog(isRevision ? `Starting Tech Lead review (revision ${reviewRound - 1}/${maxRevisions}, ${revProvider}/${revModel})...` : `Starting Tech Lead review (${revProvider}/${revModel})...`);
-      output.log("tech_lead", `Starting agent execution (model: ${revModel})`);
+      output.log("tech_lead", `Starting agent execution (\x1b[35m${revProvider}/${revModel}\x1b[0m)`);
 
       output.status(isRevision ? "Reviewer -- Re-checking after revisions" : "Reviewer -- Checking code quality");
 
@@ -1805,7 +1805,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
 
           output.coordinatorLog(`Revising story ${i + 1} of ${sorted.length}: ${story.title}`);
           logger.info(`Revision started`, { story: i + 1, persona: story.persona, title: story.title, hasSpecificFeedback: !!storyReason });
-          output.log(story.persona, `Starting revision: ${story.title} (${sProvider}/${sModel})`);
+          output.log(story.persona, `Starting revision: ${story.title} (\x1b[33m${sProvider}/${sModel}\x1b[0m)`);
 
           output.status(`${story.persona}: revising...`);
 

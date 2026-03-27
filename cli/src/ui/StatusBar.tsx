@@ -141,11 +141,11 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
       <Box flexWrap="wrap">
         {toolEntries.length > 0 ? (
           toolEntries.map(([name, count], i) => (
-            <Text key={name}>
+            <Text key={name} dimColor>
               <Text color={theme.success}>{"✓ "}</Text>
-              <Text color={theme.text}>{name.replace(/_/g, " ")}</Text>
-              <Text color={theme.subtle}>{` ×${count}`}</Text>
-              {i < toolEntries.length - 1 ? <Text color={theme.subtle}>{" │ "}</Text> : null}
+              <Text color={theme.subtle}>{name.replace(/_/g, " ")}</Text>
+              <Text color={theme.inactive}>{` ×${count}`}</Text>
+              {i < toolEntries.length - 1 ? <Text color={theme.inactive}>{" │ "}</Text> : null}
             </Text>
           ))
         ) : (

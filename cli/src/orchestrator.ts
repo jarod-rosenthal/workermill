@@ -541,26 +541,42 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
     },
   });
   // Stream planner output line-by-line as it arrives
-  let lineBuffer = "";
-  for await (const chunk of planStream.textStream) {
-    lineBuffer += chunk;
-    const lines = lineBuffer.split("\n");
-    lineBuffer = lines.pop() || ""; // keep incomplete last line in buffer
-    for (const line of lines) {
-      if (line.trim()) {
-        output.log("planner", line);
+  let planText = "";
+  let planUsage: { inputTokens?: number; outputTokens?: number } | undefined;
+  try {
+    let lineBuffer = "";
+    for await (const chunk of planStream.textStream) {
+      lineBuffer += chunk;
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() || ""; // keep incomplete last line in buffer
+      for (const line of lines) {
+        if (line.trim()) {
+          output.log("planner", line);
+        }
       }
     }
+    if (lineBuffer.trim()) {
+      output.log("planner", lineBuffer);
+    }
+    planText = await planStream.text;
+    planUsage = await planStream.totalUsage;
+  } catch (planErr) {
+    clearInterval(heartbeat);
+    output.statusDone();
+    const msg = planErr instanceof Error ? planErr.message : String(planErr);
+    logger.error("Planner failed", { error: msg });
+    output.error(`Planner failed: ${msg}`);
+    return {
+      stories: [],
+      provider: pProvider,
+      model: pModel,
+      inputTokens: 0,
+      outputTokens: 0,
+      rejected: true,
+      rejectionReason: msg,
+    };
   }
-  // Flush remaining buffer
-  if (lineBuffer.trim()) {
-    output.log("planner", lineBuffer);
-  }
-
-  const planText = await planStream.text;
   clearInterval(heartbeat);
-
-  const planUsage = await planStream.totalUsage;
 
   // Check for planner rejection before parsing stories
   const rejectionMatch = planText.match(/"rejected"\s*:\s*true[\s\S]*?"reason"\s*:\s*"([^"]+)"/);
@@ -830,7 +846,10 @@ export async function runOrchestration(
   // Create feature branch for isolation — matches worker/epic/git-ops.ts pattern.
   // All story commits go on this branch. If cancelled, user can git checkout back.
   const originalBranch = getCurrentBranch(workingDir);
-  const featureBranch = createFeatureBranch(workingDir, userTask);
+  // Use the spec filename for the branch name if one was referenced, otherwise the task text
+  const fileRefForBranch = userTask.match(/[\w./-]+\.(?:md|txt|yaml|yml|json)\b/i);
+  const branchLabel = fileRefForBranch ? fileRefForBranch[0] : userTask;
+  const featureBranch = createFeatureBranch(workingDir, branchLabel);
   if (featureBranch) {
     output.coordinatorLog(`Working on branch: ${featureBranch}`);
   }

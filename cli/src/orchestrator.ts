@@ -1906,69 +1906,83 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
     } // end review loop
   }
 
-  // Persist learnings as memories
-  for (const learning of context.learnings) {
-    addMemory("learning", learning);
-  }
-
-  // Git commit step
+  // --- Completion Summary ---
   try {
-    // Auto-init git if not a repo
-    try {
-      execSync("git rev-parse --git-dir", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
-    } catch {
-      output.coordinatorLog("Initializing git repository...");
-      execSync("git init", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
-      const gitignorePath = `${workingDir}/.gitignore`;
-      if (!fs.existsSync(gitignorePath)) {
-        fs.writeFileSync(gitignorePath, "node_modules/\ndist/\n.env\n.workermill/\n*.log\n", "utf-8");
-      }
-      output.coordinatorLog("Git repo initialized");
-    }
+    if (featureBranch) {
+      // Show branch summary
+      const commitCount = execSync(`git rev-list --count ${mainBranch}..HEAD 2>/dev/null || echo 0`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+      const diffStat = execSync(`git diff --stat ${mainBranch}..HEAD 2>/dev/null || true`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
 
-    const diff = execSync("git diff --stat", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
-    // Also check for untracked files
-    const untracked = execSync("git ls-files --others --exclude-standard", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
-    const hasChanges = diff || untracked;
+      output.log("system", "");
+      output.log("system", `Branch: **${featureBranch}** (${commitCount} commits)`);
+      if (diffStat) output.log("system", diffStat);
+      output.log("system", "");
 
-    if (hasChanges) {
-      // Count changes for a compact summary
-      const diffLines = diff ? diff.split("\n").length : 0;
-      const untrackedFiles = untracked ? untracked.split("\n").filter(Boolean) : [];
-      const parts: string[] = [];
-      if (diffLines > 0) parts.push(`${diffLines} modified`);
-      if (untrackedFiles.length > 0) parts.push(`${untrackedFiles.length} new`);
-      output.coordinatorLog(`${parts.join(", ")} files`);
-
-      if (!trustAll) {
-        const cr = await output.confirm("Commit these changes?");
-        const commitConfirmed = typeof cr === "object" ? cr.allowed : cr;
-        if (commitConfirmed) {
-          // Stage specific files from context (NOT git add -A)
-          const filesToStage = [...context.filesCreated, ...context.filesModified].filter(Boolean);
-          if (filesToStage.length > 0) {
-            for (const f of filesToStage) {
-              try {
-                execSync(`git add "${f}"`, { cwd: workingDir, stdio: "pipe" });
-              } catch {
-                // File may have been deleted or moved — skip
-              }
-            }
-          } else {
-            // Fallback: stage tracked modified + all new files from context
-            execSync("git add -u", { cwd: workingDir, stdio: "pipe" });
-          }
-          const storyTitles = sorted.map(s => s.title).join(", ");
-          const msg = `feat: ${storyTitles}`.slice(0, 72);
-          execSync(`git commit -m "${msg.replace(/"/g, '\\"')}"`, { cwd: workingDir, stdio: "pipe" });
-          output.log("system", "Changes committed");
+      // Commit any remaining uncommitted changes
+      try {
+        execSync("git add .", { cwd: workingDir, stdio: "pipe" });
+        const status = execSync("git status --porcelain", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+        if (status) {
+          execSync('git commit --no-verify -m "chore: uncommitted changes from /ship session"', { cwd: workingDir, stdio: "pipe" });
         }
+      } catch { /* nothing to commit */ }
+
+      // Check if remote exists for PR
+      let hasRemote = false;
+      try {
+        const remote = execSync("git remote get-url origin 2>/dev/null", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+        hasRemote = !!remote;
+      } catch { /* no remote */ }
+
+      if (hasRemote) {
+        const cr = await output.confirm("Push branch and open a pull request?");
+        const confirmed = typeof cr === "object" ? cr.allowed : cr;
+        if (confirmed) {
+          try {
+            output.status("Pushing branch...");
+            execSync(`git push -u origin "${featureBranch}" 2>&1`, { cwd: workingDir, encoding: "utf-8", stdio: "pipe" });
+            output.statusDone();
+
+            // Try to create PR with gh CLI
+            try {
+              const storyTitles = sorted.map(s => s.title).join(", ");
+              const prTitle = storyTitles.length > 70 ? storyTitles.slice(0, 67) + "..." : storyTitles;
+              const prBody = `## Summary\n\n${sorted.map((s, i) => `- **Story ${i + 1}** (${s.persona}): ${s.title}`).join("\n")}\n\n---\nShipped by [WorkerMill CLI](https://workermill.com)`;
+              const prUrl = execSync(
+                `gh pr create --title "${prTitle.replace(/"/g, '\\"')}" --body "${prBody.replace(/"/g, '\\"')}" --head "${featureBranch}" --base "${mainBranch}" 2>&1`,
+                { cwd: workingDir, encoding: "utf-8", stdio: "pipe" },
+              ).trim();
+              output.log("system", `Pull request created: ${prUrl}`);
+            } catch (prErr) {
+              const prMsg = prErr instanceof Error ? (prErr as any).stdout || prErr.message : String(prErr);
+              output.log("system", `Branch pushed. Create a PR manually (gh CLI error: ${prMsg.split("\n")[0]})`);
+            }
+          } catch (pushErr) {
+            output.statusDone();
+            const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
+            output.log("system", `Push failed: ${pushMsg.split("\n")[0]}`);
+            output.log("system", `Branch is local: \`${featureBranch}\`. Push manually with: git push -u origin ${featureBranch}`);
+          }
+        } else {
+          output.log("system", `Branch is local: \`${featureBranch}\``);
+          output.log("system", `To push later: git push -u origin ${featureBranch}`);
+          output.log("system", `To create a PR: gh pr create --head ${featureBranch}`);
+        }
+      } else {
+        output.log("system", `No remote configured. Branch: \`${featureBranch}\``);
+      }
+    } else {
+      // No feature branch — old behavior, commit uncommitted changes
+      const diff = execSync("git diff --stat 2>/dev/null || true", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+      const untracked = execSync("git ls-files --others --exclude-standard 2>/dev/null || true", { cwd: workingDir, encoding: "utf-8", stdio: "pipe" }).trim();
+      if (diff || untracked) {
+        output.coordinatorLog(`${diff ? diff.split("\n").length : 0} modified, ${untracked ? untracked.split("\n").filter(Boolean).length : 0} new files`);
       }
     }
   } catch (err) {
-    logger.debug("Git commit step failed", { error: err instanceof Error ? err.message : String(err) });
+    logger.debug("Completion summary failed", { error: err instanceof Error ? err.message : String(err) });
   }
 
-  // Final cost update — status bar shows the running total
+  // Final cost update
   output.updateCost?.(costTracker.getTotalCost());
 }

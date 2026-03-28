@@ -70,12 +70,24 @@ assign a different model to each one:
 
 The revision loop is the key mechanism. A cheap model writing code to a tight spec,
 reviewed by a strong model that catches mistakes and demands fixes, converges on quality
-that neither model produces alone. This isn't aspirational — it's how the system works.
+that neither model produces alone.
 
-**The cost implication:** you pay flagship prices for judgment (2 API calls), not for
-every line of code (200 tool calls). Run workers on Ollama for free, or on any budget
-model, while the planner and reviewer hold the quality bar. Flagship quality at a
-fraction of the cost.
+You pay flagship prices for judgment (2 API calls), not for every line of code (200 tool
+calls). Run workers on Ollama for free while the planner and reviewer hold the quality bar.
+
+```json
+{
+  "providers": {
+    "ollama": { "model": "qwen3-coder:30b" },
+    "anthropic": { "model": "claude-sonnet-4-6", "apiKey": "{env:ANTHROPIC_API_KEY}" }
+  },
+  "default": "ollama",
+  "routing": {
+    "planner": "anthropic",
+    "tech_lead": "anthropic"
+  }
+}
+```
 
 ## Here's What Happens
 
@@ -135,51 +147,11 @@ Works with **Ollama** (fully local), **Anthropic**, **OpenAI**, **Google**, **LM
 
 `/ship` triggers the full orchestration pipeline:
 
-1. **Planner** reads your codebase — existing patterns, frameworks, file structure — and decomposes the work into scoped stories with specific file targets
-2. **Specialist experts** execute stories sequentially — each one gets a scoped ticket but sees your full original spec, so intent is never lost
-3. **Tech Lead** reviews the actual code diffs against your spec — approved, revision needed, or rejected
-4. **Revision cycles** re-run only the stories that failed review, with the reviewer's specific feedback — no starting over
+1. **Planner** reads your codebase and decomposes the work into scoped stories
+2. **Specialist experts** execute stories sequentially, each with their full original spec
+3. **Tech Lead** reviews the actual code diffs — approved, revision needed, or rejected
+4. **Revision cycles** re-run only the stories that failed review with specific feedback
 5. **You approve** the commit and push — feature branch, one commit per story
-
-The planner doesn't just split your prompt into parts. It reads the codebase first, understands the patterns, and gives each expert a scoped assignment with context. That's why the output is coherent across files — it was planned, not improvised.
-
-## Why This Beats Single-Agent Tools
-
-When you ask one AI agent to build a feature that touches the backend, frontend, and infrastructure, it context-switches constantly, makes inconsistent decisions across files, and there's nobody checking its work.
-
-WorkerMill fixes all three problems:
-
-- **Specialist execution** — a backend expert builds the API, a frontend expert wires the UI, a devops expert writes the Dockerfile, each from the same plan
-- **Built-in code review** — the tech lead reads actual diffs against your original spec, catches inconsistencies, and sends specific feedback
-- **Targeted revisions** — failed reviews don't restart from scratch; only the affected stories re-run with the reviewer's notes
-
-## Flagship Quality from Local Models
-
-Most AI coding tools force a choice: pay for a flagship API or run a local model and accept lower quality. WorkerMill eliminates that trade-off.
-
-The key insight is that **different roles need different levels of intelligence.** Planning and code review require deep reasoning — understanding architecture, catching subtle bugs, evaluating whether an implementation matches a spec. Writing code to a well-scoped ticket with clear instructions is a simpler task that smaller models handle well.
-
-WorkerMill lets you assign a different model to each role:
-
-```json
-{
-  "providers": {
-    "ollama": { "model": "qwen3-coder:30b" },
-    "anthropic": { "model": "claude-sonnet-4-6", "apiKey": "{env:ANTHROPIC_API_KEY}" }
-  },
-  "default": "ollama",
-  "routing": {
-    "planner": "anthropic",
-    "tech_lead": "anthropic"
-  }
-}
-```
-
-In this configuration, a flagship model handles planning and review — the high-judgment tasks — while a local Ollama model does the actual coding. The planner decomposes work into precise, scoped tickets. The workers execute them. The tech lead reviews every diff and sends failing stories back with specific feedback. The workers revise until the reviewer is satisfied.
-
-The result: **your local model produces output that meets the standards of the flagship model reviewing it.** The revision loop is the mechanism — it's not aspirational, it's how the system works. A smaller model writing code to a tight spec, reviewed by a larger model that catches mistakes and demands fixes, converges on quality that neither model would produce alone.
-
-This also means you can run workers entirely offline on Ollama while only the planner and reviewer make API calls — dramatically reducing cost while maintaining quality.
 
 ## AI Provider Support
 

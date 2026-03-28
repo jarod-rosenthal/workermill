@@ -11,6 +11,11 @@ Component releases are tracked via git tags:
 ## [Unreleased]
 
 ### Added
+- CLI: Test suite — 227 tests across engine and CLI (Vitest 4.1, ~52% CLI line coverage, ~73% engine line coverage)
+  - Engine: 113 unit tests covering decisions, model-factory, and all 14 tools
+  - CLI: 110 unit tests covering safety, config, memory, session, git-ops, permissions, commands, cost-tracker, orchestrator
+  - E2E: 4 tests with real Ollama (single-agent bug fix, glob, read_file, full /ship workflow)
+  - WSL-aware Ollama host auto-detection for E2E tests
 - CLI: `/ship` command replaces `/build` — multi-expert orchestration (`/build` kept as alias)
 - CLI: Architect-led planner — reads codebase deeply, produces `targetFiles`, `referenceFiles`, and `implementationNotes` per story so workers follow existing patterns
 - CLI: Planner feasibility gate — rejects tasks that are too vague or contradictory before worker tokens are spent
@@ -34,6 +39,8 @@ Component releases are tracked via git tags:
 - Homepage: dedicated Planner, Reviewer, and Workers documentation sections
 
 ### Fixed
+- Engine: `EngineAIClient` silently dropped all tool calls — AI SDK v6 renamed `args` to `input` in `onStepFinish` callback; guard check `"args" in tc` always failed
+- Engine: `EngineAIClient` missing `contextLength` passthrough — Ollama models ran with default context instead of configured value
 - CLI: Reviewer works from the plan (same source of truth as workers), not the raw spec
 - CLI: Approval threshold configurable via `/settings review.threshold` (1-10 scale, default 8)
 - CLI: Reviewer prompt rewritten for fairness — "be fair" not "bias toward approval"

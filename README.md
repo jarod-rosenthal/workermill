@@ -37,8 +37,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=jrl6NZQrssc">
-    <img src="https://img.youtube.com/vi/jrl6NZQrssc/maxresdefault.jpg" alt="WorkerMill Demo" width="100%" />
+  <a href="https://www.youtube.com/watch?v=3V_GdFAPm7o">
+    <img src="https://img.youtube.com/vi/3V_GdFAPm7o/maxresdefault.jpg" alt="WorkerMill Demo" width="100%" />
   </a>
 </p>
 

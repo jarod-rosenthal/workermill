@@ -10,10 +10,10 @@ interface Demo {
 
 const demos: Demo[] = [
   {
-    id: "jrl6NZQrssc",
+    id: "3V_GdFAPm7o",
     title: "WorkerMill: AI Coding Agents That Plan, Build, and Review Each Other's Work",
-    thumbnail: "https://img.youtube.com/vi/jrl6NZQrssc/maxresdefault.jpg",
-    url: "https://youtu.be/jrl6NZQrssc",
+    thumbnail: "https://img.youtube.com/vi/3V_GdFAPm7o/maxresdefault.jpg",
+    url: "https://youtu.be/3V_GdFAPm7o",
   },
   {
     id: "fLS1tWfItzY",

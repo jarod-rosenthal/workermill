@@ -121,7 +121,8 @@ const defaultCmd = program
       const { loadLearnings } = await import("./learnings.js");
 
       const aiModel = createModel(provider as any, model, host, contextLength);
-      const tools = createToolDefinitions(workingDir, aiModel, !options.fullDisk);
+      const sandboxed = options.fullDisk ? false : config.sandbox !== false;
+      const tools = createToolDefinitions(workingDir, aiModel, sandboxed);
 
       let systemPrompt = `You are WorkerMill, an AI coding agent. Working directory: ${workingDir}\n`;
       const instructions = formatProjectInstructions(workingDir);
@@ -183,7 +184,7 @@ const defaultCmd = program
         contextLength,
         trustAll: options.trust || false,
         planMode: options.plan || false,
-        sandboxed: !options.fullDisk,
+        sandboxed: options.fullDisk ? false : config.sandbox !== false,
         resume: options.resume || false,
         maxTokens: options.maxTokens,
         workingDir,

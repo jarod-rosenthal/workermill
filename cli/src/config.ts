@@ -57,6 +57,8 @@ export interface CliConfig {
   review?: ReviewConfig;
   hooks?: HooksConfig;
   git?: GitConfig;
+  /** Restrict file/bash tools to the working directory (default: true) */
+  sandbox?: boolean;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".workermill");

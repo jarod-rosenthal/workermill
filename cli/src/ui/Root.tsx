@@ -552,6 +552,7 @@ export function Root(props: RootProps): React.ReactElement {
             const autoRevise = config.review?.autoRevise ?? false;
             const useCritic = config.review?.useCritic ?? false;
             const branchPrefix = config.git?.branchPrefix || "workermill";
+            const sandboxEnabled = config.sandbox !== false;
 
             agent.addSystemMessage(
               `**Settings** (\`~/.workermill/cli.json\`)\n\n` +
@@ -565,7 +566,8 @@ export function Root(props: RootProps): React.ReactElement {
               `| Critic threshold | ${criticThreshold} | \`/settings review.criticThreshold <n>\` |\n` +
               `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
               `| Critic pass | ${useCritic} | \`/settings review.critic <true/false>\` |\n` +
-              `| Branch prefix | ${branchPrefix} | \`/settings git.branchPrefix <name>\` |`
+              `| Branch prefix | ${branchPrefix} | \`/settings git.branchPrefix <name>\` |\n` +
+              `| Sandbox | ${sandboxEnabled} | \`/settings sandbox <true/false>\` |`
             );
           } else {
             // Parse key=value or key value
@@ -620,12 +622,16 @@ export function Root(props: RootProps): React.ReactElement {
                 config.git = { ...config.git, branchPrefix: value };
                 break;
               }
+              case "sandbox": {
+                config.sandbox = boolVal(value);
+                break;
+              }
               default:
                 agent.addSystemMessage(`Unknown setting: \`${key}\`. Type \`/settings\` to see all options.`);
                 break;
             }
 
-            if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "git.branchPrefix"].includes(key)) {
+            if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "git.branchPrefix", "sandbox"].includes(key)) {
               saveConfig(config);
               agent.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
             }

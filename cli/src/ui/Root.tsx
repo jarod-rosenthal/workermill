@@ -188,7 +188,11 @@ export function Root(props: RootProps): React.ReactElement {
     [agent],
   );
   const [gitBranch, setGitBranch] = useState(() => getGitBranch());
-  const orchestrator = useOrchestrator(addOrchestratorMessage, agent.setCost, props.cliConfig, agent.incrementToolCount, setGitBranch);
+  const [tokPerSec, setTokPerSecMap] = useState<Record<string, number>>({});
+  const handleTokPerSec = useCallback((providerModel: string, tps: number) => {
+    setTokPerSecMap(prev => ({ ...prev, [providerModel]: tps }));
+  }, []);
+  const orchestrator = useOrchestrator(addOrchestratorMessage, agent.setCost, props.cliConfig, agent.incrementToolCount, setGitBranch, handleTokPerSec);
 
   // Track the last build task for /retry
   const lastBuildTask = useRef<string | null>(null);
@@ -1382,6 +1386,7 @@ Write the file with write_file to WORKERMILL.md in the project root.`
       roleModels={props.roleModels}
       toolCounts={agent.toolCounts}
       sessionStart={agent.sessionStart}
+      tokPerSec={{ ...agent.tokPerSec, ...tokPerSec }}
     />
   );
 }

@@ -61,6 +61,8 @@ export interface OrchestrationOutput {
   updateBranch?: (branch: string) => void;
   /** Update running cost in the UI (optional — noop if not provided) */
   updateCost?: (cost: number) => void;
+  /** Update tokens-per-second for a model (optional — noop if not provided) */
+  updateTokPerSec?: (providerModel: string, tokPerSec: number) => void;
 }
 
 /**
@@ -357,8 +359,8 @@ function topologicalSort(stories: Story[]): Story[] {
   function visit(id: string): void {
     if (visited.has(id)) return;
     if (visiting.has(id)) {
-      // Circular dependency — logged via output would require passing output here,
-      // but this is a pure function. The warning is non-critical so we skip it.
+      const cycleStory = idMap.get(id);
+      logger.warn("Circular story dependency detected — breaking cycle", { storyId: id, storyTitle: cycleStory?.title || "unknown" });
       return;
     }
     visiting.add(id);
@@ -563,6 +565,14 @@ Available personas: backend_developer, frontend_developer, devops_engineer, qa_e
     }
     planText = await planStream.text;
     planUsage = await planStream.totalUsage;
+    // Track tok/s for planner model
+    const planElapsed = (Date.now() - planStart) / 1000;
+    const planOutTokens = planUsage?.outputTokens || 0;
+    if (planOutTokens > 0 && planElapsed > 0) {
+      const planTokPerSec = Math.round(planOutTokens / planElapsed);
+      output.updateTokPerSec?.(`${pProvider}/${pModel}`, planTokPerSec);
+      logger.info("Model performance", { provider: pProvider, model: pModel, tokPerSec: planTokPerSec });
+    }
   } catch (planErr) {
     clearInterval(heartbeat);
     output.statusDone();
@@ -923,9 +933,23 @@ export async function runOrchestration(
         timeout: { chunkMs: 120_000 },
         ...buildOllamaOptions(cProvider as AIProvider, cCtx),
       });
+      const criticStartMs = Date.now();
       for await (const _chunk of criticStream.textStream) { /* drive */ }
       const criticText = await criticStream.text;
       output.statusDone();
+
+      const criticUsage = await criticStream.totalUsage;
+      costTracker.addUsage("Critic", cProvider, cModel, criticUsage?.inputTokens || 0, criticUsage?.outputTokens || 0);
+      output.updateCost?.(costTracker.getTotalCost());
+
+      // Track tok/s for critic model
+      const criticElapsed = (Date.now() - criticStartMs) / 1000;
+      const criticOutTokens = criticUsage?.outputTokens || 0;
+      if (criticOutTokens > 0 && criticElapsed > 0) {
+        const criticTokPerSec = Math.round(criticOutTokens / criticElapsed);
+        output.updateTokPerSec?.(`${cProvider}/${cModel}`, criticTokPerSec);
+        logger.info("Model performance", { provider: cProvider, model: cModel, tokPerSec: criticTokPerSec });
+      }
 
       const score = extractScore(criticText);
       output.log("critic", `::review_score::${score}`);
@@ -1198,6 +1222,7 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
       let hadToolCalls = false;
       let consecutiveTextOnlySteps = 0;
 
+      const storyStartMs = Date.now();
       const stream = streamText({
         model,
         abortSignal: combinedAbort.signal,
@@ -1315,6 +1340,14 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
       const outTokens = usage?.outputTokens || 0;
       costTracker.addUsage(persona.name, provider, modelName, inTokens, outTokens);
       output.updateCost?.(costTracker.getTotalCost());
+
+      // Track tok/s for worker model
+      const storyElapsed = (Date.now() - storyStartMs) / 1000;
+      if (outTokens > 0 && storyElapsed > 0) {
+        const workerTokPerSec = Math.round(outTokens / storyElapsed);
+        output.updateTokPerSec?.(`${provider}/${modelName}`, workerTokPerSec);
+        logger.info("Model performance", { provider, model: modelName, tokPerSec: workerTokPerSec });
+      }
 
       // Detect empty story — model returned nothing
       if (outTokens === 0 && !text.trim()) {
@@ -1643,6 +1676,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         // Use onStepFinish for reviewer — same as WorkerMill ai-sdk-client.ts
         // Accumulate only the reviewer's NEW output (not the echoed prompt/previous feedback)
         let reviewerOutput = "";
+        const reviewStartMs = Date.now();
         const reviewStream = streamText({
           model: reviewModel,
           abortSignal,
@@ -1682,6 +1716,13 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
         const approved = score >= threshold;
         const revInputTokens = reviewUsage?.inputTokens || 0;
         const revOutputTokens = reviewUsage?.outputTokens || 0;
+        // Track tok/s for reviewer model
+        const reviewElapsed = (Date.now() - reviewStartMs) / 1000;
+        if (revOutputTokens > 0 && reviewElapsed > 0) {
+          const reviewTokPerSec = Math.round(revOutputTokens / reviewElapsed);
+          output.updateTokPerSec?.(`${revProvider}/${revModel}`, reviewTokPerSec);
+          logger.info("Model performance", { provider: revProvider, model: revModel, tokPerSec: reviewTokPerSec });
+        }
         logger.info(`Review round ${reviewRound} result`, { decision: decision || "no-marker-approved", score, approved, reviewTextLength: reviewText.length, inputTokens: revInputTokens, outputTokens: revOutputTokens });
 
         // Display review result with horizontal rules
@@ -1853,6 +1894,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
 Working directory: ${workingDir}`;
 
           try {
+            const revisionStartMs = Date.now();
             const revStream = streamText({
               model: storyModel,
               abortSignal,
@@ -1900,6 +1942,15 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
             costTracker.addUsage(`${storyPersona.name} (revision)`, sProvider, sModel,
               revUsage?.inputTokens || 0, revUsage?.outputTokens || 0);
             output.updateCost?.(costTracker.getTotalCost());
+
+            // Track tok/s for revision worker model
+            const revisionElapsed = (Date.now() - revisionStartMs) / 1000;
+            const revisionOutTokens = revUsage?.outputTokens || 0;
+            if (revisionOutTokens > 0 && revisionElapsed > 0) {
+              const revisionTokPerSec = Math.round(revisionOutTokens / revisionElapsed);
+              output.updateTokPerSec?.(`${sProvider}/${sModel}`, revisionTokPerSec);
+              logger.info("Model performance", { provider: sProvider, model: sModel, tokPerSec: revisionTokPerSec });
+            }
 
             logger.info(`Revision completed`, { story: i + 1, persona: story.persona, inputTokens: revUsage?.inputTokens || 0, outputTokens: revUsage?.outputTokens || 0 });
             output.log(story.persona, `${story.title} — revision complete!`);

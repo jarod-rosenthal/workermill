@@ -113,6 +113,8 @@ export function resolveConfig(): CliConfig {
       pre: [...(global.hooks?.pre || []), ...(project?.hooks?.pre || [])],
       post: [...(global.hooks?.post || []), ...(project?.hooks?.post || [])],
     },
+    git: { ...global.git, ...(project?.git || {}) },
+    sandbox: project?.sandbox ?? global.sandbox,
   };
 }
 
@@ -124,7 +126,7 @@ export function getProviderForPersona(
   const providerConfig = config.providers[providerName];
 
   if (!providerConfig) {
-    throw new Error(`Provider "${providerName}" not found in configuration.`);
+    throw new Error(`Provider "${providerName}" not found in configuration. Run \`workermill\` to set up this provider or check your routing config.`);
   }
 
   // Map OpenAI-compatible providers to "openai" for the model factory

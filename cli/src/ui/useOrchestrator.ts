@@ -90,6 +90,8 @@ export function useOrchestrator(
   incrementToolCount?: (toolName: string) => void,
   /** Update the git branch in the status bar. */
   setGitBranch?: (branch: string) => void,
+  /** Update tokens-per-second for a model in the status bar. */
+  setTokPerSec?: (providerModel: string, tokPerSec: number) => void,
 ): UseOrchestratorReturn {
   const [running, setRunning] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
@@ -251,6 +253,10 @@ export function useOrchestrator(
 
             updateCost(cost: number): void {
               setCost?.(cost);
+            },
+
+            updateTokPerSec(providerModel: string, tokPerSec: number): void {
+              setTokPerSec?.(providerModel, tokPerSec);
             },
           };
 

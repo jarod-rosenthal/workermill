@@ -44,6 +44,10 @@ export function error(message: string, data?: Record<string, unknown>): void {
   log("ERROR", message, data);
 }
 
+export function warn(message: string, data?: Record<string, unknown>): void {
+  log("WARN", message, data);
+}
+
 export function debug(message: string, data?: Record<string, unknown>): void {
   log("DEBUG", message, data);
 }

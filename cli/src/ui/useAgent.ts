@@ -327,13 +327,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       }
       hooksConfigRef.current = cliConfig?.hooks;
     } catch (err) {
-      logger.debug("Config/MCP init skipped", { error: err instanceof Error ? err.message : String(err) });
+      logger.warn("Config/MCP init failed", { error: err instanceof Error ? err.message : String(err) });
     }
 
     // Session: resume or create fresh.
     if (options.resume) {
       const loaded = loadLatestSession();
       if (loaded) {
+        logger.info("Resumed session", { sessionId: loaded.id, messageCount: loaded.messages.length });
         sessionRef.current = loaded;
         // Hydrate committed messages from the restored session.
         const restored: Message[] = loaded.messages.map((m) => ({

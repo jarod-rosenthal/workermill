@@ -20,6 +20,8 @@ interface StatusBarProps {
   sessionStart?: number;
   /** Whether WORKERMILL.md or similar instructions file is loaded */
   hasInstructions?: boolean;
+  /** Tokens-per-second map keyed by provider/model. */
+  tokPerSec?: Record<string, number>;
 }
 
 /** Format a dollar cost as a short string. Prefixed with ~ to indicate estimate. */
@@ -81,6 +83,8 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
   // Model display
   const rm = props.roleModels;
   const workerStr = rm?.worker || `${props.provider}/${props.model}`;
+  const tps = props.tokPerSec || {};
+  const workerTps = tps[workerStr];
 
   // Tool counts for row 2
   const counts = props.toolCounts || {};
@@ -107,7 +111,11 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
       <Box>
         <Text color={theme.text}>{"["}</Text>
         <Text color={theme.brand} bold>{workerStr}</Text>
-        <Text color={theme.text}>{"] "}</Text>
+        <Text color={theme.text}>{"]"}</Text>
+        {workerTps ? (
+          <Text color={theme.subtle} dimColor>{` ${workerTps}t/s`}</Text>
+        ) : null}
+        <Text>{" "}</Text>
         <Text color={barColor}>
           {"█".repeat(filled)}{"░".repeat(empty)}
         </Text>
@@ -165,6 +173,9 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
                 <Text color="cyan" bold>{"plan"}</Text>
                 <Text color={theme.subtle}>:</Text>
                 <Text color="cyan">{rm.planner}</Text>
+                {tps[rm.planner] ? (
+                  <Text color={theme.subtle} dimColor>{` ${tps[rm.planner]}t/s`}</Text>
+                ) : null}
               </Text>
             ) : null}
             {rm.planner !== rm.worker && rm.reviewer !== rm.worker ? (
@@ -175,6 +186,9 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
                 <Text color="magenta" bold>{"review"}</Text>
                 <Text color={theme.subtle}>:</Text>
                 <Text color="magenta">{rm.reviewer}</Text>
+                {tps[rm.reviewer] ? (
+                  <Text color={theme.subtle} dimColor>{` ${tps[rm.reviewer]}t/s`}</Text>
+                ) : null}
               </Text>
             ) : null}
           </>

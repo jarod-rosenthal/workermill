@@ -66,6 +66,8 @@ interface AppProps {
   buildPreviewLine?: string;
   /** Streaming tool calls — only latest shown in dynamic area during execution. */
   streamingToolCalls?: ToolCallInfo[];
+  /** Tokens-per-second map keyed by provider/model. */
+  tokPerSec?: Record<string, number>;
 }
 
 /** Static activity dot — no animation, no re-renders. */
@@ -244,6 +246,7 @@ export function App(props: AppProps): React.ReactElement {
             mcpCount={props.mcpCount}
             sessionStart={props.sessionStart}
             hasInstructions={props.hasInstructions}
+            tokPerSec={props.tokPerSec}
           />
         </>
       )}

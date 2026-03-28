@@ -11,7 +11,11 @@
     "dev": "tsx src/index.ts",
     "build": "tsup",
     "prepublishOnly": "npm run build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.0",
@@ -33,9 +37,11 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.28",
+    "@vitest/coverage-v8": "^4.1.0",
     "tsup": "^8.0.0",
     "tsx": "^4.0.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.0"
   },
   "overrides": {
     "picomatch": "^4.0.4"

@@ -330,11 +330,19 @@ export default function LandingV0() {
                 Not an assistant that suggests — an engineering team that executes.
                 From a single bug fix to a full product build.
               </p>
-              {/* Trust badge */}
-              <div className="mt-4 flex justify-center">
+              {/* Social proof + trust */}
+              <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
+                <a
+                  href="https://www.npmjs.com/package/workermill"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium bg-white/[0.06] text-white border border-white/10 tracking-wide backdrop-blur-sm hover:bg-white/[0.10] transition-colors"
+                >
+                  <img src="https://img.shields.io/npm/dw/workermill?color=14b8a6&label=downloads%2Fweek&style=flat-square" alt="npm downloads" className="h-4" />
+                </a>
                 <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium bg-teal-500/10 text-teal-400 border border-teal-500/20 tracking-wide backdrop-blur-sm">
                   <Lock className="w-3 h-3" />
-                  Your infrastructure, your rules — local by default, cloud when you need it.
+                  Open source · local by default · cloud when you need it
                 </span>
               </div>
             </div>

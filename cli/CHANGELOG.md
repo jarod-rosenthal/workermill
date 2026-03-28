@@ -4,6 +4,33 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.81] - 2026-03-28
+
+### Added
+- **Sandbox setting** — `/settings sandbox true/false` to toggle file directory restriction. On by default. CLI flag `--full-disk` also overrides. Persists to `cli.json`.
+- **Branch-aware `/diff`** — on a feature branch, `/diff` shows committed changes vs main instead of empty uncommitted diff.
+- **Status bar branch updates** — branch name updates immediately when `/ship` creates a feature branch (was stale until next prompt).
+- **Cost logging** — every `addUsage` call now logs persona, provider, model, token counts, cost, and running total to CLI logs. Review rounds also log input/output token counts.
+- **Review horizontal rules** — reviewer output framed with `────` lines above and below the decision/score for visual separation.
+- **Unit tests** — added tests for safety, config, memory, session, git-ops, permissions, commands, cost-tracker, and orchestrator.
+- **E2E tests** — Ollama integration tests for tool calling and streaming.
+
+### Changed
+- **Status bar layout** — all rows left-aligned with `│` separators (matches Claude Code). Previously project info and plan/review were right-aligned.
+- **Status bar colors** — plan (cyan) and review (magenta) colors now match terminal output exactly. Uses Ink named colors instead of hex approximations.
+- **Tool counts row dimmed** — gray text creates visual separation without extra line spacing.
+- **Worker model color** — orange in terminal output (ANSI 256-color `208`) to match status bar brand color. Was yellow.
+- **Completion summary** — shows branch + commit count only. Removed verbose diffstat file list.
+- **Banner** — "AI coding team" instead of "AI coding agent".
+- **README** — new value prop sections ("The Problem Isn't the Model" / "What WorkerMill Does Differently"), trimmed repetition, split badges into two rows, added npm weekly downloads badge.
+- **Demo video** replaced with new CLI walkthrough.
+
+### Fixed
+- **Score threshold as hard gate** — reviewer's `REVIEW_DECISION` marker alone doesn't approve; score must meet threshold (default 8).
+- **Reviewer re-blocks on real issues** — functional bugs across revision rounds properly trigger `needs_revision` even if the model marker says approved.
+- **`review.critic` setting** — was not persisting to config or being read by orchestrator.
+- **Project config** — orchestrator now reads per-project `.workermill/config.json` overrides.
+
 ## [0.15.8] - 2026-03-26
 
 ### Added

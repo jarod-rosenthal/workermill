@@ -11,19 +11,19 @@ interface Demo {
 const demos: Demo[] = [
   {
     id: "3V_GdFAPm7o",
-    title: "WorkerMill: AI Coding Agents That Plan, Build, and Review Each Other's Work",
+    title: "WorkerMill CLI — AI Coding Agents That Plan, Build, and Review Each Other's Work",
     thumbnail: "https://img.youtube.com/vi/3V_GdFAPm7o/maxresdefault.jpg",
     url: "https://youtu.be/3V_GdFAPm7o",
   },
   {
     id: "fLS1tWfItzY",
-    title: "AI Agents Build a Full-Stack SaaS App in 5 Hours — 27,000 Lines of Code",
+    title: "WorkerMill Platform — AI Agents Build a Full-Stack SaaS App in 5 Hours",
     thumbnail: "https://img.youtube.com/vi/fLS1tWfItzY/maxresdefault.jpg",
     url: "https://youtu.be/fLS1tWfItzY",
   },
   {
     id: "sa0lug-G-cg",
-    title: "WorkerMill in Action — Autonomously plan, code, and ship a feature in real-time",
+    title: "WorkerMill Platform — Autonomously Plan, Code, and Ship a Feature in Real-Time",
     thumbnail: "https://img.youtube.com/vi/sa0lug-G-cg/maxresdefault.jpg",
     url: "https://youtu.be/sa0lug-G-cg",
   },

@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { Lock, Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock, Github, Star, ExternalLink } from "lucide-react";
+import { Lock, Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock, Github, Star, ExternalLink, Download, Layers } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
@@ -9,6 +9,78 @@ import TrustCallout from "../components/TrustCallout";
 import { Demos } from "./Home/Demos";
 
 import { getFeaturedPost } from "../content/blog/posts";
+
+// ─── Social Proof Stats ─────────────────────────────────────────────────────
+
+function formatNumber(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K+`;
+  return `${n}+`;
+}
+
+function SocialProof() {
+  const [downloads, setDownloads] = useState<number | null>(null);
+  const [stars, setStars] = useState<number | null>(null);
+
+  useEffect(() => {
+    // Fetch weekly downloads from npm
+    fetch("https://api.npmjs.org/downloads/point/last-week/workermill")
+      .then((r) => r.json())
+      .then((d) => { if (d.downloads) setDownloads(d.downloads); })
+      .catch(() => {});
+
+    // Fetch stars from GitHub
+    fetch("https://api.github.com/repos/jarod-rosenthal/workermill")
+      .then((r) => r.json())
+      .then((d) => { if (d.stargazers_count) setStars(d.stargazers_count); })
+      .catch(() => {});
+  }, []);
+
+  return (
+    <div className="mt-8 flex items-center justify-center gap-8 sm:gap-12">
+      <a
+        href="https://www.npmjs.com/package/workermill"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group flex flex-col items-center gap-1 hover:opacity-80 transition-opacity"
+      >
+        <div className="flex items-center gap-2">
+          <Download className="w-4 h-4 text-teal-400" />
+          <span className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-teal-400 to-cyan-400 bg-clip-text text-transparent">
+            {downloads !== null ? formatNumber(downloads) : "—"}
+          </span>
+        </div>
+        <span className="text-xs text-slate-500 uppercase tracking-widest">downloads</span>
+      </a>
+
+      <div className="w-px h-10 bg-white/10" />
+
+      <a
+        href="https://github.com/jarod-rosenthal/workermill/stargazers"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group flex flex-col items-center gap-1 hover:opacity-80 transition-opacity"
+      >
+        <div className="flex items-center gap-2">
+          <Star className="w-4 h-4 text-amber-400" />
+          <span className="text-2xl sm:text-3xl font-bold text-white">
+            {stars !== null ? formatNumber(stars) : "—"}
+          </span>
+        </div>
+        <span className="text-xs text-slate-500 uppercase tracking-widest">GitHub stars</span>
+      </a>
+
+      <div className="w-px h-10 bg-white/10" />
+
+      <div className="flex flex-col items-center gap-1">
+        <div className="flex items-center gap-2">
+          <Layers className="w-4 h-4 text-violet-400" />
+          <span className="text-2xl sm:text-3xl font-bold text-white">Any</span>
+        </div>
+        <span className="text-xs text-slate-500 uppercase tracking-widest">LLM provider</span>
+      </div>
+    </div>
+  );
+}
 
 // ─── Featured Article ────────────────────────────────────────────────────────
 
@@ -330,21 +402,8 @@ export default function LandingV0() {
                 Not an assistant that suggests — an engineering team that executes.
                 From a single bug fix to a full product build.
               </p>
-              {/* Social proof + trust */}
-              <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
-                <a
-                  href="https://www.npmjs.com/package/workermill"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium bg-white/[0.06] text-white border border-white/10 tracking-wide backdrop-blur-sm hover:bg-white/[0.10] transition-colors"
-                >
-                  <img src="https://img.shields.io/npm/dw/workermill?color=14b8a6&label=downloads%2Fweek&style=flat-square" alt="npm downloads" className="h-4" />
-                </a>
-                <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium bg-teal-500/10 text-teal-400 border border-teal-500/20 tracking-wide backdrop-blur-sm">
-                  <Lock className="w-3 h-3" />
-                  Open source · local by default · cloud when you need it
-                </span>
-              </div>
+              {/* Social proof stats */}
+              <SocialProof />
             </div>
           </section>
 

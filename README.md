@@ -32,7 +32,11 @@
   <a href="https://github.com/jarod-rosenthal/workermill/stargazers"><img src="https://img.shields.io/github/stars/jarod-rosenthal/workermill?style=social" alt="GitHub stars"></a>
 </p>
 
-https://github.com/user-attachments/assets/ab931d38-68c5-4cc3-b210-4c0eaebf8c93
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=jrl6NZQrssc">
+    <img src="https://img.youtube.com/vi/jrl6NZQrssc/maxresdefault.jpg" alt="WorkerMill Demo" width="100%" />
+  </a>
+</p>
 
 ## The Problem Isn't the Model. It's the Architecture.
 

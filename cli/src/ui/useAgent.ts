@@ -107,6 +107,8 @@ export interface UseAgentReturn {
   cyclePermissionMode: () => void;
   /** Increment tool count for the status bar (used by orchestrator). */
   incrementToolCount: (toolName: string) => void;
+  /** Tokens-per-second map keyed by provider/model. */
+  tokPerSec: Record<string, number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +257,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     useState<PermissionRequest | null>(null);
   const [tokens, setTokens] = useState(0);
   const [cost, setCost] = useState(0);
+  const [tokPerSec, setTokPerSecMap] = useState<Record<string, number>>({});
   const [toolCounts, setToolCounts] = useState<Record<string, number>>({});
   const sessionStartRef = useRef(Date.now());
   const [trustAll, setTrustAllState] = useState(options.trustAll);
@@ -537,6 +540,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           if (mode === "trust") {
             trustAllRef.current = true;
             setTrustAllState(true);
+            permModeRef.current = "trust all";
+            setPermMode("trust all");
           } else if (mode === "always") {
             sessionAllowRef.current.add(name);
           }
@@ -664,7 +669,16 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         try {
           const model = modelRef.current!;
           const systemPrompt = buildSystemPrompt(workingDirRef.current);
+          const activeTools = getActiveTools() as ToolSet;
+          logger.info("Starting streamText", {
+            provider: aiProviderRef.current,
+            model: options.model,
+            toolCount: Object.keys(activeTools).length,
+            tools: Object.keys(activeTools).join(", "),
+            messageCount: session.messages.length,
+          });
 
+          const agentStreamStartMs = Date.now();
           const stream = streamText({
             model,
             system: systemPrompt,
@@ -677,7 +691,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
               }
               return { role: m.role as "user" | "assistant", content: m.content };
             }),
-            tools: getActiveTools() as ToolSet,
+            tools: activeTools,
             maxOutputTokens: options.maxTokens,
             stopWhen: stepCountIs(100),
             abortSignal: controller.signal,
@@ -764,6 +778,14 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           );
           setTokens(inputTokens);
           setCost(costTrackerRef.current.getTotalCost());
+
+          // Track tok/s for this model
+          const agentElapsed = (Date.now() - agentStreamStartMs) / 1000;
+          if (outputTokens > 0 && agentElapsed > 0) {
+            const providerModel = `${options.provider}/${options.model}`;
+            const tps = Math.round(outputTokens / agentElapsed);
+            setTokPerSecMap(prev => ({ ...prev, [providerModel]: tps }));
+          }
 
           // Save session to disk.
           saveSession(session);
@@ -991,5 +1013,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     toolCounts,
     sessionStart: sessionStartRef.current,
     incrementToolCount,
+    tokPerSec,
   };
 }

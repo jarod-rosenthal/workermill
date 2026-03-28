@@ -562,7 +562,7 @@ export async function runSetup(): Promise<CliConfig> {
   const apiKeys = new Map<string, string>();
 
   console.log();
-  console.log(chalk.bold("  WorkerMill CLI") + chalk.dim(" — AI coding agent"));
+  console.log(chalk.bold("  WorkerMill CLI") + chalk.dim(" — AI coding ") + chalk.dim.strikethrough("agent") + chalk.dim(" team"));
   console.log();
   console.log(chalk.dim("  Three roles — workers, planner, reviewer — each can use a different model."));
   console.log(chalk.dim("  Best: Ollama for workers (free, local), cloud models for planning/review."));

@@ -1,5 +1,5 @@
 import { streamText, stepCountIs } from "ai";
-import { createModel } from "./model-factory.js";
+import { createModel, buildOllamaOptions } from "./model-factory.js";
 import { createToolDefinitions } from "./tools/index.js";
 import type { AIClientConfig, AIClientOptions, AIClientResult, StreamMessage, TokenUsage } from "./types.js";
 
@@ -27,17 +27,20 @@ export class EngineAIClient {
         tools,
         stopWhen: stepCountIs(options.maxTurns || 100),
         abortSignal: AbortSignal.timeout(options.timeoutMs || 30 * 60 * 1000),
+        ...buildOllamaOptions(this.config.provider, options.contextLength),
         onStepFinish({ text, toolCalls, toolResults }) {
           if (text && options.onMessage) {
             options.onMessage({ type: "text", content: text });
           }
           if (toolCalls) {
             for (const tc of toolCalls) {
-              if (tc && "toolName" in tc && "args" in tc) {
+              if (tc && "toolName" in tc) {
+                // AI SDK v6 uses "input", older versions used "args"
+                const toolInput = ("input" in tc ? tc.input : "args" in tc ? tc.args : {}) as Record<string, unknown>;
                 options.onMessage?.({
                   type: "tool_use",
                   toolName: tc.toolName,
-                  toolInput: tc.args as Record<string, unknown>,
+                  toolInput,
                 });
               }
             }

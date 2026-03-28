@@ -6,8 +6,9 @@ import { execSync } from "child_process";
 import { runOrchestration } from "../../orchestrator.js";
 import type { CliConfig } from "../../config.js";
 import type { OrchestrationOutput } from "../../orchestrator.js";
+import { detectOllamaHost } from "../helpers/ollama-host.js";
 
-const OLLAMA_HOST = "http://localhost:11434";
+let OLLAMA_HOST = "";
 const MODEL = "qwen3-coder:30b";
 
 let ollamaAvailable = false;
@@ -15,6 +16,9 @@ let originalCwd: string;
 
 beforeAll(async () => {
   originalCwd = process.cwd();
+  const host = await detectOllamaHost();
+  if (!host) return;
+  OLLAMA_HOST = host;
   try {
     const res = await fetch(`${OLLAMA_HOST}/api/tags`);
     if (!res.ok) return;

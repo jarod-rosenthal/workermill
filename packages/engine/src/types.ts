@@ -46,6 +46,7 @@ export interface AIClientOptions {
   workingDir: string;
   maxTurns?: number;
   timeoutMs?: number;
+  contextLength?: number;
   sessionId?: string;
   onMessage?: (msg: StreamMessage) => void;
   onTokenUsage?: (usage: TokenUsage) => void;

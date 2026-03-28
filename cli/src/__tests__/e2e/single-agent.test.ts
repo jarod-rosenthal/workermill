@@ -4,13 +4,17 @@ import path from "path";
 import os from "os";
 import { EngineAIClient } from "../../../../packages/engine/src/ai-client.js";
 import type { StreamMessage } from "../../../../packages/engine/src/types.js";
+import { detectOllamaHost } from "../helpers/ollama-host.js";
 
-const OLLAMA_HOST = "http://localhost:11434";
+let OLLAMA_HOST = "";
 const MODEL = "qwen3-coder:30b";
 
 let ollamaAvailable = false;
 
 beforeAll(async () => {
+  const host = await detectOllamaHost();
+  if (!host) return;
+  OLLAMA_HOST = host;
   try {
     const res = await fetch(`${OLLAMA_HOST}/api/tags`);
     if (!res.ok) return;
@@ -61,6 +65,7 @@ export function multiply(a: number, b: number): number {
       model: MODEL,
       workingDir: tempDir,
       maxTurns: 20,
+      contextLength: 65536,
       onMessage: (msg) => messages.push(msg),
     });
 

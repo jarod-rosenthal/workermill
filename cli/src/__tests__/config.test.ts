@@ -204,5 +204,209 @@ describe("config", () => {
       const result = getProviderForPersona(config);
       expect(result.contextLength).toBe(65536);
     });
+
+    it("maps provider with host to 'openai' (OpenAI-compatible)", async () => {
+      const { getProviderForPersona } = await importConfig();
+      const config = {
+        providers: {
+          lmstudio: { model: "local-model", host: "http://localhost:1234", apiKey: "key" },
+        },
+        default: "lmstudio",
+      } as any;
+
+      const result = getProviderForPersona(config);
+      expect(result.provider).toBe("openai");
+      expect(result.model).toBe("local-model");
+      expect(result.host).toBe("http://localhost:1234");
+    });
+
+    it("strips _planner/_reviewer suffix from known providers", async () => {
+      const { getProviderForPersona } = await importConfig();
+      const config = {
+        providers: {
+          anthropic_planner: { model: "claude-opus-4-6", apiKey: "sk-test" },
+        },
+        default: "anthropic_planner",
+      } as any;
+
+      const result = getProviderForPersona(config);
+      expect(result.provider).toBe("anthropic");
+    });
+
+    it("throws for missing provider referenced by routing", async () => {
+      const { getProviderForPersona } = await importConfig();
+      const config = {
+        providers: {
+          ollama: { model: "test", host: "http://localhost:11434" },
+        },
+        default: "ollama",
+        routing: { planner: "nonexistent" },
+      } as any;
+
+      expect(() => getProviderForPersona(config, "planner")).toThrow('Provider "nonexistent" not found');
+    });
+  });
+
+  describe("loadProjectConfig()", () => {
+    let origCwd: string;
+    let projectDir: string;
+
+    beforeEach(() => {
+      origCwd = process.cwd();
+      projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-project-"));
+    });
+
+    afterEach(() => {
+      process.chdir(origCwd);
+      fs.rmSync(projectDir, { recursive: true, force: true });
+    });
+
+    it("returns null when no .workermill/config.json exists", async () => {
+      process.chdir(projectDir);
+      const { loadProjectConfig } = await importConfig();
+      expect(loadProjectConfig()).toBeNull();
+    });
+
+    it("loads project config from .workermill/config.json in cwd", async () => {
+      const wmDir = path.join(projectDir, ".workermill");
+      fs.mkdirSync(wmDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(wmDir, "config.json"),
+        JSON.stringify({ default: "google", providers: { google: { model: "gemini-3.1-pro", apiKey: "gkey" } } }),
+        "utf-8",
+      );
+
+      process.chdir(projectDir);
+      const { loadProjectConfig } = await importConfig();
+      const proj = loadProjectConfig();
+      expect(proj).not.toBeNull();
+      expect(proj!.default).toBe("google");
+    });
+
+    it("returns null on invalid project config JSON", async () => {
+      const wmDir = path.join(projectDir, ".workermill");
+      fs.mkdirSync(wmDir, { recursive: true });
+      fs.writeFileSync(path.join(wmDir, "config.json"), "{{bad json", "utf-8");
+
+      process.chdir(projectDir);
+      const { loadProjectConfig } = await importConfig();
+      expect(loadProjectConfig()).toBeNull();
+    });
+  });
+
+  describe("resolveConfig()", () => {
+    let origCwd: string;
+    let projectDir: string;
+
+    beforeEach(() => {
+      origCwd = process.cwd();
+      projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-resolve-"));
+    });
+
+    afterEach(() => {
+      process.chdir(origCwd);
+      fs.rmSync(projectDir, { recursive: true, force: true });
+    });
+
+    it("throws when no global config exists", async () => {
+      process.chdir(projectDir);
+      const { resolveConfig } = await importConfig();
+      expect(() => resolveConfig()).toThrow("No configuration found");
+    });
+
+    it("returns global config when no project config", async () => {
+      const globalConfig = {
+        providers: { ollama: { model: "test-model", host: "http://localhost:11434" } },
+        default: "ollama",
+      };
+      fs.writeFileSync(path.join(tmp.wmDir, "cli.json"), JSON.stringify(globalConfig), "utf-8");
+
+      process.chdir(projectDir);
+      const { resolveConfig } = await importConfig();
+      const resolved = resolveConfig();
+      expect(resolved.default).toBe("ollama");
+      expect(resolved.providers.ollama.model).toBe("test-model");
+    });
+
+    it("merges project config over global config", async () => {
+      const globalConfig = {
+        providers: { ollama: { model: "global-model", host: "http://localhost:11434" } },
+        default: "ollama",
+        routing: { planner: "ollama" },
+        review: { enabled: true, maxRevisions: 3 },
+      };
+      fs.writeFileSync(path.join(tmp.wmDir, "cli.json"), JSON.stringify(globalConfig), "utf-8");
+
+      const wmDir = path.join(projectDir, ".workermill");
+      fs.mkdirSync(wmDir, { recursive: true });
+      const projectConfig = {
+        default: "anthropic",
+        providers: { anthropic: { model: "claude-sonnet-4-6", apiKey: "sk-test" } },
+        routing: { reviewer: "anthropic" },
+        review: { maxRevisions: 5 },
+      };
+      fs.writeFileSync(path.join(wmDir, "config.json"), JSON.stringify(projectConfig), "utf-8");
+
+      process.chdir(projectDir);
+      const { resolveConfig } = await importConfig();
+      const resolved = resolveConfig();
+
+      // Project overrides default
+      expect(resolved.default).toBe("anthropic");
+      // Providers are merged
+      expect(resolved.providers.ollama.model).toBe("global-model");
+      expect(resolved.providers.anthropic.model).toBe("claude-sonnet-4-6");
+      // Routing is merged
+      expect(resolved.routing?.planner).toBe("ollama");
+      expect(resolved.routing?.reviewer).toBe("anthropic");
+      // Review is merged
+      expect(resolved.review?.enabled).toBe(true);
+      expect(resolved.review?.maxRevisions).toBe(5);
+    });
+
+    it("merges hooks arrays (global + project)", async () => {
+      const globalConfig = {
+        providers: { ollama: { model: "test", host: "http://localhost:11434" } },
+        default: "ollama",
+        hooks: { pre: [{ command: "lint", tools: ["*"] }] },
+      };
+      fs.writeFileSync(path.join(tmp.wmDir, "cli.json"), JSON.stringify(globalConfig), "utf-8");
+
+      const wmDir = path.join(projectDir, ".workermill");
+      fs.mkdirSync(wmDir, { recursive: true });
+      const projectConfig = {
+        hooks: { pre: [{ command: "format", tools: ["*"] }], post: [{ command: "test", tools: ["bash"] }] },
+      };
+      fs.writeFileSync(path.join(wmDir, "config.json"), JSON.stringify(projectConfig), "utf-8");
+
+      process.chdir(projectDir);
+      const { resolveConfig } = await importConfig();
+      const resolved = resolveConfig();
+
+      // Pre hooks concatenated
+      expect(resolved.hooks?.pre?.length).toBe(2);
+      expect(resolved.hooks?.pre?.[0].command).toBe("lint");
+      expect(resolved.hooks?.pre?.[1].command).toBe("format");
+      // Post hooks from project
+      expect(resolved.hooks?.post?.length).toBe(1);
+    });
+
+    it("uses project sandbox setting over global", async () => {
+      const globalConfig = {
+        providers: { ollama: { model: "test", host: "http://localhost:11434" } },
+        default: "ollama",
+        sandbox: true,
+      };
+      fs.writeFileSync(path.join(tmp.wmDir, "cli.json"), JSON.stringify(globalConfig), "utf-8");
+
+      const wmDir = path.join(projectDir, ".workermill");
+      fs.mkdirSync(wmDir, { recursive: true });
+      fs.writeFileSync(path.join(wmDir, "config.json"), JSON.stringify({ sandbox: false }), "utf-8");
+
+      process.chdir(projectDir);
+      const { resolveConfig } = await importConfig();
+      const resolved = resolveConfig();
+      expect(resolved.sandbox).toBe(false);
+    });
   });
 });

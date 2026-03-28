@@ -1006,7 +1006,7 @@ export async function runOrchestration(
     }
 
     output.log("system", `--- Story ${i + 1}/${sorted.length} ---`);
-    output.log(story.persona, `Starting ${story.title} (\x1b[33m${provider}/${modelName}\x1b[0m)`);
+    output.log(story.persona, `Starting ${story.title} (\x1b[38;5;208m${provider}/${modelName}\x1b[0m)`);
     logger.info(`Story ${i + 1}/${sorted.length} started`, { persona: story.persona, title: story.title, provider, model: modelName });
 
     output.status(`${story.persona}: ${story.title.slice(0, 60)}`);
@@ -1814,7 +1814,7 @@ AFFECTED_REASONS: {"2": "Missing error handling in auth controller", "3": "Front
 
           output.coordinatorLog(`Revising story ${i + 1} of ${sorted.length}: ${story.title}`);
           logger.info(`Revision started`, { story: i + 1, persona: story.persona, title: story.title, hasSpecificFeedback: !!storyReason });
-          output.log(story.persona, `Starting revision: ${story.title} (\x1b[33m${sProvider}/${sModel}\x1b[0m)`);
+          output.log(story.persona, `Starting revision: ${story.title} (\x1b[38;5;208m${sProvider}/${sModel}\x1b[0m)`);
 
           output.status(`${story.persona}: revising...`);
 

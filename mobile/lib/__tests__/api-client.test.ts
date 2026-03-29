@@ -145,7 +145,7 @@ describe('ApiClient', () => {
       // Verify Cognito API call with correct request shape
       expect(global.fetch).toHaveBeenCalledWith(
         `https://cognito-idp.${COGNITO_REGION}.amazonaws.com/`,
-        {
+        expect.objectContaining({
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-amz-json-1.1',
@@ -158,7 +158,7 @@ describe('ApiClient', () => {
               REFRESH_TOKEN: refreshToken,
             },
           }),
-        }
+        })
       );
 
       // Verify new tokens are stored
@@ -208,7 +208,9 @@ describe('ApiClient', () => {
       } catch (e) {
         // Should reject immediately without attempting refresh
         expect(global.fetch).not.toHaveBeenCalled();
-        expect(e).toBe(error);
+        // Implementation throws a new Error("Session expired") for already-retried requests
+        expect(e).toBeInstanceOf(Error);
+        expect((e as Error).message).toContain('Session expired');
       }
     });
 

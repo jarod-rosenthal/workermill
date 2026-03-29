@@ -21,6 +21,9 @@ describe('SsoAuthManager', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockCrypto.randomUUID.mockReturnValue('test-uuid-123');
+    // Mock PKCE methods — needed by signInWithProvider before any fetch call
+    mockCrypto.getRandomBytesAsync.mockResolvedValue(new Uint8Array(64));
+    mockCrypto.digestStringAsync.mockResolvedValue('dGVzdC1jb2RlLWNoYWxsZW5nZQ==');
   });
 
   describe('getSsoConfig', () => {
@@ -88,7 +91,7 @@ describe('SsoAuthManager', () => {
 
         mockWebBrowser.openAuthSessionAsync.mockResolvedValueOnce({
           type: 'success',
-          url: 'workermill://auth/callback?code=test-code',
+          url: 'workermill://auth/callback?code=test-code&state=mobile_test-uuid-123',
         } as any);
 
         const result = await signInWithProvider('GitHub', mockSsoConfig);
@@ -96,23 +99,28 @@ describe('SsoAuthManager', () => {
         // Verify authorize URL request
         expect(mockFetch).toHaveBeenNthCalledWith(1, `${API_BASE_URL}/auth/github/authorize`);
 
-        // Verify browser opened with mobile-prefixed state
+        // Verify browser opened with mobile-prefixed state and PKCE code challenge
         expect(mockWebBrowser.openAuthSessionAsync).toHaveBeenCalledWith(
-          'https://github.com/login/oauth/authorize?state=mobile_test-uuid-123',
+          expect.stringContaining('state=mobile_test-uuid-123'),
+          'workermill://auth/callback'
+        );
+        expect(mockWebBrowser.openAuthSessionAsync).toHaveBeenCalledWith(
+          expect.stringContaining('code_challenge='),
           'workermill://auth/callback'
         );
 
-        // Verify token exchange used GitHub callback endpoint
-        expect(mockFetch).toHaveBeenNthCalledWith(2, `${API_BASE_URL}/auth/github/callback`, {
+        // Verify token exchange used GitHub callback endpoint with codeVerifier
+        expect(mockFetch).toHaveBeenNthCalledWith(2, `${API_BASE_URL}/auth/github/callback`, expect.objectContaining({
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            code: 'test-code',
-            redirectUri: 'https://workermill.com/auth/github/callback',
-          }),
-        });
+        }));
+        // Body should include code, codeVerifier, and redirectUri
+        const callBody = JSON.parse((mockFetch.mock.calls[1][1] as any).body);
+        expect(callBody.code).toBe('test-code');
+        expect(callBody.codeVerifier).toBeDefined();
+        expect(callBody.redirectUri).toBe('https://workermill.com/auth/github/callback');
 
         expect(result.success).toBe(true);
         expect(result.data?.accessToken).toBe('test-access-token');
@@ -132,28 +140,32 @@ describe('SsoAuthManager', () => {
 
         mockWebBrowser.openAuthSessionAsync.mockResolvedValueOnce({
           type: 'success',
-          url: 'workermill://auth/callback?code=test-code',
+          url: 'workermill://auth/callback?code=test-code&state=mobile_test-uuid-123',
         } as any);
 
         const result = await signInWithProvider('Google', mockSsoConfig);
 
-        // Verify browser opened with correct Cognito URL
-        expect(mockWebBrowser.openAuthSessionAsync).toHaveBeenCalledWith(
-          'https://auth.example.com/oauth2/authorize?identity_provider=Google&client_id=test-client-id&response_type=code&scope=openid+email+profile&redirect_uri=https%3A%2F%2Fworkermill.com%2Fauth%2Fcallback&state=mobile_test-uuid-123',
-          'workermill://auth/callback'
-        );
+        // Verify browser opened with correct Cognito URL including PKCE challenge
+        const openCall = mockWebBrowser.openAuthSessionAsync.mock.calls[0];
+        const authorizeUrl = openCall[0] as string;
+        expect(authorizeUrl).toContain('identity_provider=Google');
+        expect(authorizeUrl).toContain('client_id=test-client-id');
+        expect(authorizeUrl).toContain('state=mobile_test-uuid-123');
+        expect(authorizeUrl).toContain('code_challenge=');
+        expect(authorizeUrl).toContain('code_challenge_method=S256');
+        expect(openCall[1]).toBe('workermill://auth/callback');
 
-        // Verify token exchange used SSO callback endpoint
-        expect(mockFetch).toHaveBeenCalledWith(`${API_BASE_URL}/auth/sso-callback`, {
+        // Verify token exchange used SSO callback endpoint with codeVerifier
+        expect(mockFetch).toHaveBeenCalledWith(`${API_BASE_URL}/auth/sso-callback`, expect.objectContaining({
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            code: 'test-code',
-            redirectUri: 'https://workermill.com/auth/callback',
-          }),
-        });
+        }));
+        const googleBody = JSON.parse((mockFetch.mock.calls[0][1] as any).body);
+        expect(googleBody.code).toBe('test-code');
+        expect(googleBody.codeVerifier).toBeDefined();
+        expect(googleBody.redirectUri).toBe('https://workermill.com/auth/callback');
 
         expect(result.success).toBe(true);
       });
@@ -175,7 +187,7 @@ describe('SsoAuthManager', () => {
       it('handles missing authorization code', async () => {
         mockWebBrowser.openAuthSessionAsync.mockResolvedValueOnce({
           type: 'success',
-          url: 'workermill://auth/callback?error=access_denied',
+          url: 'workermill://auth/callback?error=access_denied&state=mobile_test-uuid-123',
         } as any);
 
         const result = await signInWithProvider('Google', mockSsoConfig);
@@ -187,7 +199,7 @@ describe('SsoAuthManager', () => {
       it('handles token exchange failure', async () => {
         mockWebBrowser.openAuthSessionAsync.mockResolvedValueOnce({
           type: 'success',
-          url: 'workermill://auth/callback?code=test-code',
+          url: 'workermill://auth/callback?code=test-code&state=mobile_test-uuid-123',
         } as any);
 
         mockFetch.mockResolvedValueOnce({

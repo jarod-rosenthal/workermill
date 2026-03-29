@@ -294,13 +294,13 @@ export class SsoAuthManager {
   }
 }
 
-// Export convenience functions for common usage patterns
-export const getSsoConfig = SsoAuthManager.getSsoConfig;
-export const signInWithProvider = SsoAuthManager.signInWithProvider;
-export const signInWithGitHub = SsoAuthManager.signInWithGitHub;
-export const signInWithGoogle = SsoAuthManager.signInWithGoogle;
-export const signInWithMicrosoft = SsoAuthManager.signInWithMicrosoft;
-export const signInWithApple = SsoAuthManager.signInWithApple;
+// Export convenience functions — bind methods that use `this` to call other static methods
+export const getSsoConfig = SsoAuthManager.getSsoConfig.bind(SsoAuthManager);
+export const signInWithProvider = SsoAuthManager.signInWithProvider.bind(SsoAuthManager);
+export const signInWithGitHub = SsoAuthManager.signInWithGitHub.bind(SsoAuthManager);
+export const signInWithGoogle = SsoAuthManager.signInWithGoogle.bind(SsoAuthManager);
+export const signInWithMicrosoft = SsoAuthManager.signInWithMicrosoft.bind(SsoAuthManager);
+export const signInWithApple = SsoAuthManager.signInWithApple.bind(SsoAuthManager);
 export const getProviderDisplayName = SsoAuthManager.getProviderDisplayName;
 export const getProviderIconName = SsoAuthManager.getProviderIconName;
 export const isProviderAvailable = SsoAuthManager.isProviderAvailable;

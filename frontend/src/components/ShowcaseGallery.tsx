@@ -131,6 +131,7 @@ const showcaseProjects: ShowcaseProject[] = [
     duration: "~18 hrs",
     linesOfCode: "177,000",
     liveUrl: "https://oncallshift.com",
+    repoUrl: "https://github.com/jarod-rosenthal/oncallshift",
     category: "incident-management",
     icon: <Zap className="w-4 h-4" />,
   },
@@ -179,7 +180,7 @@ export default function ShowcaseGallery() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            122K lines of production code across 5 projects, deployed to
+            317K lines of production code across 6 projects, deployed to
             Vercel and Railway. Every project built from tickets — planned,
             coded, tested, reviewed, and deployed autonomously.
           </p>
@@ -190,7 +191,7 @@ export default function ShowcaseGallery() {
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <FileCode className="w-4 h-4 text-amber-400" />
-              <span className="text-2xl font-bold text-white">122K</span>
+              <span className="text-2xl font-bold text-white">317K</span>
             </div>
             <p className="text-xs text-slate-400">
               Lines of production code
@@ -199,7 +200,7 @@ export default function ShowcaseGallery() {
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <CheckCircle className="w-4 h-4 text-emerald-400" />
-              <span className="text-2xl font-bold text-white">145</span>
+              <span className="text-2xl font-bold text-white">169</span>
             </div>
             <p className="text-xs text-slate-400">Stories completed</p>
           </div>
@@ -213,7 +214,7 @@ export default function ShowcaseGallery() {
           <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 text-center">
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <TrendingUp className="w-4 h-4 text-emerald-400" />
-              <span className="text-2xl font-bold text-white">5</span>
+              <span className="text-2xl font-bold text-white">6</span>
             </div>
             <p className="text-xs text-slate-400">Projects shipped</p>
           </div>
@@ -300,14 +301,10 @@ export default function ShowcaseGallery() {
                       )}
                     </>
                   );
-                  return project.id !== "oncallshift" ? (
+                  return (
                     <Link to={`/showcase/${project.id}`} className="block px-5 pt-5 pb-3">
                       {cardBody}
                     </Link>
-                  ) : (
-                    <div className="px-5 pt-5 pb-3">
-                      {cardBody}
-                    </div>
                   );
                 })()}
 
@@ -335,15 +332,13 @@ export default function ShowcaseGallery() {
                       View repo
                     </a>
                   )}
-                  {project.id !== "oncallshift" && (
-                    <Link
+                  <Link
                       to={`/showcase/${project.id}`}
                       className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 transition-colors text-foreground"
                     >
                       <Layers className="w-3 h-3" />
                       Build log
                     </Link>
-                  )}
                 </div>
               </div>
             ),

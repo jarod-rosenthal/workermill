@@ -199,7 +199,7 @@ npm install -g workermill
 wm doctor
 ```
 
-**Requirements:** Node.js 20+ and an LLM provider (Ollama for local, or an API key).
+**Requirements:** Node.js 20+, Git, and an LLM provider (Ollama for local, or an API key). [GitHub CLI](https://cli.github.com/) (`gh`) is optional but needed for automatic PR creation.
 
 [Full CLI documentation →](cli/README.md)
 

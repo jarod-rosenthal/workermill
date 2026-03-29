@@ -4,7 +4,7 @@ AI coding agent with multi-expert orchestration. Works with any LLM provider.
 
 The lightweight, zero-setup version of [WorkerMill](https://workermill.com) — the open-source orchestration platform for AI coding agents. Same multi-expert engine, directly in your terminal. No server, no Docker, no account.
 
-Works with **Ollama** (fully local), **Anthropic**, **OpenAI**, **Google**.
+Works with **Ollama** (fully local), **Anthropic**, **OpenAI**, **Google**, **LM Studio**, and any OpenAI-compatible provider — Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, or your own endpoint.
 
 ## Quick Start
 
@@ -49,14 +49,14 @@ workermill --provider anthropic --model claude-sonnet-4-6
 # Cap output tokens
 workermill --max-tokens 4096
 
-# Then use /build inside the CLI for multi-expert orchestration
-# /build spec.md
-# /build REST API with auth, React dashboard, Docker
+# Then use /ship inside the CLI for multi-expert orchestration
+# /ship spec.md
+# /ship REST API with auth, React dashboard, Docker
 ```
 
 ## Features
 
-- **Multi-expert orchestration** — `/build` decomposes tasks into stories, each assigned to a specialist persona
+- **Multi-expert orchestration** — `/ship` decomposes tasks into stories, each assigned to a specialist persona
 - **Role-based model routing** — Different models for workers, planner, and reviewer (e.g., Ollama for workers, Gemini for planning, Claude for review)
 - **13 built-in tools** — bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, sub_agent
 - **WORKERMILL.md** — Project instructions file read by all agents. Also supports CLAUDE.md, .cursorrules
@@ -76,14 +76,14 @@ workermill --max-tokens 4096
 
 | Command | Description |
 |---------|-------------|
-| `/build <task>` | Multi-expert orchestration — plans, executes, reviews |
+| `/ship <task>` | Multi-expert orchestration — plans, executes, reviews (alias: `/build`) |
 | `/as <persona> <task>` | Run a task with a specific expert (e.g. `/as security_engineer review auth`) |
-| `/retry` | Re-run the last build task |
+| `/retry` | Re-run the last ship task |
 | `/personas` | List all available experts, view/create custom personas |
 | `/init` | Generate `WORKERMILL.md` for this project |
 | `/settings` | View/change settings (review, ollama, etc.) |
 | `/permissions` | Manage tool permissions (trust/ask/allow/deny) |
-| `/undo` | Revert last build's changes (git stash or reset) |
+| `/undo` | Revert last ship's changes (git stash or reset) |
 | `/diff` | Preview uncommitted changes |
 | `/model` | Show or switch model (`/model provider/model`) |
 | `/plan` | Toggle read-only plan mode |
@@ -108,7 +108,7 @@ workermill --max-tokens 4096
 
 ## Multi-Expert Orchestration
 
-`/build` triggers multi-expert mode:
+`/ship` triggers multi-expert mode (alias: `/build`):
 
 1. **Plans** — Explores the codebase, designs stories as scope labels with dependencies and persona assignments. Workers receive the full original spec — the planner scopes, not rewrites.
 2. **Executes** — Each story assigned to a specialist persona. Workers see `## Ticket Requirements — THIS IS YOUR SPEC` with your full task, plus their file scope.
@@ -186,7 +186,7 @@ Change settings at runtime with `/settings`:
 | Max revisions | 3 | `/settings review.maxRevisions <n>` |
 | Auto-revise | false | `/settings review.autoRevise true/false` |
 
-## 12 Expert Personas
+## 11 Expert Personas
 
 | Persona | Role |
 |---------|------|
@@ -201,7 +201,6 @@ Change settings at runtime with `/settings`:
 | `tech_writer` | Documentation and API docs |
 | `tech_lead` | Code review (used automatically) |
 | `planner` | Task decomposition (used automatically) |
-| `critic` | Plan quality review (used automatically) |
 
 Use `/personas` to list all available personas. Use `/as <persona> <task>` to run a task with a specific expert.
 
@@ -210,7 +209,9 @@ Custom personas: add `.workermill/personas/my_persona.md` to your project or `~/
 ## Requirements
 
 - Node.js 20+
+- Git
 - An LLM provider (Ollama for local, or an API key for cloud providers)
+- [GitHub CLI](https://cli.github.com/) (`gh`) — optional, needed for automatic PR creation
 
 ## License
 

@@ -373,7 +373,7 @@ export default function CLI() {
 
       {/* Personas */}
       <section className="space-y-4">
-        <h2 className="text-2xl font-semibold">13 Built-in Personas</h2>
+        <h2 className="text-2xl font-semibold">11 Built-in Personas</h2>
         <div className="flex flex-wrap gap-2">
           {[
             { name: "Backend Developer", emoji: "\u{1F4BB}" },
@@ -419,7 +419,9 @@ export default function CLI() {
         <h2 className="text-2xl font-semibold">Requirements</h2>
         <ul className="list-disc list-inside space-y-1 text-muted-foreground">
           <li>Node.js 20+</li>
+          <li>Git</li>
           <li>An LLM provider (Ollama for local, or an API key for cloud providers)</li>
+          <li><a href="https://cli.github.com/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">GitHub CLI</a> (<code className="px-1 bg-muted rounded text-xs">gh</code>) — optional, needed for automatic PR creation</li>
         </ul>
       </section>
     </div>

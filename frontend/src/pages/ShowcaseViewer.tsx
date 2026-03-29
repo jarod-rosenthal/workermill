@@ -28,6 +28,7 @@ import { taskPulseEpics, taskPulsePrd } from "../data/taskpulse-showcase-data";
 import { calMillEpics, calMillPrd } from "../data/calmill-showcase-data";
 import { shipApiEpics, shipApiPrd } from "../data/shipapi-showcase-data";
 import { flagDeckEpics, flagDeckPrd } from "../data/flagdeck-showcase-data";
+import { onCallShiftEpics } from "../data/oncallshift-showcase-data";
 
 interface QualityScores {
   lint: string;
@@ -224,15 +225,16 @@ const showcaseData: Record<string, ShowcaseDetail> = {
     id: "oncallshift",
     name: "OnCallShift",
     tagline:
-      "Production incident management platform — 177K lines across 3 repos, built entirely by WorkerMill.",
+      "Production incident management platform — 195K lines, built entirely by WorkerMill.",
     description:
-      "Production incident management platform: on-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens across oncallshift-api, oncallshift-web, and oncallshift-mobile. Deployed to AWS at oncallshift.com. Built during early WorkerMill development — build logs predate the current showcase system.",
+      "Production incident management platform: on-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 60+ database models, 35+ API routes, 60 frontend pages, 32 mobile screens, MCP server, and Terraform provider. 195K lines of TypeScript and Go across 573 files. Deployed to AWS at oncallshift.com.",
     stack: "Express + TypeScript + React + React Native + Terraform",
     storyCount: 24,
     cost: "$1,206",
     duration: "~18 hrs",
-    linesOfCode: "177,000",
+    linesOfCode: "195,000",
     liveUrl: "https://oncallshift.com",
+    repoUrl: "https://github.com/jarod-rosenthal/oncallshift",
     category: "incident-management",
     personasUsed: [
       "backend_developer",
@@ -291,7 +293,7 @@ export default function ShowcaseViewer() {
   const isShipApi = projectId === "shipapi";
   const isFlagDeck = projectId === "flagdeck";
   const isEpicBoard =
-    isTeamBoard || isTaskPulse || isCalMill || isShipApi || isFlagDeck;
+    isTeamBoard || isTaskPulse || isCalMill || isShipApi || isFlagDeck || isOnCallShift;
   const epicBoardData = isTeamBoard
     ? teamBoardEpics
     : isCalMill
@@ -300,7 +302,9 @@ export default function ShowcaseViewer() {
         ? shipApiEpics
         : isFlagDeck
           ? flagDeckEpics
-          : taskPulseEpics;
+          : isOnCallShift
+            ? onCallShiftEpics
+            : taskPulseEpics;
   const [expandedEpic, setExpandedEpic] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Record<string, "spec" | "log">>(
     {},
@@ -514,7 +518,7 @@ export default function ShowcaseViewer() {
                     {prdExpanded && (
                       <div className="border-t border-border/30 p-4 max-h-[700px] overflow-y-auto">
                         <div className="prose prose-sm prose-invert max-w-none prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground prose-code:text-primary prose-code:bg-muted/50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-muted/30 prose-pre:border prose-pre:border-border/30 prose-a:text-primary prose-li:text-muted-foreground prose-table:text-muted-foreground prose-th:text-foreground prose-td:text-muted-foreground prose-hr:border-border/30 prose-blockquote:text-muted-foreground prose-blockquote:border-border/50">
-                          <ReactMarkdown>{isTeamBoard ? teamBoardPrd : isCalMill ? calMillPrd : isTaskPulse ? taskPulsePrd : isShipApi ? shipApiPrd : flagDeckPrd}</ReactMarkdown>
+                          <ReactMarkdown>{isTeamBoard ? teamBoardPrd : isCalMill ? calMillPrd : isTaskPulse ? taskPulsePrd : isShipApi ? shipApiPrd : isOnCallShift ? "" : flagDeckPrd}</ReactMarkdown>
                         </div>
                       </div>
                     )}

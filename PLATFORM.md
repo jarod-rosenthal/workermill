@@ -4,7 +4,7 @@ The full WorkerMill platform adds a web dashboard, API server, Kanban boards, Ji
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=sa0lug-G-cg">
-    <img src="https://img.youtube.com/vi/sa0lug-G-cg/maxresdefault.jpg" alt="Watch WorkerMill in Action" width="100%" />
+    <img src=".github/assets/platform-preview.jpg" alt="Watch WorkerMill in Action" width="100%" />
   </a>
 </p>
 

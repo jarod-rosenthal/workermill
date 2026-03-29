@@ -354,8 +354,11 @@ function InstallSection() {
           Runs on macOS, Linux, and Windows &mdash; works with{" "}
           <a href="https://ollama.com" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors underline underline-offset-2">Ollama</a>{" (local), "}
           <a href="https://www.anthropic.com" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors underline underline-offset-2">Anthropic</a>{", "}
-          <a href="https://openai.com" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors underline underline-offset-2">OpenAI</a>{", and "}
-          <a href="https://ai.google.dev" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors underline underline-offset-2">Google</a>
+          <a href="https://openai.com" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors underline underline-offset-2">OpenAI</a>{", "}
+          <a href="https://ai.google.dev" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors underline underline-offset-2">Google</a>{", "}
+          <a href="https://lmstudio.ai" target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors underline underline-offset-2">LM Studio</a>
+          {", and any OpenAI-compatible provider — "}
+          Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, or your own endpoint.
         </p>
       </div>
     </section>

@@ -107,23 +107,57 @@ describe("commands", () => {
   });
 
   describe("handleCommand('cost')", () => {
-    it("does not throw", async () => {
+    it("outputs the cost tracker summary", async () => {
       const ctx = createTestContext();
-      await expect(handleCommand("/cost", ctx)).resolves.toBeUndefined();
+      vi.spyOn(ctx.costTracker, "getSummary").mockReturnValue("Total: $1.23 (500 tokens)");
+      await handleCommand("/cost", ctx);
+      expect(ctx.costTracker.getSummary).toHaveBeenCalled();
+      const logCalls = (console.log as any).mock.calls.flat().join(" ");
+      expect(logCalls).toContain("Total: $1.23 (500 tokens)");
     });
   });
 
   describe("handleCommand('status')", () => {
-    it("does not throw", async () => {
+    it("outputs message count, token count, cost, and mode", async () => {
       const ctx = createTestContext();
-      await expect(handleCommand("/status", ctx)).resolves.toBeUndefined();
+      ctx.session.messages = [
+        { role: "user", content: "hello", timestamp: new Date().toISOString() },
+        { role: "assistant", content: "hi", timestamp: new Date().toISOString() },
+        { role: "user", content: "bye", timestamp: new Date().toISOString() },
+      ];
+      ctx.session.totalTokens = 1500;
+      vi.spyOn(ctx.costTracker, "getTotalCost").mockReturnValue(0.42);
+      await handleCommand("/status", ctx);
+      const logCalls = (console.log as any).mock.calls.flat().join(" ");
+      expect(logCalls).toContain("3");       // message count
+      expect(logCalls).toContain("1,500");   // token count formatted
+      expect(logCalls).toContain("$0.42");   // cost
+      expect(logCalls).toContain("normal");  // mode
+    });
+
+    it("shows plan mode when active", async () => {
+      const ctx = createTestContext({ planMode: true });
+      await handleCommand("/status", ctx);
+      const logCalls = (console.log as any).mock.calls.flat().join(" ");
+      expect(logCalls).toContain("PLAN");
     });
   });
 
   describe("handleCommand('help')", () => {
-    it("does not throw", async () => {
+    it("outputs all available commands", async () => {
       const ctx = createTestContext();
-      await expect(handleCommand("/help", ctx)).resolves.toBeUndefined();
+      await handleCommand("/help", ctx);
+      const logCalls = (console.log as any).mock.calls.flat().join(" ");
+      expect(logCalls).toContain("/help");
+      expect(logCalls).toContain("/clear");
+      expect(logCalls).toContain("/compact");
+      expect(logCalls).toContain("/status");
+      expect(logCalls).toContain("/model");
+      expect(logCalls).toContain("/cost");
+      expect(logCalls).toContain("/git");
+      expect(logCalls).toContain("/sessions");
+      expect(logCalls).toContain("/plan");
+      expect(logCalls).toContain("/quit");
     });
   });
 
@@ -140,16 +174,22 @@ describe("commands", () => {
   });
 
   describe("unknown command", () => {
-    it("does not throw", async () => {
+    it("shows unknown command message with the command name", async () => {
       const ctx = createTestContext();
-      await expect(handleCommand("/nonexistent", ctx)).resolves.toBeUndefined();
+      await handleCommand("/nonexistent", ctx);
+      const logCalls = (console.log as any).mock.calls.flat().join(" ");
+      expect(logCalls).toContain("Unknown command");
+      expect(logCalls).toContain("nonexistent");
     });
   });
 
   describe("handleCommand('model')", () => {
-    it("does not throw", async () => {
+    it("outputs the current provider and model name", async () => {
       const ctx = createTestContext();
-      await expect(handleCommand("/model", ctx)).resolves.toBeUndefined();
+      await handleCommand("/model", ctx);
+      const logCalls = (console.log as any).mock.calls.flat().join(" ");
+      expect(logCalls).toContain("ollama");
+      expect(logCalls).toContain("test-model");
     });
   });
 
@@ -317,6 +357,90 @@ describe("commands", () => {
       await handleCommand("/exit", ctx);
       expect(exitSpy).toHaveBeenCalledWith(0);
       exitSpy.mockRestore();
+    });
+  });
+
+  describe("handleCommand('editor')", () => {
+    it("opens editor and processes the content", async () => {
+      const processInput = vi.fn();
+      const ctx = createTestContext({ processInput });
+
+      // Mock execSync to simulate editor writing content to temp file
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        // The editor command includes the temp file path — extract it and write content
+        const match = String(cmd).match(/\s(\/tmp\/workermill-\d+\.md)$/);
+        if (match) {
+          const fs = require("fs");
+          fs.writeFileSync(match[1], "Fix the login bug");
+        }
+        return "" as any;
+      });
+
+      await handleCommand("/editor", ctx);
+      expect(processInput).toHaveBeenCalledWith("Fix the login bug");
+    });
+
+    it("cancels when editor produces empty content", async () => {
+      const processInput = vi.fn();
+      const ctx = createTestContext({ processInput });
+
+      // Editor leaves file empty
+      vi.mocked(execSync).mockImplementation(() => "" as any);
+
+      await handleCommand("/editor", ctx);
+      expect(processInput).not.toHaveBeenCalled();
+      const logCalls = (console.log as any).mock.calls.flat().join(" ");
+      expect(logCalls).toContain("Empty input");
+    });
+
+    it("handles editor failure gracefully", async () => {
+      const ctx = createTestContext();
+      vi.mocked(execSync).mockImplementation(() => { throw new Error("editor crashed"); });
+
+      await handleCommand("/editor", ctx);
+      const logCalls = (console.log as any).mock.calls.flat().join(" ");
+      expect(logCalls).toContain("Editor failed");
+    });
+  });
+
+  describe("handleCommand('clear') — saves session", () => {
+    it("saves the session after clearing", async () => {
+      const { saveSession } = await import("../session.js");
+      const ctx = createTestContext();
+      ctx.session.messages = [
+        { role: "user", content: "hello", timestamp: new Date().toISOString() },
+      ];
+
+      await handleCommand("/clear", ctx);
+      expect(ctx.session.messages).toEqual([]);
+      expect(saveSession).toHaveBeenCalledWith(ctx.session);
+    });
+  });
+
+  describe("handleCommand('sessions') — no saved sessions", () => {
+    it("shows 'no saved sessions' message", async () => {
+      vi.mocked(listSessions).mockReturnValue([]);
+      const ctx = createTestContext();
+      await handleCommand("/sessions", ctx);
+      const logCalls = (console.log as any).mock.calls.flat().join(" ");
+      expect(logCalls).toContain("No saved sessions");
+    });
+  });
+
+  describe("handleCommand('git') — truncates long status", () => {
+    it("shows at most 15 changed files", async () => {
+      const lines = Array.from({ length: 20 }, (_, i) => `M file${i}.ts`).join("\n");
+      vi.mocked(execSync)
+        .mockReturnValueOnce(lines)
+        .mockReturnValueOnce("main\n");
+
+      const ctx = createTestContext();
+      await handleCommand("/git", ctx);
+
+      // console.log called with file lines — should have at most 15 file entries
+      const logCalls = (console.log as any).mock.calls.flat().join("\n");
+      const fileLines = logCalls.split("\n").filter((l: string) => l.includes("file") && l.includes(".ts"));
+      expect(fileLines.length).toBeLessThanOrEqual(15);
     });
   });
 });

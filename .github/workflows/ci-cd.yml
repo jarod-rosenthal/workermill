@@ -253,10 +253,8 @@ jobs:
     name: API Integration Tests
     runs-on: [self-hosted, linux, x64, ecs]
     needs: [api-ci]
-    # Run on push to main (catch regressions) or manual trigger
-    if: >-
-      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'workflow_dispatch' && inputs.run_integration == true)
+    # Manual trigger only — self-hosted runner must be online
+    if: github.event_name == 'workflow_dispatch' && inputs.run_integration == true
     steps:
       - uses: actions/checkout@v6
 

@@ -122,14 +122,14 @@ const showcaseProjects: ShowcaseProject[] = [
     id: "oncallshift",
     name: "OnCallShift",
     tagline:
-      "Production incident management across 3 repos — API, web, and mobile — built entirely by WorkerMill.",
+      "Production incident management platform — 195K lines of TypeScript, built entirely by WorkerMill.",
     description:
-      "177K lines across 3 repositories. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens, Terraform infrastructure. 24 epics executed sequentially across oncallshift-api, oncallshift-web, and oncallshift-mobile. Deployed to AWS at oncallshift.com.",
+      "195K lines in a single monorepo. 60+ database models, 35+ API routes, 60 frontend pages, 32 mobile screens, MCP server, and Terraform provider. 24 epics executed sequentially. Deployed to AWS at oncallshift.com.",
     stack: "Express + TypeScript + React + React Native + Terraform",
     storyCount: 24,
     cost: "$1,206",
     duration: "~18 hrs",
-    linesOfCode: "177,000",
+    linesOfCode: "195,000",
     liveUrl: "https://oncallshift.com",
     repoUrl: "https://github.com/jarod-rosenthal/oncallshift",
     category: "incident-management",

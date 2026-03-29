@@ -1,16 +1,13 @@
 <p align="center">
   <h1 align="center">WorkerMill</h1>
+  <p align="center">Multi-expert AI coding agent. Different models plan, build, and review — so bad code gets caught, not shipped.</p>
 </p>
 
 <p align="center">
-  AI-generated code has 1.7x more major issues than human-written code.<br/>
-  The industry's answer: add guardrails around a single model.<br/>
-  WorkerMill takes a different approach — separate the roles, use different models, and make them check each other's work.
-</p>
-
-<p align="center">
-  <em>This README covers the <strong>WorkerMill CLI</strong> — the fastest way to get started.<br/>
-  WorkerMill is also a <a href="PLATFORM.md">full platform</a> with a web dashboard, VS Code extension, Kanban boards, and managed infrastructure.</em>
+  <a href="https://www.npmjs.com/package/workermill"><img src="https://img.shields.io/npm/v/workermill?color=blue" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/workermill"><img src="https://img.shields.io/npm/dw/workermill?color=blue" alt="npm downloads"></a>
+  <a href="https://github.com/jarod-rosenthal/workermill/stargazers"><img src="https://img.shields.io/github/stars/jarod-rosenthal/workermill?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/jarod-rosenthal/workermill/blob/main/LICENSE"><img src="https://img.shields.io/github/license/jarod-rosenthal/workermill?color=blue" alt="License"></a>
 </p>
 
 <h3 align="center">
@@ -22,76 +19,20 @@
 </h3>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/workermill"><img src="https://img.shields.io/npm/v/workermill?color=blue" alt="npm version"></a>
-  <a href="https://www.npmjs.com/package/workermill"><img src="https://img.shields.io/npm/dw/workermill?color=blue" alt="npm downloads"></a>
-  <a href="https://github.com/jarod-rosenthal/workermill/stargazers"><img src="https://img.shields.io/github/stars/jarod-rosenthal/workermill?style=social" alt="GitHub stars"></a>
-  <a href="https://github.com/jarod-rosenthal/workermill/blob/main/LICENSE"><img src="https://img.shields.io/github/license/jarod-rosenthal/workermill?color=blue" alt="License"></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/jarod-rosenthal/workermill/actions/workflows/semgrep.yml"><img src="https://github.com/jarod-rosenthal/workermill/actions/workflows/semgrep.yml/badge.svg" alt="Semgrep"></a>
-  <a href="https://github.com/jarod-rosenthal/workermill/actions/workflows/gitleaks.yml"><img src="https://github.com/jarod-rosenthal/workermill/actions/workflows/gitleaks.yml/badge.svg" alt="Gitleaks"></a>
-  <a href="https://github.com/jarod-rosenthal/workermill/actions/workflows/trivy.yml"><img src="https://github.com/jarod-rosenthal/workermill/actions/workflows/trivy.yml/badge.svg" alt="Trivy"></a>
-  <a href="https://github.com/jarod-rosenthal/workermill/actions/workflows/npm-audit.yml"><img src="https://github.com/jarod-rosenthal/workermill/actions/workflows/npm-audit.yml/badge.svg" alt="npm audit"></a>
-  <a href="https://github.com/jarod-rosenthal/workermill/security/dependabot"><img src="https://img.shields.io/badge/dependabot-enabled-brightgreen?logo=dependabot" alt="Dependabot"></a>
-</p>
-
-<p align="center">
   <a href="https://www.youtube.com/watch?v=3V_GdFAPm7o">
-    <img src="https://img.youtube.com/vi/3V_GdFAPm7o/maxresdefault.jpg" alt="WorkerMill Demo" width="100%" />
+    <img src=".github/assets/demo-preview.jpg" alt="WorkerMill Demo" width="100%" />
   </a>
 </p>
 
-## The Problem Isn't the Model. It's the Architecture.
+## Get Started
 
-Every major AI coding tool — Cursor, Claude Code, Codex, Kiro, Aider — runs one model
-doing everything: reading the codebase, planning the work, writing the code, and judging
-its own output. When that model hallucinates a package, loses context across files, or
-makes inconsistent decisions between the backend and frontend, nothing catches it.
-
-The industry response has been to add guardrails — sandboxing, permission prompts,
-confirmation dialogs. Those help prevent destructive commands, but they don't fix the
-code quality problem. A model that writes bad code and reviews its own bad code will
-approve its own bad code, regardless of how many "are you sure?" prompts you put in front of it.
-
-## What WorkerMill Does Differently
-
-WorkerMill separates planning, execution, and review into governed roles — and lets you
-assign a different model to each one:
-
-1. **A planner** reads your codebase and decomposes the task into tight, scoped tickets.
-   No vague instructions. Each worker gets a precise assignment with specific files and
-   clear acceptance criteria. This is the "no garbage in" gate — a flagship model does the
-   thinking so workers don't have to improvise.
-
-2. **Specialist workers** execute one ticket at a time. A backend expert builds the API.
-   A frontend expert wires the UI. They don't context-switch between 15 files. They don't
-   make architectural decisions. They follow the plan.
-
-3. **A reviewer** reads the actual diffs against your original spec. Different model,
-   different provider, different blind spots. It rejects bad work with specific feedback.
-   Failed stories re-run with the reviewer's notes until the code meets the standard.
-
-The revision loop is the key mechanism. A cheap model writing code to a tight spec,
-reviewed by a strong model that catches mistakes and demands fixes, converges on quality
-that neither model produces alone.
-
-You pay flagship prices for judgment (2 API calls), not for every line of code (200 tool
-calls). Run workers on Ollama for free while the planner and reviewer hold the quality bar.
-
-```json
-{
-  "providers": {
-    "ollama": { "model": "qwen3-coder:30b" },
-    "anthropic": { "model": "claude-sonnet-4-6", "apiKey": "{env:ANTHROPIC_API_KEY}" }
-  },
-  "default": "ollama",
-  "routing": {
-    "planner": "anthropic",
-    "tech_lead": "anthropic"
-  }
-}
+```bash
+npx workermill
 ```
+
+No server. No Docker. No account. First run walks you through setup in 60 seconds.
+
+Works with **Ollama** (fully local), **Anthropic**, **OpenAI**, **Google**, **LM Studio**, and [any OpenAI-compatible provider](#ai-provider-support) — Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, or your own endpoint.
 
 ## Here's What Happens
 
@@ -129,17 +70,29 @@ $ npx workermill
 
 Two specialists worked sequentially, each scoped to their own files. A tech lead reviewed the actual diffs — not just the output, but whether it matched your spec. 16 files, committed to a branch, ready for PR. You approve or reject at every step.
 
-**That's the difference.** Every other AI coding tool is one agent trying to do everything. WorkerMill gives you a team.
+## How It Works
 
-## Get Started
+> One model doing everything writes bad code and approves its own bad code. WorkerMill separates planning, execution, and review into governed roles — and lets you assign a different model to each one.
 
-```bash
-npx workermill
+1. **A planner** reads your codebase and decomposes the task into tight, scoped tickets with specific files and clear acceptance criteria.
+2. **Specialist workers** execute one ticket at a time. A backend expert builds the API. A frontend expert wires the UI. They follow the plan.
+3. **A reviewer** reads the actual diffs against your original spec. Different model, different provider, different blind spots. It rejects bad work with specific feedback until the code meets the standard.
+
+You pay flagship prices for judgment (2 API calls), not for every line of code (200 tool calls). Run workers on Ollama for free while the planner and reviewer hold the quality bar.
+
+```json
+{
+  "providers": {
+    "ollama": { "model": "qwen3-coder:30b" },
+    "anthropic": { "model": "claude-sonnet-4-6", "apiKey": "{env:ANTHROPIC_API_KEY}" }
+  },
+  "default": "ollama",
+  "routing": {
+    "planner": "anthropic",
+    "tech_lead": "anthropic"
+  }
+}
 ```
-
-No server. No Docker. No account. First run walks you through setup in 60 seconds.
-
-Works with **Ollama** (fully local), **Anthropic**, **OpenAI**, **Google**, **LM Studio**, and [any OpenAI-compatible provider](#ai-provider-support) — Groq, DeepSeek, Mistral, OpenRouter, Together AI, xAI, or your own endpoint.
 
 ## How `/ship` Works
 
@@ -254,6 +207,8 @@ wm doctor
 
 ## Beyond the CLI: WorkerMill Platform
 
+<em>This README covers the <strong>WorkerMill CLI</strong> — the fastest way to get started. WorkerMill is also a full platform with a web dashboard, VS Code extension, Kanban boards, and managed infrastructure.</em>
+
 The CLI runs the same engine that powers the full WorkerMill platform. When you outgrow the terminal, everything scales up:
 
 - **Web Dashboard** — manage epics, monitor workers, view coordination feeds in real time
@@ -265,6 +220,16 @@ The CLI runs the same engine that powers the full WorkerMill platform. When you 
 Same experts. Same review pipeline. Same quality gates. Just more surface area.
 
 **[WorkerMill Platform →](PLATFORM.md)** — setup, architecture, contributing, and deployment.
+
+## Security
+
+<p>
+  <a href="https://github.com/jarod-rosenthal/workermill/actions/workflows/semgrep.yml"><img src="https://github.com/jarod-rosenthal/workermill/actions/workflows/semgrep.yml/badge.svg" alt="Semgrep"></a>
+  <a href="https://github.com/jarod-rosenthal/workermill/actions/workflows/gitleaks.yml"><img src="https://github.com/jarod-rosenthal/workermill/actions/workflows/gitleaks.yml/badge.svg" alt="Gitleaks"></a>
+  <a href="https://github.com/jarod-rosenthal/workermill/actions/workflows/trivy.yml"><img src="https://github.com/jarod-rosenthal/workermill/actions/workflows/trivy.yml/badge.svg" alt="Trivy"></a>
+  <a href="https://github.com/jarod-rosenthal/workermill/actions/workflows/npm-audit.yml"><img src="https://github.com/jarod-rosenthal/workermill/actions/workflows/npm-audit.yml/badge.svg" alt="npm audit"></a>
+  <a href="https://github.com/jarod-rosenthal/workermill/security/dependabot"><img src="https://img.shields.io/badge/dependabot-enabled-brightgreen?logo=dependabot" alt="Dependabot"></a>
+</p>
 
 ## License
 

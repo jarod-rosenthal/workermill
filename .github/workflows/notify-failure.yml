@@ -22,13 +22,14 @@ jobs:
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          REPO: ${{ github.repository }}
         run: |
-          WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
           LABEL="ci-failure"
 
           # Search for existing open issue with this workflow name and label
           EXISTING=$(gh issue list \
-            --repo "${{ github.repository }}" \
+            --repo "$REPO" \
             --label "$LABEL" \
             --state open \
             --search "\"${WORKFLOW_NAME}\" in:title" \
@@ -46,29 +47,30 @@ jobs:
       - name: Create or update issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+          EXISTING_ISSUE: ${{ steps.check.outputs.existing_issue }}
         run: |
-          WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
-          RUN_URL="${{ github.event.workflow_run.html_url }}"
-          RUN_ID="${{ github.event.workflow_run.id }}"
-          SHA="${{ github.event.workflow_run.head_sha }}"
           SHORT_SHA="${SHA:0:7}"
-          BRANCH="${{ github.event.workflow_run.head_branch }}"
           LABEL="ci-failure"
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
 
           # Ensure label exists
           gh label create "$LABEL" \
-            --repo "${{ github.repository }}" \
+            --repo "$REPO" \
             --color "d73a4a" \
             --description "Automated: GitHub Actions workflow failure" \
             --force 2>/dev/null || true
 
-          EXISTING="${{ steps.check.outputs.existing_issue }}"
-
-          if [ -n "$EXISTING" ]; then
+          if [ -n "$EXISTING_ISSUE" ]; then
             # Add comment to existing issue
-            gh issue comment "$EXISTING" \
-              --repo "${{ github.repository }}" \
+            gh issue comment "$EXISTING_ISSUE" \
+              --repo "$REPO" \
               --body "$(cat <<EOF
           ### Still failing — ${TIMESTAMP}
 
@@ -79,11 +81,11 @@ jobs:
           | **Branch** | \`${BRANCH}\` |
           EOF
           )"
-            echo "Updated existing issue #${EXISTING}"
+            echo "Updated existing issue #${EXISTING_ISSUE}"
           else
             # Create new issue
             gh issue create \
-              --repo "${{ github.repository }}" \
+              --repo "$REPO" \
               --label "$LABEL" \
               --title "🔴 ${WORKFLOW_NAME} is failing on ${BRANCH}" \
               --body "$(cat <<EOF
@@ -92,7 +94,7 @@ jobs:
           | | |
           |---|---|
           | **Run** | [#${RUN_ID}](${RUN_URL}) |
-          | **Commit** | [\`${SHORT_SHA}\`](https://github.com/${{ github.repository }}/commit/${SHA}) |
+          | **Commit** | [\`${SHORT_SHA}\`](https://github.com/${REPO}/commit/${SHA}) |
           | **Branch** | \`${BRANCH}\` |
           | **Detected** | ${TIMESTAMP} |
 
@@ -103,7 +105,7 @@ jobs:
           3. Close this issue when the workflow passes again
 
           ---
-          *Auto-created by [notify-failure](${{ github.server_url }}/${{ github.repository }}/actions/workflows/notify-failure.yml) workflow*
+          *Auto-created by [notify-failure](${SERVER_URL}/${REPO}/actions/workflows/notify-failure.yml) workflow*
           EOF
           )"
             echo "Created new issue"

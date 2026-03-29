@@ -36,6 +36,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 env:
   AWS_REGION: us-east-1
   ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}

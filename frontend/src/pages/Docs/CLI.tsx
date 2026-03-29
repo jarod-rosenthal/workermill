@@ -157,7 +157,8 @@ export default function CLI() {
               <li>Reads the git diff from the feature branch, plus uses tools (read_file, grep, glob) to inspect specific files</li>
               <li>Identifies which stories need revision and provides <strong className="text-foreground">per-story feedback</strong> — only affected stories re-run</li>
               <li>On revision rounds, sees <strong className="text-foreground">what changed since the last review</strong> — evaluates progress, not the full codebase from scratch</li>
-              <li>Score of 7+ auto-approves — cosmetic issues go in feedback comments, not revision requests</li>
+              <li>Configurable approval threshold (default 8/10) — scores at or above auto-approve, cosmetic issues go in feedback comments, not revision requests</li>
+              <li>Configurable max revision rounds (default 3) — prevents infinite review loops</li>
               <li>Breaks deadlocks — if the same issue persists across rounds, accepts best effort instead of looping forever</li>
             </ul>
           </div>

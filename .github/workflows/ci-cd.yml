@@ -125,8 +125,12 @@ jobs:
           cache: 'npm'
           cache-dependency-path: agent/package-lock.json
 
-      - name: Install dependencies
+      - name: Install agent dependencies
         working-directory: agent
+        run: npm ci
+
+      - name: Install API dependencies (agent imports ../api/src/)
+        working-directory: api
         run: npm ci
 
       - name: Type Check

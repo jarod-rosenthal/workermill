@@ -1,0 +1,110 @@
+name: Notify on Workflow Failure
+
+on:
+  workflow_run:
+    workflows:
+      - "CI/CD Pipeline"
+      - "Docker Images"
+      - "CI"
+      - "Agent Release"
+      - "VS Code Extension Release"
+    types:
+      - completed
+
+jobs:
+  create-issue:
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Check for existing open issue
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
+          LABEL="ci-failure"
+
+          # Search for existing open issue with this workflow name and label
+          EXISTING=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "$LABEL" \
+            --state open \
+            --search "\"${WORKFLOW_NAME}\" in:title" \
+            --json number,title \
+            --jq '.[0].number // empty')
+
+          if [ -n "$EXISTING" ]; then
+            echo "existing_issue=$EXISTING" >> "$GITHUB_OUTPUT"
+            echo "Found existing issue #${EXISTING}"
+          else
+            echo "existing_issue=" >> "$GITHUB_OUTPUT"
+            echo "No existing issue found"
+          fi
+
+      - name: Create or update issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
+          RUN_URL="${{ github.event.workflow_run.html_url }}"
+          RUN_ID="${{ github.event.workflow_run.id }}"
+          SHA="${{ github.event.workflow_run.head_sha }}"
+          SHORT_SHA="${SHA:0:7}"
+          BRANCH="${{ github.event.workflow_run.head_branch }}"
+          LABEL="ci-failure"
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+
+          # Ensure label exists
+          gh label create "$LABEL" \
+            --repo "${{ github.repository }}" \
+            --color "d73a4a" \
+            --description "Automated: GitHub Actions workflow failure" \
+            --force 2>/dev/null || true
+
+          EXISTING="${{ steps.check.outputs.existing_issue }}"
+
+          if [ -n "$EXISTING" ]; then
+            # Add comment to existing issue
+            gh issue comment "$EXISTING" \
+              --repo "${{ github.repository }}" \
+              --body "$(cat <<EOF
+          ### Still failing — ${TIMESTAMP}
+
+          | | |
+          |---|---|
+          | **Run** | [#${RUN_ID}](${RUN_URL}) |
+          | **Commit** | \`${SHORT_SHA}\` |
+          | **Branch** | \`${BRANCH}\` |
+          EOF
+          )"
+            echo "Updated existing issue #${EXISTING}"
+          else
+            # Create new issue
+            gh issue create \
+              --repo "${{ github.repository }}" \
+              --label "$LABEL" \
+              --title "🔴 ${WORKFLOW_NAME} is failing on ${BRANCH}" \
+              --body "$(cat <<EOF
+          ## ${WORKFLOW_NAME} failed
+
+          | | |
+          |---|---|
+          | **Run** | [#${RUN_ID}](${RUN_URL}) |
+          | **Commit** | [\`${SHORT_SHA}\`](https://github.com/${{ github.repository }}/commit/${SHA}) |
+          | **Branch** | \`${BRANCH}\` |
+          | **Detected** | ${TIMESTAMP} |
+
+          ### Next steps
+
+          1. Check the [workflow run](${RUN_URL}) for details
+          2. Fix the failing step(s)
+          3. Close this issue when the workflow passes again
+
+          ---
+          *Auto-created by [notify-failure](${{ github.server_url }}/${{ github.repository }}/actions/workflows/notify-failure.yml) workflow*
+          EOF
+          )"
+            echo "Created new issue"
+          fi

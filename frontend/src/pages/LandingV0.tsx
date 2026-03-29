@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { Lock, Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock, Github, Star, ExternalLink, Download, Layers } from "lucide-react";
+import { Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock, Github, Star, ExternalLink, Download, Layers } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";

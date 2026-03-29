@@ -103,7 +103,7 @@ export async function handleCommand(
         console.log(chalk.dim(`\n  Branch: `) + chalk.white(branch));
         if (status.trim()) {
           console.log(chalk.dim("  Changes:"));
-          for (const line of status.trim().split("\n").slice(0, 15)) {
+          for (const line of status.trim().split("\n")) {
             console.log(chalk.dim(`    ${line}`));
           }
         } else {

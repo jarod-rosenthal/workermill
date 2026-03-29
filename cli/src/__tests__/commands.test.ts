@@ -427,8 +427,8 @@ describe("commands", () => {
     });
   });
 
-  describe("handleCommand('git') — truncates long status", () => {
-    it("shows at most 15 changed files", async () => {
+  describe("handleCommand('git') — shows all changed files", () => {
+    it("displays all changed files without truncation", async () => {
       const lines = Array.from({ length: 20 }, (_, i) => `M file${i}.ts`).join("\n");
       vi.mocked(execSync)
         .mockReturnValueOnce(lines)
@@ -437,10 +437,11 @@ describe("commands", () => {
       const ctx = createTestContext();
       await handleCommand("/git", ctx);
 
-      // console.log called with file lines — should have at most 15 file entries
       const logCalls = (console.log as any).mock.calls.flat().join("\n");
-      const fileLines = logCalls.split("\n").filter((l: string) => l.includes("file") && l.includes(".ts"));
-      expect(fileLines.length).toBeLessThanOrEqual(15);
+      // All 20 files should be visible — no truncation
+      for (let i = 0; i < 20; i++) {
+        expect(logCalls).toContain(`file${i}.ts`);
+      }
     });
   });
 });

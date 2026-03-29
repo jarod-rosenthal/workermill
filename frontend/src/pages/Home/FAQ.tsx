@@ -10,7 +10,7 @@ const faqItems: FAQItem[] = [
   {
     question: "How does pricing work?",
     answer:
-      "WorkerMill is open source and free to run locally — you bring your own API keys and run the full platform on your own infrastructure. Cloud-hosted services with managed infrastructure and team features are coming soon. For enterprise needs including SSO, compliance, and dedicated support, contact us at sales@workermill.com.",
+      "WorkerMill is open source and free to self-host. You bring your own API keys and run the full platform on your own infrastructure.",
   },
   {
     question: "What is Epic Mode and why is it the default?",
@@ -20,7 +20,7 @@ const faqItems: FAQItem[] = [
   {
     question: "What is BYOK (Bring Your Own Keys)?",
     answer:
-      "BYOK means you provide your own API keys for AI providers like Anthropic, OpenAI, Google, or self-hosted Ollama. You pay those providers directly at their rates, and WorkerMill only charges for orchestration (compute hours). This gives you full control over AI costs and lets you use self-hosted models at zero AI cost. Planning and review features work with all supported providers.",
+      "BYOK means you provide your own API keys for AI providers like Anthropic, OpenAI, Google, or self-hosted Ollama. You pay those providers directly at their rates. This gives you full control over AI costs and lets you use self-hosted models at zero AI cost. Planning and review features work with all supported providers.",
   },
   {
     question: "What does a task look like?",

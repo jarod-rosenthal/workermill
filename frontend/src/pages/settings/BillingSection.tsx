@@ -1,13 +1,11 @@
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
-  ChevronRight,
   DollarSign,
   Loader2,
   RefreshCw,
   RotateCcw,
   Save,
-  Sparkles,
   Zap,
 } from "lucide-react";
 import type { Settings, ValidationErrors } from "./types";
@@ -301,34 +299,6 @@ export function BillingSection({
                   </p>
                 )}
               </div>
-            </div>
-          </div>
-
-          {/* Upgrade Prompt */}
-          <div className="border border-border/50 rounded-xl p-6 bg-gradient-to-r from-purple-500/5 to-pink-500/5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-                  <Sparkles className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-foreground">
-                    {(!organization?.plan || organization.plan === "pro") ? "Upgrade to Max" : "Need More Capacity?"}
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    {(!organization?.plan || organization.plan === "pro")
-                      ? "Upgrade to Max for 3x parallel workers, cloud execution, and team features"
-                      : "View all plans and upgrade options"}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={handleOpenBillingPortal}
-                className="px-4 py-2 border border-primary text-primary rounded-lg hover:bg-primary/10 inline-flex items-center gap-2 font-medium text-sm"
-              >
-                {(!organization?.plan || organization.plan === "pro") ? "Upgrade to Max" : "Manage Plan"}
-                <ChevronRight className="w-4 h-4" />
-              </button>
             </div>
           </div>
 

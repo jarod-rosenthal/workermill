@@ -38,25 +38,25 @@ export function TrialBanner() {
     bgColor = "bg-red-500/10";
     iconColor = "text-red-500";
     textColor = "text-red-400";
-    message = "Your Pro trial has expired";
+    message = "Your trial period has expired";
   } else if (daysRemaining <= 3) {
     borderColor = "border-red-500/30";
     bgColor = "bg-red-500/10";
     iconColor = "text-red-500";
     textColor = "text-red-400";
-    message = `Your Pro trial ends in ${daysRemaining} day${daysRemaining !== 1 ? "s" : ""}!`;
+    message = `Your trial period ends in ${daysRemaining} day${daysRemaining !== 1 ? "s" : ""}!`;
   } else if (daysRemaining <= 7) {
     borderColor = "border-amber-500/30";
     bgColor = "bg-amber-500/10";
     iconColor = "text-amber-500";
     textColor = "text-amber-400";
-    message = `Your Pro trial ends in ${daysRemaining} days`;
+    message = `Your trial period ends in ${daysRemaining} days`;
   } else {
     borderColor = "border-blue-500/30";
     bgColor = "bg-blue-500/10";
     iconColor = "text-blue-500";
     textColor = "text-blue-400";
-    message = `Your Pro trial ends in ${daysRemaining} days`;
+    message = `Your trial period ends in ${daysRemaining} days`;
   }
 
   return (

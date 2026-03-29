@@ -102,7 +102,7 @@ function SubscriptionVisual() {
             <div className="text-sm font-medium">Self-Hosted</div>
             <div className="text-xs text-muted-foreground">Run locally with your own API keys</div>
           </div>
-          <span className="text-lg font-bold text-green-500">Free</span>
+          <span className="text-sm font-medium text-green-500">Available</span>
         </div>
         <div className="flex items-center justify-between p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
           <div>
@@ -110,13 +110,6 @@ function SubscriptionVisual() {
             <div className="text-xs text-muted-foreground">Managed infrastructure, team features</div>
           </div>
           <span className="text-sm font-medium text-blue-500">Coming Soon</span>
-        </div>
-        <div className="flex items-center justify-between p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
-          <div>
-            <div className="text-sm font-medium">Enterprise</div>
-            <div className="text-xs text-muted-foreground">SSO, compliance, dedicated support</div>
-          </div>
-          <span className="text-sm font-medium text-purple-500">Coming Soon</span>
         </div>
       </div>
     </div>

@@ -27,11 +27,11 @@ const newProjectSteps = [
     number: "03",
     icon: Monitor,
     title: "Choose How",
-    description: "Free local mode or paid cloud execution",
+    description: "Local execution or managed cloud infrastructure",
     details: [
-      "Free: Your machine + your Anthropic account ($0)",
-      "Pro: 5 concurrent workers + cloud",
-      "BYOK or cloud — zero AI markup",
+      "Local: Your machine + your own API keys",
+      "Cloud: Managed infrastructure via the WorkerMill platform",
+      "BYOK: bring your own API keys, zero markup",
     ],
   },
   {

@@ -155,15 +155,10 @@ export default function Terms() {
               <section id="billing" className="scroll-mt-24">
                 <h2 className="text-2xl font-bold text-foreground mb-4">4. Billing & Payment</h2>
 
-                <h3 className="text-lg font-semibold text-foreground mb-2">Subscription Plans</h3>
+                <h3 className="text-lg font-semibold text-foreground mb-2">Service Tiers</h3>
                 <p className="text-muted-foreground leading-relaxed mb-4">
-                  WorkerMill offers the following subscription plans:
+                  Service tiers and pricing, if applicable, are described on the WorkerMill website and may change from time to time. Self-hosted deployments are free and open source — you are responsible only for the costs of your own infrastructure and API keys.
                 </p>
-                <ul className="list-disc list-inside text-muted-foreground space-y-2 mb-4">
-                  <li><strong>Free:</strong> $0/month - 1 concurrent worker, local + BYOK execution only</li>
-                  <li><strong>Pro:</strong> $29/month - 5 concurrent workers, cloud execution, warm pool, advanced analytics</li>
-                  <li><strong>Enterprise:</strong> Custom pricing - Unlimited everything, SSO/SAML, compliance, dedicated support</li>
-                </ul>
 
                 <h3 className="text-lg font-semibold text-foreground mb-2">Payment Processing</h3>
                 <p className="text-muted-foreground leading-relaxed mb-4">

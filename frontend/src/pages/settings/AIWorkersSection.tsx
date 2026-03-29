@@ -5,7 +5,6 @@ import {
   ChevronRight,
   Code,
   Cpu,
-  Crown,
   Database,
   Loader2,
   Lock,
@@ -31,15 +30,6 @@ interface AIWorkersSectionProps {
   getExecutionSummary: () => string;
   getRoutingSummary: () => string;
   orgPlan?: string;
-}
-
-function MaxBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 rounded-full border border-amber-500/30">
-      <Crown className="w-3 h-3" />
-      Max
-    </span>
-  );
 }
 
 function LockedOverlay() {
@@ -131,50 +121,8 @@ export function AIWorkersSection({
             defaultOpen={false}
           >
             <div className="space-y-6">
-              {isProPlan ? (
-                <>
-                  {/* Pro tier: Anthropic only, no provider picker */}
-                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary/5 border border-primary/20">
-                    <span className="text-2xl">🤖</span>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Provider: Anthropic</p>
-                      <p className="text-xs text-muted-foreground">Pro plan uses Anthropic models. <Link to="/pricing" className="text-primary hover:underline">Upgrade to Max</Link> for more providers.</p>
-                    </div>
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="block text-sm font-medium text-muted-foreground mb-2">Default Model</label>
-                      <select
-                        value={settings.defaultWorkerModel}
-                        onChange={(e) => updateSetting("defaultWorkerModel", e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
-                      >
-                        {(MODEL_OPTIONS.anthropic || []).map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label} ({option.tier})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-muted-foreground mb-2">Default Persona</label>
-                      <select
-                        value={settings.defaultWorkerPersona}
-                        onChange={(e) => updateSetting("defaultWorkerPersona", e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
-                      >
-                        {PERSONA_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {/* Pro/Enterprise: full provider picker */}
+              <>
+                  {/* Full provider picker */}
                   <div>
                     <label className="block text-sm font-medium text-muted-foreground mb-3">
                       Primary Provider
@@ -233,8 +181,7 @@ export function AIWorkersSection({
                       </select>
                     </div>
                   </div>
-                </>
-              )}
+              </>
             </div>
           </CollapsibleSection>
 
@@ -247,33 +194,7 @@ export function AIWorkersSection({
             summary={getManagerSummary()}
           >
             <div className="space-y-6">
-              {isProPlan ? (
-                <>
-                  {/* Pro tier: Anthropic only */}
-                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-indigo-500/5 border border-indigo-500/20">
-                    <span className="text-2xl">🤖</span>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Provider: Anthropic</p>
-                      <p className="text-xs text-muted-foreground">Pro plan uses Anthropic models. <Link to="/pricing" className="text-primary hover:underline">Upgrade to Max</Link> for more providers.</p>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
-                    <select
-                      value={settings.managerModelId}
-                      onChange={(e) => updateSetting("managerModelId", e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-indigo-500/50 focus:outline-none transition-all"
-                    >
-                      {(MODEL_OPTIONS.anthropic || []).map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label} ({option.tier})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-muted-foreground mb-2">Provider</label>
                     <div className="grid grid-cols-2 gap-2">
@@ -314,7 +235,6 @@ export function AIWorkersSection({
                     </select>
                   </div>
                 </div>
-              )}
               {/* Max Review Revisions (Circuit Breaker) */}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-2">
@@ -384,16 +304,7 @@ export function AIWorkersSection({
               {/* Full Build (PRD) Planning Mode Toggle */}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-3">Full Build Planning Mode</label>
-                {isProPlan ? (
-                  <div className="p-3 rounded-lg border-2 border-purple-500 bg-purple-500/10 text-left">
-                    <div className="text-sm font-medium text-foreground">Simplified</div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Single planning pass for full builds.{" "}
-                      <Link to="/pricing" className="text-primary hover:underline">Upgrade to Max</Link> for more planning modes.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => updateSetting("prdPlanningMode", "strict")}
                       className={`p-3 rounded-lg border-2 transition-all text-left ${
@@ -421,11 +332,10 @@ export function AIWorkersSection({
                       </p>
                     </button>
                   </div>
-                )}
               </div>
 
               {/* Critic Approval Threshold */}
-              {!isProPlan && (settings.prdPlanningMode === "strict" || settings.planningMode === "strict") && (
+              {(settings.prdPlanningMode === "strict" || settings.planningMode === "strict") && (
                 <div>
                   <label className="block text-sm font-medium text-muted-foreground mb-2">Critic Approval Threshold</label>
                   <div className="flex items-center gap-3">
@@ -447,33 +357,7 @@ export function AIWorkersSection({
                 </div>
               )}
 
-              {isProPlan ? (
-                <>
-                  {/* Pro tier: Anthropic only */}
-                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-purple-500/5 border border-purple-500/20">
-                    <span className="text-2xl">🤖</span>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Provider: Anthropic</p>
-                      <p className="text-xs text-muted-foreground">Pro plan uses Anthropic models. <Link to="/pricing" className="text-primary hover:underline">Upgrade to Max</Link> for more providers.</p>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
-                    <select
-                      value={settings.planningAgentModel}
-                      onChange={(e) => updateSetting("planningAgentModel", e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none transition-all"
-                    >
-                      {(MODEL_OPTIONS.anthropic || []).map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label} ({option.tier})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-muted-foreground mb-2">Provider</label>
                     <div className="grid grid-cols-2 gap-2">
@@ -514,7 +398,6 @@ export function AIWorkersSection({
                     </select>
                   </div>
                 </div>
-              )}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-2">
                   Max Files Per Story
@@ -730,7 +613,7 @@ export function AIWorkersSection({
           <div className="relative">
             {isProPlan && <LockedOverlay />}
             <CollapsibleSection
-              title={<>Warm Container Pool {isProPlan && <MaxBadge />}</>}
+              title="Warm Container Pool"
               icon={<Zap className="w-4 h-4" />}
               iconBgColor="bg-amber-500/20"
               iconColor="text-amber-500"
@@ -843,7 +726,7 @@ export function AIWorkersSection({
           <div className="relative">
             {isProPlan && <LockedOverlay />}
             <CollapsibleSection
-              title={<>Provider Routing {isProPlan && <MaxBadge />}</>}
+              title="Provider Routing"
               icon={<Router className="w-4 h-4" />}
               iconBgColor="bg-orange-500/20"
               iconColor="text-orange-500"
@@ -970,7 +853,7 @@ export function AIWorkersSection({
           <div className="relative">
             {isProPlan && <LockedOverlay />}
           <CollapsibleSection
-            title={<>Memory & Learning {isProPlan && <MaxBadge />}</>}
+            title="Memory & Learning"
             icon={<Brain className="w-4 h-4" />}
             iconBgColor="bg-violet-500/20"
             iconColor="text-violet-500"
@@ -1013,7 +896,6 @@ export function AIWorkersSection({
                     <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
                       <Code className="w-4 h-4 text-violet-500" />
                       Codebase Indexing
-                      {isProPlan && <MaxBadge />}
                     </h4>
                     <p className="text-xs text-muted-foreground mt-1">
                       Enable semantic search across your repository code for context-aware AI assistance

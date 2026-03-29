@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Crown, ExternalLink, FileText, Lock, Rocket, Sparkles } from "lucide-react";
+import { ExternalLink, FileText, Lock, Rocket, Sparkles } from "lucide-react";
 import type { Settings, ValidationErrors } from "./types";
 
 interface QualitySectionProps {
@@ -7,15 +7,6 @@ interface QualitySectionProps {
   updateSetting: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
   validationErrors: ValidationErrors;
   orgPlan?: string;
-}
-
-function MaxBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 rounded-full border border-amber-500/30">
-      <Crown className="w-3 h-3" />
-      Max
-    </span>
-  );
 }
 
 function LockedOverlay() {
@@ -95,8 +86,8 @@ export function QualitySection({
       {/* Quality Gates */}
       <div className="flex items-center gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-foreground mb-1 flex items-center gap-2">
-            Quality Gates {isProPlan && <MaxBadge />}
+          <h2 className="text-xl font-semibold text-foreground mb-1">
+            Quality Gates
           </h2>
           <p className="text-sm text-muted-foreground">
             Configure quality thresholds to enforce standards before PRs are created
@@ -427,9 +418,6 @@ export function QualitySection({
                 <div>
                   <span className="text-sm text-foreground">
                     Self-Review
-                    {isProPlan && (
-                      <span className="ml-2"><MaxBadge /></span>
-                    )}
                   </span>
                   <p className="text-xs text-muted-foreground">Extra review pass per story before merging (adds latency + cost)</p>
                 </div>

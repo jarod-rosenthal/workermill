@@ -1,6 +1,5 @@
 import {
   CheckCircle,
-  Crown,
   Github,
   Kanban,
   Loader2,
@@ -59,15 +58,6 @@ interface IntegrationsSectionProps {
   setOllamaSlideOpen: (open: boolean) => void;
   setWorkermillSlideOpen: (open: boolean) => void;
   fetchMcpApiKeys: () => void;
-}
-
-function MaxBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 rounded-full border border-amber-500/30">
-      <Crown className="w-3 h-3" />
-      Max
-    </span>
-  );
 }
 
 function LockedOverlay() {
@@ -379,7 +369,6 @@ export function IntegrationsSection({
             <div className="flex-1">
               <div className="flex items-center gap-2">
                 <h3 className="font-semibold text-foreground">Linear</h3>
-                {isProPlan && <MaxBadge />}
                 {settings?.issueTrackerProvider === "linear" && (
                   <span className="px-2 py-0.5 text-xs font-medium bg-indigo-500/10 text-indigo-500 rounded-full">
                     Default
@@ -584,7 +573,6 @@ export function IntegrationsSection({
         <div className="flex items-center gap-2 mb-1">
           <h3 className="text-lg font-semibold text-foreground">Cloud Providers</h3>
           <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground rounded">Optional</span>
-          {isProPlan && <MaxBadge />}
         </div>
         <p className="text-sm text-muted-foreground mb-4">Configure cloud credentials for worker deployment</p>
 

@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">WorkerMill</h1>
-  <p align="center">Multi-expert AI coding agent. Different models plan, build, and review — so bad code gets caught, not shipped.</p>
+  <p align="center">Multi-expert AI coding team. Different models plan, build, and review — so bad code gets caught, not shipped.</p>
 </p>
 
 <p align="center">

@@ -108,3 +108,6 @@ swebench_predictions.jsonl
 .nuxt
 .output
 .svelte-kit
+
+# Scratch scripts
+scripts/*.py

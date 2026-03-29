@@ -222,7 +222,7 @@ export function extractLabelsFromSubject(subject: string): string[] {
   const labels: string[] = [];
 
   // Match [label1, label2, ...] format
-  const bracketMatch = subject.match(/\[([^\]]+)\]/g);
+  const bracketMatch = subject.match(/\[([^\]]{1,200})\]/g);
   if (bracketMatch) {
     for (const match of bracketMatch) {
       // Remove brackets and split by comma or space

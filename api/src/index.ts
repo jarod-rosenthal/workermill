@@ -241,7 +241,14 @@ if (process.env.NODE_ENV !== "production") {
     "/api/docs",
     (req: express.Request, res: express.Response, next: express.NextFunction) => {
       helmet({
-        contentSecurityPolicy: false,
+        contentSecurityPolicy: {
+          directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", "data:", "https://validator.swagger.io"],
+          },
+        },
       })(req, res, next);
     },
     swaggerUi.serve,

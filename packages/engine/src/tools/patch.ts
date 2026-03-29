@@ -66,14 +66,14 @@ function parsePatch(patchText: string): FilePatch[] {
       continue;
     }
 
-    const oldFile = lines[i].replace(/^--- (a\/)?/, "").replace(/\t.*$/, "");
+    const oldFile = lines[i].replace(/^--- (a\/)?/, "").replace(/\t[^\n]*$/, "");
     i++;
 
     if (i >= lines.length || !lines[i].startsWith("+++ ")) {
       continue;
     }
 
-    const newFile = lines[i].replace(/^\+\+\+ (b\/)?/, "").replace(/\t.*$/, "");
+    const newFile = lines[i].replace(/^\+\+\+ (b\/)?/, "").replace(/\t[^\n]*$/, "");
     i++;
 
     const isNew = oldFile === "/dev/null";

@@ -314,7 +314,7 @@ router.post(
 
       // Clean subject for summary (remove label brackets)
       const cleanSubject =
-        subject.replace(/\[[^\]]*\]/g, "").trim() ||
+        subject.replace(/\[[^\]]{0,200}\]/g, "").trim() ||
         "Task from email";
 
       // Epic mode is now the DEFAULT (standard workflow deprecated)

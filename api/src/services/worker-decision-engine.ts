@@ -515,7 +515,7 @@ function extractAffectedFiles(errorMessage: string): string[] {
 
   // File paths with line numbers (e.g., "src/index.ts:10:5")
   const filePathWithLinePattern =
-    /([a-zA-Z0-9_\-./]+\.(ts|tsx|js|jsx|json|css|scss|vue|svelte)):\d+/g;
+    /([a-zA-Z0-9_\-./]{1,500}\.(ts|tsx|js|jsx|json|css|scss|vue|svelte)):\d+/g;
   let match;
   while ((match = filePathWithLinePattern.exec(errorMessage)) !== null) {
     files.add(match[1]);
@@ -570,7 +570,7 @@ function extractSpecificError(
     );
     if (failLine) return failLine.trim();
     const expectLine = lines.find((l) =>
-      /Expected.*to|expect\(.*\)/i.test(l),
+      /Expected[^\n]*?to|expect\([^\n)]*\)/i.test(l),
     );
     if (expectLine) return expectLine.trim();
   }
@@ -882,10 +882,10 @@ export function parseReviewOutcome(
 
   // ── Parse feedback ──────────────────────────────────────────────────────
   const structuredFeedbackMatch = output.match(
-    /::feedback::(.+?)(?=\n|$)/i,
+    /::feedback::([^\n]+)/i,
   );
   const textFeedbackMatch = output.match(
-    /FEEDBACK:\s*([\s\S]*?)(?=\n\s*(?:REVIEW_DECISION:|CODE_QUALITY_SCORE:)|$)/i,
+    /FEEDBACK:\s*([^\n](?:[^\n]|\n(?!\s*(?:REVIEW_DECISION:|CODE_QUALITY_SCORE:)))*)/i,
   );
   const feedback =
     structuredFeedbackMatch?.[1]?.trim() ||

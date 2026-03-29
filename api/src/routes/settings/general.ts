@@ -894,7 +894,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         org.emailFromAddress = null;
       } else {
         // Basic email validation
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const emailRegex = /^[^\s@]{1,64}@[^\s@]{1,255}$/;
         if (!emailRegex.test(emailFromAddress)) {
           res.status(400).json({ error: "emailFromAddress must be a valid email address" });
           return;

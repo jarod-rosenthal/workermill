@@ -218,7 +218,11 @@ export class DecisionClient {
     orgApiKey: string;
     logger?: (message: string, type?: string) => void;
   }) {
-    this.apiBaseUrl = config.apiBaseUrl.replace(/\/+$/, "");
+    let baseUrl = config.apiBaseUrl;
+    while (baseUrl.endsWith("/")) {
+      baseUrl = baseUrl.slice(0, -1);
+    }
+    this.apiBaseUrl = baseUrl;
     this.orgApiKey = config.orgApiKey;
     this.log = config.logger ?? ((msg: string) => console.log(msg));
 

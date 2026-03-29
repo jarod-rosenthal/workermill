@@ -88,7 +88,7 @@ export function parseLogForError(
   }
 
   // TypeScript errors: "error TS2307: Cannot find module" or "src/file.ts(42,5): error TS..."
-  const tsMatch = msg.match(/(?:(.+?)\((\d+),\d+\):\s*)?error\s+TS(\d+):\s*(.+)/i);
+  const tsMatch = msg.match(/(?:([^\n]+?)\((\d+),\d+\):\s*)?error\s+TS(\d+):\s*([^\n]+)/i);
   if (tsMatch) {
     return {
       type: "error",
@@ -100,7 +100,7 @@ export function parseLogForError(
   }
 
   // ESLint errors
-  const eslintMatch = msg.match(/(.+?):(\d+):\d+\s*-?\s*error[:\s]+(.+)/i);
+  const eslintMatch = msg.match(/([^\n:]+):(\d+):\d+\s*-?\s*error[:\s]+([^\n]+)/i);
   if (eslintMatch && !msg.includes("TS")) {
     return {
       type: "error",
@@ -122,7 +122,7 @@ export function parseLogForError(
   }
 
   // Test failures
-  if (/FAIL\s+\S+\.test\.|Test.*failed|\u2717.*test/i.test(msg)) {
+  if (/FAIL\s+\S+\.test\.|Test[^\n]*failed|\u2717[^\n]*test/i.test(msg)) {
     return { type: "error", category: "Test", message: msg };
   }
 

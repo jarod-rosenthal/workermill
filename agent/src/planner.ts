@@ -826,7 +826,7 @@ async function cloneTargetRepo(
   try {
     const cloneUrl = buildCloneUrl(repo, token, scmProvider, bitbucketUsername);
     // Log repo (redact token) so we can debug clone failures
-    const safeUrl = cloneUrl.replace(/\/\/[^@]+@/, "//***@");
+    const safeUrl = cloneUrl.replace(/\/\/[^@\s]+@/, "//***@");
     console.log(
       `${ts()} ${taskLabel} ${chalk.dim(`Cloning repo for planner: ${safeUrl}`)}`,
     );

@@ -23,7 +23,7 @@ const FORBIDDEN_PATTERNS = [
   /\bexec\s*\(/gi,
   /process\.env\.[A-Z_]+\s*=/gi, // Setting env vars
   /require\s*\(\s*['"`]child_process['"`]\s*\)/gi,
-  /import\s+.*from\s+['"`]child_process['"`]/gi,
+  /import\s+[^\n]*from\s+['"`]child_process['"`]/gi,
 ];
 
 /**

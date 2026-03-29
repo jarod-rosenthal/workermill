@@ -14,19 +14,15 @@ interface CTAFooterProps {
 
 export function CTAFooter({
   headline = "Ready to accelerate your engineering team?",
-  subtext = "Join the waitlist. We're onboarding teams weekly.",
-  ctaText = "Request Early Access",
+  subtext = "Open source. Run locally or in the cloud.",
+  ctaText = "View on GitHub",
   onCTAClick,
 }: CTAFooterProps) {
   const handleClick = () => {
     if (onCTAClick) {
       onCTAClick();
     } else {
-      // Default behavior: scroll to waitlist form or open modal
-      const waitlistElement = document.querySelector("#waitlist");
-      if (waitlistElement) {
-        waitlistElement.scrollIntoView({ behavior: "smooth" });
-      }
+      window.open("https://github.com/jarod-rosenthal/workermill", "_blank");
     }
   };
 
@@ -68,7 +64,7 @@ export function CTAFooter({
 
           {/* Trust indicator */}
           <p className="mt-6 text-sm text-muted-foreground">
-            Free during early access. Join teams shipping faster with AI.
+            Free and open source. Apache 2.0 license.
           </p>
         </div>
       </div>

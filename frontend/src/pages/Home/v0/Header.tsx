@@ -83,20 +83,18 @@ export function Header() {
 
         {/* Actions */}
         <div className="flex items-center gap-3">
-          <Link
-            to="/login"
-            className="hidden sm:inline-flex text-sm font-medium text-slate-400 hover:text-white transition-colors px-3 py-2"
+          <a
+            href="https://github.com/jarod-rosenthal/workermill"
+            target="_blank"
+            rel="noopener noreferrer"
           >
-            Sign in
-          </Link>
-          <Link to="/signup">
             <Button
               size="sm"
               className="bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-400 hover:to-teal-500 text-white rounded-lg px-4 h-9 text-sm font-medium shadow-lg shadow-teal-500/20 border-0"
             >
-              Join the Waitlist
+              GitHub
             </Button>
-          </Link>
+          </a>
           {/* Mobile menu toggle */}
           <button
             className="lg:hidden p-2 text-slate-400 hover:text-white transition-colors"
@@ -145,13 +143,6 @@ export function Header() {
                 </Link>
               ),
             )}
-            <Link
-              to="/login"
-              onClick={() => setMobileMenuOpen(false)}
-              className="px-3 py-2.5 text-sm font-medium text-slate-400 hover:text-white transition-colors rounded-md hover:bg-white/5 sm:hidden"
-            >
-              Sign in
-            </Link>
           </div>
         </nav>
       )}

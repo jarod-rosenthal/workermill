@@ -11,7 +11,7 @@ import { requireCurrentTos } from "../middleware/tos.js";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask } from "../models/WorkerTask.js";
 import { logger } from "../utils/logger.js";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -38,9 +38,9 @@ interface QualityMetrics {
   securityLow: number;
 }
 
-function exec(cmd: string, cwd?: string): { stdout: string; stderr: string; exitCode: number } {
+function exec(cmd: string, args: string[], cwd?: string): { stdout: string; stderr: string; exitCode: number } {
   try {
-    const stdout = execSync(cmd, {
+    const stdout = execFileSync(cmd, args, {
       cwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -104,16 +104,16 @@ function analyzeRepo(repoPath: string): QualityMetrics {
 
   for (const pkgDir of packageDirs) {
     // Install dependencies
-    exec("npm install --legacy-peer-deps 2>/dev/null", pkgDir);
+    exec("npm", ["install", "--legacy-peer-deps"], pkgDir);
 
     // TypeCheck
-    const tsResult = exec("npx tsc --noEmit 2>&1", pkgDir);
+    const tsResult = exec("npx", ["tsc", "--noEmit"], pkgDir);
     const tsErrors = (tsResult.stdout.match(/error TS\d+/g) || []).length;
     totalTypeErrors += tsErrors;
     if (tsResult.exitCode !== 0) typecheckPassed = false;
 
     // Lint (try eslint)
-    const lintResult = exec("npx eslint . --format json 2>/dev/null || echo '[]'", pkgDir);
+    const lintResult = exec("npx", ["eslint", ".", "--format", "json"], pkgDir);
     try {
       const lintOutput = JSON.parse(lintResult.stdout || "[]");
       for (const file of lintOutput) {
@@ -129,7 +129,7 @@ function analyzeRepo(repoPath: string): QualityMetrics {
     }
 
     // Tests
-    const testResult = exec("npm test --if-present 2>&1 || true", pkgDir);
+    const testResult = exec("npm", ["test", "--if-present"], pkgDir);
     const passMatch = testResult.stdout.match(/(\d+)\s+pass/i);
     const failMatch = testResult.stdout.match(/(\d+)\s+fail/i);
     const skipMatch = testResult.stdout.match(/(\d+)\s+skip/i);
@@ -138,7 +138,7 @@ function analyzeRepo(repoPath: string): QualityMetrics {
     if (skipMatch) totalTestsSkipped += parseInt(skipMatch[1]);
 
     // Security audit
-    const auditResult = exec("npm audit --json 2>/dev/null || echo '{}'", pkgDir);
+    const auditResult = exec("npm", ["audit", "--json"], pkgDir);
     try {
       const audit = JSON.parse(auditResult.stdout || "{}");
       const vulns = audit.metadata?.vulnerabilities || {};
@@ -228,13 +228,16 @@ router.post("/backfill", async (req: Request, res: Response) => {
         const repoPath = path.join(tmpDir, repo);
 
         try {
-          // Clone and checkout PR branch (use -- to prevent argument injection)
-          exec(`git clone --depth 1 -- https://github.com/${owner.replace(/[^a-zA-Z0-9_.-]/g, "")}/${repo.replace(/[^a-zA-Z0-9_.-]/g, "")}.git ${repoPath} 2>&1`, tmpDir);
+          // Clone and checkout PR branch
+          const safeOwner = owner.replace(/[^a-zA-Z0-9_.-]/g, "");
+          const safeRepo = repo.replace(/[^a-zA-Z0-9_.-]/g, "");
+          exec("git", ["clone", "--depth", "1", "--", `https://github.com/${safeOwner}/${safeRepo}.git`, repoPath], tmpDir);
 
           // If task has a branch, checkout that branch
           if (task.githubBranch) {
             const safeBranch = task.githubBranch.replace(/[^a-zA-Z0-9/_.-]/g, "");
-            exec(`git fetch origin -- ${safeBranch} && git checkout -- ${safeBranch}`, repoPath);
+            exec("git", ["fetch", "origin", "--", safeBranch], repoPath);
+            exec("git", ["checkout", safeBranch], repoPath);
           }
 
           // Analyze the repo
@@ -262,7 +265,7 @@ router.post("/backfill", async (req: Request, res: Response) => {
           results.push({ taskId: task.id, jiraKey: task.jiraIssueKey, prUrl: task.githubPrUrl, metrics });
         } finally {
           // Cleanup
-          exec(`rm -rf ${tmpDir}`, "/tmp");
+          exec("rm", ["-rf", tmpDir], "/tmp");
         }
       } catch (error) {
         logger.error("Error backfilling task", { taskId: task.id, error });
@@ -314,7 +317,10 @@ router.post("/scan-repo", async (req: Request, res: Response) => {
     const repoPath = path.join(tmpDir, safeRepo);
 
     try {
-      exec(`git clone --depth 1 ${safeBranch ? `-b ${safeBranch}` : ""} -- https://github.com/${safeOwner}/${safeRepo}.git ${repoPath} 2>&1`, tmpDir);
+      const cloneArgs = ["clone", "--depth", "1"];
+      if (safeBranch) cloneArgs.push("-b", safeBranch);
+      cloneArgs.push("--", `https://github.com/${safeOwner}/${safeRepo}.git`, repoPath);
+      exec("git", cloneArgs, tmpDir);
 
       const metrics = analyzeRepo(repoPath);
 
@@ -325,7 +331,7 @@ router.post("/scan-repo", async (req: Request, res: Response) => {
         metrics,
       });
     } finally {
-      exec(`rm -rf ${tmpDir}`, "/tmp");
+      exec("rm", ["-rf", tmpDir], "/tmp");
     }
   } catch (error) {
     logger.error("Error scanning repo", { error });

@@ -14,7 +14,7 @@
  * It replaces the shell entrypoint for Docker-free execution.
  */
 
-import { execSync, spawnSync } from "child_process";
+import { execSync, execFileSync, spawnSync } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync, readdirSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -112,16 +112,16 @@ async function resolveAuthorEmail(): Promise<string> {
 }
 
 function configureGit(authorEmail: string): void {
-  const cmds = [
-    `git config --global user.name "WorkerMill Epic Agent"`,
-    `git config --global user.email "${authorEmail}"`,
-    `git config --global credential.helper store`,
-    `git config --global core.autocrlf false`,
-    `git config --global core.safecrlf false`,
-    `git config --global core.eol lf`,
+  const configs: [string, string][] = [
+    ["user.name", "WorkerMill Epic Agent"],
+    ["user.email", authorEmail],
+    ["credential.helper", "store"],
+    ["core.autocrlf", "false"],
+    ["core.safecrlf", "false"],
+    ["core.eol", "lf"],
   ];
-  for (const cmd of cmds) {
-    execSync(cmd, { stdio: "pipe" });
+  for (const [key, value] of configs) {
+    execFileSync("git", ["config", "--global", key, value], { stdio: "pipe" });
   }
 }
 

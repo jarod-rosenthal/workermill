@@ -9,7 +9,7 @@
  */
 
 import "dotenv/config";
-import { spawn } from "child_process";
+import { spawn, execFileSync } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
 import * as https from "https";
 import axios, { AxiosInstance } from "axios";
@@ -796,7 +796,7 @@ export class MultiExpertCoordinator {
       } else {
         cloneUrl = `https://x-access-token:${this.config.githubToken}@github.com/${this.config.targetRepo}.git`;
       }
-      const child = spawn("git", ["clone", cloneUrl, this.repoPath], {
+      const child = spawn("git", ["clone", "--", cloneUrl, this.repoPath], {
         stdio: ["pipe", "pipe", "pipe"],
       });
 
@@ -1193,8 +1193,9 @@ export class MultiExpertCoordinator {
 
         let prOutput: string;
         try {
-          prOutput = execSync(
-            `gh pr create --base main --head ${branchName} --title "${prTitle}" --body-file "${prBodyFile}"`,
+          prOutput = execFileSync(
+            "gh",
+            ["pr", "create", "--base", "main", "--head", branchName, "--title", prTitle, "--body-file", prBodyFile],
             { cwd: this.repoPath, encoding: "utf-8" }
           );
         } finally {

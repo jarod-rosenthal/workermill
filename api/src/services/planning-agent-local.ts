@@ -17,7 +17,7 @@
  * - OPENAI_API_KEY, GOOGLE_API_KEY, OLLAMA_BASE_URL
  */
 
-import { spawn, execSync } from "child_process";
+import { spawn, execSync, execFileSync } from "child_process";
 import { readFileSync, writeFileSync, existsSync, rmSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { join } from "path";
@@ -324,7 +324,7 @@ function cloneTargetRepo(
     const cloneUrl = buildCloneUrl(repo, token, scmProvider);
     const safeUrl = cloneUrl.replace(/\/\/[^@]+@/, "//***@");
     logger.info("Cloning repo for local planner", { taskId, repo: safeUrl });
-    execSync(`git clone --depth 1 --single-branch "${cloneUrl}" "${tmpDir}"`, {
+    execFileSync("git", ["clone", "--depth", "1", "--single-branch", "--", cloneUrl, tmpDir], {
       stdio: ["ignore", "ignore", "pipe"],
       timeout: 300_000,
     });

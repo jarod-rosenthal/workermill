@@ -100,14 +100,15 @@ export default function AgentSetup() {
       <div className="text-center space-y-4">
         <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-500/10 text-green-500 text-sm font-medium mb-4">
           <Monitor className="w-4 h-4" />
-          WorkerMill Agent
+          VS Code Extension
         </div>
         <h1 className="text-4xl font-bold text-foreground">
-          Run Workers on Your Machine
+          Agent Setup
         </h1>
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-          A standalone binary that executes AI coding tasks on your machine
-          using your API key. Workers run in Docker containers for isolation.
+          The WorkerMill agent connects the VS Code extension to local Docker
+          workers. It runs as a background process and handles worker lifecycle
+          management.
         </p>
       </div>
 

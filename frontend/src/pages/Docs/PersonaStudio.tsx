@@ -56,7 +56,7 @@ export default function PersonaStudio() {
 
       <p className="lead text-muted-foreground">
         Create and configure AI worker personas that specialize in different types of development work.
-        Control which personas are available and how tickets are automatically assigned to the right expert.
+        Control which personas are available and how issues are automatically assigned to the right expert.
       </p>
 
       {/* Overview */}
@@ -183,7 +183,7 @@ export default function PersonaStudio() {
           Label Mappings
         </h3>
         <p>
-          Map Jira or Linear labels directly to personas. When a ticket has a matching label,
+          Map issue tracker labels (GitHub, GitLab, Jira, Linear) directly to personas. When an issue has a matching label,
           that persona is automatically assigned.
         </p>
 

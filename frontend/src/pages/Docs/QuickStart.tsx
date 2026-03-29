@@ -421,10 +421,10 @@ export default function QuickStart() {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">
-                  Remote Agent
+                  Agent Setup
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  Run workers on your machine connected to the cloud dashboard
+                  Connect the VS Code extension to local Docker workers
                 </p>
               </div>
               <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />

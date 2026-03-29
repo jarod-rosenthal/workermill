@@ -49,7 +49,7 @@ const toolCategories = [
     tools: [
       { name: "workermill_list_tasks", description: "List tasks with optional status filter", params: "status?, limit?, offset?" },
       { name: "workermill_get_task", description: "Get detailed task information", params: "id" },
-      { name: "workermill_create_task", description: "Create a new task from Jira issue", params: "jiraIssueKey, persona?, model?" },
+      { name: "workermill_create_task", description: "Create a new task from an issue (works with Jira, GitHub Issues, and GitLab Issues)", params: "jiraIssueKey, persona?, model?" },
       { name: "workermill_cancel_task", description: "Cancel a running task", params: "id" },
       { name: "workermill_retry_task", description: "Retry a failed task", params: "id" },
       { name: "workermill_delete_task", description: "Delete a task from history", params: "id" },
@@ -119,7 +119,7 @@ const guidedPrompts = [
   },
   {
     name: "create_and_monitor_task",
-    description: "Create a task from a Jira issue and monitor it through completion. Guides through the full lifecycle.",
+    description: "Create a task from an issue and monitor it through completion. Guides through the full lifecycle.",
     args: "jira_key (required)",
   },
   {
@@ -141,8 +141,8 @@ const usageExamples = [
     command: 'workermill_list_tasks(status: "running")',
   },
   {
-    title: "Create task from Jira",
-    description: "Start a new task from a Jira issue",
+    title: "Create task from issue tracker",
+    description: "Start a new task from an issue (Jira, GitHub, GitLab, Bitbucket)",
     command: 'workermill_create_task(jiraIssueKey: "PROJ-123")',
   },
   {

@@ -196,14 +196,6 @@ export default function Analytics() {
                   <CheckCircle className="w-4 h-4 text-purple-500" />
                   <span><strong>Test Score</strong> - Test pass rate</span>
                 </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-yellow-500" />
-                  <span><strong>Coverage Score</strong> - Code coverage %</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-red-500" />
-                  <span><strong>Security Score</strong> - Vulnerability scan</span>
-                </li>
               </ul>
             </div>
             <div>
@@ -255,7 +247,7 @@ export default function Analytics() {
               <ul className="space-y-2 text-sm text-muted-foreground">
                 <li><strong className="text-foreground">Phase</strong> - Planning, execution, review, etc.</li>
                 <li><strong className="text-foreground">Persona</strong> - Backend, frontend, DevOps workers</li>
-                <li><strong className="text-foreground">Model</strong> - Claude, GPT-4, Gemini, etc.</li>
+                <li><strong className="text-foreground">Model</strong> - Claude, GPT-5.4, Gemini, etc.</li>
                 <li><strong className="text-foreground">Operation Type</strong> - Code generation, analysis, etc.</li>
               </ul>
             </div>

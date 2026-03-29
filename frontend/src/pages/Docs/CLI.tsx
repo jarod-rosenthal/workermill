@@ -373,7 +373,7 @@ export default function CLI() {
 
       {/* Personas */}
       <section className="space-y-4">
-        <h2 className="text-2xl font-semibold">12 Built-in Personas</h2>
+        <h2 className="text-2xl font-semibold">13 Built-in Personas</h2>
         <div className="flex flex-wrap gap-2">
           {[
             { name: "Backend Developer", emoji: "\u{1F4BB}" },
@@ -402,7 +402,7 @@ export default function CLI() {
             <li><strong className="text-foreground">Full spec context</strong> — Every worker sees the complete original specification</li>
             <li><strong className="text-foreground">Quality gates</strong> — Typecheck and lint run automatically after each story, with auto-retry on failure</li>
             <li><strong className="text-foreground">Sibling awareness</strong> — Workers see files created and decisions made by prior experts</li>
-            <li><strong className="text-foreground">Real services, not mocks</strong> — Docker containers for databases, caches, queues</li>
+            <li><strong className="text-foreground">Isolated execution</strong> — Workers execute in isolated environments with full tool access</li>
             <li><strong className="text-foreground">Version trust</strong> — Never downgrades language/runtime versions</li>
             <li><strong className="text-foreground">Code-level review</strong> — Tech lead reads actual diffs, requests changes on specific stories only</li>
             <li><strong className="text-foreground">Sandboxed execution</strong> — Workers stay in the project directory, destructive commands blocked</li>

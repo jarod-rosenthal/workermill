@@ -135,7 +135,7 @@ const connectionFlow = [
   {
     component: "VS Code Extension",
     description:
-      "Reads ~/.workermill/agent.port, connects to the local API. Auto-reconnects every 5 seconds if the agent is restarted.",
+      "Reads ~/.workermill/agent.port, connects to the local API. Auto-reconnects with exponential backoff (2-30 seconds) if the agent is restarted.",
     location: "Your Machine",
     color: "text-blue-500",
     bgColor: "bg-blue-500/10",
@@ -476,7 +476,7 @@ export default function VSCodeExtension() {
               <div>
                 <h4 className="font-medium text-foreground">Backlog</h4>
                 <p className="text-sm text-muted-foreground">
-                  Open and in-progress Jira tickets. Use the search button to
+                  Open and in-progress issues (Jira, GitHub, GitLab). Use the search button to
                   find issues. Click the play button to run any issue as a task.
                 </p>
               </div>

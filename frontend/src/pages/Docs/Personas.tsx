@@ -229,8 +229,8 @@ export default function Personas() {
             <div className="bg-background rounded-lg p-4 border border-border">
               <h4 className="font-medium text-foreground mb-2">Automatic Assignment</h4>
               <ul className="space-y-1 text-sm text-muted-foreground">
-                <li>- Based on Jira ticket labels</li>
-                <li>- Inferred from ticket summary/description</li>
+                <li>- Based on issue tracker labels</li>
+                <li>- Inferred from issue summary/description</li>
                 <li>- Default persona if uncertain</li>
               </ul>
             </div>
@@ -261,7 +261,7 @@ export default function Personas() {
                 <h4 className="font-medium text-foreground">Balanced Models</h4>
               </div>
               <p className="text-sm text-muted-foreground">
-                Claude Sonnet, GPT-4o, Gemini 2.0 Flash — optimal balance of speed and capability for most development tasks.
+                Claude Sonnet 4.6, GPT-5.4, Gemini 3.1 Flash Lite — optimal balance of speed and capability for most development tasks.
               </p>
             </div>
             <div className="bg-background rounded-lg p-4 border border-border">
@@ -270,7 +270,7 @@ export default function Personas() {
                 <h4 className="font-medium text-foreground">Flagship Models</h4>
               </div>
               <p className="text-sm text-muted-foreground">
-                Claude Opus, o1, Gemini Pro - most capable models for complex reasoning, security, and architecture tasks.
+                Claude Opus 4.6, GPT-5.4-pro, Gemini 3.1 Pro - most capable models for complex reasoning, security, and architecture tasks.
               </p>
             </div>
             <div className="bg-background rounded-lg p-4 border border-border">
@@ -279,7 +279,7 @@ export default function Personas() {
                 <h4 className="font-medium text-foreground">Efficient Models</h4>
               </div>
               <p className="text-sm text-muted-foreground">
-                Claude Haiku, GPT-4o Mini, Gemini Flash — optimized for speed on simpler tasks.
+                Claude Haiku 4.5, GPT-5.4-mini, Gemini 3.1 Flash Lite — optimized for speed on simpler tasks.
               </p>
             </div>
             <div className="bg-background rounded-lg p-4 border border-border">

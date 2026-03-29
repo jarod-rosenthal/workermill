@@ -82,8 +82,8 @@ export default function Integrations() {
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
               { name: "Anthropic Claude", models: "Opus 4.6, Sonnet 4.6, Haiku 4.5", color: "text-orange-400", desc: "Best for complex coding tasks" },
-              { name: "OpenAI", models: "GPT-4o, o3-mini, o1", color: "text-green-400", desc: "Strong general purpose" },
-              { name: "Google Gemini", models: "Gemini 3 Pro, Gemini 2.0 Flash", color: "text-blue-400", desc: "Fast and efficient" },
+              { name: "OpenAI", models: "GPT-5.4, GPT-5.4-mini, GPT-5.4-pro", color: "text-green-400", desc: "Strong general purpose" },
+              { name: "Google Gemini", models: "Gemini 3.1 Pro, Gemini 3.1 Flash Lite", color: "text-blue-400", desc: "Fast and efficient" },
               { name: "Ollama", models: "Llama, Qwen, DeepSeek", color: "text-purple-400", desc: "Self-hosted models" },
             ].map((provider) => (
               <div key={provider.name} className="bg-background rounded-lg p-4 border border-border">
@@ -479,28 +479,23 @@ export default function Integrations() {
           Cloud Execution
         </h2>
         <p className="text-muted-foreground">
-          WorkerMill runs AI workers in isolated containers. The recommended approach is the
-          <strong className="text-foreground"> Remote Agent</strong>, which runs on your machine and uses
-          the cloud dashboard for monitoring.
+          WorkerMill runs AI workers in isolated containers. The
+          <strong className="text-foreground"> Remote Agent</strong> is part of the VS Code extension
+          workflow — it runs as a background process and manages local Docker workers.
         </p>
 
         <div className="grid md:grid-cols-2 gap-4">
-          {/* Remote Agent (Recommended) */}
-          <div className="bg-card border-2 border-primary/50 rounded-xl p-5 relative">
-            <div className="absolute -top-3 left-4">
-              <span className="px-3 py-1 bg-primary text-primary-foreground text-xs font-semibold rounded-full">
-                Recommended
-              </span>
-            </div>
-            <div className="flex items-center gap-3 mb-4 mt-1">
+          {/* Remote Agent */}
+          <div className="bg-card border border-border rounded-xl p-5 relative">
+            <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
                 <Monitor className="w-5 h-5 text-green-500" />
               </div>
               <h3 className="font-semibold text-foreground">Remote Agent</h3>
             </div>
             <p className="text-sm text-muted-foreground mb-4">
-              Workers run as native processes on your machine. Code never leaves your computer.
-              BYOK — bring your own API key, pay your provider directly.
+              Part of the VS Code extension workflow. Connects the extension to local Docker workers.
+              Code stays on your machine. BYOK — bring your own API key, pay your provider directly.
             </p>
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2 text-muted-foreground">

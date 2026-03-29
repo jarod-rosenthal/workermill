@@ -32,7 +32,7 @@ const navItems = [
   { to: "/docs/quick-start", label: "Quick Start", icon: Rocket },
   { to: "/docs/cli", label: "WorkerMill CLI", icon: TerminalSquare },
   { to: "/docs/vscode-extension", label: "VS Code Extension", icon: Radio },
-  { to: "/docs/agent", label: "Remote Agent", icon: Monitor },
+  { to: "/docs/agent", label: "Agent Setup", icon: Monitor },
   { to: "/docs/repositories", label: "Repositories", icon: FolderGit2 },
   { to: "/docs/codebase-indexing", label: "Codebase Indexing", icon: Search },
   { to: "/docs/task-lifecycle", label: "Task Lifecycle", icon: Workflow },
@@ -105,7 +105,7 @@ export default function DocsLayout() {
         <div className="p-4 border-t border-border">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <GitBranch className="w-3 h-3" />
-            <span>v0.10.4</span>
+            <span>Docs</span>
           </div>
         </div>
       </aside>

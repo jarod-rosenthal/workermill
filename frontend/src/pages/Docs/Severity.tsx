@@ -193,18 +193,18 @@ export default function Severity() {
         </div>
       </section>
 
-      {/* Jira Mapping */}
+      {/* Priority Mapping */}
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-foreground">Jira Priority Mapping</h2>
+        <h2 className="text-xl font-semibold text-foreground">Priority Mapping</h2>
         <div className="bg-card border border-border rounded-xl p-6">
           <p className="text-muted-foreground mb-4">
-            WorkerMill automatically maps Jira priority fields to severity levels:
+            WorkerMill automatically maps priority fields from all supported issue trackers (Jira, GitHub, GitLab, Bitbucket) to severity levels:
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="text-left py-3 text-foreground font-medium">Jira Priority</th>
+                  <th className="text-left py-3 text-foreground font-medium">Issue Priority</th>
                   <th className="text-left py-3 text-foreground font-medium">WorkerMill Severity</th>
                   <th className="text-left py-3 text-foreground font-medium">Response Time</th>
                 </tr>

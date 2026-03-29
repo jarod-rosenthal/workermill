@@ -5,6 +5,7 @@ import {
   GitPullRequest,
   CheckCircle,
   ArrowRight,
+  TerminalSquare,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -72,6 +73,31 @@ export default function DocsOverview() {
           into working code, pull requests, and deployed features.
         </p>
       </div>
+
+      {/* CLI — Primary Path */}
+      <section className="space-y-4">
+        <div className="bg-primary/5 border border-primary/30 rounded-xl p-6 space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+              <TerminalSquare className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold text-foreground">Get Started with the CLI</h2>
+              <p className="text-sm text-muted-foreground">The fastest way to use WorkerMill. No server, no Docker, no account.</p>
+            </div>
+          </div>
+          <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm text-foreground">
+            npx workermill
+          </div>
+          <Link
+            to="/docs/cli"
+            className="inline-flex items-center gap-2 text-sm text-primary hover:text-primary/80 transition-colors font-medium"
+          >
+            View CLI documentation
+            <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
+      </section>
 
       {/* What is WorkerMill */}
       <section className="space-y-4">

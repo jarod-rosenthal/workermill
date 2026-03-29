@@ -30,11 +30,8 @@ on:
         required: false
         type: boolean
         default: false
-      run_integration:
-        description: 'Run integration tests on self-hosted runner'
-        required: false
-        type: boolean
-        default: false
+      # run_integration: disabled — requires self-hosted ECS runner
+      # Run locally: ./bin/bastion start && cd api && npm run test:integration
 
 permissions:
   contents: read
@@ -246,42 +243,42 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # INTEGRATION TESTS - Run on self-hosted runner in VPC for database access
-  # Triggered manually via workflow_dispatch only
+  # INTEGRATION TESTS - Disabled: requires self-hosted ECS runner in VPC
+  # Run locally instead: ./bin/bastion start && cd api && npm run test:integration
+  # Uncomment when a self-hosted runner is set up in the VPC.
   # ============================================================================
 
-  integration-tests:
-    name: API Integration Tests
-    runs-on: [self-hosted, linux, x64, ecs]
-    needs: [api-ci]
-    # Manual trigger only — self-hosted runner must be online
-    if: github.event_name == 'workflow_dispatch' && inputs.run_integration == true
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '20'
-
-      - name: Install API dependencies
-        working-directory: api
-        run: npm ci
-
-      - name: Run integration tests
-        working-directory: api
-        run: npm run test:integration
-        env:
-          DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
-          NODE_ENV: test
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: integration-test-results
-          path: api/coverage/
-          retention-days: 7
+  # integration-tests:
+  #   name: API Integration Tests
+  #   runs-on: [self-hosted, linux, x64, ecs]
+  #   needs: [api-ci]
+  #   if: github.event_name == 'workflow_dispatch' && inputs.run_integration == true
+  #   steps:
+  #     - uses: actions/checkout@v6
+  #
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@v6
+  #       with:
+  #         node-version: '20'
+  #
+  #     - name: Install API dependencies
+  #       working-directory: api
+  #       run: npm ci
+  #
+  #     - name: Run integration tests
+  #       working-directory: api
+  #       run: npm run test:integration
+  #       env:
+  #         DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
+  #         NODE_ENV: test
+  #
+  #     - name: Upload test results
+  #       uses: actions/upload-artifact@v7
+  #       if: always()
+  #       with:
+  #         name: integration-test-results
+  #         path: api/coverage/
+  #         retention-days: 7
 
   # ============================================================================
   # DEPLOYMENT JOBS - Manual trigger only via workflow_dispatch inputs
@@ -290,14 +287,13 @@ jobs:
 
   deploy-api:
     name: Update API from GHCR
-    needs: [api-ci, integration-tests]
+    needs: [api-ci]
     runs-on: ubuntu-latest
     if: |
       always() &&
       github.event_name == 'workflow_dispatch' &&
       inputs.deploy_api == true &&
-      needs.api-ci.result == 'success' &&
-      (needs.integration-tests.result == 'success' || needs.integration-tests.result == 'skipped')
+      needs.api-ci.result == 'success'
     environment:
       name: production
       url: https://api.workermill.com
@@ -524,7 +520,6 @@ jobs:
       - frontend-ci
       - agent-ci
       - e2e-tests
-      - integration-tests
       - deploy-api
       - deploy-frontend
       - deploy-worker
@@ -541,7 +536,7 @@ jobs:
           echo ""
           echo "Test Results:"
           echo "  E2E Tests: ${{ needs.e2e-tests.result }}"
-          echo "  Integration Tests: ${{ needs.integration-tests.result }}"
+          echo "  Integration Tests: local only (./bin/bastion start)"
           echo ""
           echo "Deployments:"
           if [ "${{ inputs.deploy_api }}" == "true" ]; then

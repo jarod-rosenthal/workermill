@@ -26,7 +26,7 @@ vi.mock("../db/connection.js", () => ({
   },
 }));
 
-vi.mock("../routes/boards.js", () => ({
+vi.mock("../routes/boards/index.js", () => ({
   runCardAsWorkerTask: (...args: unknown[]) => mockRunCardAsWorkerTask(...args),
 }));
 

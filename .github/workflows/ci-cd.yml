@@ -137,6 +137,52 @@ jobs:
         working-directory: agent
         run: npm run typecheck
 
+  cli-ci:
+    name: CLI - Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: cli/package-lock.json
+
+      - name: Install CLI dependencies
+        working-directory: cli
+        run: npm ci
+
+      - name: Install engine dependencies
+        working-directory: packages/engine
+        run: npm ci
+
+      - name: Unit Tests
+        working-directory: cli
+        run: npx vitest run
+
+  engine-ci:
+    name: Engine - Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: packages/engine/package-lock.json
+
+      - name: Install dependencies
+        working-directory: packages/engine
+        run: npm ci
+
+      - name: Unit Tests
+        working-directory: packages/engine
+        run: npx vitest run
+
   # ============================================================================
   # E2E TESTS - Playwright against production
   # Triggered manually via workflow_dispatch only

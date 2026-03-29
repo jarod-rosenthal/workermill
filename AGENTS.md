@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file provides behavioral guidance for Claude Code when working in this repository. For codebase documentation, commands, and architecture details, see `CLAUDE.md`.
+This file provides behavioral guidance for AI coding agents working in this repository. For codebase documentation, commands, and architecture details, see `CLAUDE.md`.
 
 ## Communication Style
 
@@ -20,7 +20,7 @@ This file provides behavioral guidance for Claude Code when working in this repo
 
 ## Progress Tracking
 
-For multi-phase implementations, track progress in `.claude/progress/<feature-name>.md` to enable resumption if interrupted.
+For multi-phase implementations, track progress in a local progress file to enable resumption if interrupted.
 
 ## Task Prioritization
 

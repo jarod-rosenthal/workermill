@@ -1,6 +1,6 @@
 # Agent Instructions
 
-> This file provides context to Claude Code when executing AI Worker tasks.
+> This file provides context to AI coding agents when executing AI Worker tasks.
 
 You operate within a 3-layer architecture that separates concerns:
 
@@ -20,7 +20,7 @@ You operate within a 3-layer architecture that separates concerns:
 
 **NEVER use the Task tool for operations that require Bash execution.**
 
-Task subagents (Explore, general-purpose, Bash, etc.) **cannot execute bash commands** - they will fail with exit code 1. This is a Claude Code CLI limitation where `--dangerously-skip-permissions` does not propagate to subagents.
+Task subagents (Explore, general-purpose, Bash, etc.) **cannot execute bash commands** - they will fail with exit code 1. This is a known limitation where permissions do not propagate to subagents.
 
 **What this means:**
 - ✅ Use Task tool with `subagent_type: "Explore"` for file searching (uses Glob, Grep, Read - works fine)
@@ -135,7 +135,7 @@ OUTPUT_DIR="/tmp/attachments" \
 
 **Output:** `{ success, attachments: [{filename, path, mimeType, size}], outputDir, error }`
 
-After fetching, view images with Claude Code's image reading capability.
+After fetching, view images with the agent's image reading capability.
 
 ### Deploy Scripts
 

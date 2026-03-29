@@ -136,7 +136,7 @@ jobs:
         run: npm run typecheck
 
   cli-ci:
-    name: CLI - Unit Tests
+    name: CLI - Type Check & Unit Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -150,18 +150,22 @@ jobs:
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci --legacy-peer-deps
+        run: npm ci
 
       - name: Install engine dependencies
         working-directory: packages/engine
         run: npm install
+
+      - name: Type Check
+        working-directory: cli
+        run: npm run typecheck
 
       - name: Unit Tests
         working-directory: cli
         run: npx vitest run
 
   engine-ci:
-    name: Engine - Unit Tests
+    name: Engine - Type Check & Unit Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -174,6 +178,10 @@ jobs:
       - name: Install dependencies
         working-directory: packages/engine
         run: npm install
+
+      - name: Type Check
+        working-directory: packages/engine
+        run: npm run typecheck
 
       - name: Unit Tests
         working-directory: packages/engine

@@ -1469,6 +1469,7 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
   let autoRevise = config.review?.autoRevise ?? false;
 
   // Run inline review with revision loop
+  let finalReviewText = ""; // Captures the approved review for use in PR body
   const reviewer = reviewEnabled ? loadPersona("tech_lead") : null;
   if (reviewer) {
     const { provider: revProvider, model: revModel, host: revHost, contextLength: revCtx } = getProviderForPersona(
@@ -1504,7 +1505,6 @@ ${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `
     }
 
     let previousReviewFeedback = "";
-    let finalReviewText = ""; // Captures the approved review for use in PR body
     // Check if user cancelled before starting review
     if (abortSignal?.aborted) {
       output.coordinatorLog("Build cancelled by user.");
@@ -2024,7 +2024,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
               if (finalReviewText) {
                 // Extract just the FEEDBACK section from the review, not the markers
                 const feedbackMatch = finalReviewText.match(/FEEDBACK:\s*([\s\S]*?)(?=AFFECTED_|REVIEW_DECISION|CODE_QUALITY|$)/i);
-                const feedback = feedbackMatch ? feedbackMatch[1].trim() : finalReviewText.split("\n").filter(l => !l.includes("REVIEW_DECISION") && !l.includes("CODE_QUALITY_SCORE") && !l.includes("AFFECTED_")).join("\n").trim();
+                const feedback = feedbackMatch ? feedbackMatch[1].trim() : finalReviewText.split("\n").filter((l: string) => !l.includes("REVIEW_DECISION") && !l.includes("CODE_QUALITY_SCORE") && !l.includes("AFFECTED_")).join("\n").trim();
                 if (feedback) {
                   prParts.push("\n## Tech Lead Review\n");
                   prParts.push(feedback);

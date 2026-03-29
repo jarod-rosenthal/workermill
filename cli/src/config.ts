@@ -28,6 +28,8 @@ export interface ReviewConfig {
   approvalThreshold?: number;
   /** Score threshold for critic plan approval, 1-10 scale (default: 8) */
   criticThreshold?: number;
+  /** Enable critic pass on the plan before execution (default: false) */
+  useCritic?: boolean;
 }
 
 export interface HookConfig {

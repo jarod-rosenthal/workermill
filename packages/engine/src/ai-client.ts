@@ -35,8 +35,7 @@ export class EngineAIClient {
           if (toolCalls) {
             for (const tc of toolCalls) {
               if (tc && "toolName" in tc) {
-                // AI SDK v6 uses "input", older versions used "args"
-                const toolInput = ("input" in tc ? tc.input : "args" in tc ? tc.args : {}) as Record<string, unknown>;
+                const toolInput = ("input" in tc ? tc.input : {}) as Record<string, unknown>;
                 options.onMessage?.({
                   type: "tool_use",
                   toolName: tc.toolName,

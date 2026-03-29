@@ -152,11 +152,11 @@ jobs:
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Install engine dependencies
         working-directory: packages/engine
-        run: npm ci
+        run: npm install
 
       - name: Unit Tests
         working-directory: cli
@@ -172,12 +172,10 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: packages/engine/package-lock.json
 
       - name: Install dependencies
         working-directory: packages/engine
-        run: npm ci
+        run: npm install
 
       - name: Unit Tests
         working-directory: packages/engine

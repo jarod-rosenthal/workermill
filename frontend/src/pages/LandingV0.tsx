@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock, Github, Star, ExternalLink, Download, Layers } from "lucide-react";
+import { Copy, CheckCircle, Terminal, Monitor, ArrowRight, BookOpen, Clock, Github, Star, ExternalLink, Download, Layers, MessageSquare, GitBranch, Users, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground";
 import { Header } from "./Home/v0/Header";
@@ -402,11 +402,85 @@ export default function LandingV0() {
                 </span>
               </h1>
               <p className="mt-6 text-xl text-slate-400 max-w-3xl mx-auto text-center leading-relaxed">
-                Not an assistant that suggests — an engineering team that executes.
-                From a single bug fix to a full product build.
+                Open-source AI coding team with multi-expert orchestration. Works with any LLM.
               </p>
               {/* Social proof stats */}
               <SocialProof />
+            </div>
+          </section>
+
+          {/* How it works */}
+          <section className="relative py-16">
+            <div className="container mx-auto px-6 lg:px-8 max-w-5xl">
+
+              {/* How it works steps */}
+              <div className="grid md:grid-cols-4 gap-6 mb-16">
+                <div className="text-center">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-teal-500/10 border border-teal-500/20 mb-4">
+                    <MessageSquare className="w-6 h-6 text-teal-400" />
+                  </div>
+                  <div className="text-xs font-bold text-teal-400 uppercase tracking-widest mb-2">Step 1</div>
+                  <h3 className="text-lg font-semibold text-white mb-2">Describe the task</h3>
+                  <p className="text-sm text-slate-500 leading-relaxed">
+                    A bug fix, a new feature, or a full product. Plain English.
+                  </p>
+                </div>
+
+                <div className="text-center">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-violet-500/10 border border-violet-500/20 mb-4">
+                    <GitBranch className="w-6 h-6 text-violet-400" />
+                  </div>
+                  <div className="text-xs font-bold text-violet-400 uppercase tracking-widest mb-2">Step 2</div>
+                  <h3 className="text-lg font-semibold text-white mb-2">Coordinator plans</h3>
+                  <p className="text-sm text-slate-500 leading-relaxed">
+                    Breaks the work into tasks and assigns the right expert agents.
+                  </p>
+                </div>
+
+                <div className="text-center">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/20 mb-4">
+                    <Users className="w-6 h-6 text-blue-400" />
+                  </div>
+                  <div className="text-xs font-bold text-blue-400 uppercase tracking-widest mb-2">Step 3</div>
+                  <h3 className="text-lg font-semibold text-white mb-2">Experts execute</h3>
+                  <p className="text-sm text-slate-500 leading-relaxed">
+                    Backend, frontend, DevOps, QA, security — working in parallel on your codebase.
+                  </p>
+                </div>
+
+                <div className="text-center">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 mb-4">
+                    <Zap className="w-6 h-6 text-amber-400" />
+                  </div>
+                  <div className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-2">Step 4</div>
+                  <h3 className="text-lg font-semibold text-white mb-2">You review</h3>
+                  <p className="text-sm text-slate-500 leading-relaxed">
+                    Code is committed, tests pass, PR is ready. You approve and merge.
+                  </p>
+                </div>
+              </div>
+
+              {/* Key differentiators */}
+              <div className="grid md:grid-cols-3 gap-4">
+                <div className="rounded-xl border border-white/5 bg-white/[0.02] p-5">
+                  <h4 className="text-sm font-semibold text-white mb-1">Any LLM provider</h4>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Ollama, Anthropic, OpenAI, Google, LM Studio, or any OpenAI-compatible endpoint. Your models, your keys.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-white/5 bg-white/[0.02] p-5">
+                  <h4 className="text-sm font-semibold text-white mb-1">Runs locally</h4>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    No account, no cloud, no data leaves your machine. Just Node.js and <code className="text-slate-400">npx workermill</code>.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-white/5 bg-white/[0.02] p-5">
+                  <h4 className="text-sm font-semibold text-white mb-1">Specialized expert personas</h4>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Architect, backend, frontend, DevOps, QA, security, mobile, data/ML, tech lead, and more — each with role-specific directives.
+                  </p>
+                </div>
+              </div>
             </div>
           </section>
 

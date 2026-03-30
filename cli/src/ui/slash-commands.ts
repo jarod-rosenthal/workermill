@@ -12,11 +12,41 @@ import path from "path";
 import os from "os";
 import { listSessions, saveSession } from "../session.js";
 import { loadConfig, saveConfig } from "../config.js";
+import chalk from "chalk";
 import { loadCustomCommands } from "../custom-commands.js";
 import { loadPersona, listAvailablePersonas } from "../personas.js";
 import { stopAllMCPServers, getMCPTools, hasMCPServers, hasMCPRegistered } from "../mcp-client.js";
 import * as logger from "../logger.js";
 import { loadMemories, addMemory, removeMemory } from "../memory.js";
+
+// ---------------------------------------------------------------------------
+// Session goodbye — prints a brief summary on exit
+// ---------------------------------------------------------------------------
+
+export function printSessionGoodbye(ctx: SlashCommandContext): void {
+  const elapsed = ctx.session.startedAt
+    ? Math.round((Date.now() - new Date(ctx.session.startedAt).getTime()) / 1000)
+    : 0;
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+  const parts: string[] = [timeStr];
+  if (ctx.session.totalTokens > 0) {
+    const k = (ctx.session.totalTokens / 1000).toFixed(1);
+    parts.push(`${k}k tokens`);
+  }
+  if (ctx.cost > 0) {
+    parts.push(`~$${ctx.cost.toFixed(2)}`);
+  }
+  const msgCount = ctx.session.messages.length;
+  if (msgCount > 0) {
+    parts.push(`${msgCount} messages`);
+  }
+
+  console.log(chalk.dim(`\n  ${parts.join(" · ")}`));
+  console.log(chalk.dim("  Until next time.\n"));
+}
 
 // ---------------------------------------------------------------------------
 // Public helpers (also used by Root.tsx for periodic branch refresh)
@@ -93,6 +123,8 @@ Creates a feature branch for all changes — your current branch stays clean.
 | Command | Description |
 |---|---|
 | \`/ship <task>\` | Multi-expert orchestration — plan, execute, review, ship |
+| \`/plan <task>\` | Plan/analyze a task using the planner agent (or toggle read-only mode with no args) |
+| \`/review [task]\` | Code review using the tech lead agent (defaults to reviewing recent changes) |
 | \`/retry\` | Re-plan and re-run the last task |
 | \`/settings\` | View/change settings (review, ollama, etc.) |
 | \`/undo\` | Revert last build's changes (git stash or reset) |
@@ -273,15 +305,46 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
       break;
     }
 
-    // ---- /plan ----
+    // ---- /plan [task] ----
     case "plan": {
-      const newPlan = !ctx.planMode;
-      ctx.setPlanMode(newPlan);
-      ctx.addSystemMessage(
-        newPlan
-          ? "**Plan mode ON.** Only read-only tools (read_file, glob, grep, ls, sub_agent) are available. Write operations are blocked."
-          : "**Plan mode OFF.** All tools are now available."
-      );
+      if (arg) {
+        // With an argument: run the task as the planner persona
+        const p = loadPersona("planner");
+        if (p) {
+          const personaPrefix =
+            `[Acting as **${p.name}** — ${p.description}]\n\n` +
+            `## Expert Instructions\n\n${p.systemPrompt}\n\n` +
+            `## Task\n\n`;
+          ctx.submit(personaPrefix + arg);
+        } else {
+          ctx.submit(arg); // fallback — run without persona if not found
+        }
+      } else {
+        // No argument: toggle read-only mode
+        const newPlan = !ctx.planMode;
+        ctx.setPlanMode(newPlan);
+        ctx.addSystemMessage(
+          newPlan
+            ? "**Plan mode ON.** Only read-only tools (read_file, glob, grep, ls, sub_agent) are available. Write operations are blocked."
+            : "**Plan mode OFF.** All tools are now available."
+        );
+      }
+      break;
+    }
+
+    // ---- /review [task] ----
+    case "review": {
+      const reviewTask = arg || "Review the recent changes in this codebase. Read the git diff, check for bugs, security issues, and code quality. Provide actionable feedback.";
+      const p = loadPersona("tech_lead");
+      if (p) {
+        const personaPrefix =
+          `[Acting as **${p.name}** — ${p.description}]\n\n` +
+          `## Expert Instructions\n\n${p.systemPrompt}\n\n` +
+          `## Task\n\n`;
+        ctx.submit(personaPrefix + reviewTask);
+      } else {
+        ctx.submit(reviewTask);
+      }
       break;
     }
 
@@ -518,6 +581,20 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Branch prefix | ${branchPrefix} | \`/settings git.branchPrefix <name>\` |\n` +
           `| Sandbox | ${sandboxEnabled} | \`/settings sandbox <true/false>\` |`
         );
+
+        // Show routing if configured
+        const routing = config.routing;
+        if (routing && Object.keys(routing).length > 0) {
+          const routingRows = Object.entries(routing).map(
+            ([persona, provider]) => `| ${persona} | ${provider} |`
+          );
+          ctx.addSystemMessage(
+            `\n**Persona Routing** (\`/settings route <persona> <provider>\`)\n\n` +
+            `| Persona | Provider |\n|---|---|\n` +
+            routingRows.join("\n") +
+            `\n\nUnrouted personas use the default provider (\`${config.default}\`).`
+          );
+        }
       } else {
         // Parse key=value or key value
         const parts = arg.split(/[\s=]+/);
@@ -575,12 +652,27 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             config.sandbox = boolVal(value);
             break;
           }
+          case "route": {
+            // /settings route <persona> <provider>
+            const routeParts = value.split(/\s+/);
+            if (routeParts.length < 2) {
+              ctx.addSystemMessage("**Usage:** `/settings route <persona> <provider>`\n\nExample: `/settings route backend_developer anthropic`");
+              break;
+            }
+            const [persona, provider] = routeParts;
+            if (!config.providers[provider]) {
+              ctx.addSystemMessage(`Provider \`${provider}\` not found in config. Available: ${Object.keys(config.providers).join(", ")}`);
+              break;
+            }
+            config.routing = { ...config.routing, [persona]: provider };
+            break;
+          }
           default:
             ctx.addSystemMessage(`Unknown setting: \`${key}\`. Type \`/settings\` to see all options.`);
             break;
         }
 
-        if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "git.branchPrefix", "sandbox"].includes(key)) {
+        if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "git.branchPrefix", "sandbox", "route"].includes(key)) {
           saveConfig(config);
           ctx.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
         }
@@ -710,6 +802,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
     case "q": {
       stopAllMCPServers();
       void import("../browser.js").then(m => m.browserClose());
+      printSessionGoodbye(ctx);
       ctx.exit?.();
       // Force process exit — Ink's exit() only stops rendering but
       // dangling listeners (stdin, timers) can keep the process alive.

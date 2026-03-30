@@ -21,7 +21,7 @@ import {
 } from "./git-ops.js";
 import { loadMemories, addMemory, extractMemoryMarkers, formatMemoriesForPrompt } from "./memory.js";
 import { isDangerous, READ_TOOLS } from "./safety.js";
-import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers } from "./mcp-client.js";
+import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, getMCPToolDefinitionsAsync } from "./mcp-client.js";
 
 /**
  * If the task string looks like a file path (e.g. "spec.md", "docs/prd.yaml"),

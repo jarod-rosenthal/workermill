@@ -4,6 +4,14 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.85] - 2026-03-30
+
+### Added
+- **MCP tools in orchestrator and headless mode** — MCP servers now start and stop with `/ship` orchestration and headless (`-p`) mode, not just interactive single-agent mode. All MCP tools available to planner and story workers.
+- **MCP-aware system prompts** — when MCP servers are active, the system prompt tells the model which servers are connected and that `mcp__*` prefixed tools are real and working. Applied to interactive and headless modes.
+- **Docker Desktop MCP gateway auto-detection** — the CLI automatically discovers Docker Desktop's MCP gateway when available (WSL and native). No manual config needed — if Docker Desktop has MCP servers enabled, they're connected automatically across all three modes.
+- **External tool instructions** — agents now receive `EXTERNAL_TOOLS` guidance in story system prompts covering `gh` CLI, `web_search`, `fetch`, `curl`, and package managers.
+
 ## [0.15.81] - 2026-03-28
 
 ### Added

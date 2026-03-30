@@ -30,6 +30,10 @@ type AnyToolDef = any;
 
 const activeServers: Map<string, MCPServer> = new Map();
 
+// Lazy init: store pending config so servers start on first tool use, not on CLI launch
+let pendingConfig: Record<string, MCPServerConfig> | null = null;
+let lazyStartPromise: Promise<void> | null = null;
+
 // ---------------------------------------------------------------------------
 // JSON-RPC transport over stdio
 // ---------------------------------------------------------------------------
@@ -143,6 +147,44 @@ export async function startAllMCPServers(mcpConfig: Record<string, MCPServerConf
   await Promise.all(startPromises);
 }
 
+/**
+ * Register MCP server config for lazy start. Servers won't spawn until
+ * ensureMCPStarted() is called (triggered by first tool use or /mcp).
+ */
+export function registerMCPServers(mcpConfig: Record<string, MCPServerConfig>): void {
+  if (Object.keys(mcpConfig).length > 0) {
+    pendingConfig = mcpConfig;
+    logger.info(`Registered ${Object.keys(mcpConfig).length} MCP server(s) for lazy start`, {
+      servers: Object.keys(mcpConfig).join(", "),
+    });
+  }
+}
+
+/**
+ * Start pending MCP servers if not already started. Safe to call multiple times.
+ */
+export async function ensureMCPStarted(): Promise<void> {
+  if (!pendingConfig) return;
+  if (lazyStartPromise) return lazyStartPromise;
+
+  const config = pendingConfig;
+  pendingConfig = null;
+
+  lazyStartPromise = startAllMCPServers(config);
+  try {
+    await lazyStartPromise;
+  } finally {
+    lazyStartPromise = null;
+  }
+}
+
+/**
+ * Returns true if MCP servers are registered (pending or active).
+ */
+export function hasMCPRegistered(): boolean {
+  return pendingConfig !== null || activeServers.size > 0;
+}
+
 // ---------------------------------------------------------------------------
 // Tool call
 // ---------------------------------------------------------------------------
@@ -152,6 +194,9 @@ export async function callMCPTool(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<string> {
+  // Lazy start: if servers are pending, start them now
+  await ensureMCPStarted();
+
   const server = activeServers.get(serverName);
   if (!server) throw new Error(`MCP server "${serverName}" not found`);
 
@@ -172,6 +217,14 @@ export async function callMCPTool(
 // ---------------------------------------------------------------------------
 // Build AI SDK tool definitions from active MCP servers
 // ---------------------------------------------------------------------------
+
+/**
+ * Async version: ensures lazy-started servers are up, then returns tool defs.
+ */
+export async function getMCPToolDefinitionsAsync(): Promise<Record<string, AnyToolDef>> {
+  await ensureMCPStarted();
+  return getMCPToolDefinitions();
+}
 
 /**
  * Returns a map of AI SDK-compatible tool definitions for all tools

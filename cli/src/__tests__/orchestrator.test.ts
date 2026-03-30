@@ -47,8 +47,12 @@ vi.mock("../hooks.js", () => ({
 vi.mock("../mcp-client.js", () => ({
   startAllMCPServers: vi.fn().mockResolvedValue(undefined),
   getMCPToolDefinitions: vi.fn(() => ({})),
+  getMCPToolDefinitionsAsync: vi.fn().mockResolvedValue({}),
   stopAllMCPServers: vi.fn(),
   autoDetectMCPServers: vi.fn((existing: Record<string, unknown>) => existing),
+  registerMCPServers: vi.fn(),
+  ensureMCPStarted: vi.fn().mockResolvedValue(undefined),
+  hasMCPRegistered: vi.fn(() => false),
 }));
 
 // Mock cost-tracker — must be a real class (used with `new`)

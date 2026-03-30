@@ -23,7 +23,7 @@ import { loadMemories, formatMemoriesForPrompt, extractMemoryMarkers, addMemory,
 import { formatProjectInstructions } from "../instructions.js";
 import { parseImageReferences, toMessageContent, resolveFileReferences, resolveFolderReferences, resolveUrlReferences } from "../image-support.js";
 import * as logger from "../logger.js";
-import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers } from "../mcp-client.js";
+import { startAllMCPServers, getMCPToolDefinitions, getMCPTools, stopAllMCPServers } from "../mcp-client.js";
 import { resolveConfig, type HooksConfig } from "../config.js";
 import { runHooks } from "../hooks.js";
 import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
@@ -175,6 +175,15 @@ You have persistent memory across conversations for this project. Save memories 
 
   const memories = loadMemories();
   prompt += formatMemoriesForPrompt(memories);
+
+  // Add MCP tool awareness if any MCP servers are active
+  const mcpTools = getMCPTools();
+  if (mcpTools.length > 0) {
+    const serverNames = [...new Set(mcpTools.map(t => t.serverName))];
+    prompt += `\n\n## MCP Tools\n\nYou have additional tools from ${serverNames.length} MCP server(s): ${serverNames.join(", ")}. `;
+    prompt += `Tools prefixed with \`mcp__<server>__\` are real, working tools provided by external MCP servers. `;
+    prompt += `Use them confidently — when they return results, trust those results. Do NOT say you "cannot" use them or claim they don't work after a successful call.\n`;
+  }
 
   return prompt;
 }

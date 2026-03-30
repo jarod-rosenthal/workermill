@@ -133,7 +133,8 @@ const defaultCmd = program
       const aiModel = createModel(provider as any, model, host, contextLength);
       const sandboxed = options.fullDisk ? false : config.sandbox !== false;
       const baseTools = createToolDefinitions(workingDir, aiModel, sandboxed);
-      const tools = { ...baseTools, ...getMCPToolDefinitions() };
+      const mcpToolDefs = getMCPToolDefinitions();
+      const tools = { ...baseTools, ...mcpToolDefs };
 
       let systemPrompt = `You are WorkerMill, an AI coding agent. Working directory: ${workingDir}\n`;
       const instructions = formatProjectInstructions(workingDir);
@@ -141,6 +142,12 @@ const defaultCmd = program
       const learnings = loadLearnings();
       if (learnings.length > 0) {
         systemPrompt += `\n\n## Project Learnings\n${learnings.map(l => `- ${l}`).join("\n")}`;
+      }
+      const mcpToolKeys = Object.keys(mcpToolDefs);
+      if (mcpToolKeys.length > 0) {
+        const serverNames = [...new Set(mcpToolKeys.map(k => k.split("__")[1]))];
+        systemPrompt += `\n\n## MCP Tools\n\nYou have additional tools from MCP server(s): ${serverNames.join(", ")}. `;
+        systemPrompt += `Tools prefixed with \`mcp__<server>__\` are real, working tools. Use them confidently and trust their results.\n`;
       }
 
       const stream = streamText({

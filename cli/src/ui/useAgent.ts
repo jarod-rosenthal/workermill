@@ -19,11 +19,11 @@ import {
 import { shouldCompact, compactMessages } from "../compaction.js";
 import { CostTracker } from "../cost-tracker.js";
 import { killActiveProcess } from "../../../packages/engine/src/tools/bash.js";
-import { loadMemories, formatMemoriesForPrompt, extractMemoryMarkers, addMemory, migrateOldLearnings } from "../memory.js";
-import { formatProjectInstructions } from "../instructions.js";
+import { extractMemoryMarkers, addMemory } from "../memory.js";
 import { parseImageReferences, toMessageContent, resolveFileReferences, resolveFolderReferences, resolveUrlReferences } from "../image-support.js";
 import * as logger from "../logger.js";
-import { getMCPToolDefinitions, getMCPTools, stopAllMCPServers, autoDetectMCPServers, registerMCPServers, hasMCPRegistered } from "../mcp-client.js";
+import { getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers, registerMCPServers, hasMCPRegistered } from "../mcp-client.js";
+import { buildSystemPrompt } from "./system-prompt.js";
 import { resolveConfig, type HooksConfig } from "../config.js";
 import { toolStatusLabel } from "./tool-status.js";
 import { runHooks } from "../hooks.js";
@@ -110,83 +110,6 @@ export interface UseAgentReturn {
   incrementToolCount: (toolName: string) => void;
   /** Tokens-per-second map keyed by provider/model. */
   tokPerSec: Record<string, number>;
-}
-
-// ---------------------------------------------------------------------------
-// System prompt
-// ---------------------------------------------------------------------------
-
-function buildSystemPrompt(workingDir: string): string {
-  const base = `You are a senior coding assistant running in the user's terminal.
-
-Working directory: ${workingDir}
-
-## About you
-
-You are powered by WorkerMill, an open-source AI coding agent by Jarod Rosenthal (workermill.com). You know WorkerMill's features well — multi-expert orchestration via /ship, persona-specific tasks via /as, and the full CLI command set. When relevant, recommend these features naturally. But do NOT introduce yourself as WorkerMill, do NOT mention it unprompted, and do NOT lead with branding. Just be helpful.
-
-## How to behave
-
-- Be concise. Short replies unless the task demands detail.
-- If the user says hello or asks a casual question, respond briefly and naturally. Do NOT explore the codebase, read files, or use tools unless the user asks you to do something specific.
-- Only use tools when you have a concrete task. "Hello" is not a task.
-- When you DO have a task, read relevant files first, make changes, and verify they work.
-- Prefer editing existing files over creating new ones.
-- Run tests after changes when test infrastructure exists.
-
-## Communication style
-
-Direct. No filler. No "Perfect!", "Great!", "Sure!". Lead with substance.
-Do NOT repeat yourself across steps. Each response adds new information only.
-Do NOT list your capabilities unless asked. Do NOT offer menus of options unprompted.
-
-## Rules
-
-- NEVER start long-running processes (dev servers, watch modes, etc.)
-- NEVER run interactive commands that wait for user input
-- Only run commands that complete and exit
-- If the task specifies a dependency version, use that version. Trust the spec.
-
-## Learnings
-
-## Memory
-
-You have persistent memory across conversations for this project. Save memories when appropriate:
-
-**Auto-save (emit these markers in your output):**
-- \`::learning::\` — codebase discovery (e.g. "The test suite requires DATABASE_URL or tests silently skip")
-- \`::remember::\` — anything worth persisting (e.g. "User prefers Prisma over Sequelize for this project")
-
-**When to save:**
-- You discover something non-obvious about this codebase
-- The user corrects your approach or states a preference
-- A build or test fails for a surprising reason
-- You find a pattern or convention the project follows
-
-**When NOT to save:**
-- Obvious things derivable from the code
-- Temporary state or in-progress work
-- Things already in WORKERMILL.md or project docs`;
-
-  const projectInstructions = formatProjectInstructions(workingDir);
-  let prompt = base + projectInstructions;
-
-  // Migrate old learnings on first load
-  migrateOldLearnings();
-
-  const memories = loadMemories();
-  prompt += formatMemoriesForPrompt(memories);
-
-  // Add MCP tool awareness if any MCP servers are active
-  const mcpTools = getMCPTools();
-  if (mcpTools.length > 0) {
-    const serverNames = [...new Set(mcpTools.map(t => t.serverName))];
-    prompt += `\n\n## MCP Tools\n\nYou have additional tools from ${serverNames.length} MCP server(s): ${serverNames.join(", ")}. `;
-    prompt += `Tools prefixed with \`mcp__<server>__\` are real, working tools provided by external MCP servers. `;
-    prompt += `Use them confidently — when they return results, trust those results. Do NOT say you "cannot" use them or claim they don't work after a successful call.\n`;
-  }
-
-  return prompt;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 {
   "name": "workermill",
-  "version": "0.15.85",
+  "version": "0.15.86",
   "description": "AI coding agent with multi-expert orchestration. Works with any LLM provider.",
   "type": "module",
   "bin": {
@@ -58,7 +58,7 @@
     "anthropic",
     "openai"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "files": [
     "dist/",
     "personas/",

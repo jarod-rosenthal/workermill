@@ -215,4 +215,4 @@ Custom personas: add `.workermill/personas/my_persona.md` to your project or `~/
 
 ## License
 
-MIT
+Apache-2.0

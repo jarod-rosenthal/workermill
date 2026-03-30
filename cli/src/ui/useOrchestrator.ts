@@ -140,11 +140,13 @@ export function useOrchestrator(
           setPreviewLine("");
         }
 
+        // ---- Config ------------------------------------------------
+        // Use the CLI-resolved config (has --auto-revise etc.) if available,
+        // otherwise fall back to loading from disk.  Hoisted above try so
+        // `finally` can read `config.bell`.
+        const config = cliConfig ?? resolveConfig();
+
         try {
-          // ---- Config ------------------------------------------------
-          // Use the CLI-resolved config (has --auto-revise etc.) if available,
-          // otherwise fall back to loading from disk.
-          const config = cliConfig ?? resolveConfig();
           if (!config) {
             addMessage(
               "No provider configured. Run `workermill` (setup) first.",
@@ -281,8 +283,8 @@ export function useOrchestrator(
           setStatusMessage("");
           setPreviewLine("");
           setConfirmRequest(null);
-          // Ring terminal bell when build completes (not on cancel)
-          if (!controller.signal.aborted) {
+          // Beep on build completion (not on cancel) if sound notifications enabled
+          if (config.bell && !controller.signal.aborted) {
             process.stdout.write("\x07");
           }
         }

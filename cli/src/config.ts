@@ -61,6 +61,8 @@ export interface CliConfig {
   git?: GitConfig;
   /** Restrict file/bash tools to the working directory (default: true) */
   sandbox?: boolean;
+  /** Play a beep sound when builds complete (default: false) */
+  bell?: boolean;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".workermill");
@@ -117,6 +119,7 @@ export function resolveConfig(): CliConfig {
     },
     git: { ...global.git, ...(project?.git || {}) },
     sandbox: project?.sandbox ?? global.sandbox,
+    bell: project?.bell ?? global.bell,
   };
 }
 

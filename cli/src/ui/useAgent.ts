@@ -710,10 +710,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           setStatus("idle");
           abortRef.current = null;
 
-          // Ring terminal bell for long operations (>10s)
-          if (Date.now() - turnStartTime > 10_000) {
-            process.stdout.write("\x07");
-          }
         } catch (err) {
           clearTimeout(timeoutId);
           abortRef.current = null;

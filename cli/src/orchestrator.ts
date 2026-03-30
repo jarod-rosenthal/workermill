@@ -66,6 +66,35 @@ export interface OrchestrationOutput {
 }
 
 /**
+ * External tools — teaches agents they can use bash for GitHub, web lookups, etc.
+ */
+const EXTERNAL_TOOLS = `
+
+## External Tools Available via Bash
+
+You have full access to CLI tools installed on this machine through the bash tool. Use them freely:
+
+### GitHub CLI (\`gh\`)
+- \`gh issue list\` — list open issues
+- \`gh issue view 123\` — read a specific issue
+- \`gh issue search "search query"\` — search issues
+- \`gh pr list\` — list pull requests
+- \`gh pr view 123\` — read a specific PR
+- \`gh api repos/OWNER/REPO/issues\` — raw GitHub API access
+
+### Web & Research
+- Use the \`web_search\` tool to search the web for documentation, examples, or solutions
+- Use the \`fetch\` tool to read web pages or API docs
+- Use \`bash\` with \`curl\` for API calls or downloading files
+
+### Package Managers
+- \`npm\`, \`yarn\`, \`pnpm\` — install dependencies, run scripts
+- \`pip\`, \`cargo\`, \`go get\` — language-specific package managers
+
+You are NOT restricted to just reading and writing files. Use any available CLI tool to gather information, install dependencies, or verify your work. The only restriction is on destructive commands (rm -rf /, git push --force, etc.) and long-running processes (dev servers, watch modes).
+`;
+
+/**
  * Memory instructions — teaches models to emit memory markers.
  */
 const MEMORY_INSTRUCTIONS = `
@@ -1202,7 +1231,7 @@ When summarizing your work at the end, describe decisions in plain language. The
 When you make a decision that affects other parts of the system, include ::decision:: markers in your output.
 When you create a file, include ::file_created::path markers.
 When you modify a file, include ::file_modified::path markers.
-${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
+${DOCKER_INSTRUCTIONS}${VERSION_TRUST}${IGNORE_WORKERMILL}${EXTERNAL_TOOLS}${revisionFeedback ? `\n\n## Revision requested\n${revisionFeedback}` : ""}`;
 
     try {
       // Combine user abort with loop detection abort

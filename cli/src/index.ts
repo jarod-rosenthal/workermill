@@ -123,10 +123,17 @@ const defaultCmd = program
       const { createToolDefinitions } = await import("../../packages/engine/src/tools/index.js");
       const { formatProjectInstructions } = await import("./instructions.js");
       const { loadLearnings } = await import("./learnings.js");
+      const { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers } = await import("./mcp-client.js");
+
+      // Start MCP servers if configured
+      if (config.mcp && Object.keys(config.mcp).length > 0) {
+        await startAllMCPServers(config.mcp);
+      }
 
       const aiModel = createModel(provider as any, model, host, contextLength);
       const sandboxed = options.fullDisk ? false : config.sandbox !== false;
-      const tools = createToolDefinitions(workingDir, aiModel, sandboxed);
+      const baseTools = createToolDefinitions(workingDir, aiModel, sandboxed);
+      const tools = { ...baseTools, ...getMCPToolDefinitions() };
 
       let systemPrompt = `You are WorkerMill, an AI coding agent. Working directory: ${workingDir}\n`;
       const instructions = formatProjectInstructions(workingDir);
@@ -155,6 +162,7 @@ const defaultCmd = program
         console.log("(completed with tool calls only)");
       }
       console.log(); // newline at end
+      stopAllMCPServers();
       process.exit(0);
     }
 

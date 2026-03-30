@@ -21,6 +21,7 @@ import {
 } from "./git-ops.js";
 import { loadMemories, addMemory, extractMemoryMarkers, formatMemoriesForPrompt } from "./memory.js";
 import { isDangerous, READ_TOOLS } from "./safety.js";
+import { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers } from "./mcp-client.js";
 
 /**
  * If the task string looks like a file path (e.g. "spec.md", "docs/prd.yaml"),
@@ -453,6 +454,12 @@ async function planStories(
     }
   }
 
+  // Add MCP tools to planner's read-only tools
+  const plannerMcpTools = getMCPToolDefinitions();
+  for (const [key, def] of Object.entries(plannerMcpTools)) {
+    readOnlyTools[key] = def;
+  }
+
   // Detect file references in the task and read them upfront so the planner has full context
   const fileRefPattern = /(?:^|\s)([\w./-]+\.(?:md|txt|yaml|yml|json|toml|ts|js|py|go|rs|spec|requirements|prd|plan))\b/gi;
   const referencedFiles = [...new Set([...userTask.matchAll(fileRefPattern)].map(m => m[1]))];
@@ -878,6 +885,12 @@ export async function runOrchestration(
     }
   }
 
+  // Start MCP servers if configured
+  if (config.mcp && Object.keys(config.mcp).length > 0) {
+    output.coordinatorLog(`Starting ${Object.keys(config.mcp).length} MCP server(s)...`);
+    await startAllMCPServers(config.mcp);
+  }
+
   const costTracker = new CostTracker();
   const persistedMemories = loadMemories();
   const context: SharedContext = {
@@ -1156,6 +1169,12 @@ export async function runOrchestration(
           },
         };
       }
+    }
+
+    // Merge MCP tools into persona tools — same pattern as useAgent.ts
+    const mcpTools = getMCPToolDefinitions();
+    for (const [key, def] of Object.entries(mcpTools)) {
+      personaTools[key] = def;
     }
 
     const startedDockerCompose = new Set<string>(); // tracks cwd where compose was started
@@ -2098,4 +2117,7 @@ ${story.implementationNotes ? `\n## Architect's Guidance\n${story.implementation
 
   // Final cost update
   output.updateCost?.(costTracker.getTotalCost());
+
+  // Stop MCP servers
+  stopAllMCPServers();
 }

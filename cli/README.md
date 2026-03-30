@@ -57,7 +57,7 @@ workermill --max-tokens 4096
 ## Features
 
 - **Multi-expert orchestration** — `/ship` decomposes tasks into stories, each assigned to a specialist persona
-- **Role-based model routing** — Different models for workers, planner, and reviewer (e.g., Ollama for workers, Gemini for planning, Claude for review)
+- **Per-persona model routing** — Map any persona to any provider. Run security reviews on Claude, frontend on GPT, workers on Ollama. Use `/settings route <persona> <provider>` or edit `cli.json`
 - **13 built-in tools** — bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, sub_agent
 - **WORKERMILL.md** — Project instructions file read by all agents. Also supports CLAUDE.md, .cursorrules
 - **MCP servers** — Connect external tools via Model Context Protocol
@@ -77,6 +77,8 @@ workermill --max-tokens 4096
 | Command | Description |
 |---------|-------------|
 | `/ship <task>` | Multi-expert orchestration — plans, executes, reviews (alias: `/build`) |
+| `/plan <task>` | Plan/analyze a task using the planner agent (no args toggles read-only mode) |
+| `/review [task]` | Code review using the tech lead (defaults to reviewing recent changes) |
 | `/as <persona> <task>` | Run a task with a specific expert (e.g. `/as security_engineer review auth`) |
 | `/retry` | Re-run the last ship task |
 | `/personas` | List all available experts, view/create custom personas |
@@ -86,7 +88,7 @@ workermill --max-tokens 4096
 | `/undo` | Revert last ship's changes (git stash or reset) |
 | `/diff` | Preview uncommitted changes |
 | `/model` | Show or switch model (`/model provider/model`) |
-| `/plan` | Toggle read-only plan mode |
+| `/plan` | Plan a task or toggle read-only mode (no args) |
 | `/trust` | Auto-approve all tools for this session |
 | `/hooks` | View configured pre/post tool hooks |
 | `/skills` | Custom slash commands from `.workermill/commands/` |
@@ -157,7 +159,8 @@ Use `/retry` to re-plan the same task — the planner sees existing code and fil
   "default": "ollama",
   "routing": {
     "planner": "google",
-    "tech_lead": "anthropic"
+    "tech_lead": "anthropic",
+    "security_engineer": "anthropic"
   },
   "review": {
     "enabled": true,
@@ -185,6 +188,18 @@ Change settings at runtime with `/settings`:
 | Review enabled | true | `/settings review.enabled true/false` |
 | Max revisions | 3 | `/settings review.maxRevisions <n>` |
 | Auto-revise | false | `/settings review.autoRevise true/false` |
+
+### Per-Persona Model Routing
+
+By default, all worker personas use the same model. The planner and reviewer can be routed to different models during setup. You can also route any individual persona to any configured provider:
+
+```bash
+/settings route backend_developer anthropic
+/settings route frontend_developer google
+/settings route security_engineer anthropic
+```
+
+This lets you mix providers — e.g., local Ollama for most workers, but route security reviews to a cloud model. Routing is stored in `cli.json` under the `routing` key. Unrouted personas use the default provider.
 
 ## 11 Expert Personas
 

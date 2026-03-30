@@ -64,7 +64,7 @@ export default function CLI() {
             { title: "Git branch isolation", desc: "Each /ship session creates a feature branch with commits per story. Clean diffs for review, checkpoints for rollback." },
             { title: "Revision with memory", desc: "When the reviewer requests changes, workers see what they tried last time via git history — no repeated mistakes." },
             { title: "Error classification", desc: "Categorizes failures (typescript, lint, test, build, transient) with targeted fix hints for automatic retry." },
-            { title: "Role-based model routing", desc: "Different models for workers, planner, and reviewer. Mix local and cloud providers." },
+            { title: "Per-persona model routing", desc: "Map any persona to any provider. Run security reviews on Claude, frontend on GPT, workers on Ollama — /settings route <persona> <provider>." },
             { title: "WORKERMILL.md", desc: "Project instructions file read by all agents. Also supports CLAUDE.md and .cursorrules." },
             { title: "MCP servers", desc: "Connect external tools via Model Context Protocol. Configure in cli.json." },
             { title: "Hooks", desc: "Pre/post tool execution hooks for linting, formatting, and custom workflows." },
@@ -234,6 +234,8 @@ export default function CLI() {
             <tbody className="divide-y divide-border">
               {[
                 ["/ship <task>", "Multi-expert orchestration — plans, executes, reviews"],
+                ["/plan <task>", "Plan/analyze a task using the planner agent (no args: read-only mode)"],
+                ["/review [task]", "Code review using the tech lead (defaults to recent changes)"],
                 ["/retry", "Re-plan and re-run the last build task"],
                 ["/init", "Generate WORKERMILL.md for this project"],
                 ["/settings", "View/change settings (review, ollama, etc.)"],
@@ -241,7 +243,7 @@ export default function CLI() {
                 ["/undo", "Revert last build's changes (git stash or reset)"],
                 ["/diff", "Preview uncommitted changes"],
                 ["/model", "Show or switch model (/model provider/model)"],
-                ["/plan", "Toggle read-only plan mode"],
+                ["/plan", "Plan a task or toggle read-only mode (no args)"],
                 ["/trust", "Auto-approve all tools for this session"],
                 ["/hooks", "View configured pre/post tool hooks"],
                 ["/cost", "Session cost and token usage"],
@@ -291,6 +293,7 @@ export default function CLI() {
                 ["Max revisions", "3", "/settings review.maxRevisions <n>"],
                 ["Approval threshold", "8", "/settings review.threshold <n> (1-10 scale)"],
                 ["Auto-revise", "false", "/settings review.autoRevise true/false"],
+                ["Persona routing", "default provider", "/settings route <persona> <provider>"],
               ].map(([setting, def, cmd]) => (
                 <tr key={setting}>
                   <td className="p-3 font-medium text-foreground">{setting}</td>
@@ -354,7 +357,8 @@ export default function CLI() {
   "default": "ollama",
   "routing": {
     "planner": "google",
-    "tech_lead": "anthropic"
+    "tech_lead": "anthropic",
+    "security_engineer": "anthropic"
   },
   "review": {
     "enabled": true,

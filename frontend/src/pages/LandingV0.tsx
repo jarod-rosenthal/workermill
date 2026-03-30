@@ -447,10 +447,10 @@ export default function LandingV0() {
                 Questions, feedback, or inquiries — I'd love to hear from you.
               </p>
               <a
-                href="mailto:jarod.rosenthal@workermill.com"
+                href="mailto:jarod.rosenthal@protonmail.com"
                 className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl border border-white/10 bg-white/[0.03] text-slate-300 text-sm font-medium hover:bg-white/[0.06] hover:text-white transition-colors"
               >
-                jarod.rosenthal@workermill.com
+                jarod.rosenthal@protonmail.com
               </a>
             </div>
           </section>

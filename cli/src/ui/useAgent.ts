@@ -23,8 +23,9 @@ import { loadMemories, formatMemoriesForPrompt, extractMemoryMarkers, addMemory,
 import { formatProjectInstructions } from "../instructions.js";
 import { parseImageReferences, toMessageContent, resolveFileReferences, resolveFolderReferences, resolveUrlReferences } from "../image-support.js";
 import * as logger from "../logger.js";
-import { startAllMCPServers, getMCPToolDefinitions, getMCPTools, stopAllMCPServers, autoDetectMCPServers } from "../mcp-client.js";
+import { getMCPToolDefinitions, getMCPTools, stopAllMCPServers, autoDetectMCPServers, registerMCPServers, hasMCPRegistered } from "../mcp-client.js";
 import { resolveConfig, type HooksConfig } from "../config.js";
+import { toolStatusLabel } from "./tool-status.js";
 import { runHooks } from "../hooks.js";
 import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
 import { isDangerous, READ_TOOLS, AUTO_EDIT_TOOLS } from "../safety.js";
@@ -189,53 +190,6 @@ You have persistent memory across conversations for this project. Save memories 
 }
 
 // ---------------------------------------------------------------------------
-// Tool status labels
-// ---------------------------------------------------------------------------
-
-function toolStatusLabel(toolName: string, input: Record<string, unknown>): string {
-  switch (toolName) {
-    case "read_file":
-      return `Reading ${input.file_path || "file"}...`;
-    case "write_file":
-      return `Writing ${input.file_path || "file"}...`;
-    case "edit_file":
-      return `Editing ${input.file_path || "file"}...`;
-    case "glob":
-      return `Searching files${input.pattern ? ` (${input.pattern})` : ""}...`;
-    case "grep":
-      return `Searching code${input.pattern ? ` for "${String(input.pattern).slice(0, 30)}"` : ""}...`;
-    case "ls":
-      return `Listing ${input.path || "directory"}...`;
-    case "bash": {
-      const cmd = String(input.command || "").slice(0, 40);
-      return `Running ${cmd}${String(input.command || "").length > 40 ? "..." : ""}`;
-    }
-    case "git":
-      return `Git ${input.action || ""}...`;
-    case "sub_agent":
-      return "Running sub-agent...";
-    case "browser_open":
-      return "Opening browser...";
-    case "browser_navigate":
-      return `Navigating to ${input.url || "page"}...`;
-    case "browser_screenshot":
-      return "Taking screenshot...";
-    case "browser_click":
-      return `Clicking ${input.selector || "element"}...`;
-    case "browser_fill":
-      return `Filling ${input.selector || "field"}...`;
-    case "browser_evaluate":
-      return "Running JavaScript...";
-    case "browser_console":
-      return "Reading console...";
-    case "browser_close":
-      return "Closing browser...";
-    default:
-      return `Running ${toolName}...`;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
@@ -327,13 +281,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       options.sandboxed,
     );
 
-    // Start MCP servers — auto-detect Docker Desktop + user config
+    // Register MCP servers for lazy start — they won't spawn until first tool use
     try {
       const cliConfig = resolveConfig();
       const mcpConfig = autoDetectMCPServers(cliConfig?.mcp || {});
-      if (Object.keys(mcpConfig).length > 0) {
-        void startAllMCPServers(mcpConfig);
-      }
+      registerMCPServers(mcpConfig);
       hooksConfigRef.current = cliConfig?.hooks;
     } catch (err) {
       logger.warn("Config/MCP init failed", { error: err instanceof Error ? err.message : String(err) });
@@ -621,8 +573,13 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   /**
    * Return the tool set that should be active for this turn, respecting plan
    * mode which restricts to read-only tools.
+   * Async: triggers lazy MCP server start on first call.
    */
-  const getActiveTools = useCallback((): Record<string, AnyToolDef> => {
+  const getActiveTools = useCallback(async (): Promise<Record<string, AnyToolDef>> => {
+    // Lazy-start MCP servers on first prompt submission (not on CLI launch)
+    const { ensureMCPStarted } = await import("../mcp-client.js");
+    await ensureMCPStarted();
+
     const all = buildPermissionedTools();
     if (!planModeRef.current) return all;
     const filtered: Record<string, AnyToolDef> = {};
@@ -678,8 +635,9 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
 
         try {
           const model = modelRef.current!;
+          // Await tools first — triggers lazy MCP start so system prompt sees MCP tools
+          const activeTools = (await getActiveTools()) as ToolSet;
           const systemPrompt = buildSystemPrompt(workingDirRef.current);
-          const activeTools = getActiveTools() as ToolSet;
           logger.info("Starting streamText", {
             provider: aiProviderRef.current,
             model: options.model,

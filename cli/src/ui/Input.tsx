@@ -61,7 +61,7 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
   // Filter matching commands when input starts with /
   // After "/ship " or "/build ", complete with .md files from cwd
   const completions = useMemo(() => {
-    const shipMatch = value.match(/^\/(ship|build)\s+(.*)/);
+    const shipMatch = value.match(/^\/(ship|build|plan|review)\s+(.*)/);
     if (shipMatch) {
       const cmd = shipMatch[1];
       const partial = shipMatch[2].toLowerCase();

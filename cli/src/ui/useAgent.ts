@@ -78,8 +78,8 @@ export interface UseAgentReturn {
   cost: number;
   /** The underlying session object (for status display). */
   session: Session;
-  /** Send a user message and start the agent loop. */
-  submit: (input: string) => void;
+  /** Send a user message and start the agent loop. Optional displayText controls what the user sees (full input still sent to model). */
+  submit: (input: string, displayText?: string) => void;
   /** Cancel the running stream / tool execution. */
   cancel: () => void;
   /** Roll back the last user+assistant exchange from the conversation. */
@@ -517,7 +517,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   // ------- submit() -------- //
 
   const submit = useCallback(
-    (input: string) => {
+    (input: string, displayText?: string) => {
       // Fire-and-forget async work; errors are caught internally.
       void (async () => {
         const session = sessionRef.current;
@@ -539,7 +539,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         const userMsg: Message = {
           id: crypto.randomUUID(),
           role: "user",
-          content: input,
+          content: displayText ?? input,
           timestamp: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, userMsg]);

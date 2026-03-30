@@ -45,7 +45,7 @@ export function printSessionGoodbye(ctx: SlashCommandContext): void {
   }
 
   console.log(chalk.dim(`\n  ${parts.join(" · ")}`));
-  console.log(chalk.dim("  Until next time.\n"));
+  console.log();
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +160,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 export interface SlashCommandContext {
   addSystemMessage: (content: string) => void;
   addUserMessage: (content: string) => void;
-  submit: (input: string) => void;
+  submit: (input: string, displayText?: string) => void;
   provider: string;
   model: string;
   workingDir: string;
@@ -315,9 +315,9 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             `[Acting as **${p.name}** — ${p.description}]\n\n` +
             `## Expert Instructions\n\n${p.systemPrompt}\n\n` +
             `## Task\n\n`;
-          ctx.submit(personaPrefix + arg);
+          ctx.submit(personaPrefix + arg, `/plan ${arg}`);
         } else {
-          ctx.submit(arg); // fallback — run without persona if not found
+          ctx.submit(arg, `/plan ${arg}`); // fallback — run without persona if not found
         }
       } else {
         // No argument: toggle read-only mode
@@ -341,9 +341,9 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `[Acting as **${p.name}** — ${p.description}]\n\n` +
           `## Expert Instructions\n\n${p.systemPrompt}\n\n` +
           `## Task\n\n`;
-        ctx.submit(personaPrefix + reviewTask);
+        ctx.submit(personaPrefix + reviewTask, `/review${arg ? " " + arg : ""}`);
       } else {
-        ctx.submit(reviewTask);
+        ctx.submit(reviewTask, `/review${arg ? " " + arg : ""}`);
       }
       break;
     }
@@ -835,7 +835,8 @@ Then either:
 1. If improvements are needed, update the file directly with write_file and explain what you changed.
 2. If it's already good, say so and suggest any minor additions.
 
-Do NOT rewrite from scratch unless it's severely outdated — preserve the user's custom sections.`
+Do NOT rewrite from scratch unless it's severely outdated — preserve the user's custom sections.`,
+          "/init (reviewing WORKERMILL.md)"
         );
       } else {
         // First run: generate from scratch
@@ -919,7 +920,8 @@ Rules for writing:
 - If you can't determine something from the code, leave it out rather than guessing
 - Use code blocks for commands and file paths
 
-Write the file with write_file to WORKERMILL.md in the project root.`
+Write the file with write_file to WORKERMILL.md in the project root.`,
+          "/init (generating WORKERMILL.md)"
         );
       }
       break;
@@ -1098,7 +1100,7 @@ Write the file with write_file to WORKERMILL.md in the project root.`
             `[Acting as **${p.name}** — ${p.description}]\n\n` +
             `## Expert Instructions\n\n${p.systemPrompt}\n\n` +
             `## Task\n\n`;
-          ctx.submit(personaPrefix + task);
+          ctx.submit(personaPrefix + task, `/as ${personaSlug} ${task}`);
         }
       }
       break;
@@ -1323,7 +1325,7 @@ Write the file with write_file to WORKERMILL.md in the project root.`
       const customCmd = customCommands.find(c => c.name === cmd);
       if (customCmd) {
         ctx.addUserMessage(`/${cmd}${arg ? " " + arg : ""}`);
-        ctx.submit(customCmd.prompt + (arg ? `\n\nAdditional context: ${arg}` : ""));
+        ctx.submit(customCmd.prompt + (arg ? `\n\nAdditional context: ${arg}` : ""), `/${cmd}${arg ? " " + arg : ""}`);
         break;
       }
       ctx.addSystemMessage(

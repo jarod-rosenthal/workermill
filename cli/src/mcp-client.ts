@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "child_process";
+import { spawn, execSync as nodeExecSync, type ChildProcess } from "child_process";
 import { jsonSchema } from "ai";
 import type { MCPServerConfig } from "./config.js";
 import * as logger from "./logger.js";
@@ -230,6 +230,62 @@ export function getMCPTools(): Array<{ serverName: string; tool: MCPTool }> {
  */
 export function hasMCPServers(): boolean {
   return activeServers.size > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-detect Docker Desktop MCP gateway
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect if Docker Desktop's MCP gateway is available.
+ * Checks for `docker.exe` (WSL) or `docker` with the `mcp` subcommand.
+ * Returns an MCPServerConfig if available, null otherwise.
+ */
+export function detectDockerMCP(): MCPServerConfig | null {
+  // Candidate docker binaries — WSL needs docker.exe from Windows side
+  const candidates = [
+    "/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe",
+    "docker.exe",
+    "docker",
+  ];
+
+  for (const bin of candidates) {
+    try {
+      const result = nodeExecSync(`"${bin}" mcp server list 2>&1`, {
+        encoding: "utf-8",
+        timeout: 5000,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      // Check if there are enabled servers (output contains "enabled")
+      if (result.includes("enabled")) {
+        logger.info("Docker Desktop MCP gateway detected", { binary: bin });
+        return {
+          command: bin,
+          args: ["mcp", "gateway", "run"],
+        };
+      }
+    } catch {
+      // This binary doesn't have mcp support or isn't available
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Auto-detect available MCP servers and merge with user config.
+ * Currently detects Docker Desktop's MCP gateway.
+ */
+export function autoDetectMCPServers(existing: Record<string, MCPServerConfig>): Record<string, MCPServerConfig> {
+  // Don't auto-detect if user already has a "docker" MCP server configured
+  if (existing.docker) return existing;
+
+  const dockerConfig = detectDockerMCP();
+  if (dockerConfig) {
+    return { ...existing, docker: dockerConfig };
+  }
+
+  return existing;
 }
 
 // ---------------------------------------------------------------------------

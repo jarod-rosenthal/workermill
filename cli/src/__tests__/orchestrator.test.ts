@@ -43,6 +43,14 @@ vi.mock("../hooks.js", () => ({
   runHooks: vi.fn(),
 }));
 
+// Mock mcp-client — prevent Docker Desktop detection from hanging in tests
+vi.mock("../mcp-client.js", () => ({
+  startAllMCPServers: vi.fn().mockResolvedValue(undefined),
+  getMCPToolDefinitions: vi.fn(() => ({})),
+  stopAllMCPServers: vi.fn(),
+  autoDetectMCPServers: vi.fn((existing: Record<string, unknown>) => existing),
+}));
+
 // Mock cost-tracker — must be a real class (used with `new`)
 vi.mock("../cost-tracker.js", () => ({
   CostTracker: class {

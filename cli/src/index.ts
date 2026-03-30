@@ -123,11 +123,12 @@ const defaultCmd = program
       const { createToolDefinitions } = await import("../../packages/engine/src/tools/index.js");
       const { formatProjectInstructions } = await import("./instructions.js");
       const { loadLearnings } = await import("./learnings.js");
-      const { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers } = await import("./mcp-client.js");
+      const { startAllMCPServers, getMCPToolDefinitions, stopAllMCPServers, autoDetectMCPServers } = await import("./mcp-client.js");
 
-      // Start MCP servers if configured
-      if (config.mcp && Object.keys(config.mcp).length > 0) {
-        await startAllMCPServers(config.mcp);
+      // Start MCP servers — auto-detect Docker Desktop + user config
+      const mcpConfig = autoDetectMCPServers(config.mcp || {});
+      if (Object.keys(mcpConfig).length > 0) {
+        await startAllMCPServers(mcpConfig);
       }
 
       const aiModel = createModel(provider as any, model, host, contextLength);

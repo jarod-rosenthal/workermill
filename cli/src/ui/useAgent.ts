@@ -23,7 +23,7 @@ import { loadMemories, formatMemoriesForPrompt, extractMemoryMarkers, addMemory,
 import { formatProjectInstructions } from "../instructions.js";
 import { parseImageReferences, toMessageContent, resolveFileReferences, resolveFolderReferences, resolveUrlReferences } from "../image-support.js";
 import * as logger from "../logger.js";
-import { startAllMCPServers, getMCPToolDefinitions, getMCPTools, stopAllMCPServers } from "../mcp-client.js";
+import { startAllMCPServers, getMCPToolDefinitions, getMCPTools, stopAllMCPServers, autoDetectMCPServers } from "../mcp-client.js";
 import { resolveConfig, type HooksConfig } from "../config.js";
 import { runHooks } from "../hooks.js";
 import { browserOpen, browserNavigate, browserScreenshot, browserClick, browserFill, browserEvaluate, browserConsole, browserClose } from "../browser.js";
@@ -327,12 +327,12 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
       options.sandboxed,
     );
 
-    // Start MCP servers if configured (fire-and-forget — tools available
-    // by the time the user sends their first prompt in practice).
+    // Start MCP servers — auto-detect Docker Desktop + user config
     try {
       const cliConfig = resolveConfig();
-      if (cliConfig?.mcp && Object.keys(cliConfig.mcp).length > 0) {
-        void startAllMCPServers(cliConfig.mcp);
+      const mcpConfig = autoDetectMCPServers(cliConfig?.mcp || {});
+      if (Object.keys(mcpConfig).length > 0) {
+        void startAllMCPServers(mcpConfig);
       }
       hooksConfigRef.current = cliConfig?.hooks;
     } catch (err) {

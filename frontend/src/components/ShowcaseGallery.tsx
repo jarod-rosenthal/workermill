@@ -5,11 +5,8 @@ import {
   Layers,
   Zap,
   Globe,
-  Shield,
   Terminal,
   BarChart3,
-  FileText,
-  Workflow,
   Calendar,
   CheckCircle,
   AlertTriangle,
@@ -33,7 +30,6 @@ interface ShowcaseProject {
   liveUrl?: string;
   category: string;
   icon: React.ReactNode;
-  comingSoon?: boolean;
 }
 
 const showcaseProjects: ShowcaseProject[] = [
@@ -135,33 +131,6 @@ const showcaseProjects: ShowcaseProject[] = [
     category: "incident-management",
     icon: <Zap className="w-4 h-4" />,
   },
-  {
-    id: "docforge",
-    name: "DocForge",
-    tagline: "Developer docs with CMS, search, and version history.",
-    stack: "Django + HTMX + Meilisearch",
-    category: "documentation",
-    icon: <FileText className="w-4 h-4" />,
-    comingSoon: true,
-  },
-  {
-    id: "envguard",
-    name: "EnvGuard",
-    tagline: "Secret scanning CLI (Go) with tracking dashboard.",
-    stack: "Go + Cobra + Next.js",
-    category: "security",
-    icon: <Shield className="w-4 h-4" />,
-    comingSoon: true,
-  },
-  {
-    id: "orderflow",
-    name: "OrderFlow",
-    tagline: "Event-driven microservices with monitoring dashboard.",
-    stack: "Express + SQS + React + Terraform",
-    category: "microservices",
-    icon: <Workflow className="w-4 h-4" />,
-    comingSoon: true,
-  },
 ];
 
 export default function ShowcaseGallery() {
@@ -222,35 +191,7 @@ export default function ShowcaseGallery() {
 
         {/* Project cards grid */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {showcaseProjects.map((project) =>
-            project.comingSoon ? (
-              <div
-                key={project.id}
-                className="card-elevated border border-border/50 rounded-2xl overflow-hidden opacity-60"
-              >
-                <div className="px-5 pt-5 pb-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary">
-                        {project.icon}
-                      </div>
-                      <h3 className="text-lg font-semibold text-foreground">
-                        {project.name}
-                      </h3>
-                    </div>
-                    <span className="text-xs font-medium text-muted-foreground bg-muted px-2.5 py-1 rounded-full">
-                      Coming Soon
-                    </span>
-                  </div>
-                  <p className="text-sm text-muted-foreground leading-relaxed mb-3">
-                    {project.tagline}
-                  </p>
-                  <div className="inline-block px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20 text-[11px] font-medium text-primary">
-                    {project.stack}
-                  </div>
-                </div>
-              </div>
-            ) : (
+          {showcaseProjects.map((project) => (
               <div
                 key={project.id}
                 className="card-elevated border border-border/50 rounded-2xl overflow-hidden card-hover group"
@@ -341,8 +282,7 @@ export default function ShowcaseGallery() {
                     </Link>
                 </div>
               </div>
-            ),
-          )}
+          ))}
         </div>
 
         {/* Bottom note */}

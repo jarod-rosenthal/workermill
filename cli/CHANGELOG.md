@@ -26,10 +26,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **`/compact [focus]` documented** — added to `/help` command list. Focus instructions were already supported but not discoverable.
 - **`lsp` added to all personas** — available to all developer, architect, tech lead, and writer personas.
 
+### Changed (cont.)
+- **`/ship` stays on feature branch** — no longer auto-checkouts main after completion. Developer stays on the feature branch to review, test, and push.
+- **`/help` expanded** — added `/as`, `/remember`, `/forget`, `/memories`, `/setup`, `/clear`, `/settings key`. Added keyboard shortcuts (arrow keys, Ctrl+A/E, Shift+Tab, Tab).
+- **`/settings` display** — added API keys row with `/settings key` command.
+- **Custom command shadow warning** — `/skills` warns when a custom command name conflicts with a built-in.
+
 ### Fixed
 - **Trust-all permission bug** — selecting "trust all" in `/ship` mode only added 7 hardcoded tool names to the allow set. Tools like `verify`, `todo`, `lsp`, and MCP tools would prompt again. Now uses a `*` wildcard — one trust-all click covers everything.
 - **Setup stdin handoff** — `rl.close()` destroyed stdin, preventing Ink from setting raw mode after first-run setup. Fixed with `rl.close()` + `process.stdin.resume()`.
 - **`/setup reset` routing** — `case "setup reset"` was a dead branch that never matched. Now handled as `arg === "reset"` inside the setup case.
+- **Stale `/retry` state** — `getRetryableRun` now verifies the branch still exists. Deleted branches are auto-cleared instead of showing "incomplete run" notes forever.
+- **`/log` crash** — replaced `require("crypto")` with ESM import (dynamic require not supported in ESM bundle).
 
 ## [0.15.87] - 2026-03-30
 

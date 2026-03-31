@@ -9,6 +9,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { execSync } from "child_process";
 import type { Story } from "./orchestrator.js";
 
 const STATE_FILE = path.join(os.homedir(), ".workermill", "ship-runs.json");
@@ -68,6 +69,21 @@ export function getRetryableRun(workingDir: string): ShipRun | null {
     if (run.workingDir !== workingDir) continue;
     // Skip fully completed runs
     if (run.completedStoryIds.length >= run.stories.length) continue;
+
+    // Verify the branch still exists — if deleted, clear the stale state
+    if (run.featureBranch) {
+      try {
+        execSync(`git rev-parse --verify "${run.featureBranch}"`, {
+          cwd: workingDir,
+          stdio: "pipe",
+        });
+      } catch {
+        // Branch is gone — clean up stale state
+        clearShipRun(run.featureBranch);
+        continue;
+      }
+    }
+
     const t = new Date(run.updatedAt).getTime();
     if (t > bestTime) {
       best = run;

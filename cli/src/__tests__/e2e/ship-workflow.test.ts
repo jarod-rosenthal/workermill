@@ -120,29 +120,15 @@ export default app;
       output,
     );
 
-    // Verify: a feature branch was created (not on main/master)
-    const branches = execSync("git branch", { cwd: tempDir }).toString();
+    // Verify: we're on a feature branch (not main) with new commits
     const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: tempDir })
-      .toString()
-      .trim();
-
-    // Either we're on a feature branch, or there are multiple branches
-    const branchList = branches
-      .split("\n")
-      .map((b) => b.trim().replace(/^\* /, ""))
-      .filter(Boolean);
-    expect(branchList.length).toBeGreaterThanOrEqual(1);
-
-    // Verify: at least one commit beyond the initial
-    const commitCount = execSync("git rev-list --count HEAD", { cwd: tempDir })
       .toString()
       .trim();
     const currentHash = execSync("git rev-parse HEAD", { cwd: tempDir }).toString().trim();
 
-    // Either more commits or different branch created
-    const hasNewCommits = currentHash !== initialHash;
-    const hasFeatureBranch = currentBranch !== "main" && currentBranch !== "master";
-    expect(hasNewCommits || hasFeatureBranch).toBe(true);
+    expect(currentBranch).not.toBe("main");
+    expect(currentBranch).not.toBe("master");
+    expect(currentHash).not.toBe(initialHash);
 
     // Cleanup
     fs.rmSync(tempDir, { recursive: true, force: true });

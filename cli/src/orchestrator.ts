@@ -326,22 +326,15 @@ export async function checkToolPermission(
   return result;
 }
 
-/** Format a tool call for display (replaces the imported formatToolCall from tui.js) */
+/** Format a tool call for display — short and to the point. */
 function formatToolCallDisplay(toolName: string, toolInput: Record<string, unknown>): string {
-  let msg = `Tool: ${toolName}`;
-  if (toolInput) {
-    if (toolInput.file_path) msg += ` -> ${toolInput.file_path}`;
-    else if (toolInput.path) msg += ` -> ${toolInput.path}`;
-    else if (toolInput.command) msg += ` -> ${String(toolInput.command).substring(0, 500)}`;
-    else if (toolInput.pattern) msg += ` -> pattern: ${toolInput.pattern}`;
-    else {
-      const keys = Object.keys(toolInput).slice(0, 3);
-      if (keys.length > 0) {
-        msg += ` -> ${keys.map(k => `${k}: ${String(toolInput[k]).substring(0, 200)}`).join(", ")}`;
-      }
-    }
+  if (toolInput.file_path) return String(toolInput.file_path);
+  if (toolInput.path) return String(toolInput.path);
+  if (toolInput.command) {
+    const cmd = String(toolInput.command);
+    return cmd.length > 80 ? cmd.slice(0, 77) + "..." : cmd;
   }
-  return msg;
+  return "";
 }
 
 export async function classifyComplexity(

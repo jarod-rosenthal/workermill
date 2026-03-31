@@ -78,10 +78,28 @@ function Spinner({ color }: { color: string }): React.ReactElement {
 
 /** Confirm prompt for orchestrator — context-aware options. */
 function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: (yes: boolean, mode?: "always" | "trust") => void } }): React.ReactElement {
-  const [answered, setAnswered] = React.useState<string>("");
+  // Reuse PermissionPrompt for tool permission prompts — one component, consistent UX
   const isToolPrompt = request.prompt.startsWith("Allow ");
+  if (isToolPrompt) {
+    // Parse tool name from "Allow <toolname>? <detail>"
+    const match = request.prompt.match(/^Allow (\w+)\??\s*(.*)/);
+    const toolName = match?.[1] || "tool";
+    const detail = match?.[2] || "";
+    return (
+      <PermissionPrompt request={{
+        toolName,
+        toolInput: detail ? { _display: detail } : {},
+        isDangerous: false,
+        resolve: (allowed: boolean, mode?: "always" | "trust") => {
+          request.resolve(allowed, mode);
+        },
+      }} />
+    );
+  }
+
+  // Non-tool prompts (plan approval, revision confirm, PR push) — simple y/a/n
+  const [answered, setAnswered] = React.useState<string>("");
   const isRevisionPrompt = request.prompt.startsWith("Revise ");
-  const hasAlways = isToolPrompt || isRevisionPrompt;
   useInput((input, key) => {
     if (answered) return;
     const resolve = (label: string, yes: boolean, mode?: "always" | "trust") => {
@@ -91,12 +109,10 @@ function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: 
     if (key.escape) resolve("esc", false);
     else if (input === "y" || input === "Y") resolve("y", true);
     else if (input === "n" || input === "N") resolve("n", false);
-    else if (hasAlways && (input === "a" || input === "A")) resolve("a", true, "always");
+    else if (isRevisionPrompt && (input === "a" || input === "A")) resolve("a", true, "always");
   }, { isActive: !answered });
 
-  let hint = "(y/n)";
-  if (isToolPrompt) hint = "(y)es (a) don't ask again (n)o";
-  else if (isRevisionPrompt) hint = "(y)es (a)lways (n)o";
+  const hint = isRevisionPrompt ? "(y)es (a)lways (n)o" : "(y/n)";
 
   return (
     <Box marginLeft={2} marginY={1}>

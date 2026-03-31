@@ -11,13 +11,13 @@ interface Option {
 /** Extract a short description of what the tool wants to do. */
 function describeAction(request: PermissionRequest): string {
   const input = request.toolInput;
+  if (input._display) return String(input._display);
   if (input.file_path) return String(input.file_path);
   if (input.path) return String(input.path);
   if (input.command) {
     const cmd = String(input.command);
-    return cmd.length > 120 ? cmd.slice(0, 117) + "..." : cmd;
+    return cmd.length > 80 ? cmd.slice(0, 77) + "..." : cmd;
   }
-  if (input.pattern) return `pattern: ${String(input.pattern)}`;
   return "";
 }
 

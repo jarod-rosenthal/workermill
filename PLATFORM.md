@@ -255,10 +255,4 @@ If you're diving into the codebase, these are the patterns that hold the system 
 
 ## Documentation
 
-- **[Docs](https://workermill.com/docs)** — User-facing guides: quick start, integrations, task lifecycle, personas, epics
-- **[Architecture](docs/agent/architecture.md)** — Models, routes, task flow, execution modes
-- **[Infrastructure](docs/agent/infrastructure.md)** — Deployment requirements and options
-- **[Local Dev](docs/agent/local-dev.md)** — Development environment setup
-- **[Agent & VS Code](docs/agent/agent-and-vscode.md)** — Agent internals, extension details
-- **[Testing](docs/agent/testing.md)** — Vitest (API), Playwright (E2E)
-- **[Troubleshooting](docs/agent/troubleshooting.md)** — Common issues and fixes
+- **[Docs](https://workermill.com/docs)** — User-facing guides: quick start, CLI, integrations, task lifecycle, personas

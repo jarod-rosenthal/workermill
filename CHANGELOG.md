@@ -8,7 +8,7 @@ Component releases are tracked via git tags:
 
 ---
 
-## [Unreleased]
+## 2026-03-31 — CLI v0.15.87 + Platform Updates
 
 ### Added
 - CLI: Test suite — 227 tests across engine and CLI (Vitest 4.1, ~52% CLI line coverage, ~73% engine line coverage)
@@ -62,6 +62,37 @@ Component releases are tracked via git tags:
 - CLI: Planner minimizes stories — one persona = one story, aims for 5 or fewer
 - CLI: All logging goes to cli.log — tool results, tool errors, model output, reviewer output
 
+- CLI: Live model switching — `/model provider/model [context]` hot-swaps mid-session with autocomplete, API key validation, command chaining, and auto-compaction
+- CLI: `/compact [focus]` runs immediately with optional focus instructions
+- CLI: `/settings key <provider> <api-key>` adds API keys inline
+- CLI: Context window in status bar (`[provider/model (256k context)]`)
+- CLI: Cursor movement (arrow keys, Ctrl+A/E, word jump) in input
+- CLI: xAI, Groq, DeepSeek, Mistral as OpenAI-compatible providers
+- CLI: Google model alias resolution (gemini-3.1-pro → gemini-3.1-pro-preview)
+- CLI: MCP tools in orchestrator and headless mode
+- CLI: Docker Desktop MCP gateway auto-detection
+- Homepage: total npm downloads instead of weekly average
+- Homepage: contact links to jarodrosenthal.com
+
+### Changed
+- CLI: Removed `/plan` command
+- CLI: `/init` re-run is stability-first — validates, asks before writing
+- CLI: Browser tools use Zod inputSchema (fixes OpenAI Responses API)
+- CLI: Completed tool calls hidden from message history (status bar tracks counts)
+- CLI: Session summary shows git diffstat instead of message count
+- CLI: Voice, Chrome, Schedule marked as experimental
+- CLI: Review model color: lilac instead of magenta
+- Platform: PLATFORM.md — removed dead documentation links
+
+### Fixed
+- CLI: Anthropic context windows — Opus 4.6 and Sonnet 4.6 are 1M (was 200k)
+- CLI: OpenAI pricing verified — gpt-5.4 (1M/$2.50/$15), gpt-5.4-mini (400k/$0.75/$4.50), gpt-5.4-pro (1.05M/$30/$180), gpt-5.4-nano (400k/$0.20/$1.25)
+- CLI: Google pricing verified — gemini-3.1-pro-preview ($2/$12), gemini-3-flash-preview ($0.50/$3)
+- CLI: Google model names use actual API names (`gemini-3.1-pro-preview`)
+- CLI: Ollama context switching — unloads model when context doesn't match (not just too small)
+- CLI: Status bar updates on `/model` switch (provider, model, context, tok/s)
+- CLI: Stale tsc build artifacts causing vitest to resolve wrong files
+
 ### Removed
 - CLI: Auto-detected quality gates (tsc/lint) — caused cascading failures; workers self-verify
 - CLI: Invented agents (inline verifier, integration fixer, review fixer, critic)
@@ -69,6 +100,8 @@ Component releases are tracked via git tags:
 - CLI: `sub_agent` tool from planner and reviewer
 - CLI: All `totalMs` wall-clock timeouts on AI operations
 - CLI: All content truncation
+- CLI: 10-minute safety timeout on agent operations
+- CLI: 5-minute E2E test timeout
 
 ---
 

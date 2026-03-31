@@ -169,27 +169,27 @@ const OPENAI_MODELS: Record<string, ModelInfo> = {
     supportsStreaming: false,
     supportsCaching: true,
   },
-  // GPT-5.3 Codex (latest code-specific model)
+  // GPT-5.3 Codex — verified from openai.com/api/pricing (March 2026)
   "gpt-5.3-codex": {
     id: "gpt-5.3-codex",
     displayName: "GPT-5.3 Codex",
     tier: "powerful",
-    inputRate: 0.00175, // $1.75 per 1M (estimated from 5.2 pricing)
+    inputRate: 0.00175, // $1.75 per 1M
     outputRate: 0.014, // $14 per 1M
     cacheReadRate: 0.000175, // $0.175 per 1M
-    contextWindow: 128000,
+    contextWindow: 400000,
     supportsStreaming: false,
     supportsCaching: true,
   },
-  // GPT-5.4 family (latest, March 2026)
+  // GPT-5.4 family — verified from openai.com/api/pricing (March 2026)
   "gpt-5.4": {
     id: "gpt-5.4",
     displayName: "GPT-5.4",
     tier: "powerful",
-    inputRate: 0.00075, // $0.75 per 1M (estimated)
-    outputRate: 0.0045, // $4.50 per 1M
-    cacheReadRate: 0.000075, // $0.075 per 1M
-    contextWindow: 128000,
+    inputRate: 0.0025, // $2.50 per 1M
+    outputRate: 0.015, // $15 per 1M
+    cacheReadRate: 0.00025, // $0.25 per 1M
+    contextWindow: 1000000,
     supportsStreaming: true,
     supportsCaching: true,
   },
@@ -197,10 +197,10 @@ const OPENAI_MODELS: Record<string, ModelInfo> = {
     id: "gpt-5.4-mini",
     displayName: "GPT-5.4 Mini",
     tier: "budget",
-    inputRate: 0.00015, // $0.15 per 1M (estimated)
-    outputRate: 0.0006, // $0.60 per 1M
-    cacheReadRate: 0.000015, // $0.015 per 1M
-    contextWindow: 128000,
+    inputRate: 0.00075, // $0.75 per 1M
+    outputRate: 0.0045, // $4.50 per 1M
+    cacheReadRate: 0.000075, // $0.075 per 1M
+    contextWindow: 400000,
     supportsStreaming: true,
     supportsCaching: true,
   },
@@ -208,21 +208,20 @@ const OPENAI_MODELS: Record<string, ModelInfo> = {
     id: "gpt-5.4-pro",
     displayName: "GPT-5.4 Pro",
     tier: "powerful",
-    inputRate: 0.005, // $5 per 1M (estimated)
-    outputRate: 0.02, // $20 per 1M
-    cacheReadRate: 0.0005, // $0.50 per 1M
-    contextWindow: 128000,
+    inputRate: 0.03, // $30 per 1M
+    outputRate: 0.18, // $180 per 1M
+    contextWindow: 1050000,
     supportsStreaming: true,
-    supportsCaching: true,
+    supportsCaching: false,
   },
   "gpt-5.4-nano": {
     id: "gpt-5.4-nano",
     displayName: "GPT-5.4 Nano",
     tier: "budget",
-    inputRate: 0.00005, // $0.05 per 1M (estimated)
-    outputRate: 0.0004, // $0.40 per 1M
-    cacheReadRate: 0.000005, // $0.005 per 1M
-    contextWindow: 128000,
+    inputRate: 0.0002, // $0.20 per 1M
+    outputRate: 0.00125, // $1.25 per 1M
+    cacheReadRate: 0.00002, // $0.02 per 1M
+    contextWindow: 400000,
     supportsStreaming: true,
     supportsCaching: true,
   },

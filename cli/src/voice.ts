@@ -11,7 +11,9 @@
 import { execSync, exec, type ChildProcess } from "child_process";
 import * as logger from "./logger.js";
 
-const MAX_LISTEN_SECONDS = 60; // safety cap — most speech is under 30s
+// No artificial cap — EndSilenceTimeout handles stopping when the user stops talking.
+// arecord/whisper path needs a duration for the recording command, so we use a generous default.
+const MAX_LISTEN_SECONDS = 300;
 
 interface VoiceResult {
   text: string;
@@ -68,19 +70,29 @@ function detectVoiceTool(): { tool: "hear" | "powershell" | "whisper" | null; in
  * Record and transcribe speech using the platform's native tool.
  */
 async function transcribeWithHear(): Promise<VoiceResult> {
-  try {
-    // hear -i -l en — interactive mode, stops on silence, outputs transcribed text
-    const text = execSync(`hear -i -l en 2>/dev/null`, {
-      encoding: "utf-8",
-      timeout: (MAX_LISTEN_SECONDS + 5) * 1000,
-    }).trim();
-    return { text };
-  } catch (err) {
-    return { text: "", error: `hear failed: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  const { spawn } = await import("child_process");
+  return new Promise((resolve) => {
+    let stdout = "";
+    const child = spawn("hear", ["-i", "-l", "en"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
+    child.on("close", (code) => {
+      if (code !== 0 && !stdout.trim()) {
+        resolve({ text: "", error: `hear exited with code ${code}` });
+        return;
+      }
+      resolve({ text: stdout.trim() });
+    });
+    child.on("error", (err) => {
+      resolve({ text: "", error: `hear failed: ${err.message}` });
+    });
+  });
 }
 
 async function transcribeWithPowerShell(): Promise<VoiceResult> {
+  const { spawn } = await import("child_process");
   const psCommand = process.platform === "win32" ? "powershell" : "powershell.exe";
   const script = [
     "Add-Type -AssemblyName System.Speech",
@@ -94,38 +106,67 @@ async function transcribeWithPowerShell(): Promise<VoiceResult> {
     "$r.Dispose()",
   ].join("; ");
 
-  // Use -EncodedCommand to avoid quote escaping issues
   const encoded = Buffer.from(script, "utf16le").toString("base64");
 
-  try {
-    const text = execSync(`${psCommand} -NoProfile -EncodedCommand ${encoded}`, {
-      encoding: "utf-8",
-      timeout: (MAX_LISTEN_SECONDS + 10) * 1000,
-    }).trim();
-    return { text };
-  } catch (err) {
-    return { text: "", error: `PowerShell speech recognition failed: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+
+    const child = spawn(psCommand, ["-NoProfile", "-EncodedCommand", encoded], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
+    child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+
+    child.on("close", (code) => {
+      if (code !== 0 || stderr.includes("Exception")) {
+        if (stderr.includes("SetInputToDefaultAudioDevice") || stderr.includes("InvalidOperationException")) {
+          resolve({ text: "", error: "No microphone found. Check Windows Sound Settings → Recording devices." });
+        } else {
+          resolve({ text: "", error: `PowerShell speech failed: ${stderr.trim().split("\n")[0] || `exit code ${code}`}` });
+        }
+        return;
+      }
+      resolve({ text: stdout.trim() });
+    });
+
+    child.on("error", (err) => {
+      resolve({ text: "", error: `Failed to start PowerShell: ${err.message}` });
+    });
+  });
 }
 
 async function transcribeWithWhisper(): Promise<VoiceResult> {
-  // Record audio with arecord, pipe to whisper
   try {
-    // Check for arecord
     execSync("which arecord", { stdio: "pipe" });
   } catch {
     return { text: "", error: "arecord not found. Install alsa-utils: `sudo apt install alsa-utils`" };
   }
 
-  try {
-    const text = execSync(
-      `arecord -q -f cd -t wav -d ${MAX_LISTEN_SECONDS} /tmp/wm-voice.wav 2>/dev/null && whisper /tmp/wm-voice.wav --language en --output_format txt --output_dir /tmp 2>/dev/null && cat /tmp/wm-voice.txt && rm -f /tmp/wm-voice.wav /tmp/wm-voice.txt`,
-      { encoding: "utf-8", timeout: (MAX_LISTEN_SECONDS + 30) * 1000 },
-    ).trim();
-    return { text };
-  } catch (err) {
-    return { text: "", error: `Whisper transcription failed: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  const { spawn } = await import("child_process");
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    const cmd = `arecord -q -f cd -t wav -d ${MAX_LISTEN_SECONDS} /tmp/wm-voice.wav 2>/dev/null && whisper /tmp/wm-voice.wav --language en --output_format txt --output_dir /tmp 2>/dev/null && cat /tmp/wm-voice.txt && rm -f /tmp/wm-voice.wav /tmp/wm-voice.txt`;
+
+    const child = spawn("bash", ["-c", cmd], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
+    child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+    child.on("close", (code) => {
+      if (code !== 0 && !stdout.trim()) {
+        resolve({ text: "", error: `Whisper transcription failed: ${stderr.trim().split("\n")[0] || `exit code ${code}`}` });
+        return;
+      }
+      resolve({ text: stdout.trim() });
+    });
+    child.on("error", (err) => {
+      resolve({ text: "", error: `Whisper failed: ${err.message}` });
+    });
+  });
 }
 
 /**

@@ -46,7 +46,7 @@ export async function ensureOllamaContext(
     const loaded = data.models?.find((m) => m.name === modelName);
     if (!loaded) return; // Not loaded — will load fresh with correct ctx
 
-    if (loaded.context_length && loaded.context_length < requiredCtx) {
+    if (loaded.context_length && loaded.context_length !== requiredCtx) {
       // Unload so it reloads with the correct num_ctx on next request
       await globalThis.fetch(`${host}/api/generate`, {
         method: "POST",
@@ -84,8 +84,17 @@ export function createModel(
       return openai.chat(modelName);
     }
     case "google":
-    case "gemini":
-      return google(modelName);
+    case "gemini": {
+      // Google 3.x models require -preview suffix in the API
+      const googleAliases: Record<string, string> = {
+        "gemini-3.1-pro": "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-lite": "gemini-3.1-flash-lite-preview",
+        "gemini-3-flash": "gemini-3-flash-preview",
+        "gemini-3-pro": "gemini-3-pro-preview",
+      };
+      const resolvedName = googleAliases[modelName] || modelName;
+      return google(resolvedName);
+    }
     case "ollama": {
       const ollamaHost = host || "http://localhost:11434";
       // keepAlive: "-1" prevents model unload during long tool calls (CLAUDE.md rule).
@@ -93,7 +102,20 @@ export function createModel(
       const ollamaProvider = createOllama({ baseURL: `${ollamaHost}/api`, keepAlive: "-1" } as any);
       return ollamaProvider(modelName);
     }
-    default:
+    default: {
+      // OpenAI-compatible providers (xAI, Groq, DeepSeek, Mistral, etc.)
+      const compatibleHosts: Record<string, string> = {
+        xai: "https://api.x.ai/v1",
+        groq: "https://api.groq.com/openai/v1",
+        deepseek: "https://api.deepseek.com/v1",
+        mistral: "https://api.mistral.ai/v1",
+      };
+      const compatHost = host || compatibleHosts[provider];
+      if (compatHost) {
+        const compat = createOpenAI({ baseURL: compatHost });
+        return compat.chat(modelName);
+      }
       throw new Error(`Unsupported provider: ${provider}`);
+    }
   }
 }

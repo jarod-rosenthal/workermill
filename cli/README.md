@@ -37,9 +37,6 @@ workermill
 # Skip permission prompts
 workermill --trust
 
-# Read-only research mode
-workermill --plan
-
 # Resume last conversation
 workermill --resume
 
@@ -58,7 +55,7 @@ workermill --max-tokens 4096
 
 - **Multi-expert orchestration** — `/ship` decomposes tasks into stories, each assigned to a specialist persona
 - **Per-persona model routing** — Map any persona to any provider. Run security reviews on Claude, frontend on GPT, workers on Ollama. Use `/settings route <persona> <provider>` or edit `cli.json`
-- **13 built-in tools** — bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, sub_agent
+- **Built-in tools** — bash, read_file, write_file, edit_file, patch, glob, grep, ls, fetch, git, web_search, todo, verify, sub_agent, plus 8 browser tools
 - **WORKERMILL.md** — Project instructions file read by all agents. Also supports CLAUDE.md, .cursorrules
 - **MCP servers** — Connect external tools via Model Context Protocol
 - **Hooks** — Pre/post tool execution hooks for linting, formatting, etc.
@@ -67,9 +64,11 @@ workermill --max-tokens 4096
 - **@mentions** — `@file.ts` inlines code, `@dir/` inlines tree, `@https://url` fetches content, `@image.png` sends multimodal
 - **Code review** — Tech lead reads actual code diffs, with configurable revision cycles
 - **Bash guardrails** — Blocks destructive commands and writes outside the project directory
-- **Permissions** — Tab to cycle: Allow → Deny → Always allow → Trust all
+- **Permissions** — Shift+Tab to cycle: Ask → Auto-edit → Trust all. Per-tool always-allow from prompt.
 - **Session management** — Persistent conversations with resume
 - **Cost tracking** — Live in status bar with per-model pricing
+- **Live model switching** — `/model` hot-swaps provider and model mid-session with autocomplete, context validation, and auto-compaction
+- **Status bar** — Shows active model, context window, usage percentage, cost, git branch, and tokens/sec
 - **Auto-update** — Notifies when a newer version is available
 
 ## Commands
@@ -77,7 +76,6 @@ workermill --max-tokens 4096
 | Command | Description |
 |---------|-------------|
 | `/ship <task>` | Multi-expert orchestration — plans, executes, reviews (alias: `/build`) |
-| `/plan <task>` | Plan/analyze a task using the planner agent (no args toggles read-only mode) |
 | `/review [task]` | Code review using the tech lead (defaults to reviewing recent changes) |
 | `/as <persona> <task>` | Run a task with a specific expert (e.g. `/as security_engineer review auth`) |
 | `/retry` | Re-run the last ship task |
@@ -87,14 +85,14 @@ workermill --max-tokens 4096
 | `/permissions` | Manage tool permissions (trust/ask/allow/deny) |
 | `/undo` | Revert last ship's changes (git stash or reset) |
 | `/diff` | Preview uncommitted changes |
-| `/model` | Show or switch model (`/model provider/model`) |
-| `/plan` | Plan a task or toggle read-only mode (no args) |
+| `/model [provider/model] [context]` | Switch model mid-session with autocomplete. Context: `/model ollama/qwen3-coder:30b 256k`. Chain: `/model openai/gpt-5.4 /as backend_developer fix auth` |
+| `/compact [focus]` | Compact conversation history (optional focus: `/compact focus on API changes`) |
 | `/trust` | Auto-approve all tools for this session |
 | `/hooks` | View configured pre/post tool hooks |
 | `/skills` | Custom slash commands from `.workermill/commands/` |
-| `/chrome` | Open/close headless Chrome browser |
-| `/voice` | Voice input — speaks until silence |
-| `/schedule` | Scheduled recurring tasks |
+| `/chrome` | Open/close headless Chrome *(experimental)* |
+| `/voice` | Voice input *(experimental)* |
+| `/schedule` | Scheduled recurring tasks *(experimental)* |
 | `/update` | Check for updates |
 | `/release-notes` | Show changelog |
 | `/cost` | Session cost and token usage |
@@ -106,7 +104,7 @@ workermill --max-tokens 4096
 | `/clear` | Reset conversation |
 | `/quit` | Exit |
 
-**Shortcuts:** `!command` runs shell directly, `ESC` cancels, `ESC ESC` rolls back last exchange, `Shift+Tab` cycles permission mode, `Ctrl+C Ctrl+C` exits.
+**Shortcuts:** `!command` runs shell directly, `ESC` cancels, `ESC ESC` rolls back last exchange, `Shift+Tab` cycles permission mode, `Ctrl+C Ctrl+C` exits, `←/→` cursor movement, `Ctrl+←/→` word jump, `Ctrl+A/E` home/end, `Tab` autocomplete.
 
 ## Multi-Expert Orchestration
 
@@ -132,7 +130,7 @@ Use `/retry` to re-plan the same task — the planner sees existing code and fil
 | `~/.workermill/cli.json` | Global config (providers, routing, review, hooks, MCP) |
 | `~/.workermill/sessions/` | Conversation sessions |
 | `~/.workermill/logs/` | Debug logs (per-project) |
-| `~/.workermill/learnings/` | Persistent learnings (per-project) |
+| `~/.workermill/memory/` | Project memory — learnings, preferences, context (per-project) |
 | `.workermill/config.json` | Per-project config overrides |
 | `.workermill/commands/*.md` | Custom slash commands |
 | `.workermill/personas/*.md` | Custom persona overrides |
@@ -145,7 +143,7 @@ Use `/retry` to re-plan the same task — the planner sees existing code and fil
     "ollama": {
       "model": "qwen3-coder:30b",
       "host": "http://localhost:11434",
-      "contextLength": 65536
+      "contextLength": 262144
     },
     "anthropic": {
       "model": "claude-sonnet-4-6",
@@ -184,10 +182,11 @@ Change settings at runtime with `/settings`:
 | Setting | Default | Command |
 |---------|---------|---------|
 | Ollama host | auto-detected | `/settings ollama.host <url>` |
-| Ollama context | 65536 | `/settings ollama.context <n>` |
+| Ollama context | chosen during setup | `/settings ollama.context <n>` |
 | Review enabled | true | `/settings review.enabled true/false` |
 | Max revisions | 3 | `/settings review.maxRevisions <n>` |
 | Auto-revise | false | `/settings review.autoRevise true/false` |
+| API key | — | `/settings key <provider> <api-key>` |
 
 ### Per-Persona Model Routing
 
@@ -201,7 +200,7 @@ By default, all worker personas use the same model. The planner and reviewer can
 
 This lets you mix providers — e.g., local Ollama for most workers, but route security reviews to a cloud model. Routing is stored in `cli.json` under the `routing` key. Unrouted personas use the default provider.
 
-## 11 Expert Personas
+## Expert Personas
 
 | Persona | Role |
 |---------|------|

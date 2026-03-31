@@ -44,7 +44,7 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     supportsCaching: true,
   },
 
-  // Sonnet 4.6 (current balanced tier)
+  // Sonnet 4.6 (current balanced tier) — 1M context
   "claude-sonnet-4-6": {
     id: "claude-sonnet-4-6",
     displayName: "Claude Sonnet 4.6",
@@ -53,7 +53,7 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     outputRate: 0.015,
     cacheWriteRate: 0.00375, // 1.25x input
     cacheReadRate: 0.0003, // 0.1x input
-    contextWindow: 200000,
+    contextWindow: 1000000,
     supportsStreaming: true,
     supportsCaching: true,
   },
@@ -84,7 +84,7 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     supportsCaching: true,
   },
 
-  // Opus 4.6 (powerful tier)
+  // Opus 4.6 (powerful tier) — 1M context
   "claude-opus-4-6": {
     id: "claude-opus-4-6",
     displayName: "Claude Opus 4.6",
@@ -93,7 +93,7 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     outputRate: 0.025,
     cacheWriteRate: 0.00625, // 1.25x input
     cacheReadRate: 0.0005, // 0.1x input
-    contextWindow: 200000,
+    contextWindow: 1000000,
     supportsStreaming: true,
     supportsCaching: true,
   },

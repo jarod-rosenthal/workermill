@@ -57,7 +57,7 @@ const providers: Record<string, ProviderConfig> = {
     id: "google",
     name: "Google (Gemini)",
     pricingEngine: new GooglePricingEngine(),
-    defaultModel: "gemini-3.1-flash-lite",
+    defaultModel: "gemini-3.1-flash-lite-preview",
     requiresApiKey: true,
     apiKeyEnvVar: "GOOGLE_API_KEY",
   },

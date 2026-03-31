@@ -18,6 +18,7 @@ import { loadPersona, listAvailablePersonas } from "../personas.js";
 import { stopAllMCPServers, getMCPTools, hasMCPServers, hasMCPRegistered } from "../mcp-client.js";
 import * as logger from "../logger.js";
 import { loadMemories, addMemory, removeMemory } from "../memory.js";
+import { findModelInfo } from "../../../api/src/providers/index.js";
 
 // ---------------------------------------------------------------------------
 // Session goodbye — prints a brief summary on exit
@@ -39,10 +40,25 @@ export function printSessionGoodbye(ctx: SlashCommandContext): void {
   if (ctx.cost > 0) {
     parts.push(`~$${ctx.cost.toFixed(2)}`);
   }
-  const msgCount = ctx.session.messages.length;
-  if (msgCount > 0) {
-    parts.push(`${msgCount} messages`);
-  }
+  // Git diffstat — insertions/deletions are more useful than message count
+  try {
+    const stat = execSync("git diff --shortstat HEAD 2>/dev/null || git diff --shortstat 2>/dev/null", {
+      encoding: "utf-8",
+      cwd: ctx.workingDir,
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+    if (stat) {
+      // "3 files changed, 45 insertions(+), 12 deletions(-)"
+      const ins = stat.match(/(\d+) insertion/);
+      const del = stat.match(/(\d+) deletion/);
+      const files = stat.match(/(\d+) file/);
+      const diffParts: string[] = [];
+      if (files) diffParts.push(`${files[1]} files`);
+      if (ins) diffParts.push(`+${ins[1]}`);
+      if (del) diffParts.push(`-${del[1]}`);
+      if (diffParts.length > 0) parts.push(diffParts.join(", "));
+    }
+  } catch { /* not a git repo or no changes */ }
 
   console.log(chalk.dim(`\n  ${parts.join(" · ")}`));
   console.log();
@@ -123,13 +139,11 @@ Creates a feature branch for all changes — your current branch stays clean.
 | Command | Description |
 |---|---|
 | \`/ship <task>\` | Multi-expert orchestration — plan, execute, review, ship |
-| \`/plan <task>\` | Plan/analyze a task using the planner agent (or toggle read-only mode with no args) |
 | \`/review [task]\` | Code review using the tech lead agent (defaults to reviewing recent changes) |
 | \`/retry\` | Re-plan and re-run the last task |
 | \`/settings\` | View/change settings (review, ollama, etc.) |
 | \`/undo\` | Revert last build's changes (git stash or reset) |
 | \`/diff\` | Preview uncommitted changes |
-| \`/plan\` | Toggle plan mode (read-only, explore before committing) |
 | \`/trust\` | Auto-approve all tool calls for this session |
 | \`/init\` | Generate \`WORKERMILL.md\` for this project |
 | \`/permissions\` | Manage tool permissions (trust/ask/allow/deny) |
@@ -142,9 +156,9 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/skills\` | List custom commands |
 | \`/personas\` | List, show, or create personas |
 | \`/mcp\` | Show MCP server status |
-| \`/chrome\` | Open/close headless Chrome browser |
-| \`/voice\` | Voice input — speak instead of type |
-| \`/schedule\` | Create/list/delete scheduled tasks |
+| \`/chrome\` | Open/close headless Chrome *(experimental)* |
+| \`/voice\` | Voice input *(experimental)* |
+| \`/schedule\` | Scheduled tasks *(experimental)* |
 | \`/update\` | Update to latest version |
 | \`/release-notes\` | Show changelog |
 | \`/hooks\` | Show configured pre/post tool hooks |
@@ -188,6 +202,8 @@ export interface SlashCommandContext {
   setLastBuildTask: (task: string) => void;
   sandboxed?: boolean;
   exit?: () => void;
+  switchModel?: (provider: string, model: string) => void;
+  forceCompact?: (focusInstructions?: string) => Promise<{ before: number; after: number }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -233,35 +249,112 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           "**Supported providers:** ollama, anthropic, openai, google"
         );
       } else {
-        // Parse provider/model
-        const modelParts = arg.split("/");
+        // Parse provider/model — only the first token, ignore anything after a space
+        const tokens = arg.split(/\s+/);
+        const modelArg = tokens[0];
+        // Check for optional context size (e.g. "256k", "128k", "1m")
+        let contextOverride: number | undefined;
+        let remainderStart = 1;
+        if (tokens[1] && /^\d+[km]$/i.test(tokens[1])) {
+          const ctxStr = tokens[1].toLowerCase();
+          if (ctxStr.endsWith("m")) {
+            contextOverride = parseInt(ctxStr, 10) * 1_048_576;
+          } else {
+            contextOverride = parseInt(ctxStr, 10) * 1024;
+          }
+          remainderStart = 2;
+        }
+        const remainder = tokens.slice(remainderStart).join(" ").trim();
+        const modelParts = modelArg.split("/");
         let newProvider: string;
         let newModel: string;
         if (modelParts.length >= 2) {
           newProvider = modelParts[0];
           newModel = modelParts.slice(1).join("/");
         } else {
-          // Just a model name — keep current provider
           newProvider = ctx.provider;
-          newModel = arg;
+          newModel = modelArg;
         }
 
-        // Update config
+        // Check if the provider needs an API key and whether we have one
+        const envKeyMap: Record<string, string> = {
+          anthropic: "ANTHROPIC_API_KEY",
+          openai: "OPENAI_API_KEY",
+          google: "GOOGLE_GENERATIVE_AI_API_KEY",
+          xai: "XAI_API_KEY",
+          groq: "GROQ_API_KEY",
+          deepseek: "DEEPSEEK_API_KEY",
+          mistral: "MISTRAL_API_KEY",
+        };
+        const needsKey = !!envKeyMap[newProvider];
         const modelConfig = loadConfig();
+        const existingProviderConfig = modelConfig?.providers?.[newProvider];
+        const hasConfigKey = !!existingProviderConfig?.apiKey;
+        const envVar = envKeyMap[newProvider];
+        const hasEnvKey = !!(envVar && process.env[envVar]);
+
+        if (needsKey && !hasConfigKey && !hasEnvKey) {
+          // No credentials — tell the user how to provide them
+          ctx.addSystemMessage(
+            `**Cannot switch to \`${newProvider}\`** — no API key found.\n\n` +
+            `Add your key: \`/settings key ${newProvider} <your-api-key>\`\n` +
+            `Then run \`/model ${modelArg}\` again.`
+          );
+          break;
+        }
+
+        // Update config — only the provider's model entry, NOT config.default.
+        // /model is a session switch for the active (worker) model.
+        // Planner/reviewer routing is unchanged. Use /setup to change roles.
         if (modelConfig) {
-          if (!modelConfig.providers[newProvider]) {
-            modelConfig.providers[newProvider] = { model: newModel };
+          if (!existingProviderConfig) {
+            const keyRef = hasEnvKey ? `{env:${envVar}}` : undefined;
+            modelConfig.providers[newProvider] = { model: newModel, ...(keyRef ? { apiKey: keyRef } : {}), ...(contextOverride ? { contextLength: contextOverride } : {}) };
           } else {
-            modelConfig.providers[newProvider].model = newModel;
+            existingProviderConfig.model = newModel;
+            if (contextOverride) existingProviderConfig.contextLength = contextOverride;
           }
-          modelConfig.default = newProvider;
           saveConfig(modelConfig);
         }
 
-        ctx.addSystemMessage(
-          `**Model switched** to \`${newProvider}/${newModel}\`\n\n` +
-          "Restart the CLI to use the new model. Config saved to `~/.workermill/cli.json`."
-        );
+        // Hot-swap the model in the current session
+        const ctxLabel = contextOverride
+          ? ` (${contextOverride >= 1_048_576 ? `${contextOverride / 1_048_576}M` : `${contextOverride / 1024}k`} context)`
+          : "";
+        if (ctx.switchModel) {
+          ctx.switchModel(newProvider, newModel);
+
+          // Auto-compact if conversation exceeds new model's context
+          const newCtxWindow = contextOverride
+            || (newProvider === "ollama" ? modelConfig?.providers?.[newProvider]?.contextLength : undefined)
+            || findModelInfo(newModel)?.contextWindow
+            || 128_000;
+          if (ctx.tokens > 0 && ctx.tokens > newCtxWindow * 0.8 && ctx.forceCompact) {
+            ctx.addSystemMessage(
+              `\n**Model switched** to \`${newProvider}/${newModel}\`${ctxLabel} — compacting conversation to fit...`
+            );
+            void ctx.forceCompact().then(({ before, after }) => {
+              ctx.addSystemMessage(`Compacted ${before} → ${after} messages.`);
+            });
+          } else {
+            ctx.addSystemMessage(
+              `\n**Model switched** to \`${newProvider}/${newModel}\`${ctxLabel} — active now.`
+            );
+          }
+        } else {
+          ctx.addSystemMessage(
+            `**Model switched** to \`${newProvider}/${newModel}\` — config saved. Takes effect on next session.`
+          );
+        }
+
+        // If there's a trailing command (e.g. "/model openai/gpt-5.4 /as backend_developer do X"),
+        // dispatch it as a follow-up slash command.
+        if (remainder.startsWith("/")) {
+          handleSlashCommand(remainder, ctx);
+        } else if (remainder) {
+          // Trailing text that isn't a command — submit as a prompt
+          ctx.submit(remainder);
+        }
       }
       break;
     }
@@ -302,33 +395,6 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         `| Working dir | \`${ctx.workingDir}\` |\n` +
         `| Started | ${session.startedAt} |`
       );
-      break;
-    }
-
-    // ---- /plan [task] ----
-    case "plan": {
-      if (arg) {
-        // With an argument: run the task as the planner persona
-        const p = loadPersona("planner");
-        if (p) {
-          const personaPrefix =
-            `[Acting as **${p.name}** — ${p.description}]\n\n` +
-            `## Expert Instructions\n\n${p.systemPrompt}\n\n` +
-            `## Task\n\n`;
-          ctx.submit(personaPrefix + arg, `/plan ${arg}`);
-        } else {
-          ctx.submit(arg, `/plan ${arg}`); // fallback — run without persona if not found
-        }
-      } else {
-        // No argument: toggle read-only mode
-        const newPlan = !ctx.planMode;
-        ctx.setPlanMode(newPlan);
-        ctx.addSystemMessage(
-          newPlan
-            ? "**Plan mode ON.** Only read-only tools (read_file, glob, grep, ls, sub_agent) are available. Write operations are blocked."
-            : "**Plan mode OFF.** All tools are now available."
-        );
-      }
       break;
     }
 
@@ -495,18 +561,19 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /compact ----
     case "compact": {
-      const inputTokens = ctx.tokens;
-      if (inputTokens > 0) {
-        ctx.addSystemMessage(
-          "Compaction is triggered automatically when context usage exceeds 80%. " +
-          `Current last-observed input tokens: ${inputTokens.toLocaleString()}. ` +
-          "To force compaction, send a message and the agent will evaluate context pressure."
-        );
-      } else {
-        ctx.addSystemMessage(
-          "No token usage recorded yet. Compaction happens automatically when context usage exceeds 80% of the model limit."
-        );
+      if (!ctx.forceCompact) {
+        ctx.addSystemMessage("Compaction not available.");
+        break;
       }
+      const msgCount = ctx.session.messages.length;
+      if (msgCount <= 2 && ctx.tokens === 0) {
+        ctx.addSystemMessage("Nothing to compact — conversation is empty.");
+        break;
+      }
+      ctx.addSystemMessage(`**Compacting...** ~${ctx.tokens.toLocaleString()} tokens${arg ? ` (preserving: ${arg})` : ""}`);
+      void ctx.forceCompact(arg || undefined).then(({ before, after }) => {
+        ctx.addSystemMessage(`**Compacted.** ~${before.toLocaleString()} → ~${after.toLocaleString()} tokens.`);
+      });
       break;
     }
 
@@ -667,12 +734,42 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             config.routing = { ...config.routing, [persona]: provider };
             break;
           }
+          case "key": {
+            // /settings key <provider> <api-key>
+            const keyParts = value.split(/\s+/);
+            if (keyParts.length < 2) {
+              ctx.addSystemMessage("**Usage:** `/settings key <provider> <api-key>`\n\nExample: `/settings key anthropic sk-ant-...`");
+              break;
+            }
+            const [keyProvider, ...keyRest] = keyParts;
+            const apiKeyValue = keyRest.join(" ").trim();
+            if (!config.providers[keyProvider]) {
+              config.providers[keyProvider] = { model: "", apiKey: apiKeyValue };
+            } else {
+              config.providers[keyProvider].apiKey = apiKeyValue;
+            }
+            // Also set in process.env so it's immediately usable
+            const envNames: Record<string, string> = {
+              anthropic: "ANTHROPIC_API_KEY",
+              openai: "OPENAI_API_KEY",
+              google: "GOOGLE_GENERATIVE_AI_API_KEY",
+              xai: "XAI_API_KEY",
+              groq: "GROQ_API_KEY",
+              deepseek: "DEEPSEEK_API_KEY",
+              mistral: "MISTRAL_API_KEY",
+            };
+            const envName = envNames[keyProvider];
+            if (envName) {
+              process.env[envName] = apiKeyValue;
+            }
+            break;
+          }
           default:
             ctx.addSystemMessage(`Unknown setting: \`${key}\`. Type \`/settings\` to see all options.`);
             break;
         }
 
-        if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "git.branchPrefix", "sandbox", "route"].includes(key)) {
+        if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "git.branchPrefix", "sandbox", "route", "key"].includes(key)) {
           saveConfig(config);
           ctx.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
         }
@@ -817,26 +914,33 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
       const isForce = arg?.includes("--force");
 
       if (exists && !isForce) {
-        // Re-run: review and suggest improvements
-        ctx.addSystemMessage("**Reviewing WORKERMILL.md...** I'll analyze your project and suggest improvements.");
+        // Re-run: validate existing file, bias toward stability
+        ctx.addSystemMessage("**Validating WORKERMILL.md...** Checking accuracy against current codebase.");
         ctx.submit(
-          `Read the existing WORKERMILL.md file and review it against the current state of the codebase.
+          `Read the existing WORKERMILL.md file and validate it against the current state of the codebase.
 
-Use your tools to explore — read key source files, check directory structure, look at configs, tests, and dependencies. Then compare what WORKERMILL.md says vs what actually exists.
+IMPORTANT: Your default stance is that the file is correct. Do NOT make changes unless something is **concretely wrong or missing**. Rewording for style, reordering sections, or adding "nice to have" content are NOT valid reasons to edit. If the file is accurate and complete, say "WORKERMILL.md is up to date — no changes needed." and stop.
 
-Evaluate the WORKERMILL.md on these criteria:
-- **Accuracy** — Does it match the current codebase? Are file paths, commands, and patterns still correct?
-- **Completeness** — Is anything important missing? New modules, changed architecture, added dependencies?
-- **Specificity** — Does it reference actual file paths and commands, or is it generic boilerplate?
-- **Actionability** — Would an AI agent reading this know exactly how to work in this codebase?
-- **Conciseness** — Is it under ~200 lines? Are there redundant sections?
+Use your tools to spot-check — read a few key files, verify commands still work, confirm directory structure matches. You do not need to exhaustively re-explore the entire codebase.
 
-Then either:
-1. If improvements are needed, update the file directly with write_file and explain what you changed.
-2. If it's already good, say so and suggest any minor additions.
+Only flag issues that are **factually incorrect**:
+- A file path, command, or pattern that no longer exists
+- A new top-level module or major dependency that is completely absent
+- A command that would fail if an agent ran it
 
-Do NOT rewrite from scratch unless it's severely outdated — preserve the user's custom sections.`,
-          "/init (reviewing WORKERMILL.md)"
+Do NOT touch:
+- Wording, tone, or section ordering
+- Content that is accurate but could be "more detailed"
+- Sections the user wrote manually (custom notes, pitfalls, workflow preferences)
+
+If you find concrete issues, list them and ask the user whether to apply fixes — do NOT write changes automatically. Present a short summary like:
+
+**Found 2 issues:**
+1. \`npm run typecheck\` should be \`npx tsc -b\` (command changed)
+2. Missing \`api/src/middleware/\` section (new module added since last init)
+
+**Apply fixes?** (say yes or I'll leave it as-is)`,
+          "/init (validating WORKERMILL.md)"
         );
       } else {
         // First run: generate from scratch

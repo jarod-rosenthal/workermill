@@ -4,6 +4,50 @@ All notable changes to the WorkerMill CLI are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.87] - 2026-03-30
+
+### Added
+- **Live model switching** — `/model provider/model [context]` hot-swaps mid-session. No restart. Status bar, context window, and tok/s all update immediately.
+- **Model autocomplete** — `/model ` shows all available models from all providers (cloud from pricing registry, Ollama from live API). Tab to accept.
+- **Context window in status bar** — displays `[provider/model (256k context)]` like Claude Code. Resolved from pricing registry for cloud, config for Ollama.
+- **Auto-compact on model switch** — switching to a smaller context model auto-compacts conversation if tokens exceed 80% of new limit.
+- **`/model` command chaining** — `/model openai/gpt-5.4 /as backend_developer fix auth` switches model then dispatches the trailing command.
+- **`/compact [focus]`** — runs compaction immediately with optional focus instructions (e.g. `/compact focus on API changes`). No longer defers to automatic.
+- **`/settings key <provider> <api-key>`** — add API keys inline without leaving the session. Saved to config and active immediately.
+- **API key validation on `/model` switch** — blocks switch if no key found, prompts user with `/settings key` command.
+- **Cursor movement** — left/right arrows, Ctrl+Left/Right (word jump), Ctrl+A/E (home/end) in the input field.
+- **OpenAI-compatible providers** — xAI, Groq, DeepSeek, Mistral work via `/model` with known base URLs.
+- **Google model alias resolution** — `gemini-3.1-pro` auto-resolves to `gemini-3.1-pro-preview` at the API level.
+
+### Changed
+- **Removed `/plan` command** — redundant with status bar permissions. Removed from help text, autocomplete, and tests.
+- **`/init` re-run prompt** — stability-first. Validates existing WORKERMILL.md, lists concrete issues, asks before writing. No longer auto-edits.
+- **Splash screen simplified** — removed role model display, context line, persona count. Shows a random tip and `/help` pointer.
+- **Browser tools use Zod** — converted from raw JSON schema `parameters` to Zod `inputSchema` for cross-provider compatibility (fixes OpenAI Responses API crash).
+- **Review model color** — lilac (`#C586C0` label, `#A066A0` model) instead of raw magenta. Easier on the eyes.
+- **Permission escalation consistent** — "Always allow this tool" now escalates status bar to `auto-edit`. Previously only "Trust all" updated the display.
+- **Completed tool calls hidden** — no longer shows vertical list of completed tools after each turn. Status bar tracks counts, in-progress indicator still shows.
+- **`/model` doesn't change planner/reviewer** — only switches the active worker model. Use `/setup` to change role assignments.
+- **Welcome message** — removed "12" from "AI experts ready to work" to avoid going stale.
+
+### Changed (cont.)
+- **Session summary** — exit summary shows git diffstat (files, +insertions, -deletions) instead of meaningless message count.
+- **`/compact` reports tokens** — shows before/after token count instead of message count. Status bar percentage updates after compaction.
+- **Orchestrator permission prompt** — removed spurious `[🤖 system] Tool: write_file` line. Permission details now inline in the confirm prompt.
+
+### Fixed
+- **Anthropic context windows** — Opus 4.6 and Sonnet 4.6 correctly show 1M context (was 200k).
+- **OpenAI pricing** — gpt-5.4 (1M/$2.50/$15), gpt-5.4-mini (400k/$0.75/$4.50), gpt-5.4-pro (1.05M/$30/$180), gpt-5.4-nano (400k/$0.20/$1.25). All verified from openai.com/api/pricing.
+- **Google pricing** — gemini-3.1-pro-preview ($2/$12), gemini-3-flash-preview ($0.50/$3), gemini-2.5-pro ($1.25/$10). All verified from ai.google.dev/pricing.
+- **Google model names** — use actual API names (`gemini-3.1-pro-preview`, not `gemini-3.1-pro`).
+- **Context display math** — power-of-2 values (Ollama) use 1024 divisor, cloud values use 1000.
+- **Stale tsc build artifacts** — vitest was resolving `.js` files over `.ts` sources. Cleaned `cli/src/` and `packages/engine/src/`.
+- **Status bar not updating on `/model` switch** — provider, model, and context now use reactive state.
+- **Tok/s tracking after `/model` switch** — was keyed to startup model, now uses active model refs.
+- **Ollama context switching** — `ensureOllamaContext` now unloads model when context doesn't match (was only unloading when too small, not when switching down).
+- **`buildOllamaOptions` uses active context** — was passing startup context length instead of the value set by `/model`.
+- **`/compact` on high-token short conversations** — now summarizes even with few messages when token count is high (e.g. 192k tokens in 2 messages from tool calls).
+
 ## [0.15.85] - 2026-03-30
 
 ### Added

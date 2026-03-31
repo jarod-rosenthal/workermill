@@ -37,14 +37,31 @@ export function shouldCompact(totalTokens: number, model: string, configuredCont
 export async function compactMessages(
   model: LanguageModel,
   messages: Array<{ role: "user" | "assistant"; content: string }>,
-  mode: "soft" | "hard"
+  mode: "soft" | "hard",
+  focusInstructions?: string,
 ): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
-  if (messages.length <= 4) return messages; // Nothing to compact
+  if (messages.length === 0) return messages;
 
-  // Keep the last 2 exchanges (4 messages) always
-  const keepCount = mode === "hard" ? 2 : 4;
-  const toCompact = messages.slice(0, -keepCount);
-  const toKeep = messages.slice(-keepCount);
+  // Estimate total tokens (rough: 1 token ≈ 4 chars)
+  const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+  const estimatedTokens = Math.round(totalChars / 4);
+
+  // If few messages but high token count, summarize ALL of them
+  if (messages.length <= 4 && estimatedTokens < 10000) return messages;
+
+  // For short conversations with high token count, summarize everything
+  let toCompact: typeof messages;
+  let toKeep: typeof messages;
+  if (messages.length <= 4) {
+    // All messages are heavy — summarize everything
+    toCompact = messages;
+    toKeep = [];
+  } else {
+    // Keep the last 2 exchanges (4 messages) always
+    const keepCount = mode === "hard" ? 2 : 4;
+    toCompact = messages.slice(0, -keepCount);
+    toKeep = messages.slice(-keepCount);
+  }
 
   if (toCompact.length === 0) return messages;
 
@@ -53,10 +70,14 @@ export async function compactMessages(
     .map(m => `${m.role}: ${m.content.slice(0, 500)}`)
     .join("\n\n");
 
+  const systemPrompt = focusInstructions
+    ? `Summarize this conversation history concisely. Focus especially on: ${focusInstructions}. Also preserve: what was discussed, what decisions were made, what files were modified, and what the current state of work is.`
+    : "Summarize this conversation history concisely. Focus on: what was discussed, what decisions were made, what files were modified, and what the current state of work is. Be brief but preserve all important context.";
+
   try {
     const result = await generateText({
       model,
-      system: "Summarize this conversation history concisely. Focus on: what was discussed, what decisions were made, what files were modified, and what the current state of work is. Be brief but preserve all important context.",
+      system: systemPrompt,
       prompt: summaryText,
     });
 

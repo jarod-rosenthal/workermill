@@ -131,11 +131,11 @@ Any provider with an OpenAI-compatible API also works — Groq, DeepSeek, Mistra
 | `/ship <task>` | Plan, execute with experts, review, commit |
 | `/as <persona> <task>` | Run a task with a specific expert |
 | `/retry` | Re-plan the same task (planner sees existing code) |
-| `/personas` | List all 12 experts, view/create custom ones |
+| `/personas` | List all experts, view/create custom ones |
 | `/init` | Generate `WORKERMILL.md` project instructions |
 | `/undo` | Revert last build's changes |
 | `/diff` | Preview uncommitted changes |
-| `/model` | Show or switch model |
+| `/model` | Switch model mid-session with autocomplete |
 | `/chrome` | Headless Chrome for testing and scraping |
 | `/voice` | Voice input — speak your task |
 | `/schedule` | Scheduled recurring tasks |
@@ -168,7 +168,7 @@ Use `/as <persona> <task>` to target one directly. Create custom personas in `.w
 <details>
 <summary><strong>All Features</strong></summary>
 
-**Tools:** 13 built-in (bash, read/write/edit files, glob, grep, ls, fetch, git, web search, sub-agent, todo, think) + MCP server support for anything else.
+**Tools:** bash, read/write/edit files, glob, grep, ls, fetch, git, web search, sub-agent, todo, verify, plus 8 browser tools + MCP server support for anything else.
 
 **Project instructions:** `WORKERMILL.md` (also reads `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`) — your coding standards, applied to every agent.
 

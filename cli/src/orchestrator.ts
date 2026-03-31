@@ -280,8 +280,7 @@ async function checkToolPermission(
 
   // Prompt user — supports y/a/t/n like the single-agent permission prompt
   const display = formatToolCallDisplay(toolName, toolInput);
-  output.log("system", `Tool: ${toolName} -- ${display}`);
-  const result = await output.confirm(`Allow ${toolName}?`);
+  const result = await output.confirm(`Allow ${toolName}? ${display}`);
 
   if (typeof result === "object") {
     if (result.mode === "trust") {

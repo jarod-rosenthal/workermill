@@ -72,9 +72,11 @@ export default function CLI() {
             { title: "Project memory", desc: "Learnings, preferences, and context persisted across sessions and injected into future builds." },
             { title: "@mentions", desc: "@file.ts inlines code, @dir/ lists tree, @https://url fetches content, @image.png sends multimodal." },
             { title: "Code review", desc: "Tech lead reads actual code diffs (not summaries), with selective revision of only affected stories." },
-            { title: "Permissions", desc: "Tab to cycle: Allow → Deny → Always allow → Trust all. Per-tool allow/deny via /permissions." },
+            { title: "Permissions", desc: "Shift+Tab to cycle: Ask → Auto-edit → Trust all. Per-tool always-allow from prompt. Per-tool allow/deny via /permissions." },
             { title: "Bash guardrails", desc: "Blocks destructive commands and writes outside the project directory." },
-            { title: "13 built-in tools", desc: "bash, read/write/edit files, patch, glob, grep, ls, fetch, git, web search, todo, sub-agent." },
+            { title: "Built-in tools", desc: "bash, read/write/edit files, patch, glob, grep, ls, fetch, git, web search, todo, verify, sub-agent, plus 8 browser tools." },
+            { title: "Live model switching", desc: "/model hot-swaps provider and model mid-session. Autocomplete shows all available models. Auto-compacts when switching to a smaller context window." },
+            { title: "Status bar", desc: "Shows active model with context window size, usage percentage, cost estimate, git branch, and tokens/sec." },
             { title: "Auto-update", desc: "Checks npm once per 24h and notifies when a newer version is available." },
           ].map((f) => (
             <div key={f.title} className="p-3 rounded-lg border border-border bg-card/50">
@@ -88,7 +90,7 @@ export default function CLI() {
       {/* Usage */}
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">Usage</h2>
-        <CopyBlock code={`# Interactive chat\nworkermill\n\n# Skip permission prompts\nworkermill --trust\n\n# Read-only research mode\nworkermill --plan\n\n# Resume last conversation\nworkermill --resume\n\n# Cap output tokens\nworkermill --max-tokens 4096\n\n# Then use /ship inside the CLI for multi-expert orchestration\n# /ship spec.md\n# /ship REST API with auth, React dashboard, Docker`} />
+        <CopyBlock code={`# Interactive chat\nworkermill\n\n# Skip permission prompts\nworkermill --trust\n\n# Resume last conversation\nworkermill --resume\n\n# Cap output tokens\nworkermill --max-tokens 4096\n\n# Then use /ship inside the CLI for multi-expert orchestration\n# /ship spec.md\n# /ship REST API with auth, React dashboard, Docker`} />
       </section>
 
       {/* Multi-Expert Orchestration */}
@@ -234,7 +236,6 @@ export default function CLI() {
             <tbody className="divide-y divide-border">
               {[
                 ["/ship <task>", "Multi-expert orchestration — plans, executes, reviews"],
-                ["/plan <task>", "Plan/analyze a task using the planner agent (no args: read-only mode)"],
                 ["/review [task]", "Code review using the tech lead (defaults to recent changes)"],
                 ["/retry", "Re-plan and re-run the last build task"],
                 ["/init", "Generate WORKERMILL.md for this project"],
@@ -242,8 +243,8 @@ export default function CLI() {
                 ["/permissions", "Manage tool permissions (trust/ask/allow/deny)"],
                 ["/undo", "Revert last build's changes (git stash or reset)"],
                 ["/diff", "Preview uncommitted changes"],
-                ["/model", "Show or switch model (/model provider/model)"],
-                ["/plan", "Plan a task or toggle read-only mode (no args)"],
+                ["/model [provider/model] [context]", "Switch model mid-session with autocomplete and auto-compact"],
+                ["/compact [focus]", "Compact conversation (e.g. /compact focus on API changes)"],
                 ["/trust", "Auto-approve all tools for this session"],
                 ["/hooks", "View configured pre/post tool hooks"],
                 ["/cost", "Session cost and token usage"],
@@ -294,6 +295,7 @@ export default function CLI() {
                 ["Approval threshold", "8", "/settings review.threshold <n> (1-10 scale)"],
                 ["Auto-revise", "false", "/settings review.autoRevise true/false"],
                 ["Persona routing", "default provider", "/settings route <persona> <provider>"],
+                ["API key", "\u2014", "/settings key <provider> <api-key>"],
               ].map(([setting, def, cmd]) => (
                 <tr key={setting}>
                   <td className="p-3 font-medium text-foreground">{setting}</td>
@@ -378,7 +380,7 @@ export default function CLI() {
 
       {/* Personas */}
       <section className="space-y-4">
-        <h2 className="text-2xl font-semibold">11 Built-in Personas</h2>
+        <h2 className="text-2xl font-semibold">Built-in Personas</h2>
         <div className="flex flex-wrap gap-2">
           {[
             { name: "Backend Developer", emoji: "\u{1F4BB}" },

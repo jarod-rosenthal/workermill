@@ -9,6 +9,22 @@ import { useOrchestrator } from "./useOrchestrator.js";
 import { App } from "./App.js";
 import { handleSlashCommand as dispatchSlashCommand, getGitBranch, type SlashCommandContext } from "./slash-commands.js";
 import type { UseAgentOptions } from "./useAgent.js";
+import { findModelInfo } from "../../../api/src/providers/index.js";
+import { resolveConfig } from "../config.js";
+
+/**
+ * Resolve context window for a model.
+ * Ollama: uses the user's configured contextLength.
+ * Cloud: looks up from the pricing/model registry.
+ * Fallback: 128k.
+ */
+function resolveContextWindow(provider: string, model: string, configContextLength?: number): number {
+  if (provider === "ollama" || provider === "lmstudio") {
+    return configContextLength || 128_000;
+  }
+  const info = findModelInfo(model);
+  return info?.contextWindow || 128_000;
+}
 
 // ---------------------------------------------------------------------------
 // History persistence
@@ -67,6 +83,24 @@ export function Root(props: RootProps): React.ReactElement {
   const { exit } = useApp();
   const agent = useAgent(props);
 
+  // Active provider/model/context — starts from props, updates on /model switch
+  const [activeProvider, setActiveProvider] = useState(props.provider);
+  const [activeModel, setActiveModel] = useState(props.model);
+  const [activeContext, setActiveContext] = useState(
+    resolveContextWindow(props.provider, props.model, props.contextLength)
+  );
+
+  // Wrap switchModel to also update the display state
+  const switchModelAndDisplay = useCallback((provider: string, model: string) => {
+    agent.switchModel(provider, model);
+    setActiveProvider(provider);
+    setActiveModel(model);
+    // Re-resolve context from config (switchModel may have updated it)
+    const cfg = resolveConfig();
+    const provCfg = cfg?.providers?.[provider];
+    setActiveContext(resolveContextWindow(provider, model, provCfg?.contextLength));
+  }, [agent]);
+
   // Orchestrator for /build — pushes messages via agent.addSystemMessage
   const addOrchestratorMessage = useCallback(
     (content: string, role?: "user" | "assistant") => {
@@ -117,8 +151,8 @@ export function Root(props: RootProps): React.ReactElement {
         addSystemMessage: agent.addSystemMessage,
         addUserMessage: agent.addUserMessage,
         submit: agent.submit,
-        provider: props.provider,
-        model: props.model,
+        provider: activeProvider,
+        model: activeModel,
         workingDir: props.workingDir,
         session: agent.session,
         cost: agent.cost,
@@ -136,6 +170,8 @@ export function Root(props: RootProps): React.ReactElement {
         setLastBuildTask: (task: string) => { lastBuildTask.current = task; },
         sandboxed: props.sandboxed,
         exit,
+        switchModel: switchModelAndDisplay,
+        forceCompact: agent.forceCompact,
       };
       return dispatchSlashCommand(input, ctx);
     },
@@ -210,10 +246,10 @@ export function Root(props: RootProps): React.ReactElement {
 
   return (
     <App
-      provider={props.provider}
-      model={props.model}
+      provider={activeProvider}
+      model={activeModel}
       workingDir={props.workingDir}
-      maxContext={props.contextLength || 128_000}
+      maxContext={activeContext}
       trustAll={props.trustAll}
       planMode={props.planMode}
       onSubmit={handleSubmit}

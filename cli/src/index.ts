@@ -30,7 +30,7 @@ function getRoleModelsFromConfig(config: import("./config.js").CliConfig): {
 }
 
 /** Print the branded welcome header before Ink takes over the terminal. */
-async function printWelcome(roleModels: { worker: string; planner: string; reviewer: string }, workingDir: string, isFirstRun = false): Promise<void> {
+async function printWelcome(workingDir: string, isFirstRun = false): Promise<void> {
   const brand = chalk.hex("#D77757");
   const dim = chalk.dim;
   const white = chalk.white;
@@ -40,79 +40,23 @@ async function printWelcome(roleModels: { worker: string; planner: string; revie
 
   if (isFirstRun) {
     console.log();
-    console.log(brand("  Welcome aboard!") + dim(" You have a team of 12 AI experts ready to work."));
+    console.log(brand("  Welcome aboard!") + dim(" You have a team of AI experts ready to work."));
     console.log(dim("  Try /ship <task> to plan, build, review, and commit — all in one shot."));
     console.log(dim("  Or just describe what you need and your team will figure it out."));
-  } else {
-    // Contextual project info — more useful than a random greeting
-    const { execSync } = await import("child_process");
-    const contextParts: string[] = [];
-    try {
-      // Project name from git remote or directory name
-      let projectName: string;
-      try {
-        const remote = execSync("git remote get-url origin", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-        projectName = remote.replace(/.*\//, "").replace(/\.git$/, "");
-      } catch {
-        projectName = workingDir.split("/").pop() || "unknown";
-      }
-      contextParts.push(`Project: ${projectName}`);
-
-      // Branch
-      try {
-        const branch = execSync("git branch --show-current", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-        if (branch) contextParts.push(`Branch: ${branch}`);
-      } catch { /* not a git repo */ }
-
-      // Uncommitted files
-      try {
-        const status = execSync("git status --porcelain", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-        if (status) {
-          const count = status.split("\n").filter(l => l.trim()).length;
-          contextParts.push(`${count} uncommitted file${count === 1 ? "" : "s"}`);
-        }
-      } catch { /* not a git repo */ }
-    } catch { /* fall through with whatever we have */ }
-
-    if (contextParts.length > 0) {
-      console.log(dim(`  ${contextParts.join(" | ")}`));
-    }
   }
-  console.log();
-  // Pad role labels so model names align
-  const pad = (label: string) => label.padEnd(10);
-  if (roleModels.planner === roleModels.worker && roleModels.reviewer === roleModels.worker) {
-    console.log(dim(`  ${roleModels.worker}`));
-  } else {
-    const maxModelLen = Math.max(roleModels.worker.length, roleModels.planner.length, roleModels.reviewer.length);
-    const padModel = (m: string) => m.padEnd(maxModelLen);
-    console.log(dim(`  ${pad("workers:")}`) + white(padModel(roleModels.worker)) + dim("  writes code"));
-    console.log(dim(`  ${pad("planner:")}`) + white(padModel(roleModels.planner)) + dim("  scopes the work"));
-    console.log(dim(`  ${pad("reviewer:")}`) + white(padModel(roleModels.reviewer)) + dim("  reviews every diff"));
-  }
-  console.log(dim(`  12 expert personas · cwd: ${workingDir}`));
-  console.log();
-  console.log(dim("  ") + brand("/ship <task>") + dim("          plan, build, review, commit"));
-  console.log(dim("  ") + brand("/plan <task>") + dim("          architect-level planning"));
-  console.log(dim("  ") + brand("/review") + dim("               tech lead code review"));
-  console.log(dim("  ") + brand("/as <expert> <task>") + dim("   one expert, one job"));
-  console.log(dim("  ") + brand("/setup") + dim("                change providers    ") + white("/help") + dim(" for more"));
   console.log();
 
   const tips = [
-    "Use /ship to plan, build, review, and commit in one shot.",
-    "Each expert has deep knowledge — /as security_engineer for audits.",
-    "Add project instructions in .workermill/instructions.md for context.",
-    "WorkerMill learns as it works — learnings persist across sessions.",
-    "Customize personas by adding overrides in .workermill/personas/.",
-    "Use --trust to skip permission prompts when you're in the zone.",
-    "Run /init to generate project instructions from your codebase.",
-    "The tech_lead reviews every diff before commit — quality built in.",
-    "Use /compact to free up context when conversations get long.",
-    "Custom commands live in .workermill/commands/ — automate your workflows.",
-    "Map any persona to any provider — /settings route backend_developer anthropic.",
+    "/ship <task> assigns a team of experts to plan, build, review, and commit your feature.",
+    "/as backend_developer <task> gives you a single dedicated expert for focused work.",
+    "/review runs a tech lead code review on your uncommitted changes.",
+    "/init creates a WORKERMILL.md — project context that every expert reads before starting.",
+    "Route specific experts to different providers with /settings route <persona> <provider>.",
+    "Use /model <provider>/<model> to switch models mid-session without restarting.",
+    "Resume your last session with --resume — all messages and context are restored.",
   ];
-  console.log(dim(`  tip: ${tips[Math.floor(Math.random() * tips.length)]}`));
+  console.log(dim(`  ${tips[Math.floor(Math.random() * tips.length)]}`));
+  console.log(dim(`  Type ${white("/help")} for all commands.`));
   console.log();
 
   // Blocking update check — must print before Ink takes over stdout
@@ -235,7 +179,7 @@ const defaultCmd = program
       process.exit(0);
     }
 
-    await printWelcome(roleModels, workingDir, isFirstRun);
+    await printWelcome(workingDir, isFirstRun);
 
     // Enable synchronized output (DEC mode 2026) to prevent terminal tearing.
     // Wraps each stdout.write in begin/end synchronized update sequences so the

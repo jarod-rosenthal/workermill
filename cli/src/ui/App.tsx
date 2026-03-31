@@ -184,9 +184,6 @@ export function App(props: AppProps): React.ReactElement {
               </Box>
             ) : (
               <Box flexDirection="column" marginLeft={2}>
-                {message.toolCalls?.map((tc) => (
-                  <ToolCallDisplay key={tc.id} tool={tc} />
-                ))}
                 {message.content ? (
                   <Markdown content={message.content} />
                 ) : null}

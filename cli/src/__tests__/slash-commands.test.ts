@@ -205,12 +205,14 @@ describe("handleSlashCommand", () => {
     });
 
     it("switches model with provider/model arg", () => {
+      process.env.ANTHROPIC_API_KEY = "sk-test-key";
       const ctx = createContext();
       handleSlashCommand("/model anthropic/claude-sonnet-4-6", ctx);
       expect(saveConfig).toHaveBeenCalled();
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("anthropic/claude-sonnet-4-6")
       );
+      delete process.env.ANTHROPIC_API_KEY;
     });
 
     it("keeps current provider when only model name given", () => {
@@ -223,6 +225,7 @@ describe("handleSlashCommand", () => {
     });
 
     it("handles null config gracefully", () => {
+      process.env.ANTHROPIC_API_KEY = "sk-test-key";
       vi.mocked(loadConfig).mockReturnValueOnce(null);
       const ctx = createContext();
       handleSlashCommand("/model anthropic/claude-sonnet-4-6", ctx);
@@ -231,6 +234,17 @@ describe("handleSlashCommand", () => {
         expect.stringContaining("Model switched")
       );
       expect(saveConfig).not.toHaveBeenCalled();
+      delete process.env.ANTHROPIC_API_KEY;
+    });
+
+    it("rejects switch to cloud provider without API key", () => {
+      delete process.env.ANTHROPIC_API_KEY;
+      const ctx = createContext();
+      handleSlashCommand("/model anthropic/claude-sonnet-4-6", ctx);
+      expect(saveConfig).not.toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("no API key found")
+      );
     });
   });
 
@@ -266,28 +280,6 @@ describe("handleSlashCommand", () => {
       handleSlashCommand("/status", ctx);
       const msg = vi.mocked(ctx.addSystemMessage).mock.calls[0][0];
       expect(msg).toContain("TRUST ALL");
-    });
-  });
-
-  // ---- /plan ----
-
-  describe("/plan", () => {
-    it("toggles plan mode ON when currently off", () => {
-      const ctx = createContext({ planMode: false });
-      handleSlashCommand("/plan", ctx);
-      expect(ctx.setPlanMode).toHaveBeenCalledWith(true);
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Plan mode ON")
-      );
-    });
-
-    it("toggles plan mode OFF when currently on", () => {
-      const ctx = createContext({ planMode: true });
-      handleSlashCommand("/plan", ctx);
-      expect(ctx.setPlanMode).toHaveBeenCalledWith(false);
-      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Plan mode OFF")
-      );
     });
   });
 
@@ -762,19 +754,47 @@ describe("handleSlashCommand", () => {
   // ---- /compact ----
 
   describe("/compact", () => {
-    it("shows token info when tokens recorded", () => {
-      const ctx = createContext({ tokens: 50000 });
+    it("compacts when messages exist", () => {
+      const session = {
+        id: "test", startedAt: "2026-03-30T10:00:00Z", totalTokens: 5000,
+        messages: [
+          { role: "user", content: "a" }, { role: "assistant", content: "b" },
+          { role: "user", content: "c" }, { role: "assistant", content: "d" },
+          { role: "user", content: "e" }, { role: "assistant", content: "f" },
+        ],
+      };
+      const forceCompact = vi.fn().mockResolvedValue({ before: 6, after: 3 });
+      const ctx = createContext({ session } as any);
+      (ctx as any).forceCompact = forceCompact;
       handleSlashCommand("/compact", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("50,000")
+        expect.stringContaining("Compacting")
       );
+      expect(forceCompact).toHaveBeenCalledWith(undefined);
     });
 
-    it("shows no tokens message when none recorded", () => {
+    it("passes focus instructions when provided", () => {
+      const session = {
+        id: "test", startedAt: "2026-03-30T10:00:00Z", totalTokens: 5000,
+        messages: [
+          { role: "user", content: "a" }, { role: "assistant", content: "b" },
+          { role: "user", content: "c" }, { role: "assistant", content: "d" },
+          { role: "user", content: "e" }, { role: "assistant", content: "f" },
+        ],
+      };
+      const forceCompact = vi.fn().mockResolvedValue({ before: 6, after: 3 });
+      const ctx = createContext({ session } as any);
+      (ctx as any).forceCompact = forceCompact;
+      handleSlashCommand("/compact focus on API changes", ctx);
+      expect(forceCompact).toHaveBeenCalledWith("focus on API changes");
+    });
+
+    it("shows nothing-to-compact for empty conversations", () => {
       const ctx = createContext({ tokens: 0 });
+      (ctx as any).forceCompact = vi.fn();
       handleSlashCommand("/compact", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("No token usage")
+        expect.stringContaining("empty")
       );
     });
   });
@@ -790,16 +810,17 @@ describe("handleSlashCommand", () => {
         expect.stringContaining("Analyzing codebase")
       );
       expect(ctx.submit).toHaveBeenCalledWith(
-        expect.stringContaining("WORKERMILL.md")
+        expect.stringContaining("WORKERMILL.md"),
+        expect.any(String),
       );
     });
 
-    it("reviews existing WORKERMILL.md when it exists", () => {
+    it("validates existing WORKERMILL.md when it exists", () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       const ctx = createContext();
       handleSlashCommand("/init", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Reviewing WORKERMILL.md")
+        expect.stringContaining("Validating WORKERMILL.md")
       );
     });
 
@@ -947,7 +968,8 @@ describe("handleSlashCommand", () => {
       const ctx = createContext();
       handleSlashCommand("/as backend_engineer review the auth middleware", ctx);
       expect(ctx.submit).toHaveBeenCalledWith(
-        expect.stringContaining("review the auth middleware")
+        expect.stringContaining("review the auth middleware"),
+        expect.any(String),
       );
     });
 
@@ -1059,7 +1081,7 @@ describe("handleSlashCommand", () => {
       const ctx = createContext();
       handleSlashCommand("/deploy", ctx);
       expect(ctx.addUserMessage).toHaveBeenCalledWith("/deploy");
-      expect(ctx.submit).toHaveBeenCalledWith("run deploy script");
+      expect(ctx.submit).toHaveBeenCalledWith("run deploy script", "/deploy");
     });
 
     it("dispatches custom command with arg", () => {
@@ -1069,7 +1091,8 @@ describe("handleSlashCommand", () => {
       const ctx = createContext();
       handleSlashCommand("/deploy staging", ctx);
       expect(ctx.submit).toHaveBeenCalledWith(
-        expect.stringContaining("Additional context: staging")
+        expect.stringContaining("Additional context: staging"),
+        "/deploy staging",
       );
     });
   });

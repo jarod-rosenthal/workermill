@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { streamText, stepCountIs, type ToolSet } from "ai";
 import type { LanguageModel } from "ai";
+import { z } from "zod";
 import crypto from "crypto";
 import {
   createModel,
@@ -121,6 +122,8 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
   const modelRef = useRef<LanguageModel | null>(null);
   const toolsRef = useRef<Record<string, AnyToolDef> | null>(null);
   const aiProviderRef = useRef<AIProvider>(options.provider as AIProvider);
+  const activeModelNameRef = useRef(options.model);
+  const activeContextLengthRef = useRef(options.contextLength);
 
   // ------- React state -------- //
   const [messages, setMessages] = useState<Message[]>([]);
@@ -352,20 +355,20 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     // servers that finish starting after init are picked up).
     const allRawTools: Record<string, AnyToolDef> = { ...raw, ...getMCPToolDefinitions() };
 
-    // Browser tools — added inline with raw JSON schema parameters.
+    // Browser tools — use Zod inputSchema for cross-provider compatibility.
     allRawTools.browser_open = {
       description: "Open a headless Chrome browser for navigating websites, taking screenshots, and verifying UI.",
-      parameters: { type: "object", properties: {}, required: [] },
+      inputSchema: z.object({}),
       execute: async () => browserOpen(),
     };
     allRawTools.browser_navigate = {
       description: "Navigate the browser to a URL. Returns the page title.",
-      parameters: { type: "object", properties: { url: { type: "string", description: "URL to navigate to" } }, required: ["url"] },
+      inputSchema: z.object({ url: z.string().describe("URL to navigate to") }),
       execute: async ({ url }: { url: string }) => browserNavigate(url),
     };
     allRawTools.browser_screenshot = {
       description: "Take a screenshot of the current browser page. Returns the image for visual inspection.",
-      parameters: { type: "object", properties: {}, required: [] },
+      inputSchema: z.object({}),
       execute: async () => {
         const { base64, description } = await browserScreenshot();
         if (base64) {
@@ -376,27 +379,27 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     };
     allRawTools.browser_click = {
       description: "Click an element on the page by CSS selector.",
-      parameters: { type: "object", properties: { selector: { type: "string", description: "CSS selector (e.g., 'button.submit', '#login')" } }, required: ["selector"] },
+      inputSchema: z.object({ selector: z.string().describe("CSS selector (e.g., 'button.submit', '#login')") }),
       execute: async ({ selector }: { selector: string }) => browserClick(selector),
     };
     allRawTools.browser_fill = {
       description: "Fill a form field by CSS selector with a value.",
-      parameters: { type: "object", properties: { selector: { type: "string", description: "CSS selector for the input field" }, value: { type: "string", description: "Value to fill" } }, required: ["selector", "value"] },
+      inputSchema: z.object({ selector: z.string().describe("CSS selector for the input field"), value: z.string().describe("Value to fill") }),
       execute: async ({ selector, value }: { selector: string; value: string }) => browserFill(selector, value),
     };
     allRawTools.browser_evaluate = {
       description: "Execute JavaScript in the browser and return the result.",
-      parameters: { type: "object", properties: { expression: { type: "string", description: "JavaScript expression to evaluate" } }, required: ["expression"] },
+      inputSchema: z.object({ expression: z.string().describe("JavaScript expression to evaluate") }),
       execute: async ({ expression }: { expression: string }) => browserEvaluate(expression),
     };
     allRawTools.browser_console = {
       description: "Get console messages (log, error, warn) from the browser.",
-      parameters: { type: "object", properties: {}, required: [] },
+      inputSchema: z.object({}),
       execute: async () => browserConsole(),
     };
     allRawTools.browser_close = {
       description: "Close the headless Chrome browser.",
-      parameters: { type: "object", properties: {}, required: [] },
+      inputSchema: z.object({}),
       execute: async () => browserClose(),
     };
 
@@ -422,6 +425,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           const { allowed, mode } = await checkPermission(name, input);
 
           // Handle mode escalation from the permission prompt.
+          // Both update refs for behavior, and update displayed mode for consistency.
           if (mode === "trust") {
             trustAllRef.current = true;
             setTrustAllState(true);
@@ -429,6 +433,11 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             setPermMode("trust all");
           } else if (mode === "always") {
             sessionAllowRef.current.add(name);
+            // Reflect in status bar — show auto-edit since user is granting standing permissions
+            if (permModeRef.current === "ask") {
+              permModeRef.current = "auto-edit";
+              setPermMode("auto-edit");
+            }
           }
 
           if (!allowed) {
@@ -553,8 +562,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
         const controller = new AbortController();
         abortRef.current = controller;
 
-        // 10-minute safety timeout.
-        const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+        // No artificial timeout — the user controls cancellation via ESC/Ctrl+C.
 
         try {
           const model = modelRef.current!;
@@ -588,7 +596,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             abortSignal: controller.signal,
             ...buildOllamaOptions(
               aiProviderRef.current,
-              options.contextLength,
+              activeContextLengthRef.current,
             ),
             onStepFinish({ text }) {
               if (text) {
@@ -606,7 +614,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
             // the async iterator so the SDK processes all steps.
           }
 
-          clearTimeout(timeoutId);
 
           // ---- Finalise ---- //
           const finalText = await stream.text;
@@ -670,10 +677,10 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           setTokens(inputTokens);
           setCost(costTrackerRef.current.getTotalCost());
 
-          // Track tok/s for this model
+          // Track tok/s for this model — use active refs, not startup options
           const agentElapsed = (Date.now() - agentStreamStartMs) / 1000;
           if (outputTokens > 0 && agentElapsed > 0) {
-            const providerModel = `${options.provider}/${options.model}`;
+            const providerModel = `${aiProviderRef.current}/${activeModelNameRef.current}`;
             const tps = Math.round(outputTokens / agentElapsed);
             setTokPerSecMap(prev => ({ ...prev, [providerModel]: tps }));
           }
@@ -711,7 +718,6 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
           abortRef.current = null;
 
         } catch (err) {
-          clearTimeout(timeoutId);
           abortRef.current = null;
 
           if (err instanceof Error && err.name === "AbortError") {
@@ -867,6 +873,79 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     setMessages((prev) => [...prev, msg]);
   }, []);
 
+  // ------- switchModel() — hot-swap provider/model mid-session -------- //
+
+  const switchModel = useCallback((newProvider: string, newModel: string) => {
+    const config = resolveConfig();
+    const providerConfig = config?.providers?.[newProvider];
+    const host = providerConfig?.host;
+    const contextLength = providerConfig?.contextLength;
+
+    // Ensure API key is in process.env for cloud providers
+    const apiKey = providerConfig?.apiKey;
+    if (apiKey) {
+      const envMap: Record<string, string> = {
+        anthropic: "ANTHROPIC_API_KEY",
+        openai: "OPENAI_API_KEY",
+        google: "GOOGLE_GENERATIVE_AI_API_KEY",
+        xai: "XAI_API_KEY",
+        groq: "GROQ_API_KEY",
+        deepseek: "DEEPSEEK_API_KEY",
+        mistral: "MISTRAL_API_KEY",
+      };
+      // OpenAI-compatible providers use OPENAI_API_KEY as fallback
+      const envVar = envMap[newProvider] || "OPENAI_API_KEY";
+      if (envVar) {
+        const resolvedKey = apiKey.startsWith("{env:")
+          ? process.env[apiKey.slice(5, -1)] || ""
+          : apiKey;
+        if (resolvedKey) {
+          process.env[envVar] = resolvedKey;
+        }
+      }
+    }
+
+    aiProviderRef.current = newProvider as AIProvider;
+    activeModelNameRef.current = newModel;
+    activeContextLengthRef.current = contextLength;
+    modelRef.current = createModel(newProvider as AIProvider, newModel, host, contextLength);
+
+    // Ollama needs context length ensured before first use
+    if (newProvider === "ollama" && host && contextLength) {
+      void ensureOllamaContext(host, newModel, contextLength);
+    }
+  }, []);
+
+  // ------- forceCompact() — user-triggered compaction -------- //
+
+  const forceCompact = useCallback(async (focusInstructions?: string): Promise<{ before: number; after: number }> => {
+    const session = sessionRef.current;
+    const model = modelRef.current;
+    if (!model || !session || session.messages.length === 0) {
+      return { before: 0, after: 0 };
+    }
+
+    const beforeChars = session.messages.reduce((s, m) => s + m.content.length, 0);
+    const plainMessages = session.messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    const compacted = await compactMessages(model, plainMessages, "soft", focusInstructions);
+    session.messages = compacted.map((m) => ({
+      role: m.role,
+      content: m.content,
+      timestamp: new Date().toISOString(),
+    }));
+    saveSession(session);
+
+    const afterChars = session.messages.reduce((s, m) => s + m.content.length, 0);
+    const afterTokens = Math.round(afterChars / 4);
+    // Update the displayed token count so the status bar reflects compaction
+    setTokens(afterTokens);
+    return { before: Math.round(beforeChars / 4), after: afterTokens };
+  }, []);
+
   // ------- Tool count helper (for orchestrator) -------- //
 
   const incrementToolCount = useCallback((toolName: string) => {
@@ -901,5 +980,7 @@ export function useAgent(options: UseAgentOptions): UseAgentReturn {
     sessionStart: sessionStartRef.current,
     incrementToolCount,
     tokPerSec,
+    switchModel,
+    forceCompact,
   };
 }

@@ -80,9 +80,19 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
       break;
   }
 
-  // Model display
+  // Model display — show context window like Claude Code: [provider/model (256k context)]
   const rm = props.roleModels;
-  const workerStr = rm?.worker || `${props.provider}/${props.model}`;
+  // Active model from props (updated by /model switch) takes priority over roleModels
+  const workerStr = `${props.provider}/${props.model}`;
+  // Power-of-2 values (Ollama: 32768, 65536, 262144) use 1024 divisor;
+  // cloud models (200000, 128000) use 1000.
+  const isPow2 = (props.maxContext & (props.maxContext - 1)) === 0;
+  const divisor = isPow2 ? 1024 : 1000;
+  const bigDivisor = isPow2 ? 1_048_576 : 1_000_000;
+  const ctxK = props.maxContext >= bigDivisor
+    ? `${(props.maxContext / bigDivisor).toFixed(props.maxContext % bigDivisor === 0 ? 0 : 1)}M`
+    : `${Math.round(props.maxContext / divisor)}k`;
+  const modelDisplay = `${workerStr} (${ctxK} context)`;
   const tps = props.tokPerSec || {};
   const workerTps = tps[workerStr];
 
@@ -110,7 +120,7 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
       {/* Row 1: Model + context + project info — left-aligned with │ separators */}
       <Box>
         <Text color={theme.text}>{"["}</Text>
-        <Text color={theme.brand} bold>{workerStr}</Text>
+        <Text color={theme.brand} bold>{modelDisplay}</Text>
         <Text color={theme.text}>{"]"}</Text>
         {workerTps ? (
           <Text color={theme.subtle} dimColor>{` ${workerTps}t/s`}</Text>
@@ -183,9 +193,9 @@ export function StatusBar(props: StatusBarProps): React.ReactElement {
             ) : null}
             {rm.reviewer !== rm.worker ? (
               <Text>
-                <Text color="magenta" bold>{"review"}</Text>
+                <Text color="#C586C0" bold>{"review"}</Text>
                 <Text color={theme.subtle}>:</Text>
-                <Text color="magenta">{rm.reviewer}</Text>
+                <Text color="#A066A0">{rm.reviewer}</Text>
                 {tps[rm.reviewer] ? (
                   <Text color={theme.subtle} dimColor>{` ${tps[rm.reviewer]}t/s`}</Text>
                 ) : null}

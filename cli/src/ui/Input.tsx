@@ -1,7 +1,9 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import fs from "fs";
 import { theme } from "./theme.js";
+import { listProviders } from "../../../api/src/providers/index.js";
+import { resolveConfig } from "../config.js";
 
 const BUILTIN_COMMANDS = [
   { name: "/as", desc: "Run task as persona" },
@@ -15,7 +17,6 @@ const BUILTIN_COMMANDS = [
   { name: "/undo", desc: "Revert changes" },
   { name: "/diff", desc: "Preview changes" },
   { name: "/model", desc: "Show/switch model" },
-  { name: "/plan", desc: "Plan task or toggle read-only" },
   { name: "/review", desc: "Code review with tech lead" },
   { name: "/trust", desc: "Auto-approve tools" },
   { name: "/hooks", desc: "View tool hooks" },
@@ -25,9 +26,9 @@ const BUILTIN_COMMANDS = [
   { name: "/forget", desc: "Remove a memory" },
   { name: "/personas", desc: "List/create personas" },
   { name: "/mcp", desc: "MCP server status" },
-  { name: "/chrome", desc: "Open/close browser" },
-  { name: "/voice", desc: "Voice input" },
-  { name: "/schedule", desc: "Scheduled tasks" },
+  { name: "/chrome", desc: "Browser (experimental)" },
+  { name: "/voice", desc: "Voice (experimental)" },
+  { name: "/schedule", desc: "Scheduled tasks (experimental)" },
   { name: "/update", desc: "Update to latest" },
   { name: "/release-notes", desc: "Changelog" },
   { name: "/cost", desc: "Token costs" },
@@ -55,13 +56,53 @@ interface InputProps {
  */
 export function Input({ onSubmit, isActive, history }: InputProps): React.ReactElement {
   const [value, setValue] = useState("");
+  const [cursorPos, setCursorPos] = useState(0);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [completionIndex, setCompletionIndex] = useState(0);
 
+  // Fetch Ollama models once on mount (async)
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  useEffect(() => {
+    const config = resolveConfig();
+    const ollamaHost = config?.providers?.ollama?.host || "http://localhost:11434";
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    globalThis.fetch(`${ollamaHost}/api/tags`, { signal: controller.signal })
+      .then(res => res.ok ? res.json() : null)
+      .then((data: any) => {
+        clearTimeout(timeout);
+        if (data?.models) {
+          setOllamaModels(data.models.map((m: any) => m.name));
+        }
+      })
+      .catch(() => { clearTimeout(timeout); });
+  }, []);
+
+  // Build model list from provider registry + Ollama for /model completions
+  const modelChoices = useMemo(() => {
+    const choices: { name: string; desc: string }[] = [];
+    // Ollama models from live API
+    for (const m of ollamaModels) {
+      choices.push({ name: `/model ollama/${m}`, desc: "local" });
+    }
+    // Cloud models from pricing registry
+    for (const provider of listProviders()) {
+      if (provider.id === "ollama") continue;
+      for (const model of provider.pricingEngine.getModels()) {
+        choices.push({
+          name: `/model ${provider.id}/${model.id}`,
+          desc: model.displayName,
+        });
+      }
+    }
+    return choices;
+  }, [ollamaModels]);
+
   // Filter matching commands when input starts with /
   // After "/ship " or "/build ", complete with .md files from cwd
+  // After "/model ", complete with provider/model names
   const completions = useMemo(() => {
-    const shipMatch = value.match(/^\/(ship|build|plan)\s+(.*)/);
+    const shipMatch = value.match(/^\/(ship|build)\s+(.*)/);
     if (shipMatch) {
       const cmd = shipMatch[1];
       const partial = shipMatch[2].toLowerCase();
@@ -74,10 +115,19 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
           .map(f => ({ name: `/${cmd} ${f}`, desc: "" }));
       } catch { return []; }
     }
+    // /model completions — match against provider/model names
+    const modelMatch = value.match(/^\/model\s+(.*)/);
+    if (modelMatch) {
+      const partial = modelMatch[1].toLowerCase();
+      if (!partial) return modelChoices.slice(0, 10); // show first 10 if no input yet
+      return modelChoices
+        .filter(c => c.name.slice("/model ".length).toLowerCase().startsWith(partial))
+        .slice(0, 10);
+    }
     if (!value.startsWith("/") || value.includes(" ")) return [];
     const query = value.toLowerCase();
     return BUILTIN_COMMANDS.filter((c) => c.name.startsWith(query) && c.name !== query);
-  }, [value]);
+  }, [value, modelChoices]);
 
   const showCompletions = isActive && completions.length > 0;
 
@@ -89,7 +139,9 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
       if (key.tab && showCompletions) {
         const selected = completions[completionIndex % completions.length];
         if (selected) {
-          setValue(selected.name + " ");
+          const newVal = selected.name + " ";
+          setValue(newVal);
+          setCursorPos(newVal.length);
           setCompletionIndex(0);
         }
         return;
@@ -105,25 +157,62 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         return;
       }
 
+      // Left/Right arrow: move cursor
+      if (key.leftArrow) {
+        if (key.ctrl || key.meta) {
+          // Jump to previous word boundary
+          const before = value.slice(0, cursorPos);
+          const match = before.match(/\S+\s*$/);
+          setCursorPos(match ? cursorPos - match[0].length : 0);
+        } else {
+          setCursorPos((p) => Math.max(0, p - 1));
+        }
+        return;
+      }
+      if (key.rightArrow) {
+        if (key.ctrl || key.meta) {
+          // Jump to next word boundary
+          const after = value.slice(cursorPos);
+          const match = after.match(/^\s*\S+/);
+          setCursorPos(match ? cursorPos + match[0].length : value.length);
+        } else {
+          setCursorPos((p) => Math.min(value.length, p + 1));
+        }
+        return;
+      }
+
       // Submit
       if (key.return) {
         const trimmed = value.trim();
         if (trimmed) {
           onSubmit(trimmed);
           setValue("");
+          setCursorPos(0);
           setHistoryIndex(-1);
           setCompletionIndex(0);
         }
         return;
       }
 
+      // Home / Ctrl+A: beginning of line
+      if ((key.ctrl && input === "a")) {
+        setCursorPos(0);
+        return;
+      }
+      // End / Ctrl+E: end of line
+      if ((key.ctrl && input === "e")) {
+        setCursorPos(value.length);
+        return;
+      }
+
       // History: up — navigate from most recent to oldest.
-      // historyIndex: -1 = not navigating, 0 = most recent, 1 = second most recent, etc.
       if (key.upArrow) {
         const newIdx = Math.min(historyIndex + 1, history.length - 1);
         if (newIdx >= 0 && history.length > 0) {
           setHistoryIndex(newIdx);
-          setValue(history[history.length - 1 - newIdx]);
+          const hist = history[history.length - 1 - newIdx];
+          setValue(hist);
+          setCursorPos(hist.length);
         }
         return;
       }
@@ -133,10 +222,13 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
         const newIdx = historyIndex - 1;
         if (newIdx >= 0 && history.length > 0) {
           setHistoryIndex(newIdx);
-          setValue(history[history.length - 1 - newIdx]);
+          const hist = history[history.length - 1 - newIdx];
+          setValue(hist);
+          setCursorPos(hist.length);
         } else {
           setHistoryIndex(-1);
           setValue("");
+          setCursorPos(0);
         }
         return;
       }
@@ -145,15 +237,16 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
       if (key.escape) {
         if (showCompletions) {
           setCompletionIndex(0);
-          // Don't clear value — just dismiss completions by adding a space
-          // Actually, just let parent ESC handler deal with it
         }
         return;
       }
 
-      // Backspace / delete
+      // Backspace: delete character before cursor
       if (key.backspace || key.delete) {
-        setValue((v) => v.slice(0, -1));
+        if (cursorPos > 0) {
+          setValue((v) => v.slice(0, cursorPos - 1) + v.slice(cursorPos));
+          setCursorPos((p) => p - 1);
+        }
         setCompletionIndex(0);
         return;
       }
@@ -161,20 +254,26 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
       // Ctrl+U: clear line
       if (key.ctrl && input === "u") {
         setValue("");
+        setCursorPos(0);
         setCompletionIndex(0);
         return;
       }
 
-      // Ctrl+W: delete last word
+      // Ctrl+W: delete last word (from cursor position)
       if (key.ctrl && input === "w") {
-        setValue((v) => v.replace(/\S+\s*$/, ""));
+        const before = value.slice(0, cursorPos);
+        const after = value.slice(cursorPos);
+        const trimmed = before.replace(/\S+\s*$/, "");
+        setValue(trimmed + after);
+        setCursorPos(trimmed.length);
         setCompletionIndex(0);
         return;
       }
 
       // Regular character input (ignore ctrl/meta sequences)
       if (input && !key.ctrl && !key.meta) {
-        setValue((v) => v + input);
+        setValue((v) => v.slice(0, cursorPos) + input + v.slice(cursorPos));
+        setCursorPos((p) => p + input.length);
         setCompletionIndex(0);
       }
     },
@@ -191,8 +290,11 @@ export function Input({ onSubmit, isActive, history }: InputProps): React.ReactE
       <Text color={isActive ? theme.brand : theme.inactive} bold>
         {isActive ? "\u25C6 " : "\u25C7 "}
       </Text>
-      <Text color={theme.text}>{value}</Text>
-      {isActive && !hint && <Text inverse>{" "}</Text>}
+      <Text color={theme.text}>{value.slice(0, cursorPos)}</Text>
+      {isActive ? (
+        <Text inverse>{cursorPos < value.length ? value[cursorPos] : " "}</Text>
+      ) : null}
+      <Text color={theme.text}>{value.slice(cursorPos + 1)}</Text>
       {hint ? (
         <Text color={theme.subtle} dimColor>
           {hint.name.slice(value.length)}{" "}

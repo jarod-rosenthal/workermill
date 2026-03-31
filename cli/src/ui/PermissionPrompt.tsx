@@ -50,6 +50,13 @@ export function PermissionPrompt({ request }: PermissionPromptProps): React.Reac
     (input, key) => {
       if (resolved) return;
 
+      // ESC denies the permission request
+      if (key.escape) {
+        setResolved(true);
+        request.resolve(false);
+        return;
+      }
+
       // Tab / Shift+Tab to cycle (Claude Code style) + arrow keys
       if (key.tab) {
         if (key.shift) {
@@ -142,7 +149,7 @@ export function PermissionPrompt({ request }: PermissionPromptProps): React.Reac
 
       {/* Hint */}
       <Text color={theme.subtle} dimColor>
-        {"  "}Tab to cycle, Enter to confirm
+        {"  "}Tab to cycle, Enter to confirm, Esc to deny
       </Text>
     </Box>
   );

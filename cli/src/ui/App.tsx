@@ -82,16 +82,16 @@ function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: 
   const isToolPrompt = request.prompt.startsWith("Allow ");
   const isRevisionPrompt = request.prompt.startsWith("Revise ");
   const hasAlways = isToolPrompt || isRevisionPrompt;
-  useInput((input) => {
+  useInput((input, key) => {
     if (answered) return;
-    const resolve = (key: string, yes: boolean, mode?: "always" | "trust") => {
-      setAnswered(key);
-      // Delay resolve so React renders the answer before the orchestrator continues
+    const resolve = (label: string, yes: boolean, mode?: "always" | "trust") => {
+      setAnswered(label);
       setTimeout(() => request.resolve(yes, mode), 150);
     };
-    if (input === "y" || input === "Y") resolve("y", true);
-    if (input === "n" || input === "N") resolve("n", false);
-    if (hasAlways && (input === "a" || input === "A")) resolve("a", true, "always");
+    if (key.escape) resolve("esc", false);
+    else if (input === "y" || input === "Y") resolve("y", true);
+    else if (input === "n" || input === "N") resolve("n", false);
+    else if (hasAlways && (input === "a" || input === "A")) resolve("a", true, "always");
   }, { isActive: !answered });
 
   let hint = "(y/n)";
@@ -219,36 +219,36 @@ export function App(props: AppProps): React.ReactElement {
         )}
       </Box>
 
-      {/* Permission/confirm prompts — replace input when active */}
+      {/* Permission/confirm prompts — shown above status bar when active */}
       {props.permissionRequest ? (
         <PermissionPrompt request={props.permissionRequest} />
       ) : props.orchestratorConfirm ? (
         <OrchestratorConfirm request={props.orchestratorConfirm} />
       ) : (
-        <>
-          <Input
-            onSubmit={props.onSubmit}
-            isActive={props.status === "idle" && !props.orchestratorStatus}
-            history={props.inputHistory}
-          />
-          <StatusBar
-            model={props.model}
-            provider={props.provider}
-            tokens={props.tokens}
-            maxContext={props.maxContext}
-            cost={props.cost}
-            mode={mode}
-            gitBranch={props.gitBranch}
-            cwd={props.workingDir.split("/").pop() || ""}
-            roleModels={props.roleModels}
-            toolCounts={props.toolCounts}
-            mcpCount={props.mcpCount}
-            sessionStart={props.sessionStart}
-            hasInstructions={props.hasInstructions}
-            tokPerSec={props.tokPerSec}
-          />
-        </>
+        <Input
+          onSubmit={props.onSubmit}
+          isActive={props.status === "idle" && !props.orchestratorStatus}
+          history={props.inputHistory}
+        />
       )}
+
+      {/* Status bar — always visible */}
+      <StatusBar
+        model={props.model}
+        provider={props.provider}
+        tokens={props.tokens}
+        maxContext={props.maxContext}
+        cost={props.cost}
+        mode={mode}
+        gitBranch={props.gitBranch}
+        cwd={props.workingDir.split("/").pop() || ""}
+        roleModels={props.roleModels}
+        toolCounts={props.toolCounts}
+        mcpCount={props.mcpCount}
+        sessionStart={props.sessionStart}
+        hasInstructions={props.hasInstructions}
+        tokPerSec={props.tokPerSec}
+      />
     </Box>
   );
 }

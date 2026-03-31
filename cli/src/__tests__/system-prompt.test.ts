@@ -1,3 +1,10 @@
+/**
+ * Tests for buildSystemPrompt() in system-prompt.ts.
+ *
+ * Mocks: fs (for instruction file detection), mcp-client (for MCP tools),
+ * memory module (for learnings), and instructions module.
+ */
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../memory.js", () => ({
@@ -42,6 +49,13 @@ describe("buildSystemPrompt", () => {
     mockGetMCPTools.mockReturnValue([]);
   });
 
+  it("returns a non-empty string", () => {
+    const prompt = buildSystemPrompt("/home/user/project");
+    expect(prompt).toBeTruthy();
+    expect(typeof prompt).toBe("string");
+    expect(prompt.length).toBeGreaterThan(0);
+  });
+
   it("includes working directory in the prompt", () => {
     const prompt = buildSystemPrompt("/home/user/myproject");
     expect(prompt).toContain("Working directory: /home/user/myproject");
@@ -69,6 +83,12 @@ describe("buildSystemPrompt", () => {
     expect(mockFormatProjectInstructions).toHaveBeenCalledWith("/specific/dir");
   });
 
+  it("does not include project instructions section when none found", () => {
+    mockFormatProjectInstructions.mockReturnValue("");
+    const prompt = buildSystemPrompt("/project");
+    expect(prompt).not.toContain("## Project Instructions");
+  });
+
   it("includes memory content when formatMemoriesForPrompt returns content", () => {
     mockFormatMemoriesForPrompt.mockReturnValue("\n\n## Memories\n\n- Use TypeScript strict mode.");
     const prompt = buildSystemPrompt("/project");
@@ -84,32 +104,73 @@ describe("buildSystemPrompt", () => {
     expect(mockFormatMemoriesForPrompt).toHaveBeenCalledWith(fakeMemories);
   });
 
-  it("includes MCP tool awareness section when MCP servers are active", () => {
-    mockGetMCPTools.mockReturnValue([
-      { serverName: "filesystem", name: "mcp__filesystem__read_file", description: "Read a file", inputSchema: {} },
-    ]);
-    const prompt = buildSystemPrompt("/project");
-    expect(prompt).toContain("## MCP Tools");
-    expect(prompt).toContain("filesystem");
-    expect(prompt).toContain("1 MCP server(s)");
-  });
-
-  it("lists all unique server names in the MCP section", () => {
-    mockGetMCPTools.mockReturnValue([
-      { serverName: "filesystem", name: "mcp__filesystem__read_file", description: "Read", inputSchema: {} },
-      { serverName: "filesystem", name: "mcp__filesystem__write_file", description: "Write", inputSchema: {} },
-      { serverName: "git", name: "mcp__git__status", description: "Git status", inputSchema: {} },
-    ]);
-    const prompt = buildSystemPrompt("/project");
-    expect(prompt).toContain("2 MCP server(s)");
-    expect(prompt).toContain("filesystem");
-    expect(prompt).toContain("git");
-  });
-
-  it("omits MCP section when no MCP tools are registered", () => {
+  it("falls back gracefully when no instruction files exist", () => {
+    mockFormatProjectInstructions.mockReturnValue("");
+    mockFormatMemoriesForPrompt.mockReturnValue("");
     mockGetMCPTools.mockReturnValue([]);
-    const prompt = buildSystemPrompt("/project");
+
+    const prompt = buildSystemPrompt("/tmp/empty-project");
+    // Should still have the base prompt with working directory
+    expect(prompt).toContain("Working directory: /tmp/empty-project");
+    expect(prompt).toContain("senior coding assistant");
+    expect(prompt).not.toContain("## Project Instructions");
     expect(prompt).not.toContain("## MCP Tools");
+  });
+
+  describe("MCP tool awareness", () => {
+    it("includes MCP tool instructions when MCP servers are active", () => {
+      mockGetMCPTools.mockReturnValue([
+        { serverName: "filesystem", tool: { name: "read_file", description: "Read a file", inputSchema: {} } },
+      ] as ReturnType<typeof getMCPTools>);
+      const prompt = buildSystemPrompt("/project");
+      expect(prompt).toContain("## MCP Tools");
+      expect(prompt).toContain("filesystem");
+      expect(prompt).toContain("1 MCP server(s)");
+      expect(prompt).toContain("mcp__<server>__");
+    });
+
+    it("lists all unique server names in the MCP section", () => {
+      mockGetMCPTools.mockReturnValue([
+        { serverName: "filesystem", tool: { name: "read_file", description: "Read", inputSchema: {} } },
+        { serverName: "filesystem", tool: { name: "write_file", description: "Write", inputSchema: {} } },
+        { serverName: "git", tool: { name: "status", description: "Git status", inputSchema: {} } },
+      ] as ReturnType<typeof getMCPTools>);
+      const prompt = buildSystemPrompt("/project");
+      expect(prompt).toContain("2 MCP server(s)");
+      expect(prompt).toContain("filesystem");
+      expect(prompt).toContain("git");
+    });
+
+    it("omits MCP section when no MCP tools are registered", () => {
+      mockGetMCPTools.mockReturnValue([]);
+      const prompt = buildSystemPrompt("/project");
+      expect(prompt).not.toContain("## MCP Tools");
+    });
+
+    it("deduplicates server names from multiple tools on same server", () => {
+      mockGetMCPTools.mockReturnValue([
+        { serverName: "github", tool: { name: "tool1", inputSchema: {} } },
+        { serverName: "github", tool: { name: "tool2", inputSchema: {} } },
+        { serverName: "github", tool: { name: "tool3", inputSchema: {} } },
+      ] as ReturnType<typeof getMCPTools>);
+      const prompt = buildSystemPrompt("/project");
+      expect(prompt).toContain("1 MCP server(s)");
+    });
+
+    it("includes confidence instruction for MCP tools", () => {
+      mockGetMCPTools.mockReturnValue([
+        { serverName: "slack", tool: { name: "send", inputSchema: {} } },
+      ] as ReturnType<typeof getMCPTools>);
+      const prompt = buildSystemPrompt("/project");
+      expect(prompt).toContain("Use them confidently");
+      expect(prompt).toContain("trust those results");
+    });
+  });
+
+  it("contains WorkerMill mention in about section", () => {
+    const prompt = buildSystemPrompt("/project");
+    expect(prompt).toContain("WorkerMill");
+    expect(prompt).toContain("workermill.com");
   });
 
   it("contains ::learning:: marker instructions", () => {
@@ -130,5 +191,10 @@ describe("buildSystemPrompt", () => {
   it("contains rule against long-running processes", () => {
     const prompt = buildSystemPrompt("/project");
     expect(prompt).toContain("NEVER start long-running processes");
+  });
+
+  it("contains communication style instructions", () => {
+    const prompt = buildSystemPrompt("/project");
+    expect(prompt).toContain("Direct. No filler");
   });
 });

@@ -110,13 +110,15 @@ describe("createModel", () => {
 
   it("creates a google model", () => {
     const model = createModel("google", "gemini-3.1-pro");
-    expect(mockGoogleFn).toHaveBeenCalledWith("gemini-3.1-pro");
+    // gemini-3.1-pro auto-resolves to gemini-3.1-pro-preview
+    expect(mockGoogleFn).toHaveBeenCalledWith("gemini-3.1-pro-preview");
     expect(model).toBe(mockGoogleModel);
   });
 
   it("creates a gemini model (alias for google)", () => {
     const model = createModel("gemini", "gemini-3.1-flash-lite");
-    expect(mockGoogleFn).toHaveBeenCalledWith("gemini-3.1-flash-lite");
+    // gemini-3.1-flash-lite auto-resolves to gemini-3.1-flash-lite-preview
+    expect(mockGoogleFn).toHaveBeenCalledWith("gemini-3.1-flash-lite-preview");
     expect(model).toBe(mockGoogleModel);
   });
 
@@ -141,10 +143,16 @@ describe("createModel", () => {
     );
   });
 
-  it("throws for unsupported provider", () => {
+  it("creates an OpenAI-compatible model for xai", () => {
+    // xAI is now an OpenAI-compatible provider with known base URL
+    const model = createModel("xai" as any, "grok-3");
+    expect(mockCreateOpenAI).toHaveBeenCalledWith({ baseURL: "https://api.x.ai/v1" });
+  });
+
+  it("throws for truly unsupported provider", () => {
     expect(() =>
-      createModel("xai" as any, "grok-3"),
-    ).toThrow("Unsupported provider: xai");
+      createModel("nonexistent" as any, "model"),
+    ).toThrow("Unsupported provider: nonexistent");
   });
 });
 
@@ -198,18 +206,34 @@ describe("ensureOllamaContext", () => {
     );
   });
 
-  it("does nothing when loaded context is sufficient", async () => {
+  it("does nothing when loaded context matches exactly", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
       json: async () => ({
-        models: [{ name: "qwen3-coder:30b", context_length: 65536 }],
+        models: [{ name: "qwen3-coder:30b", context_length: 32768 }],
       }),
     } as Response);
 
     await ensureOllamaContext("http://localhost:11434", "qwen3-coder:30b", 32768);
 
-    // Only the /api/ps call, no unload
+    // Only the /api/ps call, no unload — context already matches
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("unloads model when loaded context is too large", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          models: [{ name: "qwen3-coder:30b", context_length: 262144 }],
+        }),
+      } as Response)
+      .mockResolvedValueOnce({ ok: true } as Response);
+
+    await ensureOllamaContext("http://localhost:11434", "qwen3-coder:30b", 65536);
+
+    // /api/ps + /api/generate (unload) — context was too large
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("unloads model when loaded context is too small", async () => {

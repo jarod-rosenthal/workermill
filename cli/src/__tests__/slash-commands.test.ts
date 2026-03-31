@@ -81,6 +81,25 @@ vi.mock("../browser.js", () => ({
   isBrowserOpen: vi.fn(() => false),
 }));
 
+vi.mock("../../../packages/engine/src/tools/lsp.js", () => ({
+  shutdown: vi.fn(),
+}));
+
+vi.mock("../../../api/src/providers/index.js", () => ({
+  findModelInfo: vi.fn(() => null),
+}));
+
+vi.mock("../../../packages/engine/src/tools/sub-agent.js", () => ({
+  cleanupStaleWorktrees: vi.fn(),
+}));
+
+vi.mock("../checkpoints.js", () => ({
+  undoLast: vi.fn(() => []),
+  undoFile: vi.fn(() => false),
+  listCheckpoints: vi.fn(() => []),
+  clearCheckpoints: vi.fn(),
+}));
+
 // ---- Imports ----
 
 import { handleSlashCommand, type SlashCommandContext } from "../ui/slash-commands.js";
@@ -88,6 +107,7 @@ import { execSync } from "child_process";
 import fs from "fs";
 import { listSessions, saveSession } from "../session.js";
 import { loadConfig, saveConfig } from "../config.js";
+import { undoLast, undoFile, listCheckpoints } from "../checkpoints.js";
 import { loadCustomCommands } from "../custom-commands.js";
 import { listAvailablePersonas, loadPersona } from "../personas.js";
 import { stopAllMCPServers, hasMCPServers, hasMCPRegistered, getMCPTools } from "../mcp-client.js";
@@ -120,6 +140,7 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     denyTool: vi.fn(),
     orchestratorRunning: false,
     startOrchestrator: vi.fn(),
+    retryOrchestrator: vi.fn().mockReturnValue(false),
     lastBuildTask: null,
     setLastBuildTask: vi.fn(),
     sandboxed: false,
@@ -341,66 +362,97 @@ describe("handleSlashCommand", () => {
   // ---- /retry ----
 
   describe("/retry", () => {
-    it("shows error with no previous task", () => {
-      const ctx = createContext({ lastBuildTask: null });
+    it("shows error when nothing to retry", () => {
+      const ctx = createContext();
       handleSlashCommand("/retry", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
-        expect.stringContaining("No previous task")
+        expect.stringContaining("Nothing to retry")
       );
     });
 
-    it("restarts with last task", () => {
-      const ctx = createContext({ lastBuildTask: "build login page" });
+    it("calls retryOrchestrator and succeeds", () => {
+      const ctx = createContext({ retryOrchestrator: vi.fn().mockReturnValue(true) });
       handleSlashCommand("/retry", ctx);
-      expect(ctx.addUserMessage).toHaveBeenCalledWith(
-        expect.stringContaining("/retry")
-      );
-      expect(ctx.startOrchestrator).toHaveBeenCalledWith("build login page", false, false);
+      expect(ctx.addUserMessage).toHaveBeenCalledWith("/retry");
+      expect(ctx.retryOrchestrator).toHaveBeenCalledWith(false, false);
+      // Should NOT show error message when retry returns true
+      expect(ctx.addSystemMessage).not.toHaveBeenCalled();
     });
 
     it("blocks when orchestrator is running", () => {
-      const ctx = createContext({ orchestratorRunning: true, lastBuildTask: "task" });
+      const ctx = createContext({ orchestratorRunning: true });
       handleSlashCommand("/retry", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("already running")
       );
-      expect(ctx.startOrchestrator).not.toHaveBeenCalled();
+      expect(ctx.retryOrchestrator).not.toHaveBeenCalled();
     });
   });
 
   // ---- /undo ----
 
   describe("/undo", () => {
-    it("reports nothing to undo when clean and no commits", () => {
-      // git status --porcelain returns empty (clean)
+    it("defaults to file checkpoint undo — reports no checkpoints", () => {
+      vi.mocked(undoLast).mockReturnValueOnce([]);
+      const ctx = createContext();
+      handleSlashCommand("/undo", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("No file checkpoints")
+      );
+    });
+
+    it("restores files from checkpoint", () => {
+      vi.mocked(undoLast).mockReturnValueOnce(["src/index.ts"]);
+      const ctx = createContext();
+      handleSlashCommand("/undo", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Restored")
+      );
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("src/index.ts")
+      );
+    });
+
+    it("lists checkpoints with /undo list", () => {
+      vi.mocked(listCheckpoints).mockReturnValueOnce([
+        { file: "src/index.ts", time: "12:00:00" },
+      ]);
+      const ctx = createContext();
+      handleSlashCommand("/undo list", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("src/index.ts")
+      );
+    });
+
+    it("git undo: reports nothing to undo when clean and no commits", () => {
       vi.mocked(execSync)
         .mockReturnValueOnce("") // git status --porcelain
         .mockImplementationOnce(() => { throw new Error("no commits"); }); // git log fails
       const ctx = createContext();
-      handleSlashCommand("/undo", ctx);
+      handleSlashCommand("/undo git", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("Nothing to undo")
       );
     });
 
-    it("stashes uncommitted changes", () => {
+    it("git undo: stashes uncommitted changes", () => {
       vi.mocked(execSync)
         .mockReturnValueOnce("M src/index.ts\nM src/app.ts") // git status
         .mockReturnValueOnce(""); // git stash
       const ctx = createContext();
-      handleSlashCommand("/undo", ctx);
+      handleSlashCommand("/undo git", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("stashed 2 changed files")
       );
     });
 
-    it("resets last commit when tree is clean", () => {
+    it("git undo: resets last commit when tree is clean", () => {
       vi.mocked(execSync)
         .mockReturnValueOnce("") // git status (clean)
         .mockReturnValueOnce("Add feature X") // git log
         .mockReturnValueOnce(""); // git reset
       const ctx = createContext();
-      handleSlashCommand("/undo", ctx);
+      handleSlashCommand("/undo git", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining('Undone')
       );
@@ -409,10 +461,10 @@ describe("handleSlashCommand", () => {
       );
     });
 
-    it("handles git errors gracefully", () => {
+    it("git undo: handles git errors gracefully", () => {
       vi.mocked(execSync).mockImplementation(() => { throw new Error("not a git repo"); });
       const ctx = createContext();
-      handleSlashCommand("/undo", ctx);
+      handleSlashCommand("/undo git", ctx);
       expect(ctx.addSystemMessage).toHaveBeenCalledWith(
         expect.stringContaining("Undo failed")
       );
@@ -1094,6 +1146,441 @@ describe("handleSlashCommand", () => {
         expect.stringContaining("Additional context: staging"),
         "/deploy staging",
       );
+    });
+  });
+
+  // ---- /review ----
+
+  describe("/review", () => {
+    it("submits default review task with no arg", () => {
+      const ctx = createContext();
+      handleSlashCommand("/review", ctx);
+      expect(loadPersona).toHaveBeenCalledWith("tech_lead");
+      expect(ctx.submit).toHaveBeenCalledWith(
+        expect.stringContaining("Review the recent changes"),
+        "/review",
+      );
+    });
+
+    it("submits custom review task with arg", () => {
+      const ctx = createContext();
+      handleSlashCommand("/review check the auth middleware for XSS", ctx);
+      expect(loadPersona).toHaveBeenCalledWith("tech_lead");
+      expect(ctx.submit).toHaveBeenCalledWith(
+        expect.stringContaining("check the auth middleware for XSS"),
+        "/review check the auth middleware for XSS",
+      );
+    });
+
+    it("includes persona instructions when persona loads", () => {
+      const ctx = createContext();
+      handleSlashCommand("/review", ctx);
+      const submitCall = vi.mocked(ctx.submit).mock.calls[0][0];
+      expect(submitCall).toContain("Acting as");
+      expect(submitCall).toContain("Expert Instructions");
+    });
+
+    it("submits without persona prefix when persona not found", () => {
+      vi.mocked(loadPersona).mockReturnValueOnce(null as any);
+      const ctx = createContext();
+      handleSlashCommand("/review check security", ctx);
+      const submitCall = vi.mocked(ctx.submit).mock.calls[0][0];
+      expect(submitCall).not.toContain("Acting as");
+      expect(submitCall).toBe("check security");
+    });
+  });
+
+  // ---- /editor ----
+
+  describe("/editor", () => {
+    it("submits editor content when non-empty", () => {
+      vi.mocked(fs.readFileSync).mockReturnValueOnce("Build a REST API for users");
+      vi.mocked(execSync).mockReturnValue("" as any);
+      const ctx = createContext();
+      handleSlashCommand("/editor", ctx);
+      expect(fs.writeFileSync).toHaveBeenCalled();
+      expect(ctx.addUserMessage).toHaveBeenCalledWith("Build a REST API for users");
+      expect(ctx.submit).toHaveBeenCalledWith("Build a REST API for users");
+    });
+
+    it("shows message when editor closed with empty content", () => {
+      vi.mocked(fs.readFileSync).mockReturnValueOnce("  \n  ");
+      vi.mocked(execSync).mockReturnValue("" as any);
+      const ctx = createContext();
+      handleSlashCommand("/editor", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("no content"),
+      );
+      expect(ctx.submit).not.toHaveBeenCalled();
+    });
+
+    it("shows error when editor fails to open", () => {
+      vi.mocked(execSync).mockImplementation(() => { throw new Error("editor not found"); });
+      const ctx = createContext();
+      handleSlashCommand("/editor", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to open editor"),
+      );
+    });
+  });
+
+  // ---- /log ----
+
+  describe("/log", () => {
+    it("shows log entries when file exists", () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValueOnce(
+        "2026-03-30 10:00:00 INFO Starting\n2026-03-30 10:00:01 DEBUG Connected\n",
+      );
+      const ctx = createContext();
+      handleSlashCommand("/log", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Last 20 log entries"),
+      );
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Starting"),
+      );
+    });
+
+    it("shows message when no log file exists", () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      const ctx = createContext();
+      handleSlashCommand("/log", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("No log file found"),
+      );
+    });
+
+    it("shows error on read failure", () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation(() => { throw new Error("EACCES"); });
+      const ctx = createContext();
+      handleSlashCommand("/log", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to read log"),
+      );
+    });
+  });
+
+  // ---- /settings subcommands ----
+
+  describe("/settings subcommands", () => {
+    it("updates ollama.host", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings ollama.host http://192.168.1.10:11434", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providers: expect.objectContaining({
+            ollama: expect.objectContaining({ host: "http://192.168.1.10:11434" }),
+          }),
+        }),
+      );
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining("Updated"));
+    });
+
+    it("updates ollama.context", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings ollama.context 131072", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providers: expect.objectContaining({
+            ollama: expect.objectContaining({ contextLength: 131072 }),
+          }),
+        }),
+      );
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining("Updated"));
+    });
+
+    it("updates review.enabled true", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings review.enabled true", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          review: expect.objectContaining({ enabled: true }),
+        }),
+      );
+    });
+
+    it("updates review.enabled false", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings review.enabled false", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          review: expect.objectContaining({ enabled: false }),
+        }),
+      );
+    });
+
+    it("updates review.maxRevisions", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings review.maxRevisions 5", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          review: expect.objectContaining({ maxRevisions: 5 }),
+        }),
+      );
+    });
+
+    it("updates review.threshold", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings review.threshold 7", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          review: expect.objectContaining({ approvalThreshold: 7 }),
+        }),
+      );
+    });
+
+    it("updates review.autoRevise true", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings review.autoRevise true", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          review: expect.objectContaining({ autoRevise: true }),
+        }),
+      );
+    });
+
+    it("updates review.critic true", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings review.critic true", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          review: expect.objectContaining({ useCritic: true }),
+        }),
+      );
+    });
+
+    it("updates git.branchPrefix", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings git.branchPrefix feat", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          git: expect.objectContaining({ branchPrefix: "feat" }),
+        }),
+      );
+    });
+
+    it("updates sandbox true/false", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings sandbox true", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ sandbox: true }),
+      );
+
+      vi.clearAllMocks();
+      handleSlashCommand("/settings sandbox false", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ sandbox: false }),
+      );
+    });
+
+    it("sets API key for known provider", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings key anthropic sk-ant-test123", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providers: expect.objectContaining({
+            anthropic: expect.objectContaining({ apiKey: "sk-ant-test123" }),
+          }),
+        }),
+      );
+      expect(process.env.ANTHROPIC_API_KEY).toBe("sk-ant-test123");
+      // Clean up
+      delete process.env.ANTHROPIC_API_KEY;
+    });
+
+    it("sets API key for unknown provider (creates entry)", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings key xai xai-test-key", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providers: expect.objectContaining({
+            xai: expect.objectContaining({ apiKey: "xai-test-key" }),
+          }),
+        }),
+      );
+      delete process.env.XAI_API_KEY;
+    });
+
+    it("shows usage for key without enough args", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings key anthropic", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Usage"),
+      );
+    });
+
+    it("routes persona to provider", () => {
+      vi.mocked(loadConfig).mockReturnValueOnce({
+        providers: { ollama: { model: "qwen3-coder:30b" }, anthropic: { model: "claude-sonnet-4-6", apiKey: "sk-test" } },
+        default: "ollama",
+      } as any);
+      const ctx = createContext();
+      handleSlashCommand("/settings route backend_developer anthropic", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          routing: expect.objectContaining({ backend_developer: "anthropic" }),
+        }),
+      );
+    });
+
+    it("rejects route to nonexistent provider", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings route backend_developer nonexistent", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("not found"),
+      );
+    });
+
+    it("shows usage for route without enough args", () => {
+      const ctx = createContext();
+      handleSlashCommand("/settings route backend_developer", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Usage"),
+      );
+    });
+  });
+
+  // ---- /model with context size ----
+
+  describe("/model with context size", () => {
+    it("parses context size in k suffix", () => {
+      const ctx = createContext();
+      handleSlashCommand("/model ollama/qwen3-coder:30b 256k", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providers: expect.objectContaining({
+            ollama: expect.objectContaining({
+              model: "qwen3-coder:30b",
+              contextLength: 262144, // 256 * 1024
+            }),
+          }),
+        }),
+      );
+    });
+
+    it("parses context size in m suffix", () => {
+      const ctx = createContext();
+      handleSlashCommand("/model ollama/qwen3-coder:30b 1m", ctx);
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providers: expect.objectContaining({
+            ollama: expect.objectContaining({
+              contextLength: 1048576, // 1 * 1024 * 1024
+            }),
+          }),
+        }),
+      );
+    });
+
+    it("displays context label in switch message when switchModel is set", () => {
+      const switchModel = vi.fn();
+      const ctx = createContext({ switchModel } as any);
+      handleSlashCommand("/model ollama/qwen3-coder:30b 256k", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("256k context"),
+      );
+    });
+  });
+
+  // ---- /model with chaining ----
+
+  describe("/model with chaining", () => {
+    it("dispatches trailing slash command after model switch", () => {
+      process.env.OPENAI_API_KEY = "sk-test-key";
+      const ctx = createContext();
+      handleSlashCommand("/model openai/gpt-5.4 /as backend_developer fix auth", ctx);
+      // Should have called saveConfig for model switch
+      expect(saveConfig).toHaveBeenCalled();
+      // The trailing /as command should be dispatched
+      expect(ctx.submit).toHaveBeenCalledWith(
+        expect.stringContaining("fix auth"),
+        expect.any(String),
+      );
+      delete process.env.OPENAI_API_KEY;
+    });
+
+    it("submits trailing text as prompt when not a slash command", () => {
+      process.env.OPENAI_API_KEY = "sk-test-key";
+      const switchModel = vi.fn();
+      const ctx = createContext({ switchModel } as any);
+      handleSlashCommand("/model openai/gpt-5.4 explain this code", ctx);
+      expect(saveConfig).toHaveBeenCalled();
+      expect(ctx.submit).toHaveBeenCalledWith("explain this code");
+      delete process.env.OPENAI_API_KEY;
+    });
+  });
+
+  // ---- /model API key rejection for unknown provider ----
+
+  describe("/model API key rejection", () => {
+    it("rejects switch to provider that needs key but has none", () => {
+      delete process.env.OPENAI_API_KEY;
+      const ctx = createContext();
+      handleSlashCommand("/model openai/gpt-5.4", ctx);
+      expect(saveConfig).not.toHaveBeenCalled();
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("no API key found"),
+      );
+    });
+
+    it("allows switch to ollama without API key", () => {
+      const ctx = createContext();
+      handleSlashCommand("/model ollama/llama3.1", ctx);
+      // Ollama doesn't need a key, so should succeed
+      expect(saveConfig).toHaveBeenCalled();
+    });
+  });
+
+  // ---- /compact with focus preservation ----
+
+  describe("/compact focus instructions", () => {
+    it("preserves focus instructions passed as arg", () => {
+      const session = {
+        id: "test", startedAt: "2026-03-30T10:00:00Z", totalTokens: 5000,
+        messages: [
+          { role: "user", content: "a" }, { role: "assistant", content: "b" },
+          { role: "user", content: "c" }, { role: "assistant", content: "d" },
+        ],
+      };
+      const forceCompact = vi.fn().mockResolvedValue({ before: 4, after: 2 });
+      const ctx = createContext({ session, tokens: 50000 } as any);
+      (ctx as any).forceCompact = forceCompact;
+      handleSlashCommand("/compact the API changes and database schema", ctx);
+      expect(forceCompact).toHaveBeenCalledWith("the API changes and database schema");
+    });
+
+    it("includes focus text in compacting message", () => {
+      const session = {
+        id: "test", startedAt: "2026-03-30T10:00:00Z", totalTokens: 5000,
+        messages: [
+          { role: "user", content: "a" }, { role: "assistant", content: "b" },
+          { role: "user", content: "c" }, { role: "assistant", content: "d" },
+        ],
+      };
+      const forceCompact = vi.fn().mockResolvedValue({ before: 4, after: 2 });
+      const ctx = createContext({ session, tokens: 50000 } as any);
+      (ctx as any).forceCompact = forceCompact;
+      handleSlashCommand("/compact the auth module", ctx);
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(
+        expect.stringContaining("preserving: the auth module"),
+      );
+    });
+
+    it("passes undefined when no focus arg given", () => {
+      const session = {
+        id: "test", startedAt: "2026-03-30T10:00:00Z", totalTokens: 5000,
+        messages: [
+          { role: "user", content: "a" }, { role: "assistant", content: "b" },
+          { role: "user", content: "c" }, { role: "assistant", content: "d" },
+        ],
+      };
+      const forceCompact = vi.fn().mockResolvedValue({ before: 4, after: 2 });
+      const ctx = createContext({ session, tokens: 50000 } as any);
+      (ctx as any).forceCompact = forceCompact;
+      handleSlashCommand("/compact", ctx);
+      expect(forceCompact).toHaveBeenCalledWith(undefined);
     });
   });
 

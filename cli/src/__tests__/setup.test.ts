@@ -62,6 +62,9 @@ class FakeRl extends EventEmitter {
   close(): void {
     /* no-op */
   }
+  pause(): void {
+    /* no-op */
+  }
 }
 
 let fakeRl: FakeRl;

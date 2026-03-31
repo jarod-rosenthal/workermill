@@ -92,11 +92,10 @@ function OrchestratorConfirm({ request }: { request: { prompt: string; resolve: 
     if (input === "y" || input === "Y") resolve("y", true);
     if (input === "n" || input === "N") resolve("n", false);
     if (hasAlways && (input === "a" || input === "A")) resolve("a", true, "always");
-    if (isToolPrompt && (input === "t" || input === "T")) resolve("t", true, "trust");
   }, { isActive: !answered });
 
   let hint = "(y/n)";
-  if (isToolPrompt) hint = "(y)es (a)lways (t)rust all (n)o";
+  if (isToolPrompt) hint = "(y)es (a) don't ask again (n)o";
   else if (isRevisionPrompt) hint = "(y)es (a)lways (n)o";
 
   return (

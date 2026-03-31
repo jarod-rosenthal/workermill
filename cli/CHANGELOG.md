@@ -34,6 +34,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - **Trust-all permission bug** — selecting "trust all" in `/ship` mode only added 7 hardcoded tool names to the allow set. Tools like `verify`, `todo`, `lsp`, and MCP tools would prompt again. Now uses a `*` wildcard — one trust-all click covers everything.
+- **Shift+tab mode applies mid-run** — changing permission mode during `/ship` or `/retry` now takes effect immediately. Previously the mode was captured at launch and never rechecked.
+- **Unified permission prompt** — chat mode and `/ship` mode now use the same `PermissionPrompt` component. Previously two separate implementations with different options and behavior.
+- **Status bar visible during prompts** — permission prompts no longer hide the status bar. ESC key denies in all prompt types.
+- **`/permissions allow` and `deny` save permanently** — rules saved to `~/.workermill/cli.json`, not just the session. `/permissions allow bash` permanently allows all bash commands.
+- **Setup preserves API keys** — re-running setup reuses saved keys from existing config instead of forcing re-entry.
+- **Shorter permission prompt text** — tool display shows file path or command only, not verbose key dumps.
 - **Setup stdin handoff** — `rl.close()` destroyed stdin, preventing Ink from setting raw mode after first-run setup. Fixed with `rl.close()` + `process.stdin.resume()`.
 - **`/setup reset` routing** — `case "setup reset"` was a dead branch that never matched. Now handled as `arg === "reset"` inside the setup case.
 - **Stale `/retry` state** — `getRetryableRun` now verifies the branch still exists. Deleted branches are auto-cleared instead of showing "incomplete run" notes forever.

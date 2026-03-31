@@ -88,7 +88,10 @@ __pycache__/
 
 # Internal docs, plans, and Claude config (not public)
 /docs/
-**/docs/*.md
+/cli/docs/
+/worker/docs/
+/agent/docs/
+/packages/docs/
 .plan
 .superpowers/
 CLAUDE.md

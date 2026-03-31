@@ -133,6 +133,7 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     tokens: 1200,
     permissionMode: "default",
     trustAll: false,
+    isTrustAll: () => false,
     planMode: false,
     setPlanMode: vi.fn(),
     setTrustAll: vi.fn(),
@@ -329,18 +330,22 @@ describe("handleSlashCommand", () => {
       expect(ctx.startOrchestrator).not.toHaveBeenCalled();
     });
 
-    it("starts orchestrator with arg", () => {
+    it("starts orchestrator with arg and isTrustAll getter", () => {
       const ctx = createContext();
       handleSlashCommand("/ship build a login page", ctx);
       expect(ctx.setLastBuildTask).toHaveBeenCalledWith("build a login page");
       expect(ctx.addUserMessage).toHaveBeenCalledWith("/ship build a login page");
-      expect(ctx.startOrchestrator).toHaveBeenCalledWith("build a login page", false, false);
+      expect(ctx.startOrchestrator).toHaveBeenCalledWith("build a login page", expect.any(Function), false);
+      // The getter should return false in default mode
+      const getter = vi.mocked(ctx.startOrchestrator).mock.calls[0][1] as () => boolean;
+      expect(getter()).toBe(false);
     });
 
-    it("starts orchestrator in trust mode when permissionMode is trust all", () => {
-      const ctx = createContext({ permissionMode: "bypassPermissions" });
+    it("isTrustAll getter returns true in bypassPermissions mode", () => {
+      const ctx = createContext({ permissionMode: "bypassPermissions", isTrustAll: () => true });
       handleSlashCommand("/ship add auth", ctx);
-      expect(ctx.startOrchestrator).toHaveBeenCalledWith("add auth", true, false);
+      const getter = vi.mocked(ctx.startOrchestrator).mock.calls[0][1] as () => boolean;
+      expect(getter()).toBe(true);
     });
 
     it("blocks when orchestrator is running", () => {
@@ -355,7 +360,7 @@ describe("handleSlashCommand", () => {
     it("/build is an alias for /ship", () => {
       const ctx = createContext();
       handleSlashCommand("/build add tests", ctx);
-      expect(ctx.startOrchestrator).toHaveBeenCalledWith("add tests", false, false);
+      expect(ctx.startOrchestrator).toHaveBeenCalledWith("add tests", expect.any(Function), false);
     });
   });
 
@@ -374,7 +379,7 @@ describe("handleSlashCommand", () => {
       const ctx = createContext({ retryOrchestrator: vi.fn().mockReturnValue(true) });
       handleSlashCommand("/retry", ctx);
       expect(ctx.addUserMessage).toHaveBeenCalledWith("/retry");
-      expect(ctx.retryOrchestrator).toHaveBeenCalledWith(false, false);
+      expect(ctx.retryOrchestrator).toHaveBeenCalledWith(expect.any(Function), false);
       // Should NOT show error message when retry returns true
       expect(ctx.addSystemMessage).not.toHaveBeenCalled();
     });

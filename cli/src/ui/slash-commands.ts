@@ -218,14 +218,16 @@ export interface SlashCommandContext {
   tokens: number;
   permissionMode: string;
   trustAll: boolean;
+  /** Live getter for trust-all state — reads current mode, not the value at /ship launch */
+  isTrustAll: () => boolean;
   planMode: boolean;
   setPlanMode: (v: boolean) => void;
   setTrustAll: (v: boolean) => void;
   allowTool: (name: string) => void;
   denyTool: (name: string) => void;
   orchestratorRunning: boolean;
-  startOrchestrator: (task: string, trustAll: boolean, sandboxed: boolean) => void;
-  retryOrchestrator: (trustAll: boolean, sandboxed: boolean) => boolean;
+  startOrchestrator: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean) => void;
+  retryOrchestrator: (trustAll: boolean | (() => boolean), sandboxed: boolean) => boolean;
   lastBuildTask: string | null;
   setLastBuildTask: (task: string) => void;
   sandboxed?: boolean;
@@ -477,7 +479,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         }
         ctx.setLastBuildTask(arg);
         ctx.addUserMessage(`/ship ${arg}`);
-        ctx.startOrchestrator(arg, ctx.permissionMode === "bypassPermissions", ctx.sandboxed ?? false);
+        ctx.startOrchestrator(arg, ctx.isTrustAll, ctx.sandboxed ?? false);
       }
       break;
     }
@@ -488,7 +490,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         ctx.addSystemMessage("Orchestration is already running. Wait for it to complete.");
       } else {
         ctx.addUserMessage("/retry");
-        const started = ctx.retryOrchestrator(ctx.permissionMode === "bypassPermissions", ctx.sandboxed ?? false);
+        const started = ctx.retryOrchestrator(ctx.isTrustAll, ctx.sandboxed ?? false);
         if (!started) {
           ctx.addSystemMessage("Nothing to retry. No incomplete `/ship` runs found for this project.");
         }

@@ -158,6 +158,7 @@ export function Root(props: RootProps): React.ReactElement {
         tokens: agent.tokens,
         permissionMode: agent.permissionMode,
         trustAll: props.trustAll,
+        isTrustAll: () => agent.permissionMode === "bypassPermissions",
         planMode: props.planMode,
         setPlanMode: agent.setPlanMode,
         setTrustAll: agent.setTrustAll,

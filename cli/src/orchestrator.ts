@@ -258,7 +258,7 @@ interface SharedContext {
 export async function checkToolPermission(
   toolName: string,
   toolInput: Record<string, unknown>,
-  trustAll: boolean,
+  trustAll: boolean | (() => boolean),
   sessionAllow: Set<string>,
   output: OrchestrationOutput,
   permissionRules?: { allow?: string[]; deny?: string[] },
@@ -284,7 +284,8 @@ export async function checkToolPermission(
 
   if (ruleResult !== "ask") {
     // Normal mode checks (skip if "ask" rule forced a prompt)
-    if (trustAll) return true;
+    const isTrusted = typeof trustAll === "function" ? trustAll() : trustAll;
+    if (isTrusted) return true;
     if (READ_TOOLS.has(toolName)) return true;
     if (sessionAllow.has(toolName) || sessionAllow.has("*")) return true;
   }
@@ -898,7 +899,7 @@ export interface RetryPlan {
 export async function runOrchestration(
   config: CliConfig,
   userTask: string,
-  trustAll: boolean,
+  trustAll: boolean | (() => boolean),
   sandboxed: boolean | "os",
   output: OrchestrationOutput,
   abortSignal?: AbortSignal,
@@ -1088,7 +1089,7 @@ export async function runOrchestration(
 
     // Prompt user to proceed (unless --trust mode)
     // Still on original branch — declining costs nothing
-    if (!trustAll) {
+    if (!(typeof trustAll === "function" ? trustAll() : trustAll)) {
       let proceed = false;
       try {
         const r = await output.confirm("Execute this plan?");

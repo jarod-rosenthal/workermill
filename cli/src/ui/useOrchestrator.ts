@@ -59,9 +59,9 @@ export interface UseOrchestratorReturn {
   /** Whether orchestration is currently running. */
   running: boolean;
   /** Start orchestration for a task. */
-  start: (task: string, trustAll: boolean, sandboxed: boolean) => void;
+  start: (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean) => void;
   /** Retry the most recent incomplete run — skips planning, resumes from first incomplete story. Returns false if nothing to retry. */
-  retry: (trustAll: boolean, sandboxed: boolean) => boolean;
+  retry: (trustAll: boolean | (() => boolean), sandboxed: boolean) => boolean;
   /** Cancel the running orchestration. */
   cancel: () => void;
   /** Current status message (replaces ora spinner in the old TUI). */
@@ -120,7 +120,7 @@ export function useOrchestrator(
   // ------------------------------------------------------------------
 
   const start = useCallback(
-    (task: string, trustAll: boolean, sandboxed: boolean) => {
+    (task: string, trustAll: boolean | (() => boolean), sandboxed: boolean) => {
       // Abort any previous run
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();

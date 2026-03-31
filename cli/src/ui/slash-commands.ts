@@ -932,22 +932,45 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             ctx.setTrustAll(false);
             ctx.addSystemMessage("**default mode ON.** Tools require approval.");
             break;
-          case "allow":
+          case "allow": {
             if (!toolName) {
-              ctx.addSystemMessage("Usage: `/permissions allow <tool>`");
+              ctx.addSystemMessage("Usage: `/permissions allow <tool or pattern>`\n\nExamples:\n- `/permissions allow bash` — allow all bash\n- `/permissions allow bash(npm run *)` — allow npm run commands\n- `/permissions allow edit_file` — allow all file edits");
             } else {
-              ctx.allowTool(toolName);
-              ctx.addSystemMessage(`**Allowed** \`${toolName}\` for this session.`);
+              // Save permanently to config
+              const cfg = loadConfig();
+              if (cfg) {
+                cfg.permissions = cfg.permissions || {};
+                cfg.permissions.allow = cfg.permissions.allow || [];
+                if (!cfg.permissions.allow.includes(toolName)) {
+                  cfg.permissions.allow.push(toolName);
+                  saveConfig(cfg);
+                }
+              }
+              // Also add to session for immediate effect
+              ctx.allowTool(toolName.split("(")[0]); // session set uses bare tool name
+              ctx.addSystemMessage(`**Allowed** \`${toolName}\` — saved permanently.`);
             }
             break;
-          case "deny":
+          }
+          case "deny": {
             if (!toolName) {
-              ctx.addSystemMessage("Usage: `/permissions deny <tool>`");
+              ctx.addSystemMessage("Usage: `/permissions deny <tool or pattern>`");
             } else {
-              ctx.denyTool(toolName);
-              ctx.addSystemMessage(`**Denied** \`${toolName}\` for this session. The tool will be blocked.`);
+              // Save permanently to config
+              const cfg = loadConfig();
+              if (cfg) {
+                cfg.permissions = cfg.permissions || {};
+                cfg.permissions.deny = cfg.permissions.deny || [];
+                if (!cfg.permissions.deny.includes(toolName)) {
+                  cfg.permissions.deny.push(toolName);
+                  saveConfig(cfg);
+                }
+              }
+              ctx.denyTool(toolName.split("(")[0]);
+              ctx.addSystemMessage(`**Denied** \`${toolName}\` — saved permanently.`);
             }
             break;
+          }
           case "reset":
             ctx.setTrustAll(false);
             ctx.addSystemMessage("**Permissions reset** to ask mode.");

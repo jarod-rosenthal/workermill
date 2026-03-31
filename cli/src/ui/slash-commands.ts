@@ -16,9 +16,13 @@ import chalk from "chalk";
 import { loadCustomCommands } from "../custom-commands.js";
 import { loadPersona, listAvailablePersonas } from "../personas.js";
 import { stopAllMCPServers, getMCPTools, hasMCPServers, hasMCPRegistered } from "../mcp-client.js";
+import { shutdown as shutdownLSP } from "../../../packages/engine/src/tools/lsp.js";
+import { cleanupStaleWorktrees } from "../../../packages/engine/src/tools/sub-agent.js";
+import { undoLast, undoFile, listCheckpoints, clearCheckpoints } from "../checkpoints.js";
 import * as logger from "../logger.js";
 import { loadMemories, addMemory, removeMemory } from "../memory.js";
 import { findModelInfo } from "../../../api/src/providers/index.js";
+import crypto from "crypto";
 
 // ---------------------------------------------------------------------------
 // Session goodbye — prints a brief summary on exit
@@ -151,6 +155,7 @@ Creates a feature branch for all changes — your current branch stays clean.
 | \`/cost\` | Session cost and token usage |
 | \`/status\` | Session info |
 | \`/git\` | Git branch and status |
+| \`/compact [focus]\` | Compress conversation history (optional focus: "the API changes") |
 | \`/sessions\` | List/switch sessions |
 | \`/log\` | Show recent CLI log entries |
 | \`/skills\` | List custom commands |
@@ -461,34 +466,59 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
 
     // ---- /undo ----
     case "undo": {
-      try {
-        // Check if there are uncommitted changes
-        const status = execSync("git status --porcelain 2>/dev/null", {
-          cwd: ctx.workingDir, encoding: "utf-8", timeout: 5000,
-        }).trim();
-
-        if (!status) {
-          // No uncommitted changes — try undoing last commit
-          try {
-            const lastMsg = execSync("git log -1 --format=%s 2>/dev/null", {
-              cwd: ctx.workingDir, encoding: "utf-8", timeout: 5000,
-            }).trim();
-            execSync("git reset HEAD~1", { cwd: ctx.workingDir, encoding: "utf-8", timeout: 5000 });
-            ctx.addSystemMessage(`**Undone** last commit: "${lastMsg}"\n\nChanges are now unstaged. Run \`/undo\` again to discard them.`);
-          } catch {
-            ctx.addSystemMessage("Nothing to undo — no uncommitted changes and no commits to reset.");
+      // File-level undo via checkpoints (default), or git-level undo via /undo git
+      if (arg === "git") {
+        // Legacy git-based undo
+        try {
+          const status = execSync("git status --porcelain 2>/dev/null", {
+            cwd: ctx.workingDir, encoding: "utf-8", timeout: 5000,
+          }).trim();
+          if (!status) {
+            try {
+              const lastMsg = execSync("git log -1 --format=%s 2>/dev/null", {
+                cwd: ctx.workingDir, encoding: "utf-8", timeout: 5000,
+              }).trim();
+              execSync("git reset HEAD~1", { cwd: ctx.workingDir, encoding: "utf-8", timeout: 5000 });
+              ctx.addSystemMessage(`**Undone** last commit: "${lastMsg}"\n\nChanges are now unstaged.`);
+            } catch {
+              ctx.addSystemMessage("Nothing to undo — no uncommitted changes and no commits to reset.");
+            }
+          } else {
+            const fileCount = status.split("\n").length;
+            execSync("git stash push -m 'workermill-undo'", {
+              cwd: ctx.workingDir, encoding: "utf-8", timeout: 10000,
+            });
+            ctx.addSystemMessage(`**Undone** — stashed ${fileCount} changed files.\n\nRecover with \`!git stash pop\` if needed.`);
           }
-        } else {
-          // Has uncommitted changes — stash them
-          const fileCount = status.split("\n").length;
-          execSync("git stash push -m 'workermill-undo'", {
-            cwd: ctx.workingDir, encoding: "utf-8", timeout: 10000,
-          });
-          ctx.addSystemMessage(`**Undone** — stashed ${fileCount} changed files.\n\nRecover with \`!git stash pop\` if needed.`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          ctx.addSystemMessage(`**Undo failed:** ${msg}`);
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        ctx.addSystemMessage(`**Undo failed:** ${msg}\n\nMake sure you're in a git repository.`);
+      } else if (arg === "list") {
+        const cps = listCheckpoints();
+        if (cps.length === 0) {
+          ctx.addSystemMessage("No file checkpoints in this session.");
+        } else {
+          const lines = cps.map((cp, i) => `${i + 1}. \`${cp.file}\` (${cp.time})`);
+          ctx.addSystemMessage(`**Checkpoints** (${cps.length}):\n${lines.join("\n")}`);
+        }
+      } else if (arg && isNaN(Number(arg))) {
+        // Undo specific file
+        const restored = undoFile(arg);
+        if (restored) {
+          ctx.addSystemMessage(`**Restored** \`${arg}\` to pre-edit state.`);
+        } else {
+          ctx.addSystemMessage(`No checkpoint found for \`${arg}\`.`);
+        }
+      } else {
+        // Undo last N edits (default 1)
+        const count = arg ? parseInt(arg, 10) : 1;
+        const restored = undoLast(count);
+        if (restored.length === 0) {
+          ctx.addSystemMessage("No file checkpoints to undo. Use `/undo git` for git-level undo.");
+        } else {
+          ctx.addSystemMessage(`**Restored** ${restored.length} file(s):\n${restored.map(f => `- \`${f}\``).join("\n")}`);
+        }
       }
       break;
     }
@@ -632,6 +662,9 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
         const useCritic = config.review?.useCritic ?? false;
         const branchPrefix = config.git?.branchPrefix || "workermill";
         const sandboxEnabled = config.sandbox !== false;
+        const bellEnabled = config.bell === true;
+        const allowRules = config.permissions?.allow || [];
+        const denyRules = config.permissions?.deny || [];
 
         ctx.addSystemMessage(
           `**Settings** (\`~/.workermill/cli.json\`)\n\n` +
@@ -646,7 +679,10 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
           `| Auto-revise | ${autoRevise} | \`/settings review.autoRevise <true/false>\` |\n` +
           `| Critic pass | ${useCritic} | \`/settings review.critic <true/false>\` |\n` +
           `| Branch prefix | ${branchPrefix} | \`/settings git.branchPrefix <name>\` |\n` +
-          `| Sandbox | ${sandboxEnabled} | \`/settings sandbox <true/false>\` |`
+          `| Sandbox | ${sandboxEnabled} | \`/settings sandbox <true/false>\` |\n` +
+          `| Beep when /ship finishes | ${bellEnabled} | \`/settings bell <true/false>\` |\n` +
+          `| Permission allow rules | ${allowRules.length} rule(s) | Edit \`cli.json\` |\n` +
+          `| Permission deny rules | ${denyRules.length} rule(s) | Edit \`cli.json\` |`
         );
 
         // Show routing if configured
@@ -719,6 +755,10 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             config.sandbox = boolVal(value);
             break;
           }
+          case "bell": {
+            config.bell = boolVal(value);
+            break;
+          }
           case "route": {
             // /settings route <persona> <provider>
             const routeParts = value.split(/\s+/);
@@ -769,7 +809,7 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
             break;
         }
 
-        if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "git.branchPrefix", "sandbox", "route", "key"].includes(key)) {
+        if (["ollama.host", "ollama.context", "review.enabled", "review.maxRevisions", "review.threshold", "review.criticThreshold", "review.autoRevise", "review.critic", "git.branchPrefix", "sandbox", "bell", "route", "key"].includes(key)) {
           saveConfig(config);
           ctx.addSystemMessage(`**Updated** \`${key}\` → \`${value}\` (saved to ~/.workermill/cli.json)`);
         }
@@ -898,6 +938,9 @@ export function handleSlashCommand(input: string, ctx: SlashCommandContext): boo
     case "exit":
     case "q": {
       stopAllMCPServers();
+      shutdownLSP();
+      cleanupStaleWorktrees(ctx.workingDir);
+      clearCheckpoints();
       void import("../browser.js").then(m => m.browserClose());
       printSessionGoodbye(ctx);
       ctx.exit?.();
@@ -1033,7 +1076,7 @@ Write the file with write_file to WORKERMILL.md in the project root.`,
 
     // ---- /log ----
     case "log": {
-      const projectHash = require("crypto").createHash("md5").update(ctx.workingDir).digest("hex").slice(0, 8);
+      const projectHash = crypto.createHash("md5").update(ctx.workingDir).digest("hex").slice(0, 8);
       const logPath = path.join(os.homedir(), ".workermill", "logs", projectHash, "cli.log");
       try {
         if (!fs.existsSync(logPath)) {
